@@ -1523,28 +1523,37 @@ mod universe_polymorphism {
 
     #[test]
     fn level_arguments_round_trip_through_the_wire() {
-        // The chain-format half. A monomorphic reference is byte-identical to what
-        // shipped before; a polymorphic one carries its arguments.
+        // The chain-format half. Both forms carry a level list; a monomorphic reference's is
+        // empty. It was an OPTIONAL trailing argument — one argument when monomorphic — to
+        // keep the `ConstRef`s already on the chain byte-identical. D85 §5 step 4 re-encodes
+        // every term, so nothing is preserved by the optionality and `eigentt:Term` declares
+        // the argument outright.
         use crate::program::eigentt_type_mirror::{decode_type, encode_type};
         let layer = polymorphic_layer();
         let iri = Iri::parse("urn:eigenius:p:Box").unwrap();
 
         let poly = Exp::Const(iri.clone(), vec![Level::of_nat(1)]);
-        let encoded = encode_type(&poly).expect("encodes");
+        let encoded = encode_type(&poly, crate::testing::codec_names()).expect("encodes");
         let decoded = decode_type(&encoded, &layer).expect("decodes");
         assert_eq!(decoded, poly, "a level-carrying reference round-trips");
 
-        // Monomorphic: one argument, exactly as before E2.
         let mono = Exp::Const(iri, Vec::new());
-        let enc_mono = encode_type(&mono).expect("encodes");
-        let as_json = match &enc_mono {
-            crate::ontology::resource::Value::Json(j) => j.clone(),
-            other => panic!("expected Json, got {other:?}"),
+        let enc_mono = encode_type(&mono, crate::testing::codec_names()).expect("encodes");
+        let back = decode_type(&enc_mono, &layer).expect("decodes");
+        assert_eq!(back, mono, "a monomorphic reference round-trips");
+        let levels = match &enc_mono {
+            crate::ontology::resource::Value::Embedded(r) => r
+                .get(
+                    &crate::ontology::iri::Iri::parse("urn:eigenius:eigentt:Term-ConstRef-levels")
+                        .unwrap(),
+                )
+                .cloned(),
+            other => panic!("expected a value resource, got {other:?}"),
         };
         assert_eq!(
-            as_json["args"].as_array().map(|a| a.len()),
-            Some(1),
-            "a monomorphic ConstRef keeps its single argument: {as_json}"
+            levels,
+            Some(crate::ontology::resource::Value::Array(Vec::new())),
+            "a monomorphic ConstRef carries an EMPTY level list, not a missing one"
         );
     }
 }

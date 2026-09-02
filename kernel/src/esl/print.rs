@@ -717,18 +717,35 @@ pub fn print_value_term(
             path: path.into(),
         })?;
     // Alias the ctor namespace by handing `split` a dummy local part; only the alias is used.
-    let (alias, _) = ns
-        .split(&format!("{ctor_namespace}:x"))
-        .map_err(|e| PrintError {
-            message: e,
-            path: path.into(),
-        })?;
+    // The value's own inductive when it carries one, and only the property's namespace as a
+    // fallback. A constructor short name is not unique — `Pi` belongs to three inductives —
+    // so `alias:Type:Ctor` is what recompiles unambiguously.
+    let inductive = obj.get(INDUCTIVE_KEY).and_then(Value::as_str);
+    let (alias, qualifier) = match inductive {
+        Some(ind) => {
+            let (ns_part, local) = ind.rsplit_once(':').unwrap_or(("", ind));
+            let (alias, _) = ns.split(&format!("{ns_part}:x")).map_err(|e| PrintError {
+                message: e,
+                path: path.into(),
+            })?;
+            (alias, format!("{local}:"))
+        }
+        None => {
+            let (alias, _) = ns
+                .split(&format!("{ctor_namespace}:x"))
+                .map_err(|e| PrintError {
+                    message: e,
+                    path: path.into(),
+                })?;
+            (alias, String::new())
+        }
+    };
     let args = obj
         .get("args")
         .and_then(Value::as_array)
         .map_or(&[][..], |a| a);
     if args.is_empty() {
-        return Ok(format!("{alias}:{ctor}"));
+        return Ok(format!("{alias}:{qualifier}{ctor}"));
     }
     let mut parts = Vec::with_capacity(args.len());
     for a in args {
@@ -739,7 +756,7 @@ pub fn print_value_term(
             _ => print_value_term(a, ns, ctor_namespace)?,
         });
     }
-    Ok(format!("{alias}:{ctor}({})", parts.join(", ")))
+    Ok(format!("{alias}:{qualifier}{ctor}({})", parts.join(", ")))
 }
 
 /// Read a `Sort`'s level argument as a numeral.
@@ -770,6 +787,11 @@ fn level_as_nat(v: &Value) -> Option<u64> {
 /// Used to tell the two dialects apart when walking a document: a term carrying a ctor outside
 /// this set cannot be D47. `App` is in both sets, which is why the test is over *every* node
 /// rather than the root.
+/// Where [`untag_value_resources`] records the inductive a value belongs to, for the printer
+/// to read back. Not `@`-prefixed like `@id`: it never reaches a document, only the tagged
+/// tree the printer walks.
+const INDUCTIVE_KEY: &str = "$inductive";
+
 const D47_CTORS: &[&str] = &[
     "Lam",
     "Sort",
@@ -808,6 +830,15 @@ const D47_CTORS: &[&str] = &[
 pub fn is_d47_term(term: &Value) -> bool {
     match term {
         Value::Object(o) => {
+            // The value says which inductive it is (D85 §6.1); only `eigentt:Term` and the
+            // level algebra it embeds are the D47 surface. The constructor-name test below is
+            // for input that carries no such marker — a hand-written tagged dict.
+            if let Some(ind) = o.get(INDUCTIVE_KEY).and_then(Value::as_str) {
+                return (ind == wk::EIGENTT_TERM || ind == wk::LEVEL)
+                    && o.iter()
+                        .filter(|(k, _)| k.as_str() != INDUCTIVE_KEY)
+                        .all(|(_, v)| is_d47_term(v));
+            }
             if let Some(c) = o.get("ctor").and_then(Value::as_str) {
                 if !D47_CTORS.contains(&c) {
                     return false;
@@ -832,8 +863,15 @@ pub fn is_d47_term(term: &Value) -> bool {
 /// Keyed by the constructor class IRI (`<inductive>-<Ctor>`), valued by the argument names in
 /// DECLARATION order — which is where order lives under D85 §6.1, since a value resource names
 /// its arguments and a JSON object does not preserve their order.
-fn ctor_arg_order(doc: &Value) -> BTreeMap<String, Vec<String>> {
-    let mut out = BTreeMap::new();
+fn ctor_arg_order(doc: &Value, layer: &crate::layer::Layer) -> BTreeMap<String, Vec<String>> {
+    // Seed from the CHAIN, then let the document's own declarations shadow it. A printed value
+    // names its constructor's class, and the class of a term — `eigentt:Term-LitBool`, say —
+    // is declared down the chain, not in the document being printed.
+    let mut out: BTreeMap<String, Vec<String>> =
+        crate::esl::compile::collect_ctors_from_layer(layer)
+            .arg_names
+            .into_iter()
+            .collect();
     fn walk(v: &Value, out: &mut BTreeMap<String, Vec<String>>) {
         match v {
             Value::Object(o) => {
@@ -945,7 +983,17 @@ fn untag_value_resources(
                         None => Err(format!("`{class}` value is missing argument `{n}`")),
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                return Ok(serde_json::json!({ "ctor": ctor, "args": args }));
+                // Carry the INDUCTIVE, not just the constructor name. Which dialect a value
+                // is printed in — the D47 term surface or `alias:Ctor(...)` — is a fact about
+                // its inductive, and `eigentt:Term`, `formulas:FormulaTerm` and `lean:LeanExpr`
+                // all declare `Pi`. Classifying by constructor name misprinted a `FormulaTerm`
+                // as a term, and the result recompiled ambiguously.
+                let inductive = class.rsplit_once('-').map_or(class, |(i, _)| i);
+                return Ok(serde_json::json!({
+                    "ctor": ctor,
+                    "args": args,
+                    INDUCTIVE_KEY: inductive,
+                }));
             }
             let mut out = serde_json::Map::new();
             for (k, val) in o {
@@ -957,16 +1005,20 @@ fn untag_value_resources(
     }
 }
 
-pub fn print_document(doc: &Value) -> Result<String, PrintError> {
-    print_document_with(doc, Layout::Flat)
+pub fn print_document(doc: &Value, layer: &crate::layer::Layer) -> Result<String, PrintError> {
+    print_document_with(doc, Layout::Flat, layer)
 }
 
 /// [`print_document`], laid out per `layout`.
-pub fn print_document_with(doc: &Value, layout: Layout) -> Result<String, PrintError> {
+pub fn print_document_with(
+    doc: &Value,
+    layout: Layout,
+    layer: &crate::layer::Layer,
+) -> Result<String, PrintError> {
     // D85 §1 — an inductive VALUE is a resource. Rewrite every one back to the `{"ctor","args"}`
     // form before printing, so the rest of this module reads one shape (see
     // `untag_value_resources`).
-    let table = ctor_arg_order(doc);
+    let table = ctor_arg_order(doc, layer);
     let untagged = untag_value_resources(doc, &table).map_err(|message| PrintError {
         message,
         path: "<document>".to_string(),

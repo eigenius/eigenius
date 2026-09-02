@@ -95,7 +95,7 @@ fn chain_with_parse_vocabulary() -> Arc<Layer> {
         class cls:activity { }
         class cls:model { }
     "#,
-        &eigenius_kernel::layer::Layer::empty(),
+        bootstrap_chain(),
     )
     .unwrap()
     {
@@ -164,7 +164,7 @@ fn definite_description_parse() -> Exp {
 /// Emit side, as of slice 1: decode the stored proposition, hash the resulting `Exp`.
 fn emit_side_hash(layer: &Layer, stored: &Value) -> [u8; 32] {
     let decoded = decode_type(stored, layer).expect("stored proposition decodes");
-    hash_proposition_exp(&decoded).expect("decoded proposition hashes")
+    hash_proposition_exp(&decoded, codec()).expect("decoded proposition hashes")
 }
 
 /// Check side, as it already behaves: the proposition arrives evaluated, and is read back before
@@ -172,7 +172,7 @@ fn emit_side_hash(layer: &Layer, stored: &Value) -> [u8; 32] {
 fn check_side_hash(layer: &Layer, stored: &Value) -> [u8; 32] {
     let decoded = decode_type(stored, layer).expect("stored proposition decodes");
     let value = eval(&decoded, &Rho::Nil).expect("decoded proposition evaluates");
-    hash_proposition_exp(&readback_val(0, &value)).expect("readback hashes")
+    hash_proposition_exp(&readback_val(0, &value), codec()).expect("readback hashes")
 }
 
 /// The load-bearing test: on the shape every parsed sentence has, the two ends agree.
@@ -180,12 +180,43 @@ fn check_side_hash(layer: &Layer, stored: &Value) -> [u8; 32] {
 /// They differ by `eval` + `readback`. Readback freshens binder names, which
 /// `alpha_canonicalize_proposition_json` absorbs (D66 D4). `eval` has nothing to do here: parses are
 /// β-normal, and under D9 a definition's body is stored already normalized so decode yields a normal
+/// The D47 codec's constructor argument names, from the bootstrap chain, built once.
+///
+/// Encoding a term names its constructor's arguments (D85 §6.1), and the names live in
+/// `eigentt:Term` and `core:Level`'s declarations — so an encode needs a chain.
+fn codec() -> &'static eigenius_kernel::program::eigentt_type_mirror::CodecNames {
+    static NAMES: std::sync::OnceLock<eigenius_kernel::program::eigentt_type_mirror::CodecNames> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
+/// The bootstrap chain, built once. An ESL compile needs the chain that declares the term
+/// language: a `def` body, an `axiom` statement and a `data` constructor type all encode terms,
+/// and a term names its constructor's class (D85 §6.1).
+fn bootstrap_chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
 /// term. If either of those stops holding, this fails.
 #[test]
 fn emit_and_check_agree_on_the_definite_description() {
     let layer = chain_with_parse_vocabulary();
     let prop = definite_description_parse();
-    let stored = encode_type(&prop).expect("the parse shape encodes");
+    let stored = encode_type(&prop, codec()).expect("the parse shape encodes");
 
     assert_eq!(
         emit_side_hash(&layer, &stored),
@@ -206,8 +237,8 @@ fn negation_agrees_and_does_not_collide() {
         Box::new(Exp::EigonClass(iri("urn:eigenius:logic:False"))),
     );
 
-    let plain_stored = encode_type(&plain).unwrap();
-    let negated_stored = encode_type(&negated).unwrap();
+    let plain_stored = encode_type(&plain, codec()).unwrap();
+    let negated_stored = encode_type(&negated, codec()).unwrap();
 
     assert_eq!(
         emit_side_hash(&layer, &negated_stored),
@@ -246,13 +277,13 @@ fn binder_renaming_does_not_change_the_key() {
     }
     let renamed = rename(&prop, "x0", "G#0");
     assert_ne!(
-        encode_type(&prop).unwrap(),
-        encode_type(&renamed).unwrap(),
+        encode_type(&prop, codec()).unwrap(),
+        encode_type(&renamed, codec()).unwrap(),
         "the two encodings must differ syntactically, or this proves nothing"
     );
     assert_eq!(
-        emit_side_hash(&layer, &encode_type(&prop).unwrap()),
-        emit_side_hash(&layer, &encode_type(&renamed).unwrap()),
+        emit_side_hash(&layer, &encode_type(&prop, codec()).unwrap()),
+        emit_side_hash(&layer, &encode_type(&renamed, codec()).unwrap()),
         "alpha-variants must produce the same witness key"
     );
 }
@@ -265,14 +296,14 @@ fn binder_renaming_does_not_change_the_key() {
 #[test]
 fn the_two_paths_are_actually_different() {
     let layer = chain_with_parse_vocabulary();
-    let stored = encode_type(&definite_description_parse()).unwrap();
+    let stored = encode_type(&definite_description_parse(), codec()).unwrap();
 
     let decoded = decode_type(&stored, &layer).unwrap();
     let round_tripped = readback_val(0, &eval(&decoded, &Rho::Nil).unwrap());
 
     assert_ne!(
-        encode_type(&decoded).unwrap(),
-        encode_type(&round_tripped).unwrap(),
+        encode_type(&decoded, codec()).unwrap(),
+        encode_type(&round_tripped, codec()).unwrap(),
         "eval + readback must change the term (it freshens binders); if it does not, the \
          agreement tests above are trivially true and prove nothing"
     );
@@ -317,6 +348,7 @@ fn definition_resource(def_iri: &str, opaque: bool) -> Resource {
             },
             other => other,
         },
+        codec(),
     )
     .expect("lambda chain encodes");
 
@@ -329,15 +361,18 @@ fn definition_resource(def_iri: &str, opaque: bool) -> Resource {
     );
     r.set(
         iri("urn:eigenius:eigentt:definition_type"),
-        encode_type(&Exp::Pi(
-            Patt::Unit,
-            Box::new(Exp::sort(1)),
-            Box::new(Exp::Pi(
+        encode_type(
+            &Exp::Pi(
                 Patt::Unit,
                 Box::new(Exp::sort(1)),
-                Box::new(Exp::sort(0)),
-            )),
-        ))
+                Box::new(Exp::Pi(
+                    Patt::Unit,
+                    Box::new(Exp::sort(1)),
+                    Box::new(Exp::sort(0)),
+                )),
+            ),
+            codec(),
+        )
         .unwrap(),
     );
     r.set(iri("urn:eigenius:eigentt:definition_body"), encoded_body);
@@ -372,7 +407,7 @@ fn a_transparent_definition_unfolds_at_decode() {
         cls("urn:eigenius:demo:cls:WRN"),
         cls("urn:eigenius:demo:cls:exonuclease"),
     );
-    let stored = encode_type(&use_site).unwrap();
+    let stored = encode_type(&use_site, codec()).unwrap();
     let decoded = decode_type(&stored, &layer).expect("the use decodes");
 
     // What the body means once instantiated.
@@ -414,7 +449,7 @@ fn an_opaque_definition_stays_folded() {
         cls("urn:eigenius:demo:cls:WRN"),
         cls("urn:eigenius:demo:cls:exonuclease"),
     );
-    let stored = encode_type(&use_site).unwrap();
+    let stored = encode_type(&use_site, codec()).unwrap();
     let decoded = decode_type(&stored, &layer).expect("the use decodes");
     assert_eq!(
         decoded, use_site,
@@ -427,23 +462,29 @@ fn an_opaque_definition_stays_folded() {
 #[test]
 fn folded_and_unfolded_uses_hash_the_same() {
     let layer = chain_with_definition(DEF, false);
-    let folded = encode_type(&app2(
-        Exp::EigonAxiom(iri(DEF)),
-        cls("urn:eigenius:demo:cls:WRN"),
-        cls("urn:eigenius:demo:cls:exonuclease"),
-    ))
+    let folded = encode_type(
+        &app2(
+            Exp::EigonAxiom(iri(DEF)),
+            cls("urn:eigenius:demo:cls:WRN"),
+            cls("urn:eigenius:demo:cls:exonuclease"),
+        ),
+        codec(),
+    )
     .unwrap();
-    let unfolded = encode_type(&app2(
-        ax("urn:eigenius:ontology:prep_of"),
-        Exp::App(
-            Box::new(ax("urn:eigenius:ontology:kind_of")),
-            Box::new(cls("urn:eigenius:demo:cls:WRN")),
+    let unfolded = encode_type(
+        &app2(
+            ax("urn:eigenius:ontology:prep_of"),
+            Exp::App(
+                Box::new(ax("urn:eigenius:ontology:kind_of")),
+                Box::new(cls("urn:eigenius:demo:cls:WRN")),
+            ),
+            Exp::App(
+                Box::new(ax("urn:eigenius:ontology:kind_of")),
+                Box::new(cls("urn:eigenius:demo:cls:exonuclease")),
+            ),
         ),
-        Exp::App(
-            Box::new(ax("urn:eigenius:ontology:kind_of")),
-            Box::new(cls("urn:eigenius:demo:cls:exonuclease")),
-        ),
-    ))
+        codec(),
+    )
     .unwrap();
 
     assert_ne!(folded, unfolded, "the stored forms differ, as they must");
@@ -493,6 +534,7 @@ fn rule24_rejects_a_recursive_definition() {
             Exp::Var("g".into()),
             Exp::Var("a".into()),
         ),
+        codec(),
     )
     .unwrap();
     r.set(iri("urn:eigenius:eigentt:definition_body"), self_ref);
@@ -526,6 +568,7 @@ fn rule24_rejects_a_body_that_is_not_in_normal_form() {
                                 Box::new(ax("urn:eigenius:ontology:kind_of")),
                                 Box::new(Exp::Var("z".into())),
                             ),
+                            codec(),
                         )
                         .unwrap(),
                         &chain_with_parse_vocabulary(),
@@ -539,6 +582,7 @@ fn rule24_rejects_a_body_that_is_not_in_normal_form() {
                 Box::new(Exp::Var("a".into())),
             ),
         ),
+        codec(),
     );
     // `encode_lam_chain` refuses a bare inner `Lam`, so if the redex cannot even be encoded the
     // invariant is enforced one layer earlier — which is also acceptable. Only assert when it can.
@@ -560,7 +604,7 @@ fn rule24_rejects_a_body_that_does_not_inhabit_its_declared_type() {
     // Declared `Set -> Set -> Prop`, but the body is a bare sort.
     r.set(
         iri("urn:eigenius:eigentt:definition_body"),
-        encode_type(&Exp::sort(0)).unwrap(),
+        encode_type(&Exp::sort(0), codec()).unwrap(),
     );
     let errs = definition_errors(r);
     assert!(
@@ -581,8 +625,7 @@ fn esl_def_compiles_and_unfolds_at_a_use_site() {
             ont:prep_of(ont:kind_of(g), ont:kind_of(a))
             desc: "the a-activity of g";
     "#;
-    let resources =
-        esl::compile(src, &eigenius_kernel::layer::Layer::empty()).expect("`def` compiles");
+    let resources = esl::compile(src, bootstrap_chain()).expect("`def` compiles");
     let def = resources
         .iter()
         .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:demo:esl:Activity"))
@@ -613,7 +656,8 @@ fn esl_def_compiles_and_unfolds_at_a_use_site() {
         cls("urn:eigenius:demo:cls:WRN"),
         cls("urn:eigenius:demo:cls:exonuclease"),
     );
-    let decoded = decode_type(&encode_type(&use_site).unwrap(), &layer).expect("the use decodes");
+    let decoded =
+        decode_type(&encode_type(&use_site, codec()).unwrap(), &layer).expect("the use decodes");
     let expected = app2(
         ax("urn:eigenius:ontology:prep_of"),
         Exp::App(
@@ -643,11 +687,12 @@ fn a_definition_round_trips_through_the_printer() {
         def d:Activity(g : Set, a : Set) : Prop =
             ont:prep_of(ont:kind_of(g), ont:kind_of(a));
     "#;
-    let original = esl::compile(src, &eigenius_kernel::layer::Layer::empty()).expect("compiles");
+    let original = esl::compile(src, bootstrap_chain()).expect("compiles");
     // The printer takes an Eigon-JSON document, the same path `eigenius decompile` uses.
     let doc = eigenius_kernel::ontology::eigon_json::serialize_document(&original);
-    let printed = eigenius_kernel::esl::print::print_document(&doc).expect("prints");
-    let reparsed = esl::compile(&printed, &eigenius_kernel::layer::Layer::empty())
+    let printed =
+        eigenius_kernel::esl::print::print_document(&doc, bootstrap_chain()).expect("prints");
+    let reparsed = esl::compile(&printed, bootstrap_chain())
         .unwrap_or_else(|e| panic!("printed ESL does not recompile: {e:?}\n---\n{printed}"));
 
     let find = |rs: &[Resource]| {
@@ -685,8 +730,7 @@ fn nested_definitions_unfold_all_the_way_at_decode() {
         "namespace ont",
         "namespace lexicon = \"urn:eigenius:lexicon\";\n        namespace ont",
     );
-    let resources =
-        esl::compile(&src, &eigenius_kernel::layer::Layer::empty()).expect("nested defs compile");
+    let resources = esl::compile(&src, bootstrap_chain()).expect("nested defs compile");
     let mut b = LayerBuilder::new("nested", Some(chain_with_parse_vocabulary()));
     for r in resources {
         b.add_resource(r).unwrap();
@@ -698,7 +742,7 @@ fn nested_definitions_unfold_all_the_way_at_decode() {
         cls("urn:eigenius:demo:cls:WRN"),
         cls("urn:eigenius:demo:cls:exonuclease"),
     );
-    let decoded = decode_type(&encode_type(&use_site).unwrap(), &layer).expect("decodes");
+    let decoded = decode_type(&encode_type(&use_site, codec()).unwrap(), &layer).expect("decodes");
 
     // Fully unfolded: BOTH levels gone, `Inner` nowhere in the result.
     let expected = app2(
@@ -732,7 +776,7 @@ fn a_partial_application_decodes_to_a_beta_normal_lambda() {
         Box::new(Exp::EigonAxiom(iri(DEF))),
         Box::new(cls("urn:eigenius:demo:cls:WRN")),
     );
-    let decoded = decode_type(&encode_type(&partial).unwrap(), &layer).expect("decodes");
+    let decoded = decode_type(&encode_type(&partial, codec()).unwrap(), &layer).expect("decodes");
     match &decoded {
         Exp::Lam(..) => {}
         other => panic!("a partial application must leave a Lam, got {other:?}"),
@@ -761,7 +805,7 @@ fn an_esl_authored_def_passes_commit_validation() {
     "#;
     let base = chain_with_parse_vocabulary();
     let validator = Validator::new(Arc::clone(&base));
-    for r in esl::compile(src, &eigenius_kernel::layer::Layer::empty()).expect("compiles") {
+    for r in esl::compile(src, bootstrap_chain()).expect("compiles") {
         let errs: Vec<String> = validator
             .validate_resource(&r)
             .into_iter()
@@ -790,7 +834,7 @@ fn a_proposition_using_a_definition_type_checks_at_commit() {
             ont:prep_of(ont:kind_of(g), ont:kind_of(a));
     "#;
     let mut b = LayerBuilder::new("defs", Some(chain_with_parse_vocabulary()));
-    for r in esl::compile(src, &eigenius_kernel::layer::Layer::empty()).expect("compiles") {
+    for r in esl::compile(src, bootstrap_chain()).expect("compiles") {
         b.add_resource(r).unwrap();
     }
     let layer = Arc::new(b.build(LayerStorage::in_memory()));
@@ -817,11 +861,14 @@ fn a_proposition_using_a_definition_type_checks_at_commit() {
     );
     claim.set(
         iri(wk::CANONICAL_PROPOSITION),
-        encode_type(&app2(
-            Exp::EigonAxiom(iri("urn:eigenius:demo:esl:Activity")),
-            cls("urn:eigenius:demo:cls:WRN"),
-            cls("urn:eigenius:demo:cls:exonuclease"),
-        ))
+        encode_type(
+            &app2(
+                Exp::EigonAxiom(iri("urn:eigenius:demo:esl:Activity")),
+                cls("urn:eigenius:demo:cls:WRN"),
+                cls("urn:eigenius:demo:cls:exonuclease"),
+            ),
+            codec(),
+        )
         .unwrap(),
     );
 
@@ -864,7 +911,7 @@ fn definition_body_cannot_escape_checking_by_riding_on_another_class() {
     // A body that Rule 24 would reject (ill-typed), on a resource Rule 24 will never look at.
     smuggler.set(
         iri("urn:eigenius:eigentt:definition_body"),
-        encode_type(&Exp::sort(0)).unwrap(),
+        encode_type(&Exp::sort(0), codec()).unwrap(),
     );
 
     let errs = Validator::new(layer).validate_resource(&smuggler);
@@ -989,8 +1036,8 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         "{def_name} must unfold to EXACTLY the committed parse"
     );
     assert_eq!(
-        hash_proposition_exp(&call_decoded).unwrap(),
-        hash_proposition_exp(&parse_decoded).unwrap(),
+        hash_proposition_exp(&call_decoded, codec()).unwrap(),
+        hash_proposition_exp(&parse_decoded, codec()).unwrap(),
         "{def_name}: and therefore hash identically — this is what makes the lift free"
     );
 }

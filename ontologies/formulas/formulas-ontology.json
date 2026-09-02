@@ -14,7 +14,8 @@
             "urn:eigenius:core:arg_name": "name",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           }
         ]
@@ -28,7 +29,8 @@
             "urn:eigenius:core:arg_name": "value",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:float"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:float",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           }
         ]
@@ -42,7 +44,8 @@
             "urn:eigenius:core:arg_name": "iri",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           }
         ]
@@ -56,7 +59,8 @@
             "urn:eigenius:core:arg_name": "head",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           },
           {
@@ -64,7 +68,8 @@
             "urn:eigenius:core:arg_name": "arg",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           }
         ]
@@ -78,7 +83,8 @@
             "urn:eigenius:core:arg_name": "name",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           },
           {
@@ -86,7 +92,8 @@
             "urn:eigenius:core:arg_name": "ty",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           },
           {
@@ -94,7 +101,8 @@
             "urn:eigenius:core:arg_name": "body",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           }
         ]
@@ -108,7 +116,8 @@
             "urn:eigenius:core:arg_name": "name",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           },
           {
@@ -116,7 +125,8 @@
             "urn:eigenius:core:arg_name": "ty",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           },
           {
@@ -124,7 +134,8 @@
             "urn:eigenius:core:arg_name": "body",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm"
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:formulas:FormulaTerm",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           }
         ]

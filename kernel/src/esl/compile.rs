@@ -243,7 +243,15 @@ fn const_ref_value(
     i: &str,
     pos: &crate::esl::error::Position,
 ) -> Result<Value, EslError> {
-    term_value(arg_names, "ConstRef", &[Value::String(i.to_string())], pos)
+    // Two arguments: the IRI and the universe levels it is instantiated at. A reference
+    // written in ESL is monomorphic, so the level list is empty — see the `Exp::Const` arm of
+    // `encode_type_json` for why the argument stopped being optional.
+    term_value(
+        arg_names,
+        "ConstRef",
+        &[Value::String(i.to_string()), Value::Array(Vec::new())],
+        pos,
+    )
 }
 
 /// A bare type-parameter name as a `Var` value.
@@ -277,6 +285,7 @@ pub fn compile_file_with_context(
     compiler.institutions = institutions;
     compiler.ctors_by_short_name = external_ctors.by_short_name;
     compiler.ctor_arg_names = external_ctors.arg_names;
+    compiler.ctor_arg_types = external_ctors.arg_types;
     compiler.macros = external_macros;
 
     // Register namespace aliases.
@@ -318,6 +327,14 @@ pub fn compile_file_with_context(
         return Err(vec![e]);
     }
 
+    // The codec's table is rebuilt from the MERGED constructor table — the chain's plus this
+    // file's. A file declares an inductive and writes values of it in the same compile, and
+    // encoding a value names its constructor's class (D85 §6.1), so a table from the parent
+    // chain alone cannot encode `justification:Term`'s constructors while compiling
+    // `justification.esl`.
+    compiler.codec_names =
+        crate::program::eigentt_type_mirror::CodecNames::from_class_table(&compiler.ctor_arg_names);
+
     // D52 §12 — collect every `macro` declaration in the file so
     // `Value::MacroCall` expansion can resolve forward references
     // (a macro declared later in the file referenced earlier). Adds
@@ -358,6 +375,10 @@ pub fn compile_file_with_context(
 #[derive(Debug, Default, Clone)]
 pub struct CtorSeed {
     pub by_short_name: BTreeMap<String, Vec<String>>,
+    /// Argument names for the two inductives the D47 codec writes — `eigentt:Term` and
+    /// `core:Level`. Same provenance as `arg_names` and read on the same walk, but keyed by
+    /// constructor name because that is what the codec has in hand (D85 §5 step 4).
+    pub codec: crate::program::eigentt_type_mirror::CodecNames,
     /// Argument names per constructor, in DECLARATION order, keyed by the constructor class IRI
     /// (`<inductive>-<Ctor>`, D85 §6.1).
     ///
@@ -366,6 +387,8 @@ pub struct CtorSeed {
     /// nowhere else. Reading them from the chain rather than a table of its own is why
     /// `esl::compile` takes a layer.
     pub arg_names: BTreeMap<String, Vec<String>>,
+    /// The declared TYPE of each argument, parallel to `arg_names` and keyed the same way.
+    pub arg_types: BTreeMap<String, Vec<Option<String>>>,
 }
 
 /// Walk a layer chain and collect every chain-resident inductive's
@@ -415,6 +438,7 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
             // The value-resource class for this ctor, and its arguments in declaration order.
             let arg_types_iri = Iri::parse(wk::ARG_TYPES).ok();
             let args: Vec<String> = arg_types_iri
+                .clone()
                 .and_then(|i| ctor_resource.get(&i).cloned())
                 .and_then(|v| match v {
                     Value::Array(a) => Some(a),
@@ -435,9 +459,27 @@ pub fn collect_ctors_from_layer(layer: &crate::layer::Layer) -> CtorSeed {
                         .collect()
                 })
                 .unwrap_or_default();
+            let types: Vec<Option<String>> = arg_types_iri
+                .and_then(|i| ctor_resource.get(&i).cloned())
+                .and_then(|v| match v {
+                    Value::Array(a) => Some(a),
+                    _ => None,
+                })
+                .map(|a| {
+                    a.iter()
+                        .map(|at| match at {
+                            Value::Embedded(r) => crate::layer::ctor_classes::declared_arg_type(r),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             out.arg_names
                 .entry(format!("{parent_iri}-{name}"))
                 .or_insert(args);
+            out.arg_types
+                .entry(format!("{parent_iri}-{name}"))
+                .or_insert(types);
             if seen_iris.insert(ctor_iri.clone()) {
                 // First time we see this exact ctor IRI; also index it
                 // by short name. Duplicate IRIs (same ctor visible via
@@ -538,6 +580,10 @@ struct Compiler {
     ctors_by_short_name: BTreeMap<String, Vec<String>>,
     /// Argument names per constructor class, in declaration order — see [`CtorSeed::arg_names`].
     ctor_arg_names: BTreeMap<String, Vec<String>>,
+    /// Constructor argument names for the D47 codec — see [`CtorSeed::codec`].
+    codec_names: crate::program::eigentt_type_mirror::CodecNames,
+    /// Declared argument types, keyed by constructor class — see [`CtorSeed::arg_types`].
+    ctor_arg_types: BTreeMap<String, Vec<Option<String>>>,
     /// D52 §12 — per-file smart-constructor macro table: full macro
     /// IRI → its declaration AST. Built in `collect_macro_table`
     /// before any value is compiled, so `Value::MacroCall` resolution
@@ -828,6 +874,8 @@ impl Compiler {
             declared_universes: std::collections::BTreeSet::new(),
             ctors_by_short_name: BTreeMap::new(),
             ctor_arg_names: BTreeMap::new(),
+            codec_names: Default::default(),
+            ctor_arg_types: BTreeMap::new(),
             macros: BTreeMap::new(),
             institutions: None,
         }
@@ -886,8 +934,20 @@ impl Compiler {
                                 ast::CtorArg::Positional(_) => format!("arg_{i}"),
                             })
                             .collect();
+                        let types = args
+                            .iter()
+                            .map(|a| {
+                                let ty = match a {
+                                    ast::CtorArg::Named { typ, .. } => typ,
+                                    ast::CtorArg::Positional(ty) => ty,
+                                };
+                                self.resolve(&ty.name).ok()
+                            })
+                            .collect();
                         self.ctor_arg_names
                             .insert(format!("{parent_iri}-{}", ctor.name()), names);
+                        self.ctor_arg_types
+                            .insert(format!("{parent_iri}-{}", ctor.name()), types);
                     }
                 }
             }
@@ -1630,12 +1690,13 @@ impl Compiler {
         let empty_scope: std::collections::HashSet<&str> = std::collections::HashSet::new();
         let statement_exp = self.lower_type_expr_to_exp(&decl.statement, &empty_scope)?;
         let encoded =
-            crate::program::eigentt_type_mirror::encode_type(&statement_exp).map_err(|e| {
-                EslError::compiler(
-                    Some(decl.pos.clone()),
-                    format!("axiom statement encoding failed: {e}"),
-                )
-            })?;
+            crate::program::eigentt_type_mirror::encode_type(&statement_exp, &self.codec_names)
+                .map_err(|e| {
+                    EslError::compiler(
+                        Some(decl.pos.clone()),
+                        format!("axiom statement encoding failed: {e}"),
+                    )
+                })?;
         let id = self.resolve_iri(&decl.name)?;
         let mut r = Resource::new(id);
         r.set(
@@ -1692,15 +1753,18 @@ impl Compiler {
         }
 
         let encoded_type =
-            crate::program::eigentt_type_mirror::encode_type(&type_exp).map_err(|e| {
-                EslError::compiler(
-                    Some(decl.pos.clone()),
-                    format!("definition type encoding failed: {e}"),
-                )
-            })?;
+            crate::program::eigentt_type_mirror::encode_type(&type_exp, &self.codec_names)
+                .map_err(|e| {
+                    EslError::compiler(
+                        Some(decl.pos.clone()),
+                        format!("definition type encoding failed: {e}"),
+                    )
+                })?;
         // `Exp::Lam` carries no domain slot, so the encoder takes the annotations separately.
         let encoded_body = crate::program::eigentt_type_mirror::encode_lam_chain(
-            &binders, &body_exp,
+            &binders,
+            &body_exp,
+            &self.codec_names,
         )
         .map_err(|e| {
             EslError::compiler(
@@ -2008,87 +2072,116 @@ impl Compiler {
     /// Cases that can contain nested `Lambda`s (Arrow, Pi, BinderArrow,
     /// Ref with args) recurse here so the annotation survives at any
     /// depth. Leaves with no Lambda exposure (Sort, literals) delegate
-    /// to `lower_type_expr_to_exp` + `encode_type`.
-    fn encode_type_expr_to_json(
+    /// One `eigentt:Term` value, built through the single layout authority.
+    fn term(&self, ctor: &str, args: Vec<Value>) -> Result<Value, EslError> {
+        self.inductive_value(
+            crate::ontology::well_known::EIGENTT_TERM,
+            ctor,
+            args,
+            &crate::esl::error::Position { line: 0, column: 0 },
+        )
+    }
+
+    /// A value of `inductive`'s constructor `ctor`, arguments already encoded.
+    ///
+    /// The names come from the declaration and the layout from
+    /// `ctor_classes::value_resource` — the same pair every other producer uses, so there is
+    /// one description of what an inductive value looks like.
+    fn inductive_value(
+        &self,
+        inductive: &str,
+        ctor: &str,
+        args: Vec<Value>,
+        pos: &crate::esl::error::Position,
+    ) -> Result<Value, EslError> {
+        let class = crate::layer::ctor_classes::class_iri(inductive, ctor);
+        let names = self.ctor_arg_names.get(&class).ok_or_else(|| {
+            EslError::compiler(
+                Some(pos.clone()),
+                format!("`{inductive}` declares no constructor `{ctor}` in this chain"),
+            )
+        })?;
+        if names.len() != args.len() {
+            return Err(EslError::compiler(
+                Some(pos.clone()),
+                format!(
+                    "`{ctor}` of `{inductive}` takes {} argument(s), got {}",
+                    names.len(),
+                    args.len()
+                ),
+            ));
+        }
+        Ok(crate::layer::ctor_classes::value_resource(
+            inductive, ctor, names, &args,
+        ))
+    }
+
+    fn encode_type_expr_to_value(
         &self,
         typ: &ast::Term,
         scope: &std::collections::HashSet<&str>,
-    ) -> Result<serde_json::Value, EslError> {
-        use crate::program::eigentt_type_mirror::encode_type;
-        use serde_json::json;
+    ) -> Result<Value, EslError> {
         // `alias` sugar — expand bindings into the body and recurse.
         if let ast::Term::Alias { .. } = typ {
             let expanded = expand_aliases(typ, &BTreeMap::new());
-            return self.encode_type_expr_to_json(&expanded, scope);
+            return self.encode_type_expr_to_value(&expanded, scope);
         }
 
         // Wrap a leaf Term: lower to Exp, encode via the D47
         // encoder, unwrap to raw JSON. Safe for any subtree whose
         // lowered Exp contains no `Lam`.
-        let encode_leaf = |this: &Self, t: &ast::Term| -> Result<serde_json::Value, EslError> {
+        let encode_leaf = |this: &Self, t: &ast::Term| -> Result<Value, EslError> {
             let exp = this.lower_type_expr_to_exp(t, scope)?;
-            let v = encode_type(&exp).map_err(|e| {
+            crate::program::eigentt_type_mirror::encode_type(&exp, &self.codec_names).map_err(|e| {
                 EslError::compiler(
                     Some(t.pos().clone()),
                     format!("type_expr encoding failed: {e}"),
                 )
-            })?;
-            match v {
-                Value::Json(j) => Ok(j),
-                other => Err(EslError::compiler(
-                    Some(t.pos().clone()),
-                    format!("type_expr encoding did not produce JSON: {other:?}"),
-                )),
-            }
+            })
         };
 
         match typ {
-            ast::Term::Unit { .. } => Ok(serde_json::json!({"ctor": "UnitVal", "args": []})),
+            ast::Term::Unit { .. } => self.term("UnitVal", vec![]),
             ast::Term::Lambda { params, body, .. } => {
                 // Mirror the lowering's scope-threading so later params
                 // can mention earlier binders. Each dom is encoded
                 // against the scope where prior binders are visible.
                 let mut working: std::collections::HashSet<String> =
                     scope.iter().map(|s| s.to_string()).collect();
-                let mut binder_doms: Vec<(String, serde_json::Value)> =
-                    Vec::with_capacity(params.len());
+                let mut binder_doms: Vec<(String, Value)> = Vec::with_capacity(params.len());
                 for p in params {
                     let local: std::collections::HashSet<&str> =
                         working.iter().map(|s| s.as_str()).collect();
-                    let dom_json = self.encode_type_expr_to_json(&p.typ, &local)?;
+                    let dom_json = self.encode_type_expr_to_value(&p.typ, &local)?;
                     binder_doms.push((p.name.clone(), dom_json));
                     working.insert(p.name.clone());
                 }
                 let inner_scope: std::collections::HashSet<&str> =
                     working.iter().map(|s| s.as_str()).collect();
-                let mut acc = self.encode_type_expr_to_json(body, &inner_scope)?;
+                let mut acc = self.encode_type_expr_to_value(body, &inner_scope)?;
                 for (name, dom) in binder_doms.into_iter().rev() {
-                    acc = json!({
-                        "ctor": "Lam",
-                        "args": [name, dom, acc],
-                    });
+                    acc = self.term("Lam", vec![Value::String(name), dom, acc])?;
                 }
                 Ok(acc)
             }
             ast::Term::Sigma { params, body, .. } => {
                 let mut working: std::collections::HashSet<String> =
                     scope.iter().map(|s| s.to_string()).collect();
-                let mut binder_doms: Vec<(String, serde_json::Value)> =
-                    Vec::with_capacity(params.len());
+                let mut binder_doms: Vec<(String, Value)> = Vec::with_capacity(params.len());
                 for p in params {
                     let local: std::collections::HashSet<&str> =
                         working.iter().map(|s| s.as_str()).collect();
                     binder_doms.push((
                         p.name.clone(),
-                        self.encode_type_expr_to_json(&p.typ, &local)?,
+                        self.encode_type_expr_to_value(&p.typ, &local)?,
                     ));
                     working.insert(p.name.clone());
                 }
                 let inner_scope: std::collections::HashSet<&str> =
                     working.iter().map(|s| s.as_str()).collect();
-                let mut acc = self.encode_type_expr_to_json(body, &inner_scope)?;
+                let mut acc = self.encode_type_expr_to_value(body, &inner_scope)?;
                 for (name, dom) in binder_doms.into_iter().rev() {
-                    acc = json!({ "ctor": "Sig", "args": [name, dom, acc] });
+                    acc = self.term("Sig", vec![Value::String(name), dom, acc])?;
                 }
                 Ok(acc)
             }
@@ -2097,62 +2190,49 @@ impl Compiler {
             } => {
                 let mut working: std::collections::HashSet<String> =
                     scope.iter().map(|s| s.to_string()).collect();
-                let mut binder_doms: Vec<(String, serde_json::Value)> =
-                    Vec::with_capacity(params.len());
+                let mut binder_doms: Vec<(String, Value)> = Vec::with_capacity(params.len());
                 for p in params {
                     let local: std::collections::HashSet<&str> =
                         working.iter().map(|s| s.as_str()).collect();
-                    let dom_json = self.encode_type_expr_to_json(&p.typ, &local)?;
+                    let dom_json = self.encode_type_expr_to_value(&p.typ, &local)?;
                     binder_doms.push((p.name.clone(), dom_json));
                     working.insert(p.name.clone());
                 }
                 let inner_scope: std::collections::HashSet<&str> =
                     working.iter().map(|s| s.as_str()).collect();
-                let mut acc = self.encode_type_expr_to_json(codomain, &inner_scope)?;
+                let mut acc = self.encode_type_expr_to_value(codomain, &inner_scope)?;
                 for (name, dom) in binder_doms.into_iter().rev() {
-                    acc = json!({
-                        "ctor": "Pi",
-                        "args": [name, dom, acc],
-                    });
+                    acc = self.term("Pi", vec![Value::String(name), dom, acc])?;
                 }
                 Ok(acc)
             }
             ast::Term::Arrow {
                 domain, codomain, ..
             } => {
-                let dom_json = self.encode_type_expr_to_json(domain, scope)?;
-                let cod_json = self.encode_type_expr_to_json(codomain, scope)?;
-                Ok(json!({
-                    "ctor": "Pi",
-                    "args": ["", dom_json, cod_json],
-                }))
+                let dom_json = self.encode_type_expr_to_value(domain, scope)?;
+                let cod_json = self.encode_type_expr_to_value(codomain, scope)?;
+                Ok(self.term("Pi", vec![Value::String(String::new()), dom_json, cod_json])?)
             }
             // `(e : T)` — bidirectional annotation. Recurse into both children so
             // a `fun` lambda inside `e` keeps its binder annotations (the whole
             // reason `sem` can carry a λ-term that `check_infer` then accepts).
             ast::Term::Ann { expr, typ, .. } => {
-                let e_json = self.encode_type_expr_to_json(expr, scope)?;
-                let t_json = self.encode_type_expr_to_json(typ, scope)?;
-                Ok(json!({
-                    "ctor": "Ann",
-                    "args": [e_json, t_json],
-                }))
+                let e_json = self.encode_type_expr_to_value(expr, scope)?;
+                let t_json = self.encode_type_expr_to_value(typ, scope)?;
+                Ok(self.term("Ann", vec![e_json, t_json])?)
             }
             ast::Term::BinderArrow {
                 name, kind, body, ..
             } => {
                 let kind_str = self.resolve(kind)?;
-                let dom_json = json!({
-                    "ctor": "ConstRef",
-                    "args": [kind_str],
-                });
+                let dom_json = self.term(
+                    "ConstRef",
+                    vec![Value::String(kind_str), Value::Array(Vec::new())],
+                )?;
                 let mut inner_scope: std::collections::HashSet<&str> = scope.clone();
                 inner_scope.insert(name.as_str());
-                let body_json = self.encode_type_expr_to_json(body, &inner_scope)?;
-                Ok(json!({
-                    "ctor": "Pi",
-                    "args": [name.clone(), dom_json, body_json],
-                }))
+                let body_json = self.encode_type_expr_to_value(body, &inner_scope)?;
+                Ok(self.term("Pi", vec![Value::String(name.clone()), dom_json, body_json])?)
             }
             // Sigma ELIMINATION. `eigentt:fst(p)` / `eigentt:snd(p)` are surface spellings of
             // the `Fst`/`Snd` term nodes, not axioms — an axiom would be opaque and never
@@ -2172,8 +2252,8 @@ impl Compiler {
                 } else {
                     "Snd"
                 };
-                let inner = self.encode_type_expr_to_json(&args[0], scope)?;
-                Ok(json!({ "ctor": ctor, "args": [inner] }))
+                let inner = self.encode_type_expr_to_value(&args[0], scope)?;
+                Ok(self.term(ctor, vec![inner])?)
             }
             ast::Term::Ref { name, args, .. } => {
                 // Mirror `lower_type_expr_to_exp`'s Ref resolution: bound
@@ -2185,53 +2265,47 @@ impl Compiler {
                 // there keeps its annotation.
                 let is_bound = name.namespace.is_none() && scope.contains(name.name.as_str());
                 let head_json = if is_bound {
-                    json!({"ctor": "Var", "args": [name.name.clone()]})
+                    self.term("Var", vec![Value::String(name.name.clone())])?
                 } else {
                     // Pre-resolution bare-name ctor lookup (with
                     // ambiguity detection via `resolve_ctor_iri`).
-                    let bare_ctor = if name.namespace.is_none() {
+                    let ctor_iri = if name.namespace.is_none() {
                         self.resolve_ctor_iri(name)?
                     } else {
                         None
-                    };
-                    if let Some(ctor_iri_str) = bare_ctor {
+                    }
+                    .or(self.resolve_ctor_iri(name)?);
+                    // `type_expr(...)` is a TERM, so a constructor head is the term
+                    // language's `CtorApp`, applied by `App` — the same shape `encode_term`
+                    // gives `Exp::InductiveCtor`, and what `Term-App-arg` admits. A value at a
+                    // slot typed by its own inductive takes the other shape; see
+                    // `Compiler::ctor_application`.
+                    if let Some(ctor_iri_str) = ctor_iri {
                         let parent_iri_str = ctor_iri_str
                             .rsplit_once(':')
                             .map(|(p, _)| p.to_string())
                             .unwrap_or(ctor_iri_str);
-                        json!({
-                            "ctor": "CtorApp",
-                            "args": [parent_iri_str, name.name.clone()],
-                        })
+                        self.term(
+                            "CtorApp",
+                            vec![
+                                Value::String(parent_iri_str),
+                                Value::String(name.name.clone()),
+                            ],
+                        )?
                     } else {
-                        // Namespace-resolve, then check via
-                        // `resolve_ctor_iri` (which walks the
-                        // short-name bucket filtered by namespace).
+                        // Primitive IRIs ride the ConstRef path (the D47 decoder maps the
+                        // five primitive IRIs to EigonPrimitive directly).
                         let iri_str = self.resolve(name)?;
-                        if let Some(ctor_iri_str) = self.resolve_ctor_iri(name)? {
-                            let parent_iri_str = ctor_iri_str
-                                .rsplit_once(':')
-                                .map(|(p, _)| p.to_string())
-                                .unwrap_or(ctor_iri_str);
-                            json!({
-                                "ctor": "CtorApp",
-                                "args": [parent_iri_str, name.name.clone()],
-                            })
-                        } else {
-                            // Primitive IRIs ride the ConstRef path
-                            // (the D47 decoder maps the five primitive
-                            // IRIs to EigonPrimitive directly).
-                            json!({"ctor": "ConstRef", "args": [iri_str]})
-                        }
+                        self.term(
+                            "ConstRef",
+                            vec![Value::String(iri_str), Value::Array(Vec::new())],
+                        )?
                     }
                 };
                 let mut acc = head_json;
                 for arg in args {
-                    let arg_json = self.encode_type_expr_to_json(arg, scope)?;
-                    acc = json!({
-                        "ctor": "App",
-                        "args": [acc, arg_json],
-                    });
+                    let arg_json = self.encode_type_expr_to_value(arg, scope)?;
+                    acc = self.term("App", vec![acc, arg_json])?;
                 }
                 Ok(acc)
             }
@@ -2429,8 +2503,11 @@ impl Compiler {
                             scope.insert(idx.name.as_str());
                         }
                         let ctor_exp = self.lower_type_expr_to_exp(typ, &scope)?;
-                        let encoded = crate::program::eigentt_type_mirror::encode_type(&ctor_exp)
-                            .map_err(|e| {
+                        let encoded = crate::program::eigentt_type_mirror::encode_type(
+                            &ctor_exp,
+                            &self.codec_names,
+                        )
+                        .map_err(|e| {
                             EslError::compiler(
                                 Some(pos.clone()),
                                 format!("failed to encode ctor type for `{}`: {e}", c.name()),
@@ -2686,7 +2763,8 @@ impl Compiler {
                     let scope: std::collections::HashSet<&str> = std::collections::HashSet::new();
                     let exp = self.lower_type_expr_to_exp(typ, &scope)?;
                     let encoded =
-                        crate::program::eigentt_type_mirror::encode_type(&exp).map_err(|e| {
+                        crate::program::eigentt_type_mirror::encode_type(&exp, &self.codec_names)
+                            .map_err(|e| {
                             EslError::compiler(
                                 Some(prop.pos.clone()),
                                 format!("expected_type encoding failed: {e}"),
@@ -2775,7 +2853,7 @@ impl Compiler {
             // a `CtorApp` lands against — the chain validator has the
             // full ctor schema and reports a clean structural error
             // if the name + arg shapes don't match.
-            ast::Value::CtorApp { .. } => Ok(Value::Json(self.ctor_value_to_json(value)?)),
+            ast::Value::CtorApp { ctor, args, pos } => self.ctor_application(ctor, args, pos),
             // `type_expr(<Term>)` — inline D47-encoded EigenTT
             // type expression. Lowers via the same path as `axiom`
             // and `data` ctor types: ESL Term →
@@ -2789,8 +2867,7 @@ impl Compiler {
                 // the D47 codec. The generic `encode_type` rejects bare
                 // `Exp::Lam` (no annotation to recover post-lowering).
                 let scope = std::collections::HashSet::new();
-                let json = self.encode_type_expr_to_json(typ, &scope)?;
-                Ok(Value::Json(json))
+                self.encode_type_expr_to_value(typ, &scope)
             }
             // The parser routes any `ns:Name(args)` to `MacroCall`
             // because it can't tell at parse time whether `Name` is a
@@ -2805,8 +2882,7 @@ impl Compiler {
             // collides with another inductive's ctor short name.
             ast::Value::MacroCall { name, args, pos } => {
                 if self.resolve_ctor_iri(name)?.is_some() {
-                    let json = self.qualified_ctor_to_json(&name.name, args)?;
-                    return Ok(Value::Json(json));
+                    return self.ctor_application(&name.name, args, pos);
                 }
                 let expanded = self.expand_macro_call(name, args, pos)?;
                 self.compile_value(&expanded)
@@ -2865,74 +2941,118 @@ impl Compiler {
     /// `CtorApp` becomes `{"ctor": ..., "args": [...]}`. `Block`
     /// embedded resources are rejected — inductive ctor args are
     /// flat values or other ctors, not nested resources.
-    fn ctor_value_to_json(&self, value: &ast::Value) -> Result<serde_json::Value, EslError> {
+    /// One constructor application, as a D85 §6.1 value resource.
+    ///
+    /// **The conversion happens HERE, not at the property boundary**, because the tagged form
+    /// records only a constructor's SHORT NAME and two inductives may share one. `is_a` names
+    /// the constructor's class, so the inductive has to be resolved while it is still known —
+    /// `resolve_ctor_iri` is what knows it, and it is in scope only at this point.
+    fn ctor_application(
+        &self,
+        ctor: &str,
+        args: &[ast::Value],
+        pos: &crate::esl::error::Position,
+    ) -> Result<Value, EslError> {
+        let qn = ast::QualifiedName {
+            namespace: None,
+            name: ctor.to_string(),
+            pos: pos.clone(),
+        };
+        let ctor_iri = self.resolve_ctor_iri(&qn)?.ok_or_else(|| {
+            EslError::compiler(
+                Some(pos.clone()),
+                format!("`{ctor}` is not a constructor declared in this file or the chain"),
+            )
+        })?;
+        let (inductive, ctor_name) = ctor_iri.rsplit_once(':').ok_or_else(|| {
+            EslError::compiler(
+                Some(pos.clone()),
+                format!("constructor IRI `{ctor_iri}` is not `<inductive>:<ctor>`"),
+            )
+        })?;
+        let class = crate::layer::ctor_classes::class_iri(inductive, ctor_name);
+        let names = self.ctor_arg_names.get(&class).ok_or_else(|| {
+            EslError::compiler(
+                Some(pos.clone()),
+                format!("`{inductive}` declares no argument names for `{ctor_name}`"),
+            )
+        })?;
+        if names.len() != args.len() {
+            return Err(EslError::compiler(
+                Some(pos.clone()),
+                format!(
+                    "`{ctor_name}` takes {} argument(s), got {}",
+                    names.len(),
+                    args.len()
+                ),
+            ));
+        }
+        let types = self.ctor_arg_types.get(&class);
+        let vals: Result<Vec<Value>, EslError> = args
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let val = self.ctor_value_to_value(v)?;
+                // A literal takes the argument's DECLARED type: `2` in a `core:float` slot is
+                // `2.0`. JSON has one number type, so the tagged form never had to say this;
+                // a `Value` distinguishes `Integer` from `Float` and validation checks it.
+                let declared = types.and_then(|ts| ts.get(i)).and_then(Option::as_deref);
+                Ok(match (declared, &val) {
+                    (Some(crate::ontology::well_known::FLOAT), Value::Integer(n)) => {
+                        Value::Float(*n as f64)
+                    }
+                    _ => val,
+                })
+            })
+            .collect();
+        Ok(crate::layer::ctor_classes::value_resource(
+            inductive, ctor_name, names, &vals?,
+        ))
+    }
+
+    /// A constructor argument, as a `Value`.
+    ///
+    /// Returned `Value`s, not `serde_json::Value`: a nested constructor application is a value
+    /// RESOURCE (D85 §6.1), and the tagged form it used to build could not express one — the
+    /// short name alone does not say which inductive the constructor belongs to.
+    fn ctor_value_to_value(&self, value: &ast::Value) -> Result<Value, EslError> {
         match value {
-            ast::Value::Json(j) => Ok(j.clone()),
-            ast::Value::String(s) => Ok(serde_json::Value::String(s.clone())),
-            ast::Value::Int(n) => Ok(serde_json::Value::Number((*n).into())),
-            ast::Value::Float(f) => Ok(serde_json::Number::from_f64(*f)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)),
-            ast::Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
-            ast::Value::Ref(qn) => Ok(serde_json::Value::String(self.resolve(qn)?)),
+            ast::Value::Json(j) => Ok(Value::Json(j.clone())),
+            ast::Value::String(s) => Ok(Value::String(s.clone())),
+            ast::Value::Int(n) => Ok(Value::Integer(*n)),
+            ast::Value::Float(f) => Ok(Value::Float(*f)),
+            ast::Value::Bool(b) => Ok(Value::Boolean(*b)),
+            ast::Value::Ref(qn) => Ok(Value::String(self.resolve(qn)?)),
             ast::Value::Array(items) => {
-                let json_items: Result<Vec<_>, _> =
-                    items.iter().map(|v| self.ctor_value_to_json(v)).collect();
-                Ok(serde_json::Value::Array(json_items?))
+                let vals: Result<Vec<_>, _> =
+                    items.iter().map(|v| self.ctor_value_to_value(v)).collect();
+                Ok(Value::Array(vals?))
             }
             ast::Value::Block(_) => Err(EslError::compiler(
                 None,
                 "embedded `{...}` resource blocks cannot appear as constructor arguments — \
                  ctor args are flat values or nested constructor applications",
             )),
-            ast::Value::CtorApp { ctor, args, .. } => {
-                let json_args: Result<Vec<_>, _> =
-                    args.iter().map(|v| self.ctor_value_to_json(v)).collect();
-                let mut obj = serde_json::Map::new();
-                obj.insert("ctor".to_string(), serde_json::Value::String(ctor.clone()));
-                obj.insert("args".to_string(), serde_json::Value::Array(json_args?));
-                Ok(serde_json::Value::Object(obj))
+            ast::Value::CtorApp { ctor, args, pos } => self.ctor_application(ctor, args, pos),
+            // A constructor argument declared `eigentt:Term` holds a TERM, so `type_expr(...)`
+            // belongs here. It was refused while an argument was a flat value or a nested
+            // constructor application and nothing else — a restriction of the tagged form,
+            // which had no way to say what an argument's declared type was.
+            ast::Value::Term { typ, .. } => {
+                let scope = std::collections::HashSet::new();
+                self.encode_type_expr_to_value(typ, &scope)
             }
-            ast::Value::Term { .. } => Err(EslError::compiler(
-                None,
-                "`type_expr(...)` cannot appear as an argument inside a chain inductive ctor — \
-                 D32 §3.7 ctor args are flat values or nested ctor applications, not D47-encoded \
-                 type expressions. Lift the type_expr to the property value directly.",
-            )),
-            // Same disambiguation as `compile_value`: try ctor
-            // resolution first (qualified ctor refs reach this site
-            // when an outer ctor's arg is `justification:App(...)`),
-            // fall back to macro expansion otherwise.
+            // Same disambiguation as `compile_value`: try ctor resolution first (qualified ctor
+            // refs reach this site when an outer ctor's arg is `justification:App(...)`), fall
+            // back to macro expansion otherwise.
             ast::Value::MacroCall { name, args, pos } => {
                 if self.resolve_ctor_iri(name)?.is_some() {
-                    return self.qualified_ctor_to_json(&name.name, args);
+                    return self.ctor_application(&name.name, args, pos);
                 }
                 let expanded = self.expand_macro_call(name, args, pos)?;
-                self.ctor_value_to_json(&expanded)
+                self.ctor_value_to_value(&expanded)
             }
         }
-    }
-
-    /// Encode a qualified ctor call to the same `{ctor, args}` JSON
-    /// shape as a bare `Value::CtorApp`. The "ctor" field carries the
-    /// short name (the inductive's per-ctor identifier inside its
-    /// decl); chain consumers disambiguate by the expected inductive
-    /// at extract time, so the qualifier doesn't need to land in the
-    /// serialised form.
-    fn qualified_ctor_to_json(
-        &self,
-        ctor_short_name: &str,
-        args: &[ast::Value],
-    ) -> Result<serde_json::Value, EslError> {
-        let json_args: Result<Vec<_>, _> =
-            args.iter().map(|v| self.ctor_value_to_json(v)).collect();
-        let mut obj = serde_json::Map::new();
-        obj.insert(
-            "ctor".to_string(),
-            serde_json::Value::String(ctor_short_name.to_string()),
-        );
-        obj.insert("args".to_string(), serde_json::Value::Array(json_args?));
-        Ok(serde_json::Value::Object(obj))
     }
 
     // --- Program ---
@@ -3522,7 +3642,9 @@ impl Compiler {
                                 working.iter().map(|s| s.as_str()).collect();
                             let body_exp = self.lower_type_expr_to_exp(body, &inner_scope)?;
                             let encoded = crate::program::eigentt_type_mirror::encode_lam_chain(
-                                &binders, &body_exp,
+                                &binders,
+                                &body_exp,
+                                &self.codec_names,
                             )
                             .map_err(|e| {
                                 EslError::compiler(
@@ -3538,14 +3660,16 @@ impl Compiler {
                             // contain no Lams so `encode_type` is OK.
                             let scope = std::collections::HashSet::new();
                             let motive_exp = self.lower_type_expr_to_exp(other, &scope)?;
-                            let encoded =
-                                crate::program::eigentt_type_mirror::encode_type(&motive_exp)
-                                    .map_err(|e| {
-                                        EslError::compiler(
-                                            Some(other.pos().clone()),
-                                            format!("failed to encode match motive: {e}"),
-                                        )
-                                    })?;
+                            let encoded = crate::program::eigentt_type_mirror::encode_type(
+                                &motive_exp,
+                                &self.codec_names,
+                            )
+                            .map_err(|e| {
+                                EslError::compiler(
+                                    Some(other.pos().clone()),
+                                    format!("failed to encode match motive: {e}"),
+                                )
+                            })?;
                             r.set(iri("urn:eigenius:program:result_motive"), encoded);
                         }
                     }
@@ -3989,7 +4113,10 @@ mod tests {
         expected_ctor(
             "urn:eigenius:eigentt:Term",
             "ConstRef",
-            &[("iri", Value::String(target.to_string()))],
+            &[
+                ("iri", Value::String(target.to_string())),
+                ("levels", Value::Array(Vec::new())),
+            ],
         )
     }
 
@@ -4000,6 +4127,43 @@ mod tests {
             "Var",
             &[("name", Value::String(name.to_string()))],
         )
+    }
+
+    /// The CONSTRUCTOR view of a compiled value, for assertions written as `j["ctor"]`.
+    ///
+    /// Reads `is_a` and the argument properties in declaration order. Deliberately not
+    /// `value_resource_to_tagged`, which projects to the D47 TERM encoding — for an inductive
+    /// other than `eigentt:Term` that is an `App` spine over `CtorApp`, a fact about the term
+    /// language rather than about the value these tests compiled.
+    fn tagged_of(v: &Value) -> serde_json::Value {
+        match v {
+            Value::Embedded(r) => {
+                let class = r.is_a().first().expect("a value names its class").clone();
+                let (ind, ctor) = class
+                    .as_str()
+                    .rsplit_once('-')
+                    .expect("a constructor class is `<inductive>-<ctor>`");
+                let ind_iri = Iri::parse(ind).expect("inductive IRI");
+                let names = crate::layer::ctor_classes::arg_names_of(term_chain(), &ind_iri)
+                    .and_then(|m| m.get(ctor).cloned())
+                    .unwrap_or_default();
+                let args: Vec<serde_json::Value> = names
+                    .iter()
+                    .map(|n| {
+                        let k = Iri::parse(&format!("{class}-{n}")).expect("arg property");
+                        r.get(&k).map(tagged_of).unwrap_or(serde_json::Value::Null)
+                    })
+                    .collect();
+                serde_json::json!({ "ctor": ctor, "args": args })
+            }
+            Value::Json(j) => j.clone(),
+            Value::String(s) => serde_json::Value::String(s.clone()),
+            Value::Integer(i) => serde_json::Value::from(*i),
+            Value::Float(f) => serde_json::Value::from(*f),
+            Value::Boolean(b) => serde_json::Value::Bool(*b),
+            Value::Array(items) => serde_json::Value::Array(items.iter().map(tagged_of).collect()),
+            other => panic!("expected a term value, got {other:?}"),
+        }
     }
 
     fn compile_esl(input: &str) -> Vec<Resource> {
@@ -4190,10 +4354,11 @@ mod tests {
             r#"
             namespace core = "urn:eigenius:core";
             namespace ex   = "urn:eigenius:example";
+            namespace f    = "urn:eigenius:formulas";
 
             resource ex:t : ex:Holder {
-                ex:term = App(OpRef("urn:eigenius:formulas:ops:mul"),
-                              LitFloat(2.0));
+                ex:term = f:FormulaTerm:App(f:FormulaTerm:OpRef("urn:eigenius:formulas:ops:mul"),
+                                            f:FormulaTerm:LitFloat(2.0));
             }
         "#,
         );
@@ -4201,19 +4366,32 @@ mod tests {
         let term = r
             .get(&iri("urn:eigenius:example:term"))
             .expect("term property must be set");
-        let Value::Json(json) = term else {
-            panic!("expected Value::Json, got {term:?}");
-        };
-        assert_eq!(json["ctor"], serde_json::json!("App"));
-        let args = json["args"].as_array().expect("args must be array");
-        assert_eq!(args.len(), 2);
-        assert_eq!(args[0]["ctor"], serde_json::json!("OpRef"));
+        // On the VALUE shape, not a tagged projection: a `FormulaTerm` value states its
+        // constructor's class, and projecting it back gives the D47 term encoding of that
+        // value — an `App` spine over `CtorApp(FormulaTerm, App)` — which is a fact about the
+        // term language, not about what this compile produced.
+        const FT: &str = "urn:eigenius:formulas:FormulaTerm";
         assert_eq!(
-            args[0]["args"][0],
-            serde_json::json!("urn:eigenius:formulas:ops:mul")
+            term,
+            &expected_ctor(
+                FT,
+                "App",
+                &[
+                    (
+                        "head",
+                        expected_ctor(
+                            FT,
+                            "OpRef",
+                            &[("iri", Value::String("urn:eigenius:formulas:ops:mul".into()))],
+                        )
+                    ),
+                    (
+                        "arg",
+                        expected_ctor(FT, "LitFloat", &[("value", Value::Float(2.0))])
+                    ),
+                ],
+            )
         );
-        assert_eq!(args[1]["ctor"], serde_json::json!("LitFloat"));
-        assert_eq!(args[1]["args"][0], serde_json::json!(2.0));
     }
 
     #[test]
@@ -4236,9 +4414,7 @@ mod tests {
         let term = r
             .get(&iri("urn:eigenius:example:term"))
             .expect("term property");
-        let Value::Json(json) = term else {
-            panic!("expected Value::Json on ex:term");
-        };
+        let json = tagged_of(term);
         // Outermost is pow; rhs is the LitFloat(2.0) exponent.
         assert_eq!(json["ctor"], serde_json::json!("App"));
         assert_eq!(
@@ -4254,27 +4430,56 @@ mod tests {
     }
 
     #[test]
-    fn compile_nullary_ctor_value() {
-        // Nullary ctor (`LE()`) lowers to `{ "ctor": "LE", "args": [] }`.
+    fn a_nullary_ctor_value_names_its_class() {
         let resources = compile_esl(
             r#"
             namespace core = "urn:eigenius:core";
             namespace ex   = "urn:eigenius:example";
+
+            data ex:Relation { LE, GT }
 
             resource ex:c : ex:Constraint {
                 ex:relation = LE();
             }
         "#,
         );
-        let r = &resources[0];
+        let r = resources
+            .iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:c"))
+            .expect("the resource is emitted");
         let rel = r
             .get(&iri("urn:eigenius:example:relation"))
             .expect("relation property must be set");
-        let Value::Json(json) = rel else {
-            panic!("expected Value::Json, got {rel:?}");
-        };
-        assert_eq!(json["ctor"], serde_json::json!("LE"));
-        assert_eq!(json["args"], serde_json::json!([]));
+        assert_eq!(
+            rel,
+            &expected_ctor("urn:eigenius:example:Relation", "LE", &[])
+        );
+    }
+
+    /// **An undeclared constructor is now a compile error**, where it used to compile to an
+    /// opaque `{"ctor": "LE", "args": []}` and fail later at validation. D85 §6.1 forces it:
+    /// a value states its constructor's CLASS in `is_a`, and a constructor nothing declares
+    /// has no class to state. The diagnostic carries the source position, which the deferred
+    /// validation error did not.
+    #[test]
+    fn an_undeclared_ctor_value_is_refused_at_the_source() {
+        let err = crate::esl::compile(
+            r#"
+            namespace ex = "urn:eigenius:example";
+            resource ex:c : ex:Constraint { ex:relation = LE(); }
+        "#,
+            term_chain(),
+        )
+        .expect_err("an undeclared constructor cannot be spelled");
+        let msg = err
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("; ");
+        assert!(
+            msg.contains("LE") && msg.contains("not a constructor"),
+            "expected an undeclared-constructor diagnostic, got {msg}"
+        );
     }
 
     #[test]
@@ -4289,22 +4494,23 @@ mod tests {
             r#"
             namespace core   = "urn:eigenius:core";
             namespace diffeq = "urn:eigenius:diffeq";
+                namespace f      = "urn:eigenius:formulas";
             namespace nb     = "urn:eigenius:notebook:kinase_demo";
 
             resource nb:rhs_A : diffeq:RhsComponent {
-                diffeq:term = App(
-                    App(
-                        App(OpRef("urn:eigenius:formulas:ops:mul"), LitFloat(-1.0)),
-                        Var("A")
+                diffeq:term = f:FormulaTerm:App(
+                    f:FormulaTerm:App(
+                        f:FormulaTerm:App(f:FormulaTerm:OpRef("urn:eigenius:formulas:ops:mul"), f:FormulaTerm:LitFloat(-1.0)),
+                        f:FormulaTerm:Var("A")
                     ),
-                    Var("k")
+                    f:FormulaTerm:Var("k")
                 );
             }
 
             resource nb:rhs_B : diffeq:RhsComponent {
-                diffeq:term = App(
-                    App(OpRef("urn:eigenius:formulas:ops:mul"), Var("A")),
-                    Var("k")
+                diffeq:term = f:FormulaTerm:App(
+                    f:FormulaTerm:App(f:FormulaTerm:OpRef("urn:eigenius:formulas:ops:mul"), f:FormulaTerm:Var("A")),
+                    f:FormulaTerm:Var("k")
                 );
             }
 
@@ -4338,14 +4544,12 @@ mod tests {
         let term = rhs_a
             .get(&iri("urn:eigenius:diffeq:term"))
             .expect("term property");
-        let Value::Json(json) = term else {
-            panic!("expected Value::Json on diffeq:term");
-        };
+        let json = tagged_of(term);
         assert_eq!(json["ctor"], serde_json::json!("App"));
-        // Walk the App-spine: App(App(App(OpRef, Lit), Var(A)), Var(k)).
-        // args[0] is the inner App(App(OpRef, Lit), Var(A));
-        // args[0]["args"][0] is App(OpRef, Lit);
-        // args[0]["args"][0]["args"][0] is OpRef(...:mul).
+        // Walk the App-spine: f:FormulaTerm:App(f:FormulaTerm:App(f:FormulaTerm:App(OpRef, Lit), f:FormulaTerm:Var(A)), f:FormulaTerm:Var(k)).
+        // args[0] is the inner f:FormulaTerm:App(f:FormulaTerm:App(OpRef, Lit), f:FormulaTerm:Var(A));
+        // args[0]["args"][0] is f:FormulaTerm:App(OpRef, Lit);
+        // args[0]["args"][0]["args"][0] is f:FormulaTerm:OpRef(...:mul).
         assert_eq!(
             json["args"][0]["args"][0]["args"][0]["ctor"],
             serde_json::json!("OpRef")
@@ -6243,19 +6447,17 @@ mod tests {
         let stmt = ax
             .get(&iri("urn:eigenius:eigentt:axiom_statement"))
             .expect("axiom_statement property must be set");
-        match stmt {
-            Value::Json(j) => {
-                // The outer shape should be a Pi (encoded by the
-                // D47 codec): {ctor: "Pi", args: ["", <Sort 0>, <Sort 0>]}.
-                assert_eq!(j["ctor"], "Pi");
-                let args = j["args"].as_array().expect("Pi has args");
-                assert_eq!(args[0], serde_json::json!(""));
-                assert_eq!(args[1]["ctor"], "Sort");
-                assert_eq!(args[1]["args"][0]["ctor"], "Zero");
-                assert_eq!(args[2]["ctor"], "Sort");
-                assert_eq!(args[2]["args"][0]["ctor"], "Zero");
-            }
-            other => panic!("expected Value::Json, got {other:?}"),
+        {
+            let j = &tagged_of(stmt);
+            // The outer shape should be a Pi (encoded by the
+            // D47 codec): {ctor: "Pi", args: ["", <Sort 0>, <Sort 0>]}.
+            assert_eq!(j["ctor"], "Pi");
+            let args = j["args"].as_array().expect("Pi has args");
+            assert_eq!(args[0], serde_json::json!(""));
+            assert_eq!(args[1]["ctor"], "Sort");
+            assert_eq!(args[1]["args"][0]["ctor"], "Zero");
+            assert_eq!(args[2]["ctor"], "Sort");
+            assert_eq!(args[2]["args"][0]["ctor"], "Zero");
         }
     }
 
@@ -6280,24 +6482,22 @@ mod tests {
         let stmt = ax
             .get(&iri("urn:eigenius:eigentt:axiom_statement"))
             .expect("axiom_statement set");
-        match stmt {
-            Value::Json(j) => {
-                // forall (P : Prop) => P -> P
-                //   lowers to Pi(P : Sort(0), Pi(_ : Var(P), Var(P)))
-                //   encodes as Pi("P", Sort(0), Pi("", Var("P"), Var("P")))
-                assert_eq!(j["ctor"], "Pi");
-                assert_eq!(j["args"][0], "P");
-                assert_eq!(j["args"][1]["ctor"], "Sort");
-                assert_eq!(j["args"][1]["args"][0]["ctor"], "Zero");
-                let inner = &j["args"][2];
-                assert_eq!(inner["ctor"], "Pi");
-                assert_eq!(inner["args"][0], "");
-                assert_eq!(inner["args"][1]["ctor"], "Var");
-                assert_eq!(inner["args"][1]["args"][0], "P");
-                assert_eq!(inner["args"][2]["ctor"], "Var");
-                assert_eq!(inner["args"][2]["args"][0], "P");
-            }
-            other => panic!("expected Value::Json, got {other:?}"),
+        {
+            let j = &tagged_of(stmt);
+            // forall (P : Prop) => P -> P
+            //   lowers to Pi(P : Sort(0), Pi(_ : Var(P), Var(P)))
+            //   encodes as Pi("P", Sort(0), Pi("", Var("P"), Var("P")))
+            assert_eq!(j["ctor"], "Pi");
+            assert_eq!(j["args"][0], "P");
+            assert_eq!(j["args"][1]["ctor"], "Sort");
+            assert_eq!(j["args"][1]["args"][0]["ctor"], "Zero");
+            let inner = &j["args"][2];
+            assert_eq!(inner["ctor"], "Pi");
+            assert_eq!(inner["args"][0], "");
+            assert_eq!(inner["args"][1]["ctor"], "Var");
+            assert_eq!(inner["args"][1]["args"][0], "P");
+            assert_eq!(inner["args"][2]["ctor"], "Var");
+            assert_eq!(inner["args"][2]["args"][0], "P");
         }
     }
 
@@ -6580,21 +6780,19 @@ mod tests {
         let body = holder
             .get(&iri("urn:eigenius:test:typeexpr:body"))
             .expect("eg:body set");
-        match body {
-            Value::Json(j) => {
-                // forall (A : Set) => A -> A
-                //   → Pi("A", Sort(1), Pi("", Var("A"), Var("A")))
-                assert_eq!(j["ctor"], "Pi");
-                assert_eq!(j["args"][0], "A");
-                assert_eq!(j["args"][1]["ctor"], "Sort");
-                assert_eq!(j["args"][1]["args"][0]["ctor"], "Succ");
-                assert_eq!(j["args"][1]["args"][0]["args"][0]["ctor"], "Zero");
-                let inner = &j["args"][2];
-                assert_eq!(inner["ctor"], "Pi");
-                assert_eq!(inner["args"][1]["ctor"], "Var");
-                assert_eq!(inner["args"][1]["args"][0], "A");
-            }
-            other => panic!("expected Value::Json, got {other:?}"),
+        {
+            let j = &tagged_of(body);
+            // forall (A : Set) => A -> A
+            //   → Pi("A", Sort(1), Pi("", Var("A"), Var("A")))
+            assert_eq!(j["ctor"], "Pi");
+            assert_eq!(j["args"][0], "A");
+            assert_eq!(j["args"][1]["ctor"], "Sort");
+            assert_eq!(j["args"][1]["args"][0]["ctor"], "Succ");
+            assert_eq!(j["args"][1]["args"][0]["args"][0]["ctor"], "Zero");
+            let inner = &j["args"][2];
+            assert_eq!(inner["ctor"], "Pi");
+            assert_eq!(inner["args"][1]["ctor"], "Var");
+            assert_eq!(inner["args"][1]["args"][0], "A");
         }
     }
 
@@ -6739,17 +6937,22 @@ mod tests {
         let body = holder
             .get(&iri("urn:eigenius:test:macro:body"))
             .expect("eg:body set");
-        match body {
-            Value::Json(j) => {
-                // Expansion: swap_both("first", "second") substitutes
-                // into Both(b, a) → Both("second", "first") — the
-                // positional swap is what proves substitution happened.
-                assert_eq!(j["ctor"], "Both");
-                assert_eq!(j["args"][0], "second");
-                assert_eq!(j["args"][1], "first");
-            }
-            other => panic!("expected Value::Json (CtorApp serialization), got {other:?}"),
-        }
+        // Expansion: swap_both("first", "second") substitutes into Both(b, a) →
+        // Both("second", "first") — the positional swap is what proves substitution happened.
+        // Asserted on the value resource rather than a tagged projection: `eg:Pair` is
+        // declared in this source, so its constructor class exists only once the resources are
+        // built into a layer, and nothing here has one.
+        assert_eq!(
+            body,
+            &expected_ctor(
+                "urn:eigenius:test:macro:Pair",
+                "Both",
+                &[
+                    ("arg_0", Value::String("second".into())),
+                    ("arg_1", Value::String("first".into())),
+                ],
+            )
+        );
     }
 
     #[test]
@@ -6823,8 +7026,14 @@ mod sigma_surface_tests {
             .get(&crate::ontology::iri::Iri::parse("urn:eigenius:eigentt:axiom_statement").unwrap())
             .expect("axiom_statement")
         {
+            // The tagged view of the value resource, so these structural assertions keep
+            // reading `j["ctor"]` rather than walking derived property names.
+            crate::ontology::resource::Value::Embedded(r) => {
+                crate::program::eigentt_type_mirror::value_resource_to_tagged(r, term_chain())
+                    .expect("a compiled statement is a well-formed value resource")
+            }
             crate::ontology::resource::Value::Json(j) => j.clone(),
-            other => panic!("expected Json, got {other:?}"),
+            other => panic!("expected a term, got {other:?}"),
         }
     }
 

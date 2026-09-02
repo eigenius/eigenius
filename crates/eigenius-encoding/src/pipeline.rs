@@ -400,10 +400,13 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         None => None,
     };
     let kind_recorder = kind_classifier.map(crate::RecordingKindClassifier::new);
+    // The codec's constructor argument names, from the chain this run emits against.
+    let codec = eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(&head);
+    let print_chain = std::sync::Arc::clone(&head);
     // ONE claim identity: the lander names claims exactly as the emitter will, so the
     // `enc:AnaphorBinding` this run records points at resources this run's artifact contains.
     let lander = kind_recorder.as_ref().map(|k| {
-        crate::DerivedClaimLander::new(&doc_id, k)
+        crate::DerivedClaimLander::new(&doc_id, k, codec.clone())
             .with_emission_namespace(&args.ns)
             .with_source(&format!("{} (sha256 {sha})", args.source.display()))
     });
@@ -477,6 +480,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     // authority, fail-closed or partial, then the artifact. Identical work for every surface, so it
     // lives in `formalize` and this driver only supplies the inputs.
     let artifact = crate::formalize::emit_from_encoding(&crate::formalize::EmissionInputs {
+        codec: &codec,
         doc: &doc,
         encoding: &encoding,
         landed: &landed,
@@ -505,6 +509,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             OutputFormat::Json => ArtifactFormat::EigonJson,
             OutputFormat::Esl => ArtifactFormat::Esl,
         },
+        &print_chain,
     )?;
     write_doc(&args.out, &rendered)?;
     eprintln!(

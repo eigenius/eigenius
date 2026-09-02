@@ -99,6 +99,23 @@ fn build_rcbd_chain() -> ExecutionContext {
     )
 }
 
+/// The constructor view of a value, for assertions written as `j["args"][0]["ctor"]`.
+///
+/// A value is a resource whose `is_a` names its constructor's class (D85 §6.1); the projection
+/// reads it back positionally, which needs the chain because argument order is declared.
+fn tagged_of(
+    v: &eigenius_kernel::ontology::resource::Value,
+    layer: &eigenius_kernel::layer::Layer,
+) -> serde_json::Value {
+    use eigenius_kernel::ontology::resource::Value as RV;
+    match v {
+        RV::Embedded(r) => eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, layer)
+            .expect("a stored value is well formed"),
+        RV::Json(j) => j.clone(),
+        other => panic!("expected an inductive value, got {other:?}"),
+    }
+}
+
 #[test]
 fn rcbd_3x3_recomputes_to_holds() {
     let ctx = build_rcbd_chain();
@@ -114,10 +131,11 @@ fn rcbd_3x3_recomputes_to_holds() {
     let outcome = inst
         .query(&proc_iri, &claim, &ctx)
         .expect("validate_analysis_plan returns an outcome");
-    let result = outcome
-        .derivations
-        .first()
-        .expect("statistics emits a StatisticalAnalysisResult when the SAP ran");
+    let result = outcome.derivations.first().unwrap_or_else(|| {
+        panic!(
+            "statistics emits a StatisticalAnalysisResult when the SAP ran; outcome = {outcome:?}"
+        )
+    });
 
     let ctor = result
         .get(&Iri::parse(iris::PROP_VERDICT_CTOR).unwrap())
@@ -193,11 +211,7 @@ fn rcbd_data_lands_at_rcb_dispatch_position() {
     let sample_set_value = sample_set_res
         .get(&Iri::parse("urn:eigenius:measurements:sample_set_value").unwrap())
         .expect("sample_set_value set");
-    let bundle_json = if let Value::Json(j) = sample_set_value {
-        j
-    } else {
-        panic!("sample_set_value is not Value::Json");
-    };
+    let bundle_json = &tagged_of(sample_set_value, ctx.head());
     // args[0] = Restricted (randomization axis)
     let randomization = bundle_json["args"][0]["ctor"].as_str();
     assert_eq!(randomization, Some("Restricted"));

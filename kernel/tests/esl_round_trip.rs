@@ -58,23 +58,35 @@ const CORPUS: &[&str] = &[
 ];
 
 /// A D47 node: an object carrying `ctor` + `args`.
-fn is_term(v: &Value) -> bool {
-    v.get("ctor").and_then(Value::as_str).is_some() && v.get("args").is_some()
+/// Is this property value a TERM?
+///
+/// A term is a resource whose `is_a` names an `eigentt:Term` constructor class (D85 §6.1). It
+/// used to be "a JSON object with `ctor` and `args`" — the tagged shape, which no longer
+/// reaches a property.
+fn is_term(v: &eigenius_kernel::ontology::resource::Value) -> bool {
+    use eigenius_kernel::ontology::resource::Value as RV;
+    match v {
+        RV::Embedded(r) => r
+            .is_a()
+            .first()
+            .is_some_and(|c| c.as_str().starts_with("urn:eigenius:eigentt:Term-")),
+        _ => false,
+    }
 }
 
 /// Every term-valued property in a document, keyed `<resource-id> :: <property>`.
-fn terms_in(doc: &Value) -> BTreeMap<String, Value> {
+fn terms_in(
+    resources: &[eigenius_kernel::ontology::resource::Resource],
+) -> BTreeMap<String, Value> {
     let mut out = BTreeMap::new();
-    let rs = match doc {
-        Value::Array(a) => a.clone(),
-        other => vec![other.clone()],
-    };
-    for r in rs {
-        let Some(o) = r.as_object() else { continue };
-        let id = o.get("@id").and_then(Value::as_str).unwrap_or("<anon>");
-        for (k, v) in o {
+    for r in resources {
+        let id = r
+            .id()
+            .map(|i| i.as_str().to_string())
+            .unwrap_or_else(|| "<anon>".to_string());
+        for (k, v) in r.properties() {
             if is_term(v) {
-                out.insert(format!("{id} :: {k}"), v.clone());
+                out.insert(format!("{id} :: {k}"), tagged_of(v));
             }
         }
     }
@@ -114,13 +126,45 @@ fn print_then_compile(term: &Value, prop_ns: &str, layer: &Layer) -> Result<Valu
     let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:roundtrip:term")
         .expect("well-formed IRI");
     for r in &resources {
-        if let Some(eigenius_kernel::ontology::resource::Value::Json(j)) = r.get(&iri) {
-            return Ok(j.clone());
+        if let Some(v) = r.get(&iri) {
+            return Ok(tagged_of(v));
         }
     }
     Err(format!(
         "no rt:term in recompiled output\n--- source ---\n{src}"
     ))
+}
+
+/// The constructor view of a compiled value, for assertions written as `j["ctor"]`.
+///
+/// A term is a resource whose `is_a` names its constructor's class (D85 §6.1); this reads it
+/// back positionally so these assertions stay about the TERM rather than about property names.
+fn tagged_of(v: &eigenius_kernel::ontology::resource::Value) -> serde_json::Value {
+    use eigenius_kernel::ontology::resource::Value;
+    match v {
+        Value::Embedded(r) => {
+            eigenius_kernel::program::eigentt_type_mirror::value_resource_to_tagged(
+                r,
+                bootstrap_chain(),
+            )
+            .expect("a compiled term is a well-formed value resource")
+        }
+        Value::Json(j) => j.clone(),
+        other => panic!("expected a term value, got {other:?}"),
+    }
+}
+
+/// The bootstrap chain, built once — a value resource names classes the chain declares.
+fn bootstrap_chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
 }
 
 #[test]
@@ -136,13 +180,7 @@ fn every_demo_term_round_trips_through_esl() {
         };
         let resources =
             esl::compile(&text, layer).unwrap_or_else(|e| panic!("{path} does not compile: {e:?}"));
-        let doc = Value::Array(
-            resources
-                .iter()
-                .map(eigenius_kernel::ontology::eigon_json::serialize_resource)
-                .collect(),
-        );
-        for (label, term) in terms_in(&doc) {
+        for (label, term) in terms_in(&resources) {
             checked += 1;
             // The inductive a property's values inhabit is declared in the same ontology as the
             // property, so the property IRI minus its local name is the ctor namespace.
@@ -199,10 +237,7 @@ fn boolean_literal_round_trips_through_esl() {
             .expect("well-formed IRI");
         let term = resources
             .iter()
-            .find_map(|r| match r.get(&iri) {
-                Some(eigenius_kernel::ontology::resource::Value::Json(j)) => Some(j.clone()),
-                _ => None,
-            })
+            .find_map(|r| r.get(&iri).map(tagged_of))
             .expect("rt:term is a D47 term");
 
         assert_eq!(
@@ -269,13 +304,7 @@ fn pretty_layout_changes_only_whitespace() {
     for path in CORPUS {
         let text = std::fs::read_to_string(path).expect("corpus file");
         let resources = esl::compile(&text, layer).expect("corpus compiles");
-        let doc = Value::Array(
-            resources
-                .iter()
-                .map(eigenius_kernel::ontology::eigon_json::serialize_resource)
-                .collect(),
-        );
-        for (label, term) in terms_in(&doc) {
+        for (label, term) in terms_in(&resources) {
             if !is_d47_term(&term) {
                 continue;
             }
@@ -348,7 +377,7 @@ fn sorts_round_trip_in_every_position() {
             (
                 "App argument",
                 serde_json::json!({"ctor": "App", "args": [
-                    {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]},
+                    {"ctor": "ConstRef", "args": ["urn:eigenius:core:string", []]},
                     s.clone(),
                 ]}),
             ),
@@ -398,8 +427,8 @@ fn wrap_and_compile(body: &str, ns: &Namespaces, layer: &Layer) -> Result<Value,
     let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:roundtrip:term")
         .expect("well-formed IRI");
     for r in &resources {
-        if let Some(eigenius_kernel::ontology::resource::Value::Json(j)) = r.get(&iri) {
-            return Ok(j.clone());
+        if let Some(v) = r.get(&iri) {
+            return Ok(tagged_of(v));
         }
     }
     Err("no rt:term".into())

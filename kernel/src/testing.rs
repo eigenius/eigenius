@@ -8,35 +8,32 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::layer::{Layer, LayerBuilder, LayerStorage};
+use crate::layer::Layer;
 
-/// `core` + `eigentt-type-fragment`, built once per test binary.
+/// The bootstrap chain, built once per test binary.
 ///
-/// The shortest chain carrying `core:Level` and `eigentt:Term`, which is all the ESL surface
-/// needs; the rest of `BOOTSTRAP_CHAIN` adds only weight. Both are JSON, so building this
-/// costs no ESL compile of its own.
+/// It was `core` + `eigentt-type-fragment` — the shortest chain carrying `eigentt:Term` and
+/// `core:Level` — until D85 §5 step 4. Constructor VALUES now name their class, so a test that
+/// spells `OpRef(...)` needs `formulas:FormulaTerm` declared, not just the term language; the
+/// minimal chain refused those with "`OpRef` is not a constructor". The full chain is what any
+/// real compile runs against anyway.
 pub(crate) fn term_chain() -> &'static Arc<Layer> {
     static CHAIN: OnceLock<Arc<Layer>> = OnceLock::new();
     CHAIN.get_or_init(|| {
-        let mut parent: Option<Arc<Layer>> = None;
-        for (name, src) in [
-            (
-                "core",
-                include_str!("../../ontologies/core/core-ontology.json"),
-            ),
-            (
-                "eigentt-type-fragment",
-                include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
-            ),
-        ] {
-            let mut b = LayerBuilder::new(name, parent);
-            for r in
-                crate::ontology::eigon_json::parse_document(src).expect("bootstrap JSON parses")
-            {
-                b.add_resource(r).expect("bootstrap resource");
-            }
-            parent = Some(Arc::new(b.build(LayerStorage::in_memory())));
-        }
-        parent.expect("two layers")
+        Arc::clone(
+            crate::bootstrap::bootstrap()
+                .expect("the bootstrap chain builds")
+                .head(),
+        )
     })
+}
+
+/// The D47 codec's constructor argument names, read from [`term_chain`] once per test binary.
+///
+/// Encoding a term names its constructor's arguments (D85 §6.1), and those names come from
+/// `eigentt:Term` and `core:Level`'s declarations — so an encode needs a chain just as a
+/// compile does.
+pub(crate) fn codec_names() -> &'static crate::program::eigentt_type_mirror::CodecNames {
+    static NAMES: OnceLock<crate::program::eigentt_type_mirror::CodecNames> = OnceLock::new();
+    NAMES.get_or_init(|| crate::program::eigentt_type_mirror::CodecNames::from_layer(term_chain()))
 }

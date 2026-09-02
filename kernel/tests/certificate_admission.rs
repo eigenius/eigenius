@@ -181,9 +181,10 @@ fn synthetic_sentence(
 /// that used to be separate slots: `holds(kernel, cert, Certificate(j, P))`.
 fn judgement(proposition: Value, justification: Value, cert: Value) -> Value {
     use eigenius_kernel::program::eigentt_type_mirror::{certificate_type, encode_judgement};
-    let typ =
-        certificate_type(&d47(&justification), &proposition).expect("certificate type encodes");
-    encode_judgement("urn:eigenius:eigentt:logic_kernel", &cert, &typ).expect("judgement encodes")
+    let typ = certificate_type(&d47(&justification), &proposition, codec())
+        .expect("certificate type encodes");
+    encode_judgement("urn:eigenius:eigentt:logic_kernel", &cert, &typ, codec())
+        .expect("judgement encodes")
 }
 
 /// Re-encode a plain D32 §3.7 tagged-dict `justification:Term` into the D47
@@ -379,7 +380,7 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
         Vec::new(),
         vec![Exp::LitString(target_iri_str.to_string())],
     );
-    let prop_value = encode_type(&prop_exp).expect("encode Asserts(iri)");
+    let prop_value = encode_type(&prop_exp, codec()).expect("encode Asserts(iri)");
 
     let target_iri = Iri::parse(target_iri_str).unwrap();
     let mut target = Resource::new(target_iri.clone());
@@ -447,6 +448,22 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
 ///
 /// Every test below reads errors filtered to its own synthetic sentence. That filter is only
 /// honest if the chain underneath carries no errors of its own — otherwise a "clean" result
+/// The D47 codec's constructor argument names, from the bootstrap chain, built once.
+///
+/// Encoding a term names its constructor's arguments (D85 §6.1), and the names live in
+/// `eigentt:Term` and `core:Level`'s declarations — so an encode needs a chain.
+fn codec() -> &'static eigenius_kernel::program::eigentt_type_mirror::CodecNames {
+    static NAMES: std::sync::OnceLock<eigenius_kernel::program::eigentt_type_mirror::CodecNames> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
 /// could be a filter hiding a broken fixture. This asserts the premise directly.
 #[test]
 fn the_fixture_chain_validates_clean() {
@@ -487,7 +504,7 @@ fn an_explicit_canonical_proposition_admits_the_same_witness_as_the_default() {
     let asserts_subtree = json!({
         "ctor": "App",
         "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts", []]},
             {"ctor": "LitString", "args": [target]},
         ],
     });
@@ -521,7 +538,7 @@ fn a_certificate_matching_an_admitted_witness_type_checks() {
     let asserts_subtree = json!({
         "ctor": "App",
         "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts", []]},
             {"ctor": "LitString", "args": [target]},
         ],
     });
@@ -560,7 +577,7 @@ fn a_certificate_citing_the_wrong_proposition_is_rejected() {
     let mismatched_subtree = json!({
         "ctor": "App",
         "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts", []]},
             {"ctor": "LitString", "args": [mismatched]},
         ],
     });
@@ -600,7 +617,7 @@ fn a_certificate_citing_an_untraced_iri_is_rejected() {
     let asserts_subtree = json!({
         "ctor": "App",
         "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts", []]},
             {"ctor": "LitString", "args": [target]},
         ],
     });
@@ -636,7 +653,7 @@ fn arity_mismatch_in_certificate_is_rejected() {
     let proposition = Value::Json(json!({
         "ctor": "App",
         "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts", []]},
             {"ctor": "LitString", "args": ["urn:foo"]},
         ],
     }));
@@ -691,7 +708,7 @@ fn an_external_execution_trace_admits_declared_not_derived() {
     let prop = json!({
         "ctor": "App",
         "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts"]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Asserts", []]},
             {"ctor": "LitString", "args": [target]},
         ],
     });
@@ -744,7 +761,7 @@ fn an_external_execution_trace_admits_declared_not_derived() {
     let exp =
         eigenius_kernel::program::eigentt_type_mirror::decode_type(&Value::Json(prop), &layer)
             .expect("proposition decodes");
-    let key = |c| WitnessKey::from_exp(c, target_iri.clone(), &exp).expect("key builds");
+    let key = |c| WitnessKey::from_exp(c, target_iri.clone(), &exp, codec()).expect("key builds");
 
     assert!(
         layer_admits_witness(&layer, &key(WitnessCategory::Declared)),

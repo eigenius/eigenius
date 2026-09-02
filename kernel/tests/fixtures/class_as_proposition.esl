@@ -46,17 +46,18 @@ resource screen:rule_class_trace : prov:DeclarationTrace {
 resource screen:concl_class : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:CellLine";
 
-    justification:judgement = type_expr(
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
         holds( eigentt:logic_kernel,
-               declared(
+               type_expr(declared(
                    "urn:eigenius:demo:screen:rule_class",
                    screen:CellLine,
                    Prop
-               ),
-               justification:Certificate(
+               )),
+               type_expr(justification:Certificate(
                    Declared("urn:eigenius:demo:screen:rule_class"),
-                   screen:CellLine ) )
-    );
+                   screen:CellLine )) );
 
 
 }
@@ -83,17 +84,18 @@ resource screen:rule_prop_trace : prov:DeclarationTrace {
 resource screen:concl_prop : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:IsInhibitory";
 
-    justification:judgement = type_expr(
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
         holds( eigentt:logic_kernel,
-               declared(
+               type_expr(declared(
                    "urn:eigenius:demo:screen:rule_prop",
                    screen:IsInhibitory,
                    Prop
-               ),
-               justification:Certificate(
+               )),
+               type_expr(justification:Certificate(
                    Declared("urn:eigenius:demo:screen:rule_prop"),
-                   screen:IsInhibitory ) )
-    );
+                   screen:IsInhibitory )) );
 
 
 }

@@ -165,8 +165,11 @@ resource s18:impl_rule_trace : prov:DeclarationTrace {
 resource s18:concl_solution_implements : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:bench:sab18:solution";
 
-    justification:judgement = type_expr(
-        alias
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
             P    = "urn:eigenius:bench:sab18:solution",
             RULE = "urn:eigenius:bench:sab18:impl_rule",
             D1   = "urn:eigenius:bench:sab18:conf_featurization",
@@ -215,9 +218,57 @@ resource s18:concl_solution_implements : justification:Conclusion {
             cert3 = app(C3, C4 -> C5 -> IMPL, j2, Declared(D3), cert2, declared(D3, C3)),
             cert4 = app(C4, C5 -> IMPL, j3, Declared(D4), cert3, declared(D4, C4))
         in
-        holds( eigentt:logic_kernel,
-               app(C5, IMPL, j4, Declared(D5), cert4, declared(D5, C5)),
-               justification:Certificate(
+        app(C5, IMPL, j4, Declared(D5), cert4, declared(D5, C5))),
+               type_expr(alias
+            P    = "urn:eigenius:bench:sab18:solution",
+            RULE = "urn:eigenius:bench:sab18:impl_rule",
+            D1   = "urn:eigenius:bench:sab18:conf_featurization",
+            D2   = "urn:eigenius:bench:sab18:conf_label_mapping",
+            D3   = "urn:eigenius:bench:sab18:conf_configs",
+            D4   = "urn:eigenius:bench:sab18:conf_model_selection",
+            D5   = "urn:eigenius:bench:sab18:conf_output_format",
+
+            C1   = s18:ConformsFeaturization(P),
+            C2   = s18:ConformsLabelMapping(P),
+            C3   = s18:ConformsConfigs(P),
+            C4   = s18:ConformsModelSelection(P),
+            C5   = s18:ConformsOutputFormat(P),
+            IMPL = s18:ImplementsDILIPredictor(P),
+
+            RULE_P = forall (p : core:string) =>
+                s18:ConformsFeaturization(p) ->
+                s18:ConformsLabelMapping(p) ->
+                s18:ConformsConfigs(p) ->
+                s18:ConformsModelSelection(p) ->
+                s18:ConformsOutputFormat(p) ->
+                s18:ImplementsDILIPredictor(p),
+
+            j0 = Declared(RULE),
+            j1 = justification:App(j0, Declared(D1)),
+            j2 = justification:App(j1, Declared(D2)),
+            j3 = justification:App(j2, Declared(D3)),
+            j4 = justification:App(j3, Declared(D4)),
+
+            rule_cert = spec_poly(
+                // T : the domain
+                core:string,
+                fun (p : core:string) =>
+                    s18:ConformsFeaturization(p) ->
+                    s18:ConformsLabelMapping(p) ->
+                    s18:ConformsConfigs(p) ->
+                    s18:ConformsModelSelection(p) ->
+                    s18:ConformsOutputFormat(p) ->
+                    s18:ImplementsDILIPredictor(p),
+                Declared(RULE),
+                P,
+                declared(RULE, RULE_P)
+            ),
+            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, Declared(D1), rule_cert, declared(D1, C1)),
+            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, Declared(D2), cert1, declared(D2, C2)),
+            cert3 = app(C3, C4 -> C5 -> IMPL, j2, Declared(D3), cert2, declared(D3, C3)),
+            cert4 = app(C4, C5 -> IMPL, j3, Declared(D4), cert3, declared(D4, C4))
+        in
+        justification:Certificate(
                    justification:App(
                        justification:App(
                            justification:App(
@@ -234,8 +285,7 @@ resource s18:concl_solution_implements : justification:Conclusion {
                        ),
                        Declared("urn:eigenius:bench:sab18:conf_output_format")
                    ),
-                   s18:ImplementsDILIPredictor("urn:eigenius:bench:sab18:solution") ) )
-    );
+                   s18:ImplementsDILIPredictor("urn:eigenius:bench:sab18:solution") )) );
 
 
 }

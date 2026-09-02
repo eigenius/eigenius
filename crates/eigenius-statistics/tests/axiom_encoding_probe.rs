@@ -105,7 +105,7 @@ fn verifier_emit_stats_lt_mean_of(sample_set_iri: &str, threshold: f64) -> serde
 }
 
 fn encode_const_ref(iri: &str) -> serde_json::Value {
-    serde_json::json!({"ctor": "ConstRef", "args": [iri]})
+    serde_json::json!({"ctor": "ConstRef", "args": [iri, []]})
 }
 
 fn encode_lit_string(s: &str) -> serde_json::Value {
@@ -157,8 +157,14 @@ resource probe:bridge_proposition : justification:Claim {
         .expect("bridge resource committed");
     let prop_iri = Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap();
     match bridge.get(&prop_iri) {
+        // A term is a value resource (D85 §6.1); project it back for the positional
+        // assertions below.
+        Some(Value::Embedded(r)) => {
+            eigenius_kernel::program::eigentt_type_mirror::value_resource_to_tagged(r, &layer)
+                .expect("a stored proposition is well formed")
+        }
         Some(Value::Json(j)) => j.clone(),
-        other => panic!("canonical_proposition is not Value::Json: {other:?}"),
+        other => panic!("canonical_proposition is not a term: {other:?}"),
     }
 }
 

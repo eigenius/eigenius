@@ -325,9 +325,11 @@ resource screen:bridge_eig0291_lowic50_trace : prov:DeclarationTrace {
 resource screen:concl_eig0291_strong : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
-    justification:judgement = type_expr(
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
         holds( eigentt:logic_kernel,
-               app(
+               type_expr(app(
                    // outer A
                    screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
                    // outer B
@@ -389,8 +391,8 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                            observed("urn:eigenius:demo:screen:m_eig0291_sampleset", core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset"))
                        )
                    )
-               ),
-               justification:Certificate(
+               )),
+               type_expr(justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:demo:screen:rule_strong"),
                        justification:App(
@@ -398,8 +400,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                            justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"))
                        )
                    ),
-                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") ) )
-    );
+                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") )) );
 
 
     // Outer app: applies the literature rule to the result of the

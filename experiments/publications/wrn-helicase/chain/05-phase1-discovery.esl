@@ -155,8 +155,11 @@ resource wrn:discovery_rule_trace : prov:DeclarationTrace {
 resource wrn:concl_wrn_selective : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
-    justification:judgement = type_expr(
-        alias
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
             G    = "WRN",
             ACTX = "Achilles_MSI",
             DCTX = "DRIVE_MSI",
@@ -191,9 +194,43 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
             ),
             cert1 = app(TA, TD -> SE, j0, Declared(DDA), rule_cert, declared(DDA, TA))
         in
-        holds( eigentt:logic_kernel,
-               app(TD, SE, justification:App(j0, Declared(DDA)), Declared(DDD), cert1, declared(DDD, TD)),
-               justification:Certificate(
+        app(TD, SE, justification:App(j0, Declared(DDA)), Declared(DDD), cert1, declared(DDD, TD))),
+               type_expr(alias
+            G    = "WRN",
+            ACTX = "Achilles_MSI",
+            DCTX = "DRIVE_MSI",
+            MSI  = "MSI",
+            RULE = "urn:eigenius:pub:wrn:discovery_rule",
+            DDA  = "urn:eigenius:pub:wrn:dd_achilles",
+            DDD  = "urn:eigenius:pub:wrn:dd_drive",
+
+            TA = onco:TopDifferentialDependency(G, ACTX),
+            TD = onco:TopDifferentialDependency(G, DCTX),
+            SE = onco:SelectivelyEssential(G, MSI),
+
+            RULE_P = forall (g : core:string) =>
+                onco:TopDifferentialDependency(g, ACTX) ->
+                onco:TopDifferentialDependency(g, DCTX) ->
+                onco:SelectivelyEssential(g, MSI),
+
+            // Specialization leaves the TERM unchanged — `spec_poly` narrows the
+            // proposition from the universal to WRN, and narrowing introduces no
+            // ground. The rule is Declared before and after.
+            j0 = Declared(RULE),
+            rule_cert = spec_poly(
+                // T : the domain
+                core:string,
+                fun (g : core:string) =>
+                    onco:TopDifferentialDependency(g, ACTX) ->
+                    onco:TopDifferentialDependency(g, DCTX) ->
+                    onco:SelectivelyEssential(g, MSI),
+                Declared(RULE),
+                G,
+                declared(RULE, RULE_P)
+            ),
+            cert1 = app(TA, TD -> SE, j0, Declared(DDA), rule_cert, declared(DDA, TA))
+        in
+        justification:Certificate(
                    justification:App(
                        justification:App(
                            Declared("urn:eigenius:pub:wrn:discovery_rule"),
@@ -201,8 +238,7 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                        ),
                        Declared("urn:eigenius:pub:wrn:dd_drive")
                    ),
-                   onco:SelectivelyEssential("WRN", "MSI") ) )
-    );
+                   onco:SelectivelyEssential("WRN", "MSI") )) );
 
 
 }

@@ -51,15 +51,16 @@ class wrn:CompetitionTable {
 // Mirrors concl_vivo's shape (D54 certificate over a wrapped-R derived result).
 resource wrn:concl_viab_KM12_biological : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    justification:judgement = type_expr(
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
         holds( eigentt:logic_kernel,
-               app(core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table"), onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12"), Declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:viab_KM12_competition_table"),
+               type_expr(app(core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table"), onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12"), Declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:viab_KM12_competition_table"),
                        declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table") -> onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")),
-                       observed("urn:eigenius:pub:wrn:viab_KM12_competition_table", core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table"))),
-               justification:Certificate(
+                       observed("urn:eigenius:pub:wrn:viab_KM12_competition_table", core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table")))),
+               type_expr(justification:Certificate(
                    justification:App(Declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:viab_KM12_competition_table")),
-                   onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12") ) )
-    );
+                   onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12") )) );
 }
 
 // F4 as a first-class chain fact: the two SAPs over the same KM12 competition

@@ -232,7 +232,8 @@ mod tests {
                     iri(AXIOM_CLASS_IRI).as_str().to_string(),
                 )]),
             );
-            let encoded = encode_type(&statement_exp).expect("encode statement");
+            let encoded = encode_type(&statement_exp, crate::testing::codec_names())
+                .expect("encode statement");
             r.set(iri(AXIOM_STATEMENT_IRI), encoded);
             if let Some(j) = justification {
                 r.set(
@@ -393,7 +394,8 @@ mod tests {
             Box::new(Exp::LitString("urn:eigenius:test:subject".to_string())),
         );
 
-        let encoded = encode_type(&application).expect("encode proposition");
+        let encoded =
+            encode_type(&application, crate::testing::codec_names()).expect("encode proposition");
         let decoded = decode_type(&encoded, &chain).expect("decode round-trips");
         assert_eq!(
             decoded, application,

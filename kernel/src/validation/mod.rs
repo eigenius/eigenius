@@ -1131,8 +1131,12 @@ impl Validator {
         //    no decode, and is also where a self-reference is visible as itself rather than as
         //    whatever decode turned it into. There is no fuel and no termination argument for
         //    recursion here — see #66.
-        if let (Some(id), crate::ontology::resource::Value::Json(json)) = (res_id, body_value) {
-            if json_mentions_const_ref(json, id.as_str()) {
+        // Reads the value in EITHER shape. It was gated on `Value::Json`, which stopped
+        // matching the moment D85 §5 step 4 made a definition body a value resource — and a
+        // guard that never fires looks exactly like a guard with nothing to catch. The
+        // recursion was still refused, but by a decode failure with an unrelated message.
+        if let Some(id) = res_id {
+            if mentions_iri(body_value, id) {
                 fail(
                     &mut errors,
                     Some(body_prop.clone()),
@@ -1369,24 +1373,16 @@ struct ComorphismFormatRef<'a> {
     expected_label: &'a str,
 }
 
-/// Does this encoded `eigentt:Term` tree contain a `ConstRef` to `target`? Used by Rule 24's
-/// recursion check, on the encoded form because that is where a self-reference is visible as itself
-/// rather than as whatever decode turned it into.
-fn json_mentions_const_ref(v: &serde_json::Value, target: &str) -> bool {
-    match v {
-        serde_json::Value::Object(o) => {
-            if o.get("ctor").and_then(|c| c.as_str()) == Some("ConstRef") {
-                if let Some(args) = o.get("args").and_then(|a| a.as_array()) {
-                    if args.first().and_then(|x| x.as_str()) == Some(target) {
-                        return true;
-                    }
-                }
-            }
-            o.values().any(|x| json_mentions_const_ref(x, target))
-        }
-        serde_json::Value::Array(a) => a.iter().any(|x| json_mentions_const_ref(x, target)),
-        _ => false,
-    }
+/// Does this encoded term mention `target`? Used by Rule 24's recursion check, on the encoded
+/// form because that is where a self-reference is visible as itself rather than as whatever
+/// decode turned it into.
+///
+/// Delegates to the one walker that reads both shapes, rather than keeping a second one that
+/// only understood the tagged dict.
+fn mentions_iri(v: &crate::ontology::resource::Value, target: &Iri) -> bool {
+    let mut out = std::collections::BTreeSet::new();
+    crate::layer::term_mentions::json_mentions_of_value(v, &mut out);
+    out.contains(target)
 }
 
 /// The first beta-redex in `e` — an `App` whose head is a `Lam` — rendered for the diagnostic, or

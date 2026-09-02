@@ -101,7 +101,10 @@ impl Validator {
         };
         let ranged_on_term = ranged_on(TERM_IRI);
         let ranged_on_judgement = ranged_on(JUDGEMENT_IRI);
-        if (!ranged_on_term && !ranged_on_judgement) || is_declaration_internal(prop_iri) {
+        if (!ranged_on_term && !ranged_on_judgement)
+            || is_declaration_internal(prop_iri)
+            || is_constructor_argument(prop_iri, owner)
+        {
             return vec![];
         }
 
@@ -324,6 +327,26 @@ fn paired_slot(prop_iri: &Iri, owner: &Resource) -> Option<(&'static str, Value)
 /// reliably out of scope (`core:type_name` on a statistics sample set carries
 /// `ConstRef(core:value_array)`, which does not resolve as a term), which is
 /// what separates them.
+/// Is this slot an ARGUMENT of the term that owns it, rather than a term-valued slot on some
+/// resource?
+///
+/// A value resource states its constructor's class in `is_a` and carries each argument under
+/// `<class>-<arg>` (D85 §6.1), so the test is exactly that naming: the property belongs to the
+/// class the owner instantiates.
+///
+/// It matters because a term's ARGUMENTS are open. `justification:Certificate`'s `declared`
+/// constructor is `forall (iri : core:string, P : Prop) => …`, so the `Pi`'s body mentions
+/// `iri`, which is bound by the `Pi` and by nothing below it. Checking that body standalone
+/// reports `unbound variable in type context: iri` — which is what happened the moment D85 §5
+/// step 4 turned terms into resources and Rule 23 began recursing into them. The outermost
+/// term's check covers every subterm; the subterms are not separate obligations.
+fn is_constructor_argument(prop_iri: &Iri, owner: &Resource) -> bool {
+    owner
+        .is_a()
+        .iter()
+        .any(|class| prop_iri.as_str().starts_with(&format!("{class}-")))
+}
+
 fn is_declaration_internal(prop_iri: &Iri) -> bool {
     matches!(
         prop_iri.as_str(),
@@ -469,7 +492,7 @@ mod tests {
     fn integer_literal_in_a_proposition_slot_rejected() {
         // eigenius#175's example: a literal decodes and type-checks (at
         // `core:integer`), so steps 1–2 pass. Only step 3 catches it.
-        let encoded = encode_type(&Exp::LitInt(42)).unwrap();
+        let encoded = encode_type(&Exp::LitInt(42), crate::testing::codec_names()).unwrap();
         let errs = errors_for_claim(encoded);
         assert_eq!(
             errs.len(),
@@ -489,7 +512,7 @@ mod tests {
         // `Prop` itself is a perfectly good `eigentt:Term` — it passes in
         // the unconstrained `test:tx` slot above — but it inhabits `Set`, so
         // it asserts nothing.
-        let encoded = encode_type(&Exp::sort(0)).unwrap();
+        let encoded = encode_type(&Exp::sort(0), crate::testing::codec_names()).unwrap();
         let errs = errors_for_claim(encoded);
         assert_eq!(errs.len(), 1, "`Prop` asserts nothing; got {errs:?}");
         assert!(matches!(errs[0].rule, ValidationRule::TermNotAProposition));
@@ -529,7 +552,7 @@ mod tests {
         // belonged in the same slot. That was true when a slot outside the
         // proposition list carried no obligation at all; a slot admitting both is
         // now unrepresentable, which is the defect this phase closes.
-        let set = encode_type(&Exp::sort(1)).unwrap();
+        let set = encode_type(&Exp::sort(1), crate::testing::codec_names()).unwrap();
 
         let chain = chain_with_eigentt_prop();
         let mut top = LayerBuilder::new("tx", Some(chain));
@@ -555,7 +578,7 @@ mod tests {
         let chain = chain_with_eigentt_prop();
         let mut top = LayerBuilder::new("ok", Some(chain));
         // `Prop` (Sort(0)) is a valid type expression that type-checks.
-        let encoded = encode_type(&Exp::sort(0)).unwrap();
+        let encoded = encode_type(&Exp::sort(0), crate::testing::codec_names()).unwrap();
         top.add_resource(holder_with_tx("urn:eigenius:test:ok", encoded))
             .unwrap();
         let layer = Arc::new(top.build(LayerStorage::in_memory()));

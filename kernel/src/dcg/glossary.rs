@@ -333,8 +333,9 @@ pub fn abbreviation_resources(
         let cat = Exp::InductiveCtor(cat_decl, "cat_n".into(), vec![concept_ty, num]);
         (cat, Value::iri(&concept.clone()))
     };
-    let cat_val = encode_type(&cat).ok()?;
-    let sem_type_val = encode_type(&denote_cat(&cat).ok()?).ok()?;
+    let codec = crate::program::eigentt_type_mirror::CodecNames::from_layer(layer);
+    let cat_val = encode_type(&cat, &codec).ok()?;
+    let sem_type_val = encode_type(&denote_cat(&cat).ok()?, &codec).ok()?;
 
     let key = slug(binding.abbr);
     let e_iri = Iri::parse(&format!("{}:e_{key}", binding.doc_ns)).ok()?;

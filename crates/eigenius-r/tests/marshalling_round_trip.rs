@@ -155,7 +155,7 @@ fn eigon_r_marshalling_round_trip() {
         "ctor": "App",
         "args": [
             {"ctor": "App", "args": [
-                {"ctor": "ConstRef", "args": ["urn:eigenius:test:GroupsDiffer"]},
+                {"ctor": "ConstRef", "args": ["urn:eigenius:test:GroupsDiffer", []]},
                 {"ctor": "LitString", "args": ["x"]}
             ]},
             {"ctor": "LitString", "args": ["g"]}

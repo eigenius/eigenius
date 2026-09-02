@@ -43,7 +43,7 @@ fn compile_to_json(src: &str) -> std::collections::BTreeMap<String, Value> {
 
 /// Decompile one resource and recompile it, returning the resulting JSON.
 fn round_trip(json: &Value) -> std::collections::BTreeMap<String, Value> {
-    let printed = esl::print::print_document(&Value::Array(vec![json.clone()]))
+    let printed = esl::print::print_document(&Value::Array(vec![json.clone()]), chain())
         .unwrap_or_else(|e| panic!("decompile must succeed: {e:?}"));
     compile_to_json(&printed)
 }
@@ -274,13 +274,14 @@ fn every_shipped_inductive_round_trips_through_esl() {
             seen += 1;
             let id = r.id().map(|i| i.as_str().to_string()).unwrap_or_default();
             let before = eigon_json::serialize_resource(r);
-            let printed = match esl::print::print_document(&Value::Array(vec![before.clone()])) {
-                Ok(p) => p,
-                Err(e) => {
-                    failures.push(format!("{id}: does not decompile at all: {e:?}"));
-                    continue;
-                }
-            };
+            let printed =
+                match esl::print::print_document(&Value::Array(vec![before.clone()]), chain()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        failures.push(format!("{id}: does not decompile at all: {e:?}"));
+                        continue;
+                    }
+                };
             // Compile against the CHAIN. A declaration's values name their constructor's
             // arguments (D85 §6.1), so reproducing what the ontology authored needs the
             // argument names of constructors the document only REFERENCES — `eigentt:Term`'s,
@@ -379,7 +380,7 @@ fn every_shipped_ontology_document_round_trips() {
                 .map(eigon_json::serialize_resource)
                 .collect(),
         );
-        match esl::print::print_document(&doc) {
+        match esl::print::print_document(&doc, chain()) {
             Err(e) => failures.push(format!("{name}: does not decompile: {}", e.message)),
             Ok(src) => match esl::compile(&src, chain()) {
                 Ok(_) => ok += 1,
@@ -477,7 +478,7 @@ fn the_printer_quotes_only_what_needs_it() {
     "#;
     let rs = esl::compile(src, chain()).expect("compiles");
     let doc = Value::Array(rs.iter().map(eigon_json::serialize_resource).collect());
-    let printed = esl::print::print_document(&doc).expect("decompiles");
+    let printed = esl::print::print_document(&doc, chain()).expect("decompiles");
 
     assert!(
         printed.contains("'obo-foundry'"),

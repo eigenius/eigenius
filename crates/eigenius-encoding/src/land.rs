@@ -48,11 +48,18 @@ pub struct DerivedClaimLander<'a> {
     /// source identity supplies it via [`Self::with_source`].
     source_label: Option<String>,
     classifier: &'a dyn KindClassifier,
+    /// Constructor argument names for the D47 codec, read from the chain this lander's claims
+    /// will be committed to (D85 §5 step 4). A claim's proposition is encoded here.
+    codec: eigenius_kernel::program::eigentt_type_mirror::CodecNames,
     landed: std::cell::RefCell<Vec<GradedClaim>>,
 }
 
 impl<'a> DerivedClaimLander<'a> {
-    pub fn new(doc_id: &str, classifier: &'a dyn KindClassifier) -> Self {
+    pub fn new(
+        doc_id: &str,
+        classifier: &'a dyn KindClassifier,
+        codec: eigenius_kernel::program::eigentt_type_mirror::CodecNames,
+    ) -> Self {
         Self {
             doc_id: doc_id.to_string(),
             // An agent IRI, not a program's name: `declared_by` is resource-typed since
@@ -64,6 +71,7 @@ impl<'a> DerivedClaimLander<'a> {
             emission_ns: None,
             source_label: None,
             classifier,
+            codec,
             landed: std::cell::RefCell::new(Vec::new()),
         }
     }
@@ -135,6 +143,7 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
                     &self.declared_by,
                     &self.timestamp,
                     &kinds,
+                    &self.codec,
                 )
                 .ok()?;
                 let claim_iri = claim.id().expect("cluster sets the claim id").clone();
@@ -154,6 +163,7 @@ impl eigenius_kernel::dcg::ClaimLander for DerivedClaimLander<'_> {
                         provenance: &provenance,
                         kind_classes: &kinds,
                     },
+                    &self.codec,
                 )
                 .ok()?, // un-gradable ⇒ nothing lands (fail closed, run breaks)
         };

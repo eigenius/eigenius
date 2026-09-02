@@ -42,6 +42,7 @@ use crate::observability::{field, operation};
 use crate::ontology::resource::Resource;
 use crate::ontology::well_known as wk;
 use crate::ontology::{Iri, Value};
+use crate::program::eigentt_type_mirror::CodecNames;
 use crate::witness::{hash_proposition_exp, WitnessCategory, WitnessKey};
 
 /// D54: the `justification:Conclusion` class IRI and its `proposition`
@@ -136,7 +137,7 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
             return None;
         }
     };
-    match hash_proposition_exp(&decoded) {
+    match hash_proposition_exp(&decoded, &CodecNames::from_layer(layer)) {
         Ok(h) => Some(h),
         Err(e) => {
             tracing::warn!(
@@ -306,7 +307,7 @@ fn emit_from_reasoning_sentence(layer: &Layer, sentence: &Resource) -> Option<Wi
         return None;
     }
 
-    let prop_hash = hash_proposition_exp(&proof.typ).ok()?;
+    let prop_hash = hash_proposition_exp(&proof.typ, &CodecNames::from_layer(layer)).ok()?;
     Some(WitnessKey {
         category: WitnessCategory::Verified,
         iri: sentence_iri,
@@ -375,7 +376,7 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
                 if let Some((_, prop)) =
                     crate::program::eigentt_type_mirror::certificate_indices(&j.typ)
                 {
-                    return hash_proposition_exp(prop).ok();
+                    return hash_proposition_exp(prop, &CodecNames::from_layer(layer)).ok();
                 }
             }
         }
@@ -418,7 +419,7 @@ pub fn default_asserts_proposition_hash(layer: &Layer, target_iri: &Iri) -> Opti
             target_iri.as_str().to_string(),
         )],
     );
-    crate::witness::hash_proposition_exp(&proposition).ok()
+    crate::witness::hash_proposition_exp(&proposition, &CodecNames::from_layer(layer)).ok()
 }
 
 /// Public synthesis variant of [`default_asserts_proposition_hash`]
@@ -517,7 +518,13 @@ pub fn synthesize_chain_witness(
     iri: &Iri,
     proposition: &crate::nbe::term::Exp,
 ) -> Result<crate::nbe::val::Val, String> {
-    let key = WitnessKey::from_exp(category, iri.clone(), proposition).map_err(|e| {
+    let key = WitnessKey::from_exp(
+        category,
+        iri.clone(),
+        proposition,
+        &CodecNames::from_layer(layer),
+    )
+    .map_err(|e| {
         format!(
             "synthesize_chain_witness: failed to encode proposition for {} witness on {}: {e}",
             category.label(),
@@ -565,7 +572,7 @@ mod tests {
             iri(wk::IS_A),
             Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
-        let encoded = encode_type(prop).unwrap();
+        let encoded = encode_type(prop, crate::testing::codec_names()).unwrap();
         r.set(iri(wk::CANONICAL_PROPOSITION), encoded);
         r
     }
@@ -586,15 +593,17 @@ mod tests {
         );
         // `holds(kernel, t, P)` — the proof's TYPE is the proposition itself,
         // with no certificate to unwrap. That is what makes it factive.
-        let p = encode_type(prop).unwrap();
-        let t = crate::program::eigentt_type_mirror::encode_type(&Exp::LitString(
-            "urn:eigenius:test:proof-term".into(),
-        ))
+        let p = encode_type(prop, crate::testing::codec_names()).unwrap();
+        let t = crate::program::eigentt_type_mirror::encode_type(
+            &Exp::LitString("urn:eigenius:test:proof-term".into()),
+            crate::testing::codec_names(),
+        )
         .unwrap();
         let proof = crate::program::eigentt_type_mirror::encode_judgement(
             "urn:eigenius:eigentt:logic_kernel",
             &t,
             &p,
+            crate::testing::codec_names(),
         )
         .unwrap();
         r.set(iri(CONCLUSION_PROOF), proof);
@@ -613,7 +622,10 @@ mod tests {
 
     #[test]
     fn build_witness_index_emits_declared_for_declaration_trace() {
-        let mut b = LayerBuilder::new("test", None);
+        let mut b = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         let target = "urn:eigenius:example:thing";
         let prop = Exp::sort(0);
         b.add_resource(target_resource_with_canonical_prop(target, &prop))
@@ -624,7 +636,13 @@ mod tests {
         ))
         .unwrap();
         let layer = b.build(LayerStorage::in_memory());
-        let expected = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
+        let expected = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             layer_admits_witness(&layer, &expected),
             "expected IsDeclaredAs witness for target"
@@ -636,7 +654,10 @@ mod tests {
         // Phase-4 behaviour: no Asserts(iri) default yet (deferred to
         // Phase 5). When the target lacks `canonical_proposition`, the
         // witness emitter skips emission.
-        let mut b = LayerBuilder::new("test", None);
+        let mut b = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         let target = "urn:eigenius:example:bare";
         let mut bare = Resource::new(iri(target));
         bare.set(
@@ -653,8 +674,13 @@ mod tests {
         // No `core:Asserts` in this chain, so the default proposition cannot be built and no
         // witness is admitted at any proposition. Probe the two hashes a caller could plausibly
         // present: the sort the target would carry, and `Asserts`'s own absence.
-        let probe =
-            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &Exp::sort(0)).unwrap();
+        let probe = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &Exp::sort(0),
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             !layer_admits_witness(&layer, &probe),
             "nothing is admitted when canonical_proposition is absent and Asserts is unavailable"
@@ -666,7 +692,10 @@ mod tests {
         // Layer A defines the trace + target with canonical_prop.
         // Layer B (child of A) defines nothing. Lookup against B for
         // the witness key admitted by A succeeds (parent-chain walk).
-        let mut a = LayerBuilder::new("parent", None);
+        let mut a = LayerBuilder::new(
+            "parent",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         let target = "urn:eigenius:example:thing";
         let prop = Exp::sort(0);
         a.add_resource(target_resource_with_canonical_prop(target, &prop))
@@ -681,7 +710,13 @@ mod tests {
         let b = LayerBuilder::new("child", Some(layer_a.clone()));
         let layer_b = b.build(LayerStorage::in_memory());
 
-        let key = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
+        let key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             lookup_chain_witness(&layer_b, &key),
             "lookup must walk parent chain and find the witness in layer A"
@@ -689,8 +724,13 @@ mod tests {
 
         // Lookup of a witness that doesn't exist anywhere correctly misses.
         let other_prop = Exp::sort(1);
-        let other_key =
-            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &other_prop).unwrap();
+        let other_key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &other_prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             !lookup_chain_witness(&layer_b, &other_key),
             "lookup must miss when the (iri, prop) pair was never admitted"
@@ -701,16 +741,14 @@ mod tests {
 
     use crate::nbe::term::Patt;
 
+    /// The chain these fixtures decode against.
+    ///
+    /// It built its own `core` layer from `core-ontology.json` until D85 §5 step 4, which is
+    /// what `crate::testing::term_chain()` already is — and a hand-built copy can no longer
+    /// sit anywhere useful: a layer minting `core:` names must be a root, and a root does not
+    /// carry `eigentt:Term`, so nothing on it can decode a term.
     fn layer_with_core_ontology() -> Arc<crate::layer::Layer> {
-        // Load the real core ontology so `core:Asserts` resolves.
-        use crate::ontology::eigon_json;
-        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
-        let core_resources = eigon_json::parse_document(core_json).unwrap();
-        let mut core_builder = LayerBuilder::new("core", None);
-        for r in core_resources {
-            core_builder.add_resource(r).unwrap();
-        }
-        Arc::new(core_builder.build(LayerStorage::in_memory()))
+        Arc::clone(crate::testing::term_chain())
     }
 
     #[test]
@@ -785,8 +823,13 @@ mod tests {
         .unwrap();
         let user_layer = user.build(LayerStorage::in_memory());
 
-        let explicit_key =
-            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &explicit_prop).unwrap();
+        let explicit_key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &explicit_prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             layer_admits_witness(&user_layer, &explicit_key),
             "explicit canonical_proposition witness must be admitted"
@@ -876,15 +919,24 @@ mod tests {
 
         // The justification term is a bare DECLARATION — an agent asserted the
         // premise. Nothing here is proved.
-        let j = encode_type(&Exp::InductiveCtor(
-            iri("urn:eigenius:justification:Term"),
-            "Declared".into(),
-            vec![Exp::LitString("urn:eigenius:test:p3:premise".into())],
-        ))
+        let j = encode_type(
+            &Exp::InductiveCtor(
+                iri("urn:eigenius:justification:Term"),
+                "Declared".into(),
+                vec![Exp::LitString("urn:eigenius:test:p3:premise".into())],
+            ),
+            crate::testing::codec_names(),
+        )
         .unwrap();
-        let p = encode_type(&prop).unwrap();
-        let typ = certificate_type(&j, &p).unwrap();
-        let judgement = encode_judgement("urn:eigenius:eigentt:logic_kernel", &j, &typ).unwrap();
+        let p = encode_type(&prop, crate::testing::codec_names()).unwrap();
+        let typ = certificate_type(&j, &p, crate::testing::codec_names()).unwrap();
+        let judgement = encode_judgement(
+            "urn:eigenius:eigentt:logic_kernel",
+            &j,
+            &typ,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
 
         let mut r = Resource::new(iri(conclusion_iri));
         r.set(
@@ -897,8 +949,13 @@ mod tests {
         b.add_resource(r).unwrap();
         let layer = b.build(LayerStorage::in_memory());
 
-        let verified =
-            WitnessKey::from_exp(WitnessCategory::Verified, iri(conclusion_iri), &prop).unwrap();
+        let verified = WitnessKey::from_exp(
+            WitnessCategory::Verified,
+            iri(conclusion_iri),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             !lookup_chain_witness(&layer, &verified),
             "a conclusion whose only ground is Declared must NOT be admitted as Verified — \
@@ -911,7 +968,10 @@ mod tests {
     fn skip_hint_short_circuits_the_lookup() {
         let target = "urn:eigenius:example:thing";
         let prop = Exp::sort(0);
-        let mut b = LayerBuilder::new("test", None);
+        let mut b = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         b.add_resource(target_resource_with_canonical_prop(target, &prop))
             .unwrap();
         b.add_resource(declaration_trace(
@@ -920,7 +980,13 @@ mod tests {
         ))
         .unwrap();
         let layer = b.build(LayerStorage::in_memory());
-        let key = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
+        let key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
 
         // Freshly built layers are conservatively `true`, so the witness is found.
         assert!(layer.has_witness_candidates());
@@ -986,26 +1052,36 @@ mod tests {
 
         for (label, prop) in cases {
             // The check side: the proposition as a certificate would supply it.
-            let flat = hash_proposition_exp(&prop).expect("flat proposition hashes");
+            let flat = hash_proposition_exp(&prop, crate::testing::codec_names())
+                .expect("flat proposition hashes");
 
             // The emit side: the same proposition, reached through a judgement.
-            let p = encode_type(&prop).unwrap();
-            let j = encode_type(&Exp::InductiveCtor(
-                iri("urn:eigenius:justification:Term"),
-                "Declared".into(),
-                vec![Exp::LitString("urn:eigenius:test:premise".into())],
-            ))
+            let p = encode_type(&prop, crate::testing::codec_names()).unwrap();
+            let j = encode_type(
+                &Exp::InductiveCtor(
+                    iri("urn:eigenius:justification:Term"),
+                    "Declared".into(),
+                    vec![Exp::LitString("urn:eigenius:test:premise".into())],
+                ),
+                crate::testing::codec_names(),
+            )
             .unwrap();
-            let typ = certificate_type(&j, &p).expect("certificate type encodes");
-            let stored = encode_judgement("urn:eigenius:eigentt:logic_kernel", &j, &typ)
-                .expect("judgement encodes");
+            let typ = certificate_type(&j, &p, crate::testing::codec_names())
+                .expect("certificate type encodes");
+            let stored = encode_judgement(
+                "urn:eigenius:eigentt:logic_kernel",
+                &j,
+                &typ,
+                crate::testing::codec_names(),
+            )
+            .expect("judgement encodes");
 
             let judgement = decode_judgement(&stored, &layer)
                 .unwrap_or_else(|e| panic!("{label}: judgement must decode: {e}"));
             let (_, projected) = certificate_indices(&judgement.typ)
                 .unwrap_or_else(|| panic!("{label}: judgement type must be a Certificate"));
-            let via_judgement =
-                hash_proposition_exp(projected).expect("projected proposition hashes");
+            let via_judgement = hash_proposition_exp(projected, crate::testing::codec_names())
+                .expect("projected proposition hashes");
 
             assert_eq!(
                 flat, via_judgement,
@@ -1056,7 +1132,7 @@ mod tests {
 
         let mut broken = Vec::new();
         for (label, exp) in &cases {
-            let Ok(stored) = encode_type(exp) else {
+            let Ok(stored) = encode_type(exp, crate::testing::codec_names()) else {
                 broken.push(format!("{label}: does not encode"));
                 continue;
             };
@@ -1068,13 +1144,17 @@ mod tests {
                 }
             };
             // Emit side, after slice 1.
-            let emit = crate::witness::hash_proposition_exp(&decoded);
+            let emit =
+                crate::witness::hash_proposition_exp(&decoded, crate::testing::codec_names());
             // Check side, as it already behaves.
             let check = eval(&decoded, &Rho::Nil)
                 .map_err(|e| format!("{e:?}"))
                 .and_then(|v| {
-                    crate::witness::hash_proposition_exp(&readback_val(0, &v))
-                        .map_err(|e| format!("{e:?}"))
+                    crate::witness::hash_proposition_exp(
+                        &readback_val(0, &v),
+                        crate::testing::codec_names(),
+                    )
+                    .map_err(|e| format!("{e:?}"))
                 });
             match (emit, check) {
                 (Ok(a), Ok(b)) if a == b => {}
@@ -1109,14 +1189,15 @@ mod tests {
     fn lam_bearing_propositions_cannot_round_trip_on_either_side() {
         let lam = Exp::Lam(Patt::Var("x".into()), Box::new(Exp::sort(0)));
         assert!(
-            encode_type(&lam).is_err(),
+            encode_type(&lam, crate::testing::codec_names()).is_err(),
             "a bare Lam must not encode — decode cannot recover its domain"
         );
         assert!(
             WitnessKey::from_exp(
                 WitnessCategory::Declared,
                 iri("urn:eigenius:example:l"),
-                &lam
+                &lam,
+                crate::testing::codec_names()
             )
             .is_err(),
             "so the CHECK side already cannot key a Lam-bearing proposition today"
@@ -1127,7 +1208,10 @@ mod tests {
 
     #[test]
     fn synthesize_chain_witness_succeeds_when_admitted() {
-        let mut b = LayerBuilder::new("test", None);
+        let mut b = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         let target = "urn:eigenius:example:thing";
         let prop = Exp::sort(0);
         b.add_resource(target_resource_with_canonical_prop(target, &prop))
@@ -1153,7 +1237,11 @@ mod tests {
 
     #[test]
     fn synthesize_chain_witness_fails_with_diagnostic_when_missing() {
-        let layer = LayerBuilder::new("test", None).build(LayerStorage::in_memory());
+        let layer = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        )
+        .build(LayerStorage::in_memory());
         let target_iri = iri("urn:eigenius:example:unfounded");
         let prop = Exp::sort(0);
         let err = synthesize_chain_witness(&layer, WitnessCategory::Declared, &target_iri, &prop)
@@ -1174,7 +1262,10 @@ mod tests {
 
     #[test]
     fn synthesize_chain_witness_walks_parent_chain() {
-        let mut parent = LayerBuilder::new("parent", None);
+        let mut parent = LayerBuilder::new(
+            "parent",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         let target = "urn:eigenius:example:thing";
         let prop = Exp::sort(0);
         parent
@@ -1226,14 +1317,21 @@ mod tests {
         let layer = b.build(LayerStorage::in_memory());
 
         // The witness that IS admitted.
-        let verified_key =
-            WitnessKey::from_exp(WitnessCategory::Verified, iri(target), &prop).unwrap();
+        let verified_key = WitnessKey::from_exp(
+            WitnessCategory::Verified,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(lookup_chain_witness(&layer, &verified_key));
 
         // Neither remaining category is reachable from it at the same
         // (iri, prop_hash).
         for category in [WitnessCategory::Declared, WitnessCategory::Observed] {
-            let key = WitnessKey::from_exp(category, iri(target), &prop).unwrap();
+            let key =
+                WitnessKey::from_exp(category, iri(target), &prop, crate::testing::codec_names())
+                    .unwrap();
             assert!(
                 !lookup_chain_witness(&layer, &key),
                 "IsVerifiedAs must not coerce to {} — the families are independent",
@@ -1284,10 +1382,13 @@ mod tests {
         // after `Dog` is redefined — the term is unchanged while its meaning is
         // not.
         let prop = quantified_over_subject_class();
-        let encoded = encode_type(&prop).unwrap();
+        let encoded = encode_type(&prop, crate::testing::codec_names()).unwrap();
         let owner = iri("urn:eigenius:example:claim");
 
-        let mut b1 = LayerBuilder::new("dog-v1", None);
+        let mut b1 = LayerBuilder::new(
+            "dog-v1",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         b1.add_resource(class_requiring(SUBJECT_CLASS, NARROW))
             .unwrap();
         let l1 = Arc::new(b1.build(LayerStorage::in_memory()));
@@ -1341,7 +1442,10 @@ mod tests {
         let prop = quantified_over_subject_class();
         let target = "urn:eigenius:example:every-dog-claim";
 
-        let mut b1 = LayerBuilder::new("credit-v1", None);
+        let mut b1 = LayerBuilder::new(
+            "credit-v1",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         b1.add_resource(class_requiring(SUBJECT_CLASS, NARROW))
             .unwrap();
         b1.add_resource(target_resource_with_canonical_prop(target, &prop))
@@ -1353,7 +1457,13 @@ mod tests {
         .unwrap();
         let l1 = Arc::new(b1.build(LayerStorage::in_memory()));
 
-        let key = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
+        let key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             layer_admits_witness(&l1, &key),
             "test setup: the witness must be admitted against Dog-v1"

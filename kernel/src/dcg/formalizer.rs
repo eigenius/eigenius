@@ -91,6 +91,7 @@ impl ArtifactFormat {
 pub fn render_artifact(
     resources: &[crate::ontology::resource::Resource],
     format: ArtifactFormat,
+    layer: &Layer,
 ) -> Result<Vec<u8>, String> {
     match format {
         ArtifactFormat::Cbor => Ok(crate::ontology::eigon_cbor::serialize_document(resources)),
@@ -98,7 +99,7 @@ pub fn render_artifact(
         ArtifactFormat::Esl => {
             let doc: serde_json::Value = serde_json::from_slice(&json_bytes(resources))
                 .map_err(|e| format!("emitted document is not valid JSON: {e}"))?;
-            crate::esl::print::print_document_with(&doc, crate::esl::print::Layout::Pretty)
+            crate::esl::print::print_document_with(&doc, crate::esl::print::Layout::Pretty, layer)
                 .map(String::into_bytes)
                 .map_err(|e| format!("cannot render the artifact as ESL: {e}"))
         }

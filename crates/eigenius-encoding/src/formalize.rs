@@ -65,6 +65,9 @@ pub struct EmissionInputs<'a> {
     /// Record non-encoding units as `CutItem`s instead of aborting (D67 §5).
     pub partial: bool,
     pub meta: DocumentMeta<'a>,
+    /// Constructor argument names for the D47 codec, read from the chain these resources are
+    /// emitted against (D85 §5 step 4).
+    pub codec: &'a eigenius_kernel::program::eigentt_type_mirror::CodecNames,
 }
 
 /// Map a document's encoding to its artifact.
@@ -238,8 +241,8 @@ pub fn emit_from_encoding(inputs: &EmissionInputs<'_>) -> Result<Artifact, Strin
     if !glossary.is_empty() {
         eprintln!("glossary: {} Stage-A resource(s) emitted", glossary.len());
     }
-    let resources =
-        emit_resources(&inputs.meta, &glossary, &parsed, &cuts).map_err(|e| e.to_string())?;
+    let resources = emit_resources(&inputs.meta, &glossary, &parsed, &cuts, inputs.codec)
+        .map_err(|e| e.to_string())?;
     Ok(Artifact {
         resources,
         encoded: parsed.len(),
@@ -364,6 +367,9 @@ impl DocumentFormalizer for EncodingFormalizer {
         // Draws are read from the branch a PREVIOUS run left (or supplied inline). On a first run
         // there are none and every seam asks live — which needs a key, and fails closed without one.
         let branch = doc_branch_head(&backend, &req.doc_id)?;
+        // The codec's constructor argument names, from the chain these resources land on.
+        let codec = eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(&base);
+        let print_chain = std::sync::Arc::clone(&base);
 
         // ── the four arms ───────────────────────────────────────────────────────────────────
         let rank_json = seam_json(req, branch.as_ref(), DrawSeam::SenseRank)?;
@@ -383,7 +389,7 @@ impl DocumentFormalizer for EncodingFormalizer {
         // MOVED out of `arms` has to come out before that borrow starts.
         let proposer = arms.proposer.take().unwrap_or_else(|| Box::new(NoProposer));
         let sense_arm = arms.sense.take();
-        let lander = arms.lander(req);
+        let lander = arms.lander(req, codec.clone());
 
         // ── the run ─────────────────────────────────────────────────────────────────────────
         let ranker_slot = std::cell::RefCell::new(sense_arm);
@@ -436,6 +442,7 @@ impl DocumentFormalizer for EncodingFormalizer {
 
         // ── the artifact — the SHARED emitter (slice 5a) ────────────────────────────────────
         let artifact = emit_from_encoding(&EmissionInputs {
+            codec: &codec,
             doc: &req.source_text,
             encoding: &encoding,
             landed: &landed,
@@ -478,6 +485,7 @@ impl DocumentFormalizer for EncodingFormalizer {
             artifact: eigenius_kernel::dcg::formalizer::render_artifact(
                 &artifact.resources,
                 req.format,
+                &print_chain,
             )?,
             content_type: req.format,
             structure_iri: format!("{}:structure", req.ns),
@@ -638,9 +646,13 @@ impl Arms {
 
     /// The in-loop claim lander, when a kind arm exists (D68): a landed claim carries its discourse
     /// kind, which is what lets a later demonstrative bind to it.
-    fn lander(&self, req: &FormalizeRequest) -> Option<crate::DerivedClaimLander<'_>> {
+    fn lander(
+        &self,
+        req: &FormalizeRequest,
+        codec: eigenius_kernel::program::eigentt_type_mirror::CodecNames,
+    ) -> Option<crate::DerivedClaimLander<'_>> {
         self.kinds.as_ref().map(|k| {
-            crate::DerivedClaimLander::new(&req.doc_id, &**k)
+            crate::DerivedClaimLander::new(&req.doc_id, &**k, codec.clone())
                 .with_emission_namespace(&req.ns)
                 .with_source(&self.source_label)
         })

@@ -330,8 +330,37 @@ against the layer each was already building on. Two consequences the empty layer
 `cons`, `some` and `none` are ambiguous unqualified — and the qualifier that resolves it does not
 reach program bodies (eigenius#231).
 
+**The SLOT'S DECLARED TYPE decides the shape — settled `2026-09-02`, and it is what step 4
+turns on.** A value written at a slot declaring `class_types: [I]` is a value of `I`'s
+constructor: `is_a` names `I-c` and the arguments are properties. A SUBTERM of an
+`eigentt:Term` is a term, so a constructor application there is `CtorApp` applied by `App` —
+which is what `eigentt:Term` declares and what `Term-App-arg`'s own `class_types` admits.
+
+Each position has ONE shape and none is converted into another. The first implementation
+missed this and treated `CtorApp` as a rival ENCODING of a constructor value, translating in
+both directions: an `encode`-side fold, a `decode`-side unfold, a `ConstRef` unwrapper for
+reference-typed arguments, and a per-argument type table threaded through two crates to drive
+them. All of it went when the rule was stated; the compiler found each piece dead as its cause
+was removed, which is the test of whether it was load-bearing.
+
+The chain reported the rule directly, and only because step 4 makes the shape explicit:
+`Term-App-arg has is_a [justification:Term-Declared] but must be an instance of
+[eigentt:Term]`.
+
+Two consequences worth naming. `CodecNames` carries EVERY inductive the chain declares, not
+the three the codec writes into — `Exp::InductiveCtor(I, c, args)` names `I`, so the encoder
+needs `I`'s argument names — and the ESL compiler rebuilds it from its MERGED table, because a
+file declares an inductive and writes values of it in the same compile. And a read of a value
+comes in two forms with one walk behind them: `ctor_view` answers "which constructor, and what
+are its arguments", which is what every consumer wants; `value_resource_to_tagged` folds that
+into the term language for `decode_type_json` alone, and goes with it at step 5.
+
 **Step 4 turns OFF Rule 24's recursion guard unless it is ported in the same commit — found
-`2026-09-01`.** `validation/mod.rs:1133` reads
+`2026-09-01`, ported `2026-09-02`.** It fired exactly as predicted: the recursive definition
+was still refused, but by an unrelated decode failure, with the guard silently skipped. The
+port reads the value in either shape through `term_mentions::json_mentions_of_value`, which
+deleted `json_mentions_const_ref` — one of step 5's twins, gone early because the port had no
+use for a walker that understood only the tagged dict. `validation/mod.rs:1133` reads
 
 ```rust
 if let (Some(id), Value::Json(json)) = (res_id, body_value) {

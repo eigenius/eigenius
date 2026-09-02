@@ -116,7 +116,7 @@ fn a_real_proposition() -> Value {
         "ctor": "App",
         "args": [
             {"ctor": "App", "args": [
-                {"ctor": "ConstRef", "args": ["urn:eigenius:measurements:lt"]},
+                {"ctor": "ConstRef", "args": ["urn:eigenius:measurements:lt", []]},
                 {"ctor": "LitFloat", "args": [1.0]}
             ]},
             {"ctor": "LitFloat", "args": [2.0]}
@@ -153,11 +153,27 @@ fn rejection_errors(
     }
 }
 
+/// The D47 codec's constructor argument names, from the bootstrap chain, built once.
+///
+/// Encoding a term names its constructor's arguments (D85 §6.1), and the names live in
+/// `eigentt:Term` and `core:Level`'s declarations — so an encode needs a chain.
+fn codec() -> &'static eigenius_kernel::program::eigentt_type_mirror::CodecNames {
+    static NAMES: std::sync::OnceLock<eigenius_kernel::program::eigentt_type_mirror::CodecNames> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
 /// The defect in #175, end to end: a literal in the proposition slot.
 #[test]
 fn integer_literal_claim_is_rejected_by_the_commit() {
     let errors = rejection_errors(
-        encode_type(&Exp::LitInt(42)).expect("literal encodes"),
+        encode_type(&Exp::LitInt(42), codec()).expect("literal encodes"),
         "an integer literal",
     );
     let hit = errors
@@ -185,7 +201,10 @@ fn integer_literal_claim_is_rejected_by_the_commit() {
 /// is not a claim.
 #[test]
 fn a_type_in_the_proposition_slot_is_rejected_by_the_commit() {
-    let errors = rejection_errors(encode_type(&Exp::sort(0)).expect("Prop encodes"), "a type");
+    let errors = rejection_errors(
+        encode_type(&Exp::sort(0), codec()).expect("Prop encodes"),
+        "a type",
+    );
     assert!(
         errors
             .iter()
@@ -217,7 +236,7 @@ fn a_class_annotated_as_a_proposition_is_rejected_by_the_commit() {
     let annotated = Value::Json(serde_json::json!({
         "ctor": "Ann",
         "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class"]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class", []]},
             {"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}
         ]
     }));

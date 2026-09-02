@@ -1798,8 +1798,14 @@ fn cmd_decompile(file: &str, verify: bool, pretty: bool) {
     } else {
         eigenius_kernel::esl::print::Layout::Flat
     };
-    let source =
-        eigenius_kernel::esl::print::print_document_with(&doc, layout).unwrap_or_else(|e| {
+    // The bootstrap chain: a printed value names its constructor's class, and the class of a
+    // term is declared down the chain rather than in the document being decompiled.
+    let chain = eigenius_kernel::bootstrap::bootstrap().unwrap_or_else(|e| {
+        eprintln!("cannot build the bootstrap chain: {e:?}");
+        std::process::exit(1);
+    });
+    let source = eigenius_kernel::esl::print::print_document_with(&doc, layout, chain.head())
+        .unwrap_or_else(|e| {
             eprintln!("{file}: cannot decompile: {e}");
             std::process::exit(1);
         });

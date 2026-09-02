@@ -420,6 +420,21 @@ impl BuiltinComponent for ArrheniusComponent {
 /// The post-translation invariant fires `assay_prediction_validity`
 /// AutoOnLoad on the produced AssayPrediction; for in-tolerance ΔG
 /// the resulting IC₅₀ is positive so the invariant Holds.
+/// The bootstrap chain, built once. An ESL compile needs the chain that declares the term
+/// language: a `def` body, an `axiom` statement and a `data` constructor type all encode terms,
+/// and a term names its constructor's class (D85 §6.1).
+fn bootstrap_chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
 #[test]
 fn comorphism_translates_dock_to_assay() {
     let (layer, _storage) = build_demo_layer();
@@ -435,12 +450,9 @@ fn comorphism_translates_dock_to_assay() {
         }
     ";
 
-    let user_resources = eigenius_kernel::esl::compile_full(
-        source,
-        Arc::clone(&index),
-        &eigenius_kernel::layer::Layer::empty(),
-    )
-    .expect("ESL compile");
+    let user_resources =
+        eigenius_kernel::esl::compile_full(source, Arc::clone(&index), bootstrap_chain())
+            .expect("ESL compile");
     let mut user_builder = LayerBuilder::new("dock-assay-demo-program", Some(Arc::clone(&layer)));
     for r in user_resources {
         user_builder.add_resource(r).expect("add user resource");

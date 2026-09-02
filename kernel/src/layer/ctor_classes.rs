@@ -156,6 +156,102 @@ fn arg_property_type(
 ///
 /// Returns them in IRI order. An IRI already present in `resources` is skipped: an author who
 /// wrote the class by hand keeps it, and Rule 25 is what judges whether it is well-formed.
+/// The class a value of constructor `ctor` on inductive `inductive` states in its `is_a`.
+///
+/// One authority for the naming scheme. `derive` materialises the class under this name and
+/// every producer of a value — the ESL compiler's declaration emitters, the D47 codec —
+/// spells it through here, so a value cannot name a class the derivation did not create.
+pub(crate) fn class_iri(inductive: &str, ctor: &str) -> String {
+    format!("{inductive}-{ctor}")
+}
+
+/// The property one argument of that constructor is carried under.
+pub(crate) fn arg_property_iri(class: &str, arg_name: &str) -> String {
+    format!("{class}-{arg_name}")
+}
+
+/// Build a value resource (D85 §6.1): `is_a` names the constructor's class, and each argument
+/// is a property on it. `names` are the constructor's argument names in DECLARATION order, as
+/// the caller read them from the inductive; `args` must be the same length, which every caller
+/// checks against the declaration before reaching here.
+pub(crate) fn value_resource(
+    inductive: &str,
+    ctor: &str,
+    names: &[String],
+    args: &[Value],
+) -> Value {
+    debug_assert_eq!(names.len(), args.len(), "arity is the caller's to check");
+    let class = class_iri(inductive, ctor);
+    let mut r = Resource::new_embedded();
+    r.set(
+        Iri::parse(wk::IS_A).expect("core:is_a"),
+        Value::Array(vec![Value::String(class.clone())]),
+    );
+    for (n, a) in names.iter().zip(args) {
+        r.set(
+            Iri::parse(&arg_property_iri(&class, n)).expect("derived property IRI"),
+            a.clone(),
+        );
+    }
+    Value::Embedded(Box::new(r))
+}
+
+/// The argument names of every constructor of `inductive`, in declaration order, keyed by
+/// constructor name. `None` when the chain does not carry that inductive.
+///
+/// This is the read side of `derive`: the names it materialises properties from are the names
+/// a producer must spell. Reading them here rather than hard-coding them is what keeps the
+/// declaration the only place a constructor's arguments are named.
+/// The IRI a constructor argument's `core:type_name` names, when it is a plain `ConstRef` —
+/// which is every declared case. `None` for anything else (a `Var`, an application).
+pub(crate) fn declared_arg_type(arg: &Resource) -> Option<String> {
+    match arg.get(&iri(wk::TYPE_NAME))? {
+        Value::Embedded(r) => const_ref_target(r).map(|i| i.as_str().to_string()),
+        Value::Json(j) => j
+            .get("args")
+            .and_then(|a| a.as_array())
+            .and_then(|a| a.first())
+            .and_then(|s| s.as_str())
+            .map(str::to_string),
+        _ => None,
+    }
+}
+
+pub(crate) fn arg_names_of(
+    layer: &Layer,
+    inductive: &Iri,
+) -> Option<BTreeMap<String, Vec<String>>> {
+    let ind = layer.resolve(inductive)?;
+    let Some(Value::Array(ctors)) = ind.get(&iri(wk::CTORS)) else {
+        return Some(BTreeMap::new());
+    };
+    let mut out = BTreeMap::new();
+    for ctor_val in ctors {
+        let Value::Embedded(ctor) = ctor_val else {
+            continue;
+        };
+        let Some(name) = ctor.get(&iri(wk::CTOR_NAME)).and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let args = match ctor.get(&iri(wk::ARG_TYPES)) {
+            Some(Value::Array(a)) => a
+                .iter()
+                .enumerate()
+                .map(|(i, at)| match at {
+                    Value::Embedded(r) => r
+                        .get(&iri(wk::ARG_NAME))
+                        .and_then(|v| v.as_str().map(str::to_string))
+                        .unwrap_or_else(|| format!("arg_{i}")),
+                    _ => format!("arg_{i}"),
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        out.insert(name.to_string(), args);
+    }
+    Some(out)
+}
+
 pub(crate) fn derive(resources: &BTreeMap<Iri, Resource>, parents: &[Arc<Layer>]) -> Vec<Resource> {
     let inductive = iri(wk::INDUCTIVE_TYPE);
     let mut out: BTreeMap<Iri, Resource> = BTreeMap::new();

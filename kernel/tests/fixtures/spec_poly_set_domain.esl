@@ -68,9 +68,11 @@ resource poly:obs_trace : prov:ObservationTrace {
 resource poly:concl : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:poly:Model";
 
-    justification:judgement = type_expr(
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
         holds( eigentt:logic_kernel,
-               app(
+               type_expr(app(
                    poly:HasActivity(poly:Model),
                    poly:RequiresActivity(poly:Model),
                    Declared("urn:eigenius:demo:poly:rule"),
@@ -91,14 +93,13 @@ resource poly:concl : justification:Conclusion {
                        poly:HasActivity(poly:Model),
                        ()
                    )
-               ),
-               justification:Certificate(
+               )),
+               type_expr(justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:demo:poly:rule"),
                        Observed("urn:eigenius:demo:poly:obs")
                    ),
-                   poly:RequiresActivity(poly:Model) ) )
-    );
+                   poly:RequiresActivity(poly:Model) )) );
 
 
 }

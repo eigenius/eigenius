@@ -123,7 +123,9 @@ fn colour_inductive() -> Resource {
     );
     arg.set(
         iri("urn:eigenius:core:type_name"),
-        Value::Json(serde_json::json!({"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]})),
+        Value::Json(
+            serde_json::json!({"ctor": "ConstRef", "args": ["urn:eigenius:core:string", []]}),
+        ),
     );
     named.set(
         iri("urn:eigenius:core:arg_types"),
@@ -259,7 +261,7 @@ fn derived_names_are_esl_spellable() {
             "urn:eigenius:core:description": "probe"
         }])
     };
-    let print = |id: &str| eigenius_kernel::esl::print::print_document(&doc_for(id));
+    let print = |id: &str| eigenius_kernel::esl::print::print_document(&doc_for(id), &core_layer());
 
     assert!(
         print("urn:eigenius:eigentt:Term-App").is_ok(),
@@ -486,7 +488,7 @@ fn a_value_resource_decodes_in_a_term_ranged_slot() {
 fn both_shapes_decode_to_the_same_exp() {
     let core = core_layer();
     let tagged = Value::Json(serde_json::json!({
-        "ctor": "ConstRef", "args": ["urn:eigenius:core:string"]
+        "ctor": "ConstRef", "args": ["urn:eigenius:core:string", []]
     }));
     let mut res = Resource::new_embedded();
     res.set(
@@ -496,6 +498,10 @@ fn both_shapes_decode_to_the_same_exp() {
     res.set(
         iri("urn:eigenius:eigentt:Term-ConstRef-iri"),
         Value::String("urn:eigenius:core:string".into()),
+    );
+    res.set(
+        iri("urn:eigenius:eigentt:Term-ConstRef-levels"),
+        Value::Array(Vec::new()),
     );
 
     let from_json = eigenius_kernel::program::eigentt_type_mirror::decode_type(&tagged, &core)

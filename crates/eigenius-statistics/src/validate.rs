@@ -132,6 +132,9 @@ pub fn do_validate_analysis_plan(
     claim: &Resource,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
+    // The chain: an inductive value's argument ORDER is its declaration's, so projecting one
+    // back positionally needs the layer that declares it.
+    let layer = ctx.head();
     // ── Step 1: read sample_set IRI from the claim ────────────────────
     let sample_set_iri_str = match read_iri_property(claim, iris::PROP_SAMPLE_SET)? {
         Some(s) => s,
@@ -171,6 +174,19 @@ pub fn do_validate_analysis_plan(
         }
     };
     let bundle_json = match bundle_value {
+        // The `Bundle` value, projected back positionally — its argument order is the
+        // declaration's (D85 §6.1).
+        Value::Embedded(r) => {
+            &match eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, layer) {
+                Ok(j) => j,
+                Err(e) => {
+                    return Ok(gate_fails(format!(
+                        "SampleSetResource `{sample_set_iri}`'s sample_set_value is not a \
+                     well-formed inductive value: {e:?}"
+                    )))
+                }
+            }
+        }
         Value::Json(j) => j,
         other => {
             return Ok(gate_fails(format!(
@@ -261,11 +277,11 @@ pub fn do_validate_analysis_plan(
         Some(a) => a,
         None => return Ok(gate_fails("claim missing `alpha`".into())),
     };
-    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY, layer)? {
         Some(j) => j,
         None => return Ok(gate_fails("claim missing `directionality`".into())),
     };
-    let effect_size = match read_json_property(claim, iris::PROP_EFFECT_SIZE)? {
+    let effect_size = match read_json_property(claim, iris::PROP_EFFECT_SIZE, layer)? {
         Some(j) => j,
         None => return Ok(gate_fails("claim missing `effect_size`".into())),
     };
@@ -320,7 +336,7 @@ pub fn do_validate_analysis_plan(
     // Read variance_assumption for the IID dispatch arm (one-sample
     // dispatch ignores it — there's only one variance parameter to
     // estimate there).
-    let variance_assumption = read_json_property(claim, iris::PROP_VARIANCE_ASSUMPTION)?;
+    let variance_assumption = read_json_property(claim, iris::PROP_VARIANCE_ASSUMPTION, layer)?;
 
     // §7.2 outlier-exclusion dispatch matrix. Phase 5 v1 wires the
     // `(SingleSampleEstimate, ESD(k, alpha))` cell — the cell that
@@ -329,7 +345,7 @@ pub fn do_validate_analysis_plan(
     // exclusion) combinations reject up front with a diagnostic
     // referencing the tracked follow-on. Identity exclusion takes the
     // standard single-verdict path on any dispatch.
-    let outlier_exclusion = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION)?;
+    let outlier_exclusion = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION, layer)?;
     let exclusion_ctor = outlier_exclusion
         .as_ref()
         .and_then(json_ctor_name)
@@ -407,10 +423,10 @@ pub fn do_validate_analysis_plan(
     // proposition derivation per effect and returns a gate-Holds
     // outcome carrying N derivations (one per effect).
     if matches!(dispatch, DispatchPos::Factorial) {
-        return do_factorial_per_effect(claim, &bundle, alpha, &effect_size);
+        return do_factorial_per_effect(claim, layer, &bundle, alpha, &effect_size);
     }
     if matches!(dispatch, DispatchPos::SplitPlot) {
-        return do_splitplot_per_effect(claim, &bundle, alpha);
+        return do_splitplot_per_effect(claim, layer, &bundle, alpha);
     }
 
     // ── Step 6: run the test (dispatch-specific) ──────────────────────
@@ -757,7 +773,8 @@ pub fn do_validate_analysis_plan(
                 // Read the claim's `autocorrelation_structure`; absent
                 // defaults to CompoundSymmetry (the assumption a flat
                 // RM-ANOVA implicitly makes).
-                let autocorr = read_json_property(claim, iris::PROP_AUTOCORRELATION_STRUCTURE)?;
+                let autocorr =
+                    read_json_property(claim, iris::PROP_AUTOCORRELATION_STRUCTURE, layer)?;
                 let autocorr_ctor = autocorr.as_ref().and_then(json_ctor_name);
                 let autocorr_name = autocorr_ctor.unwrap_or("CompoundSymmetry");
                 match (autocorr_name, k_between) {
@@ -1001,8 +1018,10 @@ pub fn do_validate_analysis_plan(
 fn recompute_method_comparison_claim(
     claim: &Resource,
     bundle: &DecodedBundle,
-    _ctx: &ExecutionContext,
+    ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
+    // The chain: an inductive value's argument order is its declaration's.
+    let layer = ctx.head();
     if bundle.blocking != "PairedBlocking" {
         return Ok(gate_fails(format!(
             "MethodComparisonAnalysisPlan requires a Paired SampleSet (blocking = PairedBlocking, \
@@ -1011,7 +1030,7 @@ fn recompute_method_comparison_claim(
             bundle.blocking, bundle.factor, bundle.repeated_measures,
         )));
     }
-    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY, layer)? {
         Some(j) => j,
         None => return Ok(gate_fails("claim missing `directionality`".into())),
     };
@@ -1023,7 +1042,7 @@ fn recompute_method_comparison_claim(
                 .into(),
         ));
     }
-    let outlier = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION)?;
+    let outlier = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION, layer)?;
     if let Some(ctor) = outlier.as_ref().and_then(json_ctor_name) {
         if ctor != "Identity" {
             return Ok(gate_fails(format!(
@@ -1256,6 +1275,8 @@ fn recompute_nested_anova_claim(
     sample_set_iri_str: &str,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
+    // The chain: an inductive value's argument order is its declaration's.
+    let layer = ctx.head();
     let (flat_a, flat_b, sizes_a, sizes_b) =
         match decode_nested_observations(&bundle.observations_raw) {
             Ok(p) => p,
@@ -1273,7 +1294,7 @@ fn recompute_nested_anova_claim(
         Some(a) => a,
         None => return Ok(gate_fails("claim missing `alpha`".into())),
     };
-    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY, layer)? {
         Some(j) => j,
         None => return Ok(gate_fails("claim missing `directionality`".into())),
     };
@@ -1376,6 +1397,8 @@ fn recompute_crossed_anova_claim(
     sample_set_iri_str: &str,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
+    // The chain: an inductive value's argument order is its declaration's.
+    let layer = ctx.head();
     let (flat_a, flat_b, sizes_a, sizes_b) =
         match decode_nested_observations(&bundle.observations_raw) {
             Ok(p) => p,
@@ -1403,7 +1426,7 @@ fn recompute_crossed_anova_claim(
         Some(a) => a,
         None => return Ok(gate_fails("claim missing `alpha`".into())),
     };
-    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY, layer)? {
         Some(j) => j,
         None => return Ok(gate_fails("claim missing `directionality`".into())),
     };
@@ -1650,8 +1673,9 @@ impl MultipleComparisonCorrection {
 /// institutional failures.
 fn read_multiple_comparison_correction(
     claim: &Resource,
+    layer: &eigenius_kernel::layer::Layer,
 ) -> Result<Result<MultipleComparisonCorrection, String>, InstitutionError> {
-    let raw = match read_json_property(claim, iris::PROP_MULTIPLE_COMPARISON_CORRECTION)? {
+    let raw = match read_json_property(claim, iris::PROP_MULTIPLE_COMPARISON_CORRECTION, layer)? {
         Some(j) => j,
         None => return Ok(Ok(MultipleComparisonCorrection::NoCorrection)),
     };
@@ -1774,6 +1798,7 @@ fn apply_correction(
 /// SAP's raw alpha.
 fn do_factorial_per_effect(
     claim: &Resource,
+    layer: &eigenius_kernel::layer::Layer,
     bundle: &DecodedBundle,
     alpha: f64,
     effect_size: &serde_json::Value,
@@ -1815,7 +1840,7 @@ fn do_factorial_per_effect(
     // Apply the SAP's multiple-comparison correction (NoCorrection
     // when the slot is absent) to the raw per-effect p-values; the
     // per-effect Holds/Fails decision uses the corrected rejection.
-    let correction = match read_multiple_comparison_correction(claim)? {
+    let correction = match read_multiple_comparison_correction(claim, layer)? {
         Ok(m) => m,
         Err(diag) => return Ok(gate_fails(diag)),
     };
@@ -1894,6 +1919,7 @@ fn do_factorial_per_effect(
 /// itself ran.
 fn do_splitplot_per_effect(
     claim: &Resource,
+    layer: &eigenius_kernel::layer::Layer,
     bundle: &DecodedBundle,
     alpha: f64,
 ) -> Result<QueryOutcome, InstitutionError> {
@@ -1939,7 +1965,7 @@ fn do_splitplot_per_effect(
         }
     };
 
-    let correction = match read_multiple_comparison_correction(claim)? {
+    let correction = match read_multiple_comparison_correction(claim, layer)? {
         Ok(m) => m,
         Err(diag) => return Ok(gate_fails(diag)),
     };
@@ -3122,12 +3148,29 @@ fn read_float_property(claim: &Resource, prop_iri: &str) -> Result<Option<f64>, 
     }
 }
 
+/// Read an inductive-valued property as `{ctor, args}`.
+///
+/// A value is a resource whose `is_a` names its constructor's class and whose arguments are
+/// named properties (D85 §6.1); this projects it back positionally so the `json_ctor_name` /
+/// `parse_*` readers below are unchanged. The projection needs the chain, because argument
+/// ORDER is the declaration's.
 fn read_json_property(
     claim: &Resource,
     prop_iri: &str,
+    layer: &eigenius_kernel::layer::Layer,
 ) -> Result<Option<serde_json::Value>, InstitutionError> {
     let iri = Iri::parse(prop_iri).expect("static IRI");
     match claim.get(&iri) {
+        Some(Value::Embedded(r)) => {
+            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, layer)
+                .map(Some)
+                .map_err(|e| {
+                    InstitutionError::ComputationFailed(format!(
+                        "StatisticalAnalysisPlan `{prop_iri}` is not a well-formed inductive \
+                         value: {e:?}"
+                    ))
+                })
+        }
         Some(Value::Json(j)) => Ok(Some(j.clone())),
         Some(other) => Err(InstitutionError::ComputationFailed(format!(
             "StatisticalAnalysisPlan `{prop_iri}` is not a chain-inductive value: {other:?}"

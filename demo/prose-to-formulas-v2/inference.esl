@@ -76,11 +76,15 @@ resource inferred:sentence : justification:Conclusion {
     //
     // `alias` names the model term once instead of four times. It is compile-time substitution —
     // the stored proposition is identical to writing the term out at each site.
-    justification:judgement = type_expr(
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its `term`
+    // and `type` arguments are declared `eigentt:Term`, so each is a `type_expr(...)` and
+    // the `alias` binding scopes inside each one.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(
         alias msi = (exists x0 : umlscui:C1516211 =>
                         ontology:compound_kind(x0, umlscui:C0920269))
         in
-        holds( eigentt:logic_kernel,
                justification:app(
                    // A — the antecedent. Sentence 1's proposition. `HasActivity` is a DEFINITION, so this
                    // unfolds to exactly the term `claim_1` carries; the witness below matches by
@@ -149,7 +153,12 @@ resource inferred:sentence : justification:Conclusion {
                        onco_typed:HasActivity(msi, umlscui:C0388246),
                        ()
                    )
+               )
                ),
+               type_expr(
+        alias msi = (exists x0 : umlscui:C1516211 =>
+                        ontology:compound_kind(x0, umlscui:C0920269))
+        in
                justification:Certificate(
                    justification:App(
                        justification:Declared(
@@ -160,8 +169,8 @@ resource inferred:sentence : justification:Conclusion {
                    onco_typed:RequiresActivity(
                    (exists x0 : umlscui:C1516211 =>
                        ontology:compound_kind(x0, umlscui:C0920269)),
-                   umlscui:C0388246) ) )
-    );
+                   umlscui:C0388246) )
+               ) );
 
     // The justification TERM — the same shape as the certificate's `justification:App(j1, j2)`, recorded on its
     // own so the warrant is readable (and indexable) without re-checking the proof. The gate

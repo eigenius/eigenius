@@ -111,9 +111,13 @@ resource screen:m_eig0291_trace : prov:ObservationTrace {
 resource screen:concl_eig0291_strong : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
-    justification:judgement = type_expr(
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which is what this slot declares
+    // (`class_types eigentt:Judgement`). Its `term` and `type` arguments are declared
+    // `eigentt:Term`, so those are `type_expr(...)` — the slot's declared type decides the
+    // shape at each position (D85 §6.1).
+    justification:judgement =
         holds( eigentt:logic_kernel,
-               app(
+               type_expr(app(
                    // A : Prop = HasLowIC50("urn:EIG_0291")
                    screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
                    // B : Prop = StrongInhibitor("urn:EIG_0291")
@@ -157,14 +161,13 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
                        Prop
                    )
-               ),
-               justification:Certificate(
+               )),
+               type_expr(justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:demo:screen:rule_strong"),
                        Observed("urn:eigenius:demo:screen:m_eig0291")
                    ),
-                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") ) )
-    );
+                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") ) ) );
 
     // Chain-shape justification:Term value.
 

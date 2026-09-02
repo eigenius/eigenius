@@ -99,6 +99,23 @@ fn build_paired_chain() -> ExecutionContext {
     )
 }
 
+/// The constructor view of a value, for assertions written as `j["args"][0]["ctor"]`.
+///
+/// A value is a resource whose `is_a` names its constructor's class (D85 §6.1); the projection
+/// reads it back positionally, which needs the chain because argument order is declared.
+fn tagged_of(
+    v: &eigenius_kernel::ontology::resource::Value,
+    layer: &eigenius_kernel::layer::Layer,
+) -> serde_json::Value {
+    use eigenius_kernel::ontology::resource::Value as RV;
+    match v {
+        RV::Embedded(r) => eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, layer)
+            .expect("a stored value is well formed"),
+        RV::Json(j) => j.clone(),
+        other => panic!("expected an inductive value, got {other:?}"),
+    }
+}
+
 #[test]
 fn paired_design_recomputes_to_holds() {
     let ctx = build_paired_chain();
@@ -202,11 +219,7 @@ fn paired_data_routes_only_through_paired_dispatch() {
     let sample_set_value = sample_set_res
         .get(&Iri::parse("urn:eigenius:measurements:sample_set_value").unwrap())
         .expect("sample_set_value set");
-    let bundle_json = if let Value::Json(j) = sample_set_value {
-        j
-    } else {
-        panic!("sample_set_value is not Value::Json");
-    };
+    let bundle_json = &tagged_of(sample_set_value, ctx.head());
     // args[1] is the blocking axis. `PairedBlocking()` ctor is what
     // distinguishes the paired-dispatch position from any IID variant.
     let blocking_ctor = bundle_json["args"][1]["ctor"]

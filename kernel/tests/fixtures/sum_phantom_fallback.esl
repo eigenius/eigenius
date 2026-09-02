@@ -45,18 +45,26 @@ resource screen:review_a_trace : prov:DeclarationTrace {
 
 resource screen:concl_phantom_fallback : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
-    justification:judgement = type_expr(
-        alias
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares. Its
+    // `term` and `type` arguments are declared `eigentt:Term`, so each is a
+    // `type_expr(...)`, and the `alias` bindings — term-surface sugar — scope
+    // inside each one rather than over the judgement.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
             A = "urn:eigenius:demo:screen:review_a",
             B = "urn:eigenius:demo:screen:review_absent",
             P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
         in
-        holds( eigentt:logic_kernel,
-               sum_l(P, Declared(A), Declared(B),
+        sum_l(P, Declared(A), Declared(B),
                      declared(A, P),
-                     declared(B, P)),
-               justification:Certificate(
+                     declared(B, P))),
+               type_expr(alias
+            A = "urn:eigenius:demo:screen:review_a",
+            B = "urn:eigenius:demo:screen:review_absent",
+            P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+        in
+        justification:Certificate(
                    justification:Sum(Declared(A), Declared(B)),
-                   P ) )
-    );
+                   P )) );
 }

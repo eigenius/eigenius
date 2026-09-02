@@ -212,10 +212,11 @@ pub fn emit_document(
     glossary: &[Resource],
     sentences: &[ParsedSentence<'_>],
     cuts: &[CutSentence],
+    names: &eigenius_kernel::program::eigentt_type_mirror::CodecNames,
 ) -> Result<String, EmitError> {
     Ok(
         serde_json::to_string_pretty(&serialize_document(&emit_resources(
-            meta, glossary, sentences, cuts,
+            meta, glossary, sentences, cuts, names,
         )?))
         .expect("serialize Eigon-JSON"),
     )
@@ -232,6 +233,7 @@ pub fn emit_resources(
     glossary: &[Resource],
     sentences: &[ParsedSentence<'_>],
     cuts: &[CutSentence],
+    names: &eigenius_kernel::program::eigentt_type_mirror::CodecNames,
 ) -> Result<Vec<Resource>, EmitError> {
     let DocumentMeta {
         ns,
@@ -294,6 +296,7 @@ pub fn emit_resources(
                 declared_by,
                 timestamp,
                 &[],
+                names,
             )
             .map_err(|e| EmitError::Encode {
                 ordinal: n,
@@ -434,7 +437,7 @@ pub fn emit_resources(
                     );
                 }
                 Candidate::Kind { term, .. } => {
-                    let encoded = encode_type(term).map_err(|e| EmitError::Encode {
+                    let encoded = encode_type(term, names).map_err(|e| EmitError::Encode {
                         ordinal: n,
                         detail: format!("kind antecedent: {e:?}"),
                     })?;
@@ -693,6 +696,11 @@ mod tests {
             glossary,
             s,
             cuts,
+            &eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+                eigenius_kernel::bootstrap::bootstrap()
+                    .expect("bootstrap")
+                    .head(),
+            ),
         )
         .expect("emits")
     }
@@ -819,6 +827,11 @@ mod tests {
             &[],
             &s,
             &[],
+            &eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+                eigenius_kernel::bootstrap::bootstrap()
+                    .expect("bootstrap")
+                    .head(),
+            ),
         )
         .expect("emits");
         assert!(json.contains(

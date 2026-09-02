@@ -95,7 +95,7 @@ impl NatChain {
         succ_arg.set(
             iri(PROP_TYPE_NAME),
             Value::Json(serde_json::json!({
-                "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat"],
+                "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat", []],
             })),
         );
 

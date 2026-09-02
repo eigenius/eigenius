@@ -79,7 +79,23 @@ fn rule21_errors(class: &str, prop: &str, value: Value) -> Vec<ValidationRule> {
 /// A term that is well-typed but is NOT a type: the float literal `1.0`.
 /// Inference succeeds on it, which is exactly why the old rule let it through.
 fn a_well_typed_non_type() -> Value {
-    encode_type(&Exp::LitFloat(1.0)).expect("literal encodes")
+    encode_type(&Exp::LitFloat(1.0), codec()).expect("literal encodes")
+}
+
+/// The D47 codec's constructor argument names, from the bootstrap chain, built once.
+///
+/// Encoding a term names its constructor's arguments (D85 §6.1), and the names live in
+/// `eigentt:Term` and `core:Level`'s declarations — so an encode needs a chain.
+fn codec() -> &'static eigenius_kernel::program::eigentt_type_mirror::CodecNames {
+    static NAMES: std::sync::OnceLock<eigenius_kernel::program::eigentt_type_mirror::CodecNames> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
 }
 
 #[test]
@@ -103,17 +119,20 @@ fn a_lexicon_cat_slot_accepts_a_real_cat() {
     // The other half: the declaration must not reject what the lexicon
     // actually stores. `cat_n(Set, num_any)` is the shape 2,062,659 committed
     // entries carry.
-    let cat = encode_type(&Exp::InductiveCtor(
-        iri("urn:eigenius:lexicon:Cat"),
-        "cat_n".into(),
-        vec![
-            // `cat_n : Set -> Num -> Cat` takes a MEMBER of Set — a class —
-            // not `Set` itself. Committed entries pass a WordNet synset class
-            // here; `lexicon:Entity` stands in for one.
-            Exp::EigonClass(iri("urn:eigenius:lexicon:Entity")),
-            Exp::InductiveCtor(iri("urn:eigenius:lexicon:Num"), "num_any".into(), vec![]),
-        ],
-    ))
+    let cat = encode_type(
+        &Exp::InductiveCtor(
+            iri("urn:eigenius:lexicon:Cat"),
+            "cat_n".into(),
+            vec![
+                // `cat_n : Set -> Num -> Cat` takes a MEMBER of Set — a class —
+                // not `Set` itself. Committed entries pass a WordNet synset class
+                // here; `lexicon:Entity` stands in for one.
+                Exp::EigonClass(iri("urn:eigenius:lexicon:Entity")),
+                Exp::InductiveCtor(iri("urn:eigenius:lexicon:Num"), "num_any".into(), vec![]),
+            ],
+        ),
+        codec(),
+    )
     .expect("cat encodes");
     let errs = rule21_errors(
         "urn:eigenius:lexicon:LexicalEntry",

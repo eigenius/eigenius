@@ -1570,6 +1570,9 @@ mod tests {
     }
 
     #[test]
+    // `PassThrough`, not `Identity`: the latter is a constructor of a `statistics` inductive,
+    // so against a real chain it resolves as one and the test would be about `CtorApply`
+    // rather than the legacy sugar it is named for.
     fn non_ctor_two_arg_legacy_sugar_still_works() {
         // Backward compat: `f(a, b)` for a non-ctor function still
         // means "input + component_argument" (legacy sugar for the
@@ -1580,7 +1583,7 @@ mod tests {
             namespace ex = "urn:eigenius:example";
 
             program ex:demo : core:string -> core:string {
-                Identity(input, "config")
+                PassThrough(input, "config")
             }
             "#,
         );

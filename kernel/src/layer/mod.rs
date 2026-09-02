@@ -30,7 +30,7 @@
 mod bloom;
 mod cache;
 mod consolidate;
-mod ctor_classes;
+pub(crate) mod ctor_classes;
 pub mod declaration_order;
 mod handle;
 mod index;

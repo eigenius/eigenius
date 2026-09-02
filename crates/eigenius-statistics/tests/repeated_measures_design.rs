@@ -102,6 +102,23 @@ fn build_rm_chain() -> ExecutionContext {
     )
 }
 
+/// The constructor view of a value, for assertions written as `j["args"][0]["ctor"]`.
+///
+/// A value is a resource whose `is_a` names its constructor's class (D85 §6.1); the projection
+/// reads it back positionally, which needs the chain because argument order is declared.
+fn tagged_of(
+    v: &eigenius_kernel::ontology::resource::Value,
+    layer: &eigenius_kernel::layer::Layer,
+) -> serde_json::Value {
+    use eigenius_kernel::ontology::resource::Value as RV;
+    match v {
+        RV::Embedded(r) => eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, layer)
+            .expect("a stored value is well formed"),
+        RV::Json(j) => j.clone(),
+        other => panic!("expected an inductive value, got {other:?}"),
+    }
+}
+
 #[test]
 fn rm_compound_symmetry_recomputes_to_holds() {
     let ctx = build_rm_chain();
@@ -203,11 +220,7 @@ fn rm_data_lands_at_longitudinal_dispatch_position() {
     let sample_set_value = sample_set_res
         .get(&Iri::parse("urn:eigenius:measurements:sample_set_value").unwrap())
         .expect("sample_set_value set");
-    let bundle_json = if let Value::Json(j) = sample_set_value {
-        j
-    } else {
-        panic!("sample_set_value is not Value::Json");
-    };
+    let bundle_json = &tagged_of(sample_set_value, ctx.head());
     // args[4] = Longitudinal(4) — RM-specific repeated-measures axis
     // with the timepoint count carried in args[0] of the inner ctor.
     let rm_ctor = bundle_json["args"][4]["ctor"].as_str();

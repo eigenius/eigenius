@@ -4130,7 +4130,7 @@ mod tests {
         );
         target.set(
             Iri::parse(wk_local::CANONICAL_PROPOSITION).unwrap(),
-            encode_type(&prop_exp).unwrap(),
+            encode_type(&prop_exp, crate::testing::codec_names()).unwrap(),
         );
 
         let mut trace = Resource::new(Iri::parse("urn:test:phase9:axiom-trace").unwrap());
@@ -4143,7 +4143,10 @@ mod tests {
             RVal::String(Iri::parse(target_iri_str).unwrap().as_str().to_string()),
         );
 
-        let mut builder = LayerBuilder::new("phase9-witness-test", None);
+        let mut builder = LayerBuilder::new(
+            "phase9-witness-test",
+            Some(Arc::clone(crate::testing::term_chain())),
+        );
         builder.add_resource(target).unwrap();
         builder.add_resource(trace).unwrap();
         let layer = Arc::new(builder.build(LayerStorage::in_memory()));

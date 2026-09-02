@@ -928,7 +928,7 @@ impl<'a> Parser<'a> {
                     _ => {
                         let inner = self.parse_formula_atom()?;
                         Ok(Value::CtorApp {
-                            ctor: "App".to_string(),
+                            ctor: FORMULA_APP.to_string(),
                             args: vec![
                                 formula_op_ref("urn:eigenius:formulas:ops:neg", pos.clone()),
                                 inner,
@@ -973,7 +973,7 @@ impl<'a> Parser<'a> {
                     Ok(formula_function_call(&op_iri, args, pos))
                 } else {
                     Ok(Value::CtorApp {
-                        ctor: "Var".to_string(),
+                        ctor: FORMULA_VAR.to_string(),
                         args: vec![Value::String(name)],
                         pos,
                     })
@@ -2701,9 +2701,21 @@ impl<'a> Parser<'a> {
 // because they're pure — they don't touch parser state — and the
 // formula sub-parser uses them at multiple call sites.
 
+/// The `formula(...)` sugar builds `formulas:FormulaTerm` values, and says so.
+///
+/// It emitted bare `App` / `OpRef` / `LitFloat` until D85 §5 step 4, which worked only while
+/// one inductive in scope declared those names. A value states its constructor's CLASS, so the
+/// compiler resolves the name — and against a real chain `App` is `eigentt:Term`'s,
+/// `justification:Term`'s AND `formulas:FormulaTerm`'s. The `Type:ctor` form (eigenius#24) is
+/// what the sugar has always meant.
+const FORMULA_APP: &str = "FormulaTerm:App";
+const FORMULA_OP_REF: &str = "FormulaTerm:OpRef";
+const FORMULA_LIT_FLOAT: &str = "FormulaTerm:LitFloat";
+const FORMULA_VAR: &str = "FormulaTerm:Var";
+
 fn formula_lit_float(value: f64, pos: Position) -> Value {
     Value::CtorApp {
-        ctor: "LitFloat".to_string(),
+        ctor: FORMULA_LIT_FLOAT.to_string(),
         args: vec![Value::Float(value)],
         pos,
     }
@@ -2711,7 +2723,7 @@ fn formula_lit_float(value: f64, pos: Position) -> Value {
 
 fn formula_op_ref(iri: &str, pos: Position) -> Value {
     Value::CtorApp {
-        ctor: "OpRef".to_string(),
+        ctor: FORMULA_OP_REF.to_string(),
         args: vec![Value::String(iri.to_string())],
         pos,
     }
@@ -2721,10 +2733,10 @@ fn formula_op_ref(iri: &str, pos: Position) -> Value {
 /// operator at the given position.
 fn formula_binary_app(op_iri: &str, lhs: Value, rhs: Value, pos: Position) -> Value {
     Value::CtorApp {
-        ctor: "App".to_string(),
+        ctor: FORMULA_APP.to_string(),
         args: vec![
             Value::CtorApp {
-                ctor: "App".to_string(),
+                ctor: FORMULA_APP.to_string(),
                 args: vec![formula_op_ref(op_iri, pos.clone()), lhs],
                 pos: pos.clone(),
             },
@@ -2753,7 +2765,7 @@ fn formula_function_call(op_iri: &str, args: Vec<Value>, pos: Position) -> Value
     if iter.len() == 0 {
         // Unary call: `App(OpRef(op), arg1)`.
         return Value::CtorApp {
-            ctor: "App".to_string(),
+            ctor: FORMULA_APP.to_string(),
             args: vec![formula_op_ref(op_iri, pos.clone()), first],
             pos,
         };
@@ -3078,7 +3090,7 @@ mod tests {
         let Value::CtorApp { ctor, args, .. } = first_field_value(&file) else {
             panic!("expected CtorApp");
         };
-        assert_eq!(ctor, "App");
+        assert_eq!(ctor, FORMULA_APP);
         assert_eq!(args.len(), 2);
         // args[0] should be App(OpRef("...:add"), Var("x")).
         let Value::CtorApp {
@@ -3087,7 +3099,7 @@ mod tests {
         else {
             panic!("expected nested App on lhs");
         };
-        assert_eq!(c1, "App");
+        assert_eq!(c1, FORMULA_APP);
         let Value::CtorApp {
             ctor: c_op,
             args: a_op,
@@ -3096,7 +3108,7 @@ mod tests {
         else {
             panic!("expected OpRef");
         };
-        assert_eq!(c_op, "OpRef");
+        assert_eq!(c_op, FORMULA_OP_REF);
         assert!(matches!(&a_op[0], Value::String(s) if s == "urn:eigenius:formulas:ops:add"));
         let Value::CtorApp {
             ctor: c_var,
@@ -3106,7 +3118,7 @@ mod tests {
         else {
             panic!("expected Var");
         };
-        assert_eq!(c_var, "Var");
+        assert_eq!(c_var, FORMULA_VAR);
         assert!(matches!(&a_var[0], Value::String(s) if s == "x"));
         // args[1] should be LitFloat(2.0).
         let Value::CtorApp {
@@ -3117,7 +3129,7 @@ mod tests {
         else {
             panic!("expected LitFloat");
         };
-        assert_eq!(c_lit, "LitFloat");
+        assert_eq!(c_lit, FORMULA_LIT_FLOAT);
         assert!(matches!(&a_lit[0], Value::Float(f) if (*f - 2.0).abs() < f64::EPSILON));
     }
 
@@ -3176,7 +3188,7 @@ mod tests {
         else {
             panic!("expected inner App for pow");
         };
-        assert_eq!(inner_ctor, "App");
+        assert_eq!(inner_ctor, FORMULA_APP);
         let Value::CtorApp { args: inner_op, .. } = &inner_args[0] else {
             panic!("expected App with OpRef");
         };
@@ -3201,7 +3213,7 @@ mod tests {
         let Value::CtorApp { ctor, args, .. } = first_field_value(&file) else {
             panic!("expected CtorApp");
         };
-        assert_eq!(ctor, "LitFloat");
+        assert_eq!(ctor, FORMULA_LIT_FLOAT);
         assert!(matches!(&args[0], Value::Float(f) if (*f + 2.0).abs() < f64::EPSILON));
     }
 
@@ -3219,7 +3231,7 @@ mod tests {
         let Value::CtorApp { ctor, args, .. } = first_field_value(&file) else {
             panic!("expected CtorApp");
         };
-        assert_eq!(ctor, "App");
+        assert_eq!(ctor, FORMULA_APP);
         let Value::CtorApp { args: op_args, .. } = &args[0] else {
             panic!("expected OpRef");
         };
@@ -3232,7 +3244,7 @@ mod tests {
         else {
             panic!("expected Var");
         };
-        assert_eq!(var_ctor, "Var");
+        assert_eq!(var_ctor, FORMULA_VAR);
         assert!(matches!(&var_args[0], Value::String(s) if s == "x"));
     }
 
@@ -3320,7 +3332,7 @@ mod tests {
         let Value::CtorApp { ctor, .. } = first_field_value(&file) else {
             panic!("expected CtorApp");
         };
-        assert_eq!(ctor, "App");
+        assert_eq!(ctor, FORMULA_APP);
     }
 
     #[test]

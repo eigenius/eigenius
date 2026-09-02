@@ -201,6 +201,12 @@ pub const ASSERTS: &str = "urn:eigenius:core:Asserts";
 pub const INDUCTIVE_ARG_TYPE: &str = "urn:eigenius:core:InductiveArgType";
 pub const INDUCTIVE_PARAM: &str = "urn:eigenius:core:InductiveParam";
 pub const CTORS: &str = "urn:eigenius:core:ctors";
+
+/// The two inductives the D47 codec writes into, and the only two whose constructor names it
+/// hard-codes. They were spelled as private constants in five places across four modules
+/// before D85 step 4; the codec, the ESL emitters and Rule 21 all mean the same declaration.
+pub const EIGENTT_TERM: &str = "urn:eigenius:eigentt:Term";
+pub const LEVEL: &str = "urn:eigenius:core:Level";
 pub const TYPE_PARAMS: &str = "urn:eigenius:core:type_params";
 pub const CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
 pub const ARG_TYPES: &str = "urn:eigenius:core:arg_types";

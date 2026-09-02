@@ -160,7 +160,12 @@ impl std::error::Error for GradeError {}
 /// commit. Downstream of the DCG pipeline.
 pub trait ClaimGrader {
     /// Build the claim cluster asserting `proposition` at the grade its `source` warrants.
-    fn grade(&self, proposition: &Exp, source: &ClaimSource) -> Result<GradedClaim, GradeError>;
+    fn grade(
+        &self,
+        proposition: &Exp,
+        source: &ClaimSource,
+        names: &eigenius_kernel::program::eigentt_type_mirror::CodecNames,
+    ) -> Result<GradedClaim, GradeError>;
 }
 
 /// The **parsed-claim** grader (D73 §6 — the landing shape for parsed sentences): the 2-resource
@@ -205,9 +210,10 @@ impl ParsedClaimGrader {
         declared_by: &str,
         timestamp: &str,
         kind_classes: &[Iri],
+        names: &eigenius_kernel::program::eigentt_type_mirror::CodecNames,
     ) -> Result<(Resource, Resource), GradeError> {
         let prop_value =
-            encode_type(proposition).map_err(|e| GradeError::Encode(format!("{e:?}")))?;
+            encode_type(proposition, names).map_err(|e| GradeError::Encode(format!("{e:?}")))?;
         let iri = |s: &str| Iri::parse(s).map_err(|e| GradeError::Iri(format!("{s}: {e:?}")));
 
         let claim_id = iri(claim_iri)?;
@@ -245,7 +251,12 @@ impl ParsedClaimGrader {
 }
 
 impl ClaimGrader for ParsedClaimGrader {
-    fn grade(&self, proposition: &Exp, source: &ClaimSource) -> Result<GradedClaim, GradeError> {
+    fn grade(
+        &self,
+        proposition: &Exp,
+        source: &ClaimSource,
+        names: &eigenius_kernel::program::eigentt_type_mirror::CodecNames,
+    ) -> Result<GradedClaim, GradeError> {
         let claim_iri = format!("{}:claim", source.stem);
         let trace_iri = format!("{}:trace", source.stem);
         let (claim, trace) = Self::cluster(
@@ -255,6 +266,7 @@ impl ClaimGrader for ParsedClaimGrader {
             source.declared_by,
             source.timestamp,
             source.kind_classes,
+            names,
         )?;
         let claim_iri = claim.id().expect("cluster sets the claim id").clone();
         Ok(GradedClaim {

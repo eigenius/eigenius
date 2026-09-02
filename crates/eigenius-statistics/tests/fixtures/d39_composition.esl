@@ -184,8 +184,12 @@ resource screen:rule_strong_trace : prov:DeclarationTrace {
 resource screen:concl_eig0291_strong : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
-    justification:judgement = type_expr(
-        alias
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so each is a
+    // `type_expr(...)` and the `alias` bindings scope inside each one.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
             EIG    = "urn:eigenius:demo:screen:EIG_0291",
             SS     = "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
             PLAN   = "urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds_yields_main_effect",
@@ -219,8 +223,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
             bridge_app  = justification:App(bridge_full, sf_j),
             full_app    = justification:App(bridge_app, computed_j)
         in
-        holds( eigentt:logic_kernel,
-               app(
+        app(
                    // outer A, B
                    HAS_LOW, STRONG,
                    // outer j1, j2
@@ -281,8 +284,42 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                            observed(SS, core:Asserts(SS))
                        )
                    )
-               ),
-               justification:Certificate(
+               )),
+               type_expr(alias
+            EIG    = "urn:eigenius:demo:screen:EIG_0291",
+            SS     = "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
+            PLAN   = "urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds_yields_main_effect",
+            BRIDGE = "urn:eigenius:demo:screen:bridge_lowic50",
+            RULE   = "urn:eigenius:demo:screen:rule_strong",
+            SFW    = "urn:eigenius:demo:screen:sample_for_eig0291_confirmatory",
+
+            // Reusable propositions
+            STAT    = stats:lt(stats:mean_of(SS), 100.0),
+            HAS_LOW = screen:HasLowIC50(EIG),
+            STRONG  = screen:StrongInhibitor(EIG),
+            S_FOR   = screen:sample_for(SS, EIG),
+
+            // Universal propositions for rule + bridge
+            RULE_P   = forall (x : core:string) =>
+                          screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
+            BRIDGE_P = forall (s : core:string) =>
+                       forall (c : core:string) =>
+                          screen:sample_for(s, c)
+                          -> stats:lt(stats:mean_of(s), 100.0)
+                          -> screen:HasLowIC50(c),
+
+            // Justification spine pieces — reused inside the cert
+            rule_j      = Declared(RULE),
+            bridge_s    = Declared(BRIDGE),
+            bridge_full = bridge_s,
+            sf_j        = Declared(SFW),
+            // The COMPUTED ground: the plan applied to the input. Was
+            // `DerivedEvidence(SAR)`, one leaf for both halves of what happened.
+            computed_j  = justification:App(Declared(PLAN), Observed(SS)),
+            bridge_app  = justification:App(bridge_full, sf_j),
+            full_app    = justification:App(bridge_app, computed_j)
+        in
+        justification:Certificate(
                    justification:App(
                        Declared("urn:eigenius:demo:screen:rule_strong"),
                        justification:App(
@@ -296,8 +333,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                            )
                        )
                    ),
-                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") ) )
-    );
+                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") )) );
 
 
 }

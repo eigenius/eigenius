@@ -3667,7 +3667,11 @@ fn resolve_document_discourse_close_out() {
         }
     };
     let kinds = eigenius_encoding::RecordingKindClassifier::new(inner_kinds);
-    let lander = eigenius_encoding::DerivedClaimLander::new("wrn-first-page", &kinds);
+    let lander = eigenius_encoding::DerivedClaimLander::new(
+        "wrn-first-page",
+        &kinds,
+        eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(&head),
+    );
 
     // ── Reading-ranker arm — the COMPOSED configuration (plan §1.3 + §2.2: selection lives
     // INSIDE the discourse loop, choosing over the pool of closed ∪ resolved-open readings).
