@@ -358,6 +358,16 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
     // `lexicon:Cat` and `lexicon:Num`. Dropping them keeps the retained edges to the
     // ones a rebinding can actually break, which over the lexicon is the entry's
     // sense class.
+    //
+    // **A constructor class is sealed with its inductive**, and saying so is what keeps this
+    // affordable after D85 §6.1. A value used to name `lexicon:Num` — an `InductiveType`, so
+    // sealed. It now names `lexicon:Num-sg`, a class DERIVED from that inductive's
+    // `core:ctors`, and the test above stopped matching: on the `2026-09-02` reseed the index
+    // went from 35.5M to 76.2M triples in each direction, +1.5 GiB on disk after compaction,
+    // because exactly the millions-of-members posting lists this seal exists to drop came back
+    // under the constructor's IRI. The seal's argument carries over unchanged — Rule 25's
+    // two-sided closedness means such a class exists because `core:ctors` has that entry and
+    // cannot be rebound independently of the inductive, which is itself sealed.
     let inductive_type = Iri::parse(wk::INDUCTIVE_TYPE).ok();
     let sealed: BTreeSet<Iri> = match &inductive_type {
         None => BTreeSet::new(),
@@ -367,6 +377,7 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 layer
                     .resolve(m)
                     .is_some_and(|r| r.is_a().iter().any(|c| c == it))
+                    || crate::layer::ctor_classes::is_constructor_class(m, layer)
             })
             .cloned()
             .collect(),
@@ -1548,12 +1559,13 @@ mod mentions_tests {
         Arc::new(b.build(LayerStorage::in_memory()))
     }
 
-    /// The IRIs a term names, EXCLUDING the constructor classes it instantiates.
+    /// The IRIs a term names.
     ///
-    /// A value states its class, and the index counts that as a mention because the class is a
-    /// real dependency (D85 §6.1). These tests are about the constants and premise IRIs a term
-    /// refers to, so the classes are filtered out here rather than repeated in every
-    /// expectation.
+    /// A value states its constructor's class, and that class is sealed with its inductive, so
+    /// the index drops it — which is why these expectations name only the constants and premise
+    /// IRIs the term refers to. This helper filtered the classes out by hand for one commit,
+    /// between D85 §6.1 landing and the seal being taught about derived classes; the filter is
+    /// gone because the thing it hid is fixed.
     fn mentions_of(term: serde_json::Value) -> Vec<String> {
         let mut b = LayerBuilder::new("mentions_top", Some(base()));
         let mut holder = Resource::new(iri("urn:eigenius:test:holder"));
@@ -1571,7 +1583,6 @@ mod mentions_tests {
             .into_iter()
             .filter(|t| t.predicate.as_str() == wk::MENTIONS)
             .map(|t| t.object.as_str().to_string())
-            .filter(|o| !o.contains("-"))
             .collect()
     }
 
@@ -1622,6 +1633,28 @@ mod mentions_tests {
             {"ctor": "CtorApp", "args": ["urn:eigenius:test:Colour", "red"]},
             {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []]}]}));
         assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");
+    }
+
+    /// **A constructor's class is sealed with its inductive.** Every value states the class
+    /// of the constructor that built it (D85 §6.1), so if this were not sealed the index would
+    /// carry one edge per value naming a handful of constant IRIs — which is what the seal
+    /// exists to prevent, and what it stopped preventing when the shape changed. Measured on
+    /// the `2026-09-02` lexicon reseed: 35.5M triples became 76.2M in each direction, +1.5 GiB
+    /// on disk after full compaction.
+    ///
+    /// `mentions_of` builds a real `eigentt:Term` value, so the classes at stake here are
+    /// `eigentt:Term-ConstRef` and friends — the same relationship `lexicon:Num-sg` has to
+    /// `lexicon:Num` over the corpus. The assertions above are exact equality; each would carry
+    /// those classes too if this did not hold.
+    #[test]
+    fn a_mention_of_a_constructors_class_is_dropped_with_its_inductive() {
+        let m = mentions_of(serde_json::json!({
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []],
+        }));
+        assert!(
+            !m.iter().any(|o| o.contains("Term-")),
+            "a constructor class is sealed with its inductive: {m:?}"
+        );
     }
 
     /// Deduplicated per subject: naming the same declaration twice in one term is

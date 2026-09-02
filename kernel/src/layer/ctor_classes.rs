@@ -155,9 +155,21 @@ pub(crate) fn is_inductive_value(value: &Value, layer: &Layer) -> bool {
         return false;
     };
     let is_a = r.is_a();
-    let Some(class) = is_a.first() else {
-        return false;
-    };
+    is_a.first()
+        .is_some_and(|class| is_constructor_class(class, layer))
+}
+
+/// Is `class` a DERIVED constructor class — one [`derive`] materialised from an inductive's
+/// `core:ctors`?
+///
+/// Read off `parent_classes`, which is the edge `derive` writes and the only way such a class
+/// comes into being on the normal path. Rule 25 answers a class someone writes by hand anyway.
+///
+/// It matters wherever a fact about an inductive has to reach its constructors. The index's
+/// seal is the case that found this: it drops a mention whose object can never be rebound, and
+/// an inductive is sealed, but D85 §6.1 moved what a value NAMES from the inductive to the
+/// constructor's class — so the seal stopped matching the very posting lists it exists to drop.
+pub(crate) fn is_constructor_class(class: &Iri, layer: &Layer) -> bool {
     let Some(class) = layer.resolve(class) else {
         return false;
     };
