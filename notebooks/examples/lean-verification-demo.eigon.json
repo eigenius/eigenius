@@ -49,7 +49,7 @@
     "urn:eigenius:runtime:mirrored_classes": [
       "urn:eigenius:demo:lean:Patient"
     ],
-    "urn:eigenius:runtime:source_layer": "urn:eigenius:layer:62680cf14786e20108755d4ca622f3a51536def476392a5e909b391c2730706f"
+    "urn:eigenius:runtime:source_layer": "urn:eigenius:layer:97256212a83f159c554b6e6bc6220b8af121f9a061cb52ffd9f63c978c3ad87f"
   },
   {
     "@id": "urn:eigenius:demo:lean:proof_payload",
@@ -67,608 +67,698 @@
     "urn:eigenius:lean:mirror_iri": "urn:eigenius:demo:lean:mirror",
     "urn:eigenius:lean:proof_payload": "urn:eigenius:demo:lean:proof_payload",
     "urn:eigenius:lean:proposition": {
-      "args": [
-        {
-          "args": [
-            {
-              "ctor": "Anon"
-            },
-            "p"
-          ],
-          "ctor": "Str"
-        },
-        "default",
-        {
-          "args": [
-            {
-              "args": [
-                {
-                  "args": [
-                    {
-                      "ctor": "Anon"
-                    },
-                    "EigeniusFFI"
-                  ],
-                  "ctor": "Str"
-                },
-                "Patient"
-              ],
-              "ctor": "Str"
-            },
-            {
-              "ctor": "Nil"
-            }
-          ],
-          "ctor": "Const"
-        },
-        {
-          "args": [
-            {
-              "args": [
-                {
-                  "args": [
-                    {
-                      "args": [
-                        {
-                          "args": [
-                            {
-                              "args": [
-                                {
-                                  "args": [
-                                    {
-                                      "ctor": "Anon"
-                                    },
-                                    "LE"
-                                  ],
-                                  "ctor": "Str"
-                                },
-                                "le"
-                              ],
-                              "ctor": "Str"
-                            },
-                            {
-                              "args": [
-                                {
-                                  "ctor": "Zero"
-                                },
-                                {
-                                  "ctor": "Nil"
-                                }
-                              ],
-                              "ctor": "Cons"
-                            }
-                          ],
-                          "ctor": "Const"
-                        },
-                        {
-                          "args": [
-                            {
-                              "args": [
-                                {
-                                  "ctor": "Anon"
-                                },
-                                "Float"
-                              ],
-                              "ctor": "Str"
-                            },
-                            {
-                              "ctor": "Nil"
-                            }
-                          ],
-                          "ctor": "Const"
-                        }
-                      ],
-                      "ctor": "App"
-                    },
-                    {
-                      "args": [
-                        {
-                          "args": [
-                            {
-                              "ctor": "Anon"
-                            },
-                            "instLEFloat"
-                          ],
-                          "ctor": "Str"
-                        },
-                        {
-                          "ctor": "Nil"
-                        }
-                      ],
-                      "ctor": "Const"
-                    }
-                  ],
-                  "ctor": "App"
-                },
-                {
-                  "args": [
-                    {
-                      "args": [
-                        {
-                          "args": [
-                            {
-                              "args": [
-                                {
-                                  "args": [
-                                    {
-                                      "args": [
-                                        {
-                                          "args": [
-                                            {
-                                              "args": [
-                                                {
-                                                  "ctor": "Anon"
-                                                },
-                                                "OfScientific"
-                                              ],
-                                              "ctor": "Str"
-                                            },
-                                            "ofScientific"
-                                          ],
-                                          "ctor": "Str"
-                                        },
-                                        {
-                                          "args": [
-                                            {
-                                              "ctor": "Zero"
-                                            },
-                                            {
-                                              "ctor": "Nil"
-                                            }
-                                          ],
-                                          "ctor": "Cons"
-                                        }
-                                      ],
-                                      "ctor": "Const"
-                                    },
-                                    {
-                                      "args": [
-                                        {
-                                          "args": [
-                                            {
-                                              "ctor": "Anon"
-                                            },
-                                            "Float"
-                                          ],
-                                          "ctor": "Str"
-                                        },
-                                        {
-                                          "ctor": "Nil"
-                                        }
-                                      ],
-                                      "ctor": "Const"
-                                    }
-                                  ],
-                                  "ctor": "App"
-                                },
-                                {
-                                  "args": [
-                                    {
-                                      "args": [
-                                        {
-                                          "ctor": "Anon"
-                                        },
-                                        "instOfScientificFloat"
-                                      ],
-                                      "ctor": "Str"
-                                    },
-                                    {
-                                      "ctor": "Nil"
-                                    }
-                                  ],
-                                  "ctor": "Const"
-                                }
-                              ],
-                              "ctor": "App"
-                            },
-                            {
-                              "args": [
-                                "0"
-                              ],
-                              "ctor": "NatLit"
-                            }
-                          ],
-                          "ctor": "App"
-                        },
-                        {
-                          "args": [
-                            {
-                              "args": [
-                                {
-                                  "args": [
-                                    {
-                                      "ctor": "Anon"
-                                    },
-                                    "Bool"
-                                  ],
-                                  "ctor": "Str"
-                                },
-                                "true"
-                              ],
-                              "ctor": "Str"
-                            },
-                            {
-                              "ctor": "Nil"
-                            }
-                          ],
-                          "ctor": "Const"
-                        }
-                      ],
-                      "ctor": "App"
-                    },
-                    {
-                      "args": [
-                        "1"
-                      ],
-                      "ctor": "NatLit"
-                    }
-                  ],
-                  "ctor": "App"
-                }
-              ],
-              "ctor": "App"
-            },
-            {
-              "args": [
-                {
-                  "args": [
-                    {
-                      "args": [
-                        {
-                          "args": [
-                            {
-                              "args": [
-                                {
-                                  "args": [
-                                    {
-                                      "ctor": "Anon"
-                                    },
-                                    "Subtype"
-                                  ],
-                                  "ctor": "Str"
-                                },
-                                "val"
-                              ],
-                              "ctor": "Str"
-                            },
-                            {
-                              "args": [
-                                {
-                                  "args": [
-                                    {
-                                      "ctor": "Zero"
-                                    }
-                                  ],
-                                  "ctor": "Succ"
-                                },
-                                {
-                                  "ctor": "Nil"
-                                }
-                              ],
-                              "ctor": "Cons"
-                            }
-                          ],
-                          "ctor": "Const"
-                        },
-                        {
-                          "args": [
-                            {
-                              "args": [
-                                {
-                                  "ctor": "Anon"
-                                },
-                                "Float"
-                              ],
-                              "ctor": "Str"
-                            },
-                            {
-                              "ctor": "Nil"
-                            }
-                          ],
-                          "ctor": "Const"
-                        }
-                      ],
-                      "ctor": "App"
-                    },
-                    {
-                      "args": [
-                        {
-                          "args": [
-                            {
-                              "ctor": "Anon"
-                            },
-                            "x"
-                          ],
-                          "ctor": "Str"
-                        },
-                        "default",
-                        {
-                          "args": [
-                            {
-                              "args": [
-                                {
-                                  "ctor": "Anon"
-                                },
-                                "Float"
-                              ],
-                              "ctor": "Str"
-                            },
-                            {
-                              "ctor": "Nil"
-                            }
-                          ],
-                          "ctor": "Const"
-                        },
-                        {
-                          "args": [
-                            {
-                              "args": [
-                                {
-                                  "args": [
-                                    {
-                                      "args": [
-                                        {
-                                          "args": [
-                                            {
-                                              "args": [
-                                                {
-                                                  "args": [
-                                                    {
-                                                      "ctor": "Anon"
-                                                    },
-                                                    "LE"
-                                                  ],
-                                                  "ctor": "Str"
-                                                },
-                                                "le"
-                                              ],
-                                              "ctor": "Str"
-                                            },
-                                            {
-                                              "args": [
-                                                {
-                                                  "ctor": "Zero"
-                                                },
-                                                {
-                                                  "ctor": "Nil"
-                                                }
-                                              ],
-                                              "ctor": "Cons"
-                                            }
-                                          ],
-                                          "ctor": "Const"
-                                        },
-                                        {
-                                          "args": [
-                                            {
-                                              "args": [
-                                                {
-                                                  "ctor": "Anon"
-                                                },
-                                                "Float"
-                                              ],
-                                              "ctor": "Str"
-                                            },
-                                            {
-                                              "ctor": "Nil"
-                                            }
-                                          ],
-                                          "ctor": "Const"
-                                        }
-                                      ],
-                                      "ctor": "App"
-                                    },
-                                    {
-                                      "args": [
-                                        {
-                                          "args": [
-                                            {
-                                              "ctor": "Anon"
-                                            },
-                                            "instLEFloat"
-                                          ],
-                                          "ctor": "Str"
-                                        },
-                                        {
-                                          "ctor": "Nil"
-                                        }
-                                      ],
-                                      "ctor": "Const"
-                                    }
-                                  ],
-                                  "ctor": "App"
-                                },
-                                {
-                                  "args": [
-                                    {
-                                      "args": [
-                                        {
-                                          "args": [
-                                            {
-                                              "args": [
-                                                {
-                                                  "args": [
-                                                    {
-                                                      "args": [
-                                                        {
-                                                          "args": [
-                                                            {
-                                                              "args": [
-                                                                {
-                                                                  "ctor": "Anon"
-                                                                },
-                                                                "OfScientific"
-                                                              ],
-                                                              "ctor": "Str"
-                                                            },
-                                                            "ofScientific"
-                                                          ],
-                                                          "ctor": "Str"
-                                                        },
-                                                        {
-                                                          "args": [
-                                                            {
-                                                              "ctor": "Zero"
-                                                            },
-                                                            {
-                                                              "ctor": "Nil"
-                                                            }
-                                                          ],
-                                                          "ctor": "Cons"
-                                                        }
-                                                      ],
-                                                      "ctor": "Const"
-                                                    },
-                                                    {
-                                                      "args": [
-                                                        {
-                                                          "args": [
-                                                            {
-                                                              "ctor": "Anon"
-                                                            },
-                                                            "Float"
-                                                          ],
-                                                          "ctor": "Str"
-                                                        },
-                                                        {
-                                                          "ctor": "Nil"
-                                                        }
-                                                      ],
-                                                      "ctor": "Const"
-                                                    }
-                                                  ],
-                                                  "ctor": "App"
-                                                },
-                                                {
-                                                  "args": [
-                                                    {
-                                                      "args": [
-                                                        {
-                                                          "ctor": "Anon"
-                                                        },
-                                                        "instOfScientificFloat"
-                                                      ],
-                                                      "ctor": "Str"
-                                                    },
-                                                    {
-                                                      "ctor": "Nil"
-                                                    }
-                                                  ],
-                                                  "ctor": "Const"
-                                                }
-                                              ],
-                                              "ctor": "App"
-                                            },
-                                            {
-                                              "args": [
-                                                "0"
-                                              ],
-                                              "ctor": "NatLit"
-                                            }
-                                          ],
-                                          "ctor": "App"
-                                        },
-                                        {
-                                          "args": [
-                                            {
-                                              "args": [
-                                                {
-                                                  "args": [
-                                                    {
-                                                      "ctor": "Anon"
-                                                    },
-                                                    "Bool"
-                                                  ],
-                                                  "ctor": "Str"
-                                                },
-                                                "true"
-                                              ],
-                                              "ctor": "Str"
-                                            },
-                                            {
-                                              "ctor": "Nil"
-                                            }
-                                          ],
-                                          "ctor": "Const"
-                                        }
-                                      ],
-                                      "ctor": "App"
-                                    },
-                                    {
-                                      "args": [
-                                        "1"
-                                      ],
-                                      "ctor": "NatLit"
-                                    }
-                                  ],
-                                  "ctor": "App"
-                                }
-                              ],
-                              "ctor": "App"
-                            },
-                            {
-                              "args": [
-                                0
-                              ],
-                              "ctor": "Var"
-                            }
-                          ],
-                          "ctor": "App"
-                        }
-                      ],
-                      "ctor": "Lambda"
-                    }
-                  ],
-                  "ctor": "App"
-                },
-                {
-                  "args": [
-                    {
-                      "args": [
-                        {
-                          "args": [
-                            {
-                              "args": [
-                                {
-                                  "args": [
-                                    {
-                                      "ctor": "Anon"
-                                    },
-                                    "EigeniusFFI"
-                                  ],
-                                  "ctor": "Str"
-                                },
-                                "Patient"
-                              ],
-                              "ctor": "Str"
-                            },
-                            "weight"
-                          ],
-                          "ctor": "Str"
-                        },
-                        {
-                          "ctor": "Nil"
-                        }
-                      ],
-                      "ctor": "Const"
-                    },
-                    {
-                      "args": [
-                        0
-                      ],
-                      "ctor": "Var"
-                    }
-                  ],
-                  "ctor": "App"
-                }
-              ],
-              "ctor": "App"
-            }
-          ],
-          "ctor": "App"
-        }
+      "urn:eigenius:core:is_a": [
+        "urn:eigenius:lean:LeanExpr-Pi"
       ],
-      "ctor": "Pi"
+      "urn:eigenius:lean:LeanExpr-Pi-binder_name": {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:lean:LeanName-Str"
+        ],
+        "urn:eigenius:lean:LeanName-Str-prefix": {
+          "urn:eigenius:core:is_a": [
+            "urn:eigenius:lean:LeanName-Anon"
+          ]
+        },
+        "urn:eigenius:lean:LeanName-Str-suffix": "p"
+      },
+      "urn:eigenius:lean:LeanExpr-Pi-binder_style": "default",
+      "urn:eigenius:lean:LeanExpr-Pi-binder_type": {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:lean:LeanExpr-Const"
+        ],
+        "urn:eigenius:lean:LeanExpr-Const-levels": {
+          "urn:eigenius:core:is_a": [
+            "urn:eigenius:lean:LeanLevelList-Nil"
+          ]
+        },
+        "urn:eigenius:lean:LeanExpr-Const-name": {
+          "urn:eigenius:core:is_a": [
+            "urn:eigenius:lean:LeanName-Str"
+          ],
+          "urn:eigenius:lean:LeanName-Str-prefix": {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:lean:LeanName-Str"
+            ],
+            "urn:eigenius:lean:LeanName-Str-prefix": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:lean:LeanName-Anon"
+              ]
+            },
+            "urn:eigenius:lean:LeanName-Str-suffix": "EigeniusFFI"
+          },
+          "urn:eigenius:lean:LeanName-Str-suffix": "Patient"
+        }
+      },
+      "urn:eigenius:lean:LeanExpr-Pi-body": {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:lean:LeanExpr-App"
+        ],
+        "urn:eigenius:lean:LeanExpr-App-arg": {
+          "urn:eigenius:core:is_a": [
+            "urn:eigenius:lean:LeanExpr-App"
+          ],
+          "urn:eigenius:lean:LeanExpr-App-arg": {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:lean:LeanExpr-App"
+            ],
+            "urn:eigenius:lean:LeanExpr-App-arg": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:lean:LeanExpr-Var"
+              ],
+              "urn:eigenius:lean:LeanExpr-Var-dbj_idx": 0
+            },
+            "urn:eigenius:lean:LeanExpr-App-fun": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:lean:LeanExpr-Const"
+              ],
+              "urn:eigenius:lean:LeanExpr-Const-levels": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanLevelList-Nil"
+                ]
+              },
+              "urn:eigenius:lean:LeanExpr-Const-name": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanName-Str"
+                ],
+                "urn:eigenius:lean:LeanName-Str-prefix": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanName-Str"
+                  ],
+                  "urn:eigenius:lean:LeanName-Str-prefix": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanName-Str"
+                    ],
+                    "urn:eigenius:lean:LeanName-Str-prefix": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanName-Anon"
+                      ]
+                    },
+                    "urn:eigenius:lean:LeanName-Str-suffix": "EigeniusFFI"
+                  },
+                  "urn:eigenius:lean:LeanName-Str-suffix": "Patient"
+                },
+                "urn:eigenius:lean:LeanName-Str-suffix": "weight"
+              }
+            }
+          },
+          "urn:eigenius:lean:LeanExpr-App-fun": {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:lean:LeanExpr-App"
+            ],
+            "urn:eigenius:lean:LeanExpr-App-arg": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:lean:LeanExpr-Lambda"
+              ],
+              "urn:eigenius:lean:LeanExpr-Lambda-binder_name": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanName-Str"
+                ],
+                "urn:eigenius:lean:LeanName-Str-prefix": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanName-Anon"
+                  ]
+                },
+                "urn:eigenius:lean:LeanName-Str-suffix": "x"
+              },
+              "urn:eigenius:lean:LeanExpr-Lambda-binder_style": "default",
+              "urn:eigenius:lean:LeanExpr-Lambda-binder_type": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanExpr-Const"
+                ],
+                "urn:eigenius:lean:LeanExpr-Const-levels": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanLevelList-Nil"
+                  ]
+                },
+                "urn:eigenius:lean:LeanExpr-Const-name": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanName-Str"
+                  ],
+                  "urn:eigenius:lean:LeanName-Str-prefix": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanName-Anon"
+                    ]
+                  },
+                  "urn:eigenius:lean:LeanName-Str-suffix": "Float"
+                }
+              },
+              "urn:eigenius:lean:LeanExpr-Lambda-body": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanExpr-App"
+                ],
+                "urn:eigenius:lean:LeanExpr-App-arg": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanExpr-Var"
+                  ],
+                  "urn:eigenius:lean:LeanExpr-Var-dbj_idx": 0
+                },
+                "urn:eigenius:lean:LeanExpr-App-fun": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanExpr-App"
+                  ],
+                  "urn:eigenius:lean:LeanExpr-App-arg": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanExpr-App"
+                    ],
+                    "urn:eigenius:lean:LeanExpr-App-arg": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanExpr-NatLit"
+                      ],
+                      "urn:eigenius:lean:LeanExpr-NatLit-value": "1"
+                    },
+                    "urn:eigenius:lean:LeanExpr-App-fun": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanExpr-App"
+                      ],
+                      "urn:eigenius:lean:LeanExpr-App-arg": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanExpr-Const"
+                        ],
+                        "urn:eigenius:lean:LeanExpr-Const-levels": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanLevelList-Nil"
+                          ]
+                        },
+                        "urn:eigenius:lean:LeanExpr-Const-name": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanName-Str"
+                          ],
+                          "urn:eigenius:lean:LeanName-Str-prefix": {
+                            "urn:eigenius:core:is_a": [
+                              "urn:eigenius:lean:LeanName-Str"
+                            ],
+                            "urn:eigenius:lean:LeanName-Str-prefix": {
+                              "urn:eigenius:core:is_a": [
+                                "urn:eigenius:lean:LeanName-Anon"
+                              ]
+                            },
+                            "urn:eigenius:lean:LeanName-Str-suffix": "Bool"
+                          },
+                          "urn:eigenius:lean:LeanName-Str-suffix": "true"
+                        }
+                      },
+                      "urn:eigenius:lean:LeanExpr-App-fun": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanExpr-App"
+                        ],
+                        "urn:eigenius:lean:LeanExpr-App-arg": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanExpr-NatLit"
+                          ],
+                          "urn:eigenius:lean:LeanExpr-NatLit-value": "0"
+                        },
+                        "urn:eigenius:lean:LeanExpr-App-fun": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanExpr-App"
+                          ],
+                          "urn:eigenius:lean:LeanExpr-App-arg": {
+                            "urn:eigenius:core:is_a": [
+                              "urn:eigenius:lean:LeanExpr-Const"
+                            ],
+                            "urn:eigenius:lean:LeanExpr-Const-levels": {
+                              "urn:eigenius:core:is_a": [
+                                "urn:eigenius:lean:LeanLevelList-Nil"
+                              ]
+                            },
+                            "urn:eigenius:lean:LeanExpr-Const-name": {
+                              "urn:eigenius:core:is_a": [
+                                "urn:eigenius:lean:LeanName-Str"
+                              ],
+                              "urn:eigenius:lean:LeanName-Str-prefix": {
+                                "urn:eigenius:core:is_a": [
+                                  "urn:eigenius:lean:LeanName-Anon"
+                                ]
+                              },
+                              "urn:eigenius:lean:LeanName-Str-suffix": "instOfScientificFloat"
+                            }
+                          },
+                          "urn:eigenius:lean:LeanExpr-App-fun": {
+                            "urn:eigenius:core:is_a": [
+                              "urn:eigenius:lean:LeanExpr-App"
+                            ],
+                            "urn:eigenius:lean:LeanExpr-App-arg": {
+                              "urn:eigenius:core:is_a": [
+                                "urn:eigenius:lean:LeanExpr-Const"
+                              ],
+                              "urn:eigenius:lean:LeanExpr-Const-levels": {
+                                "urn:eigenius:core:is_a": [
+                                  "urn:eigenius:lean:LeanLevelList-Nil"
+                                ]
+                              },
+                              "urn:eigenius:lean:LeanExpr-Const-name": {
+                                "urn:eigenius:core:is_a": [
+                                  "urn:eigenius:lean:LeanName-Str"
+                                ],
+                                "urn:eigenius:lean:LeanName-Str-prefix": {
+                                  "urn:eigenius:core:is_a": [
+                                    "urn:eigenius:lean:LeanName-Anon"
+                                  ]
+                                },
+                                "urn:eigenius:lean:LeanName-Str-suffix": "Float"
+                              }
+                            },
+                            "urn:eigenius:lean:LeanExpr-App-fun": {
+                              "urn:eigenius:core:is_a": [
+                                "urn:eigenius:lean:LeanExpr-Const"
+                              ],
+                              "urn:eigenius:lean:LeanExpr-Const-levels": {
+                                "urn:eigenius:core:is_a": [
+                                  "urn:eigenius:lean:LeanLevelList-Cons"
+                                ],
+                                "urn:eigenius:lean:LeanLevelList-Cons-head": {
+                                  "urn:eigenius:core:is_a": [
+                                    "urn:eigenius:lean:LeanLevel-Zero"
+                                  ]
+                                },
+                                "urn:eigenius:lean:LeanLevelList-Cons-tail": {
+                                  "urn:eigenius:core:is_a": [
+                                    "urn:eigenius:lean:LeanLevelList-Nil"
+                                  ]
+                                }
+                              },
+                              "urn:eigenius:lean:LeanExpr-Const-name": {
+                                "urn:eigenius:core:is_a": [
+                                  "urn:eigenius:lean:LeanName-Str"
+                                ],
+                                "urn:eigenius:lean:LeanName-Str-prefix": {
+                                  "urn:eigenius:core:is_a": [
+                                    "urn:eigenius:lean:LeanName-Str"
+                                  ],
+                                  "urn:eigenius:lean:LeanName-Str-prefix": {
+                                    "urn:eigenius:core:is_a": [
+                                      "urn:eigenius:lean:LeanName-Anon"
+                                    ]
+                                  },
+                                  "urn:eigenius:lean:LeanName-Str-suffix": "OfScientific"
+                                },
+                                "urn:eigenius:lean:LeanName-Str-suffix": "ofScientific"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "urn:eigenius:lean:LeanExpr-App-fun": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanExpr-App"
+                    ],
+                    "urn:eigenius:lean:LeanExpr-App-arg": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanExpr-Const"
+                      ],
+                      "urn:eigenius:lean:LeanExpr-Const-levels": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanLevelList-Nil"
+                        ]
+                      },
+                      "urn:eigenius:lean:LeanExpr-Const-name": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanName-Str"
+                        ],
+                        "urn:eigenius:lean:LeanName-Str-prefix": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanName-Anon"
+                          ]
+                        },
+                        "urn:eigenius:lean:LeanName-Str-suffix": "instLEFloat"
+                      }
+                    },
+                    "urn:eigenius:lean:LeanExpr-App-fun": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanExpr-App"
+                      ],
+                      "urn:eigenius:lean:LeanExpr-App-arg": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanExpr-Const"
+                        ],
+                        "urn:eigenius:lean:LeanExpr-Const-levels": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanLevelList-Nil"
+                          ]
+                        },
+                        "urn:eigenius:lean:LeanExpr-Const-name": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanName-Str"
+                          ],
+                          "urn:eigenius:lean:LeanName-Str-prefix": {
+                            "urn:eigenius:core:is_a": [
+                              "urn:eigenius:lean:LeanName-Anon"
+                            ]
+                          },
+                          "urn:eigenius:lean:LeanName-Str-suffix": "Float"
+                        }
+                      },
+                      "urn:eigenius:lean:LeanExpr-App-fun": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanExpr-Const"
+                        ],
+                        "urn:eigenius:lean:LeanExpr-Const-levels": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanLevelList-Cons"
+                          ],
+                          "urn:eigenius:lean:LeanLevelList-Cons-head": {
+                            "urn:eigenius:core:is_a": [
+                              "urn:eigenius:lean:LeanLevel-Zero"
+                            ]
+                          },
+                          "urn:eigenius:lean:LeanLevelList-Cons-tail": {
+                            "urn:eigenius:core:is_a": [
+                              "urn:eigenius:lean:LeanLevelList-Nil"
+                            ]
+                          }
+                        },
+                        "urn:eigenius:lean:LeanExpr-Const-name": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanName-Str"
+                          ],
+                          "urn:eigenius:lean:LeanName-Str-prefix": {
+                            "urn:eigenius:core:is_a": [
+                              "urn:eigenius:lean:LeanName-Str"
+                            ],
+                            "urn:eigenius:lean:LeanName-Str-prefix": {
+                              "urn:eigenius:core:is_a": [
+                                "urn:eigenius:lean:LeanName-Anon"
+                              ]
+                            },
+                            "urn:eigenius:lean:LeanName-Str-suffix": "LE"
+                          },
+                          "urn:eigenius:lean:LeanName-Str-suffix": "le"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "urn:eigenius:lean:LeanExpr-App-fun": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:lean:LeanExpr-App"
+              ],
+              "urn:eigenius:lean:LeanExpr-App-arg": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanExpr-Const"
+                ],
+                "urn:eigenius:lean:LeanExpr-Const-levels": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanLevelList-Nil"
+                  ]
+                },
+                "urn:eigenius:lean:LeanExpr-Const-name": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanName-Str"
+                  ],
+                  "urn:eigenius:lean:LeanName-Str-prefix": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanName-Anon"
+                    ]
+                  },
+                  "urn:eigenius:lean:LeanName-Str-suffix": "Float"
+                }
+              },
+              "urn:eigenius:lean:LeanExpr-App-fun": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanExpr-Const"
+                ],
+                "urn:eigenius:lean:LeanExpr-Const-levels": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanLevelList-Cons"
+                  ],
+                  "urn:eigenius:lean:LeanLevelList-Cons-head": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanLevel-Succ"
+                    ],
+                    "urn:eigenius:lean:LeanLevel-Succ-base": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanLevel-Zero"
+                      ]
+                    }
+                  },
+                  "urn:eigenius:lean:LeanLevelList-Cons-tail": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanLevelList-Nil"
+                    ]
+                  }
+                },
+                "urn:eigenius:lean:LeanExpr-Const-name": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanName-Str"
+                  ],
+                  "urn:eigenius:lean:LeanName-Str-prefix": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanName-Str"
+                    ],
+                    "urn:eigenius:lean:LeanName-Str-prefix": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanName-Anon"
+                      ]
+                    },
+                    "urn:eigenius:lean:LeanName-Str-suffix": "Subtype"
+                  },
+                  "urn:eigenius:lean:LeanName-Str-suffix": "val"
+                }
+              }
+            }
+          }
+        },
+        "urn:eigenius:lean:LeanExpr-App-fun": {
+          "urn:eigenius:core:is_a": [
+            "urn:eigenius:lean:LeanExpr-App"
+          ],
+          "urn:eigenius:lean:LeanExpr-App-arg": {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:lean:LeanExpr-App"
+            ],
+            "urn:eigenius:lean:LeanExpr-App-arg": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:lean:LeanExpr-NatLit"
+              ],
+              "urn:eigenius:lean:LeanExpr-NatLit-value": "1"
+            },
+            "urn:eigenius:lean:LeanExpr-App-fun": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:lean:LeanExpr-App"
+              ],
+              "urn:eigenius:lean:LeanExpr-App-arg": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanExpr-Const"
+                ],
+                "urn:eigenius:lean:LeanExpr-Const-levels": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanLevelList-Nil"
+                  ]
+                },
+                "urn:eigenius:lean:LeanExpr-Const-name": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanName-Str"
+                  ],
+                  "urn:eigenius:lean:LeanName-Str-prefix": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanName-Str"
+                    ],
+                    "urn:eigenius:lean:LeanName-Str-prefix": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanName-Anon"
+                      ]
+                    },
+                    "urn:eigenius:lean:LeanName-Str-suffix": "Bool"
+                  },
+                  "urn:eigenius:lean:LeanName-Str-suffix": "true"
+                }
+              },
+              "urn:eigenius:lean:LeanExpr-App-fun": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanExpr-App"
+                ],
+                "urn:eigenius:lean:LeanExpr-App-arg": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanExpr-NatLit"
+                  ],
+                  "urn:eigenius:lean:LeanExpr-NatLit-value": "0"
+                },
+                "urn:eigenius:lean:LeanExpr-App-fun": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanExpr-App"
+                  ],
+                  "urn:eigenius:lean:LeanExpr-App-arg": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanExpr-Const"
+                    ],
+                    "urn:eigenius:lean:LeanExpr-Const-levels": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanLevelList-Nil"
+                      ]
+                    },
+                    "urn:eigenius:lean:LeanExpr-Const-name": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanName-Str"
+                      ],
+                      "urn:eigenius:lean:LeanName-Str-prefix": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanName-Anon"
+                        ]
+                      },
+                      "urn:eigenius:lean:LeanName-Str-suffix": "instOfScientificFloat"
+                    }
+                  },
+                  "urn:eigenius:lean:LeanExpr-App-fun": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanExpr-App"
+                    ],
+                    "urn:eigenius:lean:LeanExpr-App-arg": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanExpr-Const"
+                      ],
+                      "urn:eigenius:lean:LeanExpr-Const-levels": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanLevelList-Nil"
+                        ]
+                      },
+                      "urn:eigenius:lean:LeanExpr-Const-name": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanName-Str"
+                        ],
+                        "urn:eigenius:lean:LeanName-Str-prefix": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanName-Anon"
+                          ]
+                        },
+                        "urn:eigenius:lean:LeanName-Str-suffix": "Float"
+                      }
+                    },
+                    "urn:eigenius:lean:LeanExpr-App-fun": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanExpr-Const"
+                      ],
+                      "urn:eigenius:lean:LeanExpr-Const-levels": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanLevelList-Cons"
+                        ],
+                        "urn:eigenius:lean:LeanLevelList-Cons-head": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanLevel-Zero"
+                          ]
+                        },
+                        "urn:eigenius:lean:LeanLevelList-Cons-tail": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanLevelList-Nil"
+                          ]
+                        }
+                      },
+                      "urn:eigenius:lean:LeanExpr-Const-name": {
+                        "urn:eigenius:core:is_a": [
+                          "urn:eigenius:lean:LeanName-Str"
+                        ],
+                        "urn:eigenius:lean:LeanName-Str-prefix": {
+                          "urn:eigenius:core:is_a": [
+                            "urn:eigenius:lean:LeanName-Str"
+                          ],
+                          "urn:eigenius:lean:LeanName-Str-prefix": {
+                            "urn:eigenius:core:is_a": [
+                              "urn:eigenius:lean:LeanName-Anon"
+                            ]
+                          },
+                          "urn:eigenius:lean:LeanName-Str-suffix": "OfScientific"
+                        },
+                        "urn:eigenius:lean:LeanName-Str-suffix": "ofScientific"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "urn:eigenius:lean:LeanExpr-App-fun": {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:lean:LeanExpr-App"
+            ],
+            "urn:eigenius:lean:LeanExpr-App-arg": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:lean:LeanExpr-Const"
+              ],
+              "urn:eigenius:lean:LeanExpr-Const-levels": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanLevelList-Nil"
+                ]
+              },
+              "urn:eigenius:lean:LeanExpr-Const-name": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanName-Str"
+                ],
+                "urn:eigenius:lean:LeanName-Str-prefix": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanName-Anon"
+                  ]
+                },
+                "urn:eigenius:lean:LeanName-Str-suffix": "instLEFloat"
+              }
+            },
+            "urn:eigenius:lean:LeanExpr-App-fun": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:lean:LeanExpr-App"
+              ],
+              "urn:eigenius:lean:LeanExpr-App-arg": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanExpr-Const"
+                ],
+                "urn:eigenius:lean:LeanExpr-Const-levels": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanLevelList-Nil"
+                  ]
+                },
+                "urn:eigenius:lean:LeanExpr-Const-name": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanName-Str"
+                  ],
+                  "urn:eigenius:lean:LeanName-Str-prefix": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanName-Anon"
+                    ]
+                  },
+                  "urn:eigenius:lean:LeanName-Str-suffix": "Float"
+                }
+              },
+              "urn:eigenius:lean:LeanExpr-App-fun": {
+                "urn:eigenius:core:is_a": [
+                  "urn:eigenius:lean:LeanExpr-Const"
+                ],
+                "urn:eigenius:lean:LeanExpr-Const-levels": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanLevelList-Cons"
+                  ],
+                  "urn:eigenius:lean:LeanLevelList-Cons-head": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanLevel-Zero"
+                    ]
+                  },
+                  "urn:eigenius:lean:LeanLevelList-Cons-tail": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanLevelList-Nil"
+                    ]
+                  }
+                },
+                "urn:eigenius:lean:LeanExpr-Const-name": {
+                  "urn:eigenius:core:is_a": [
+                    "urn:eigenius:lean:LeanName-Str"
+                  ],
+                  "urn:eigenius:lean:LeanName-Str-prefix": {
+                    "urn:eigenius:core:is_a": [
+                      "urn:eigenius:lean:LeanName-Str"
+                    ],
+                    "urn:eigenius:lean:LeanName-Str-prefix": {
+                      "urn:eigenius:core:is_a": [
+                        "urn:eigenius:lean:LeanName-Anon"
+                      ]
+                    },
+                    "urn:eigenius:lean:LeanName-Str-suffix": "LE"
+                  },
+                  "urn:eigenius:lean:LeanName-Str-suffix": "le"
+                }
+              }
+            }
+          }
+        }
+      }
     },
     "urn:eigenius:lean:target_name": "patient_weight_nonneg"
   }

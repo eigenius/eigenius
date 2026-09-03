@@ -78,9 +78,10 @@ pub enum ChainMirrorError {
 /// `target_name`. The value mirrors the theorem's *type* — its
 /// proposition — per D40 §4.1.
 ///
-/// The returned [`Value::Json`] is suitable for direct assignment
-/// onto a `LeanProofTerm.proposition` property and will validate
-/// against the `lean:LeanExpr` InductiveType once committed.
+/// The returned value is a D85 §6.1 value resource — [`Value::Embedded`], whose `is_a` names
+/// the constructor's class and whose arguments are named properties. It is suitable for direct
+/// assignment onto a `LeanProofTerm.proposition`, which declares `data_type: core:inductive`
+/// and so admits only that shape.
 pub fn bytes_to_lean_expr(
     bytes: &[u8],
     target_name: &str,

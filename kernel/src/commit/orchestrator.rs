@@ -39,7 +39,7 @@ use std::sync::Arc;
 
 use crate::context::ExecutionContext;
 use crate::lattice::{CommitError, CommitPolicy};
-use crate::observability::operation;
+use crate::observability::{field, operation};
 use crate::validation::CommitWorkingSetPool;
 
 use super::hooks::{rebuild_institution_index, CommitHookHost, DidDrainHook};
@@ -251,6 +251,28 @@ impl<'a> CommitOrchestrator<'a> {
                     // Descendants (including Siblings on
                     // outcome.emissions) are dropped: their parent did
                     // not land. didPersist hooks did not run.
+                    //
+                    // Say so when there were any. A dropped
+                    // `verdict_provenance` Sibling is an audit anchor
+                    // that did not land, and the drop looked identical
+                    // to "no dispatch ran" from the outside — which is
+                    // how eigenius#207 stayed misdiagnosed. A
+                    // no-op CAS is routine (different-position cache
+                    // hit), so this is `debug`, not `warn`.
+                    if !outcome.emissions.is_empty() {
+                        tracing::debug!(
+                            { field::OPERATION } = operation::COMMIT_ORCHESTRATOR_RUN,
+                            { field::LAYER_ID } = %outcome.layer.id(),
+                            layer_name = em_name,
+                            dropped = outcome.emissions.len(),
+                            dropped_names = ?outcome
+                                .emissions
+                                .iter()
+                                .map(|e| e.name)
+                                .collect::<Vec<_>>(),
+                            "branch did not advance; dropping this layer's emissions"
+                        );
+                    }
                     layers.push(outcome);
                 }
                 Err(PipelineRunErr {

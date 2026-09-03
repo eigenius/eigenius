@@ -42,16 +42,18 @@
 //! position the demo's Verdict lands on; we inspect the orchestrator
 //! outcome's `layers` array for it after the drain.
 //!
-//! Heavy (`include_bytes!`-equivalent of a ~675 KB fixture +
-//! nanoda re-checks the capstone proof), so gated `#[ignore]` like
-//! the sibling capstone test.
+//! Reads a ~675 KB fixture and has nanoda re-check the capstone proof, and runs in a few
+//! seconds — it is NOT `#[ignore]`d. It was, and a real failure sat behind the annotation
+//! unnoticed (eigenius#207): the gate stopped being about cost and started hiding a
+//! regression. This is the only test that puts a `lean:proposition` through the validator,
+//! so it is the one that catches a shape change in the chain mirror.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use eigenius_kernel::commit::{
-    BackendStorePersister, CommitOrchestrator, CommitWorkingSetPool, EmissionKind,
-    InstitutionContext, LayerEmission, LayerRole, NoopHost, PipelineKind,
+    BackendPersister, CommitOrchestrator, CommitWorkingSetPool, EmissionKind, InstitutionContext,
+    LayerEmission, LayerRole, NoopHost, PipelineKind,
 };
 use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::institution::registry::InstitutionIndex;
@@ -84,7 +86,6 @@ fn fixture_path() -> PathBuf {
 }
 
 #[test]
-#[ignore = "heavy: parses ~9 kLoC of lean4export output via nanoda against the demo fixture"]
 fn notebook_demo_fixture_lands_holds() {
     let path = fixture_path();
     let bytes = std::fs::read_to_string(&path).unwrap_or_else(|e| {
@@ -120,6 +121,15 @@ fn notebook_demo_fixture_lands_holds() {
         .expect("bootstrap with memory backend");
     let head = Arc::clone(bootstrap_ctx.head());
 
+    // Seed the `main` ref at the bootstrap head. `BackendPersister`'s CAS passes
+    // `expected_old = layer.parent().id()`; against a store where `main` was never written the
+    // ref reads as the zero LayerId, the CAS mismatches, and the commit comes back
+    // `NeedsWitnessedMerge` with `branch_advanced: false` — which silently drops the Sibling.
+    // A server writes this ref when it bootstraps a fresh store; the test bootstraps its own.
+    backend
+        .put_branch("main", head.id())
+        .expect("seed the main branch ref at the bootstrap head");
+
     let (index, errors) = InstitutionIndex::from_layer(&head);
     assert!(
         errors.is_empty(),
@@ -154,10 +164,18 @@ fn notebook_demo_fixture_lands_holds() {
     }
 
     // Drive the commit orchestrator the way the Load handler does
-    // (kernel/src/server/mod.rs §2190). `BackendStorePersister` plays
-    // the role of `EigeniusService as LayerPersister` for this
-    // standalone test — no anchored-commit cache, no CAS, but the
-    // pipeline's persist phase still gets a real backend to write to.
+    // (kernel/src/server/mod.rs §2190), through the same persister the
+    // gRPC service holds: `BackendPersister` owns the anchored-commit
+    // cache probe and the branch CAS.
+    //
+    // The lattice-side `BackendStorePersister` cannot stand in here. It
+    // is `store_layer`-only and reports `branch_advanced: false`
+    // unconditionally, and the orchestrator drops a landed layer's
+    // emissions when its parent did not advance the branch
+    // (`orchestrator.rs` §6.4). Under that persister the
+    // `verdict_provenance` Sibling is queued and then discarded, so the
+    // assertion below could never hold however the demo verified.
+    //
     // `NoopHost` satisfies `CommitHookHost` without needing the
     // server's index-rebuild / vector-sweep machinery; the test cares
     // about AutoOnLoad's `verdict_provenance` Sibling.
@@ -171,9 +189,7 @@ fn notebook_demo_fixture_lands_holds() {
         EmissionKind::Child,
         working,
     );
-    let persister = BackendStorePersister {
-        backend: backend.as_ref(),
-    };
+    let persister = BackendPersister::new(Some(Arc::clone(&backend) as Arc<dyn PersistentBackend>));
     let host = NoopHost;
     let pool = CommitWorkingSetPool::in_memory();
     let outcome = {
