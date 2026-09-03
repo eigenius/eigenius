@@ -207,3 +207,88 @@ fn a_sigma_over_a_class_matches_a_lean_subtype() {
         "a Σ over a class must externalize to the `Subtype` the declaration uses; got {v:?}"
     );
 }
+
+/// `Σ w : Widget. Big(w) → Widget` where the codomain is reached by projection.
+///
+/// The fixture's `projected : { w : Widget // Big w } → Widget` has that type. Nothing here
+/// exercises `Fst` in the STATEMENT — a projection appears in a term, not a type — so this pins
+/// the type side, and `fst_recovers_its_implicits_by_inference` below pins the reconstruction.
+#[test]
+fn a_projection_declarations_type_still_matches() {
+    let layer = widget_layer();
+    let iri = |s: &str| eigenius_kernel::ontology::iri::Iri::parse(s).unwrap();
+    let widget = Exp::EigonClass(iri("urn:eigenius:test:Widget"));
+    let big = Exp::EigonAxiom(iri("urn:eigenius:test:Big"));
+    let sigma = Exp::Sig(
+        eigenius_kernel::nbe::term::Patt::Var("w".into()),
+        Box::new(widget.clone()),
+        Box::new(Exp::App(Box::new(big), Box::new(Exp::Var("w".into())))),
+    );
+    let prop = Exp::Arrow(Box::new(sigma), Box::new(widget));
+
+    let v = check_proof(
+        SIGMA_SUBTYPE,
+        "projected",
+        &["EigeniusFFI.eigenius.test.Big".to_string()],
+        Some(&ExpectedStatement {
+            proposition: &prop,
+            layer: &layer,
+        }),
+    )
+    .expect("infrastructure ok");
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// `Fst` under a binder is refused, with the reason — the boundary is nanoda's API, not
+/// EigenTT's form.
+///
+/// The implicits ARE recoverable in principle: `TypeChecker::infer` is `pub(crate)` but
+/// `is_proof` is public and returns `(is_prop, infer(e))`. What blocks it is going under a
+/// binder. nanoda descends by turning bound variables into FREE ones (`mk_dbj_level`) so
+/// `infer` can run on an open term — `infer` rejects loose bvars. We cannot follow:
+/// `TypeChecker::new` asserts `dbj_level_counter == 0`, so no checker can exist while a binder
+/// is open. nanoda never meets this because its checker is already live when it descends.
+#[test]
+fn fst_under_a_binder_is_refused_with_the_reason() {
+    let layer = widget_layer();
+    let iri = |s: &str| eigenius_kernel::ontology::iri::Iri::parse(s).unwrap();
+    let widget = Exp::EigonClass(iri("urn:eigenius:test:Widget"));
+    let big = || Exp::EigonAxiom(iri("urn:eigenius:test:Big"));
+    let sigma = Exp::Sig(
+        eigenius_kernel::nbe::term::Patt::Var("w".into()),
+        Box::new(widget),
+        Box::new(Exp::App(Box::new(big()), Box::new(Exp::Var("w".into())))),
+    );
+    // ∀ s : (Σ w : Widget. Big w). Big (Fst s)  — `Fst` sits under the Π.
+    let prop = Exp::Pi(
+        eigenius_kernel::nbe::term::Patt::Var("s".into()),
+        Box::new(sigma),
+        Box::new(Exp::App(
+            Box::new(big()),
+            Box::new(Exp::Fst(Box::new(Exp::Var("s".into())))),
+        )),
+    );
+    let v = check_proof(
+        SIGMA_SUBTYPE,
+        "projects_in_the_type",
+        &["EigeniusFFI.eigenius.test.Big".to_string()],
+        Some(&ExpectedStatement {
+            proposition: &prop,
+            layer: &layer,
+        }),
+    )
+    .expect("infrastructure ok");
+    match v {
+        Verdict::Fails { diagnostic } => {
+            assert!(
+                diagnostic.contains("under binder"),
+                "must say the binder is why; got {diagnostic}"
+            );
+            assert!(
+                !diagnostic.contains("panicked"),
+                "and must be a refusal, not a caught panic; got {diagnostic}"
+            );
+        }
+        other => panic!("expected a typed refusal; got {other:?}"),
+    }
+}

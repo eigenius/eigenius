@@ -113,6 +113,31 @@ pub enum ExternalizeError {
         /// Universe arguments available to supply — the target declaration's own.
         available: usize,
     },
+    /// A `Fst`/`Snd` under an enclosing binder.
+    ///
+    /// Reconstructing `Subtype.val`'s implicits means inferring the scrutinee's type, and
+    /// nanoda's `infer` rejects loose bound variables — it descends under binders by turning
+    /// them into FREE variables (`mk_dbj_level`, de Bruijn levels). We cannot follow it there:
+    /// `TypeChecker::new` asserts `dbj_level_counter == 0`, so a checker cannot be built while a
+    /// binder is open, and `infer` itself is `pub(crate)`. nanoda never meets this because its
+    /// checker is already live when it descends.
+    ///
+    /// Lifting it is an upstream change — a public `infer`, or a relaxed precondition — not a
+    /// limit of EigenTT's form, which carries everything needed.
+    ProjectionUnderBinder {
+        /// `"Fst"` or `"Snd"`.
+        form: &'static str,
+        /// The binders in scope, innermost last.
+        binders: Vec<String>,
+    },
+    /// A `Fst`/`Snd` whose scrutinee does not have a `Subtype` type.
+    ///
+    /// EigenTT's Σ maps to `Subtype` (§4.2), so its projections eliminate one. A scrutinee that
+    /// infers to anything else is a term the fragment cannot place.
+    NotASubtype {
+        /// `"Fst"` or `"Snd"`.
+        form: &'static str,
+    },
     /// A universe parameter the target declaration does not declare (D74 §6.5).
     ///
     /// `def_eq` compares levels, so a `Param` naming something outside the target's `uparams`
@@ -157,6 +182,18 @@ impl std::fmt::Display for ExternalizeError {
                 "`{lean_name}` takes {expected} universe argument(s) and the target declaration \
                  supplies {available}; a universe-polymorphic constant can only be spelled with \
                  the target's own parameters"
+            ),
+            Self::ProjectionUnderBinder { form, binders } => write!(
+                f,
+                "`{form}` appears under binder(s) [{}]; reconstructing the projection's implicit \
+                 arguments needs the scrutinee's type, and nanoda's `infer` cannot run while a \
+                 binder is open",
+                binders.join(", ")
+            ),
+            Self::NotASubtype { form } => write!(
+                f,
+                "`{form}` projects a term whose type is not a `Subtype`, so there is no \
+                 elimination to build"
             ),
             Self::UnknownUniverseParam { param, declared } => write!(
                 f,
@@ -258,6 +295,7 @@ pub fn externalize<'t, 'p: 't>(
     layer: &Layer,
     uparams: &[String],
     arities: &HashMap<NamePtr<'t>, usize>,
+    target_index: usize,
 ) -> Result<ExprPtr<'t>, ExternalizeError> {
     let mut binders = Binders(Vec::new());
     let mut cx = Cx {
@@ -265,6 +303,7 @@ pub fn externalize<'t, 'p: 't>(
         layer,
         uparams,
         arities,
+        target_index,
     };
     go(exp, ctx, &mut cx, &mut binders)
 }
@@ -277,6 +316,13 @@ struct Cx<'a, 't> {
     uparams: &'a [String],
     /// Universe arity per declared name — see [`const_levels`].
     arities: &'a HashMap<NamePtr<'t>, usize>,
+    /// Index of the declaration being compared against. `Fst`/`Snd` infer a sub-term's type and
+    /// must do it under the same environment the comparison runs under (§6.5).
+    ///
+    /// An INDEX rather than a name: `EnvLimit::ByName` is parameterized by the export's lifetime
+    /// and these pointers are the arena's, which is shorter. `new_env` resolves a name to
+    /// `declars.get_index_of(n)` anyway, so the two limits are the same environment.
+    target_index: usize,
 }
 
 impl<'t> Cx<'_, 't> {
@@ -514,16 +560,33 @@ fn go<'t, 'p: 't>(
             "`Subtype.mk` takes the type and predicate as implicit arguments, which this form \
              does not carry; recovering them needs the term's type (§4.4)",
         ),
-        Exp::Fst(_) => outside(
-            "Fst",
-            "`Subtype.val` takes the type and predicate as implicit arguments, which this form \
-             does not carry; recovering them needs the term's type (§4.4)",
-        ),
-        Exp::Snd(_) => outside(
-            "Snd",
-            "`Subtype.property` takes the type and predicate as implicit arguments, which this \
-             form does not carry; recovering them needs the term's type (§4.4)",
-        ),
+        // The eliminations. `Subtype.val : {α} → {p} → Subtype p → α` takes its type and
+        // predicate implicitly, and a fully-elaborated export carries them explicitly — so they
+        // must be supplied. `Fst(e)` does not carry them, but they are RECOVERABLE: the
+        // externalized scrutinee is a well-formed term, so inferring its type gives `Subtype α p`
+        // and destructuring that spine gives both. See `subtype_indices`.
+        Exp::Fst(e) => {
+            if !binders.0.is_empty() {
+                return Err(ExternalizeError::ProjectionUnderBinder {
+                    form: "Fst",
+                    binders: binders.0.clone(),
+                });
+            }
+            let scrutinee = go(e, ctx, cx, binders)?;
+            let (a, pred) = subtype_indices(ctx, cx, scrutinee, "Fst")?;
+            subtype_projection(ctx, cx, "Subtype.val", a, pred, scrutinee)
+        }
+        Exp::Snd(e) => {
+            if !binders.0.is_empty() {
+                return Err(ExternalizeError::ProjectionUnderBinder {
+                    form: "Snd",
+                    binders: binders.0.clone(),
+                });
+            }
+            let scrutinee = go(e, ctx, cx, binders)?;
+            let (a, pred) = subtype_indices(ctx, cx, scrutinee, "Snd")?;
+            subtype_projection(ctx, cx, "Subtype.property", a, pred, scrutinee)
+        }
 
         Exp::Record(_) => outside(
             "Record",
@@ -600,6 +663,61 @@ fn go<'t, 'p: 't>(
 /// implicit/instance binders, because the claim's proposition has no notion of them.
 fn default_binder_style() -> nanoda_lib::expr::BinderStyle {
     nanoda_lib::expr::BinderStyle::Default
+}
+
+/// The `α` and predicate a `Subtype`-typed term is indexed by, recovered by inference.
+///
+/// This is the elaborator's job, done with a checker's tools. nanoda never faces it: it reads
+/// exports in which Lean's elaborator has already made every implicit explicit. Externalizing
+/// puts us on the other side of that, so the implicits have to come from somewhere — and for an
+/// ELIMINATION they can be inferred, because the scrutinee is already a well-formed term whose
+/// type is `Subtype α p`.
+///
+/// `TypeChecker::infer` is `pub(crate)`, but `is_proof` is public and returns
+/// `(is_prop, infer(e))` — its second component is the inferred type. `TcCtx::with_tc` scopes the
+/// checker so the arena is free again afterwards.
+fn subtype_indices<'t, 'p: 't>(
+    ctx: &mut TcCtx<'t, 'p>,
+    cx: &Cx<'_, 't>,
+    scrutinee: ExprPtr<'t>,
+    form: &'static str,
+) -> Result<(ExprPtr<'t>, ExprPtr<'t>), ExternalizeError> {
+    let ty = ctx.with_tc(nanoda_lib::env::EnvLimit::ByIndex(cx.target_index), |tc| {
+        let inferred = tc.is_proof(scrutinee).1;
+        // The type may be an unreduced application; `whnf` exposes the `Subtype` head.
+        tc.whnf(inferred)
+    });
+    let Some((_, name, _, args)) = ctx.unfold_const_apps(ty) else {
+        return Err(ExternalizeError::NotASubtype { form });
+    };
+    if render_name(ctx, name) != "Subtype" || args.len() != 2 {
+        return Err(ExternalizeError::NotASubtype { form });
+    }
+    Ok((args[0], args[1]))
+}
+
+/// `Subtype.val α p e` / `Subtype.property α p e` — an elimination with its implicits supplied.
+fn subtype_projection<'t, 'p: 't>(
+    ctx: &mut TcCtx<'t, 'p>,
+    cx: &Cx<'_, 't>,
+    which: &'static str,
+    a: ExprPtr<'t>,
+    pred: ExprPtr<'t>,
+    scrutinee: ExprPtr<'t>,
+) -> Result<ExprPtr<'t>, ExternalizeError> {
+    let name = cx
+        .names
+        .get(which)
+        .ok_or(ExternalizeError::MissingLeanConstant(which))?;
+    let one = {
+        let z = ctx.zero();
+        ctx.succ(z)
+    };
+    let levels = ctx.alloc_levels_slice(&[one]);
+    let head = ctx.mk_const(name, levels);
+    let e = ctx.mk_app(head, a);
+    let e = ctx.mk_app(e, pred);
+    Ok(ctx.mk_app(e, scrutinee))
 }
 
 /// `Subtype α pred` — the Lean image of an EigenTT `Sig` (D74 §4.2).

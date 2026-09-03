@@ -228,6 +228,8 @@ fn check_statement(
             })
             .collect();
 
+        // The comparison and any nested inference run under the same environment (§6.5).
+        let target_index = export.declars.get_index_of(&info.name).unwrap_or(0);
         let declared: Vec<_> = export.declars.keys().copied().collect();
         let names = externalize::NameTable::build(ctx, &declared);
 
@@ -247,6 +249,7 @@ fn check_statement(
             expected.layer,
             &uparams,
             &arities,
+            target_index,
         ) {
             Ok(g) => g,
             Err(e) => {

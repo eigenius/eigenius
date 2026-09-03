@@ -209,7 +209,45 @@ reads as permission, which is the opposite of what this section is for.
 the kernel breaks that file rather than falling through to a translation nobody chose. **The
 code is the authority for totality; this table is the authority for the reasons.**
 
-### 4.1 Translated (18)
+### 4.0 The denominator that matters: what decoding can produce
+
+§4.1–§4.6 classify every `Exp` variant, which is what makes the implementation's exhaustive
+`match` meaningful. But a proposition reaches externalization only by being **decoded from
+`reflection:canonical_proposition`**, so the set that can actually arrive is what `decode_type`
+emits — not the whole AST.
+
+The D47 codec's `eigentt:Term` declares **21** constructors:
+
+```
+Sort  Var  ConstRef  App  Ann  Pi  Sig  Lam  One  Id  UnitVal
+LitInt  LitString  LitFloat  LitBool  CtorApp  Pair  Fst  Snd  Record  Refine
+```
+
+`Arrow` and `Times` have no constructor of their own — they encode as `Pi` / `Sig` with a `Unit`
+binder — and `ConstRef` decodes to `Const`, `EigonClass` or `EigonAxiom` depending on what it
+resolves to. Read off `decode_type`, the **23 variants decoding can produce** are:
+
+| | |
+|---|---|
+| **translated** | `Sort` `Var` `Const` `EigonClass` `EigonAxiom` `EigonPrimitive` `App` `Pi` `Sig` `One` `Unit` `Id` `LitInt` `LitString` `LitBool` — 15 |
+| **conditional** | `Fst` `Snd` — top level only (§4.6) |
+| **refused** | `Ann` `Lam` `LitFloat` `InductiveCtor` `Pair` `Refine` — 6 |
+
+Everything else the fragment classifies — `Map`, `Reduce`, `Construct`, `Template`, `Match`,
+`InstitutionInvoke`, `InductiveRec`, `Case`, `Data`, `Dec`, `IdJ`, `NativeDecide`, `DecEq`,
+`EigonResource`, `PropAccess`, `Record`, `Refl`, `Con`, `Arrow`, `Times` — cannot be produced by
+decoding. Their refusals are correctness insurance against a future codec, not present limits.
+(`Record` is a wire constructor but `decode_type` never yields one; §4.7.)
+
+**What is actually committed is narrower still.** Measured `2026-09-03` across every `.esl` and
+`.json` in the tree, committed `eigentt:Term` values use **three** constructors: `ConstRef` (282
+occurrences), `Sort` (12), `Var` (6). All three translate, and no committed proposition contains
+a `Lam`, a `Pair`, a `Record` or a `Refine`.
+
+Three constructors is a thin corpus, so "everything committed externalizes" says less than it
+sounds. The parser's own output is what will exercise the rest.
+
+### 4.1 Translated (20, two conditionally)
 
 | EigenTT | Lean | note |
 |---|---|---|
@@ -229,10 +267,12 @@ code is the authority for totality; this table is the authority for the reasons.
 | `Refl(x)` | `rfl` | |
 | `Sig(p, A, B)` | `Subtype A (fun p : A => B)` | §4.5 — **not** `Sigma`; `Exists` cannot work |
 | `Times(A, B)` | `Subtype A (fun _ : A => B)` | a non-dependent `Sig` |
+| `Fst(e)` | `Subtype.val α p e` | §4.6 — implicits inferred; **top level only** |
+| `Snd(e)` | `Subtype.property α p e` | §4.6 — same |
 | `One` | `PUnit` | |
 | `Unit` | `PUnit.unit` | |
 
-### 4.2 Refused (25)
+### 4.2 Refused (23)
 
 Refusal is **typed and total**: an `ExternalizeError` naming the variant and the sub-term, never
 a silent approximation. A proposition outside the fragment must fail loudly, since the
@@ -240,8 +280,9 @@ alternative — translating "close enough" — proves a different theorem soundl
 
 | group | variants | why |
 |---|---|---|
-| **Σ intro / elim** | `Pair`, `Fst`, `Snd` | `Subtype.mk`, `.val` and `.property` each take the type and the predicate as IMPLICIT arguments, which a fully-elaborated export carries explicitly. These forms do not carry them, and recovering them needs the sub-term's type — §4.4's problem again. `Sig` and `Times` themselves are translated; see §4.5 |
-| **Records (D78)** | `Record`, `Refine` | a resource's own shape, and a shape together with the classes it satisfies — resource-level, not a proposition about one |
+| **Σ intro** | `Pair` | `Subtype.mk`'s predicate cannot be inferred from `p a` without higher-order unification — the elaborator's job, which a checker does not offer |
+| **Σ elim under a binder** | `Fst`, `Snd` | translated at the top level; refused under an enclosing binder — see §4.6 |
+| **Records (D78)** | `Record`, `Refine` | an anonymous structural type, and one carrying the classes it satisfies. Refused for different reasons and with different prospects — see §4.7 |
 | **Computation** | `Map`, `Reduce`, `NativeDecide`, `DecEq` | computation, not proposition |
 | **Resource-level** | `Template`, `Construct`, `EigonResource`, `PropAccess` | a proposition mentioning a resource *value* rather than its class is outside the fragment. `PropAccess` projects a field off a value |
 | **Elimination** | `Case`, `Match`, `IdJ`, `InductiveRec` | `Id` and `Refl` are in the fragment; eliminating them is not. `InductiveRec` is a recursor application |
@@ -274,6 +315,32 @@ Nothing changes for the externalizer today: `InductiveCtor` refuses with a diagn
 D30 v1's coverage. `Const(iri, …)` naming an inductive fails the same way, through
 `UnknownConstant` — which reports the Lean name it looked for, so the diagnostic is legible
 either way.
+
+### 4.4 `Lam` is refused because Mini-TT lambdas carry no domain
+
+The original table had `Lam(p, e)` in the fragment — *"appears inside propositions as a
+motive"*. It cannot be translated as it stands.
+
+`Exp::Lam(Patt, Box<Exp>)` is **Mini-TT's unannotated lambda**, inherited with the rest of this
+AST from the Coquand et al. reference implementation `kernel/src/nbe/` ports. It carries no
+domain by design, because Mini-TT is bidirectional: a lambda is only ever *checked* against a
+known `Pi`, which supplies one. The kernel holds that line — `check_infer` has no `Lam` arm
+(pinned as "not inferable"), and `(Exp::Lam(..), Val::Sort(n))` is an explicit type error, so a
+λ cannot *be* a proposition. It can only appear as an argument inside one, where the applied
+function's type determines its domain.
+
+Lean's `Lambda` requires a domain, and `def_eq` **compares** it: `def_eq_binder_aux` runs
+`if self.def_eq(t1, t2) { … } else { return false }` over the binder types. So there is no
+placeholder that `def_eq` sees through — a wrong domain is a wrong term.
+
+Admitting `Lam` therefore means making externalization **bidirectional**, threading the expected
+type down so a lambda under an application takes its domain from the function. That is a real
+change to the shape of §2's pipeline, not a missing row.
+
+**Measured before refusing:** of the 102 committed `canonical_proposition` values in the tree,
+**zero** contain a `Lam`. The four occurrences of "Lam" in `ontologies/` are the *declaration* of
+the constructor in `eigentt:Term`, `lean:LeanExpr` and the formulas term type, not uses. v1 gives
+up nothing that exists.
 
 ### 4.5 Σ is `Subtype` — settled `2026-09-03` by measurement
 
@@ -322,35 +389,72 @@ structure and the relation named as §3.3's mangling spells them.
 `Arrow(Sig(w, Widget, Big(w)), One)` and `def_eq`s it against that type. Regenerate it the way
 §6.5 regenerates the capstone — `lake build && lake exe lean4export SigmaFixture -- refined`.
 
-**What this does not unblock.** `Lam` (§4.4) and the Σ intro/elim forms still need
-bidirectional externalization, and the parser builds those too. Admitting Σ removes the
-quantifier from the blocking list, not the whole of parser output.
+**What this does not unblock.** `Lam` (§4.4) still needs bidirectional externalization, `Pair`
+needs unification, and `Fst`/`Snd` under a binder need the upstream change in §4.6. The parser
+builds all of those. Admitting Σ removes the quantifier from the blocking list, not the whole of
+parser output.
 
-### 4.4 `Lam` is refused because Mini-TT lambdas carry no domain
+### 4.6 `Fst` / `Snd` — the boundary is nanoda's API, not EigenTT's form
 
-The original table had `Lam(p, e)` in the fragment — *"appears inside propositions as a
-motive"*. It cannot be translated as it stands.
+The projections were first refused here on the ground that `Subtype.val : {α} → {p} → Subtype p →
+α` takes implicits the EigenTT form does not carry. That reasoning is wrong, and worth correcting
+rather than deleting: the implicits are **recoverable**, because the externalized scrutinee is a
+well-formed term whose type is `Subtype α p`. `TypeChecker::infer` is `pub(crate)`, but `is_proof`
+is public and returns `(is_prop, infer(e))` — destructuring that type gives both.
 
-`Exp::Lam(Patt, Box<Exp>)` is **Mini-TT's unannotated lambda**, inherited with the rest of this
-AST from the Coquand et al. reference implementation `kernel/src/nbe/` ports. It carries no
-domain by design, because Mini-TT is bidirectional: a lambda is only ever *checked* against a
-known `Pi`, which supplies one. The kernel holds that line — `check_infer` has no `Lam` arm
-(pinned as "not inferable"), and `(Exp::Lam(..), Val::Sort(n))` is an explicit type error, so a
-λ cannot *be* a proposition. It can only appear as an argument inside one, where the applied
-function's type determines its domain.
+**What actually blocks it is going under a binder.** nanoda is locally nameless: descending into
+a `Pi` body it calls `mk_dbj_level(binder_name, style, ty)`, turning the bound variable into a
+FREE one, precisely so `infer` can run on the open term. `infer` rejects loose bound variables
+outright ("no loose bvars allowed in infer").
 
-Lean's `Lambda` requires a domain, and `def_eq` **compares** it: `def_eq_binder_aux` runs
-`if self.def_eq(t1, t2) { … } else { return false }` over the binder types. So there is no
-placeholder that `def_eq` sees through — a wrong domain is a wrong term.
+Externalization cannot follow it there. `TypeChecker::new` opens with
+`assert_eq!(dag.dbj_level_counter, 0)` — **no checker may exist while a binder is open**. nanoda
+never meets this because its checker is already live when it descends; from outside, the only
+public route to inference is constructing one.
 
-Admitting `Lam` therefore means making externalization **bidirectional**, threading the expected
-type down so a lambda under an application takes its domain from the function. That is a real
-change to the shape of §2's pipeline, not a missing row.
+So the boundary is exact, and narrower than "refused": `Fst`/`Snd` translate with no enclosing
+binder and are refused under one, with a diagnostic naming the binders. Lifting it is an
+**upstream change** — a public `infer`, or a relaxed precondition — against a `lean4export` and
+`nanoda_lib` this repo already vendors and pins. It is not a limit of EigenTT's representation,
+which carries everything required.
 
-**Measured before refusing:** of the 102 committed `canonical_proposition` values in the tree,
-**zero** contain a `Lam`. The four occurrences of "Lam" in `ontologies/` are the *declaration* of
-the constructor in `eigentt:Term`, `lean:LeanExpr` and the formulas term type, not uses. v1 gives
-up nothing that exists.
+`Pair` is different and stays refused: `Subtype.mk` needs the predicate `p`, and recovering it
+from `p a` is higher-order unification. That is the elaborator's work, and nanoda is a checker of
+already-elaborated terms.
+
+### 4.7 `Record` is refused permanently; `Refine` over one class is not
+
+These two are grouped as "D78 record types" in §4.2, and they should not be — their prospects
+differ.
+
+**`Record` can never be translated, and refusing it is the correct answer rather than a deferred
+decision.** A `Record` is an *anonymous* structural type: a canonically-ordered telescope of
+named fields. D30 mirrors **named classes** as `structure`s, so an anonymous record has no Lean
+name because no declaration was ever emitted for it. Unlike §4.5's `Sig`, this cannot be fixed by
+choosing a library type: the proof was compiled against a fixed environment, and a declaration
+cannot be added to an export after the fact. A record the proof never mentioned can never be
+`def_eq` to anything in it.
+
+**`Refine(R, {C})` over a single class plausibly can be.** It carries the record *together with
+the classes it satisfies*, and nominal identity is the point — `Exp::Refine`'s own documentation
+records that `Refine(R, {Alpha})` and `Refine(R, {Beta})` must differ even when `Alpha` and
+`Beta` have the same fields (D75 §8 Q2). So the class name is the identity and the record is the
+structural detail it stands for, which makes `Const(C)` — the class D30 already mirrors — the
+faithful image.
+
+Two things stop that being written today, and neither is a naming question:
+
+1. **Multi-class `Refine(R, {C, D})` has no single Lean name.** D30 emits one `structure` per
+   class; a record satisfying two of them is an intersection Lean has no primitive for.
+2. **Nothing produces one.** No committed proposition carries a `Refine`, and the DCG formalizer
+   never builds one (`Exp::Refine` is constructed only in `nbe/readback.rs` and the D47 codec).
+
+**Posture: refuse both now, and treat them differently when they arrive.** A `Record` reaching
+externalization means a proposition quantified over an anonymous shape, which is a modelling
+error upstream — the refusal should stay and say so. A single-class `Refine` reaching it is
+ordinary and should be implemented as `Const(C)` at that point, measured the way §4.5 measured
+`Sig` rather than assumed. Writing either before something produces one would be building against
+a guess, which is what §4's stale table cost us once already.
 
 ## 5. What this makes true, and what it does not
 
