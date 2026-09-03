@@ -123,3 +123,87 @@ fn a_universe_param_the_target_does_not_declare_is_refused() {
         other => panic!("an undeclared universe param must not Hold; got {other:?}"),
     }
 }
+
+// ─── D74 §4.2 — Σ as `Subtype`, against a real Lean declaration ────────────────────────────
+//
+// `test_resources/sigma_subtype.json` exports
+//     def refined : { w : EigeniusFFI.eigenius.test.Widget // Big w } → PUnit
+// whose type is `Subtype Big → PUnit` — the shape the DCG builds for a refined noun
+// (`ontology.esl:65`: *"mutator load" → `Σx:Load. compound_kind(x, Mutator)`*), with the
+// structure named as #208's mangling spells it.
+
+const SIGMA_SUBTYPE: &[u8] = include_bytes!("../test_resources/sigma_subtype.json");
+
+/// A layer declaring the class the fixture's structure mirrors, so `EigonClass` resolves to
+/// `EigeniusFFI.eigenius.test.Widget` through D30's naming authority.
+fn widget_layer() -> Arc<Layer> {
+    use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
+    use eigenius_kernel::ontology::iri::Iri;
+    use eigenius_kernel::ontology::resource::{Resource, Value};
+    use eigenius_kernel::ontology::well_known as wk;
+
+    let parent = head();
+    let mut b = LayerBuilder::new("widget", Some(Arc::clone(&parent)));
+    let mut r = Resource::new(Iri::parse("urn:eigenius:test:Widget").unwrap());
+    r.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::String(wk::CLASS.to_string())]),
+    );
+    r.set(
+        Iri::parse(wk::SHORT_NAME).unwrap(),
+        Value::String("Widget".to_string()),
+    );
+    b.add_resource(r).expect("add Widget");
+
+    // The refinement predicate, as an ESL `axiom` would appear.
+    let mut a = Resource::new(Iri::parse("urn:eigenius:test:Big").unwrap());
+    a.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::String(wk::CLASS.to_string())]),
+    );
+    a.set(
+        Iri::parse(wk::SHORT_NAME).unwrap(),
+        Value::String("Big".to_string()),
+    );
+    b.add_resource(a).expect("add Big");
+    Arc::new(b.build(LayerStorage::in_memory()))
+}
+
+/// `Σ w : Widget. Big(w)` in domain position, against `Subtype Big → PUnit`.
+///
+/// This is the case that decides §4.2: the parser's Σ is a refinement over a class, and
+/// `Subtype` is what it denotes.
+#[test]
+fn a_sigma_over_a_class_matches_a_lean_subtype() {
+    let layer = widget_layer();
+    let widget = Exp::EigonClass(
+        eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:test:Widget").unwrap(),
+    );
+    let big = Exp::EigonAxiom(
+        eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:test:Big").unwrap(),
+    );
+    // Σ w : Widget. Big(w)  →  PUnit
+    let sigma = Exp::Sig(
+        eigenius_kernel::nbe::term::Patt::Var("w".into()),
+        Box::new(widget),
+        Box::new(Exp::App(Box::new(big), Box::new(Exp::Var("w".into())))),
+    );
+    let prop = Exp::Arrow(Box::new(sigma), Box::new(Exp::One));
+
+    // `Big` is an `axiom` in the fixture, as a chain relation is in ESL
+    // (`axiom ontology:compound_kind : lexicon:Entity -> Set -> Prop`), so it must be permitted.
+    let v = check_proof(
+        SIGMA_SUBTYPE,
+        "refined",
+        &["EigeniusFFI.eigenius.test.Big".to_string()],
+        Some(&ExpectedStatement {
+            proposition: &prop,
+            layer: &layer,
+        }),
+    )
+    .expect("infrastructure ok");
+    assert!(
+        matches!(v, Verdict::Holds),
+        "a Σ over a class must externalize to the `Subtype` the declaration uses; got {v:?}"
+    );
+}

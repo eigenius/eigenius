@@ -209,7 +209,7 @@ reads as permission, which is the opposite of what this section is for.
 the kernel breaks that file rather than falling through to a translation nobody chose. **The
 code is the authority for totality; this table is the authority for the reasons.**
 
-### 4.1 Translated (16)
+### 4.1 Translated (18)
 
 | EigenTT | Lean | note |
 |---|---|---|
@@ -227,10 +227,12 @@ code is the authority for totality; this table is the authority for the reasons.
 | `LitBool(b)` | `Const(Bool.true / Bool.false)` | |
 | `Id(a, x, y)` | `Eq` | |
 | `Refl(x)` | `rfl` | |
+| `Sig(p, A, B)` | `Subtype A (fun p : A => B)` | §4.5 — **not** `Sigma`; `Exists` cannot work |
+| `Times(A, B)` | `Subtype A (fun _ : A => B)` | a non-dependent `Sig` |
 | `One` | `PUnit` | |
 | `Unit` | `PUnit.unit` | |
 
-### 4.2 Refused (27)
+### 4.2 Refused (25)
 
 Refusal is **typed and total**: an `ExternalizeError` naming the variant and the sub-term, never
 a silent approximation. A proposition outside the fragment must fail loudly, since the
@@ -238,7 +240,7 @@ alternative — translating "close enough" — proves a different theorem soundl
 
 | group | variants | why |
 |---|---|---|
-| **Σ-types** | `Sig`, `Times`, `Pair`, `Fst`, `Snd` | Lean's `Sigma` is library, not primitive; admitting it means pinning WHICH `Sigma`, a decision of its own. `Times` is a non-dependent `Sig` |
+| **Σ intro / elim** | `Pair`, `Fst`, `Snd` | `Subtype.mk`, `.val` and `.property` each take the type and the predicate as IMPLICIT arguments, which a fully-elaborated export carries explicitly. These forms do not carry them, and recovering them needs the sub-term's type — §4.4's problem again. `Sig` and `Times` themselves are translated; see §4.5 |
 | **Records (D78)** | `Record`, `Refine` | a resource's own shape, and a shape together with the classes it satisfies — resource-level, not a proposition about one |
 | **Computation** | `Map`, `Reduce`, `NativeDecide`, `DecEq` | computation, not proposition |
 | **Resource-level** | `Template`, `Construct`, `EigonResource`, `PropAccess` | a proposition mentioning a resource *value* rather than its class is outside the fragment. `PropAccess` projects a field off a value |
@@ -272,6 +274,57 @@ Nothing changes for the externalizer today: `InductiveCtor` refuses with a diagn
 D30 v1's coverage. `Const(iri, …)` naming an inductive fails the same way, through
 `UnknownConstant` — which reports the Lean name it looked for, so the diagnostic is legible
 either way.
+
+### 4.5 Σ is `Subtype` — settled `2026-09-03` by measurement
+
+The original table refused `Sig` on the ground that *"Lean's `Sigma` is library, not primitive;
+admitting it means pinning WHICH `Sigma`, a decision of its own"*. The decision turns out to be
+made by the data, and by a constraint the kernel already imposes.
+
+**Lean 4 core ships four Σ-shaped types, and there is no default.** `∃` notation binds `Exists`
+specifically, but that is notation, not a canonical choice:
+
+| | signature |
+|---|---|
+| `Exists` | `{α : Sort u} → (α → Prop) → Prop` |
+| `Sigma` | `{α : Type u} → (α → Type v) → Type (max u v)` |
+| `PSigma` | `{α : Sort u} → (α → Sort v) → Sort (max 1 u v)` |
+| `Subtype` | `{α : Sort u} → (α → Prop) → Sort (max 1 u)` |
+
+**What the formalizer actually builds is `Σ x : <class at Set>. <predicate at Prop>`.** Every Σ
+goes through `dcg/rules/combinators.rs::refine_conjoin`, whose second component is an application
+of a relation declared into `Prop` — `axiom ontology:compound_kind : lexicon:Entity -> Set ->
+Prop`, and its siblings `compound`, `prep_of`, `prep_in` — or `logic:And` over two of those,
+which `logic.esl` documents as *"sort-typed at `Prop`, mirroring Lean's `And (a b : Prop) :
+Prop`"*. `ontology.esl:65` states the intended shape: *"mutator load" → `Σx:Load.
+compound_kind(x, Mutator)`*.
+
+That signature is `Subtype`'s exactly. The universes line up too: EigenTT's Σ-in-`Prop` is
+predicative (`nbe/check/mod.rs`: *"Sigma in Prop is predicative — both components must be in
+Prop"*), so a Σ over a class cannot inhabit `Prop` and its domain sits at `Set`; `Subtype` over a
+`Sort 1` domain gives `Sort (max 1 1) = Sort 1`.
+
+**Three things settle it beyond fit.** `Exists` is ruled out independently — it has no
+projections, and `Exists.elim` eliminates into `Prop` only, so `Fst`/`Snd` could never have an
+image. `Sigma` requires both components in `Type`, excluding the `Prop` predicate that is the
+whole point. And **D30 already emits `Subtype`**: the golden `Mirror.lean` renders a
+refinement-constrained field as `{ x : Float // 0.0 ≤ x ∧ x ≤ 100.0 }` and its encoder projects
+with `.val`. Choosing it adds no mirror vocabulary.
+
+The `Subtype` level is `1`, not one of the target's parameters: which universe it sits at is
+fixed by its domain, and a parsed Σ's domain is a class, which D30 emits as a Lean `structure` —
+a `Type`.
+
+**Verified against a real declaration.** `crates/eigenius-lean/test_resources/sigma_subtype.json`
+exports `def refined : { w : EigeniusFFI.eigenius.test.Widget // …Big w } → PUnit`, with the
+structure and the relation named as §3.3's mangling spells them.
+`externalize_test::a_sigma_over_a_class_matches_a_lean_subtype` externalizes
+`Arrow(Sig(w, Widget, Big(w)), One)` and `def_eq`s it against that type. Regenerate it the way
+§6.5 regenerates the capstone — `lake build && lake exe lean4export SigmaFixture -- refined`.
+
+**What this does not unblock.** `Lam` (§4.4) and the Σ intro/elim forms still need
+bidirectional externalization, and the parser builds those too. Admitting Σ removes the
+quantifier from the blocking list, not the whole of parser output.
 
 ### 4.4 `Lam` is refused because Mini-TT lambdas carry no domain
 

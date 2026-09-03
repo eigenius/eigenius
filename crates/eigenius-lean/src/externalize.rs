@@ -469,15 +469,61 @@ fn go<'t, 'p: 't>(
              supplying it means making externalization bidirectional",
         ),
 
-        Exp::Sig(_, _, _) => outside(
-            "Sig",
-            "Lean's `Sigma` is library, not primitive — admitting it means pinning WHICH Sigma, \
-             which is a decision of its own",
+        // D74 §4.2 — `Subtype`, not `Sigma`. Measured: every Σ the DCG formalizer builds is
+        // `Σ x : <class at Set>. <predicate at Prop>` — the restriction is always an application
+        // of a relation declared `… -> Prop` (`ontology:compound_kind : Entity -> Set -> Prop`)
+        // or `logic:And` over two of them. `Subtype : {α : Sort u} → (α → Prop) → Sort (max 1 u)`
+        // is exactly that signature, and D30 already emits it for refinement-constrained fields
+        // (`{ x : Float // 0.0 ≤ x }`), so it needs no new mirror vocabulary.
+        //
+        // `Exists` is ruled out independently: it has no projections — `Exists.elim` eliminates
+        // into `Prop` only — so `Fst`/`Snd` would have no image at all.
+        //
+        // The predicate is a lambda built here, so §4.4's missing-domain problem does not arise:
+        // the domain is the Σ's own, in hand.
+        Exp::Sig(p, dom, body) => {
+            let a = go(dom, ctx, cx, binders)?;
+            let name = binder_name(p);
+            let n = ctx.str1_owned(name.clone());
+            binders.0.push(name);
+            let b = go(body, ctx, cx, binders);
+            binders.0.pop();
+            let pred = ctx.mk_lambda(n, default_binder_style(), a, b?);
+            subtype_of(ctx, cx, a, pred)
+        }
+
+        // A non-dependent `Sig`; the binder is unused, so nothing is pushed.
+        Exp::Times(dom, body) => {
+            let a = go(dom, ctx, cx, binders)?;
+            let n = ctx.str1_owned("_".to_string());
+            binders.0.push("_".to_string());
+            let b = go(body, ctx, cx, binders);
+            binders.0.pop();
+            let pred = ctx.mk_lambda(n, default_binder_style(), a, b?);
+            subtype_of(ctx, cx, a, pred)
+        }
+
+        // The introduction and elimination forms stay refused, and NOT for want of a decision.
+        // `Subtype.mk : {α} → {p} → (val : α) → p val → Subtype p`, `Subtype.val : {α} → {p} →
+        // Subtype p → α`, and `Subtype.property` likewise: each takes two implicit arguments that
+        // a fully-elaborated export carries explicitly. `Pair(a, b)` and `Fst(e)` do not carry
+        // them — recovering `α` and `p` needs the sub-term's TYPE, which is §4.4's bidirectional
+        // problem in another costume.
+        Exp::Pair(_, _) => outside(
+            "Pair",
+            "`Subtype.mk` takes the type and predicate as implicit arguments, which this form \
+             does not carry; recovering them needs the term's type (§4.4)",
         ),
-        Exp::Times(_, _) => outside("Times", "a non-dependent `Sig`; same decision"),
-        Exp::Pair(_, _) => outside("Pair", "the introduction form for `Sig`"),
-        Exp::Fst(_) => outside("Fst", "an elimination form for `Sig`"),
-        Exp::Snd(_) => outside("Snd", "an elimination form for `Sig`"),
+        Exp::Fst(_) => outside(
+            "Fst",
+            "`Subtype.val` takes the type and predicate as implicit arguments, which this form \
+             does not carry; recovering them needs the term's type (§4.4)",
+        ),
+        Exp::Snd(_) => outside(
+            "Snd",
+            "`Subtype.property` takes the type and predicate as implicit arguments, which this \
+             form does not carry; recovering them needs the term's type (§4.4)",
+        ),
 
         Exp::Record(_) => outside(
             "Record",
@@ -554,6 +600,34 @@ fn go<'t, 'p: 't>(
 /// implicit/instance binders, because the claim's proposition has no notion of them.
 fn default_binder_style() -> nanoda_lib::expr::BinderStyle {
     nanoda_lib::expr::BinderStyle::Default
+}
+
+/// `Subtype α pred` — the Lean image of an EigenTT `Sig` (D74 §4.2).
+///
+/// `Subtype` binds ONE universe parameter: the one its domain sits at. EigenTT's Σ is predicative
+/// (`nbe/check/mod.rs`: "Sigma in Prop is predicative — both components must be in Prop"), so a
+/// Σ quantifying over a class cannot inhabit `Prop`; its domain is a class at `Set`, which D30
+/// emits as a Lean `structure` — a `Type`, i.e. `Sort 1`. The level is therefore `1`, spelled
+/// `succ zero`, and NOT taken from the target's parameters: which universe `Subtype` sits at is
+/// fixed by its domain, not by the enclosing declaration.
+fn subtype_of<'t, 'p: 't>(
+    ctx: &mut TcCtx<'t, 'p>,
+    cx: &Cx<'_, 't>,
+    domain: ExprPtr<'t>,
+    predicate: ExprPtr<'t>,
+) -> Result<ExprPtr<'t>, ExternalizeError> {
+    let name = cx
+        .names
+        .get("Subtype")
+        .ok_or(ExternalizeError::MissingLeanConstant("Subtype"))?;
+    let one = {
+        let z = ctx.zero();
+        ctx.succ(z)
+    };
+    let levels = ctx.alloc_levels_slice(&[one]);
+    let head = ctx.mk_const(name, levels);
+    let applied = ctx.mk_app(head, domain);
+    Ok(ctx.mk_app(applied, predicate))
 }
 
 /// Resolve one of Lean's own constants by name.
