@@ -105,9 +105,9 @@ same restriction eigenius#136 left standing in `spec_poly`'s fixed `Type 1` bind
 
 ### 3.3 Chain constants → Lean names
 
-`EigonClass(iri)`, `EigonAxiom(iri)` and `InductiveType(decl, args)` are references to chain
-resources. Each becomes `Const(Name, levels)` — and **which `Name`** is the one genuinely open
-decision in this document.
+`Const(iri, levels)`, `EigonClass(iri)` and `EigonAxiom(iri)` are references to chain resources.
+Each becomes `Const(Name, levels)` — and **which `Name`** is the one genuinely open decision in
+this document. (`Const` replaced `InductiveType(decl, args)` in D76 Phase B1; see §4.)
 
 The requirement is a *total, injective, and stable* map from IRI to Lean `Name`, agreed by both the
 externalizer and whatever produced the export.
@@ -195,46 +195,72 @@ exactly as `structure Person` does.
 
 ## 4. The fragment
 
-**v1 translates propositions, not programs.** The domain is the terms that legitimately appear in
-`reflection:canonical_proposition` — which Rule 21 already constrains to inhabit `Sort(0)`.
+**v1 translates propositions, not programs.** The domain is the terms that legitimately appear
+in `reflection:canonical_proposition` — which Rule 21 already constrains to inhabit `Sort(0)`.
+
+**Restated `2026-09-03` against the current AST.** The original table was written before D76
+Phase B1 and eigenius#218 and had drifted: it gave a row to `InductiveType(decl, args)`, which
+no longer exists, refused four constructs that had been deleted (`Codata`, `CoRecord`,
+`Observe`, `SizeSort`), and said nothing at all about nine that do exist. A table with holes
+reads as permission, which is the opposite of what this section is for.
+
+`kernel/src/nbe/term.rs` declares **43** `Exp` variants. All 43 are classified below, and
+`crates/eigenius-lean/src/externalize.rs` matches on them exhaustively — so a variant added to
+the kernel breaks that file rather than falling through to a translation nobody chose. **The
+code is the authority for totality; this table is the authority for the reasons.**
+
+### 4.1 Translated (17)
 
 | EigenTT | Lean | note |
 |---|---|---|
-| `Sort(n)` | `Sort n` | §3.2, no shift |
+| `Sort(l)` | `Sort l` | §3.2, no shift. `l` maps structurally: `Zero`/`Succ`/`Max`/`IMax`/`Param` |
 | `Pi(p, a, b)` | `Pi` | binder name carried for readability only |
 | `Arrow(a, b)` | `Pi` with an unused binder | `Arrow` is non-dependent `Pi` |
-| `App(f, x)` | `App` | spines fold with `foldl_apps` |
+| `App(f, x)` | `App` | |
 | `Lam(p, e)` | `Lambda` | appears inside propositions as a motive |
-| `Var(x)` | `Var{idx}` | §3.1 |
+| `Var(x)` | `Var{idx}` | §3.1 — named to de Bruijn, against the binder stack |
+| `Const(iri, levels)` | `Const(name, levels)` | §3.3. **Replaced `InductiveType(decl, args)`** in D76 Phase B1, and is now how every chain-resident reference translates |
 | `EigonClass(iri)` | `Const(name, [])` | §3.3 |
 | `EigonAxiom(iri)` | `Const(name, [])` | §3.3 |
-| `InductiveType(decl, args)` | `Const(name, [])` applied to args | §3.3 |
-| `InductiveCtor(decl, c, args)` | `Const(name.c, [])` applied to args | |
-| `EigonPrimitive(String/Integer/Boolean)` | `Const(String/Int/Bool)` | Lean's own |
+| `EigonPrimitive(String/Integer/Boolean)` | `Const(String/Int/Bool)` | Lean's own; `Float` and `Json` are refused — see §4.2 |
 | `LitString(s)` | `StringLit` | |
-| `LitInt(n)`, `n ≥ 0` | `NatLit` | **negative refused**: `NatLit` is a `BigUint` |
+| `LitInt(n)`, `n ≥ 0` | `NatLit` | **negative refused**: `NatLit` holds a `BigUint`, and synthesising `Int.negSucc` would be a different term than the one authored |
 | `LitBool(b)` | `Const(Bool.true / Bool.false)` | |
-| `Id(a, x, y)` / `Refl(x)` | `Eq` / `rfl` | |
-| `One` / `Unit` | `PUnit` / `PUnit.unit` | |
+| `Id(a, x, y)` | `Eq` | |
+| `Refl(x)` | `rfl` | |
+| `One` | `PUnit` | |
+| `Unit` | `PUnit.unit` | |
 
-**Refused in v1**, each with a typed error naming the construct:
+### 4.2 Refused (26)
 
-- `Sig` / `Pair` / `Fst` / `Snd` — Lean's `Sigma` is library, not primitive; admitting it means
-  pinning which `Sigma` and is a decision of its own.
-- `Codata` / `CoRecord` / `Observe` — coinduction has no v1 Lean image.
-- `Map` / `Reduce` / `NativeDecide` / `DecEq` — computation, not proposition.
-- `Template` / `PropAccess` / `Construct` / `EigonResource` — resource-level constructs; a
-  proposition mentioning a *resource value* rather than its class is outside the fragment.
-- `LitFloat` — Lean has no float literal; a proposition over reals needs a decision about `Float`
-  vs `Real` that v1 does not make.
-- `SizeSort` / sized binders — D46's sized fragment has no Lean counterpart.
-- `Data` / `Case` / `Dec` / `Ann` — surface forms the codec does not emit into proposition slots.
+Refusal is **typed and total**: an `ExternalizeError` naming the variant and the sub-term, never
+a silent approximation. A proposition outside the fragment must fail loudly, since the
+alternative — translating "close enough" — proves a different theorem soundly.
 
-Refusal is **typed and total**: an `ExternalizeError` naming the variant and the sub-term, never a
-silent approximation. A proposition outside the fragment must fail loudly at externalization, since
-the alternative — translating "close enough" — proves a different theorem soundly.
+| group | variants | why |
+|---|---|---|
+| **Σ-types** | `Sig`, `Times`, `Pair`, `Fst`, `Snd` | Lean's `Sigma` is library, not primitive; admitting it means pinning WHICH `Sigma`, a decision of its own. `Times` is a non-dependent `Sig` |
+| **Records (D78)** | `Record`, `Refine` | a resource's own shape, and a shape together with the classes it satisfies — resource-level, not a proposition about one |
+| **Computation** | `Map`, `Reduce`, `NativeDecide`, `DecEq` | computation, not proposition |
+| **Resource-level** | `Template`, `Construct`, `EigonResource`, `PropAccess` | a proposition mentioning a resource *value* rather than its class is outside the fragment. `PropAccess` projects a field off a value |
+| **Elimination** | `Case`, `Match`, `IdJ`, `InductiveRec` | `Id` and `Refl` are in the fragment; eliminating them is not. `InductiveRec` is a recursor application |
+| **Surface forms** | `Data`, `Dec`, `Ann`, `Con` | declaration, `let`/`letrec`, ascription, and a constructor application whose inductive is implicit — forms the codec does not emit into a proposition slot |
+| **Effects** | `InstitutionInvoke` | dispatches a comorphism; its result is not determined by the proposition alone |
+| **No Lean image** | `LitFloat`, `EigonPrimitive(Float)`, `EigonPrimitive(Json)` | Lean has no float literal, and a proposition over reals needs a `Float` vs `Real` decision v1 does not make. `Json` is a chain-side carrier |
+| **Open** | `InductiveCtor` | see §4.3 |
 
----
+### 4.3 `InductiveCtor` is open, not decided
+
+The original table put `InductiveCtor(decl, c, args)` in the fragment, mapping to
+`Const(name.c, [])`. That asserted an answer to a question D85 reopened: a constructor now
+*names a class* (`ctor_classes::class_iri` derives `<inductive>-<ctor>`), and which Lean name
+D30's emitter gives that class is not settled — `<inductive>.<ctor>` is the Lean convention, and
+the derived class has its own `core:short_name` under §3.3's mangling. Those are two different
+names for one thing, and picking one silently is how a value ends up stating a class its slot
+does not admit.
+
+It is refused until that is settled, with a diagnostic saying so. A proposition quantifying over
+a constructor is rare in the claims this document serves; a wrong name for one would not be.
 
 ## 5. What this makes true, and what it does not
 
