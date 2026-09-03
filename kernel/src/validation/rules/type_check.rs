@@ -48,7 +48,19 @@ impl Validator {
                 // *shape* gate and must be invariant under persist/reload, so it accepts
                 // `String` (a reference) and `Embedded` (an inlined Resource). Whether the
                 // IRI actually *resolves* is reference integrity's job (Rule 22), not this
-                // rule's.
+                // rule's — but whether it IS an IRI is this rule's, and was nobody's.
+                //
+                // The string has to PARSE. Accepting any string here left prose in a
+                // reference slot detectable only by accident: Rule 22 collects targets with
+                // `value.as_iri()`, so a value that does not parse yields no targets and the
+                // resolve loop never runs. `prov:was_generated_by` — `core:resource` at
+                // `class_types: [prov:Activity]` — held a description in 14 places across the
+                // WRN inputs, and exactly ONE was ever reported: the one whose text contains
+                // `Firefly:Renilla`, which parses as an IRI and therefore reached the check.
+                // Thirteen equally wrong values were green because their prose had no colon.
+                //
+                // So the slot's declared type decides the shape, and the downstream rule stops
+                // inferring intent from punctuation.
                 //
                 // A `Value::ResourceRef` was accepted here too, until it was retired on
                 // `2026-08-31` (D85 §6.2). It was exactly the non-durable distinction this
@@ -58,12 +70,18 @@ impl Validator {
                 // A slot whose `class_types` names an `InductiveType` needs no separate arm:
                 // an inductive value is a resource (D85 §6.1), so it arrives `Embedded` like
                 // any other, and Rule 6 checks its constructor class against `class_types`.
-                matches!(value, Value::String(_) | Value::Embedded(_))
+                match value {
+                    Value::Embedded(_) => true,
+                    Value::String(_) => value.as_iri().is_some(),
+                    _ => false,
+                }
             }
             wk::RESOURCE_ARRAY => match value {
-                Value::Array(arr) => arr
-                    .iter()
-                    .all(|v| matches!(v, Value::String(_) | Value::Embedded(_))),
+                Value::Array(arr) => arr.iter().all(|v| match v {
+                    Value::Embedded(_) => true,
+                    Value::String(_) => v.as_iri().is_some(),
+                    _ => false,
+                }),
                 _ => false,
             },
             wk::VALUE_ARRAY => matches!(value, Value::Array(_)),

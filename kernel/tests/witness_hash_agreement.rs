@@ -855,9 +855,14 @@ fn a_proposition_using_a_definition_type_checks_at_commit() {
         iri("urn:eigenius:core:short_name"),
         Value::String("claim".into()),
     );
+    // `prov:was_attributed_to` NAMES an agent — `core:resource` at
+    // `class_types: [prov:Agent]`. The bare string `"test"` sat here until the wire-shape
+    // gate started requiring a resource-typed slot's string to parse as an IRI; before that
+    // it was accepted silently, because Rule 22 only resolves values that already look like
+    // one.
     claim.set(
         iri("urn:eigenius:prov:was_attributed_to"),
-        Value::String("test".into()),
+        Value::String("urn:eigenius:prov:agent:unattributed".into()),
     );
     claim.set(
         iri(wk::CANONICAL_PROPOSITION),
