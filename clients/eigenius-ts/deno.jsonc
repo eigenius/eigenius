@@ -39,6 +39,12 @@
     "@connectrpc/connect": "npm:@connectrpc/connect@^2",
     "@connectrpc/connect-web": "npm:@connectrpc/connect-web@^2"
   },
+  // This package carries a `package.json` (it is also consumed by the notebooks SPA through
+  // npm), so Deno switches to node_modules resolution and expects the directory to exist.
+  // `auto` lets Deno populate it from the `npm:` specifiers above, which is what makes
+  // `deno test` self-sufficient on a clean checkout — CI runs it without an `npm install`,
+  // and `client.ts`'s `@connectrpc/*` imports failed to resolve there.
+  "nodeModulesDir": "auto",
   "lint": {
     "exclude": ["generated/"]
   },
