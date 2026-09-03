@@ -238,9 +238,14 @@ fn build_phase3_ctx() -> ExecutionContext {
         &bench_core,
         "harness",
     );
+    let vocab = esl_against(
+        include_str!("../../experiments/publications/wrn-helicase/chain/00-wrn-vocabulary.esl"),
+        &harness,
+        "wrn-vocabulary",
+    );
     let onco = esl_against(
         include_str!("../../experiments/publications/wrn-helicase/chain/01-onco.esl"),
-        &harness,
+        &vocab,
         "onco",
     );
     // Literature layer: references + imported-claim warrants (reference:Citation),
@@ -289,6 +294,12 @@ fn build_phase3_ctx() -> ExecutionContext {
     let program_inputs = {
         let mut b = LayerBuilder::new("wrn-program-inputs", Some(phase2.clone()));
         for src in [
+            include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/foci-ed6-files.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/gh2ax-foci-files.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/gh2ax-intensity-files.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/if-ed5-files.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/patm-foci-files.json"),
+            include_str!("../../experiments/publications/wrn-helicase/programs/specificity/paralog-ed9a-files.json"),
             include_str!("../../experiments/publications/wrn-helicase/programs/invivo/xenograft-input.json"),
             include_str!("../../experiments/publications/wrn-helicase/programs/invivo/km12-competition-input.json"),
             include_str!("../../experiments/publications/wrn-helicase/programs/mechanism/foci-ed6-input.json"),
@@ -302,7 +313,18 @@ fn build_phase3_ctx() -> ExecutionContext {
                 b.add_resource(r).unwrap();
             }
         }
-        Arc::new(b.build(LayerStorage::in_memory()))
+        // VALIDATE, like every other layer this test builds. Without it these inputs enter
+        // the chain through a path the live loader does not have: `esl_against` runs the
+        // structural gate on each ESL layer, but this one was a bare `build`. That is how 13
+        // `prov:was_generated_by` values holding prose instead of an Activity IRI stayed green
+        // here while the demo, going through the real commit pipeline, refused them.
+        let layer = Arc::new(b.build(LayerStorage::in_memory()));
+        let errors = eigenius_kernel::validation::Validator::new(layer.clone()).validate();
+        assert!(
+            errors.is_empty(),
+            "wrn-program-inputs must validate structurally — the live loader runs this: {errors:?}"
+        );
+        layer
     };
     let provenance = esl_against(
         include_str!(

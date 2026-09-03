@@ -144,6 +144,16 @@ resource wrnact:figshare_drive : prov:Activity {
     core:short_name = "figshare_drive";
 }
 
+resource wrnact:geo_gse126464 : prov:Activity {
+    core:description = "Download of GEO GSE126464 WRN-KO RNA-seq STAR gene counts (genes x 12 samples), the mechanism arm's expression input.";
+    core:short_name = "geo_gse126464";
+}
+
+resource wrnact:msigdb_hallmark : prov:Activity {
+    core:description = "Download of MSigDB Hallmark v6.2 (50 gene sets, gene symbols), the collection fgsea tests the WRN-KO signature against.";
+    core:short_name = "msigdb_hallmark";
+}
+
 resource wrnact:nihms_supp_table1 : prov:Activity {
     core:description = "Extraction from NIHMS1522798 Supplementary Table 1 — the paper's own cell-line table.";
     core:short_name = "nihms_supp_table1";
