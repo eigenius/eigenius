@@ -118,10 +118,33 @@ fn convert_property_set_is_expressible() {
         "convert-properties",
     );
 
-    let errors = Validator::new(properties).validate();
+    // Validate EVERY layer this test stacks, not just the top one.
+    //
+    // `Validator::validate` covers "all resources in this layer" — a layer's own residents, not
+    // its ancestors'. Validating only `properties` therefore said nothing about the ontology it
+    // was compiled against, and `objective-ontology.esl` is not in `BOOTSTRAP_CHAIN`, so nothing
+    // else validated it either. Four class definitions there named properties whose declarations
+    // P5 had deleted — `objective:acceptance_grade` on Milestone, `objective:axiom_kind` on
+    // Axiom, `objective:warrant` on DecisionPoint and Option. Rule 14 catches exactly that and
+    // was never given the chance to run.
+    let mut errors = Vec::new();
+    for (name, layer) in [
+        ("prov", &prov),
+        ("reasoning", &reasoning),
+        ("reference", &reference),
+        ("objective", &objective),
+        ("convert-properties", &properties),
+    ] {
+        errors.extend(
+            Validator::new(Arc::clone(layer))
+                .validate()
+                .into_iter()
+                .map(|e| format!("[{name}] {e}")),
+        );
+    }
     assert!(
         errors.is_empty(),
-        "the convert.rs typed property set must validate cleanly (Expressible). \
+        "every layer in the stack must validate cleanly (Expressible). \
          {} error(s):\n{}",
         errors.len(),
         errors

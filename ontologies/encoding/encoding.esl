@@ -12,7 +12,7 @@
 // contracts** for that state machine: every stage is `resource → resource`, so each is
 // testable in isolation and the pipeline state is chain-committed and auditable.
 //
-// REUSE, DON'T MINT. Grades reuse reflection:EpistemicStatus; the encoded proposition
+// REUSE, DON'T MINT. The encoded proposition
 // reuses reflection:canonical_proposition (eigentt:Term); warrants reuse
 // prov:rationale; source works reuse reference:Reference; lexicon scope/entries
 // reuse lexicon:Lexicon / lexicon:LexicalEntry. New vocabulary here is only the

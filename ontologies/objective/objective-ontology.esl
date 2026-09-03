@@ -37,15 +37,14 @@ class objective:Objective {
 
 class objective:Milestone {
     description = "A proposition to establish, with acceptance criteria. Carries the Prop (objective:proposition — the same value the discharging justification:Conclusion will carry), the acceptance grade + witness kind + falsifier, and the intended-warrant edges (objective:depends_on → other Milestones/Axioms). Completion is a query: the milestone is satisfied iff a Holds justification:Conclusion carries its proposition (objective:satisfied_by records which). The thesis is just the root Milestone. The Checkable gate (D58 §3) is a TYPE CHECK, not a runtime query: proposition + acceptance_grade + witness_kind + falsifier are all required, so the structural validator rejects any milestone whose acceptance is undefined at commit — a non-checkable milestone cannot be recorded.";
-    requires   objective:proposition, objective:acceptance_grade,
-               objective:witness_kind, objective:falsifier;
+    requires   objective:proposition, objective:witness_kind, objective:falsifier;
     recommends objective:depends_on, objective:status,
                objective:frontier_gate, objective:satisfied_by;
 }
 
 class objective:Axiom {
     description = "A premise admitted WITHOUT derivation — a pointer to an already-admitted witness, not the witness itself. Carries the Prop, the axiom kind (observed | declared; a 'cited' premise is just declared with a reference:Citation witness), and objective:witness (the IsObservedAs / IsDeclaredAs / reference:Citation IRI). objective:witness is REQUIRED: an axiom that names no witness is an unjustified assumption, and the structural validator rejects it at commit — so the presence half of the Anchored gate (D58 §3) is a type check. The residual (does the named witness actually resolve to an admitted IsObservedAs/IsDeclaredAs/Citation) is the open-world part left to a query.";
-    requires   objective:proposition, objective:axiom_kind, objective:witness;
+    requires   objective:proposition, objective:witness;
 }
 
 // ── D61 decision layer (typed discovery / decision-making nodes; D61 §5) ──
@@ -63,12 +62,11 @@ class objective:CompetencyQuestion {
 class objective:DecisionPoint {
     description = "A decision any instance of a task-type must make (descent move 1): the decision as a Prop (objective:proposition), a TYPED option space (objective:options -> objective:Option), the selected option (objective:selected), and the warrant. Recording DecisionPoints makes a task-type's decision structure retrievable & reusable (move-1 retrieve-first).";
     requires   objective:proposition, objective:options, objective:selected;
-    recommends objective:warrant, objective:status;
+    recommends objective:status;
 }
 class objective:Option {
     description = "A typed alternative inside a DecisionPoint's option space; its claim is a Prop (objective:option_claim) — what lets a DesirableProperty be checked against it.";
     requires   objective:option_claim;
-    recommends objective:warrant;
 }
 class objective:Hypothesis {
     description = "A formulated conjecture (descent): a Prop asserted as a Declared hypothesis, with the path to a DECISIVE OUTCOME — objective:resolved_by names the sentence/verdict that discharges it (Derived/Verified) or refutes it (a recorded finding); objective:outcome records held|refuted|open. Unlike a Milestone, a Hypothesis MAY turn out false — refutation is a valid outcome.";
@@ -97,11 +95,10 @@ class objective:CutItem {
 
 // ── Enumerations (resource vocabularies; allows_only constrains to these) ──
 //
-// The grade fields REUSE reflection:EpistemicStatus (the canonical four-grade
-// vocabulary: epistemic:{observed,declared,derived,verified}) rather
-// than minting a parallel enum — objective: is a thin layer over the reflection
-// epistemic stack. The only objective-specific enum is WitnessKind (operational
-// "how", no reflection analog). Plain-string fields (status, frontier_gate)
+// There are no grade fields. They REUSED reflection:EpistemicStatus rather than minting a
+// parallel enum, and P5 deleted that vocabulary along with the four grade classes — warrant is
+// computed from a justification term and stored nowhere. The only enum here is WitnessKind
+// (operational "how", which never had a reflection analog). Plain-string fields (status, frontier_gate)
 // carry mutable progress state and are not enumerated.
 
 class objective:WitnessKind {
@@ -251,6 +248,11 @@ property objective:option_claim : core:inductive {
     expected_type Prop;
     domain objective:Option;
 }
+// `objective:warrant` was here — recommended on DecisionPoint and Option, holding why a
+// selection held. It was a stored warrant, which is the shape P5 removed everywhere: warrant is
+// computed from a justification term and stored nowhere, so a recorded one could disagree with
+// the term and nothing checked that it did not. The grounds themselves are `objective:rests_on`
+// below; whether they suffice is the query §7 calls `warrant becomes a query`.
 property objective:rests_on : core:resource_array {
     description = "Why a selection holds: the DesirableProperties / CompetencyQuestions / Axioms it was chosen against. Named `objective:warrant` until the provenance/warrant split, which it was on the wrong side of — this is the DECLARED REASON a selection was made, which is provenance, and warrant under this design is computed from a justification term and stored nowhere. Plural where prov:had_primary_source is singular, because a selection is argued from several properties at once; otherwise the same relation.";
     class_types objective:DesirableProperty, objective:CompetencyQuestion, objective:Axiom;

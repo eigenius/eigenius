@@ -33,7 +33,7 @@
 //!   `RunRuntimeScript` invocation. `input` and `argument` are
 //!   Eigon-CBOR `Buffer`s (the kernel sends them via gRPC; the
 //!   orchestrator's handler re-encodes from JS objects via
-//!   `wasm/cbor.ts`). Returns the output Resource as Eigon-CBOR.
+//!   `codec/cbor.ts`). Returns the output Resource as Eigon-CBOR.
 //! - `dispatchCallRuntimeMethod(input, argument)` — same pattern for
 //!   the method-call surface. Service-lifecycle envs land in 19a;
 //!   today this returns a `MethodSignatureMismatch` error from any
