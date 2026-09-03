@@ -187,7 +187,7 @@ pub trait ClaimGrader {
 /// `IsDerivedAs`. The `2026-08-10` settlement behind that split the world on *parsed vs curated*;
 /// D73 §6 replaced the axis with *who asserts*. The parser is a formulation instrument: it
 /// establishes that the text parses to this well-typed term, and cannot establish that the term is
-/// faithful to what the author wrote (D61, unbuilt) or that what the author wrote is true. Three
+/// faithful to what the author wrote, or that what the author wrote is true. Three
 /// propositions that must not collapse into one witness — and `IsDerivedAs(claim, P)` collapsed
 /// them, because a certificate citing it read as "a program established P".
 ///

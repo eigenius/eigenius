@@ -122,62 +122,24 @@ accountable agent behind them.
 
 ## The loop
 
-### 0. Frame ⇄ Ground — make the objective well-posed (the assessment phase)
-Frame the task as an **obligation graph** (D58): a **thesis** proposition + the
-**axioms** it may assume (Observed data / Declared rules / Cited anchors) + the
-**milestones** to derive, each with an acceptance grade. You usually can't state the
-axioms or milestones until you have grounded enough to *express* them — so framing
-and grounding are **co-recursive**. Iterate until the graph is well-posed, then
-execute.
+### 0. Frame ⇄ Ground — state the thesis before deriving toward it
+Say what you are trying to establish, what you may assume, and what would falsify
+each step — before deriving. You usually cannot state the assumptions until you have
+grounded enough to *express* them, so framing and grounding are co-recursive: iterate
+until the thesis and its steps are expressible, then execute.
 
-Draft the graph as typed `objective:` resources, then check four admissibility
-gates. Three are **enforced by the type system at commit** — a non-well-posed frame
-simply won't load — and one is a query you run:
-- **Expressible** — every proposition compiles (an undefined predicate ⇒ vocabulary
-  gap → `grounding`: import/align/declare terms). *The frame loads = passes.*
-- **Checkable** — every `objective:Milestone` carries `acceptance_grade` +
-  `witness_kind` + `falsifier` (all `requires`d; values `allows_only`-constrained).
-  A milestone with undefined acceptance won't commit.
-- **Anchored (presence)** — every `objective:Axiom` carries a `witness` (required);
-  an unanchored axiom won't commit. Its referential half (does the witness resolve?)
-  is the query below.
-- **Reachable** + **Anchored (referential)** — the two runtime checks: run
-  [`experiments/objectives/well-posed-reachable.eigenql`](../../experiments/objectives/well-posed-reachable.eigenql)
-  and [`well-posed-anchored.eigenql`](../../experiments/objectives/well-posed-anchored.eigenql)
-  against the objective's branch. **Empty result = passes;** any row is a node
-  disconnected from the thesis / an axiom with a dangling witness → `grounding`
-  (cite/observe), decompose, or record **blocked**.
+Two disciplines carry the weight, and neither needs machinery:
 
-Loop frame⇄ground until all gates pass (`grounding`'s retrieve-first shrinks the
-frontier each pass, so it converges). **Loop budget:** cap reframing at a few
-rounds — if a gate still can't be closed after ~3 passes (no evidence, no path, no
-grounding), stop and record the finding: the objective is ill-posed/blocked *here*;
-don't proceed on faith. Full spec + the objective ontology: **D58**. (Distinct from
-kernel D21 tasks / `bench:TaskOutput`, which are program-run execution — D58 §6.)
+- **Every step names what would falsify it.** A step with no falsifier has no
+  acceptance criterion, so it cannot fail and therefore cannot be evidence.
+- **Re-enter the frame at every subgoal boundary.** Execution teaches things the
+  original cut could not anticipate — sharpen a downstream step once you can express
+  it precisely, decompose it, or reframe when a learning shows the cut was wrong. Do
+  it as the work lands. The anti-pattern, seen in D57, is executing against a stale
+  frame and retrofitting the formalization afterward.
 
-**The frame is a living artifact — re-enter it at every subgoal boundary (D58 §4.1).**
-A frame seeded from a high-level goal cannot anticipate what execution teaches, so
-`EXECUTE` is not a one-way exit: after each milestone lands, or whenever an insight
-surfaces, **re-assess the frame and fold the learning back in** — *sharpen* a
-downstream milestone now that you can express it precisely, *re-grade* it when a
-stronger witness turns out mechanical (the grade-climbing below — do it as the
-evidence lands, not as a cleanup pass), *decompose* it, or *reframe* the goal when a
-learning shows the original cut was wrong. Do this **proactively**, as part of the
-work — the anti-pattern (seen in D57) is executing against a stale high-level frame
-and then *retrofitting* the formalization afterward under manual steering. Each such
-change is a recorded, versioned frame revision (a structural diff, not silent prose).
-
-Commit the thesis + milestones now (the goal posts) as typed `objective:` resources
-in the objective's own namespace — the propositions they target as `Prop` decls,
-wrapped in `objective:Milestone`/`Axiom` nodes (worked example:
-`experiments/objectives/d57-schema-org/chain/`):
-```esl
-namespace obj = "urn:eigenius:obj:<slug>";
-data obj:ThesisHolds : core:string -> Prop { }
-// Each Prop is the TARGET of an objective:Milestone (acceptance_grade +
-// witness_kind + falsifier + depends_on edges); it only Holds once its
-// antecedents do. The thesis is the root Milestone.
-```
+If a step cannot be closed after a few passes — no evidence, no path — stop and
+record that it is blocked. Do not proceed on faith.
 
 ### 1. Anchor — when entering new territory, fix the ground in real sources
 Run the **`grounding`** skill: **retrieve-first** (ask the kernel what it already
