@@ -120,6 +120,24 @@ disagreement into a `def_eq` mismatch — a worse diagnostic at a later stage. T
 reproduces the generator's, and a class the mirror does not cover is **refused at externalization**
 with a diagnostic naming the class and the mirror.
 
+**Amended `2026-09-02`: the mangling is the authority; the mirror is not consulted.** §6.3.1
+deletes `mirror_iri`, so the institution has no handle on a mirror to look a name up in. It does
+not need one. Once #208 makes the name a namespace-qualified function of the IRI (§3.3.1), the
+generator's map and the externalizer's are the *same total function*, and they agree by
+construction rather than by lookup — the reason for consulting the mirror was that the map was
+a table only the generator held.
+
+What is lost is the early coverage refusal: a class the mirror does not cover now surfaces as a
+`def_eq` failure on a constant the export does not declare, rather than a diagnostic naming the
+class and the mirror. That is the same trade §6.3.1 takes for check 2a, for the same reason.
+
+**Implementation constraint this carries.** The function must exist once and be called by both
+sides — the D30 generator when it emits, and the externalizer when it reads — the way
+`ctor_classes::class_iri` is the single authority for D85's derived class names. Two
+implementations of "the same" mangling is precisely the naming disagreement this section exists
+to prevent, and it would surface as a `def_eq` mismatch with no indication that naming was the
+cause.
+
 ### 3.3.1 D30's current naming is not injective, and that has to be fixed first
 
 D30 §7.1 emits `structure <short_name>` flat inside `namespace EigeniusFFI`, so the Lean name of a
