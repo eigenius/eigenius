@@ -310,7 +310,7 @@ impl SubstrateDispatcher {
 /// the partial-invocation packaging.
 fn build_outcome(outcome: RunOutcome, language: &str) -> DispatchOutcome {
     let RunOutcome {
-        mut output,
+        output,
         derivations,
         image_digest,
         started_at,
@@ -318,14 +318,18 @@ fn build_outcome(outcome: RunOutcome, language: &str) -> DispatchOutcome {
         numerical_metadata,
         dispatched_to,
     } = outcome;
-    // Epistemic category stamp: every resource produced by a runtime
-    // is, by construction, derived (it was computed from inputs by a
-    // typed program). The reflection-ontology pins this as
-    // `DerivedResource` (D29 §8.4 cross-link, see the reflection
-    // ontology). The mirror codec stamps only the structural class on
-    // `is_a`; the substrate's commit pipeline owns the epistemic
-    // categorization — applied here before the orchestrator commits.
-    stamp_derived_epistemic_category(&mut output);
+    // NO epistemic-category stamp. Every runtime output used to get
+    // `is_a: [reflection:DerivedResource]` here, on the reasoning that a resource computed
+    // from inputs by a typed program is derived by construction.
+    //
+    // P4 (6/n) deleted that whole scheme — `DerivedEvidence`, `witness:IsDerivedAs`,
+    // `WitnessCategory::Derived`, `Ground::Derived` — because a computed claim does not rest
+    // on the fact that a computation ran: it rests on the assertion that the plan denotes
+    // `I -> O` plus the inputs, so a computed ground is `App(Declared(plan), Observed(inputs))`.
+    // P5 (2/n) then removed `DerivedResource` and its three siblings from the reflection
+    // ontology. This call was not removed with them, so every wrapped-R warrant stamped a
+    // class that no longer resolves and Rule 22 refused the commit — all twelve of the WRN
+    // demo's R legs, with the epistemic category now carried by the certificate's structure.
     let trace = DispatchTrace {
         language: language.to_string(),
         image_digest,
@@ -344,42 +348,6 @@ fn build_outcome(outcome: RunOutcome, language: &str) -> DispatchOutcome {
         derivations_cbor,
         partial_invocation_cbor: eigon_cbor::serialize_resource(&partial),
     }
-}
-
-/// IRI of the reflection ontology's class for resources produced by
-/// computation. Stamped onto every runtime-substrate output's
-/// `is_a` list so the chain auditor can distinguish runtime-produced
-/// resources from declared / observed / verified ones (reflection
-/// ontology §`DerivedResource`).
-const PROP_IS_A: &str = "urn:eigenius:core:is_a";
-const CLASS_DERIVED_RESOURCE: &str = "urn:eigenius:reflection:DerivedResource";
-
-/// Append `urn:eigenius:reflection:DerivedResource` to the output's
-/// `is_a` list, preserving any structural class the mirror codec
-/// stamped. Idempotent: a second call is a no-op. Resources without
-/// any prior `is_a` (a primitive output, or a worker that didn't
-/// stamp) get a single-element list.
-fn stamp_derived_epistemic_category(output: &mut Resource) {
-    let is_a_iri = Iri::parse(PROP_IS_A).expect("static IRI");
-    let derived_iri = Iri::parse(CLASS_DERIVED_RESOURCE).expect("static IRI");
-
-    let mut entries: Vec<Value> = match output.get(&is_a_iri) {
-        Some(Value::Array(arr)) => arr.clone(),
-        Some(other) => {
-            // Defensive: an unexpected shape (a single value rather than an array).
-            // Promote into an array so the rule "is_a is a list" is preserved post-stamp.
-            vec![other.clone()]
-        }
-        None => Vec::new(),
-    };
-    let already_present = entries.iter().any(|v| match v {
-        Value::String(s) => s == derived_iri.as_str(),
-        _ => false,
-    });
-    if !already_present {
-        entries.push(Value::iri(&derived_iri));
-    }
-    output.set(is_a_iri, Value::Array(entries));
 }
 
 /// Empty input is treated as an embedded Resource with no properties
@@ -552,57 +520,9 @@ mod tests {
         assert!(matches!(err, FacadeError::InvalidCbor(_)), "got {err:?}");
     }
 
-    fn iri(s: &str) -> Iri {
-        Iri::parse(s).unwrap()
-    }
-
-    #[test]
-    fn stamp_appends_derived_resource_to_empty_is_a() {
-        let mut r = Resource::new_embedded();
-        stamp_derived_epistemic_category(&mut r);
-        let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();
-        assert_eq!(is_a, vec![iri(CLASS_DERIVED_RESOURCE)]);
-    }
-
-    #[test]
-    fn stamp_preserves_existing_is_a_classes() {
-        // Output came from a mirror codec carrying its own structural
-        // class — the stamp must not drop that.
-        let mut r = Resource::new_embedded();
-        r.set(
-            iri(PROP_IS_A),
-            Value::Array(vec![Value::String(
-                iri("urn:eigenius:test:Demo").as_str().to_string(),
-            )]),
-        );
-        stamp_derived_epistemic_category(&mut r);
-        let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();
-        assert!(is_a.contains(&iri("urn:eigenius:test:Demo")));
-        assert!(is_a.contains(&iri(CLASS_DERIVED_RESOURCE)));
-    }
-
-    #[test]
-    fn stamp_is_idempotent() {
-        let mut r = Resource::new_embedded();
-        stamp_derived_epistemic_category(&mut r);
-        stamp_derived_epistemic_category(&mut r);
-        let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();
-        // Exactly one entry — no duplicates from the second stamp.
-        assert_eq!(is_a, vec![iri(CLASS_DERIVED_RESOURCE)]);
-    }
-
-    #[test]
-    fn stamp_promotes_non_array_is_a_to_array() {
-        // Defensive: some workers might emit a single value rather than a list (older codec
-        // shapes). Stamp must still produce a valid is_a list.
-        let mut r = Resource::new_embedded();
-        r.set(
-            iri(PROP_IS_A),
-            Value::iri(&iri("urn:eigenius:test:OldShape")),
-        );
-        stamp_derived_epistemic_category(&mut r);
-        let is_a = r.get(&iri(PROP_IS_A)).expect("is_a present").as_iri_array();
-        assert!(is_a.contains(&iri("urn:eigenius:test:OldShape")));
-        assert!(is_a.contains(&iri(CLASS_DERIVED_RESOURCE)));
-    }
+    // The four `stamp_*` tests that stood here went with
+    // `stamp_derived_epistemic_category`: they pinned that every runtime output carried
+    // `is_a: [reflection:DerivedResource]`, a class P5 (2/n) removed from the ontology. They
+    // passed for three days after the class was gone, because they asserted on a string
+    // constant this file declared rather than on anything the chain would accept.
 }

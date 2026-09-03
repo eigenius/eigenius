@@ -185,6 +185,28 @@ impl EigeniusService {
                 Some(crate::ontology::resource::Value::Array(arr)) => arr.clone(),
                 _ => Vec::new(),
             };
+            // An output that states NO class takes the one the program DECLARES it
+            // produces. A program is typed `I -> O`, so its output inhabits `O`; reading
+            // `program:output_type` here is that type discipline applied to the resource
+            // rather than a second place to decide what the thing is.
+            //
+            // The gap this fills: a wrapped-R script builds its result through
+            // `r_eigon_begin` / `r_eigon_set_*` and need not name a class, and the runtime
+            // substrate used to supply one by stamping `reflection:DerivedResource` on every
+            // output. P4 (6/n) deleted that whole axis — a computed claim rests on
+            // `App(Declared(plan), Observed(inputs))`, not on the fact that a run happened —
+            // and P5 (2/n) removed the class, leaving those outputs with no `is_a` at all and
+            // every wrapped-R warrant failing Rule 1 on commit.
+            let types = if types.is_empty() {
+                let out_ty = Iri::parse(wk::PROGRAM_OUTPUT_TYPE).unwrap();
+                program
+                    .get(&out_ty)
+                    .and_then(|v| v.as_str())
+                    .map(|t| vec![crate::ontology::resource::Value::String(t.to_string())])
+                    .unwrap_or_default()
+            } else {
+                types
+            };
             output.set(is_a_iri, crate::ontology::resource::Value::Array(types));
             // The run is recorded by the ProductionTrace this points at. It used to
             // also stamp `DerivedResource` and nominate `epistemic_status =

@@ -3046,7 +3046,7 @@ impl Compiler {
 
         let output_type = self.resolve(&prog.output_type)?;
         r.set(
-            iri("urn:eigenius:program:output_type"),
+            iri(crate::ontology::well_known::PROGRAM_OUTPUT_TYPE),
             Value::String(output_type),
         );
 

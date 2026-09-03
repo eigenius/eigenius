@@ -128,6 +128,20 @@ pub const MERGE_TARGET_CLASS: &str = "urn:eigenius:core:merge_target_class";
 /// resources.
 pub const PROGRAM_TYPE: &str = "urn:eigenius:program:type";
 
+/// The class a `program:Program` declares it produces (`domain:
+/// [program:Program]`, `class_types: [core:Class]`, declared in
+/// `ontologies/program/program-ontology.json`).
+///
+/// A program is typed `I -> O`, so its output inhabits `O`. `run_program` reads
+/// this to give an output its `is_a` when the computation stated no class of its
+/// own — a wrapped-R script builds its result through `r_eigon_begin` /
+/// `r_eigon_set_*` and need not name one. The runtime substrate used to supply
+/// that class by stamping `reflection:DerivedResource` on every output; P4 (6/n)
+/// deleted the axis (a computed claim rests on `App(Declared(plan),
+/// Observed(inputs))`, not on the fact that a run happened) and P5 (2/n) removed
+/// the class, so the declared type is what fills the slot now.
+pub const PROGRAM_OUTPUT_TYPE: &str = "urn:eigenius:program:output_type";
+
 // --- Merge resolution records (D38 §3) ---
 //
 // One `MergeResolutionRecord` resource is committed alongside the

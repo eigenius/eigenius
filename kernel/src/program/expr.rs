@@ -51,7 +51,7 @@ const DECIDE_APPLY: &str = "urn:eigenius:program:DecideApply";
 /// - type is `Exp::Pi(input_type, output_type)`
 pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), String> {
     let input_type_iri = get_iri(resource, "urn:eigenius:program:input_type")?;
-    let output_type_iri = get_iri(resource, "urn:eigenius:program:output_type")?;
+    let output_type_iri = get_iri(resource, crate::ontology::well_known::PROGRAM_OUTPUT_TYPE)?;
 
     let input_type = resolve_class_type(&input_type_iri, layer)?;
     let output_type = resolve_class_type(&output_type_iri, layer)?;
