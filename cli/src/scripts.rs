@@ -291,7 +291,12 @@ pub async fn script_run(
         "@id": program_iri,
         "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
         "urn:eigenius:program:input_type": input_type,
-        "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+        // `core:Resource`, the catch-all — every WRN program declares the same. This said
+        // `reflection:DerivedResource` until P5 (2/n) removed that class, which made the
+        // declared output type name nothing that resolves. It matters more than it looks:
+        // `run_program` now reads `program:output_type` to give an output its `is_a` when the
+        // computation states no class, so a dead class here would be stamped onto results.
+        "urn:eigenius:program:output_type": "urn:eigenius:core:Resource",
         "urn:eigenius:program:body": {
             "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
             "urn:eigenius:program:function": "urn:eigenius:program:components:RunRuntimeScript",

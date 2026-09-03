@@ -76,7 +76,6 @@ const FORMAT: &str = "urn:eigenius:core:format";
 const SOURCE_IRL: &str = "urn:eigenius:core:source_irl";
 const CORE_CLASS: &str = "urn:eigenius:core:Class";
 const CORE_PROPERTY: &str = "urn:eigenius:core:Property";
-const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
 const DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
 const DECLARED_BY_VALUE: &str = "urn:schema_org";
 const ORGANIZATION: &str = "urn:eigenius:prov:Organization";
@@ -429,10 +428,7 @@ fn emit_class(
 ) {
     let (urn, https) = map_schema_id(id).expect("schema: id");
     let mut r = Resource::new(iri(&urn));
-    r.set(
-        iri(IS_A),
-        Value::Array(vec![rref(CORE_CLASS), rref(DECLARED_RESOURCE)]),
-    );
+    r.set(iri(IS_A), Value::Array(vec![rref(CORE_CLASS)]));
     // subclass_of: in-scope schema: parents only (drop external cross-refs,
     // folded DataTypes, and out-of-scope/pending parents).
     let parents: Vec<Value> = iri_refs(n, K_SUBCLASS_OF)
@@ -471,8 +467,8 @@ fn emit_member(
 ) {
     let (urn, https) = map_schema_id(id).expect("schema: id");
     let mut r = Resource::new(iri(&urn));
-    // is_a = [<every in-scope enum class it instantiates>..., DeclaredResource]
-    let mut is_a: Vec<Value> = types
+    // is_a = [<every in-scope enum class it instantiates>...]
+    let is_a: Vec<Value> = types
         .iter()
         .filter(|t| enum_set.contains(**t))
         .filter_map(|t| map_schema_id(t).map(|(u, _)| u))
@@ -482,7 +478,6 @@ fn emit_member(
     if is_a.is_empty() {
         return; // its enumeration class is out of scope — skip the member
     }
-    is_a.push(rref(DECLARED_RESOURCE));
     r.set(iri(IS_A), Value::Array(is_a));
     common_meta(&mut r, n, &https);
     report.resources.push(r);
@@ -501,10 +496,7 @@ fn emit_property(
 ) {
     let (urn, https) = map_schema_id(id).expect("schema: id");
     let mut r = Resource::new(iri(&urn));
-    r.set(
-        iri(IS_A),
-        Value::Array(vec![rref(CORE_PROPERTY), rref(DECLARED_RESOURCE)]),
-    );
+    r.set(iri(IS_A), Value::Array(vec![rref(CORE_PROPERTY)]));
     // NB: schema.org `domainIncludes` is NOT emitted as `core:domain` (which would
     // restrict usage); it is inverted into each domain class's `core:recommends`
     // (see `convert`), faithfully preserving schema.org's advisory stance.
@@ -675,10 +667,13 @@ mod tests {
     }
 
     #[test]
-    fn class_maps_with_subclass_and_grade() {
+    fn class_maps_with_subclass() {
         let rep = convert(&graph());
         let d = find(&rep, "urn:schema_org:Dataset").expect("Dataset emitted");
-        assert_eq!(refs(d, IS_A), vec![CORE_CLASS, DECLARED_RESOURCE]);
+        // `reflection:DeclaredResource` stood beside `core:Class` here until P5 (2/n)
+        // removed the class from the ontology. The test kept passing because it compared
+        // against this file's own constant, not against anything the chain would accept.
+        assert_eq!(refs(d, IS_A), vec![CORE_CLASS]);
         assert_eq!(refs(d, SUBCLASS_OF), vec!["urn:schema_org:CreativeWork"]);
         assert_eq!(
             d.get(&iri(SOURCE_IRL)).and_then(|v| v.as_str()),

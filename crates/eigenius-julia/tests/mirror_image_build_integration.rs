@@ -586,16 +586,12 @@ fn julia_call_runtime_method_dispatches_typed_handler() {
         output_is_a.contains(&iri("urn:eigenius:test:Demo")),
         "output must be is_a Demo, got {output_is_a:?}"
     );
-    // Epistemic category stamp (Phase 19a.4 / D29 §8.4 substrate
-    // commit-pipeline rule): every runtime-produced resource lands
-    // with `urn:eigenius:reflection:DerivedResource` on its `is_a`,
-    // alongside its structural class. Lets the chain auditor
-    // distinguish runtime-produced from declared / observed /
-    // verified resources.
-    assert!(
-        output_is_a.contains(&iri("urn:eigenius:reflection:DerivedResource")),
-        "output must be is_a DerivedResource, got {output_is_a:?}"
-    );
+    // The epistemic-category stamp that stood here is gone. Every runtime-produced resource
+    // used to land with `reflection:DerivedResource` beside its structural class, so an
+    // auditor could tell runtime-produced from declared / observed / verified. P4 (6/n)
+    // deleted that axis and P5 (2/n) removed the class; what it meant is carried by the
+    // certificate's `App(Declared(plan), Observed(inputs))`, not by an `is_a` marker. The
+    // structural class asserted above is what the output actually carries.
 
     // Step 4: partial RuntimeInvocation carries dispatched_to.
     let inv = eigon_cbor::parse_resource_lenient(&outcome.partial_invocation_cbor)

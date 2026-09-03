@@ -18,7 +18,7 @@
 //! runtime. The KM12 shWRN1 xenograft tumor volumes (Fig 2d, Dox± , 5+5
 //! mice × up to 8 days) are dispatched as a chain-resident table; the R
 //! script fits `lmer(Volume ~ Day + (0+Day|Mouse))` vs `+ Day:Dox` and
-//! returns the LRT p as an Eigon `DerivedResource`.
+//! returns the LRT p as an Eigon resource.
 //!
 //! Testability: the data marshalling runs everywhere (the script decodes
 //! the four columns before `library(lme4)`), so this test exercises the
@@ -82,7 +82,7 @@ const MICE: [&str; 73] = [
 
 /// The authors' lme4 model (in_vivo_KM12_analysis.R), wrapped: random-slope
 /// mixed model, Day:Dox interaction LRT. Returns the LRT p as a
-/// DerivedResource.
+/// resource.
 const SCRIPT: &str = r#"
 in0   <- eigenius_inputs[[1]]
 vol   <- .Call("r_eigon_f64_array", in0, "urn:eigenius:pub:wrn:vivo_volume")
@@ -97,7 +97,7 @@ m2 <- lmer(Volume ~ Day + Day:Dox + (0 + Day | Mouse), df, REML = FALSE)
 a <- anova(m1, m2)
 pval <- a[["Pr(>Chisq)"]][2]
 b <- .Call("r_eigon_begin", "urn:eigenius:pub:wrn:vivo_lme4:result")
-.Call("r_eigon_add_class", b, "urn:eigenius:reflection:DerivedResource")
+.Call("r_eigon_add_class", b, "urn:eigenius:core:Resource")
 .Call("r_eigon_set_f64", b, "urn:eigenius:measurements:lrt_p_value", pval)
 .Call("r_eigon_finish", b)
 "#;

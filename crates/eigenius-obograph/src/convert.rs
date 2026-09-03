@@ -139,7 +139,6 @@ const RESOURCE: &str = "urn:eigenius:core:Resource";
 const STRING_DATA_TYPE: &str = "urn:eigenius:core:string";
 const RESOURCE_DATA_TYPE: &str = "urn:eigenius:core:resource";
 
-const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
 const DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
 
 /// Declared-by attribution for converter-synthesised Property
@@ -532,20 +531,12 @@ fn ensure_synthetic_property_declarations(by_iri: &mut BTreeMap<String, Resource
         let mut r = Resource::new(iri);
         r.set(
             Iri::parse(IS_A).expect("well-known IRI"),
-            Value::Array(vec![
-                Value::String(
-                    Iri::parse(PROPERTY)
-                        .expect("well-known IRI")
-                        .as_str()
-                        .to_string(),
-                ),
-                Value::String(
-                    Iri::parse(DECLARED_RESOURCE)
-                        .expect("well-known IRI")
-                        .as_str()
-                        .to_string(),
-                ),
-            ]),
+            Value::Array(vec![Value::String(
+                Iri::parse(PROPERTY)
+                    .expect("well-known IRI")
+                    .as_str()
+                    .to_string(),
+            )]),
         );
         r.set(
             Iri::parse(DECLARED_BY).expect("well-known IRI"),
@@ -584,12 +575,14 @@ fn node_to_resource(
 ) -> Resource {
     let mut r = Resource::new(iri);
 
-    // is_a — driven by node type, then extended with
-    // [`DECLARED_RESOURCE`] so every imported Resource is
-    // structurally a declared one. PROPERTY nodes get a `data_type`
-    // companion slot; INDIVIDUAL gets the catch-all `core:Resource`;
-    // unknown/missing type still gets DeclaredResource (the only
-    // tag).
+    // is_a — driven by node type. PROPERTY nodes get a `data_type` companion slot;
+    // INDIVIDUAL and an unknown/missing type both get the catch-all `core:Resource`.
+    //
+    // Every imported Resource used to be extended with `reflection:DeclaredResource` as well,
+    // "structurally a declared one". P4 (6/n) deleted that axis and P5 (2/n) removed the
+    // class, so the tag named nothing that resolves. It could not simply be dropped: for an
+    // unknown node type it was the ONLY entry, and an empty `is_a` fails Rule 1. So the
+    // unknown case names the catch-all explicitly, which is what it always meant.
     let is_a_iri = Iri::parse(IS_A).expect("well-known IRI");
     let (is_a_target, data_type_target): (Option<&str>, Option<&str>) =
         match node.node_type.as_deref() {
@@ -606,7 +599,7 @@ fn node_to_resource(
                 (Some(PROPERTY), Some(dt))
             }
             Some("INDIVIDUAL") => (Some(RESOURCE), None),
-            _ => (None, None),
+            _ => (Some(RESOURCE), None),
         };
     let mut is_a_array: Vec<Value> = Vec::new();
     if let Some(target) = is_a_target {
@@ -617,12 +610,6 @@ fn node_to_resource(
                 .to_string(),
         ));
     }
-    is_a_array.push(Value::String(
-        Iri::parse(DECLARED_RESOURCE)
-            .expect("well-known IRI")
-            .as_str()
-            .to_string(),
-    ));
     r.set(is_a_iri, Value::Array(is_a_array));
 
     if let Some(target) = data_type_target {
@@ -755,8 +742,11 @@ fn apply_edge(
         let mut r = Resource::new(sub_iri);
         r.set(
             Iri::parse(IS_A).expect("well-known IRI"),
+            // `core:Resource`, the catch-all, where `reflection:DeclaredResource` stood as
+            // this resource's ONLY class. Dropping the retired tag without naming a real one
+            // would leave an empty `is_a` and fail Rule 1.
             Value::Array(vec![Value::String(
-                Iri::parse(DECLARED_RESOURCE)
+                Iri::parse(RESOURCE)
                     .expect("well-known IRI")
                     .as_str()
                     .to_string(),
@@ -888,7 +878,7 @@ mod tests {
                 .collect(),
             other => panic!("expected Array, got {other:?}"),
         };
-        assert_eq!(iris, vec![CLASS.to_string(), DECLARED_RESOURCE.to_string()]);
+        assert_eq!(iris, vec![CLASS.to_string()]);
         match cell.get(&Iri::parse(SHORT_NAME).unwrap()) {
             Some(Value::String(s)) => assert_eq!(s, "cell"),
             other => panic!("expected short_name string, got {other:?}"),
@@ -954,7 +944,6 @@ mod tests {
             iris,
             vec![
                 CLASS.to_string(),
-                DECLARED_RESOURCE.to_string(),
                 "http://example.org/Organelle".to_string(),
             ]
         );
@@ -1068,7 +1057,6 @@ mod tests {
         };
         assert!(i1_iris.iter().any(|i| i == "http://example.org/C1"));
         assert!(i1_iris.iter().any(|i| i == RESOURCE));
-        assert!(i1_iris.iter().any(|i| i == DECLARED_RESOURCE));
     }
 
     /// Synonyms in `meta.synonyms` collapse onto the Resource as
@@ -1412,7 +1400,6 @@ mod tests {
             _ => panic!("expected Array"),
         };
         assert!(is_a_iris.iter().any(|i| i == PROPERTY));
-        assert!(is_a_iris.iter().any(|i| i == DECLARED_RESOURCE));
     }
 
     /// A `urn:obo:*` slot used in the data AND already explicitly

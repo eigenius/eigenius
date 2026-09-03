@@ -969,9 +969,10 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         namespace eigentt  = "urn:eigenius:eigentt";
         namespace reflection = "urn:eigenius:reflection";
         namespace prov = "urn:eigenius:prov";
+        namespace core = "urn:eigenius:core";
         namespace p = "urn:eigenius:demo:parse";
-        resource p:claim : reflection:DeclaredResource {{
-            prov:was_attributed_to = "test";
+        resource p:claim : core:Resource {{
+            prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
             reflection:canonical_proposition = type_expr(
                 {verb_axiom}(
                     eigentt:fst(ontology:the(
@@ -992,6 +993,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         namespace reflection = "urn:eigenius:reflection";
         namespace prov = "urn:eigenius:prov";
         namespace onco = "urn:eigenius:demo:onco";
+        namespace core = "urn:eigenius:core";
         namespace d = "urn:eigenius:demo:def";
 
         def onco:{def_name}(m : Set, g : Set) : Prop =
@@ -1001,8 +1003,8 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
                         ontology:prep_of(x0, ontology:kind_of(g))))),
                 ontology:kind_of(m));
 
-        resource d:claim : reflection:DeclaredResource {{
-            prov:was_attributed_to = "test";
+        resource d:claim : core:Resource {{
+            prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
             reflection:canonical_proposition = type_expr(
                 onco:{def_name}({MSI}, umlscui:C0388246)
             );

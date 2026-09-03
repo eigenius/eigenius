@@ -37,7 +37,7 @@ use crate::convert::Coverage;
 pub const RESULT_IRI: &str = "urn:eigenius:obj:d57:generate_result";
 
 const IS_A: &str = "urn:eigenius:core:is_a";
-const DERIVED_RESOURCE: &str = "urn:eigenius:reflection:DerivedResource";
+const CORE_RESOURCE: &str = "urn:eigenius:core:Resource";
 const SOURCE: &str = "urn:eigenius:prov:was_generated_by";
 const OUTPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:output_content_hash";
 const INPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:input_content_hash";
@@ -67,9 +67,10 @@ pub fn build_report(
     let mut r = Resource::new(iri(id));
     r.set(
         iri(IS_A),
-        Value::Array(vec![Value::String(
-            iri(DERIVED_RESOURCE).as_str().to_string(),
-        )]),
+        // `core:Resource`, the catch-all. This was `reflection:DerivedResource` — the
+        // report's only class — until P5 (2/n) removed it from the ontology. What that tag
+        // meant is now carried by the trace and the certificate, not by an `is_a` marker.
+        Value::Array(vec![Value::String(iri(CORE_RESOURCE).as_str().to_string())]),
     );
     r.set(
         iri(INPUT_CONTENT_HASH),
@@ -144,7 +145,7 @@ mod tests {
 
         // The result is identified and typed as a derivation result.
         assert_eq!(back.id().map(|i| i.as_str()), Some(RESULT_IRI));
-        assert!(back.is_a().iter().any(|c| c.as_str() == DERIVED_RESOURCE));
+        assert!(back.is_a().iter().any(|c| c.as_str() == CORE_RESOURCE));
 
         // The input→output provenance survives the round trip exactly.
         assert_eq!(

@@ -1522,47 +1522,12 @@ mod tests {
         ctx.head().clone()
     }
 
-    #[test]
-    fn derived_resource_without_derivation_passes_with_recommendation() {
-        // Per the reflection ontology, `derivation` is *recommended*
-        // (not required) on `DerivedResource`. A resource carrying the
-        // epistemic stamp without a chain-resident trace IRI still
-        // validates — substrate-produced resources from FIBER ... INTO
-        // commits and post-translation comorphism reify outputs are
-        // derived by construction but may not have a kernel-generated
-        // ProgramTrace yet (D14 §9.3 chain reinsertion). When the
-        // kernel does generate a trace (RunProgram, AutoOnLoad fires),
-        // it sets `derivation` so the audit trail is complete.
-        let base = build_full_bootstrap_layer();
-        let mut builder = LayerBuilder::new("test", Some(base));
-        builder
-            .add_resource(make_resource(
-                "urn:eigenius:test:bad_derived",
-                vec![(
-                    wk::IS_A,
-                    Value::Array(vec![Value::String(
-                        "urn:eigenius:reflection:DerivedResource".to_string(),
-                    )]),
-                )],
-            ))
-            .unwrap();
-
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-
-        let derived_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| {
-                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_derived")
-                    && e.rule == ValidationRule::MissingRequired
-            })
-            .collect();
-        assert!(
-            derived_errors.is_empty(),
-            "DerivedResource without 'derivation' should validate (derivation is recommended, not required), got: {derived_errors:?}"
-        );
-    }
+    // `derived_resource_without_derivation_passes_with_recommendation` stood here. It
+    // asserted that a resource carrying `reflection:DerivedResource` and no `derivation`
+    // raises no `MissingRequired`, because `derivation` was recommended rather than required
+    // on that class. P5 (2/n) deleted the class, so the test kept passing for a reason it
+    // never claimed: an `is_a` naming nothing resolvable has no `requires` to enforce. It
+    // asserted the absence of an error that can no longer occur.
 
     // These exercised `requires` enforcement through the four grade classes. Those
     // are deleted — a stored grade conflated provenance with warrant — so the same

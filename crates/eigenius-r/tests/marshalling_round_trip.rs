@@ -17,7 +17,7 @@
 //! arrays is dispatched; the R script decodes the columns with
 //! `r_eigon_f64_array` / `r_eigon_str_array`, computes a base-R statistic
 //! (no extra packages — runs anywhere R is present), and encodes an Eigon
-//! `DerivedResource` via the `r_eigon_begin/add_class/set_f64/finish`
+//! a resource via the `r_eigon_begin/add_class/set_f64/finish`
 //! builder. `run_script` parses that CBOR back into the `RunOutcome`
 //! output. This proves the full wrapped-R recompute shape the P5 lme4
 //! xenograft recompute uses — minus lme4, so it's green in this sandbox.
@@ -56,7 +56,7 @@ const MEAN: &str = "urn:eigenius:test:mean";
 const PVAL: &str = "urn:eigenius:test:p";
 
 /// The R script: decode two columns, compute a base-R group t-test +
-/// overall mean, and encode a DerivedResource. (`as.character` so `g`
+/// overall mean, and encode a resource. (`as.character` so `g`
 /// round-trips as strings; `t.test(x ~ factor(g))` needs no packages.)
 const SCRIPT: &str = r#"
 in0 <- eigenius_inputs[[1]]
@@ -65,7 +65,7 @@ g <- .Call("r_eigon_str_array", in0, "urn:eigenius:test:g")
 m <- mean(x)
 p <- t.test(x ~ factor(g))$p.value
 b <- .Call("r_eigon_begin", "urn:eigenius:test:result")
-.Call("r_eigon_add_class", b, "urn:eigenius:reflection:DerivedResource")
+.Call("r_eigon_add_class", b, "urn:eigenius:core:Resource")
 .Call("r_eigon_set_f64", b, "urn:eigenius:test:mean", m)
 .Call("r_eigon_set_f64", b, "urn:eigenius:test:p", p)
 if (p < 0.05) {
@@ -119,7 +119,7 @@ fn eigon_r_marshalling_round_trip() {
         .run_script(&env, &script, &[input])
         .expect("marshalling round-trip dispatch succeeds");
 
-    // The output is the parsed Eigon DerivedResource the script built.
+    // The output is the parsed Eigon resource the script built.
     let get_f64 = |iri: &str| match outcome.output.get(&Iri::parse(iri).unwrap()) {
         Some(Value::Float(f)) => *f,
         other => panic!("property {iri} not a Float: {other:?}"),
@@ -137,9 +137,13 @@ fn eigon_r_marshalling_round_trip() {
     let is_a = outcome
         .output
         .get(&Iri::parse("urn:eigenius:core:is_a").unwrap());
-    let has_derived = matches!(is_a, Some(Value::Array(a))
-        if a.iter().any(|v| matches!(v, Value::String(s) if s == "urn:eigenius:reflection:DerivedResource")));
-    assert!(has_derived, "output is_a missing DerivedResource: {is_a:?}");
+    let has_class = matches!(is_a, Some(Value::Array(a))
+        if a.iter().any(|v| matches!(v, Value::String(s) if s == "urn:eigenius:core:Resource")));
+    // The class is incidental — this pins that `r_eigon_add_class` round-trips at
+    // all. It named `reflection:DerivedResource` until P5 (2/n) removed that class from
+    // the ontology, at which point the assertion held while the resource it described
+    // would have been refused at commit.
+    assert!(has_class, "output is_a missing core:Resource: {is_a:?}");
 
     // The canonical_proposition the script set (groups differ → p < 0.05)
     // round-trips as the D47 App-spine term the reasoning institution
