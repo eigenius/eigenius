@@ -23,9 +23,18 @@ description = "Lean 4 verification institution for Eigenius. Wraps nanoda_lib as
 nanoda_lib = { git = "https://github.com/ammkrn/nanoda_lib", rev = "6ae1f0cd962f081f6c423454c5da729d841236a7" }
 
 # Kernel dep wired in 20a.4: `LeanInstitution` implements
-# `kernel::institution::Institution`; the chain-mirror translator
-# produces `kernel::ontology::Resource` / `Value::Json` trees per D40.
+# `kernel::institution::Institution`.
 eigenius-kernel = { path = "../../kernel" }
+
+# D74 §3.3: the IRI -> Lean `Name` mangling is a SINGLE authority, and it lives with D30's
+# emitter (`mirror_gen::lean_name`). The externalizer must spell a constant exactly as the
+# generator did or the comparison fails on naming rather than on content, so it calls the same
+# function rather than reimplementing it. Promoted from a dev-dependency for this.
+eigenius-lean-runtime = { path = "../eigenius-lean-runtime" }
+
+# D74 §4 — `LitInt` maps to Lean's `NatLit`, whose payload is a `BigUint`. Same version nanoda
+# pins, so the type crossing `mk_nat_lit_quick` is the one it expects.
+num-bigint = "0.4.4"
 
 thiserror.workspace = true
 serde_json.workspace = true
@@ -43,14 +52,9 @@ sha2 = "0.10"
 tempfile = "3"
 
 [dev-dependencies]
-# The notebook-fixture generator (examples/gen_verification_demo.rs)
-# uses the canonical `mirror_to_resource` helper from the substrate's
-# Lean runtime so the generated mirror carries every required property
-# the chain validator enforces. Dev-only — the verification side
-# (production API of this crate) doesn't depend on the authoring
-# runtime. Avoids drift between the fixture and what a real
-# generator-driven commit pipeline would emit.
-eigenius-lean-runtime = { path = "../eigenius-lean-runtime" }
+# `eigenius-lean-runtime` is a real dependency now (see above) — the verification side calls
+# D30's naming authority so it spells a constant the way the generator did. It was dev-only
+# while only `examples/gen_verification_demo.rs` needed it, for `mirror_to_resource`.
 # `MirrorGenerationOutput::library` carries a `LibraryContent::Embedded`
 # value, whose entries are `LibraryFile { path, content }`. The
 # generator binary stages the capstone Lake project into one.

@@ -42,6 +42,8 @@
 
 pub mod chain_mirror;
 pub mod checker;
+/// D74 — EigenTT `Prop` -> nanoda `Expr`, so the Lean goal is manufactured from the claim.
+pub mod externalize;
 pub mod institution;
 pub mod startup;
 

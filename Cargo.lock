@@ -1126,6 +1126,7 @@ dependencies = [
  "eigenius-lean-runtime",
  "eigenius-runtime-substrate",
  "nanoda_lib",
+ "num-bigint",
  "serde_json",
  "sha2",
  "tempfile",
