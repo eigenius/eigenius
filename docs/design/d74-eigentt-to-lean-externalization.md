@@ -164,6 +164,15 @@ for implementing this document.
 by the last component alone, and that is the whole of its case — it is injective by measurement,
 and re-collides the first time two namespaces share a final segment. See §6.1.
 
+**In the emitted Lean: one `namespace EigeniusFFI` block, dotted declaration names.** The
+generator writes `structure eigenius.reflection.Person where` inside the single block it already
+opens, rather than nesting a block per namespace path. Dotted declaration names preserve the
+topological order a structure's field references require — grouping by namespace would fight it —
+and keep the `export EigeniusLeanCommon (…)` helper resolution the codec emitter relies on,
+since every declaration stays lexically inside `EigeniusFFI`. Codec functions qualify the same
+way (`eigenius.reflection.decodePerson`), because `decodePerson` flat in `EigeniusFFI` collides
+exactly as `structure Person` does.
+
 ---
 
 ## 4. The fragment
@@ -262,24 +271,67 @@ collaboration with Nada Amin's group made the Lean institution load-bearing and 
    length in proof text.
 
 2. ~~**Where does `def_eq` run?**~~ **Decided `2026-09-02` — inside the existing `check_proof`
-   call.** One arena, one parse: the export is parsed there already, so externalizing the
+   call, and a mismatch is `Verdict::Fails`.** One arena, one parse: the export is parsed there already, so externalizing the
    expected statement into the same `TcCtx` is the cheap direction, and both sides must share an
    arena for `def_eq` to be callable at all. The cost is `check_proof`'s signature, which gains
    the expected statement as an option. A second entry point would keep that contract and pay a
    second parse of the same bytes for it, which is the wrong thing to protect.
 
+   A mismatch **vetoes the commit**. §9.11.1: *"An institution may return `Fails` and block a
+   commit on its own authority."* A proof term whose statement is not the claim's is exactly
+   that case, and the asymmetry §9.11.1 draws applies — an incorrect `Fails` loses data, which
+   is recoverable; letting the resource land as `Undecidable` puts a proof term on the chain
+   whose claim it does not prove, looking like an ordinary unverified one. The
+   `verdict_provenance` Sibling still lands as the audit anchor (D41 §6.1).
+
 3. ~~**What happens when the fields are absent?**~~ **Decided `2026-09-02` — `claim_iri` becomes
-   `requires`, and the reseed is taken now.** With the statement manufactured from the claim,
-   `lean:proposition` and `mirror_iri` stop being load-bearing, but without `claim_iri` there is
-   no claim to externalize and the check has nothing to be total over. The alternative — leaving
-   it recommended and having the institution reject rather than skip — costs no migration and
-   changes the same behaviour, at the price of a schema that no longer describes what the
-   institution accepts; §9.11's whole point is that the declaration is the contract.
+   `requires`, the other two slots are deleted, and the reseed is taken now.** Without
+   `claim_iri` there is no claim to externalize and the check has nothing to be total over. The
+   alternative — leaving it recommended and having the institution reject rather than skip —
+   costs no migration and changes the same behaviour, at the price of a schema that no longer
+   describes what the institution accepts; §9.11's whole point is that the declaration is the
+   contract.
 
    Taken now rather than later because the edit moves the `lean-institution` layer hash and every
    layer id below it, and it bundles with #208's ontology work, which moves the manifest anyway.
    One reseed covers both. Deferring means paying it once collaborators hold chains committed
    against the current ids.
+
+### 6.3.1 `lean:LeanProofTerm` drops to three slots
+
+`def_eq` becomes the **one** correspondence check, and it is total. Everything the two
+`recommends`-and-skip checks were doing, it does better:
+
+| slot | check | fate |
+|---|---|---|
+| `claim_iri` | — | **`requires`**. The statement is manufactured from it. |
+| `proof_payload` | 1, nanoda | `requires`, unchanged |
+| `target_name` | 1, nanoda | `requires`, unchanged |
+| `lean:proposition` | 2c, short-name correspondence | **deleted** |
+| `mirror_iri` | 2a, `source_layer` ancestry | **deleted** |
+
+**2c is subsumed.** It asked whether the committed proposition *mentions* the claim's class —
+a proxy for the question `def_eq` answers directly. Its implementation is also the place
+#208's collision does its damage: `short_to_iri` is a `BTreeMap<String, Iri>` keyed on
+`core:short_name`, so on a colliding pair the second insert overwrites the first and a mirror
+holding both `reflection:Person` and `schema_org:Person` silently keeps one.
+
+**2a is subsumed.** A moved mirror makes the externalized `Const` names disagree with the
+export's, so `def_eq` fails. The cost of deleting it is diagnostic, not soundness: a version
+skew arrives as a statement mismatch rather than as `FFIVersionMismatch` naming the moved
+layer. Accepted `2026-09-02` on the ground that one total check beats two partial ones plus a
+better error message.
+
+**This retires D40's direction.** `chain_mirror.rs`, `bytes_to_lean_expr` and the four
+`lean:Lean{Name,Level,LevelList,Expr}` inductives exist to recover a proposition *from* Lean.
+Nothing reads the result once the goal is manufactured from the claim. D40 stays as the record
+of why the inverse was built — the premise that made it necessary is stated in §7 — and its
+implementation goes.
+
+**Sequencing note.** The demo fixture's generator writes the proposition through
+`bytes_to_lean_expr`; that step goes with it, and the fixture regenerates. Until this lands the
+fixture must keep landing `Holds`, so `notebook_demo_fixture_lands_holds` (un-`#[ignore]`d in
+#207) stays green across the change rather than being suspended for it.
 
 4. ~~**Is `def_eq` the right strictness?**~~ **Decided `2026-09-02` — yes, and deliberately.**
    It admits δ- and η-equal statements, so the check accepts statements that are not
