@@ -209,7 +209,7 @@ reads as permission, which is the opposite of what this section is for.
 the kernel breaks that file rather than falling through to a translation nobody chose. **The
 code is the authority for totality; this table is the authority for the reasons.**
 
-### 4.1 Translated (17)
+### 4.1 Translated (16)
 
 | EigenTT | Lean | note |
 |---|---|---|
@@ -217,7 +217,6 @@ code is the authority for totality; this table is the authority for the reasons.
 | `Pi(p, a, b)` | `Pi` | binder name carried for readability only |
 | `Arrow(a, b)` | `Pi` with an unused binder | `Arrow` is non-dependent `Pi` |
 | `App(f, x)` | `App` | |
-| `Lam(p, e)` | `Lambda` | appears inside propositions as a motive |
 | `Var(x)` | `Var{idx}` | §3.1 — named to de Bruijn, against the binder stack |
 | `Const(iri, levels)` | `Const(name, levels)` | §3.3. **Replaced `InductiveType(decl, args)`** in D76 Phase B1, and is now how every chain-resident reference translates |
 | `EigonClass(iri)` | `Const(name, [])` | §3.3 |
@@ -231,7 +230,7 @@ code is the authority for totality; this table is the authority for the reasons.
 | `One` | `PUnit` | |
 | `Unit` | `PUnit.unit` | |
 
-### 4.2 Refused (26)
+### 4.2 Refused (27)
 
 Refusal is **typed and total**: an `ExternalizeError` naming the variant and the sub-term, never
 a silent approximation. A proposition outside the fragment must fail loudly, since the
@@ -247,6 +246,7 @@ alternative — translating "close enough" — proves a different theorem soundl
 | **Surface forms** | `Data`, `Dec`, `Ann`, `Con` | declaration, `let`/`letrec`, ascription, and a constructor application whose inductive is implicit — forms the codec does not emit into a proposition slot |
 | **Effects** | `InstitutionInvoke` | dispatches a comorphism; its result is not determined by the proposition alone |
 | **No Lean image** | `LitFloat`, `EigonPrimitive(Float)`, `EigonPrimitive(Json)` | Lean has no float literal, and a proposition over reals needs a `Float` vs `Real` decision v1 does not make. `Json` is a chain-side carrier |
+| **Unannotated binder** | `Lam` | see §4.4 |
 | **Open** | `InductiveCtor` | see §4.3 |
 
 ### 4.3 `InductiveCtor` is open, not decided
@@ -261,6 +261,32 @@ does not admit.
 
 It is refused until that is settled, with a diagnostic saying so. A proposition quantifying over
 a constructor is rare in the claims this document serves; a wrong name for one would not be.
+
+### 4.4 `Lam` is refused because Mini-TT lambdas carry no domain
+
+The original table had `Lam(p, e)` in the fragment — *"appears inside propositions as a
+motive"*. It cannot be translated as it stands.
+
+`Exp::Lam(Patt, Box<Exp>)` is **Mini-TT's unannotated lambda**, inherited with the rest of this
+AST from the Coquand et al. reference implementation `kernel/src/nbe/` ports. It carries no
+domain by design, because Mini-TT is bidirectional: a lambda is only ever *checked* against a
+known `Pi`, which supplies one. The kernel holds that line — `check_infer` has no `Lam` arm
+(pinned as "not inferable"), and `(Exp::Lam(..), Val::Sort(n))` is an explicit type error, so a
+λ cannot *be* a proposition. It can only appear as an argument inside one, where the applied
+function's type determines its domain.
+
+Lean's `Lambda` requires a domain, and `def_eq` **compares** it: `def_eq_binder_aux` runs
+`if self.def_eq(t1, t2) { … } else { return false }` over the binder types. So there is no
+placeholder that `def_eq` sees through — a wrong domain is a wrong term.
+
+Admitting `Lam` therefore means making externalization **bidirectional**, threading the expected
+type down so a lambda under an application takes its domain from the function. That is a real
+change to the shape of §2's pipeline, not a missing row.
+
+**Measured before refusing:** of the 102 committed `canonical_proposition` values in the tree,
+**zero** contain a `Lam`. The four occurrences of "Lam" in `ontologies/` are the *declaration* of
+the constructor in `eigentt:Term`, `lean:LeanExpr` and the formulas term type, not uses. v1 gives
+up nothing that exists.
 
 ## 5. What this makes true, and what it does not
 

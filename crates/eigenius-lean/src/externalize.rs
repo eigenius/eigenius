@@ -270,23 +270,6 @@ fn go<'t, 'p: 't>(
             Ok(ctx.mk_pi(n, default_binder_style(), dom, cod?))
         }
 
-        // Appears inside a proposition as a motive.
-        Exp::Lam(p, body) => {
-            let name = binder_name(p);
-            let n = ctx.str1_owned(name.clone());
-            // EigenTT's `Lam` carries no domain annotation; Lean's `Lambda` needs one. `Sort 0`
-            // is a placeholder that `def_eq` sees through, because the domain of a lambda in a
-            // checked term is determined by the surrounding application.
-            let dom = {
-                let zero = ctx.zero();
-                ctx.mk_sort(zero)
-            };
-            binders.0.push(name);
-            let body = go(body, ctx, names, layer, binders);
-            binders.0.pop();
-            Ok(ctx.mk_lambda(n, default_binder_style(), dom, body?))
-        }
-
         // D74 §3.3 — a reference to a chain-resident declaration. `Const` replaced
         // `InductiveType(decl, args)` in D76 Phase B1, so it is this variant the §4 table's
         // `InductiveType` row now describes.
@@ -393,6 +376,28 @@ fn go<'t, 'p: 't>(
         // Each refusal names the construct. D74 §4 lists the reasons; the `match` is what makes
         // the list total, so a variant added to `Exp` breaks this file rather than falling
         // through to a wrong translation.
+        // `Lam` is Mini-TT's UNANNOTATED lambda, inherited with the rest of this AST from the
+        // Coquand et al. reference implementation. It carries no domain because Mini-TT is
+        // bidirectional: a lambda is only ever CHECKED against a known `Pi`, which supplies one.
+        // `check_infer` has no `Lam` arm at all — `kernel/src/nbe/check/mod.rs` pins that as "not
+        // inferable" — and `(Exp::Lam(..), Val::Sort(n))` is an explicit error, so a λ cannot BE
+        // a proposition; it can only appear as an argument inside one, where the applied
+        // function's type determines its domain.
+        //
+        // Lean's `Lambda` requires a domain and `def_eq` compares it — `def_eq_binder_aux` runs
+        // `if self.def_eq(t1, t2) { … } else { return false }`. So there is no placeholder that
+        // works: a wrong domain is a wrong term, not an invisible one.
+        //
+        // Admitting it means making this function bidirectional, threading the expected type down
+        // so a `Lam` under an application gets its domain from the function. Measured before
+        // refusing: of the 102 committed `canonical_proposition` values in the tree, zero contain
+        // a `Lam`, so v1 gives up nothing that exists.
+        Exp::Lam(_, _) => outside(
+            "Lam",
+            "Mini-TT's lambda carries no domain and Lean's requires one that `def_eq` compares; \
+             supplying it means making externalization bidirectional",
+        ),
+
         Exp::Sig(_, _, _) => outside(
             "Sig",
             "Lean's `Sigma` is library, not primitive — admitting it means pinning WHICH Sigma, \
