@@ -158,9 +158,11 @@ each structure in its namespace-qualified path, and §11.1 should gain the class
 check that makes the property-level one meaningful. Tracked as eigenius#208, and a **prerequisite**
 for implementing this document.
 
-The remaining latitude is narrow: whether the namespace segment is the full `urn:` path minus the
-local name (`reflection`, `schema_org`) or only its last component. The table above is satisfied by
-the last component; a chain with two `reflection`-suffixed namespaces would not be.
+**Decided `2026-09-02`: the full `urn:` path minus the local name.**
+`urn:eigenius:reflection:Person` becomes `EigeniusFFI.eigenius.reflection.Person`;
+`urn:schema_org:Person` becomes `EigeniusFFI.schema_org.Person`. The table above is also satisfied
+by the last component alone, and that is the whole of its case — it is injective by measurement,
+and re-collides the first time two namespaces share a final segment. See §6.1.
 
 ---
 
@@ -241,22 +243,52 @@ D74 therefore joins nanoda_lib and D30 in the TCB.
 
 ## 6. Open questions
 
+All four are settled. §6.1 was decided with the document; §6.2-§6.4 on `2026-09-02`, when a
+collaboration with Nada Amin's group made the Lean institution load-bearing and the
+"no live consumer" ground for deferring #159 expired.
+
 1. ~~**§3.3 — the IRI → `Name` map.**~~ **Decided `2026-08-22`** — the mirror, with
    namespace-qualified mangling inside it (§3.3). It carries a prerequisite: D30's flat
    `EigeniusFFI.<short_name>` is not injective (8 live collisions, §3.3.1) and must be qualified
    before externalization can rely on it.
-2. **Where does `def_eq` run?** Inside the existing `check_proof` call (one arena, one parse) or as
-   a second entry point beside it. The first is cheaper and keeps the export parsed once; the second
-   keeps `check_proof`'s current contract untouched.
-3. **What happens when the fields are absent?** #159's original text raises this and it survives the
-   redesign in altered form: with the statement manufactured from the claim, `lean:proposition` and
-   `mirror_iri` stop being load-bearing, but `claim_iri` becomes *required* — without it there is no
-   claim to externalize. Promoting it is an ontology edit to `lean-institution`, hence a manifest
-   move and a reseed.
-4. **Is `def_eq` the right strictness?** It admits δ- and η-equal statements. That is almost
-   certainly right — a prover may state the theorem in an unfolded form — but it means the check
-   accepts statements that are not syntactically the claim, and that should be a deliberate choice
-   rather than a default inherited from the API.
+
+   ~~The remaining latitude — full `urn:` path minus the local name, or its last component
+   only.~~ **Decided `2026-09-02` — the full path minus the local name.**
+   `urn:eigenius:reflection:Person` becomes `EigeniusFFI.eigenius.reflection.Person`.
+   The last component satisfies today's eight collisions and reads better, and that is the whole
+   of its case; it is injective by measurement, not by construction, and re-collides the first
+   time two namespaces share a final segment. The property being bought here is injectivity, and
+   buying it from the IRI — which is injective by construction, everywhere — costs only name
+   length in proof text.
+
+2. ~~**Where does `def_eq` run?**~~ **Decided `2026-09-02` — inside the existing `check_proof`
+   call.** One arena, one parse: the export is parsed there already, so externalizing the
+   expected statement into the same `TcCtx` is the cheap direction, and both sides must share an
+   arena for `def_eq` to be callable at all. The cost is `check_proof`'s signature, which gains
+   the expected statement as an option. A second entry point would keep that contract and pay a
+   second parse of the same bytes for it, which is the wrong thing to protect.
+
+3. ~~**What happens when the fields are absent?**~~ **Decided `2026-09-02` — `claim_iri` becomes
+   `requires`, and the reseed is taken now.** With the statement manufactured from the claim,
+   `lean:proposition` and `mirror_iri` stop being load-bearing, but without `claim_iri` there is
+   no claim to externalize and the check has nothing to be total over. The alternative — leaving
+   it recommended and having the institution reject rather than skip — costs no migration and
+   changes the same behaviour, at the price of a schema that no longer describes what the
+   institution accepts; §9.11's whole point is that the declaration is the contract.
+
+   Taken now rather than later because the edit moves the `lean-institution` layer hash and every
+   layer id below it, and it bundles with #208's ontology work, which moves the manifest anyway.
+   One reseed covers both. Deferring means paying it once collaborators hold chains committed
+   against the current ids.
+
+4. ~~**Is `def_eq` the right strictness?**~~ **Decided `2026-09-02` — yes, and deliberately.**
+   It admits δ- and η-equal statements, so the check accepts statements that are not
+   syntactically the claim. That is the correct latitude: a prover states a theorem in whatever
+   form the proof made convenient, and unfolding a definition does not change what was proved.
+   Syntactic equality would reject correct proofs for cosmetic reasons and push authors toward
+   restating claims to match their proofs, which inverts the dependency this document exists to
+   establish. The residue in §5 is unchanged and is the real bound on what `def_eq` buys: it
+   compares the externalized statement, so the externalization's faithfulness stays load-bearing.
 
 ---
 
