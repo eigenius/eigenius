@@ -249,18 +249,29 @@ alternative — translating "close enough" — proves a different theorem soundl
 | **Unannotated binder** | `Lam` | see §4.4 |
 | **Open** | `InductiveCtor` | see §4.3 |
 
-### 4.3 `InductiveCtor` is open, not decided
+### 4.3 `InductiveCtor` — settled `2026-09-03`: refused, and the name is not the open part
 
-The original table put `InductiveCtor(decl, c, args)` in the fragment, mapping to
-`Const(name.c, [])`. That asserted an answer to a question D85 reopened: a constructor now
-*names a class* (`ctor_classes::class_iri` derives `<inductive>-<ctor>`), and which Lean name
-D30's emitter gives that class is not settled — `<inductive>.<ctor>` is the Lean convention, and
-the derived class has its own `core:short_name` under §3.3's mangling. Those are two different
-names for one thing, and picking one silently is how a value ends up stating a class its slot
-does not admit.
+The original table mapped `InductiveCtor(decl, c, args)` to `Const(name.c, [])`. It is refused,
+and the reason is not that the name is undecided.
 
-It is refused until that is settled, with a diagnostic saying so. A proposition quantifying over
-a constructor is rare in the claims this document serves; a wrong name for one would not be.
+**D30 v1 emits no inductives.** The generator produces a `structure` per mirrored *class* and
+nothing else — `mirror_gen/mod.rs:603` records the gap in its own words, *"`InductiveType`
+bucket — those land with D30 v1.1"*, and D30 §11's roadmap puts Lean `inductive` support
+(needed for `core:allows_only` enums too) at Phase 20b / v1.1. So an inductive is not in the
+mirror, its constructors are not in the export, and there is no constant for a name to denote.
+The refusal is a consequence of the mirror's coverage, not of an undecided mangling.
+
+**When they do land, the name is `<inductive>.<ctor>`** — Lean's own convention, and the only
+candidate. The alternative that made this look open was D85's derived constructor *class*: a
+value's `is_a` names `ctor_classes::class_iri(inductive, ctor)`, which is `{inductive}-{ctor}`.
+That name cannot be a Lean identifier at all — `validate_lean_identifier_chars` admits only
+`[A-Za-z0-9_]`, and the separator is `-`. (D85 chose `-` deliberately: `.` is what ESL cannot
+spell in a local name.) So the two-names-for-one-thing framing was wrong; there was one.
+
+Nothing changes for the externalizer today: `InductiveCtor` refuses with a diagnostic naming
+D30 v1's coverage. `Const(iri, …)` naming an inductive fails the same way, through
+`UnknownConstant` — which reports the Lean name it looked for, so the diagnostic is legible
+either way.
 
 ### 4.4 `Lam` is refused because Mini-TT lambdas carry no domain
 
@@ -366,6 +377,45 @@ collaboration with Nada Amin's group made the Lean institution load-bearing and 
    layer id below it, and it bundles with #208's ontology work, which moves the manifest anyway.
    One reseed covers both. Deferring means paying it once collaborators hold chains committed
    against the current ids.
+
+### 6.5 Mechanics settled while implementing (`2026-09-03`)
+
+Three questions the document left implicit, each answered by reading nanoda rather than by
+choosing.
+
+**Which `EnvLimit` the comparison runs under: `ByName(target_name)`.** nanoda checks every
+declaration with `EnvLimit::ByName(d.name)` (`util.rs::with_tc_and_declar`), which cuts the
+environment off *at* that declaration so it sees only what precedes it. Comparing under the same
+limit compares under the environment nanoda used when it checked the theorem. `PpUnlimited`
+would let δ-unfolding reach declarations *after* the target, admitting equalities the proof's own
+check would not. `with_tc_and_declar(target_info, …)` sets it.
+
+**Universe parameters must align with the target's.** The same call passes `DeclarInfo`, which
+carries `uparams`; `check_declar_info` asserts `no_dupes_all_params(info.uparams)`. A
+`Level::Param(n)` in an externalized statement has to name a parameter the target declares —
+otherwise `def_eq` compares one parameter against a different one and fails with nothing to say
+that universes were the cause. Externalization takes the target's `uparams` and refuses an
+unknown name the way it refuses an unknown constant.
+
+**Regenerating the capstone proof is mechanical.** `lean4export` is vendored in-repo at
+`lean/runtime-worker/vendor/lean4export/` and required by path from
+`lean/research/capstone-proof/lakefile.lean`; both pin `leanprover/lean4:v4.29.1`. Nothing needs
+installing:
+
+```sh
+cd lean/research/capstone-proof
+lake build
+lake exe lean4export Capstone -- patient_weight_nonneg \
+  > ../../../crates/eigenius-lean/test_resources/capstone_proof.json
+```
+
+Verified `2026-09-03`: run against the current tree it reproduces the committed fixture
+byte-for-byte (527,994 bytes). That matters for #208 — the capstone's hand-rolled
+`EigeniusFFI.lean` declares `structure Patient`, the pre-qualification name, and must be
+re-declared as `structure eigenius.test.capstone.Patient` with the theorem quantifying over it
+before this check can resolve the constant. The lakefile records why hand-rolling is legitimate:
+the verification side reads `library_content_hash`, `mirrored_classes` and `source_layer`, never
+the source's shape.
 
 ### 6.3.1 `lean:LeanProofTerm` drops to three slots
 

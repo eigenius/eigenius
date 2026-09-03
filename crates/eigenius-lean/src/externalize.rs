@@ -451,10 +451,15 @@ fn go<'t, 'p: 't>(
             "Con",
             "a constructor application whose inductive is implicit; use `InductiveCtor`",
         ),
+        // D74 §4.3. Not a naming question: D30 v1 emits a `structure` per mirrored CLASS and no
+        // inductives at all (`mirror_gen/mod.rs:603` — "those land with D30 v1.1"), so the
+        // inductive is absent from the export and so are its constructors. When they land the
+        // name is `<inductive>.<ctor>`, Lean's convention and the only candidate — D85's derived
+        // ctor class is `{inductive}-{ctor}`, and `-` is not a Lean identifier character.
         Exp::InductiveCtor(_, _, _) => outside(
             "InductiveCtor",
-            "reachable but not yet mapped — the ctor's Lean name is `<inductive>.<ctor>`, which \
-             needs the ctor-class naming settled against D85's derived classes first",
+            "D30 v1 mirrors classes as `structure`s and emits no inductives, so a constructor \
+             has no constant in the export to denote (D30 v1.1 / Phase 20b)",
         ),
         Exp::InductiveRec { .. } => outside(
             "InductiveRec",
