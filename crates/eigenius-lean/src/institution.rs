@@ -88,12 +88,14 @@ use std::sync::Arc;
 use eigenius_kernel::context::ExecutionContext;
 use eigenius_kernel::institution::error::InstitutionError;
 use eigenius_kernel::institution::runtime::{Institution, QueryOutcome};
+use eigenius_kernel::nbe::term::Exp;
 use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
+use eigenius_kernel::program::eigentt_type_mirror::decode_type;
 
-use crate::checker::{check_proof, Verdict};
+use crate::checker::{check_proof, ExpectedStatement, Verdict};
 
 /// Well-known IRIs the institution dispatches on. Keeping them in one
 /// place so a downstream caller building a `LeanProofTerm` resource
@@ -303,6 +305,42 @@ const DEFAULT_LEAN_AXIOMS: &[&str] = &[
     "Lean.trustCompiler",
 ];
 
+/// The claim's `reflection:canonical_proposition`, decoded to an `Exp` (D74 §2).
+///
+/// `None` when the proof term names no claim, or the claim carries no proposition — the
+/// statement-level check has nothing to compare against and the caller falls back to the
+/// name-level check alone. An unresolvable `claim_iri`, or a proposition that will not decode,
+/// is an error rather than a skip: the author meant to bind a claim and the binding is broken.
+fn claim_proposition(
+    input: &Resource,
+    ctx: &ExecutionContext,
+) -> Result<Option<Exp>, InstitutionError> {
+    let Some(claim_iri) = input
+        .get(&Iri::parse(iris::PROP_CLAIM_IRI).expect("static IRI"))
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let claim_iri = Iri::parse(claim_iri).map_err(|e| {
+        InstitutionError::ComputationFailed(format!("`claim_iri` is not an IRI: {e}"))
+    })?;
+    let claim = ctx.resolve(&claim_iri).ok_or_else(|| {
+        InstitutionError::ComputationFailed(format!(
+            "`claim_iri` `{claim_iri}` does not resolve in the verification context"
+        ))
+    })?;
+    let Some(value) = claim.get(&Iri::parse(wk::CANONICAL_PROPOSITION).expect("well-known IRI"))
+    else {
+        return Ok(None);
+    };
+    let exp = decode_type(value, ctx.head()).map_err(|e| {
+        InstitutionError::ComputationFailed(format!(
+            "`{claim_iri}`'s canonical_proposition does not decode: {e:?}"
+        ))
+    })?;
+    Ok(Some(exp))
+}
+
 fn do_proof_check(
     input: &Resource,
     ctx: &ExecutionContext,
@@ -329,8 +367,28 @@ fn do_proof_check(
         .iter()
         .map(|s| (*s).to_string())
         .collect();
-    let verdict = check_proof(bytes.as_bytes(), &target_name, &permitted_axioms)
-        .map_err(|e| InstitutionError::ComputationFailed(format!("nanoda check_proof: {e}")))?;
+    // D74 / #159 — the statement-level check beside the name-level one. The claim's own
+    // proposition becomes the Lean goal, so `Holds` means "this proof proves THIS claim" rather
+    // than "a theorem with this name type-checks".
+    //
+    // `claim_iri` is `recommends` today, so an absent one still reaches the name-level check
+    // alone. D74 §6.3 promotes it to `requires`; until that ontology edit lands this is the one
+    // place the check can be skipped, and it is skipped loudly in the diagnostic rather than
+    // silently.
+    let expected = claim_proposition(input, ctx)?;
+    let verdict = check_proof(
+        bytes.as_bytes(),
+        &target_name,
+        &permitted_axioms,
+        expected
+            .as_ref()
+            .map(|prop| ExpectedStatement {
+                proposition: prop,
+                layer: ctx.head(),
+            })
+            .as_ref(),
+    )
+    .map_err(|e| InstitutionError::ComputationFailed(format!("nanoda check_proof: {e}")))?;
 
     // Check 1 (proof validity) decided — short-circuit on nanoda
     // rejection. No correspondence check runs against a proof that

@@ -31,8 +31,13 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use eigenius_kernel::layer::Layer;
+use eigenius_kernel::nbe::term::Exp;
+use nanoda_lib::env::EnvLimit;
 use nanoda_lib::pretty_printer::PpOptions;
-use nanoda_lib::util::Config;
+use nanoda_lib::util::{Config, ExportFile};
+
+use crate::externalize;
 
 /// Result of checking a Lean export file against a target theorem.
 ///
@@ -77,14 +82,25 @@ pub enum CheckError {
 /// this list causes [`Verdict::Fails`] (per
 /// `unpermitted_axiom_hard_error: true`).
 ///
+/// `expected` is D74's statement-level check. When `Some`, the claim's own proposition is
+/// externalized into the SAME `TcCtx` the export was parsed into and compared to the target's
+/// type with nanoda's `def_eq` — so the proof is bound to the claim because the goal was
+/// manufactured from the claim (#159). When `None` the call is the pre-D74 name-level check
+/// alone: "a theorem called `target_name` type-checks", which does not say what it proves.
+///
+/// Both sides must share one arena for `def_eq` to be callable at all, which is why this lives
+/// inside `check_proof` rather than beside it (D74 §6.2) — the alternative pays a second parse
+/// of the same bytes to keep this signature.
+///
 /// The function returns `CheckError` only for *infrastructure*
 /// failures (cannot create tempfile). Anything the checker has an
-/// opinion on — bad parse, missing target, type error — comes back
-/// as a `Verdict`.
+/// opinion on — bad parse, missing target, type error, a statement
+/// that is not the claim's — comes back as a `Verdict`.
 pub fn check_proof(
     bytes: &[u8],
     target_name: &str,
     permitted_axioms: &[String],
+    expected: Option<&ExpectedStatement<'_>>,
 ) -> Result<Verdict, CheckError> {
     use std::io::Write;
 
@@ -135,12 +151,124 @@ pub fn check_proof(
     // `check_all_declars` panics on type errors. `AssertUnwindSafe`
     // is sound here: we discard the `ExportFile` on panic and don't
     // expose any partially-checked state.
-    match catch_unwind(AssertUnwindSafe(|| export.check_all_declars())) {
-        Ok(()) => Ok(Verdict::Holds),
-        Err(p) => Ok(Verdict::Fails {
+    if let Err(p) = catch_unwind(AssertUnwindSafe(|| export.check_all_declars())) {
+        return Ok(Verdict::Fails {
             diagnostic: panic_payload_to_string(p),
+        });
+    }
+
+    // Check 1 passed: the export is internally sound and `target_name` is present. That is all
+    // it establishes. D74's check is what relates the named theorem to the claim.
+    let Some(expected) = expected else {
+        return Ok(Verdict::Holds);
+    };
+
+    // Same containment as check 1, for the same reason. nanoda asserts liberally inside
+    // `def_eq` — `subst_expr_levels` panics on a universe-arity mismatch rather than returning
+    // `false`, and `externalize` cannot rule out every such shape ahead of it. An institution
+    // that aborts the process instead of returning a verdict takes the kernel with it.
+    match catch_unwind(AssertUnwindSafe(|| {
+        check_statement(&export, target_name, expected)
+    })) {
+        Ok(v) => Ok(v),
+        Err(p) => Ok(Verdict::Fails {
+            diagnostic: format!(
+                "the statement check panicked comparing `{target_name}` against the claim's \
+                 proposition: {}",
+                panic_payload_to_string(p)
+            ),
         }),
     }
+}
+
+/// The claim's proposition, and what externalizing it needs.
+pub struct ExpectedStatement<'a> {
+    /// The claim's `reflection:canonical_proposition`, decoded.
+    pub proposition: &'a Exp,
+    /// Resolves a chain IRI's `core:short_name` for D30's mangling.
+    pub layer: &'a Layer,
+}
+
+/// D74 — externalize `expected` and compare it to `target_name`'s type under `def_eq`.
+///
+/// Runs under `EnvLimit::ByName(target)` via `with_tc_and_declar`, which is the environment
+/// nanoda itself checks that declaration under (D74 §6.5): it cuts the environment off AT the
+/// declaration, so δ-unfolding cannot reach anything the proof's own check could not.
+fn check_statement(
+    export: &ExportFile<'_>,
+    target_name: &str,
+    expected: &ExpectedStatement<'_>,
+) -> Verdict {
+    // The declars map is keyed by `NamePtr`, an interning handle, so finding one by spelling
+    // means rendering each — the same scan the parser's `pp_declars` precondition already did.
+    let info = export.with_ctx(|ctx| {
+        export
+            .declars
+            .iter()
+            .find(|(n, _)| externalize::render_name(ctx, **n) == target_name)
+            .map(|(_, d)| *d.info())
+    });
+    let Some(info) = info else {
+        // Unreachable in practice: `unknown_pp_declar_hard_error` already failed the parse.
+        return Verdict::Fails {
+            diagnostic: format!("`{target_name}` is not declared in the export"),
+        };
+    };
+
+    // Build the goal in the ctx, then compare inside `with_tc` — `TypeChecker::ctx` is private,
+    // so the expression cannot be built from inside the closure. `ExprPtr` is an arena handle, so
+    // carrying it in costs nothing.
+    export.with_ctx(|ctx| {
+        let uparams: Vec<String> = ctx
+            .read_levels(info.uparams)
+            .iter()
+            .filter_map(|l| match ctx.read_level(*l) {
+                nanoda_lib::level::Level::Param(n, _) => Some(externalize::render_name(ctx, n)),
+                _ => None,
+            })
+            .collect();
+
+        let declared: Vec<_> = export.declars.keys().copied().collect();
+        let names = externalize::NameTable::build(ctx, &declared);
+
+        // Universe arity per declaration. A `Const` whose level list does not match makes
+        // nanoda's `subst_expr_levels` assert — a panic inside `def_eq`, not a `false` — so
+        // externalization needs the arities up front (D74 §6.5).
+        let arities: std::collections::HashMap<_, _> = export
+            .declars
+            .iter()
+            .map(|(n, d)| (*n, ctx.read_levels(d.info().uparams).len()))
+            .collect();
+
+        let goal = match externalize::externalize(
+            expected.proposition,
+            ctx,
+            &names,
+            expected.layer,
+            &uparams,
+            &arities,
+        ) {
+            Ok(g) => g,
+            Err(e) => {
+                return Verdict::Fails {
+                    diagnostic: format!("cannot externalize the claim's proposition: {e}"),
+                }
+            }
+        };
+
+        // D74 §6.5 — the environment nanoda checks this declaration under, cut off AT it, so
+        // δ-unfolding cannot reach anything the proof's own check could not.
+        let holds = ctx.with_tc(EnvLimit::ByName(info.name), |tc| tc.def_eq(goal, info.ty));
+        if holds {
+            Verdict::Holds
+        } else {
+            Verdict::Fails {
+                diagnostic: format!(
+                    "`{target_name}` proves a statement that is not the claim's proposition"
+                ),
+            }
+        }
+    })
 }
 
 /// Best-effort recovery of a panic message. Rust panics may carry

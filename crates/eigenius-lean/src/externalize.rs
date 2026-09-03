@@ -55,7 +55,7 @@
 //! the variant named; the alternative, translating "close enough", proves a different theorem
 //! soundly.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use eigenius_kernel::layer::Layer;
 use eigenius_kernel::nbe::level::Level;
@@ -101,6 +101,28 @@ pub enum ExternalizeError {
     /// A Lean-side constant the fragment needs (`Eq`, `PUnit`, `Bool.true`, …) that the export
     /// does not declare. Distinct from [`Self::UnknownConstant`], which is about chain classes.
     MissingLeanConstant(&'static str),
+    /// A constant whose universe arity the caller cannot supply.
+    ///
+    /// nanoda's `subst_expr_levels` ASSERTS that a `Const`'s level list matches the
+    /// declaration's `uparams` arity — a mismatch panics inside `def_eq` rather than returning
+    /// `false`. Refused here so it comes back as a verdict.
+    UniverseArityMismatch {
+        lean_name: String,
+        /// Universe arguments the declaration takes.
+        expected: usize,
+        /// Universe arguments available to supply — the target declaration's own.
+        available: usize,
+    },
+    /// A universe parameter the target declaration does not declare (D74 §6.5).
+    ///
+    /// `def_eq` compares levels, so a `Param` naming something outside the target's `uparams`
+    /// compares one parameter against a different one and fails with nothing to say that
+    /// universes were the cause. Refused here so the diagnostic names the parameter.
+    UnknownUniverseParam {
+        param: String,
+        /// The parameters the target declaration does declare.
+        declared: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for ExternalizeError {
@@ -125,6 +147,26 @@ impl std::fmt::Display for ExternalizeError {
             Self::MissingLeanConstant(n) => write!(
                 f,
                 "the export does not declare `{n}`, which this proposition needs"
+            ),
+            Self::UniverseArityMismatch {
+                lean_name,
+                expected,
+                available,
+            } => write!(
+                f,
+                "`{lean_name}` takes {expected} universe argument(s) and the target declaration \
+                 supplies {available}; a universe-polymorphic constant can only be spelled with \
+                 the target's own parameters"
+            ),
+            Self::UnknownUniverseParam { param, declared } => write!(
+                f,
+                "universe parameter `{param}` is not one the target declaration declares \
+                 ({})",
+                if declared.is_empty() {
+                    "it declares none".to_string()
+                } else {
+                    declared.join(", ")
+                }
             ),
         }
     }
@@ -207,22 +249,46 @@ fn binder_name(p: &Patt) -> String {
 /// Externalize `exp` into `ctx`'s arena.
 ///
 /// `layer` resolves a chain IRI's `core:short_name`, which D30's mangling needs; `names` is the
-/// export's declared names, which is where a `Const` is resolved rather than built.
+/// export's declared names, which is where a `Const` is resolved rather than built; `uparams`
+/// are the target declaration's universe parameters, which a `Level::Param` must name (§6.5).
 pub fn externalize<'t, 'p: 't>(
     exp: &Exp,
     ctx: &mut TcCtx<'t, 'p>,
     names: &NameTable<'t>,
     layer: &Layer,
+    uparams: &[String],
+    arities: &HashMap<NamePtr<'t>, usize>,
 ) -> Result<ExprPtr<'t>, ExternalizeError> {
     let mut binders = Binders(Vec::new());
-    go(exp, ctx, names, layer, &mut binders)
+    let mut cx = Cx {
+        names,
+        layer,
+        uparams,
+        arities,
+    };
+    go(exp, ctx, &mut cx, &mut binders)
+}
+
+/// What externalization needs besides the arena, bundled so adding a lookup does not re-thread
+/// every recursive call.
+struct Cx<'a, 't> {
+    names: &'a NameTable<'t>,
+    layer: &'a Layer,
+    uparams: &'a [String],
+    /// Universe arity per declared name — see [`const_levels`].
+    arities: &'a HashMap<NamePtr<'t>, usize>,
+}
+
+impl<'t> Cx<'_, 't> {
+    fn arity_of(&self, name: NamePtr<'t>) -> usize {
+        self.arities.get(&name).copied().unwrap_or(0)
+    }
 }
 
 fn go<'t, 'p: 't>(
     exp: &Exp,
     ctx: &mut TcCtx<'t, 'p>,
-    names: &NameTable<'t>,
-    layer: &Layer,
+    cx: &mut Cx<'_, 't>,
     binders: &mut Binders,
 ) -> Result<ExprPtr<'t>, ExternalizeError> {
     let outside = |variant: &'static str, note: &'static str| {
@@ -234,7 +300,7 @@ fn go<'t, 'p: 't>(
 
         // D74 §3.2 — the universes line up exactly, no shift. D46's `Sort(0)` is Lean's `Prop`.
         Exp::Sort(l) => {
-            let level = externalize_level(l, ctx)?;
+            let level = externalize_level(l, ctx, cx)?;
             Ok(ctx.mk_sort(level))
         }
 
@@ -244,17 +310,17 @@ fn go<'t, 'p: 't>(
         },
 
         Exp::App(f, x) => {
-            let f = go(f, ctx, names, layer, binders)?;
-            let x = go(x, ctx, names, layer, binders)?;
+            let f = go(f, ctx, cx, binders)?;
+            let x = go(x, ctx, cx, binders)?;
             Ok(ctx.mk_app(f, x))
         }
 
         Exp::Pi(p, dom, body) => {
-            let dom = go(dom, ctx, names, layer, binders)?;
+            let dom = go(dom, ctx, cx, binders)?;
             let name = binder_name(p);
             let n = ctx.str1_owned(name.clone());
             binders.0.push(name);
-            let body = go(body, ctx, names, layer, binders);
+            let body = go(body, ctx, cx, binders);
             binders.0.pop();
             Ok(ctx.mk_pi(n, default_binder_style(), dom, body?))
         }
@@ -262,10 +328,10 @@ fn go<'t, 'p: 't>(
         // `Arrow` is a non-dependent `Pi`; the binder is unused, so nothing is pushed and the
         // body's indices are unaffected.
         Exp::Arrow(dom, cod) => {
-            let dom = go(dom, ctx, names, layer, binders)?;
+            let dom = go(dom, ctx, cx, binders)?;
             let n = ctx.str1_owned("_".to_string());
             binders.0.push("_".to_string());
-            let cod = go(cod, ctx, names, layer, binders);
+            let cod = go(cod, ctx, cx, binders);
             binders.0.pop();
             Ok(ctx.mk_pi(n, default_binder_style(), dom, cod?))
         }
@@ -274,17 +340,19 @@ fn go<'t, 'p: 't>(
         // `InductiveType(decl, args)` in D76 Phase B1, so it is this variant the §4 table's
         // `InductiveType` row now describes.
         Exp::Const(iri, levels) => {
-            let name = resolve_chain_const(iri, ctx, names, layer)?;
-            let ls: Result<Vec<LevelPtr<'t>>, _> =
-                levels.iter().map(|l| externalize_level(l, ctx)).collect();
+            let name = resolve_chain_const(iri, cx)?;
+            let ls: Result<Vec<LevelPtr<'t>>, _> = levels
+                .iter()
+                .map(|l| externalize_level(l, ctx, cx))
+                .collect();
             let ls = ctx.alloc_levels_slice(&ls?);
             Ok(ctx.mk_const(name, ls))
         }
 
         Exp::EigonClass(iri) | Exp::EigonAxiom(iri) => {
-            let name = resolve_chain_const(iri, ctx, names, layer)?;
-            let empty = ctx.alloc_levels_slice(&[]);
-            Ok(ctx.mk_const(name, empty))
+            let name = resolve_chain_const(iri, cx)?;
+            let ls = const_levels(ctx, cx, name, iri.as_str())?;
+            Ok(ctx.mk_const(name, ls))
         }
 
         // Both literal constructors return `None` when the corresponding parser extension is
@@ -318,30 +386,33 @@ fn go<'t, 'p: 't>(
 
         Exp::LitBool(b) => {
             let n = if *b { "Bool.true" } else { "Bool.false" };
-            let name = names.get(n).ok_or(ExternalizeError::MissingLeanConstant(
-                "Bool.true / Bool.false",
-            ))?;
+            let name = cx
+                .names
+                .get(n)
+                .ok_or(ExternalizeError::MissingLeanConstant(
+                    "Bool.true / Bool.false",
+                ))?;
             let empty = ctx.alloc_levels_slice(&[]);
             Ok(ctx.mk_const(name, empty))
         }
 
         // D46's unit type and its inhabitant.
-        Exp::One => lean_const(ctx, names, "PUnit"),
-        Exp::Unit => lean_const(ctx, names, "PUnit.unit"),
+        Exp::One => lean_const(ctx, cx, "PUnit"),
+        Exp::Unit => lean_const(ctx, cx, "PUnit.unit"),
 
         Exp::Id(ty, x, y) => {
-            let eq = lean_const(ctx, names, "Eq")?;
-            let ty = go(ty, ctx, names, layer, binders)?;
-            let x = go(x, ctx, names, layer, binders)?;
-            let y = go(y, ctx, names, layer, binders)?;
+            let eq = lean_const(ctx, cx, "Eq")?;
+            let ty = go(ty, ctx, cx, binders)?;
+            let x = go(x, ctx, cx, binders)?;
+            let y = go(y, ctx, cx, binders)?;
             let e = ctx.mk_app(eq, ty);
             let e = ctx.mk_app(e, x);
             Ok(ctx.mk_app(e, y))
         }
 
         Exp::Refl(x) => {
-            let rfl = lean_const(ctx, names, "rfl")?;
-            let x = go(x, ctx, names, layer, binders)?;
+            let rfl = lean_const(ctx, cx, "rfl")?;
+            let x = go(x, ctx, cx, binders)?;
             Ok(ctx.mk_app(rfl, x))
         }
 
@@ -368,7 +439,7 @@ fn go<'t, 'p: 't>(
                     )
                 }
             };
-            lean_const(ctx, names, n)
+            lean_const(ctx, cx, n)
         }
 
         // ─── outside the fragment ───────────────────────────────────────────────────────
@@ -488,24 +559,60 @@ fn default_binder_style() -> nanoda_lib::expr::BinderStyle {
 /// Resolve one of Lean's own constants by name.
 fn lean_const<'t, 'p: 't>(
     ctx: &mut TcCtx<'t, 'p>,
-    names: &NameTable<'t>,
+    cx: &Cx<'_, 't>,
     n: &'static str,
 ) -> Result<ExprPtr<'t>, ExternalizeError> {
-    let name = names
+    let name = cx
+        .names
         .get(n)
         .ok_or(ExternalizeError::MissingLeanConstant(n))?;
-    let empty = ctx.alloc_levels_slice(&[]);
-    Ok(ctx.mk_const(name, empty))
+    let levels = const_levels(ctx, cx, name, n)?;
+    Ok(ctx.mk_const(name, levels))
+}
+
+/// The universe arguments for `name`, taken from the target declaration's parameters.
+///
+/// Lean's `PUnit`, `Eq` and `rfl` are universe-polymorphic; a D30-emitted class is not
+/// (`structure Person where …` binds no parameters), so most constants take none. Supplying the
+/// wrong count does not merely fail the comparison — `subst_expr_levels` asserts on it and
+/// nanoda panics inside `def_eq`.
+///
+/// The target declaration's own parameters are the only source an outside-in translation has:
+/// which universe a constant sits at is determined by the surrounding term, the same
+/// information `Lam`'s domain needs (§4.4). Where the arities agree that is the right answer —
+/// `PUnit.unit : PUnit.{u}` wants exactly the `u` its own declaration binds.
+fn const_levels<'t, 'p: 't>(
+    ctx: &mut TcCtx<'t, 'p>,
+    cx: &Cx<'_, 't>,
+    name: NamePtr<'t>,
+    label: &str,
+) -> Result<nanoda_lib::util::LevelsPtr<'t>, ExternalizeError> {
+    let arity = cx.arity_of(name);
+    if arity == 0 {
+        return Ok(ctx.alloc_levels_slice(&[]));
+    }
+    if arity != cx.uparams.len() {
+        return Err(ExternalizeError::UniverseArityMismatch {
+            lean_name: label.to_string(),
+            expected: arity,
+            available: cx.uparams.len(),
+        });
+    }
+    let ls: Vec<LevelPtr<'t>> = cx
+        .uparams
+        .iter()
+        .map(|u| {
+            let p = ctx.str1_owned(u.clone());
+            ctx.param(p)
+        })
+        .collect();
+    Ok(ctx.alloc_levels_slice(&ls))
 }
 
 /// The `NamePtr` for a chain IRI, spelled by D30's mangling and resolved in the export.
-fn resolve_chain_const<'t, 'p: 't>(
-    iri: &Iri,
-    _ctx: &mut TcCtx<'t, 'p>,
-    names: &NameTable<'t>,
-    layer: &Layer,
-) -> Result<NamePtr<'t>, ExternalizeError> {
-    let def = layer
+fn resolve_chain_const<'t>(iri: &Iri, cx: &Cx<'_, 't>) -> Result<NamePtr<'t>, ExternalizeError> {
+    let def = cx
+        .layer
         .resolve(iri)
         .ok_or_else(|| ExternalizeError::Unnameable {
             iri: iri.as_str().to_string(),
@@ -519,36 +626,48 @@ fn resolve_chain_const<'t, 'p: 't>(
             reason: "carries no `core:short_name`, so D30's mangling cannot spell it",
         })?;
     let lean = lean_name::class_lean_name_absolute(iri, short);
-    names.get(&lean).ok_or(ExternalizeError::UnknownConstant {
-        iri: iri.as_str().to_string(),
-        lean_name: lean,
-    })
+    cx.names
+        .get(&lean)
+        .ok_or(ExternalizeError::UnknownConstant {
+            iri: iri.as_str().to_string(),
+            lean_name: lean,
+        })
 }
 
 /// D74 §3.2 — EigenTT levels and Lean levels are the same lattice, so this is structural.
 fn externalize_level<'t, 'p: 't>(
     l: &Level,
     ctx: &mut TcCtx<'t, 'p>,
+    cx: &Cx<'_, 't>,
 ) -> Result<LevelPtr<'t>, ExternalizeError> {
     Ok(match l {
         Level::Zero => ctx.zero(),
         Level::Succ(inner) => {
-            let i = externalize_level(inner, ctx)?;
+            let i = externalize_level(inner, ctx, cx)?;
             ctx.succ(i)
         }
         Level::Max(a, b) => {
-            let a = externalize_level(a, ctx)?;
-            let b = externalize_level(b, ctx)?;
+            let a = externalize_level(a, ctx, cx)?;
+            let b = externalize_level(b, ctx, cx)?;
             ctx.max(a, b)
         }
         Level::IMax(a, b) => {
-            let a = externalize_level(a, ctx)?;
-            let b = externalize_level(b, ctx)?;
+            let a = externalize_level(a, ctx, cx)?;
+            let b = externalize_level(b, ctx, cx)?;
             ctx.imax(a, b)
         }
+        // D74 §6.5 — a parameter the target declaration does not declare makes `def_eq` compare
+        // one parameter against a different one, and fail without saying universes were why.
         Level::Param(n) => {
-            let n = ctx.str1_owned(n.to_string());
-            ctx.param(n)
+            let n = n.to_string();
+            if !cx.uparams.contains(&n) {
+                return Err(ExternalizeError::UnknownUniverseParam {
+                    param: n,
+                    declared: cx.uparams.to_vec(),
+                });
+            }
+            let ptr = ctx.str1_owned(n);
+            ctx.param(ptr)
         }
     })
 }
