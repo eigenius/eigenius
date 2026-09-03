@@ -64,6 +64,9 @@ use eigenius_runtime_substrate::mirror_generator::{MirrorGenerationRequest, Mirr
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) mod codec_emitter;
+/// The chain IRI -> Lean `Name` map (D74 §3.3, eigenius#208). Public because D74's
+/// externalizer reads names back through the same functions the emitter writes them with.
+pub mod lean_name;
 pub(crate) mod module_assembler;
 pub(crate) mod structure_emitter;
 
@@ -676,7 +679,43 @@ fn resolve_class_declarations(
         validate_unique_inherited_fields(&decls, &iri)?;
     }
 
+    validate_injective_lean_names(&decls)?;
+
     Ok(decls)
+}
+
+/// D30 §11.1, added by eigenius#208 — no two classes in the closure may map to one Lean name.
+///
+/// §11.1 checked that *property* short_names are unique within a class's transitive field set
+/// and never that CLASS names are unique across the closure, which is how 8 collisions reached
+/// the emitter: a closure holding both `reflection:Person` and `schema_org:Person` emitted two
+/// `structure Person` declarations into one namespace.
+///
+/// Namespace qualification (`lean_name`) separates all 8, so this check finds nothing across
+/// today's ontologies. It is required rather than assumed because the declaration name is
+/// `core:short_name` rather than the IRI's local name, which leaves one residual collision
+/// shape — two classes in the SAME namespace declaring the same `short_name`. That is what this
+/// catches, and catching it here is what makes the naming injective for D74's externalizer,
+/// which cannot tell a wrong name from a right one.
+fn validate_injective_lean_names(
+    decls: &BTreeMap<Iri, ClassDecl>,
+) -> Result<(), MirrorGeneratorError> {
+    let pairs = decls.iter().map(|(iri, d)| (iri, d.short_name.as_str()));
+    match lean_name::check_injective(pairs) {
+        Ok(()) => Ok(()),
+        Err((name, first, second)) => Err(MirrorGeneratorError::UnrepresentableClass {
+            class_iri: second.as_str().to_string(),
+            language: LANGUAGE_LEAN.to_string(),
+            reason: format!(
+                "Lean name `{name}` is claimed by both `{}` and `{}`; D30 §11.1 requires class \
+                 names to be unique across the closure. Two classes in one namespace declaring \
+                 the same `core:short_name` collide even under namespace qualification — give \
+                 one of them a distinct `short_name`.",
+                first.as_str(),
+                second.as_str()
+            ),
+        }),
+    }
 }
 
 fn resolve_one_class(
@@ -1353,6 +1392,72 @@ mod tests {
         }
     }
 
+    // ─── D30 §11.1 class-name injectivity (eigenius#208) ───────────────────
+
+    /// The collision that motivated eigenius#208: two `Person` classes in one closure. Before
+    /// namespace qualification both emitted `structure Person` into `namespace EigeniusFFI`;
+    /// now they separate, and `build_decls` accepts the closure.
+    #[test]
+    fn two_person_classes_in_different_namespaces_no_longer_collide() {
+        let mut chain = InMemoryChain::new();
+        chain.insert(class_resource(
+            "urn:eigenius:reflection:Person",
+            "Person",
+            &[],
+            &[],
+            &[],
+        ));
+        chain.insert(class_resource(
+            "urn:schema_org:Person",
+            "Person",
+            &[],
+            &[],
+            &[],
+        ));
+        let layer = iri("urn:test:layer");
+        let seed = vec![
+            iri("urn:eigenius:reflection:Person"),
+            iri("urn:schema_org:Person"),
+        ];
+        let req = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+        let decls = build_decls(&req).expect("namespaces separate the two `Person` classes");
+        let lookup = class_name_lookup(&decls);
+        assert_eq!(
+            lookup.get(&iri("urn:eigenius:reflection:Person")).unwrap(),
+            "eigenius.reflection.Person"
+        );
+        assert_eq!(
+            lookup.get(&iri("urn:schema_org:Person")).unwrap(),
+            "schema_org.Person"
+        );
+    }
+
+    /// The residual collision shape qualification cannot fix, and the reason the check is
+    /// required rather than assumed: the declaration name is `core:short_name`, so two classes
+    /// in ONE namespace can still claim one Lean name.
+    #[test]
+    fn same_namespace_duplicate_short_name_is_refused() {
+        let mut chain = InMemoryChain::new();
+        chain.insert(class_resource("urn:test:Alpha", "Same", &[], &[], &[]));
+        chain.insert(class_resource("urn:test:Beta", "Same", &[], &[], &[]));
+        let layer = iri("urn:test:layer");
+        let seed = vec![iri("urn:test:Alpha"), iri("urn:test:Beta")];
+        let req = MirrorGenerationRequest {
+            source_layer: &layer,
+            seed_classes: &seed,
+            chain: &chain,
+        };
+        let err = build_decls(&req).expect_err("one Lean name for two classes must be refused");
+        let msg = format!("{err:?}");
+        assert!(msg.contains("test.Same"), "names the Lean name: {msg}");
+        assert!(msg.contains("urn:test:Alpha"), "names both IRIs: {msg}");
+        assert!(msg.contains("urn:test:Beta"), "names both IRIs: {msg}");
+    }
+
     // ─── resolve_class_declarations + property typing ───────────────
 
     #[test]
@@ -1833,9 +1938,16 @@ mod tests {
             .find(|f| f.path == "EigeniusFFI/Mirror.lean")
             .expect("mirror file");
         let body = std::str::from_utf8(&mirror.content).expect("utf8");
-        assert!(body.contains("structure Person where"));
-        assert!(body.contains("def decodePerson"));
-        assert!(body.contains("def encodePerson"));
+        // Namespace-qualified since eigenius#208: `urn:test:Person` declares as
+        // `test.Person` inside the one `namespace EigeniusFFI` block, so the full Lean name is
+        // `EigeniusFFI.test.Person`. A bare `structure Person` is what collided.
+        assert!(body.contains("structure test.Person where"));
+        assert!(
+            !body.contains("structure Person where"),
+            "the flat name must not survive — it is what eigenius#208 removes"
+        );
+        assert!(body.contains("def test.decodePerson"));
+        assert!(body.contains("def test.encodePerson"));
         assert!(body.contains("def eigeniusDecoders"));
     }
 

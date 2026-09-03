@@ -41,6 +41,7 @@
 //!   `extends` mechanism gives the `Coe C P` direction implicitly;
 //!   the explicit `CoeOut` covers the dual.
 
+use super::lean_name;
 use super::{ClassDecl, LeanType, PropertyDecl};
 use eigenius_kernel::ontology::iri::Iri;
 use std::collections::BTreeMap;
@@ -107,23 +108,28 @@ fn float_literal(v: f64) -> String {
     format!("{v:?}")
 }
 
-/// Lookup from class IRI to Lean `short_name`. Built by the
+/// Lookup from class IRI to the class's Lean type name. Built by the
 /// generator once and threaded into every emitter step so type
 /// rendering doesn't re-walk the resolution layer.
+///
+/// Since eigenius#208 the name is namespace-qualified relative to `EigeniusFFI`
+/// (`eigenius.reflection.Person`), not the bare `short_name` — see
+/// [`crate::mirror_gen::lean_name`]. Threading it through this one table is what makes every
+/// cross-class reference qualify at once.
 pub type ClassNameLookup = BTreeMap<Iri, String>;
 
-/// Build the IRI→`short_name` lookup table from a set of resolved
+/// Build the IRI→Lean-name lookup table from a set of resolved
 /// declarations. Convenience for tests and the eventual top-level
 /// emitter — both need the same shape.
 pub(crate) fn class_name_lookup(decls: &BTreeMap<Iri, ClassDecl>) -> ClassNameLookup {
     decls
         .iter()
-        .map(|(iri, d)| (iri.clone(), d.short_name.clone()))
+        .map(|(iri, d)| (iri.clone(), lean_name::class_lean_name(iri, &d.short_name)))
         .collect()
 }
 
 /// Render a single Lean type expression (D30 §4 table). Class refs
-/// resolve to their `short_name` via `lookup`; unresolved IRIs panic
+/// resolve to their namespace-qualified Lean name via `lookup`; unresolved IRIs panic
 /// — every class in a `LeanType::ClassRef`/`ListClassRef`/`Union`
 /// position is in the closure by construction (`walk_closure` +
 /// `resolve_class_types` enforce this), so a miss is an internal
@@ -177,7 +183,7 @@ fn push_structure(out: &mut String, decl: &ClassDecl, lookup: &ClassNameLookup) 
         push_docstring(out, d);
     }
     out.push_str("structure ");
-    out.push_str(&decl.short_name);
+    out.push_str(&lookup_or_panic(lookup, &decl.class_iri));
     if !decl.parents.is_empty() {
         out.push_str(" extends ");
         out.push_str(&join_class_names(&decl.parents, lookup));
@@ -209,9 +215,15 @@ fn push_coercions(out: &mut String, decl: &ClassDecl, lookup: &ClassNameLookup) 
         // give us automatically).
         out.push_str(&format!(
             "\ninstance : CoeOut {} {} where\n",
-            decl.short_name, parent_name
+            lookup_or_panic(lookup, &decl.class_iri),
+            parent_name
         ));
-        out.push_str(&format!("  coe c := c.to{}\n", parent_name));
+        // The projection `extends` generates is keyed on the parent's LAST component, not its
+        // path — verified against Lean 4, see `lean_name::leaf_of`.
+        out.push_str(&format!(
+            "  coe c := c.to{}\n",
+            lean_name::leaf_of(&parent_name)
+        ));
     }
 }
 

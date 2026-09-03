@@ -240,10 +240,12 @@ fn mirror_module_content(
             .get(iri)
             .expect("topological order yields only closure members");
         let trailing = if i + 1 == order.len() { "" } else { "," };
+        let type_name = crate::mirror_gen::lean_name::class_lean_name(iri, &decl.short_name);
+        let dec = crate::mirror_gen::lean_name::codec_name_for_type(&type_name, "decode");
+        let enc = crate::mirror_gen::lean_name::codec_name_for_type(&type_name, "encode");
         out.push_str(&format!(
-            "    (\"{}\", fun j => encode{name} <$> decode{name} j){trailing}\n",
+            "    (\"{}\", fun j => {enc} <$> {dec} j){trailing}\n",
             iri.as_str(),
-            name = decl.short_name,
         ));
     }
     out.push_str("  ]\n\nend EigeniusFFI\n");
@@ -443,6 +445,9 @@ mod tests {
 
         // Registry entry.
         assert!(body.contains("def eigeniusDecoders"));
-        assert!(body.contains("(\"urn:test:Person\", fun j => encodePerson <$> decodePerson j)"));
+        // Codecs sit in their structure's namespace (eigenius#208), so the verb lands before
+        // the leaf: `test.encodePerson`, not `encodetest.Person`.
+        assert!(body
+            .contains("(\"urn:test:Person\", fun j => test.encodePerson <$> test.decodePerson j)"));
     }
 }
