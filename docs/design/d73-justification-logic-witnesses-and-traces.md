@@ -3,7 +3,7 @@
 *Status: design memo · `2026-08-21`. **Supersedes [D39](d39-justification-logic.md).***
 
 *Reference: Artemov & Fitting, *Justification Logic*, 2019 (`references/publications/justification-logic-artemov-fitting-2020.txt`).
-Depends on D46 (Prop + proof irrelevance), D47 (the TypeExpr codec), D48 (indexed inductive families),
+Depends on D46 (Prop + proof irrelevance), D47 (the Term codec), D48 (indexed inductive families),
 [D49](d49-chainwitness-machinery.md) (witness machinery), [D6b](d6b-reasoning-trace-schema.md) (the epistemic cluster),
 [D68](../notes/d68-claim-kinds.md) (the two-axis claim), [D72](d72-declaration-provenance.md) (agent vs warrant).*
 
@@ -87,6 +87,14 @@ justification logic buys over modal epistemic logic, and D39 §8 spends it.
 Reasoning institution, not EigenQL. EigenQL was the natural home and cannot host it: a `JustificationTerm` is a
 recursive D47 tagged-dict inside a single property value, `Clause` is `Pattern | Fiber`, patterns match triples, and
 the AST has no recursion construct. The term is opaque to it.
+
+> **Reshaped `2026-08-31` (P7).** The capability stands; its housing does not. The algebra moved to
+> `kernel/src/justification/` at P6.0 — `support`, `is_fully_verified`, `leaves_of`,
+> `survives_without`, `cited_iris`, called directly on a retained term — and P7 deleted the
+> QueryClass with the Reasoning institution, along with `justification:ProjectionRequest` and
+> `justification:Projection`, which existed only to carry that query's input and output. Every
+> question §1.2 lists is answerable today; what is gone is the chain-resident request/report pair,
+> which nothing ever wrote. The paragraph above still holds on why EigenQL cannot host it.
 
 Everything above is one function plus readings of its output. A term's **support** is its disjunctive normal form —
 the alternative minimal ground-sets, any one of which carries the conclusion:
@@ -293,7 +301,7 @@ over Lean's larger language — D49 §7 concedes its own failure mode. It leaves
 two, which is what §4.2 is about. And it removes the reified view entirely, so the witness keys on the claim's own
 proposition hash.
 
-D49 §7 chose the inverse because `eigentt:TypeExpr` and the `Prop` universe did not exist when the Lean institution
+D49 §7 chose the inverse because `eigentt:Term` and the `Prop` universe did not exist when the Lean institution
 was built; D46 and D47 removed that constraint. Same shape of correction this document makes to D39 §8 — a design
 right for its premises, outliving them.
 
@@ -434,7 +442,8 @@ Withdrawn: **§8 in its entirety**, and §10's factivity parenthetical.
 2. **D49 §7**, the `VerifiedPropositionView` comorphism — closes #159 and makes `VerifiedEvidence` mean what D39 said.
 3. **Withdraw §8's stored category**; expose the projections of §1.2 as queries over the retained term. — *Done: the
    withdrawal was free (§8 was never implemented); the queries landed `2026-08-22` as
-   `reasoning:qc_project_justification` (eigenius#204).*
+   `reasoning:qc_project_justification` (eigenius#204), and are reached as Rust functions in
+   `kernel/src/justification/` since P7 deleted that QueryClass with the institution hosting it.*
 4. **Warrant formalization** as an ongoing activity, measured by §3.1's leaf count.
 
 Steps 1 and 2 are independent. Step 3 depends on nothing but is a vocabulary change with consumers.

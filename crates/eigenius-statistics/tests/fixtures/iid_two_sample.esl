@@ -10,8 +10,9 @@
 // a vehicle-only control arm and a drug-treated arm. Six biological
 // replicates per arm. Welch's t-test rejects H0 (mean_ctrl = mean_drug)
 // at α = 0.05 — the verdict is Holds, and the predicate
-// `DifferentMeanActivity` lands in the chain as a DerivedResource the
-// downstream D39 reasoning could cite via DerivedEvidence (parallel
+// `DifferentMeanActivity` lands in the chain as a DerivedResource recording
+// what the run produced; downstream D39 reasoning would ground on
+// `App(Declared(plan_yields_effect), Observed(sample_set))` (parallel
 // to the IC50 → StrongInhibitor composition in d39_composition.esl).
 
 namespace core       = "urn:eigenius:core";
@@ -20,6 +21,18 @@ namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace assay      = "urn:eigenius:demo:assay";
+namespace prov       = "urn:eigenius:prov";
+
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource assay:act_kinase_glo_plate_2026_03_15_iid : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-15-IID";
+    core:short_name = "act_kinase_glo_plate_2026_03_15_iid";
+}
+
 
 // ─── Domain predicate ──────────────────────────────────────────────
 
@@ -32,8 +45,8 @@ data assay:DifferentMeanActivity : core:string -> Prop, stats:PopulationLevel {
 // ─── SampleSet: 6 control + 6 drug-treated kinase activity readings ─
 
 resource assay:kinase_run_2026_03_15 : stats:SampleSetResource {
-    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-15-IID";
-    reflection:observed_at = "2026-03-15T11:04:30Z";
+    prov:was_generated_by      = assay:act_kinase_glo_plate_2026_03_15_iid;
+    prov:observed_at = "2026-03-15T11:04:30Z";
 
     // Group A = vehicle control (cluster around 100 a.u.), Group B =
     // drug-treated (cluster around 60 a.u.) — clear separation,
@@ -45,10 +58,10 @@ resource assay:kinase_run_2026_03_15 : stats:SampleSetResource {
     );
 }
 
-resource assay:kinase_run_trace : reflection:ObservationTrace {
-    reflection:resource  = assay:kinase_run_2026_03_15;
-    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-15-IID";
-    reflection:timestamp = "2026-03-15T11:04:30Z";
+resource assay:kinase_run_trace : prov:ObservationTrace {
+    prov:resource  = assay:kinase_run_2026_03_15;
+    prov:was_generated_by    = assay:act_kinase_glo_plate_2026_03_15_iid;
+    prov:timestamp = "2026-03-15T11:04:30Z";
 }
 
 // ─── The IID StatisticalAnalysisPlan ──────────────────────────────────────
@@ -77,8 +90,8 @@ resource assay:claim_drug_changes_activity : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion = Identity();
 }
 
-resource assay:claim_drug_changes_activity_trace : reflection:ProgramTrace {
-    reflection:resource  = assay:claim_drug_changes_activity;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-03-15T11:04:30Z";
+resource assay:claim_drug_changes_activity_trace : prov:ProgramTrace {
+    prov:resource  = assay:claim_drug_changes_activity;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2026-03-15T11:04:30Z";
 }

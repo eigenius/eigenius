@@ -311,8 +311,8 @@ const REMOTE_COMPONENTS: &[&str] = &[
     // handler routes it to `dispatchRunRuntimeScript` → `SubstrateDispatcher`
     // → the language runtime (e.g. R/lme4). A program applies it with the
     // input table as component input and the `RuntimeScript` (+ env) as the
-    // component argument; the run's `ProgramTrace` mints the `IsDerivedAs`
-    // witness over the output (D56 §3.1).
+    // component argument; the run's `ProgramTrace` records that the run happened
+    // (D56 §3.1). It mints no witness — a run record grounds nothing.
     "urn:eigenius:program:components:RunRuntimeScript",
 ];
 

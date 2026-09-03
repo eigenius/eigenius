@@ -16,7 +16,7 @@
 //!
 //! Axioms are chain-resident `eigentt:Axiom` resources. Each carries an
 //! `axiom_statement` property whose value is an EigenTT type expression
-//! (encoded as `eigentt:TypeExpr` per D47). At environment-build time,
+//! (encoded as `eigentt:Term` per D47). At environment-build time,
 //! the kernel walks the chain, collects `eigentt:Axiom` resources, decodes
 //! each statement back to an [`Exp`], type-checks it inhabits some sort
 //! (i.e. is a well-formed type), and registers the IRI → type binding.
@@ -228,9 +228,12 @@ mod tests {
             let mut r = Resource::new(iri(axiom_iri));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(AXIOM_CLASS_IRI))]),
+                Value::Array(vec![Value::String(
+                    iri(AXIOM_CLASS_IRI).as_str().to_string(),
+                )]),
             );
-            let encoded = encode_type(&statement_exp).expect("encode statement");
+            let encoded = encode_type(&statement_exp, crate::testing::codec_names())
+                .expect("encode statement");
             r.set(iri(AXIOM_STATEMENT_IRI), encoded);
             if let Some(j) = justification {
                 r.set(
@@ -354,7 +357,9 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:test:no_stmt_axiom"));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(AXIOM_CLASS_IRI))]),
+            Value::Array(vec![Value::String(
+                iri(AXIOM_CLASS_IRI).as_str().to_string(),
+            )]),
         );
         top.add_resource(r).unwrap();
         let chain = Arc::new(top.build(crate::layer::LayerStorage::in_memory()));
@@ -368,7 +373,7 @@ mod tests {
     /// the result. Without [`crate::nbe::term::Exp::EigonAxiom`] +
     /// the layer's cached `axiom_env()` accessor, `decode_type` would
     /// fail at `ConstRefWrongClass` and the bridge-resource fixture
-    /// pattern in `crates/eigenius-reasoning/tests/fixtures/` would
+    /// pattern in `kernel/tests/fixtures/` would
     /// have no path to compose statistical → domain propositions.
     #[test]
     fn axiom_reference_decodes_and_type_checks() {
@@ -389,7 +394,8 @@ mod tests {
             Box::new(Exp::LitString("urn:eigenius:test:subject".to_string())),
         );
 
-        let encoded = encode_type(&application).expect("encode proposition");
+        let encoded =
+            encode_type(&application, crate::testing::codec_names()).expect("encode proposition");
         let decoded = decode_type(&encoded, &chain).expect("decode round-trips");
         assert_eq!(
             decoded, application,

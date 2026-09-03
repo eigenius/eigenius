@@ -196,7 +196,6 @@ fn eval_similarity(
         ))
     })?;
     let subject_iri = match subject_value {
-        Value::ResourceRef(iri) => iri.clone(),
         Value::String(s) => match Iri::parse(s) {
             Ok(iri) => iri,
             Err(_) => return Ok(Value::Boolean(false)),
@@ -352,7 +351,7 @@ fn eval_unary(op: UnaryOp, val: &Value) -> Result<Value, QueryError> {
 /// (D2 v2 §3.7 / §3.8). The operand is one of:
 ///
 /// - `Value::Embedded(verdict)` — the Verdict resource directly.
-/// - `Value::String(iri)` / `Value::ResourceRef(iri)` — a synthesized
+/// - `Value::String(iri)` / `Value::iri(iri)` — a synthesized
 ///   IRI (typically from a FIBER `AS ?var` binding) that resolves to
 ///   the response resource through the runtime's transient overlay or
 ///   the layer chain.
@@ -369,15 +368,6 @@ fn eval_verdict_predicate(
             resolved = resolve_iri_string(s, layer, runtime).ok_or_else(|| {
                 QueryError::evaluation(format!(
                     "{kw} operand IRI `{s}` does not resolve to a resource (FIBER overlay or layer chain)",
-                    kw = kind.ctor_name(),
-                ))
-            })?;
-            &resolved
-        }
-        Value::ResourceRef(iri) => {
-            resolved = resolve_iri_string(iri.as_str(), layer, runtime).ok_or_else(|| {
-                QueryError::evaluation(format!(
-                    "{kw} operand IRI `{iri}` does not resolve to a resource",
                     kw = kind.ctor_name(),
                 ))
             })?;

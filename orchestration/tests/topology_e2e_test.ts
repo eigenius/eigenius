@@ -264,8 +264,8 @@ property smoke:label : core:string {
         autoCommit: true,
       });
       assert(
-        loadResp.success,
-        `load failed: ${JSON.stringify(loadResp.errors.map((e) => e.message))}`,
+        loadResp.ok,
+        `load failed: ${loadResp.ok ? "" : loadResp.message}`,
       );
 
       const withSmoke = await eigen.layerTopology();

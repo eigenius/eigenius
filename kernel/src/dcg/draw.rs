@@ -50,7 +50,8 @@ use crate::ontology::resource::{Resource, Value};
 use sha2::{Digest, Sha256};
 
 const CORE: &str = "urn:eigenius:core";
-const REFL: &str = "urn:eigenius:reflection";
+/// The provenance axis. Split out of `reflection`; see `ontologies/prov/prov.esl`.
+const PROV: &str = "urn:eigenius:prov";
 const ENC: &str = "urn:eigenius:encoding";
 
 /// Which proposer an exchange came from. Mirrors the closed `enc:DrawSeam` enumeration — adding a
@@ -145,13 +146,17 @@ pub fn draw_resources(
         let mut r = Resource::new(iri(&id)?);
         r.set(
             iri(&format!("{CORE}:is_a"))?,
-            Value::Array(vec![Value::ResourceRef(iri(&format!(
-                "{ENC}:ProposalDraw"
-            ))?)]),
+            Value::Array(vec![Value::String(
+                iri(&format!("{ENC}:ProposalDraw"))?.as_str().to_string(),
+            )]),
         );
         r.set(
             iri(&format!("{ENC}:draw_seam"))?,
-            Value::ResourceRef(iri(&format!("{ENC}:{}", seam.local_name()))?),
+            Value::String(
+                iri(&format!("{ENC}:{}", seam.local_name()))?
+                    .as_str()
+                    .to_string(),
+            ),
         );
         r.set(
             iri(&format!("{ENC}:draw_key"))?,
@@ -171,7 +176,7 @@ pub fn draw_resources(
             );
         }
         r.set(
-            iri(&format!("{REFL}:timestamp"))?,
+            iri(&format!("{PROV}:timestamp"))?,
             Value::String(timestamp.to_string()),
         );
         out.push(r);
@@ -203,7 +208,7 @@ pub fn draws_from_layer(layer: &Layer, seam: DrawSeam) -> Result<String, String>
         // Filter to this seam. A chain can carry draws from several runs and several seams; the
         // caller asked for one seam's replay set.
         //
-        // `as_iri_str`, NOT a `ResourceRef` match: CBOR persistence collapses `ResourceRef` into
+        // An accessor, never a variant match: CBOR persistence collapsed `ResourceRef` into
         // `String`, so a draw read back off a committed branch carries the string shape while one
         // built in memory carries the ref. Matching only the ref made every persisted draw
         // invisible — `draws_from_layer` returned `[]`, the run silently re-asked the model, and
@@ -211,7 +216,7 @@ pub fn draws_from_layer(layer: &Layer, seam: DrawSeam) -> Result<String, String>
         // `2026-08-20` by a second `eigenius formalize` on the same doc id reporting 11 draws
         // recorded instead of 0. The same invariant is why Rule 3 accepts a String IRI for
         // resource-typed properties.
-        match r.get(&seam_prop).and_then(|v| v.as_iri_str()) {
+        match r.get(&seam_prop).and_then(|v| v.as_str()) {
             Some(s) if s == seam_iri.as_str() => {}
             _ => continue,
         }
@@ -299,7 +304,7 @@ mod tests {
         let rec_prop = Iri::parse("urn:eigenius:encoding:draw_record").unwrap();
         assert!(matches!(
             rs[0].get(&seam_prop),
-            Some(Value::ResourceRef(s)) if s.as_str().ends_with("seam_sense_rank")
+            Some(Value::String(s)) if s.as_str().ends_with("seam_sense_rank")
         ));
         let Some(Value::String(text)) = rs[0].get(&rec_prop) else {
             panic!("record is a string")

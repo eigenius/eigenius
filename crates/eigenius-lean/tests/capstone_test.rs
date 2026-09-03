@@ -230,7 +230,7 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
     let mut patient_class = Resource::new(iri(PATIENT_CLASS_IRI));
     patient_class.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
     );
     patient_class.set(iri(wk::SHORT_NAME), Value::String("Patient".to_string()));
     builder
@@ -244,7 +244,9 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
     let mut patient = Resource::new(iri(PATIENT_INSTANCE_IRI));
     patient.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(PATIENT_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(PATIENT_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     builder.add_resource(patient).expect("add patient instance");
 
@@ -255,9 +257,11 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
     let mut mirror = Resource::new(iri(MIRROR_IRI));
     mirror.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:runtime:RuntimePackageMirror",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:runtime:RuntimePackageMirror")
+                .as_str()
+                .to_string(),
+        )]),
     );
     mirror.set(
         iri(lean_iris::PROP_MIRROR_SOURCE_LAYER),
@@ -273,7 +277,9 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
     );
     mirror.set(
         iri(lean_iris::PROP_MIRRORED_CLASSES),
-        Value::Array(vec![Value::ResourceRef(iri(PATIENT_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(PATIENT_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     builder.add_resource(mirror).expect("add mirror");
 
@@ -283,9 +289,11 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
     let mut payload = Resource::new(iri(PAYLOAD_IRI));
     payload.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofPayload",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofPayload")
+                .as_str()
+                .to_string(),
+        )]),
     );
     payload.set(
         iri(lean_iris::PROP_PAYLOAD_BYTES),
@@ -300,18 +308,18 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
     // commit pipeline would do (D28 §6.3); we replicate it here so
     // the proposition reflects the proof's actual type rather than
     // a hand-fabricated tree.
-    let proposition = bytes_to_lean_expr(CAPSTONE_PROOF_BYTES, TARGET_THEOREM)
+    let proposition = bytes_to_lean_expr(CAPSTONE_PROOF_BYTES, TARGET_THEOREM, chain())
         .expect("chain-mirror translator must decode the capstone proposition");
     let mut term = Resource::new(iri(TERM_IRI));
     term.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofTerm",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofTerm").as_str().to_string(),
+        )]),
     );
     term.set(
         iri(lean_iris::PROP_PROOF_PAYLOAD),
-        Value::ResourceRef(iri(PAYLOAD_IRI)),
+        Value::iri(&iri(PAYLOAD_IRI)),
     );
     term.set(
         iri(lean_iris::PROP_TARGET_NAME),
@@ -333,6 +341,19 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
 }
 
 // ─── The capstone assertion ────────────────────────────────────────
+
+/// The bootstrap chain — the mirror reads `LeanExpr`'s constructor argument names from it.
+fn chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
 
 #[test]
 #[ignore = "heavy: parses ~9 kLoC of lean4export output via nanoda"]

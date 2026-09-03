@@ -63,7 +63,7 @@ import {
   Search20Regular,
   Stack20Regular,
 } from "@fluentui/react-icons";
-import type {
+import type { Outcome,
   ConsolidateChainResponse,
   EstimateConsolidationResponse,
   LayerTopologyResponse,
@@ -153,7 +153,7 @@ type EstimateState =
 type RunState =
   | { kind: "idle" }
   | { kind: "running" }
-  | { kind: "done"; resp: ConsolidateChainResponse }
+  | { kind: "done"; resp: Outcome<ConsolidateChainResponse> }
   | { kind: "error"; message: string };
 
 export function CompactionPanel() {
@@ -272,14 +272,15 @@ export function CompactionPanel() {
     if (!rangeValid.ok) return;
     setRun({ kind: "running" });
     try {
-      const resp = await eigen.consolidateChain({
+      const outcome = await eigen.consolidateChain({
         branch: activeBranch,
         fromLayer,
         toLayer,
         preserveHistory,
       });
-      setRun({ kind: "done", resp });
-      if (resp.success) {
+      setRun({ kind: "done", resp: outcome });
+      if (outcome.ok) {
+        const resp = outcome.value;
         await refreshBranches(eigen);
         dispatchToast(
           <Toast>
@@ -544,24 +545,29 @@ function RunBlock({ state, styles }: RunBlockProps) {
     );
   }
   // done
-  const resp = state.resp;
-  if (!resp.success) {
+  const outcome = state.resp;
+  if (!outcome.ok) {
+    // `response` carries the structured refusal detail — `errorKind` and `errorLayer` say
+    // WHICH layer stopped the compaction, which `message` alone cannot.
+    const refused = outcome.response;
     return (
       <MessageBar intent="error">
         <MessageBarBody>
           <MessageBarTitle>
-            {friendlyErrorKind(resp.errorKind) ?? "Compaction rejected"}
+            {(refused && friendlyErrorKind(refused.errorKind)) ??
+              "Compaction rejected"}
           </MessageBarTitle>
-          <div>{resp.error || "compaction failed"}</div>
-          {resp.errorLayer && (
+          <div>{outcome.message}</div>
+          {refused?.errorLayer && (
             <Caption1 className={styles.monospace}>
-              Offending layer: {resp.errorLayer}
+              Offending layer: {refused.errorLayer}
             </Caption1>
           )}
         </MessageBarBody>
       </MessageBar>
     );
   }
+  const resp = outcome.value;
   return (
     <MessageBar intent="success">
       <MessageBarBody>

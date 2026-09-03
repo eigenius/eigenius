@@ -118,7 +118,7 @@ Both AutoOnLoad gates produce `Holds` Verdicts that commit back to the chain alo
 Cells 12–18 close the [D14 §9.3](../../design/d14-institution-realisation.md) chain-reinsertion contract directly through both surfaces:
 
 - **ESL program** (cells 13–15): a wrapper invokes the `symbolics_to_jump` comorphism via the qualified-name function-call form (`comorphisms:symbolics_to_jump(input)`); the produced `OptimisationProblem` lands at a deterministic content-hash IRI `urn:eigenius:comorphism-output:symbolics_to_jump:<hex>`. See [ESL §9.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs).
-- **EigenQL `FIBER ... INTO`** (cells 16–18): the operational backing of the same translation, dispatched interactively via FIBER, with the user pinning the result at a caller-named IRI. See [EigenQL §7.6](../eigenql/07-fiber-clauses.md#76-into--pinning-the-response-iri).
+- **EigenQL `FIBER ... INTO`** (cells 16–18): the operational backing of the same translation, dispatched interactively via FIBER, with the user pinning the result at a caller-named IRI. See [EigenQL §7.6](../eigenql/08-fiber-clauses.md#8-6-into--pinning-the-response-iri).
 
 Both paths use the same `commit_with_validation` machinery — comorphism-translated resources, however dispatched, are first-class chain residents.
 
@@ -160,7 +160,7 @@ Regeneration: when the Lean toolchain or the capstone proof changes, regenerate 
 
 Source: [`demo/prose-to-formulas-v2/run.sh`](../../../demo/prose-to-formulas-v2/run.sh) and [`demo/prose-to-formulas-v2/README.md`](../../../demo/prose-to-formulas-v2/README.md). (There is no `demo/prose-to-formulas/` — the `-v2` directory is the demo.)
 
-Two sentences of controlled prose from the WRN paper — a measurement (*"MSI cancer models had the exonuclease activity of WRN"*) and an activity claim (*"…required the helicase activity of WRN"*) — go through the DCG parser (D63), which turns each into a closed, felicity-gated `Prop`, committed as an `enc:EncodedClaim` under a `reflection:DeclarationTrace` that mints the witness `IsDeclaredAs claim_i P_i`. (Declared, not Derived, since eigenius#201: the parser fixes the claim's FORM, not its content — D73 §6. The parse RUN is the Derived object, and it gets one `reflection:ProgramTrace` on the `enc:ReasoningStructure`, not one per sentence.) Plus one rule **pinned from the literature**, not from the document: `∀m. HasActivity(m, WRN, exonuclease) → RequiresActivity(m, WRN, helicase)`.
+Two sentences of controlled prose from the WRN paper — a measurement (*"MSI cancer models had the exonuclease activity of WRN"*) and an activity claim (*"…required the helicase activity of WRN"*) — go through the DCG parser (D63), which turns each into a closed, felicity-gated `Prop`, committed as an `enc:EncodedClaim` under a `prov:DeclarationTrace` that mints the witness `IsDeclaredAs claim_i P_i`. (Declared, not Derived, since eigenius#201: the parser fixes the claim's FORM, not its content — D73 §6. The parse RUN is the Derived object, and it gets one `prov:ProgramTrace` on the `enc:ReasoningStructure`, not one per sentence.) Plus one rule **pinned from the literature**, not from the document: `∀m. HasActivity(m, WRN, exonuclease) → RequiresActivity(m, WRN, helicase)`.
 
 ```bash
 ./demo/prose-to-formulas-v2/run.sh
@@ -169,7 +169,7 @@ Two sentences of controlled prose from the WRN paper — a measurement (*"MSI ca
 
 Under D66 there is **no lift step**: `onco-typed.esl` *defines* the domain predicates over the parser's own lexicon (`def`), so a parsed sentence and its domain formula are the same term by definitional equality. The result is `RequiresActivity(MSI, WRN, helicase)` justified twice — once because sentence 2 asserts it (its own parse witness, nothing Declared), once because it *follows* from sentence 1 plus the published rule specialized at the model with [`spec_poly`](../esl/09-institutions.md#9102-the-justifiedby-certificate-predicate). The derived route carries strictly more assumptions and commits at `Declared`; the point is not that it is better-warranted but that it **knows what it depends on**. Negate the measurement and the two routes come apart in the same run: sentence 2's claim still commits, the derivation that cited sentence 1's parse has nothing left to stand on and is rejected.
 
-Two ways a claim gets justified here, both exercised by [`crates/eigenius-reasoning/tests/justification_routes.rs`](../../../crates/eigenius-reasoning/tests/justification_routes.rs):
+Two ways a claim gets justified here. The intact/edited pair is exercised end to end by [`crates/eigenius-encoding/tests/acceptance.rs`](../../../crates/eigenius-encoding/tests/acceptance.rs), which runs against a DB snapshot (`EIGENIUS_DB_SNAPSHOT`, `--ignored`). The `justification_routes.rs` test that used to be cited here went with `crates/eigenius-reasoning` at P7.
 
 | | What warrants it | Grade | Authoring cost |
 |---|---|---|---|

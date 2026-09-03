@@ -75,5 +75,4 @@ resource lexicon:that_comp : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:that_comp_sem;
     lexicon:sem_type = type_expr( Prop -> Prop );
     lexicon:sense    = "that";
-    lexicon:grade    = epistemic:declared;
 }

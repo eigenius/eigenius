@@ -23,14 +23,11 @@
  * one that was saved. That is what this covers.
  */
 
-import {
-  assertEquals,
-  assertNotEquals,
-} from "jsr:@std/assert@^1.0.19";
+import { assertEquals, assertNotEquals } from "@std/assert";
 import {
   type CellJson,
-  notebookJsonToResources,
   type NotebookJson,
+  notebookJsonToResources,
   resourcesToNotebookJson,
 } from "./notebook.ts";
 

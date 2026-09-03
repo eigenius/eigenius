@@ -62,7 +62,7 @@ import {
   ArrowSync20Regular,
   Delete20Regular,
 } from "@fluentui/react-icons";
-import type { EstimateGcResponse, RunGcResponse } from "@eigenius/client";
+import type { Outcome, EstimateGcResponse, RunGcResponse } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 
 const TOASTER_ID = "gc-panel-toaster";
@@ -133,7 +133,7 @@ type EstimateState =
 type RunState =
   | { kind: "idle" }
   | { kind: "running" }
-  | { kind: "done"; resp: RunGcResponse }
+  | { kind: "done"; resp: Outcome<RunGcResponse> }
   | { kind: "error"; message: string };
 
 export function GcPanel() {
@@ -172,9 +172,10 @@ export function GcPanel() {
     setConfirmOpen(false);
     setRun({ kind: "running" });
     try {
-      const resp = await eigen.runGc();
-      setRun({ kind: "done", resp });
-      if (resp.success) {
+      const outcome = await eigen.runGc();
+      setRun({ kind: "done", resp: outcome });
+      if (outcome.ok) {
+        const resp = outcome.value;
         dispatchToast(
           <Toast>
             <ToastTitle>GC complete</ToastTitle>
@@ -385,14 +386,15 @@ function RunBlock({ state, styles }: RunBlockProps) {
       </MessageBar>
     );
   }
-  const resp = state.resp;
-  if (!resp.success) {
+  const outcome = state.resp;
+  if (!outcome.ok) {
     return (
       <MessageBar intent="error">
-        <MessageBarBody>{resp.error || "gc failed"}</MessageBarBody>
+        <MessageBarBody>{outcome.message}</MessageBarBody>
       </MessageBar>
     );
   }
+  const resp = outcome.value;
   return (
     <MessageBar intent="success">
       <MessageBarBody>

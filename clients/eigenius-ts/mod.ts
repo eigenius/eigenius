@@ -56,6 +56,7 @@ export {
   type MergeResolutionWire,
   MergeSide,
   MergeStrategyKind,
+  type Outcome,
   PrepareMergeErrorKind,
   type PrepareMergeResponse,
   PreviewCascadeErrorKind,

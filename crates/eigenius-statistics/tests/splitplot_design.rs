@@ -70,7 +70,7 @@ fn build_splitplot_chain() -> ExecutionContext {
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
     let stats_source = include_str!("../../../ontologies/statistics/statistics.esl");
-    let stats_resources = esl::compile_against_layer(stats_source, &reflection)
+    let stats_resources = esl::compile(stats_source, &reflection)
         .expect("statistics.esl compiles against reflection layer");
     let mut stats_builder = LayerBuilder::new("statistics", Some(reflection));
     for r in stats_resources {
@@ -79,16 +79,15 @@ fn build_splitplot_chain() -> ExecutionContext {
     let stats_layer = Arc::new(stats_builder.build(LayerStorage::in_memory()));
 
     let fixture_source = include_str!("fixtures/splitplot_design.esl");
-    let fixture_resources = esl::compile_against_layer(fixture_source, &stats_layer)
-        .unwrap_or_else(|errs| {
-            panic!(
-                "splitplot_design.esl failed to compile: {}",
-                errs.into_iter()
-                    .map(|e| format!("{e:?}"))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            )
-        });
+    let fixture_resources = esl::compile(fixture_source, &stats_layer).unwrap_or_else(|errs| {
+        panic!(
+            "splitplot_design.esl failed to compile: {}",
+            errs.into_iter()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    });
     let mut fixture_builder = LayerBuilder::new("splitplot-fixture", Some(stats_layer));
     for r in fixture_resources {
         fixture_builder.add_resource(r).unwrap();
@@ -101,6 +100,23 @@ fn build_splitplot_chain() -> ExecutionContext {
         ExecutionMode::ReadOnly,
         LayerStorage::in_memory(),
     )
+}
+
+/// The constructor view of a value, for assertions written as `j["args"][0]["ctor"]`.
+///
+/// A value is a resource whose `is_a` names its constructor's class (D85 §6.1); the projection
+/// reads it back positionally, which needs the chain because argument order is declared.
+fn tagged_of(
+    v: &eigenius_kernel::ontology::resource::Value,
+    layer: &eigenius_kernel::layer::Layer,
+) -> serde_json::Value {
+    use eigenius_kernel::ontology::resource::Value as RV;
+    match v {
+        RV::Embedded(r) => eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, layer)
+            .expect("a stored value is well formed"),
+        RV::Json(j) => j.clone(),
+        other => panic!("expected an inductive value, got {other:?}"),
+    }
 }
 
 #[test]
@@ -205,9 +221,7 @@ fn splitplot_data_lands_at_split_plot_dispatch_position() {
     let sample_set_iri_str = claim
         .get(&Iri::parse(iris::PROP_SAMPLE_SET).unwrap())
         .and_then(|v| {
-            if let Value::ResourceRef(i) = v {
-                Some(i.as_str().to_string())
-            } else if let Value::String(s) = v {
+            if let Value::String(s) = v {
                 Some(s.clone())
             } else {
                 None
@@ -219,11 +233,7 @@ fn splitplot_data_lands_at_split_plot_dispatch_position() {
     let sample_set_value = sample_set_res
         .get(&Iri::parse("urn:eigenius:measurements:sample_set_value").unwrap())
         .expect("sample_set_value set");
-    let bundle_json = if let Value::Json(j) = sample_set_value {
-        j
-    } else {
-        panic!("sample_set_value is not Value::Json");
-    };
+    let bundle_json = &tagged_of(sample_set_value, ctx.head());
     // args[0] = Restricted
     let randomization = bundle_json["args"][0]["ctor"].as_str();
     assert_eq!(randomization, Some("Restricted"));

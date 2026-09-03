@@ -60,8 +60,8 @@ const DEMO: &str = include_str!("../../../experiments/lexicon/lexicon.esl");
 /// Compile `doc` against `parent` and build the layer (panicking with the compile
 /// errors if it isn't Expressible).
 fn esl_layer(name: &str, doc: &str, parent: Arc<Layer>) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(doc, &parent)
-        .unwrap_or_else(|e| panic!("{name} failed to compile: {e:?}"));
+    let resources =
+        esl::compile(doc, &parent).unwrap_or_else(|e| panic!("{name} failed to compile: {e:?}"));
     let mut b = LayerBuilder::new(name, Some(parent));
     for r in resources {
         b.add_resource(r).expect("add_resource");

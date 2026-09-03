@@ -49,17 +49,23 @@ const FIXTURE: &str = r#"
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
 namespace reflection = "urn:eigenius:reflection";
+namespace prov = "urn:eigenius:prov";
 namespace stats      = "urn:eigenius:measurements";
 namespace screen     = "urn:eigenius:demo:screen";
 
 resource screen:witness_kinaseglo_floor : stats:ImpossibilityWitness {
-    reflection:declared_by = "methodology:kinase-glo-emax-floor";
-    reflection:rationale   = "E_max plateau excludes the inverse direction; licenses the one-sided path.";
+    prov:was_attributed_to = "methodology:kinase-glo-emax-floor";
+    prov:rationale   = "E_max plateau excludes the inverse direction; licenses the one-sided path.";
+}
+
+resource screen:act_depmap_slice_ic50_confirmatory : prov:Activity {
+    core:description = "depmap-slice:ic50-confirmatory";
+    core:short_name = "act_depmap_slice_ic50_confirmatory";
 }
 
 resource screen:ss_file_backed : stats:SampleSetResource {
-    reflection:source      = "depmap-slice:ic50-confirmatory";
-    reflection:observed_at = "2026-03-11T10:18:42Z";
+    prov:was_generated_by      = screen:act_depmap_slice_ic50_confirmatory;
+    prov:observed_at = "2026-03-11T10:18:42Z";
 
     // Observations live off-chain (D53 §6.1): the inline slot is empty;
     // the verifier reads the `ic50` column of the PinnedExternalFile.
@@ -112,7 +118,7 @@ fn build_chain(csv_path: &str, content_hash: &str) -> ExecutionContext {
     };
 
     let stats_layer = {
-        let rs = esl::compile_against_layer(
+        let rs = esl::compile(
             include_str!("../../../ontologies/statistics/statistics.esl"),
             &reflection,
         )
@@ -137,7 +143,7 @@ fn build_chain(csv_path: &str, content_hash: &str) -> ExecutionContext {
     };
 
     let fixture = {
-        let rs = esl::compile_against_layer(FIXTURE, &ingest).unwrap_or_else(|errs| {
+        let rs = esl::compile(FIXTURE, &ingest).unwrap_or_else(|errs| {
             panic!(
                 "fixture failed to compile: {}",
                 errs.into_iter()
@@ -155,13 +161,15 @@ fn build_chain(csv_path: &str, content_hash: &str) -> ExecutionContext {
         let mut file = Resource::new(iri(FILE_IRI));
         file.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:ingest:PinnedExternalFile",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:ingest:PinnedExternalFile")
+                    .as_str()
+                    .to_string(),
+            )]),
         );
         file.set(
-            iri("urn:eigenius:reflection:source"),
-            Value::String("depmap-slice:ic50-confirmatory".into()),
+            iri("urn:eigenius:prov:was_generated_by"),
+            Value::String("urn:eigenius:demo:screen:act_depmap_slice_ic50_confirmatory".into()),
         );
         file.set(
             iri("urn:eigenius:ingest:reference"),

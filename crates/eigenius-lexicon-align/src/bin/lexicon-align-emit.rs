@@ -49,8 +49,18 @@ struct Args {
 /// The `num` argument of a `cat_n(umlscui:<CUI>, num)` category, or `None` if the category is not
 /// that shape — which is how a **named individual** (`cat_np(umlssty:<TUI>, sg)`) is excluded: it is
 /// an instance, not a class, and pointing it at a WordNet class would be a type error.
-fn cat_n_num(cat: &Value, cui: &str) -> Option<String> {
-    let Value::Json(j) = cat else { return None };
+fn cat_n_num(cat: &Value, cui: &str, layer: &eigenius_kernel::layer::Layer) -> Option<String> {
+    // Reads the value in EITHER shape. It matched only `Value::Json`, and a `lexicon:cat` is a
+    // value resource since D85 §5 step 4 — so every category read as "not a `cat_n`" and every
+    // entry was counted a named individual. The emitter reported 40 405 skips, a plausible
+    // number, and wrote an empty layer; the kernel then panicked on the empty commit batch.
+    let j = match cat {
+        Value::Json(j) => j.clone(),
+        Value::Embedded(r) => {
+            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, layer).ok()?
+        }
+        _ => return None,
+    };
     let s = j.to_string();
     if !s.contains("\"cat_n\"") {
         return None; // cat_np (named individual) or anything else — skip.
@@ -140,7 +150,7 @@ fn main() -> ExitCode {
                     continue; // this surface of the concept was NOT merged — leave it alone
                 };
                 let cat = r.get(&Iri::parse("urn:eigenius:lexicon:cat").unwrap());
-                let Some(num) = cat.and_then(|c| cat_n_num(c, cui)) else {
+                let Some(num) = cat.and_then(|c| cat_n_num(c, cui, head)) else {
                     skipped_named += 1; // named individual (cat_np) — cannot denote a class
                     continue;
                 };
@@ -151,10 +161,6 @@ fn main() -> ExitCode {
                     form,
                     sense: as_str(r.get(&Iri::parse("urn:eigenius:lexicon:sense").unwrap()))
                         .unwrap_or_default(),
-                    grade: qname(
-                        &as_str(r.get(&Iri::parse("urn:eigenius:lexicon:grade").unwrap()))
-                            .unwrap_or_default(),
-                    ),
                     in_lexicon: qname(
                         &as_str(r.get(&Iri::parse("urn:eigenius:lexicon:in_lexicon").unwrap()))
                             .unwrap_or_default(),

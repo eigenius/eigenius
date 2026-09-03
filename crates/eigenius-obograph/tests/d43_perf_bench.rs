@@ -125,13 +125,21 @@ fn build_go_layer_with_timing(report: &ConvertReport) -> PersistentLayer {
     let mut ti = Resource::new(Iri::parse("urn:obo:converter:go-perf:ti_desc").unwrap());
     ti.set(
         Iri::parse(wk::IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::TEXT_INDEX_CLASS).unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::TEXT_INDEX_CLASS)
+                .unwrap()
+                .as_str()
+                .to_string(),
         )]),
     );
     ti.set(
         Iri::parse(wk::TARGET_PROPERTY).unwrap(),
-        Value::ResourceRef(Iri::parse("urn:eigenius:core:description").unwrap()),
+        Value::String(
+            Iri::parse("urn:eigenius:core:description")
+                .unwrap()
+                .as_str()
+                .to_string(),
+        ),
     );
     ti.set(
         Iri::parse(wk::TEXT_ANALYZER).unwrap(),

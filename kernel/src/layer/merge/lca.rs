@@ -126,7 +126,7 @@ pub(crate) fn ancestor_chain_iris(
 /// Yield every `Iri` referenced by a `Value`, recursing through
 /// every nested container shape Eigon admits:
 ///
-/// - `ResourceRef(iri)` — yield the IRI directly.
+/// - `String(s)` that parses as an IRI — yield it directly.
 /// - `Array(items)` — recurse into each item (handles arrays of
 ///   refs, arrays of arrays, arrays of embeddeds).
 /// - `Embedded(resource)` — recurse into each of the embedded
@@ -149,24 +149,14 @@ pub(crate) fn iter_iri_values(value: &crate::ontology::resource::Value) -> Vec<I
 }
 
 pub(crate) fn collect_iri_refs_into(value: &crate::ontology::resource::Value, out: &mut Vec<Iri>) {
-    use crate::ontology::resource::Value;
-    match value {
-        Value::ResourceRef(iri) => out.push(iri.clone()),
-        Value::Array(items) => {
-            for v in items {
-                collect_iri_refs_into(v, out);
+    // Value leaves only. A property KEY inside an embedded value is the name of a property,
+    // not of a resource this value points at, and the classifier this feeds is asking which
+    // resources a value names.
+    crate::ontology::value_refs::for_each_ref(value, &mut |site, s, _path| {
+        if site == crate::ontology::value_refs::RefSite::Value {
+            if let Ok(iri) = Iri::parse(s) {
+                out.push(iri);
             }
         }
-        Value::Embedded(resource) => {
-            for v in resource.properties().values() {
-                collect_iri_refs_into(v, out);
-            }
-        }
-        Value::String(_)
-        | Value::Integer(_)
-        | Value::Float(_)
-        | Value::Boolean(_)
-        | Value::Json(_)
-        | Value::Vector { .. } => {}
-    }
+    });
 }

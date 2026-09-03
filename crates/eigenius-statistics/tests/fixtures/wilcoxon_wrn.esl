@@ -17,10 +17,26 @@ namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace wrn        = "urn:eigenius:demo:wrndep";
+namespace prov       = "urn:eigenius:prov";
+
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource wrn:act_a_18q4_avg_wrn_dependency_common_msi_lineages_supp_table : prov:Activity {
+    core:description = "depmap:18Q4 avg WRN dependency, common-MSI lineages (Supp Table 1)";
+    core:short_name = "act_a_18q4_avg_wrn_dependency_common_msi_lineages_supp_table";
+}
+resource wrn:act_a_18q4_supp_table_1 : prov:Activity {
+    core:description = "depmap:18Q4 (Supp Table 1)";
+    core:short_name = "act_a_18q4_supp_table_1";
+}
+
 
 resource wrn:wrn_dep_msi_vs_mss : stats:SampleSetResource {
-    reflection:source      = "depmap:18Q4 avg WRN dependency, common-MSI lineages (Supp Table 1)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrn:act_a_18q4_avg_wrn_dependency_common_msi_lineages_supp_table;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     stats:sample_set_value = stats:IID(
         [-2.623081, -2.225778, -2.056004, -1.826026, -1.801462, -1.775366, -1.570166, -1.505872,
@@ -44,10 +60,10 @@ resource wrn:wrn_dep_msi_vs_mss : stats:SampleSetResource {
     );
 }
 
-resource wrn:wrn_dep_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:wrn_dep_msi_vs_mss;
-    reflection:source    = "depmap:18Q4 (Supp Table 1)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:wrn_dep_trace : prov:ObservationTrace {
+    prov:resource  = wrn:wrn_dep_msi_vs_mss;
+    prov:was_generated_by    = wrn:act_a_18q4_supp_table_1;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:claim_msi_more_wrn_dependent : stats:StatisticalAnalysisPlan {
@@ -60,8 +76,8 @@ resource wrn:claim_msi_more_wrn_dependent : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion   = Identity();
 }
 
-resource wrn:claim_msi_more_wrn_dependent_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:claim_msi_more_wrn_dependent;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:claim_msi_more_wrn_dependent_trace : prov:ProgramTrace {
+    prov:resource  = wrn:claim_msi_more_wrn_dependent;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }

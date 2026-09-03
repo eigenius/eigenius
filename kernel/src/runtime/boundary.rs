@@ -252,7 +252,6 @@ fn read_iri_property(r: &Resource, prop_iri: &str) -> Result<Iri, BoundaryError>
     match value {
         Value::String(s) => Iri::parse(s)
             .map_err(|e| BoundaryError::Malformed(format!("malformed IRI in `{prop_iri}`: {e}"))),
-        Value::ResourceRef(iri) => Ok(iri.clone()),
         _ => Err(BoundaryError::Malformed(format!(
             "property `{prop_iri}` has wrong type: expected IRI string"
         ))),
@@ -263,7 +262,6 @@ fn read_optional_iri_property(r: &Resource, prop_iri: &str) -> Option<Iri> {
     let prop = Iri::parse(prop_iri).ok()?;
     match r.get(&prop)? {
         Value::String(s) => Iri::parse(s).ok(),
-        Value::ResourceRef(iri) => Some(iri.clone()),
         _ => None,
     }
 }
@@ -300,7 +298,7 @@ mod tests {
     fn env_resource(env_iri: &str, mirror_iri: Option<&str>) -> Resource {
         let mut r = Resource::new(iri(env_iri));
         if let Some(m) = mirror_iri {
-            r.set(iri(PROP_MIRROR_DEPENDENCY), Value::ResourceRef(iri(m)));
+            r.set(iri(PROP_MIRROR_DEPENDENCY), Value::iri(&iri(m)));
         }
         r
     }
@@ -320,7 +318,7 @@ mod tests {
             Value::Array(
                 mirrored_classes
                     .iter()
-                    .map(|c| Value::ResourceRef(iri(c)))
+                    .map(|c| Value::iri(&iri(c)))
                     .collect(),
             ),
         );
@@ -329,16 +327,13 @@ mod tests {
 
     fn script_resource(env_iri: &str, requires_classes: &[&str]) -> Resource {
         let mut r = Resource::new(iri("urn:eigenius:test:script:s1"));
-        r.set(
-            iri(PROP_REQUIRES_ENVIRONMENT),
-            Value::ResourceRef(iri(env_iri)),
-        );
+        r.set(iri(PROP_REQUIRES_ENVIRONMENT), Value::iri(&iri(env_iri)));
         r.set(
             iri(PROP_REQUIRES_MIRROR_CLASSES),
             Value::Array(
                 requires_classes
                     .iter()
-                    .map(|c| Value::ResourceRef(iri(c)))
+                    .map(|c| Value::iri(&iri(c)))
                     .collect(),
             ),
         );

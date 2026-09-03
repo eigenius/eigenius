@@ -57,13 +57,7 @@ pub fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
         RVal::Boolean(b) => Val::LitBool(*b),
         RVal::Embedded(r) => Val::ResourceVal(r.clone()),
         RVal::Array(items) => Val::List(items.iter().map(resource_value_to_val).collect()),
-        RVal::ResourceRef(iri) => Val::EigonClass(iri.clone()),
         RVal::Json(_) => Val::Unit,
-        // D43 §4.1: Vector values are transient compute outputs of
-        // EMBED that flow into VECTOR_NEAR / VECTOR_SIM at the query
-        // surface. They have no inhabitant in the EigenTT type
-        // system — opaque to NBE.
-        RVal::Vector { .. } => Val::Unit,
     }
 }
 

@@ -142,7 +142,7 @@ fn read_str(r: &Resource, prop: &str) -> Option<String> {
     r.get(&iri(prop)).and_then(|v| {
         v.as_str()
             .map(str::to_string)
-            .or_else(|| v.as_iri_str().map(str::to_string))
+            .or_else(|| v.as_str().map(str::to_string))
     })
 }
 
@@ -442,7 +442,7 @@ mod tests {
     }
 
     fn rref(v: &str) -> Value {
-        Value::ResourceRef(iri(v))
+        Value::iri(&iri(v))
     }
 
     /// Build the CERES wide-matrix schema from the worked example.

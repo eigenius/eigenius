@@ -132,15 +132,49 @@ pub enum Val {
     },
 
     // --- D49 ChainWitness (kernel-internal opaque value) ---
-    /// An admitted `ChainWitness` inhabitant. ESL cannot construct one;
-    /// the kernel synthesises it during `JustifiedBy.*` constructor
-    /// type-checking by looking up the per-`Layer` witness index
-    /// populated from `DeclarationTrace` / `ObservationTrace` /
-    /// `ProgramTrace` resources (and the comorphism-reified
-    /// `VerifiedPropositionView` for the `Verified` family). The witness
-    /// has no eliminator and no readback into surface syntax — it exists
-    /// only at value time, in the `Prop`-typed predicate position of a
-    /// `JustifiedBy` grounding constructor's argument list.
+    /// An admitted `ChainWitness` inhabitant — **an axiom the kernel
+    /// asserts**, not a term anyone wrote.
+    ///
+    /// The types it inhabits (`witness:IsDeclaredAs` and its three
+    /// siblings, `ontologies/justification/justification.esl`) are `Prop`-valued
+    /// inductives with **zero constructors**, so nothing in the term
+    /// language can inhabit them. That emptiness is the enforcement
+    /// mechanism, not an omission: it is what makes the kernel the only
+    /// possible source of a witness. ESL cannot construct one, and if
+    /// these types had constructors an author could write one and bypass
+    /// the check below entirely.
+    ///
+    /// What the type *says* is a proposition about the **chain**, not
+    /// about the world: `IsDeclaredAs(iri, P)` means "the chain contains
+    /// evidence that `iri` is declared as `P`". So a `justification:Certificate`
+    /// certificate stacks three levels — `P` (about the world), the
+    /// witness type (about the chain's relation to `P`), and
+    /// `justification:Certificate(j, P)` (Artemov's `t:F`), which cannot be formed
+    /// without an inhabitant of the second. A witness therefore never
+    /// asserts that `P` is true; it licenses forming the certificate.
+    ///
+    /// The kernel synthesises one during `justification:Certificate.*` constructor
+    /// type-checking, via `CheckHooks::synthesize_chain_witness` →
+    /// `layer::witness_index::layer_admits_witness`, which reads
+    /// `DeclarationTrace` / `ObservationTrace` / `ProgramTrace`
+    /// resources (and the comorphism-reified `VerifiedPropositionView`
+    /// for the `Verified` family) by **direct lookup on the key's IRI**.
+    /// There is no materialised index — the `OnceLock<BTreeMap<..>>`
+    /// this comment used to describe was removed in D66 slice 0; see
+    /// `witness_index.rs`'s module docs.
+    ///
+    /// **This is the trust boundary.** Everything above the witness is
+    /// checked; the witness itself is postulated, so
+    /// `layer_admits_witness` is inside the TCB and an incorrect
+    /// admission is undetectable downstream — an axiom has no proof to
+    /// re-check. `WitnessKey` records the category, the IRI and a hash of
+    /// the proposition, but not *which relation* it establishes, which is
+    /// how a well-formed witness for a wrongly-encoded subject passed
+    /// (D81 §5; D82 §3.5).
+    ///
+    /// The witness has no eliminator and no readback into surface syntax
+    /// — it exists only at value time, in the `Prop`-typed predicate
+    /// position of a `justification:Certificate` grounding constructor's argument list.
     ///
     /// Per D49 §8, definitional equality on `ChainWitness` values is
     /// key-based (two witnesses with the same key are equal); D46 proof

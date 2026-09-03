@@ -402,7 +402,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         //
         // This was `check(ctx, a, &Val::sort(1))` — "is a type" spelled as "inhabits `Set`". The
         // hardcoded 1 made every type ABOVE `Set` unusable in any position routed through here:
-        // `reasoning:JustifiedBy.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
+        // `justification:Certificate.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
         // which point checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Cumulativity runs the
         // wrong way for this — it lets a SMALLER type be used where a larger one is wanted, and the
         // question here is not "how big" but "is it a type at all". Same defect as the `Level` `Ord`
@@ -441,7 +441,7 @@ pub fn check_inductive_declaration(
 ///
 /// [`check_type`]'s fallback was `check(ctx, a, &Val::sort(1))` — "is a type" spelled as "inhabits
 /// `Set`". The hardcoded 1 made every type ABOVE `Set` unusable in any position routed through
-/// there: `reasoning:JustifiedBy.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
+/// there: `justification:Certificate.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
 /// which point checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Cumulativity runs the wrong
 /// way for this — it lets a SMALLER type be used where a larger one is wanted, and the question
 /// here is not "how big" but "is it a type at all". Same defect as the `Level` `Ord` derive removed
@@ -715,7 +715,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         //
         // The arm this replaces read `Val::Sort(_)` and so admitted
         // `SomeClass : Prop` — a class standing where a proposition is
-        // expected (`JustifiedBy(j, P)`, `reflection:canonical_proposition`,
+        // expected (`justification:Certificate(j, P)`, `reflection:canonical_proposition`,
         // anything Rule 21 checks at the commit gate) with no diagnostic
         // (eigenius#191). Same check-vs-infer disagreement eigenius#136
         // removed for `Sort`.
@@ -1656,7 +1656,7 @@ mod tests {
         (c, refs.into_iter().next().expect("one declaration"))
     }
 
-    /// `data D : Set` standing where a proposition is expected. `JustifiedBy(j, P)`,
+    /// `data D : Set` standing where a proposition is expected. `justification:Certificate(j, P)`,
     /// `reflection:canonical_proposition` and everything else Rule 21 checks take a `Prop` in that
     /// slot, so this is the same stakes argument as eigenius#191 with a different constructor.
     #[test]
@@ -1667,7 +1667,7 @@ mod tests {
     }
 
     /// The other half, and the reason the fix is a deletion rather than a `m >= 1` guard: a
-    /// `Prop`-sorted inductive — `logic:And`, `reasoning:JustifiedBy`, the witness predicates —
+    /// `Prop`-sorted inductive — `logic:And`, `justification:Certificate`, the witness predicates —
     /// must still check against `Set` by cumulativity. Nine of the twelve probe hits measured on
     /// `2026-08-22` were exactly this shape, so a guard written the obvious way would have broken
     /// them.
@@ -2222,9 +2222,9 @@ mod tests {
         let mut r = Resource::new(Iri::parse("urn:example:rex").unwrap());
         r.set(
             is_a_iri,
-            crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::String(dog_iri.as_str().to_string()),
-            ]),
+            crate::ontology::resource::Value::Array(vec![crate::ontology::resource::Value::iri(
+                &dog_iri,
+            )]),
         );
         let expr = Exp::EigonResource(Box::new(r));
         let t = check_infer(&mut ctx(), &expr).unwrap();
@@ -2439,8 +2439,11 @@ mod tests {
         prop.set(
             Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
             crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::ResourceRef(
-                    Iri::parse(crate::ontology::well_known::PROPERTY).unwrap(),
+                crate::ontology::resource::Value::String(
+                    Iri::parse(crate::ontology::well_known::PROPERTY)
+                        .unwrap()
+                        .as_str()
+                        .to_string(),
                 ),
             ]),
         );
@@ -2454,8 +2457,11 @@ mod tests {
         );
         prop.set(
             Iri::parse(crate::ontology::well_known::DATA_TYPE_PROP).unwrap(),
-            crate::ontology::resource::Value::ResourceRef(
-                Iri::parse(crate::ontology::well_known::STRING).unwrap(),
+            crate::ontology::resource::Value::String(
+                Iri::parse(crate::ontology::well_known::STRING)
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             ),
         );
         let mut top = LayerBuilder::new("nickname", Some(animals));
@@ -2593,8 +2599,11 @@ mod tests {
             let mut r = Resource::new(Iri::parse(class_iri).unwrap());
             r.set(
                 Iri::parse(crate::ontology::well_known::IS_A).unwrap(),
-                RV::Array(vec![RV::ResourceRef(
-                    Iri::parse(crate::ontology::well_known::CLASS).unwrap(),
+                RV::Array(vec![RV::String(
+                    Iri::parse(crate::ontology::well_known::CLASS)
+                        .unwrap()
+                        .as_str()
+                        .to_string(),
                 )]),
             );
             r.set(
@@ -2607,7 +2616,7 @@ mod tests {
             );
             r.set(
                 Iri::parse(crate::ontology::well_known::REQUIRES).unwrap(),
-                RV::Array(vec![RV::ResourceRef(name_prop.clone())]),
+                RV::Array(vec![RV::String(name_prop.clone().as_str().to_string())]),
             );
             r
         };
@@ -2677,7 +2686,9 @@ mod tests {
         let mut prop = Resource::new(nickname.clone());
         prop.set(
             Iri::parse(wk::IS_A).unwrap(),
-            RV::Array(vec![RV::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+            RV::Array(vec![RV::String(
+                Iri::parse(wk::PROPERTY).unwrap().as_str().to_string(),
+            )]),
         );
         prop.set(
             Iri::parse(wk::SHORT_NAME).unwrap(),
@@ -2689,7 +2700,7 @@ mod tests {
         );
         prop.set(
             Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            RV::ResourceRef(Iri::parse(wk::STRING).unwrap()),
+            RV::String(Iri::parse(wk::STRING).unwrap().as_str().to_string()),
         );
         let mut top = LayerBuilder::new("nickname", Some(animals));
         top.add_resource(prop).unwrap();
@@ -2699,8 +2710,11 @@ mod tests {
         let mut rex = Resource::new(Iri::parse("urn:eigenius:example:rex").unwrap());
         rex.set(
             Iri::parse(wk::IS_A).unwrap(),
-            RV::Array(vec![RV::ResourceRef(
-                Iri::parse("urn:eigenius:example:Dog").unwrap(),
+            RV::Array(vec![RV::String(
+                Iri::parse("urn:eigenius:example:Dog")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             )]),
         );
         rex.set(
@@ -2774,8 +2788,8 @@ mod tests {
         r.set(
             Iri::parse(wk::IS_A).unwrap(),
             RV::Array(vec![
-                RV::ResourceRef(Iri::parse(wk::DECLARED_RESOURCE).unwrap()),
-                RV::ResourceRef(Iri::parse(wk::CLASS).unwrap()),
+                RV::String(Iri::parse(wk::PROPERTY).unwrap().as_str().to_string()),
+                RV::String(Iri::parse(wk::CLASS).unwrap().as_str().to_string()),
             ]),
         );
         r.set(
@@ -3591,7 +3605,7 @@ mod tests {
         }
     }
 
-    /// A param-free indexed inductive — the shape `reasoning:JustifiedBy` has.
+    /// A param-free indexed inductive — the shape `justification:Certificate` has.
     /// `Flag : One -> Type 0` with `mk : Π (u : One). Flag u`.
     fn flag_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
@@ -3631,7 +3645,7 @@ mod tests {
     /// indices are determined by the ctor's declared result under the bound arguments — exactly
     /// what Lean's `infer_app` computes via `inst(fun, ctx)`.
     ///
-    /// This blocked every `reasoning:certificate` at commit (validation Rule 21 infers), including
+    /// This blocked every `justification:certificate` at commit (validation Rule 21 infers), including
     /// the WRN case study's own recompute conclusions.
     #[test]
     fn infers_indexed_ctor_result_indices() {
@@ -3980,19 +3994,25 @@ mod tests {
     // ── Phase 9 — D49 ChainWitness synthesis hook ─────────────────────
 
     /// Build a `Val::InductiveType` whose decl mimics a ChainWitness
-    /// predicate (`IsDeclaredAs` short name, 2 indices: iri + P).
-    /// Production code resolves the real decl from the chain; this
-    /// stub is enough for unit-testing the hook's recognition logic.
-    fn chain_witness_typed_at(category_short_name: &str, iri_val: Val, prop_val: Val) -> Val {
+    /// predicate (2 indices: iri + P). Production code resolves the real decl from the
+    /// chain; this stub is enough for unit-testing the hook's recognition logic.
+    ///
+    /// `decl_iri` and `short_name` are supplied SEPARATELY and deliberately. The hook keys
+    /// on the IRI; the short name reaches only diagnostics. A helper deriving one from the
+    /// other could not express the case that matters — a foreign inductive carrying a
+    /// witness short name — which is what the hook used to accept.
+    fn chain_witness_typed_at(
+        decl_iri: &str,
+        short_name: &str,
+        iri_val: Val,
+        prop_val: Val,
+    ) -> Val {
         use crate::nbe::term::{Exp as TermExp, InductiveDecl};
         Val::InductiveType {
             decl: Arc::new(InductiveDecl {
                 uparams: Vec::new(),
-                iri: crate::ontology::iri::Iri::parse(&format!(
-                    "urn:eigenius:reasoning:ChainWitness:{category_short_name}"
-                ))
-                .expect("test iri"),
-                name: category_short_name.to_string(),
+                iri: crate::ontology::iri::Iri::parse(decl_iri).expect("test iri"),
+                name: short_name.to_string(),
                 params: Vec::new(),
                 indices: Vec::new(),
                 sort: TermExp::sort(0),
@@ -4011,10 +4031,38 @@ mod tests {
         assert!(try_synthesize_chain_witness(&c, &Val::sort(0))
             .unwrap()
             .is_none());
-        // Even an InductiveType whose decl.name isn't a ChainWitness
-        // short name falls through.
-        let stub = chain_witness_typed_at("Vec", Val::LitString("A".into()), Val::sort(1));
+        // Even an InductiveType that is simply some other inductive falls through.
+        let stub = chain_witness_typed_at(
+            "urn:eigenius:core:Vec",
+            "Vec",
+            Val::LitString("A".into()),
+            Val::sort(1),
+        );
         assert!(try_synthesize_chain_witness(&c, &stub).unwrap().is_none());
+    }
+
+    #[test]
+    fn synthesis_hook_ignores_a_foreign_inductive_carrying_a_witness_short_name() {
+        // The hook used to match `decl.name` against four hardcoded strings, so ANY inductive
+        // anywhere named `IsVerifiedAs` entered the witness-synthesis path — a matching rule
+        // looser than the IRIs everything else uses (D81 §5.5). It now resolves `decl.iri`
+        // against the three well-known witness IRIs, so a same-named type in another namespace
+        // is an ordinary inductive.
+        //
+        // `Verified` is the grade this would have forged, which is why this is the name to test.
+        let c = ctx();
+        let impostor = chain_witness_typed_at(
+            "urn:example:someone-elses-ontology:IsVerifiedAs",
+            "IsVerifiedAs",
+            Val::LitString("urn:test:axiom".into()),
+            Val::sort(0),
+        );
+        assert!(
+            try_synthesize_chain_witness(&c, &impostor)
+                .unwrap()
+                .is_none(),
+            "a foreign inductive must not enter witness synthesis by short name alone"
+        );
     }
 
     #[test]
@@ -4025,6 +4073,7 @@ mod tests {
         // for the wrong reason).
         let c = ctx();
         let expected = chain_witness_typed_at(
+            wk::CHAIN_WITNESS_IS_DECLARED_AS,
             "IsDeclaredAs",
             Val::LitString("urn:test:axiom".into()),
             Val::sort(0),
@@ -4046,6 +4095,7 @@ mod tests {
         // before reaching the witness index.
         let c = ctx();
         let expected = chain_witness_typed_at(
+            wk::CHAIN_WITNESS_IS_DECLARED_AS,
             "IsDeclaredAs",
             Val::sort(0), // not a LitString
             Val::sort(0),
@@ -4076,11 +4126,11 @@ mod tests {
         let mut target = Resource::new(Iri::parse(target_iri_str).unwrap());
         target.set(
             Iri::parse(wk_local::IS_A).unwrap(),
-            RVal::Array(vec![RVal::String(wk_local::DECLARED_RESOURCE.to_string())]),
+            RVal::Array(vec![RVal::String(wk_local::CLASS.to_string())]),
         );
         target.set(
             Iri::parse(wk_local::CANONICAL_PROPOSITION).unwrap(),
-            encode_type(&prop_exp).unwrap(),
+            encode_type(&prop_exp, crate::testing::codec_names()).unwrap(),
         );
 
         let mut trace = Resource::new(Iri::parse("urn:test:phase9:axiom-trace").unwrap());
@@ -4090,10 +4140,13 @@ mod tests {
         );
         trace.set(
             Iri::parse(wk_local::REFLECTION_RESOURCE).unwrap(),
-            RVal::ResourceRef(Iri::parse(target_iri_str).unwrap()),
+            RVal::String(Iri::parse(target_iri_str).unwrap().as_str().to_string()),
         );
 
-        let mut builder = LayerBuilder::new("phase9-witness-test", None);
+        let mut builder = LayerBuilder::new(
+            "phase9-witness-test",
+            Some(Arc::clone(crate::testing::term_chain())),
+        );
         builder.add_resource(target).unwrap();
         builder.add_resource(trace).unwrap();
         let layer = Arc::new(builder.build(LayerStorage::in_memory()));
@@ -4106,6 +4159,7 @@ mod tests {
         // The eval'd index must match what the witness index was
         // populated with — prop_exp evaluates to Val::sort(0).
         let expected = chain_witness_typed_at(
+            wk::CHAIN_WITNESS_IS_DECLARED_AS,
             "IsDeclaredAs",
             Val::LitString(target_iri_str.to_string()),
             Val::sort(0),
@@ -4122,13 +4176,13 @@ mod tests {
     fn synthesis_hook_errors_when_no_witness_admitted() {
         // Layer with no witness index populated → synthesize_chain_witness
         // returns a "no admitted witness" diagnostic. The hook surfaces it
-        // as Err so the caller (the ctor type-check loop) can lift it into
-        // a ValidateJustification Verdict::Fails.
+        // as Err so the caller (the ctor type-check loop) reports it and the commit fails.
         use crate::layer::{LayerBuilder, LayerStorage};
         let layer =
             Arc::new(LayerBuilder::new("phase9-empty", None).build(LayerStorage::in_memory()));
         let c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
         let expected = chain_witness_typed_at(
+            wk::CHAIN_WITNESS_IS_DECLARED_AS,
             "IsDeclaredAs",
             Val::LitString("urn:test:phase9:missing".into()),
             Val::sort(0),

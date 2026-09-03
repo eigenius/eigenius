@@ -106,7 +106,10 @@ ORDER BY ?title
 `;
 
   const resp = await eigen.query(eigenql);
-  const decoded = decodeResultDocument(resp.document);
+  // A failed query used to surface as an empty listing — indistinguishable from "no published
+  // notebooks", which is the wrong thing to tell someone whose kernel just refused the query.
+  if (!resp.ok) throw new Error(resp.message);
+  const decoded = decodeResultDocument(resp.value.document);
 
   // The result rows carry { iri, title }. Inspect each Notebook to
   // pick up the optional description / modified columns the dialog

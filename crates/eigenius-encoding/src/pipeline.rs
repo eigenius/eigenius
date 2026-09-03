@@ -136,7 +136,7 @@ pub struct Args {
     /// Regenerated on every run — this is the layer the prose determines.
     #[arg(long)]
     out: PathBuf,
-    /// The `reflection:timestamp` on each ProgramTrace. Fixed by the caller so the emission is
+    /// The `prov:timestamp` on each ProgramTrace. Fixed by the caller so the emission is
     /// byte-reproducible.
     #[arg(long, default_value = "2026-08-03T00:00:00Z")]
     timestamp: String,
@@ -308,7 +308,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("chain-load");
-        let resources = eigenius_kernel::esl::compile_against_layer(&src, &head).map_err(|e| {
+        let resources = eigenius_kernel::esl::compile(&src, &head).map_err(|e| {
             format!(
                 "{} does not compile against the chain: {e:?}",
                 path.display()
@@ -368,9 +368,9 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     // INSIDE the discourse loop, which is what makes it available as an antecedent to a later
     // demonstrative. The kinds arm mirrors every other recorded stage (exists → replay, absent +
     // live → record); the recorder wraps whichever arm, so a run always leaves its draw.
-    let kind_classifier: Option<Box<dyn eigenius_reasoning::KindClassifier>> = match &args.kinds {
+    let kind_classifier: Option<Box<dyn crate::KindClassifier>> = match &args.kinds {
         Some(p) if p.exists() => {
-            let r = eigenius_reasoning::ReplayKindClassifier::load(p)
+            let r = crate::ReplayKindClassifier::load(p)
                 .map_err(|e| format!("read {}: {e}", p.display()))?;
             eprintln!("kinds:      REPLAY {} (deterministic, no LLM)", p.display());
             Some(Box::new(r))
@@ -378,7 +378,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         Some(p) => {
             #[cfg(feature = "use-llm")]
             {
-                let Some(c) = eigenius_reasoning::AnthropicKindClassifier::from_env(&doc) else {
+                let Some(c) = crate::AnthropicKindClassifier::from_env(&doc) else {
                     return Err(format!(
                         "--kinds {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is unset",
                         p.display()
@@ -388,7 +388,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
                     "kinds:      AnthropicKindClassifier (live) — RECORDING to {}",
                     p.display()
                 );
-                Some(Box::new(c) as Box<dyn eigenius_reasoning::KindClassifier>)
+                Some(Box::new(c) as Box<dyn crate::KindClassifier>)
             }
             #[cfg(not(feature = "use-llm"))]
             return Err(format!(
@@ -399,11 +399,14 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
         }
         None => None,
     };
-    let kind_recorder = kind_classifier.map(eigenius_reasoning::RecordingKindClassifier::new);
+    let kind_recorder = kind_classifier.map(crate::RecordingKindClassifier::new);
+    // The codec's constructor argument names, from the chain this run emits against.
+    let codec = eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(&head);
+    let print_chain = std::sync::Arc::clone(&head);
     // ONE claim identity: the lander names claims exactly as the emitter will, so the
     // `enc:AnaphorBinding` this run records points at resources this run's artifact contains.
     let lander = kind_recorder.as_ref().map(|k| {
-        eigenius_reasoning::DerivedClaimLander::new(&doc_id, k)
+        crate::DerivedClaimLander::new(&doc_id, k, codec.clone())
             .with_emission_namespace(&args.ns)
             .with_source(&format!("{} (sha256 {sha})", args.source.display()))
     });
@@ -477,6 +480,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     // authority, fail-closed or partial, then the artifact. Identical work for every surface, so it
     // lives in `formalize` and this driver only supplies the inputs.
     let artifact = crate::formalize::emit_from_encoding(&crate::formalize::EmissionInputs {
+        codec: &codec,
         doc: &doc,
         encoding: &encoding,
         landed: &landed,
@@ -490,9 +494,9 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             timestamp: &args.timestamp,
             // No agent is threaded through this surface yet, so the claim names the absence
             // rather than hiding it behind the program that parsed it (eigenius#201 / D72).
-            // Supplying a real `reflection:Agent` is D71's `land` story: the moment a
+            // Supplying a real `prov:Agent` is D71's `land` story: the moment a
             // formulation becomes an assertion is the moment someone takes responsibility.
-            declared_by: eigenius_reasoning::UNATTRIBUTED_AGENT,
+            declared_by: crate::UNATTRIBUTED_AGENT,
             source_ref: args.source_ref.as_deref(),
         },
     })?;
@@ -505,6 +509,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             OutputFormat::Json => ArtifactFormat::EigonJson,
             OutputFormat::Esl => ArtifactFormat::Esl,
         },
+        &print_chain,
     )?;
     write_doc(&args.out, &rendered)?;
     eprintln!(

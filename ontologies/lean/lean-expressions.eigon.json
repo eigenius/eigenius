@@ -16,12 +16,20 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "prefix",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanName"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanName",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "suffix",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -32,12 +40,20 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "prefix",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanName"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanName",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "suffix",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:integer"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:integer",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       }
@@ -61,7 +77,11 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "base",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanLevel"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanLevel",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -72,12 +92,20 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "left",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanLevel"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanLevel",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "right",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanLevel"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanLevel",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -88,12 +116,20 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "left",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanLevel"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanLevel",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "right",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanLevel"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanLevel",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -104,7 +140,11 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "name",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanName"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanName",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       }
@@ -128,12 +168,20 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "head",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanLevel"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanLevel",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "tail",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanLevelList"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanLevelList",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       }
@@ -153,7 +201,11 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "dbj_idx",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:integer"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:integer",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -164,7 +216,11 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "level",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanLevel"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanLevel",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -175,12 +231,20 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "name",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanName"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanName",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "levels",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanLevelList"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanLevelList",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -191,12 +255,20 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "fun",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanExpr"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanExpr",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "arg",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanExpr"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanExpr",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -207,22 +279,38 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "binder_name",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanName"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanName",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "binder_style",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "binder_type",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanExpr"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanExpr",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "body",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanExpr"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanExpr",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -233,22 +321,38 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "binder_name",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanName"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanName",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "binder_style",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "binder_type",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanExpr"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanExpr",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "body",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanExpr"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanExpr",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -259,27 +363,47 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "binder_name",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanName"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanName",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "binder_type",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanExpr"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanExpr",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "val",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanExpr"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanExpr",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "body",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanExpr"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanExpr",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "nondep",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:boolean"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:boolean",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -290,17 +414,29 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "ty_name",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanName"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanName",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "idx",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:integer"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:integer",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           },
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "structure",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:lean:LeanExpr"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:lean:LeanExpr",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -311,7 +447,11 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "value",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       },
@@ -322,7 +462,11 @@
           {
             "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
             "urn:eigenius:core:arg_name": "value",
-            "urn:eigenius:core:type_name": {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]}
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
           }
         ]
       }

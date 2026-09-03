@@ -171,10 +171,8 @@ fn parse_properties(
 /// that's the validator's job. Instead, it infers the Value variant
 /// from the JSON structure:
 ///
-/// - JSON string → try as IRI (ResourceRef) if it looks like one, otherwise String
-///   (but we can't distinguish reliably without the property definition,
-///   so all strings become Value::String; the validator will interpret them
-///   based on the property's data_type)
+/// - JSON string → `Value::String`. A reference and a string literal are the same shape;
+///   which one it is comes from the property's `data_type`, which the parser does not have
 /// - JSON number → Integer if no decimal, Float otherwise
 /// - JSON boolean → Boolean
 /// - JSON object → Embedded resource
@@ -275,29 +273,21 @@ pub fn serialize_resource(resource: &Resource) -> serde_json::Value {
 
 /// Serialize a Value to a JSON value.
 ///
-/// `Value::Vector` is treated as a programming-error invariant: the
-/// D43 design (§4.1, §5) makes vectors transient compute values that
-/// flow from `EMBED` into `VECTOR_NEAR` / `VECTOR_SIM` within a single
-/// query and are persisted as `vec_seg:<I>:<L>` blobs (§2.4), never as
-/// inline property values. Reaching this arm means a Vector ended up
-/// on a Resource that's being canonicalised or wire-serialised — that
-/// is structurally wrong and should be caught before this point.
+/// Every variant serialises. It was not always so: `Value::Vector` panicked here and in
+/// canonical CBOR, because D43 §4.1 makes an embedding vector a transient compute value that
+/// flows from `EMBED` into `VECTOR_NEAR` / `VECTOR_SIM` within one query and is persisted as
+/// a `vec_seg:<I>:<L>` blob (§2.4), never as an inline property value. A transient in the
+/// persisted value type can only be defended by a panic; D85 §5 step 6 took it out of `Value`
+/// instead, so there is nothing left to defend against.
 fn serialize_value(value: &Value) -> serde_json::Value {
     match value {
         Value::String(s) => serde_json::Value::String(s.clone()),
         Value::Integer(n) => serde_json::json!(*n),
         Value::Float(f) => serde_json::json!(*f),
         Value::Boolean(b) => serde_json::Value::Bool(*b),
-        Value::ResourceRef(iri) => serde_json::Value::String(iri.as_str().to_string()),
         Value::Embedded(resource) => serialize_resource(resource),
         Value::Array(arr) => serde_json::Value::Array(arr.iter().map(serialize_value).collect()),
         Value::Json(v) => v.clone(),
-        Value::Vector { model_iri, data } => panic!(
-            "Value::Vector is transient and must not reach JSON serialisation; \
-             model={}, dim={}",
-            model_iri.as_str(),
-            data.len()
-        ),
     }
 }
 

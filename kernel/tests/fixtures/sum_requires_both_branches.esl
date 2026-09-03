@@ -1,0 +1,98 @@
+// P4 exit criterion: `Sum` obliges you to ground BOTH branches.
+//
+// Two conclusions over the same proposition, differing only in whether the
+// second summand names a resource the chain can ground:
+//
+//   concl_two_real_sources : Sum(Declared(rule_a), Declared(rule_b))   -- commits
+//   concl_phantom_fallback : Sum(Declared(rule_a), Declared(<absent>)) -- refused
+//
+// Under LP's axiom `t:F -> (t+s):F` the second commits too: `s` is arbitrary, so
+// the unused summand need not be justified, groundable, or even name a resource
+// that exists. That is unsound here, because `support` reads `Sum`
+// DISJUNCTIVELY and reports the unchecked branch as a genuine alternative — so
+// `survives_without(rule_a)` came back TRUE, and the conclusion "survived"
+// losing its only ground by way of a branch nothing ever grounded. The
+// counterfactual D73 §1.2 calls the whole argument for retaining the
+// polynomial, answered in the reassuring direction.
+
+namespace core          = "urn:eigenius:core";
+namespace reflection    = "urn:eigenius:reflection";
+namespace screen        = "urn:eigenius:demo:screen";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace prov       = "urn:eigenius:prov";
+
+data screen:StrongInhibitor : core:string -> Prop {
+}
+
+// ─── Two independently grounded declarations of the SAME claim ─────
+//
+// Two sources agreeing is exactly the shape `Sum` is for: either one carries
+// the conclusion, so losing one costs nothing.
+
+resource screen:warrant_two_source_agreement : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Two independent reviews reach the same designation for EIG_0291. Either supports it alone, which is what makes the pair a Sum rather than an App.";
+    core:short_name = "warrant_two_source_agreement";
+}
+
+resource screen:review_a : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_two_source_agreement;
+    prov:rationale    = "First independent review designates EIG_0291 a strong inhibitor.";
+    reflection:canonical_proposition = type_expr(
+        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+    );
+}
+
+resource screen:review_a_trace : prov:DeclarationTrace {
+    prov:resource     = screen:review_a;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_two_source_agreement;
+    prov:timestamp    = "2026-04-10T09:00:00Z";
+}
+
+resource screen:review_b : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_two_source_agreement;
+    prov:rationale    = "Second independent review reaches the same designation.";
+    reflection:canonical_proposition = type_expr(
+        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+    );
+}
+
+resource screen:review_b_trace : prov:DeclarationTrace {
+    prov:resource     = screen:review_b;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_two_source_agreement;
+    prov:timestamp    = "2026-04-11T09:00:00Z";
+}
+
+// ─── The conclusion that SHOULD commit: both branches ground ───────
+
+resource screen:concl_two_real_sources : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares. Its
+    // `term` and `type` arguments are declared `eigentt:Term`, so each is a
+    // `type_expr(...)`, and the `alias` bindings — term-surface sugar — scope
+    // inside each one rather than over the judgement.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            A = "urn:eigenius:demo:screen:review_a",
+            B = "urn:eigenius:demo:screen:review_b",
+            P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+        in
+        sum_l(P, Declared(A), Declared(B),
+                     declared(A, P),
+                     declared(B, P))),
+               type_expr(alias
+            A = "urn:eigenius:demo:screen:review_a",
+            B = "urn:eigenius:demo:screen:review_b",
+            P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+        in
+        justification:Certificate(
+                   justification:Sum(Declared(A), Declared(B)),
+                   P )) );
+}

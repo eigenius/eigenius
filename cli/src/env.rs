@@ -952,8 +952,11 @@ pub async fn env_create(
     let mut env = Resource::new(env_iri.clone());
     env.set(
         Iri::parse("urn:eigenius:core:is_a").expect("static IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:runtime:RuntimeEnvironment").expect("static IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse("urn:eigenius:runtime:RuntimeEnvironment")
+                .expect("static IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     env.set(
@@ -974,8 +977,11 @@ pub async fn env_create(
     );
     env.set(
         Iri::parse("urn:eigenius:runtime:lifecycle").expect("static IRI"),
-        Value::ResourceRef(
-            Iri::parse("urn:eigenius:runtime:lifecycle:Service").expect("static IRI"),
+        Value::String(
+            Iri::parse("urn:eigenius:runtime:lifecycle:Service")
+                .expect("static IRI")
+                .as_str()
+                .to_string(),
         ),
     );
     env.set(

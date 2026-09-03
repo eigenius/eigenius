@@ -119,29 +119,19 @@ fn class_resource(
     if !parents.is_empty() {
         r.set(
             iri("urn:eigenius:core:subclass_of"),
-            Value::Array(parents.iter().map(|p| Value::ResourceRef(iri(p))).collect()),
+            Value::Array(parents.iter().map(|p| Value::iri(&iri(p))).collect()),
         );
     }
     if !requires.is_empty() {
         r.set(
             iri("urn:eigenius:core:requires"),
-            Value::Array(
-                requires
-                    .iter()
-                    .map(|p| Value::ResourceRef(iri(p)))
-                    .collect(),
-            ),
+            Value::Array(requires.iter().map(|p| Value::iri(&iri(p))).collect()),
         );
     }
     if !recommends.is_empty() {
         r.set(
             iri("urn:eigenius:core:recommends"),
-            Value::Array(
-                recommends
-                    .iter()
-                    .map(|p| Value::ResourceRef(iri(p)))
-                    .collect(),
-            ),
+            Value::Array(recommends.iter().map(|p| Value::iri(&iri(p))).collect()),
         );
     }
     r
@@ -160,22 +150,20 @@ impl PropBuilder {
         );
         r.set(
             iri("urn:eigenius:core:data_type"),
-            Value::ResourceRef(iri(data_type)),
+            Value::iri(&iri(data_type)),
         );
         Self { r }
     }
     fn class_types(mut self, classes: &[&str]) -> Self {
         self.r.set(
             iri("urn:eigenius:core:class_types"),
-            Value::Array(classes.iter().map(|c| Value::ResourceRef(iri(c))).collect()),
+            Value::Array(classes.iter().map(|c| Value::iri(&iri(c))).collect()),
         );
         self
     }
     fn element_type(mut self, et: &str) -> Self {
-        self.r.set(
-            iri("urn:eigenius:core:element_type"),
-            Value::ResourceRef(iri(et)),
-        );
+        self.r
+            .set(iri("urn:eigenius:core:element_type"), Value::iri(&iri(et)));
         self
     }
     fn min_value(mut self, v: f64) -> Self {

@@ -523,7 +523,7 @@ Val::Sig(_, Clos), Clos { body: Exp }  Val → Exp       (one way; Exp does not 
 
 `{Val, Neut}` is a genuine 2-cycle; `Exp` sits outside it.
 
-**That is why `eigentt:TypeExpr` exists and `eigentt:Val` does not.** `Exp` is self-recursive, so one
+**That is why `eigentt:Term` exists and `eigentt:Val` does not.** `Exp` is self-recursive, so one
 inductive expresses it — and one does, which is what the D47 codec encodes and decodes. `Val` and
 `Neut` need a mutual block, so they are absent. Not an oversight: #20.
 

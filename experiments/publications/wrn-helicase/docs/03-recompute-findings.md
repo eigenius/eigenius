@@ -361,7 +361,7 @@ p53-dependent — recovered directly from the per-cell source data rather than a
 worker (image now bakes `emmeans`) runs the lsmeans contrasts; the result commits as `wrn:if_ed5:result`
 (the five logFC/p-value measures, `canonical_proposition = ActivatesP53Response("WRN","MSI")`, set when
 BOTH p-p53 and p21 rise significantly) under a ProgramTrace → IsDerivedAs witness. The
-`concl_p53_activation` ReasoningSentence (chain/08-phase3-invivo-mechanism.esl) discharges that witness — a reproduced-external
+`concl_p53_activation` justification:Conclusion (chain/08-phase3-invivo-mechanism.esl) discharges that witness — a reproduced-external
 corroboration of `concl_mech`. This lifts the p53-activation arm of C-MECH from **linked-external** to
 **reproduced-external**.
 
@@ -393,7 +393,7 @@ wrapped-R path as the p53 IF warrant (F7).
 content-verifies the foci slice + Supp Table 1; a DooD-spawned R worker fits the interaction lm; the
 result commits as `wrn:foci_dsb:result` (the interaction estimate/p + per-stratum fold-changes,
 `canonical_proposition = CausesDSBs("WRN","MSI")`, set when the interaction is positive and significant)
-under a ProgramTrace → IsDerivedAs witness. The `concl_dsb_foci` ReasoningSentence (chain/08-phase3-invivo-mechanism.esl)
+under a ProgramTrace → IsDerivedAs witness. The `concl_dsb_foci` justification:Conclusion (chain/08-phase3-invivo-mechanism.esl)
 discharges it — a reproduced-external corroboration of `concl_dsb`. This lifts the **53BP1 arm** of
 CausesDSBs from linked-external to reproduced-external; the broader marker panel (γH2AX intensity ED 6c,
 pATM(S1981)/Chk2(T68) ED 6/7) remains linked corroboration in `mech_dsb`, the same-shape backlog.

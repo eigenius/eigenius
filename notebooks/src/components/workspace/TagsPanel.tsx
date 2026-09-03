@@ -192,11 +192,11 @@ export function TagsPanel() {
   const onDelete = async (t: TagInfo) => {
     try {
       const resp = await eigen.deleteTag(t.name);
-      if (!resp.success) {
+      if (!resp.ok) {
         dispatchToast(
           <Toast>
             <ToastTitle>Couldn't delete tag</ToastTitle>
-            <ToastBody>{resp.error || "kernel refused delete"}</ToastBody>
+            <ToastBody>{resp.message}</ToastBody>
           </Toast>,
           { intent: "error", timeout: 6000 },
         );
@@ -206,7 +206,7 @@ export function TagsPanel() {
         <Toast>
           <ToastTitle>Deleted tag {t.name}</ToastTitle>
           <ToastBody>
-            {resp.deleted
+            {resp.value.deleted
               ? "The target layer becomes GC-eligible if no other root reaches it."
               : "Tag was already gone (idempotent delete)."}
           </ToastBody>

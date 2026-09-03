@@ -127,7 +127,7 @@ program's *output*). A worked, validated reference chain lives in
 |---|---|---|
 | Decisions | five `Conforms…(solution)` — featurization (Morgan r=2/2048), alert catalogs (PAINS∪Brenk), reduction (**max** over all actives), threshold (strict `<0.5`), composition (alert-free ∧ below-threshold) | Declared (each rationale cites spec vs. convention) |
 | Acceptance rule | `∀p. ConformsFeaturization(p) → … → ConformsComposition(p) → ImplementsRequiredFilter(p)` | Declared |
-| Conclusion | `ReasoningSentence ImplementsRequiredFilter(solution)` whose 5-premise `App`-chain (with a `SpecStr` core) the kernel type-checks | — |
+| Conclusion | `justification:Conclusion ImplementsRequiredFilter(solution)` whose 5-premise `App`-chain (with a `SpecStr` core) the kernel type-checks | — |
 | Deliverable | `bench:TaskOutput(deliverable_kind = "python_source")` — the program as `payload`, `reasoning_chain` → the conclusion | Derived |
 
 Each methodological choice — exactly where SAB 16's correctness is won or lost — is

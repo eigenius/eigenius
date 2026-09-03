@@ -279,8 +279,9 @@ fn ground_via_form_index(
     )
     .ok()?;
 
-    // Aggregate BM25 score per concept the matched entries alias. `sem` survives persist as either a
-    // `ResourceRef` (in-memory) or a `String` IRI (CBOR round-trip collapses it) — accept both. Skip a
+    // Aggregate BM25 score per concept the matched entries alias. `sem` is an IRI string; it was
+    // read as either a `ResourceRef` or a `String` until the former was retired, precisely because
+    // the CBOR round trip collapsed one into the other. Skip a
     // concept whose kind (axiom vs not) doesn't match `expected` — POS coherence for the mint downstream.
     let mut by_concept: BTreeMap<Iri, f32> = BTreeMap::new();
     for h in &hits {
@@ -288,7 +289,6 @@ fn ground_via_form_index(
             continue;
         };
         let concept = match entry.get(&sem_prop) {
-            Some(Value::ResourceRef(iri)) => iri.clone(),
             Some(Value::String(s)) => match Iri::parse(s) {
                 Ok(i) => i,
                 Err(_) => continue,
@@ -398,25 +398,18 @@ fn predicate_alias_resources(head: &Arc<Layer>, surface: &str, concept: &Iri) ->
         let mut e = Resource::new(e_iri);
         e.set(
             p("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(p(LEXICAL_ENTRY))]),
+            Value::Array(vec![Value::iri(&p(LEXICAL_ENTRY))]),
         );
         e.set(
             p("urn:eigenius:lexicon:form"),
             Value::String(surface.to_string()),
         );
         e.set(p("urn:eigenius:lexicon:cat"), cat.clone());
-        e.set(
-            p("urn:eigenius:lexicon:sem"),
-            Value::ResourceRef(concept.clone()),
-        );
+        e.set(p("urn:eigenius:lexicon:sem"), Value::iri(&concept.clone()));
         e.set(p("urn:eigenius:lexicon:sem_type"), sem_type.clone());
         e.set(
             p("urn:eigenius:lexicon:sense"),
             Value::String(format!("doc:{key}")),
-        );
-        e.set(
-            p("urn:eigenius:lexicon:grade"),
-            Value::ResourceRef(p("urn:eigenius:reflection:epistemic:declared")),
         );
         return Some(e);
     }

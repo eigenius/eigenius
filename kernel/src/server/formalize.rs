@@ -297,7 +297,7 @@ impl EigeniusService {
     }
 }
 
-/// Milliseconds since the epoch, rendered RFC-3339 — the default `reflection:timestamp` when a
+/// Milliseconds since the epoch, rendered RFC-3339 — the default `prov:timestamp` when a
 /// caller does not fix one. A caller that wants a byte-reproducible artifact supplies its own.
 fn default_timestamp() -> String {
     let ms = crate::server::helpers::now_millis();

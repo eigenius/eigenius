@@ -13,8 +13,8 @@
 // testable in isolation and the pipeline state is chain-committed and auditable.
 //
 // REUSE, DON'T MINT. Grades reuse reflection:EpistemicStatus; the encoded proposition
-// reuses reflection:canonical_proposition (eigentt:TypeExpr); warrants reuse
-// reflection:rationale; source works reuse reference:Reference; lexicon scope/entries
+// reuses reflection:canonical_proposition (eigentt:Term); warrants reuse
+// prov:rationale; source works reuse reference:Reference; lexicon scope/entries
 // reuse lexicon:Lexicon / lexicon:LexicalEntry. New vocabulary here is only the
 // pipeline-state shapes that have no existing equivalent.
 
@@ -25,6 +25,7 @@ namespace reference   = "urn:eigenius:reference";
 namespace lexicon     = "urn:eigenius:lexicon";
 namespace formats     = "urn:eigenius:core:formats";
 namespace enc         = "urn:eigenius:encoding";
+namespace prov       = "urn:eigenius:prov";
 
 // ════════════════════════════════════════════════════════════════════
 // S0 — DiscourseUnit: the parsing unit + provenance
@@ -172,7 +173,7 @@ resource enc:gap_unresolvable : enc:GapDisposition {
 class enc:DecisionPoint {
     description = "Records a structural-disambiguation choice (S4): which reading was selected among multiple felicitous parses of one unit, and why. All candidates already type-check, so this is auditable selection, not generation. (Typed-content warrant deferred to D61.)";
     requires enc:decision_unit, enc:selected_claim;
-    recommends enc:candidate_count, reflection:rationale, enc:selected_by, enc:runner_up_skeletons;
+    recommends enc:candidate_count, prov:rationale, enc:selected_by, enc:runner_up_skeletons;
 }
 
 property enc:decision_unit : core:resource {
@@ -232,7 +233,7 @@ property enc:runner_up_skeletons : core:value_array {
 class enc:AnaphorBinding {
     description = "Records one RESOLVED referent hole (D64): the antecedent the kernel's re-gate ACCEPTED for an anaphor (pronoun / possessor / demonstrative) in a unit's encoded reading. The proposer only ranks (untrusted, recorded — proposals.json); the restrictor veto + closed re-gate decide, so this is the accepted-binding audit — the anaphora sibling of DecisionPoint. The antecedent is machine-readable: a resource reference for a named individual or landed claim, the D47 type_expr encoding for a kind term (which has no IRI); the surface is the display form the proposer saw.";
     requires enc:binding_unit, enc:hole_var, enc:antecedent_surface;
-    recommends enc:antecedent_resource, enc:antecedent_resources, enc:antecedent_term, enc:bound_by, reflection:rationale, enc:confidence;
+    recommends enc:antecedent_resource, enc:antecedent_resources, enc:antecedent_term, enc:bound_by, prov:rationale, enc:confidence;
 }
 
 property enc:binding_unit : core:resource {
@@ -262,8 +263,9 @@ property enc:antecedent_resources : core:resource_array {
 }
 
 property enc:antecedent_term : core:inductive {
-    description = "The accepted antecedent, when it is a KIND term (no IRI): the D47-encoded eigentt:TypeExpr of the `kind_of(…)` term, decodable back to the exact antecedent the re-gate accepted.";
-    class_types eigentt:TypeExpr;
+    description = "The accepted antecedent, when it is a KIND term (no IRI): the D47-encoded eigentt:Term of the `kind_of(…)` term, decodable back to the exact antecedent the re-gate accepted.";
+    class_types eigentt:Term;
+    expected_type lexicon:Entity;
     domain enc:AnaphorBinding;
 }
 
@@ -300,7 +302,7 @@ property enc:bound_by : core:resource {
 class enc:CutItem {
     description = "A unit that could not be encoded within the current grammar/vocabulary, recorded explicitly with a reason and disposition rather than dropped or force-fit (fail-closed; D62 §3). Part of the coverage feedback loop (D62 §9). (Typed-content formalization deferred to D61.)";
     requires enc:cut_unit, enc:cut_kind;
-    recommends reflection:rationale;
+    recommends prov:rationale;
 }
 
 property enc:cut_unit : core:resource {
@@ -360,11 +362,11 @@ resource enc:cut_unresolved : enc:CutKind {
 // The 2026-08-10 settlement split the world on PARSED vs CURATED. The operative axis is WHO
 // ASSERTS: encoding a source document is asserted by the document's authors (e.g. wrn:authors);
 // an agent formulating its own claim is asserted by the agent running the pipeline. D72 is what
-// makes the first expressible — wrn:authors is a resolvable reflection:Agent, so a claim from a
+// makes the first expressible — wrn:authors is a resolvable prov:Agent, so a claim from a
 // paper cites the people who made it rather than the program that transcribed it.
 
-class enc:EncodedClaim : reflection:DeclaredResource {
-    description = "One claim of the source document encoded as a Prop-typed EigenTT proposition (reflection:canonical_proposition), produced by the pipeline and attested by the felicity gate. DECLARED, not Derived (D73 §6): the parser establishes that the text parses to this well-typed term, not that the term is faithful to what the author wrote (D61, unbuilt) nor that what the author wrote is true. reflection:declared_by names the agent taking responsibility — the source document's authors when encoding a paper, the pipeline's operating agent when an agent formulates its own claim. Carries its source unit (provenance). A landed claim ALSO carries its discourse KIND as a second is_a class (enc:Finding / … — D68 §2, the two-axis claim model): the checker's multi-class inhabitation is what lets a demonstrative's restrictor resolve to it.";
+class enc:EncodedClaim {
+    description = "One claim of the source document encoded as a Prop-typed EigenTT proposition (reflection:canonical_proposition), produced by the pipeline and attested by the felicity gate. DECLARED, not Derived (D73 §6): the parser establishes that the text parses to this well-typed term, not that the term is faithful to what the author wrote (D61, unbuilt) nor that what the author wrote is true. prov:was_attributed_to names the agent taking responsibility — the source document's authors when encoding a paper, the pipeline's operating agent when an agent formulates its own claim. Carries its source unit (provenance). A landed claim ALSO carries its discourse KIND as a second is_a class (enc:Finding / … — D68 §2, the two-axis claim model): the checker's multi-class inhabitation is what lets a demonstrative's restrictor resolve to it.";
     requires enc:from_unit, reflection:canonical_proposition;
     recommends enc:confidence;
 }
@@ -427,7 +429,8 @@ property enc:confidence : core:float {
 //
 //   1. THE PROCESS's output — this class. Applying the parse engine to bytes is a program run:
 //      a function of (engine, source_sha256) -> structure. That is Derived in the plain sense,
-//      witnessed by ONE reflection:ProgramTrace for the run.
+//      recorded by ONE prov:ProgramTrace for the run. The trace is provenance and mints no
+//      witness — a run record grounds nothing, which is why the three grounds have no `Derived`.
 //   2. THE PROPOSITIONS — enc:EncodedClaim, one per claim, DECLARED by a named agent. The parser
 //      chooses the FORM; it does not assert the content.
 //
@@ -441,11 +444,12 @@ property enc:confidence : core:float {
 // The structure's own proposition needs no new vocabulary. Nothing CITES "the run happened" the way
 // a certificate cites a claim's warrant — it is provenance — so the D39 §4.1 default
 // `Asserts(structure_iri)` is adequate: the structure's identity already pins the engine, the bytes
-// and the claim set.
+// and the claim set. The three-grounds change made that reading the only one available: there is no
+// longer a constructor that could cite a run.
 
-class enc:ReasoningStructure : reflection:DerivedResource {
-    description = "The assembled output of encoding one document: the set of EncodedClaims (and the gaps/cuts recorded alongside). The artifact's ROOT and the chain-resident handle a formalization run returns (D71 §4.1) — what a service reports, a notebook cell re-opens, and a later run supersedes. An empty enc:claims is a result, not an absence: the source yielded nothing. DERIVED: this is the output of a program run over hashed input, and reflection:derivation points at the single ProgramTrace recording that run. The claims it assembles are Declared, by an agent — the parse fixes their form, not their content.";
-    requires enc:claims, reflection:derivation;
+class enc:ReasoningStructure {
+    description = "The assembled output of encoding one document: the set of EncodedClaims (and the gaps/cuts recorded alongside). The artifact's ROOT and the chain-resident handle a formalization run returns (D71 §4.1) — what a service reports, a notebook cell re-opens, and a later run supersedes. An empty enc:claims is a result, not an absence: the source yielded nothing. DERIVED: this is the output of a program run over hashed input, and prov:derivation points at the single ProgramTrace recording that run. The claims it assembles are Declared, by an agent — the parse fixes their form, not their content.";
+    requires enc:claims, prov:derivation;
     recommends enc:document, enc:source_path, enc:source_sha256;
 }
 
@@ -489,7 +493,7 @@ property enc:source_sha256 : core:string {
 class enc:ProposalDraw {
     description = "One recorded proposer exchange on a formalization run: the exact question put to an untrusted proposer and the answer it gave. Committed to the run's doc-<id> working branch, never to the branch the claims land on. Replay reads these back in place of the draw files; a changed question MISSES, it never silently replays a stale answer.";
     requires enc:draw_seam, enc:draw_key, enc:draw_record;
-    recommends enc:draw_model, reflection:timestamp;
+    recommends enc:draw_model, prov:timestamp;
 }
 
 class enc:DrawSeam {

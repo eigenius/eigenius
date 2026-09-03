@@ -146,7 +146,7 @@ fn load_layer(
 /// ESL-sourced variant of [`load_layer`]. Compiles the ESL source into
 /// chain resources via `esl::compile`, then runs the same
 /// build-and-validate pipeline. Used by Phase-8 bootstrap to ship
-/// `ontologies/reasoning/reasoning.esl` without committing a parallel
+/// `ontologies/justification/justification.esl` without committing a parallel
 /// `.json` to keep in sync — single source of truth.
 fn load_esl_layer(
     name: &str,
@@ -154,14 +154,26 @@ fn load_esl_layer(
     parent: Option<Arc<Layer>>,
     storage: crate::layer::LayerStorage,
 ) -> Result<Arc<Layer>, BootstrapError> {
-    // Compile AGAINST the parent layer when present, so the source can resolve
-    // constructors declared lower in the chain (e.g. `closed-class.esl` uses the
-    // `lexicon:Cat` ctor `cat_forall` from the schema). Parentless layers (the
-    // root) fall back to context-free compile.
-    let compiled = match &parent {
-        Some(p) => crate::esl::compile_against_layer(esl_source, p),
-        None => crate::esl::compile(esl_source),
+    // Compile AGAINST the parent layer, so the source resolves constructors declared lower in
+    // the chain (e.g. `closed-class.esl` uses the `lexicon:Cat` ctor `cat_forall` from the
+    // schema). There was a context-free fallback here for a parentless layer; it was
+    // unreachable, because the ontology list below starts with four JSON documents and the
+    // first ESL entry sits at index 4, so an ESL layer always has a parent. A root ESL layer
+    // is now a hard error rather than a silent compile with no chain.
+    let Some(parent_layer) = parent.as_ref() else {
+        return Err(BootstrapError::CoreOntologyInvalid(vec![
+            crate::validation::ValidationError {
+                resource_id: None,
+                property: None,
+                rule: crate::validation::ValidationRule::TypeMismatch,
+                message: format!(
+                    "bootstrap layer `{name}` is ESL with no parent — an ESL ontology must \
+                     compile against a chain"
+                ),
+            },
+        ]));
     };
+    let compiled = crate::esl::compile(esl_source, parent_layer);
     let resources = compiled.map_err(|errs| {
         BootstrapError::CoreOntologyInvalid(
             errs.into_iter()
@@ -266,6 +278,17 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         source: include_str!("../../../ontologies/reflection/reflection-ontology.json"),
         format: OntologyFormat::Json,
     },
+    // prov — the provenance axis (Agent / Activity / the four provenance Traces
+    // and the relations between them), mapped onto W3C PROV-O. Above reflection
+    // because `prov:ProgramTrace.trace_tree` points into the kernel's
+    // evaluation-trace family, which is the one link between the two; nothing
+    // left in reflection points back, so the order is forced in one direction
+    // only. Below obo, which carries `prov:was_attributed_to` on its entries.
+    BootstrapOntology {
+        name: "prov",
+        source: include_str!("../../../ontologies/prov/prov.esl"),
+        format: OntologyFormat::Esl,
+    },
     // obo — shared OBO meta-vocabulary used by the obograph importer (M9.2): the
     // four synonym Properties + the `inverseOf` RBox axiom imported GO / ChEBI
     // layers reference. Depends on reflection (entries carry
@@ -317,12 +340,12 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         format: OntologyFormat::Json,
     },
     // reasoning (D39 Phase 8) — the Justification Logic institution's chain
-    // artifacts (ChainWitness predicates, JustificationTerm, ReasoningSentence,
+    // artifacts (ChainWitness predicates, justification:Term, justification:Conclusion,
     // the institution + QueryClasses + ExportFormat). ESL source = single source
     // of truth. Depends on core / eigentt / reflection / institution.
     BootstrapOntology {
-        name: "reasoning",
-        source: include_str!("../../../ontologies/reasoning/reasoning.esl"),
+        name: "justification",
+        source: include_str!("../../../ontologies/justification/justification.esl"),
         format: OntologyFormat::Esl,
     },
     // statistics (D52 Phase 5) — measurement-statistics ontology (claim schema,
@@ -391,7 +414,7 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
     //
     // BOOTSTRAPPED because the kernel already depends on it: `dcg::parse::resolve`
     // hardcodes `urn:eigenius:encoding:EncodedClaim` to find a landed claim's kind
-    // class, and `eigenius-reasoning` carries the six kind IRIs as consts. Leaving
+    // class, and the reasoning crate carried the six kind IRIs as consts. Leaving
     // the vocabulary in a user layer did not remove that dependency, it only made
     // it undeclared — `FormalizeDocument` degraded quietly on a chain without it.
     // Same bar `reasoning` / `statistics` / `lean-institution` already clear.
@@ -984,7 +1007,9 @@ class p:Cat { description = "a dog"; }"#;
         assert!(!institution.is_root());
         let obo = institution.parent().unwrap();
         assert!(!obo.is_root());
-        let reflection = obo.parent().unwrap();
+        let prov = obo.parent().unwrap();
+        assert!(!prov.is_root());
+        let reflection = prov.parent().unwrap();
         assert!(!reflection.is_root());
         let program = reflection.parent().unwrap();
         assert!(!program.is_root());
@@ -1051,18 +1076,18 @@ class p:Cat { description = "a dog"; }"#;
     #[test]
     fn can_resolve_eigentt_type_expr() {
         // D47: the chain-mirrored EigenTT type fragment lives at
-        // urn:eigenius:eigentt:TypeExpr and is loaded just above the core
+        // urn:eigenius:eigentt:Term and is loaded just above the core
         // layer.
         let ctx = bootstrap().unwrap();
-        let iri = Iri::parse("urn:eigenius:eigentt:TypeExpr").unwrap();
+        let iri = Iri::parse("urn:eigenius:eigentt:Term").unwrap();
         let resolved = ctx
             .resolve(&iri)
-            .expect("should resolve eigentt:TypeExpr from the eigentt-type-fragment layer");
+            .expect("should resolve eigentt:Term from the eigentt-type-fragment layer");
         let is_a = resolved.is_a();
         let inductive_type_iri = Iri::parse("urn:eigenius:core:InductiveType").unwrap();
         assert!(
             is_a.iter().any(|i| i == &inductive_type_iri),
-            "eigentt:TypeExpr should be an InductiveType; is_a = {is_a:?}"
+            "eigentt:Term should be an InductiveType; is_a = {is_a:?}"
         );
     }
 
@@ -1253,16 +1278,14 @@ class p:Cat { description = "a dog"; }"#;
     #[test]
     fn can_resolve_reflection_classes() {
         let ctx = bootstrap().unwrap();
+        // Only the EVALUATION family is left here. The provenance traces
+        // (ProgramTrace / DeclarationTrace / ObservationTrace / VerificationTrace)
+        // moved to `prov`, which is what `prov_layer_smoke.rs` covers; the two
+        // families had shared the word `Trace` and nothing else.
         for class in [
-            "DeclaredResource",
-            "ObservedResource",
-            "DerivedResource",
-            "VerifiedResource",
+            "Trace",
             "ComponentTrace",
-            "ProgramTrace",
-            "DeclarationTrace",
-            "ObservationTrace",
-            "VerificationTrace",
+            "PureTrace",
             "LetTrace",
             "MapTrace",
             "CaseTrace",
@@ -1277,13 +1300,33 @@ class p:Cat { description = "a dog"; }"#;
     }
 
     #[test]
-    fn can_resolve_epistemic_statuses() {
+    fn the_epistemic_grade_vocabulary_is_gone() {
+        // The four `epistemic:*` individuals were the stored grade, and a stored
+        // grade conflates the two axes: how a resource came to exist is
+        // provenance and applies to everything, while what evidence exists for
+        // its proposition is warrant and applies only to resources carrying one.
+        // Warrant is now computed from a justification term and stored nowhere,
+        // so a resource that resolved one of these was asserting a grade nothing
+        // checked.
         let ctx = bootstrap().unwrap();
         for status in ["declared", "observed", "derived", "verified"] {
             let iri = Iri::parse(&format!("urn:eigenius:reflection:epistemic:{status}")).unwrap();
             assert!(
-                ctx.resolve(&iri).is_some(),
-                "should resolve epistemic status {status}"
+                ctx.resolve(&iri).is_none(),
+                "epistemic status `{status}` must not resolve — the grade vocabulary is deleted"
+            );
+        }
+        for class in [
+            "urn:eigenius:reflection:EpistemicStatus",
+            "urn:eigenius:reflection:DeclaredResource",
+            "urn:eigenius:reflection:ObservedResource",
+            "urn:eigenius:reflection:DerivedResource",
+            "urn:eigenius:reflection:VerifiedResource",
+        ] {
+            let iri = Iri::parse(class).unwrap();
+            assert!(
+                ctx.resolve(&iri).is_none(),
+                "grade class `{class}` must not resolve"
             );
         }
     }
@@ -1323,36 +1366,70 @@ class p:Cat { description = "a dog"; }"#;
     }
 
     #[test]
-    fn bootstrap_includes_reasoning_layer_artifacts() {
-        // D39 Phase 8 — confirm the reasoning layer's load_esl_layer
-        // call produced the expected chain artifacts: the 4 ChainWitness
-        // predicates, the 2 indexed inductives (JustificationTerm +
-        // JustifiedBy), the 2 resource classes (ReasoningSentence +
-        // VerifiedPropositionView), the 2 query-request classes
-        // (EntailmentRequest + ConsistencyRequest), the institution
-        // resource, the 3 QueryClasses, and the ExportFormat.
+    fn bootstrap_resolves_the_justification_layer_artifacts() {
+        // The two indexed inductives (justification:Term + justification:Certificate) and the
+        // two resource classes, plus the three witness predicates the certificate ctors
+        // reference — those now resolve from CORE, which is the point of the P7 move: the
+        // kernel constructs their inhabitants, so they cannot be owned by a layer above it.
         let ctx = bootstrap().unwrap();
         for iri in [
-            "urn:eigenius:reasoning:ChainWitness:IsDeclaredAs",
-            "urn:eigenius:reasoning:ChainWitness:IsObservedAs",
-            "urn:eigenius:reasoning:ChainWitness:IsDerivedAs",
-            "urn:eigenius:reasoning:ChainWitness:IsVerifiedAs",
-            "urn:eigenius:reasoning:JustificationTerm",
-            "urn:eigenius:reasoning:JustifiedBy",
-            "urn:eigenius:reasoning:ReasoningSentence",
-            "urn:eigenius:reasoning:VerifiedPropositionView",
-            "urn:eigenius:reasoning:EntailmentRequest",
-            "urn:eigenius:reasoning:ConsistencyRequest",
-            "urn:eigenius:reasoning:reasoning_institution",
-            "urn:eigenius:reasoning:qc_validate_justification",
-            "urn:eigenius:reasoning:qc_entailment_query",
-            "urn:eigenius:reasoning:qc_consistency_check",
-            "urn:eigenius:reasoning:ef_justification",
+            "urn:eigenius:witness:IsDeclaredAs",
+            "urn:eigenius:witness:IsObservedAs",
+            "urn:eigenius:witness:IsVerifiedAs",
+            "urn:eigenius:justification:Term",
+            "urn:eigenius:justification:Certificate",
+            "urn:eigenius:justification:Conclusion",
+            "urn:eigenius:justification:VerifiedPropositionView",
         ] {
             let parsed = Iri::parse(iri).unwrap();
             assert!(
                 ctx.resolve(&parsed).is_some(),
-                "bootstrap should resolve reasoning-layer artifact `{iri}`"
+                "bootstrap should resolve justification-layer artifact `{iri}`"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_the_reasoning_institution_declared_still_resolves() {
+        // P7 deleted the Reasoning institution, its ExportFormat, all four QueryClasses, and
+        // the five input/output classes that existed only to shape those queries.
+        // ValidateJustification was absorbed into commit by P2, EntailmentQuery's question is
+        // a witness-index lookup, ConsistencyCheck returned Undecidable for every non-empty
+        // input, and ProjectJustification's algebra moved to `kernel/src/justification/` at
+        // P6.0. With no handler left the institution hosted nothing.
+        //
+        // `urn:eigenius:reasoning` names nothing at all now. The `justification:` entries
+        // below are the request and report shapes whose only route was a deleted QueryClass —
+        // they are listed here rather than left declared, because a shape with no writer is
+        // the reserved-IRI pattern this project rejects.
+        let ctx = bootstrap().unwrap();
+        for iri in [
+            "urn:eigenius:reasoning:reasoning_institution",
+            "urn:eigenius:reasoning:ef_justification",
+            "urn:eigenius:reasoning:qc_validate_justification",
+            "urn:eigenius:reasoning:qc_entailment_query",
+            "urn:eigenius:reasoning:qc_consistency_check",
+            "urn:eigenius:reasoning:qc_project_justification",
+            "urn:eigenius:justification:EntailmentRequest",
+            "urn:eigenius:justification:ConsistencyRequest",
+            // The projection request/report pair went with the QueryClass that routed
+            // between them. The ALGEBRA is live in `kernel/src/justification/`; what is
+            // gone is a chain-resident shape nothing ever wrote.
+            "urn:eigenius:justification:ProjectionRequest",
+            "urn:eigenius:justification:Projection",
+            "urn:eigenius:justification:subject_sentence",
+            "urn:eigenius:justification:counterfactual_iri",
+            "urn:eigenius:justification:support_count",
+            "urn:eigenius:justification:fully_verified",
+            "urn:eigenius:justification:declared_grounds",
+            "urn:eigenius:justification:observed_grounds",
+            "urn:eigenius:justification:verified_grounds",
+            "urn:eigenius:justification:survives_without",
+        ] {
+            let parsed = Iri::parse(iri).unwrap();
+            assert!(
+                ctx.resolve(&parsed).is_none(),
+                "`{iri}` was retired at P7 and must not resolve"
             );
         }
     }
@@ -1507,7 +1584,7 @@ class p:Cat { description = "a dog"; }"#;
 
     /// Confirm that a kernel-emitted Verdict resource (the shape
     /// AutoOnLoad fires-and-emits at every StatisticalAnalysisPlan /
-    /// ReasoningSentence commit per D14 §5.6) validates cleanly. The
+    /// justification:Conclusion commit per D14 §5.6) validates cleanly. The
     /// resource carries `core:ctor_name` to record which Verdict ctor
     /// (Holds / Fails / Undecidable) the institution returned — same
     /// property declared on InductiveCtor for declared-ctor names.
@@ -1530,10 +1607,7 @@ class p:Cat { description = "a dog"; }"#;
         );
         r.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![
-                Value::String(wk::VERDICT.to_string()),
-                Value::String(wk::DERIVED_RESOURCE.to_string()),
-            ]),
+            Value::Array(vec![Value::String(wk::VERDICT.to_string())]),
         );
         r.set(
             Iri::parse(wk::CTOR_NAME).unwrap(),
@@ -1578,13 +1652,20 @@ class p:Cat { description = "a dog"; }"#;
         let index = Arc::new(crate::institution::registry::InstitutionIndex::default());
 
         let sample_set_cell = r#"
+namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
+namespace prov       = "urn:eigenius:prov";
 namespace stats      = "urn:eigenius:measurements";
 namespace screen     = "urn:eigenius:demo:screen";
 
+resource screen:act_kinase_glo_plate_2026_03_11 : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-11";
+    core:short_name = "act_kinase_glo_plate_2026_03_11";
+}
+
 resource screen:m_eig0291_sampleset : stats:SampleSetResource {
-    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-11";
-    reflection:observed_at = "2026-03-11T10:18:42Z";
+    prov:was_generated_by      = screen:act_kinase_glo_plate_2026_03_11;
+    prov:observed_at = "2026-03-11T10:18:42Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
         [78.0, 82.0, 85.0, 88.0, 91.0, 86.0],

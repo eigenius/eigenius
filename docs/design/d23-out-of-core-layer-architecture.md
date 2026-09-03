@@ -554,9 +554,9 @@ The three EigenQL evaluator hot spots that pre-14h scan `layer.iter_all_resource
 
 | Site | File:line | Pre-14h | Post-14h |
 |---|---|---|---|
-| `resolve_name_to_class_iri` | [`evaluate.rs:389`](../../kernel/src/query/evaluate.rs#L389) | linear scan | scan over index-narrowed Class candidates |
-| `collect_candidates` | [`evaluate.rs:491`](../../kernel/src/query/evaluate.rs#L491) | scan + class filter | POS index scan + chain dedup |
-| Negation helper | [`evaluate.rs:468`](../../kernel/src/query/evaluate.rs#L468) | scan + non-match filter | shares `collect_candidates`'s indexed path |
+| `resolve_name_to_class_iri` | [`evaluate.rs:389`](../../kernel/src/query/evaluate/mod.rs#L389) | linear scan | scan over index-narrowed Class candidates |
+| `collect_candidates` | [`evaluate.rs:491`](../../kernel/src/query/evaluate/mod.rs#L491) | scan + class filter | POS index scan + chain dedup |
+| Negation helper | [`evaluate.rs:468`](../../kernel/src/query/evaluate/mod.rs#L468) | scan + non-match filter | shares `collect_candidates`'s indexed path |
 
 #### Per-layer storage (matching §5.2)
 
@@ -713,7 +713,7 @@ This is a breaking change to in-process kernel code. The migration is contained 
 
 ### 7.2 gRPC additions
 
-Per [`proto/eigenius_kernel.proto`](../../proto/eigenius_kernel.proto), additions:
+Per [`proto/eigenius_kernel.proto`](../../proto/eigenius.proto), additions:
 
 - `CommitLayer(CommitLayerRequest) → CommitLayerResponse` — the §5.4.1 `commit_layer` primitive. Caller passes parent LayerId and content; kernel returns the new LayerId. No branch involvement.
 - `UpdateBranch(UpdateBranchRequest) → UpdateBranchResponse` — the §5.4.1 CAS primitive with FastForward / TrivialMerge / NeedsWitnessedMerge outcomes. Used both for advancing existing branches and creating new ones (`expected_old=null` case).
@@ -1019,5 +1019,5 @@ Source code touchpoints (entering Phase 14):
 - [`kernel/src/layer/index.rs`](../../kernel/src/layer/index.rs) — `TripleIndex` trait + `MemoryTripleIndex` + chain-walk helpers (Phase 14h)
 - [`storage/rocksdb/src/triple_index.rs`](../../storage/rocksdb/src/triple_index.rs) — RocksDB-backed `TripleIndex` (Phase 14h)
 - [`kernel/src/task/mod.rs`](../../kernel/src/task/mod.rs) — TaskRecord (gains a small outcome field in 14e)
-- [`kernel/src/query/evaluate.rs`](../../kernel/src/query/evaluate.rs) — pattern-matching evaluator (rewritten in 14h)
+- [`kernel/src/query/evaluate.rs`](../../kernel/src/query/evaluate/mod.rs) — pattern-matching evaluator (rewritten in 14h)
 - [`kernel/src/storage/mod.rs`](../../kernel/src/storage/mod.rs) — PersistentBackend trait (extended for the new prefixes)

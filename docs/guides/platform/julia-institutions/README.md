@@ -53,7 +53,7 @@ for the demo overview.
   payload language for cross-institution numerical work; pervasively used
   by these institutions.
 - [**ESL §9 — Institutions in ESL**](../../esl/09-institutions.md),
-  [**EigenQL §8 — Institutions in EigenQL**](../../eigenql/08-institutions.md)
+  [**EigenQL §8 — Institutions in EigenQL**](../../eigenql/09-institutions.md)
   — the user-facing dispatch surface.
 - [**D14 — Institution Realisation**](../../../design/d14-institution-realisation.md),
   [**D26 — Runtime Substrate**](../../../design/d26-runtime-substrate.md),

@@ -340,8 +340,11 @@ pub fn mirror_to_resource(
     let mut r = Resource::new(mirror_iri);
     r.set(
         Iri::parse(PROP_IS_A).expect("static IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(CLASS_RUNTIME_PACKAGE_MIRROR).expect("static IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse(CLASS_RUNTIME_PACKAGE_MIRROR)
+                .expect("static IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     r.set(
@@ -362,7 +365,7 @@ pub fn mirror_to_resource(
     );
     r.set(
         Iri::parse(PROP_MIRROR_SOURCE_LAYER).expect("static IRI"),
-        Value::String(source_layer.as_str().to_string()),
+        Value::iri(source_layer),
     );
     r.set(
         Iri::parse(PROP_MIRROR_GEN_ID).expect("static IRI"),
@@ -386,14 +389,7 @@ pub fn mirror_to_resource(
     );
     r.set(
         Iri::parse(PROP_MIRRORED_CLASSES).expect("static IRI"),
-        Value::Array(
-            output
-                .mirrored_classes
-                .iter()
-                .cloned()
-                .map(Value::ResourceRef)
-                .collect(),
-        ),
+        Value::Array(output.mirrored_classes.iter().map(Value::iri).collect()),
     );
     if let Some(ts) = generated_at {
         r.set(
@@ -1031,7 +1027,7 @@ fn resolve_inductive_declarations(
 
             let mut args = Vec::new();
             for arg_res in resource_array(&ctor_res, PROP_ARG_TYPES) {
-                // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188), so the referenced
+                // `core:type_name` is an `eigentt:Term` (eigenius#188), so the referenced
                 // type is the value's HEAD. This read it as a string; the tests did not catch the
                 // break because their fixtures build the property by hand and still built strings.
                 let type_name =
@@ -2555,15 +2551,12 @@ fn string_value(r: &Resource, prop_iri: &str) -> Option<String> {
     r.get(&iri).and_then(Value::as_str).map(str::to_string)
 }
 
-/// Read a property value as a single resource IRI. Tolerates the
-/// chain's two encodings of an IRI-typed value: `Value::ResourceRef`
-/// (the canonical form) and `Value::String` (the JSON parser stores
-/// IRIs as strings until the property's `data_type` is consulted).
+/// Read a property value as a single resource IRI — a string that parses as one. Whether a
+/// string IS a reference comes from the property's `data_type`, not the value's shape.
 fn resource_iri_value(r: &Resource, prop_iri: &str) -> Option<Iri> {
     let iri = Iri::parse(prop_iri).ok()?;
     let v = r.get(&iri)?;
     match v {
-        Value::ResourceRef(i) => Some(i.clone()),
         Value::String(s) => Iri::parse(s).ok(),
         _ => None,
     }
@@ -2608,7 +2601,7 @@ fn sanitise_for_identifier(s: &str) -> String {
 mod tests {
     /// Test-only: `core:type_name` is written by fixtures here, and READ through
     /// `eigenius_kernel::program::ground::arg_type_head` (eigenius#188 retyped it to an
-    /// `eigentt:TypeExpr`, so there is no string to read directly any more).
+    /// `eigentt:Term`, so there is no string to read directly any more).
     const PROP_TYPE_NAME: &str = "urn:eigenius:core:type_name";
 
     use super::*;
@@ -2654,17 +2647,11 @@ mod tests {
     fn class_decl(short: &str, requires: &[&str], recommends: &[&str]) -> Resource {
         let mut r = Resource::new(iri(&format!("urn:eigenius:demo:assay:{short}")));
         r.set(iri(PROP_SHORT_NAME), Value::String(short.into()));
-        let req: Vec<Value> = requires
-            .iter()
-            .map(|s| Value::ResourceRef(iri(s)))
-            .collect();
+        let req: Vec<Value> = requires.iter().map(|s| Value::iri(&iri(s))).collect();
         if !req.is_empty() {
             r.set(iri(PROP_REQUIRES), Value::Array(req));
         }
-        let rec: Vec<Value> = recommends
-            .iter()
-            .map(|s| Value::ResourceRef(iri(s)))
-            .collect();
+        let rec: Vec<Value> = recommends.iter().map(|s| Value::iri(&iri(s))).collect();
         if !rec.is_empty() {
             r.set(iri(PROP_RECOMMENDS), Value::Array(rec));
         }
@@ -2674,7 +2661,7 @@ mod tests {
     fn property_decl(iri_str: &str, short: &str, data_type: &str) -> Resource {
         let mut r = Resource::new(iri(iri_str));
         r.set(iri(PROP_SHORT_NAME), Value::String(short.into()));
-        r.set(iri(PROP_DATA_TYPE), Value::ResourceRef(iri(data_type)));
+        r.set(iri(PROP_DATA_TYPE), Value::iri(&iri(data_type)));
         r
     }
 
@@ -2682,7 +2669,7 @@ mod tests {
         let mut r = property_decl(iri_str, short, TYPE_RESOURCE);
         r.set(
             iri(PROP_CLASS_TYPES),
-            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+            Value::Array(vec![Value::iri(&iri(class_iri))]),
         );
         r
     }
@@ -2698,7 +2685,11 @@ mod tests {
     fn with_format(mut r: Resource, format_short: &str) -> Resource {
         r.set(
             iri(PROP_FORMAT),
-            Value::ResourceRef(iri(&format!("{FORMAT_IRI_PREFIX}{format_short}"))),
+            Value::String(
+                iri(&format!("{FORMAT_IRI_PREFIX}{format_short}"))
+                    .as_str()
+                    .to_string(),
+            ),
         );
         r
     }
@@ -3580,12 +3571,7 @@ end # module EigeniusMirror
         let mut r = property_decl(iri_str, short, TYPE_RESOURCE);
         r.set(
             iri(PROP_CLASS_TYPES),
-            Value::Array(
-                class_iris
-                    .iter()
-                    .map(|s| Value::ResourceRef(iri(s)))
-                    .collect(),
-            ),
+            Value::Array(class_iris.iter().map(|s| Value::iri(&iri(s))).collect()),
         );
         r
     }
@@ -3600,7 +3586,7 @@ end # module EigeniusMirror
         if !parents.is_empty() {
             r.set(
                 iri(PROP_SUBCLASS_OF),
-                Value::Array(parents.iter().map(|p| Value::ResourceRef(iri(p))).collect()),
+                Value::Array(parents.iter().map(|p| Value::iri(&iri(p))).collect()),
             );
         }
         r
@@ -4004,7 +3990,7 @@ end # module EigeniusMirror
         let mut prop = property_decl("urn:eigenius:demo:assay:p", "p", TYPE_STRING);
         prop.set(
             iri(PROP_FORMAT),
-            Value::ResourceRef(iri("urn:my:custom:format:foo")),
+            Value::iri(&iri("urn:my:custom:format:foo")),
         );
         chain.add("urn:eigenius:demo:assay:p", prop);
         chain.add(
@@ -4032,9 +4018,9 @@ end # module EigeniusMirror
         let mut zero = Resource::new(iri("urn:eigenius:test:Nat:zero"));
         zero.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:core:InductiveCtor",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:core:InductiveCtor").as_str().to_string(),
+            )]),
         );
         zero.set(iri(PROP_CTOR_NAME), Value::String("zero".into()));
         zero.set(iri(PROP_ARG_TYPES), Value::Array(vec![]));
@@ -4043,25 +4029,27 @@ end # module EigeniusMirror
         let mut succ_arg = Resource::new(iri("urn:eigenius:test:Nat:succ:pred"));
         succ_arg.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:core:InductiveArgType",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:core:InductiveArgType")
+                    .as_str()
+                    .to_string(),
+            )]),
         );
         succ_arg.set(iri(PROP_ARG_NAME), Value::String("pred".into()));
-        // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
+        // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
         succ_arg.set(
             iri(PROP_TYPE_NAME),
-            Value::Json(serde_json::json!({
-                "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat"],
+            eigenius_kernel::testing::term_value(&serde_json::json!({
+                "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat", []],
             })),
         );
 
         let mut succ = Resource::new(iri("urn:eigenius:test:Nat:succ"));
         succ.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:core:InductiveCtor",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:core:InductiveCtor").as_str().to_string(),
+            )]),
         );
         succ.set(iri(PROP_CTOR_NAME), Value::String("succ".into()));
         succ.set(
@@ -4072,7 +4060,9 @@ end # module EigeniusMirror
         let mut nat = Resource::new(iri("urn:eigenius:test:Nat"));
         nat.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(CLASS_INDUCTIVE_TYPE))]),
+            Value::Array(vec![Value::String(
+                iri(CLASS_INDUCTIVE_TYPE).as_str().to_string(),
+            )]),
         );
         nat.set(iri(PROP_SHORT_NAME), Value::String("Nat".into()));
         nat.set(

@@ -127,6 +127,33 @@ jobs:
       - name: Run tests
         run: deno test --allow-net --allow-env
 
+      # The SDK is its own Deno package (`clients/eigenius-ts/deno.jsonc`) and is NOT a
+      # workspace member of `orchestration/`, so the steps above never reached it. Its tests
+      # existed and passed locally while CI ran none of them — which is how `Outcome` could
+      # have been added with its narrowing untested. Explicit steps rather than a workspace
+      # member: the two packages have different dependency sets, and merging them would make
+      # the orchestrator's lint answer for the SDK's generated code.
+      # `clients/eigenius-ts` carries a `package.json` (the notebooks SPA consumes it through
+      # npm), so Deno uses node_modules resolution and needs the directory populated. A clean
+      # checkout has none, and `nodeModulesDir: auto` did not fill it here even though it does
+      # locally — so install explicitly rather than depend on that behaviour matching across
+      # Deno patch versions.
+      - name: Install SDK deps
+        working-directory: clients/eigenius-ts
+        run: deno install
+
+      - name: Lint (SDK)
+        working-directory: clients/eigenius-ts
+        run: deno lint
+
+      - name: Format check (SDK)
+        working-directory: clients/eigenius-ts
+        run: deno fmt --check
+
+      - name: Run tests (SDK)
+        working-directory: clients/eigenius-ts
+        run: deno test --allow-net --allow-env
+
   proto:
     name: Protobuf lint
     runs-on: ubuntu-latest

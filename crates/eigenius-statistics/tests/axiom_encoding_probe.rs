@@ -27,13 +27,13 @@
 //! - Consumer: an author writes the same proposition inside a
 //!   `reflection:canonical_proposition = type_expr(...)` slot on a
 //!   `reflection:DeclaredResource` bridge. The ESL compiler walks the
-//!   `TypeExpr::Ref { name = stats:lt, args = [...] }` tree, resolves
+//!   `Term::Ref { name = stats:lt, args = [...] }` tree, resolves
 //!   each axiom reference against the chain layer, and emits a D47
 //!   JSON tree via the kernel's shared D47 codec.
 //!
 //! If both encoders agree on the JSON shape, the witness index keyed
 //! against the verdict's canonical_proposition will match the bridge's
-//! antecedent — and the reasoning institution's `JustifiedBy.derived`
+//! antecedent — and the reasoning institution's `justification:Certificate.derived`
 //! grounding ctor can synthesise the witness against the same hash.
 //!
 //! If they disagree, the bridge restructure cannot work without an ESL
@@ -74,7 +74,7 @@ fn build_stats_layer() -> Arc<eigenius_kernel::layer::Layer> {
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
     let stats_source = include_str!("../../../ontologies/statistics/statistics.esl");
-    let stats_resources = esl::compile_against_layer(stats_source, &reflection)
+    let stats_resources = esl::compile(stats_source, &reflection)
         .expect("statistics.esl compiles against reflection layer");
     let mut stats_builder = LayerBuilder::new("statistics", Some(reflection));
     for r in stats_resources {
@@ -105,7 +105,7 @@ fn verifier_emit_stats_lt_mean_of(sample_set_iri: &str, threshold: f64) -> serde
 }
 
 fn encode_const_ref(iri: &str) -> serde_json::Value {
-    serde_json::json!({"ctor": "ConstRef", "args": [iri]})
+    serde_json::json!({"ctor": "ConstRef", "args": [iri, []]})
 }
 
 fn encode_lit_string(s: &str) -> serde_json::Value {
@@ -128,11 +128,13 @@ fn esl_canonical_proposition(
     let bridge_source = r#"
 namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
+namespace prov = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
 namespace stats      = "urn:eigenius:measurements";
 namespace probe      = "urn:eigenius:probe";
 
-resource probe:bridge_proposition : reflection:DeclaredResource {
-    reflection:declared_by = "probe:axiom-encoding";
+resource probe:bridge_proposition : justification:Claim {
+    prov:was_attributed_to = "probe:axiom-encoding";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(
@@ -142,7 +144,7 @@ resource probe:bridge_proposition : reflection:DeclaredResource {
     );
 }
 "#;
-    let resources = esl::compile_against_layer(bridge_source, stats_layer)
+    let resources = esl::compile(bridge_source, stats_layer)
         .unwrap_or_else(|errs| panic!("probe ESL failed to compile: {errs:?}"));
     let mut layer_builder = LayerBuilder::new("probe-layer", Some(Arc::clone(stats_layer)));
     for r in resources {
@@ -155,8 +157,13 @@ resource probe:bridge_proposition : reflection:DeclaredResource {
         .expect("bridge resource committed");
     let prop_iri = Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap();
     match bridge.get(&prop_iri) {
-        Some(Value::Json(j)) => j.clone(),
-        other => panic!("canonical_proposition is not Value::Json: {other:?}"),
+        // A term is a value resource (D85 §6.1); project it back for the positional
+        // assertions below.
+        Some(Value::Embedded(r)) => {
+            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, &layer)
+                .expect("a stored proposition is well formed")
+        }
+        other => panic!("canonical_proposition is not a term: {other:?}"),
     }
 }
 

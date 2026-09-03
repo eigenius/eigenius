@@ -43,7 +43,9 @@ fn validate_with_short_name(short_name: &str) -> Vec<String> {
     let mut r = Resource::new(iri("urn:eigenius:probe:thing"));
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:core:Class"))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:core:Class").as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:core:description"),

@@ -37,7 +37,6 @@ use tonic::Request;
 const UMLS_ESL: &str = r#"
 namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
-namespace epistemic  = "urn:eigenius:reflection:epistemic";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace lexicon    = "urn:eigenius:lexicon";
 namespace umlssty    = "urn:eigenius:umlssty";
@@ -62,7 +61,6 @@ resource umlscui:e_C0043119_0 : lexicon:LexicalEntry {
     lexicon:sem        = umlscui:C0043119;
     lexicon:sem_type   = type_expr( Set );
     lexicon:sense      = "umls:C0043119";
-    lexicon:grade      = epistemic:declared;
     lexicon:in_lexicon = lexicon:umls;
 }
 "#;

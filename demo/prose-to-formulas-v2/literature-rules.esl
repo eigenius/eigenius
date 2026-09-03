@@ -24,7 +24,7 @@
 //
 // With the model an explicit parameter, the quantifier is where it belongs — in the rule, visible,
 // and it is what the rule actually says. `inference.esl` eliminates it with
-// `JustifiedBy.spec_poly` at the model the sentences are about, which is the ordinary way to use a
+// `justification:Certificate.spec_poly` at the model the sentences are about, which is the ordinary way to use a
 // general claim on a particular case.
 //
 // ── AND WHY IT IS THE ONLY DECLARED THING HERE ────────────────────────────────────────────────
@@ -47,7 +47,9 @@ namespace reflection = "urn:eigenius:reflection";
 namespace onco2      = "urn:eigenius:demo:onco-typed";
 namespace umlscui    = "urn:eigenius:umlscui";
 namespace wn         = "urn:eigenius:wn";
-namespace agent = "urn:eigenius:reflection:agent";
+namespace agent = "urn:eigenius:prov:agent";
+namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
 
 // The classes the rule mentions, drawn from two different lexicons the graph already held:
 //
@@ -63,13 +65,13 @@ namespace agent = "urn:eigenius:reflection:agent";
 // definition, or design decision — as opposed to something observed, derived, or machine-verified.
 // The class requires `declared_by` and recommends `rationale` and `timestamp`. Nothing about a
 // Declared resource claims it is true; it claims someone stood behind it, and says who.
-resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
+resource onco2:lit_rule_exo_implies_helicase : justification:Claim {
     // WHO stands behind the rule. A citation slot: in a real chain this would identify the paper.
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = onco2:warrant_literature_illustrative_dependency_rule;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = onco2:warrant_literature_illustrative_dependency_rule;
 
     // WHY, recorded on chain rather than in a comment a reader of the graph would never see.
-    reflection:rationale   = "ILLUSTRATIVE, not a finding of Chan et al.: a model carrying WRN's exonuclease activity is taken to require its helicase activity. Quantified over the model, so applying it to a particular one is an explicit specialization rather than a silent generalization. Pinned here to show a published rule being applied to a measured claim; the demo is about how a sentence becomes justified, not about WRN biology.";
+    prov:rationale   = "ILLUSTRATIVE, not a finding of Chan et al.: a model carrying WRN's exonuclease activity is taken to require its helicase activity. Quantified over the model, so applying it to a particular one is an explicit specialization rather than a silent generalization. Pinned here to show a published rule being applied to a measured claim; the demo is about how a sentence becomes justified, not about WRN biology.";
 
     // WHAT the rule says, as a machine-checkable proposition rather than prose. This is the field
     // that turns a citation into something the kernel can apply.
@@ -80,7 +82,7 @@ resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
     // premise of an `app` step.
     //
     // It must match, byte for byte after D47 encoding, the implication `inference.esl`'s
-    // `reasoning:declared(...)` sub-proof writes out — the witness key hashes the proposition, so a
+    // `justification:declared(...)` sub-proof writes out — the witness key hashes the proposition, so a
     // rule that says something even slightly different is a different rule. Note that the two
     // `onco2:` calls below are DEFINITIONS: decode unfolds them to the parsed sentences on both
     // sides, so the match is on the unfolded terms and holds by construction.
@@ -97,11 +99,11 @@ resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
 //
 // The kernel's witness index is built by walking TRACE-class resources, not the resources they
 // point at. A `DeclarationTrace` is what emits `IsDeclaredAs(target_iri, P)` — the trace supplies
-// the target via `reflection:resource`, and P is read off that target's `canonical_proposition`.
+// the target via `prov:resource`, and P is read off that target's `canonical_proposition`.
 // The rule resource on its own mints nothing.
 //
 // That witness is exactly what `inference.esl` consumes. Its certificate contains
-// `reasoning:declared("…:lit_rule_exo_implies_helicase", ∀m. A -> B, ())`, and the `()` is a slot
+// `justification:declared("…:lit_rule_exo_implies_helicase", ∀m. A -> B, ())`, and the `()` is a slot
 // the kernel fills by looking up `(Declared, this IRI, hash of the proposition)` in the index.
 // `IsDeclaredAs` has zero constructors, so no author can supply an inhabitant — the lookup IS the
 // type-check. Delete this trace and the intact branch's inference stops committing.
@@ -109,17 +111,17 @@ resource onco2:lit_rule_exo_implies_helicase : reflection:DeclaredResource {
 // This is the ONLY DeclarationTrace on the branch. Counting these is how to count what the chain
 // takes on authority: `reflection:DeclaredResource` is a provenance label the ESL compiler stamps
 // on every declaration it emits, definitions included, and mints no witness.
-resource onco2:lit_rule_exo_implies_helicase_trace : reflection:DeclarationTrace {
-    reflection:resource    = onco2:lit_rule_exo_implies_helicase;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = onco2:warrant_literature_illustrative_dependency_rule;
-    reflection:timestamp   = "2026-08-03T00:00:00Z";
+resource onco2:lit_rule_exo_implies_helicase_trace : prov:DeclarationTrace {
+    prov:resource    = onco2:lit_rule_exo_implies_helicase;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = onco2:warrant_literature_illustrative_dependency_rule;
+    prov:timestamp   = "2026-08-03T00:00:00Z";
 }
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource onco2:warrant_literature_illustrative_dependency_rule : reflection:DeclaredResource {
-    reflection:declared_by = agent:eigenius_core_team;
+resource onco2:warrant_literature_illustrative_dependency_rule : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `literature:illustrative-dependency-rule`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_literature_illustrative_dependency_rule";
 }

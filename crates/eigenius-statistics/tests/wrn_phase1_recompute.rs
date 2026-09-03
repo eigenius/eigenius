@@ -17,7 +17,8 @@
 //!
 //! The **statistics** institution recomputes four `StatisticalAnalysisPlan`s
 //! from chain-resident data and emits `StatisticalAnalysisResult`s, each
-//! carrying a canonical proposition + an `IsDerivedAs` witness:
+//! carrying a canonical proposition, which the plan's reproducibility declaration
+//! is written against:
 //! 1. C-WRN — MSI-vs-MSS WRN dependency (Wilcoxon, 37 vs 91) → `lt(mean_diff_of(s), 0)`.
 //! 2. D-REFINE — WRN-dep ~ #MS-deletions (Spearman, 51 pairs) → `lt(spearman_rho(s), 0)`.
 //! 3. D-RECQ — WRN MSI-vs-MSS in the RecQ cohort (Wilcoxon, 32 vs 413) → `lt(mean_diff_of(s), 0)`.
@@ -25,7 +26,7 @@
 //!
 //! The **reasoning** institution then type-checks every conclusion, each
 //! certificate composing a declared statistical→domain bridge with
-//! `DerivedEvidence` on the matching result(s):
+//! `App(Declared(plan_yields_effect), Observed(sample_set))`:
 //! - `C-WRN` → `SelectivelyEssential(WRN, MSI)`
 //! - `D-REFINE` → `DependencyCorrelatesWithMutatorLoad(WRN, MSI)`
 //! - `D-RECQ` → `OnlyMSISelectiveInFamily(WRN, RecQ_helicases)` — WRN derived + declared uniqueness over the kernel-computed n.s. p-values of the other RecQ helicases (a null is not derivable, so the negatives are an explicit judgment)
@@ -50,13 +51,11 @@ use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 use eigenius_statistics::institution::iris;
 use eigenius_statistics::StatisticsInstitution;
 
 fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(source, parent).unwrap_or_else(|errs| {
+    let resources = esl::compile(source, parent).unwrap_or_else(|errs| {
         panic!(
             "{name} failed to compile:\n{}",
             errs.into_iter()
@@ -69,13 +68,26 @@ fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
     for r in resources {
         b.add_resource(r).unwrap();
     }
-    Arc::new(b.build(LayerStorage::in_memory()))
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    // STRUCTURAL validation, which `LayerBuilder::build` does not run and
+    // `esl::compile_against_layer` does not either — it compiles, it does not
+    // validate. `00-wrn-vocabulary.esl`'s header records that gap costing two
+    // months of a chain that could not load while every test stayed green.
+    let structural = eigenius_kernel::validation::Validator::new(layer.clone()).validate();
+    assert!(
+        structural.is_empty(),
+        "{name}: the layer must validate structurally. {} error(s): {:#?}",
+        structural.len(),
+        structural.iter().take(10).collect::<Vec<_>>()
+    );
+    layer
 }
 
 /// Dispatch the statistics institution on `plan_iri`, assert every
 /// emitted derivation Holds, and finalize each (replicating the kernel's
 /// `finalize_emitted_derivation`, which the raw `query()` skips) so the D49
-/// witness emitter will admit its `IsDerivedAs` once committed. Returns
+/// proposition a plan declaration is written against. Returns
 /// all finalized result resources — one for single-effect plans, two for
 /// the classification plan (`:result:ppv` + `:result:sensitivity`).
 fn recompute_finalized(
@@ -124,7 +136,7 @@ fn recompute_finalized(
                 Some(o) => vec![o.clone()],
                 None => Vec::new(),
             };
-            for marker in [wk::DERIVED_RESOURCE, wk::INSTITUTION_EMITTED_DERIVATION] {
+            for marker in [wk::INSTITUTION_EMITTED_DERIVATION] {
                 if !classes
                     .iter()
                     .any(|v| matches!(v, Value::String(s) if s == marker))
@@ -138,31 +150,30 @@ fn recompute_finalized(
         .collect()
 }
 
-/// Type-check a reasoning sentence against the (recomputed-result-bearing)
-/// context and assert Holds.
+/// Assert the committed conclusion at `sentence_iri` type-checks against the
+/// (recomputed-result-bearing) chain.
+///
+/// Was a `ValidateJustification` dispatch through the Reasoning institution, reading the
+/// `Verdict` it returned. P2 moved the certificate check to commit and P7 dissolves the
+/// institution, so this reads what validation reports about the sentence instead. The
+/// sentence is already on the chain — these tests resolve it rather than building it — so
+/// validating the chain and filtering to its IRI is the whole conversion.
 fn assert_reasoning_holds(ctx: &ExecutionContext, sentence_iri: &str) {
-    let inst = ReasoningInstitution::new();
-    let sentence = (*ctx
-        .resolve(&Iri::parse(sentence_iri).unwrap())
-        .unwrap_or_else(|| panic!("sentence `{sentence_iri}` on chain")))
-    .clone();
-    let outcome = do_validate_justification(&inst, &sentence, ctx).expect("validate outcome");
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict ctor")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
-        "`{sentence_iri}` should type-check against the kernel-recomputed result; \
-         got {ctor}, diagnostic: {diagnostic:?}"
+    let iri = Iri::parse(sentence_iri).unwrap();
+    assert!(
+        ctx.resolve(&iri).is_some(),
+        "sentence `{sentence_iri}` on chain"
+    );
+    let errors: Vec<String> = eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| e.resource_id.as_ref().is_some_and(|i| *i == iri))
+        .map(|e| e.message)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "`{sentence_iri}` should type-check against the kernel-recomputed result; got:\n{}",
+        errors.join("\n")
     );
 }
 
@@ -186,6 +197,7 @@ fn wrn_warrants_kernel_recomputed() {
             include_str!("../../../ontologies/reflection/reflection-ontology.json"),
             include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
             include_str!("../../../ontologies/institution/institution-ontology.json"),
+            include_str!("../../../ontologies/ingest/ingest-ontology.json"),
         ] {
             for r in eigon_json::parse_document(src).unwrap() {
                 b.add_resource(r).unwrap();
@@ -193,10 +205,29 @@ fn wrn_warrants_kernel_recomputed() {
         }
         Arc::new(b.build(LayerStorage::in_memory()))
     };
+    // `prov` — the provenance axis, above reflection and below everything that
+    // names an agent, a trace or an attribution.
+    let prov = {
+        // Compiled against the layer it sits on: its values name their constructors'
+        // arguments (D85 §6.1), and those names live in `eigentt:Term`'s declaration below.
+        let mut b = LayerBuilder::new("prov", Some(Arc::clone(&reflection)));
+        for r in esl::compile(
+            include_str!("../../../ontologies/prov/prov.esl"),
+            &reflection,
+        )
+        .unwrap()
+        {
+            b.add_resource(r).unwrap();
+        }
+        Arc::new(b.build(LayerStorage::in_memory()))
+    };
     let reasoning = {
-        let mut b = LayerBuilder::new("reasoning", Some(reflection));
-        for r in esl::compile(include_str!("../../../ontologies/reasoning/reasoning.esl"))
-            .expect("reasoning.esl compiles")
+        let mut b = LayerBuilder::new("reasoning", Some(Arc::clone(&prov)));
+        for r in esl::compile(
+            include_str!("../../../ontologies/justification/justification.esl"),
+            &prov,
+        )
+        .expect("reasoning.esl compiles")
         {
             b.add_resource(r).unwrap();
         }
@@ -207,9 +238,17 @@ fn wrn_warrants_kernel_recomputed() {
         &reasoning,
         "statistics",
     );
+    // `reference` — the literature layer uses reference:Citation, and this chain
+    // never carried the ontology declaring it. Nothing noticed because the layers
+    // were built without structural validation.
+    let reference = esl_against(
+        include_str!("../../../ontologies/reference/reference.esl"),
+        &statistics,
+        "reference",
+    );
     let bench_core = esl_against(
         include_str!("../../../experiments/benchmark/base-ontologies/bench-core.esl"),
-        &statistics,
+        &reference,
         "bench-core",
     );
     let harness = esl_against(
@@ -222,15 +261,23 @@ fn wrn_warrants_kernel_recomputed() {
         &harness,
         "onco",
     );
+    // 02-literature declares `wrn:authors`, the agent every plan declaration in 03
+    // is attributed to. This chain skipped it, and nothing noticed because the
+    // layers were built without structural validation.
+    let literature = esl_against(
+        include_str!("../../../experiments/publications/wrn-helicase/chain/02-literature.esl"),
+        &onco,
+        "wrn-literature",
+    );
     // D54 two-phase load: the plans (emitters: SampleSets +
-    // StatisticalAnalysisPlans + ImpossibilityWitnesses + DeclaredResource
-    // bridges) must load before the conclusions (consumers: the
-    // `concl_*_recomputed` ReasoningSentences citing the emitted witnesses).
+    // StatisticalAnalysisPlans + ImpossibilityWitnesses + the plan-reproducibility
+    // Claims) must load before the conclusions (consumers: the
+    // `concl_*_recomputed` Conclusions citing the emitted witnesses).
     let recompute_plans = esl_against(
         include_str!(
             "../../../experiments/publications/wrn-helicase/chain/03-phase1-recompute-plans.esl"
         ),
-        &onco,
+        &literature,
         "wrn-recompute-plans",
     );
     let recompute = esl_against(
@@ -311,7 +358,7 @@ fn wrn_warrants_kernel_recomputed() {
     );
 
     // ── Step 3: the reasoning institution type-checks every kernel-
-    //            recomputed conclusion against the IsDerivedAs-bearing
+    //            recomputed conclusion against the proposition-bearing
     //            results, plus the linked-external two-screen C-WRN ──
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_wrn_selective_recomputed");
     assert_reasoning_holds(&ctx, "urn:eigenius:pub:wrn:concl_refine_recomputed");

@@ -6,7 +6,7 @@ must eventually process, paired with the canonical propositions it should yield.
 proposition? — the D61 back-translation gold).
 
 **Provenance / status (read before trusting).**
-- The **propositions** are *authoritative* — the `reasoning:proposition` / `reflection:canonical_proposition`
+- The **propositions** are *authoritative* — the `justification:proposition` / `reflection:canonical_proposition`
   values committed in `chain/04`–`chain/09` (kernel-checked).
 - The **English** is a **Declared gloss** (rendered from the predicate names + the `onco` ontology, not the
   source paper). To curate against the actual paper prose (Chan et al.) is a follow-up — these are a

@@ -26,6 +26,13 @@
 //! carrying no reason. Direct lookup is O(1) in memory and holds the specific resource at the point
 //! of the decision (D66 slice 0).
 //!
+//! **What is being decided here is whether to assert an axiom.** The `witness:Is*As` types have zero
+//! constructors (`ontologies/justification/justification.esl:52`), so no term inhabits them and this
+//! function is the only way one comes into existence — see `Val::ChainWitness` in `nbe/val.rs` for
+//! the full anatomy. Consequently **this module is inside the TCB**: everything above a witness is
+//! type-checked, the witness itself is postulated, and a wrong admission cannot be caught
+//! downstream because an axiom has no proof to re-check.
+//!
 //! Lookup is the parent-chain walk: `lookup_chain_witness(&Layer, &key)` tries each Layer top-down,
 //! returning true on first hit. First-hit-wins is sound because Layer immutability means a
 //! once-admitted witness stays admitted in all descendants.
@@ -35,14 +42,18 @@ use crate::observability::{field, operation};
 use crate::ontology::resource::Resource;
 use crate::ontology::well_known as wk;
 use crate::ontology::{Iri, Value};
+use crate::program::eigentt_type_mirror::CodecNames;
 use crate::witness::{hash_proposition_exp, WitnessCategory, WitnessKey};
 
-/// D54: the `reasoning:ReasoningSentence` class IRI and its `proposition`
+/// D54: the `justification:Conclusion` class IRI and its `proposition`
 /// property. Named here (rather than in `well_known`) because the D49
 /// witness machinery is the one kernel site that is intrinsically
-/// reasoning-aware — it builds the witnesses `JustifiedBy` consumes.
-const REASONING_SENTENCE: &str = "urn:eigenius:reasoning:ReasoningSentence";
-const REASONING_PROPOSITION: &str = "urn:eigenius:reasoning:proposition";
+/// reasoning-aware — it builds the witnesses `justification:Certificate` consumes.
+const REASONING_SENTENCE: &str = "urn:eigenius:justification:Conclusion";
+const CONCLUSION_JUDGEMENT: &str = "urn:eigenius:justification:judgement";
+/// The conclusion's optional PROOF judgement — `holds(logic, t, P)`. This, and
+/// not the certificate judgement, is what establishes `Verified`.
+const CONCLUSION_PROOF: &str = "urn:eigenius:justification:proof";
 
 /// Does `layer` itself admit `key`?
 ///
@@ -54,11 +65,13 @@ const REASONING_PROPOSITION: &str = "urn:eigenius:reasoning:proposition";
 ///
 /// Two routes, mirroring the two ways a witness arises (D49 §6):
 ///
-/// - **self-attesting** — the key's IRI *is* the resource. A committed `reasoning:ReasoningSentence`
-///   is `Verified` on its own IRI (D54 lemma citation); a `reflection:InstitutionEmittedDerivation`
-///   is `Derived` on its own IRI (D52). Reached by [`Layer::get_resource`], which is layer-local.
+/// - **self-attesting** — the key's IRI *is* the resource. A committed `justification:Conclusion`
+///   whose judgement carries a proof is `Verified` on its own IRI. Reached by
+///   [`Layer::get_resource`], which is layer-local. A `reflection:InstitutionEmittedDerivation`
+///   used to be `Derived` on its own IRI (D52); it now attests nothing, because a program's
+///   output is not a ground — see `trace_category`.
 /// - **trace-attested** — a Trace resource *defined in this layer* points at the target through
-///   `reflection:resource`. Reached through the triple index, since that property is
+///   `prov:resource`. Reached through the triple index, since that property is
 ///   `core:resource`-typed and therefore indexed.
 ///
 /// The target itself is resolved with [`Layer::resolve`] (a chain walk), because a trace committed
@@ -77,13 +90,6 @@ pub fn layer_admits_witness(layer: &Layer, key: &WitnessKey) -> bool {
         let emitted = match key.category {
             WitnessCategory::Verified if is_a.iter().any(|c| c.as_str() == REASONING_SENTENCE) => {
                 emit_from_reasoning_sentence(layer, &resource)
-            }
-            WitnessCategory::Derived
-                if is_a
-                    .iter()
-                    .any(|c| c.as_str() == wk::INSTITUTION_EMITTED_DERIVATION) =>
-            {
-                emit_from_institution_derivation(layer, &resource)
             }
             _ => None,
         };
@@ -131,7 +137,7 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
             return None;
         }
     };
-    match hash_proposition_exp(&decoded) {
+    match hash_proposition_exp(&decoded, &CodecNames::from_layer(layer)) {
         Ok(h) => Some(h),
         Err(e) => {
             tracing::warn!(
@@ -149,7 +155,7 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
 /// Could `resource` ever admit a `ChainWitness`?
 ///
 /// True for the seven classes [`layer_admits_witness`] can emit from: the five Trace classes, a
-/// `reflection:InstitutionEmittedDerivation`, and a `reasoning:ReasoningSentence`. Stamped over a
+/// `reflection:InstitutionEmittedDerivation`, and a `justification:Conclusion`. Stamped over a
 /// layer's resources at write time into [`LayerHandle::has_witness_candidates`], so a chain walk can
 /// skip a layer that holds none without probing it — the job the materialised index used to do by
 /// caching an empty map.
@@ -168,7 +174,7 @@ pub fn is_witness_candidate(resource: &Resource) -> bool {
 /// `2026-08-21` on the reasoning that it would arrive with D49 §7's comorphism-reified
 /// `VerifiedPropositionView`. That deferred the wrong half: the view is how a LEAN proof's
 /// proposition reaches the trace, not what makes a `VerificationTrace` admit a witness. The trace
-/// already names its target through `reflection:resource`, so `emit_from_trace` reads the target's
+/// already names its target through `prov:resource`, so `emit_from_trace` reads the target's
 /// `canonical_proposition` for it exactly as it does for the other three — nothing about the
 /// Verified category needs special handling here.
 ///
@@ -180,18 +186,27 @@ fn trace_category(class_iri: &str) -> Option<WitnessCategory> {
     match class_iri {
         wk::DECLARATION_TRACE => Some(WitnessCategory::Declared),
         wk::OBSERVATION_TRACE => Some(WitnessCategory::Observed),
-        wk::PROGRAM_TRACE => Some(WitnessCategory::Derived),
+        // A `ProgramTrace` grounds NOTHING. It records that a run happened —
+        // provenance — and a computed claim does not rest on the fact that a
+        // computation ran. It rests on the assertion that the plan denotes a
+        // function `I -> O`, which is Declared by an accountable agent and which
+        // no execution can establish, and on the inputs, which are Observed. The
+        // composite `App(Declared(plan), Observed(inputs))` is built from those
+        // two, so the run record is not a third ground.
+        wk::PROGRAM_TRACE => None,
         wk::VERIFICATION_TRACE => Some(WitnessCategory::Verified),
-        // An author recording that a program ran elsewhere (eigenius#205). DECLARED, not Derived:
-        // `Derived` is reserved for a trace tied to a kernel-initiated activity, and a
-        // transcription establishes only that someone asserts the run happened. `declared_by` is
-        // required on the class, so the assertion always has an agent behind it.
+        // An author recording that a program ran elsewhere (eigenius#205). A transcription
+        // establishes only that someone asserts the run happened, so it is DECLARED, and
+        // `declared_by` is required on the class, so the assertion always has an agent behind
+        // it. This arm was the one place the old four-category split had the right instinct:
+        // it already refused to call a run record a ground of its own kind. Now that
+        // `ProgramTrace` grounds nothing either, the two agree.
         wk::EXTERNAL_EXECUTION_TRACE => Some(WitnessCategory::Declared),
         _ => None,
     }
 }
 
-/// Visit each Trace resource **defined in this layer** whose `reflection:resource` is `target`,
+/// Visit each Trace resource **defined in this layer** whose `prov:resource` is `target`,
 /// returning `true` at the first one `f` accepts. Short-circuits; holds one resource at a time.
 ///
 /// **Only STORED layers can use the index.** `autoonload_dispatch` runs before `persist`, so the
@@ -247,36 +262,55 @@ where
     false
 }
 
-/// D54: read a `reasoning:ReasoningSentence`'s `proposition` and build a
-/// `Verified` `WitnessKey` keyed on the sentence's own IRI. The proposition
-/// is the D47-encoded `Value::Json` the consumer's `JustifiedBy.verified(iri, P)`
-/// term hashes to identically (same encoding path), so the key matches.
-/// Returns `None` when the sentence has no `@id` or no `proposition`.
+/// D54: admit a `justification:Conclusion` as a `Verified` witness — but ONLY
+/// on the strength of a proof term.
+///
+/// The conclusion carries up to two judgements, and they say different things:
+///
+/// - `justification:judgement` is `holds(kernel, c, Certificate(j, P))` — *a
+///   checker verified the certificate c*. It does **not** say `P`. A
+///   certificate records the grounds a claim rests on; it is not factive.
+/// - `justification:proof` is `holds(logic, t, P)` — *a checker verified `t`
+///   against `P` itself*. That is factive, and it is what `Verified` means.
+///
+/// **Only the second admits a witness.** Minting `Verified` from the first was
+/// the substitution the two-layer separation exists to forbid: the witness is
+/// what a later `Certificate.verified(iri, P)` consumes, so a conclusion
+/// resting on nothing but `Declared("…")` laundered into a proof exactly one
+/// citation downstream, and `is_fully_verified` answered true for it.
+///
+/// A conclusion with no proof term therefore admits NO witness here. That is a
+/// deliberate tightening of D54 lemma citation: a lemma can be cited as
+/// `verified` only if it was proved, not merely justified.
+///
+/// The hash must match what a citing certificate produces. A consumer supplies
+/// `P` directly; `hash_proposition_exp` hashes the decoded `Exp`, so both sides
+/// hash the same term — see
+/// `a_projected_proposition_hashes_as_the_same_proposition_stored_flat`.
 fn emit_from_reasoning_sentence(layer: &Layer, sentence: &Resource) -> Option<WitnessKey> {
     let sentence_iri = sentence.id().cloned()?;
-    let prop_iri = Iri::parse(REASONING_PROPOSITION).ok()?;
-    let encoded_prop = sentence.get(&prop_iri)?;
-    let prop_hash = hash_stored_proposition(layer, &sentence_iri, encoded_prop)?;
+    let proof_iri = Iri::parse(CONCLUSION_PROOF).ok()?;
+    let stored = sentence.get(&proof_iri)?;
+    let proof = crate::program::eigentt_type_mirror::decode_judgement(stored, layer).ok()?;
+
+    // The proof's type IS the proposition — no certificate to unwrap. If it is
+    // a `Certificate(...)`, the slot holds a certificate judgement rather than
+    // a proof, and it establishes nothing about the proposition.
+    if crate::program::eigentt_type_mirror::certificate_indices(&proof.typ).is_some() {
+        tracing::warn!(
+            { field::OPERATION } = operation::WITNESS_DECODE,
+            { field::ERROR_KIND } = "proof_is_a_certificate",
+            resource_iri = %sentence_iri,
+            "justification:proof holds a certificate judgement, not a proof of the \
+             proposition; no Verified witness admitted"
+        );
+        return None;
+    }
+
+    let prop_hash = hash_proposition_exp(&proof.typ, &CodecNames::from_layer(layer)).ok()?;
     Some(WitnessKey {
         category: WitnessCategory::Verified,
         iri: sentence_iri,
-        prop_hash,
-    })
-}
-
-/// D52 institution-emitted derivation: read `canonical_proposition`
-/// directly off a kernel-emitted derivation resource and build a
-/// `WitnessKey` keyed against the derivation's own IRI. Returns `None`
-/// when the derivation has no `canonical_proposition` set (kernel
-/// merge dropped it, or the institution didn't supply one).
-fn emit_from_institution_derivation(layer: &Layer, derivation: &Resource) -> Option<WitnessKey> {
-    let derivation_iri = derivation.id().cloned()?;
-    let prop_iri = Iri::parse(wk::CANONICAL_PROPOSITION).ok()?;
-    let encoded_prop = derivation.get(&prop_iri)?;
-    let prop_hash = hash_stored_proposition(layer, &derivation_iri, encoded_prop)?;
-    Some(WitnessKey {
-        category: WitnessCategory::Derived,
-        iri: derivation_iri,
         prop_hash,
     })
 }
@@ -310,7 +344,7 @@ fn emit_from_trace(
 /// Three slots can hold it, tried in order:
 ///
 /// 1. `reflection:canonical_proposition` — the general slot.
-/// 2. `reasoning:proposition` — where a `ReasoningSentence` keeps the same thing under a different
+/// 2. `justification:proposition` — where a `justification:Conclusion` keeps the same thing under a different
 ///    name. **Required for correctness, not convenience** (eigenius#200): the self-attesting path
 ///    [`emit_from_reasoning_sentence`] reads slot 2, so without this arm a `VerificationTrace`
 ///    targeting a sentence would fall through to slot 3 and key the witness against
@@ -324,16 +358,27 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
     {
         return hash_stored_proposition(layer, target_iri, encoded);
     }
+    // A conclusion carries its proposition inside its judgement rather than in
+    // a slot, so it is projected out — and it MUST be, for the reason slot 2
+    // exists at all: without it a trace targeting a conclusion falls through to
+    // `Asserts(iri)`, a different hash from the one the conclusion itself
+    // emits, and no certificate cites that.
     if target
         .is_a()
         .iter()
         .any(|c| c.as_str() == REASONING_SENTENCE)
     {
-        if let Some(encoded) = Iri::parse(REASONING_PROPOSITION)
+        if let Some(stored) = Iri::parse(CONCLUSION_JUDGEMENT)
             .ok()
             .and_then(|i| target.get(&i))
         {
-            return hash_stored_proposition(layer, target_iri, encoded);
+            if let Ok(j) = crate::program::eigentt_type_mirror::decode_judgement(stored, layer) {
+                if let Some((_, prop)) =
+                    crate::program::eigentt_type_mirror::certificate_indices(&j.typ)
+                {
+                    return hash_proposition_exp(prop, &CodecNames::from_layer(layer)).ok();
+                }
+            }
         }
     }
     default_asserts_proposition_hash(layer, target_iri)
@@ -345,7 +390,7 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
 /// encodes via the D47 codec, and hashes.
 ///
 /// **Both ends of the witness machinery use the same construction.**
-/// When a future `JustifiedBy.declared(iri, Asserts(iri))` constructor
+/// When a future `justification:Certificate.declared(iri, Asserts(iri))` constructor
 /// is type-checked, the consumer side (D49 §5 / `synthesize_chain_witness`)
 /// receives the same `Exp` from the user's proof term, encodes it via
 /// the same `encode_type` path, and arrives at the same hash. The
@@ -374,13 +419,13 @@ pub fn default_asserts_proposition_hash(layer: &Layer, target_iri: &Iri) -> Opti
             target_iri.as_str().to_string(),
         )],
     );
-    crate::witness::hash_proposition_exp(&proposition).ok()
+    crate::witness::hash_proposition_exp(&proposition, &CodecNames::from_layer(layer)).ok()
 }
 
 /// Public synthesis variant of [`default_asserts_proposition_hash`]
 /// that returns the full `Exp` rather than the hash. Used by the
 /// `synthesize_chain_witness` consumer site when the agent's
-/// `JustifiedBy.declared` constructor doesn't carry an explicit
+/// `justification:Certificate.declared` constructor doesn't carry an explicit
 /// proposition (i.e. the consumer wants the default to compare
 /// against). Same `Asserts(iri)` shape; same Exp; same hash.
 pub fn default_asserts_proposition(
@@ -401,14 +446,13 @@ pub fn default_asserts_proposition(
     ))
 }
 
-/// Read the `reflection:resource` property from a Trace resource and
+/// Read the `prov:resource` property from a Trace resource and
 /// parse it as an `Iri`. Returns `None` if the property is missing or
 /// malformed.
 fn resolve_target_iri(trace: &Resource) -> Option<Iri> {
     let resource_iri = Iri::parse(wk::REFLECTION_RESOURCE).ok()?;
     let value = trace.get(&resource_iri)?;
     match value {
-        Value::ResourceRef(iri) => Some(iri.clone()),
         Value::String(s) => Iri::parse(s).ok(),
         _ => None,
     }
@@ -416,17 +460,26 @@ fn resolve_target_iri(trace: &Resource) -> Option<Iri> {
 
 /// Walk the parent chain top-down, returning true on the first Layer
 /// whose witness index contains `key`. Implements the §5 synthesis
-/// algorithm's lookup step. The `IsVerifiedAs → IsDerivedAs` coercion
-/// (D49 §4) is handled at this layer: a `Derived`-category lookup also
-/// succeeds when a corresponding `Verified` entry exists at the same
-/// `(iri, prop_hash)`.
+/// algorithm's lookup step.
+///
+/// **No coercion between categories.** A `check_layer_with_coercion` helper sat
+/// here and let a `Derived`-category lookup succeed on a `Verified` entry at the
+/// same `(iri, prop_hash)`, on the authority of the reflection ontology's
+/// `VerifiedResource subclass_of DerivedResource`. It was the second laundering
+/// path: P3 narrowed what MINTS a Verified witness, and this is what SPENT one —
+/// a `derived(…)` citation satisfied by a proof-checked conclusion, so the
+/// distinction between "a program produced this" and "the kernel verified this"
+/// collapsed at the lookup. It also implemented a lattice over the categories
+/// that the design rejects, and it did so as a match arm rather than by reading
+/// `subclass_of`, so the ontology could not have disagreed with it. Gone with
+/// the `Derived` category itself.
 pub fn lookup_chain_witness(layer: &Layer, key: &WitnessKey) -> bool {
-    if check_layer_with_coercion(layer, key) {
+    if layer_admits_witness(layer, key) {
         return true;
     }
     let mut cursor = layer.parent().cloned();
     while let Some(parent) = cursor {
-        if check_layer_with_coercion(&parent, key) {
+        if layer_admits_witness(&parent, key) {
             return true;
         }
         cursor = parent.parent().cloned();
@@ -434,36 +487,19 @@ pub fn lookup_chain_witness(layer: &Layer, key: &WitnessKey) -> bool {
     false
 }
 
-fn check_layer_with_coercion(layer: &Layer, key: &WitnessKey) -> bool {
-    if layer_admits_witness(layer, key) {
-        return true;
-    }
-    if key.category == WitnessCategory::Derived {
-        let verified_key = WitnessKey {
-            category: WitnessCategory::Verified,
-            iri: key.iri.clone(),
-            prop_hash: key.prop_hash,
-        };
-        if layer_admits_witness(layer, &verified_key) {
-            return true;
-        }
-    }
-    false
-}
-
 /// **D49 §5 synthesis algorithm — Phase 6 foundation.** Look up a
 /// `ChainWitness` inhabitant for `(category, iri, proposition)` and, on
 /// hit, return a `Val::ChainWitness(key)` value the kernel's NbE checker
-/// can use as the synthesised witness argument to a `JustifiedBy.*`
+/// can use as the synthesised witness argument to a `justification:Certificate.*`
 /// constructor. On miss, surface the precise diagnostic D49 §5
 /// specifies — naming the missing predicate family, the IRI, and what
-/// the chain needs to admit for this `JustifiedBy.*` constructor to
+/// the chain needs to admit for this `justification:Certificate.*` constructor to
 /// become well-typed.
 ///
 /// This function is the kernel-side surface the D39 Reasoning
-/// institution's `JustifiedBy` constructor type-checker calls into. The
+/// institution's `justification:Certificate` constructor type-checker calls into. The
 /// integration site — where `check_infer` in `nbe/check.rs` recognises a
-/// `JustifiedBy.declared` / `.observed` / `.derived` / `.verified`
+/// `justification:Certificate.declared` / `.observed` / `.derived` / `.verified`
 /// constructor and dispatches here — lands during D39 implementation
 /// (per D51 gap 3); this function is the stable contract that integration
 /// can call against starting today.
@@ -482,7 +518,13 @@ pub fn synthesize_chain_witness(
     iri: &Iri,
     proposition: &crate::nbe::term::Exp,
 ) -> Result<crate::nbe::val::Val, String> {
-    let key = WitnessKey::from_exp(category, iri.clone(), proposition).map_err(|e| {
+    let key = WitnessKey::from_exp(
+        category,
+        iri.clone(),
+        proposition,
+        &CodecNames::from_layer(layer),
+    )
+    .map_err(|e| {
         format!(
             "synthesize_chain_witness: failed to encode proposition for {} witness on {}: {e}",
             category.label(),
@@ -497,14 +539,13 @@ pub fn synthesize_chain_witness(
              the resource at {} must be committed with reflection:canonical_proposition \
              matching the proposition (or the proposition must be Asserts(<iri>) — the \
              default; the Asserts default lands in Phase 5b once D39's core-ontology \
-             Asserts class is authored) before this JustifiedBy.{} constructor is well-typed",
+             Asserts class is authored) before this justification:Certificate.{} constructor is well-typed",
             category.label(),
             iri,
             iri,
             match category {
                 WitnessCategory::Declared => "declared",
                 WitnessCategory::Observed => "observed",
-                WitnessCategory::Derived => "derived",
                 WitnessCategory::Verified => "verified",
             },
         ))
@@ -529,22 +570,43 @@ mod tests {
         let mut r = Resource::new(iri(target_iri));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+            Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
-        let encoded = encode_type(prop).unwrap();
+        let encoded = encode_type(prop, crate::testing::codec_names()).unwrap();
         r.set(iri(wk::CANONICAL_PROPOSITION), encoded);
         r
     }
 
-    /// A committed `reasoning:ReasoningSentence` — admitted as a `Verified` witness on its own
-    /// IRI (D54). The commit pipeline rejects `Fails` sentences, so any committed one Held.
+    /// A committed `justification:Conclusion` carrying a PROOF — the only shape
+    /// admitted as a `Verified` witness on its own IRI (D54 lemma citation).
+    ///
+    /// It used to carry only the certificate judgement, and that was enough.
+    /// It is not any more, and the change is the point of P3: a certificate
+    /// records grounds, a proof establishes the proposition, and only the
+    /// second admits `Verified`. A fixture still built the old way would test
+    /// a shape the emitter no longer honours.
     fn reasoning_sentence(sentence_iri: &str, prop: &Exp) -> Resource {
         let mut r = Resource::new(iri(sentence_iri));
         r.set(
             iri(wk::IS_A),
             Value::Array(vec![Value::String(REASONING_SENTENCE.to_string())]),
         );
-        r.set(iri(REASONING_PROPOSITION), encode_type(prop).unwrap());
+        // `holds(kernel, t, P)` — the proof's TYPE is the proposition itself,
+        // with no certificate to unwrap. That is what makes it factive.
+        let p = encode_type(prop, crate::testing::codec_names()).unwrap();
+        let t = crate::program::eigentt_type_mirror::encode_type(
+            &Exp::LitString("urn:eigenius:test:proof-term".into()),
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        let proof = crate::program::eigentt_type_mirror::encode_judgement(
+            "urn:eigenius:eigentt:logic_kernel",
+            &t,
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        r.set(iri(CONCLUSION_PROOF), proof);
         r
     }
 
@@ -554,16 +616,16 @@ mod tests {
             iri(wk::IS_A),
             Value::Array(vec![Value::String(wk::DECLARATION_TRACE.to_string())]),
         );
-        r.set(
-            iri(wk::REFLECTION_RESOURCE),
-            Value::ResourceRef(iri(target_iri)),
-        );
+        r.set(iri(wk::REFLECTION_RESOURCE), Value::iri(&iri(target_iri)));
         r
     }
 
     #[test]
     fn build_witness_index_emits_declared_for_declaration_trace() {
-        let mut b = LayerBuilder::new("test", None);
+        let mut b = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         let target = "urn:eigenius:example:thing";
         let prop = Exp::sort(0);
         b.add_resource(target_resource_with_canonical_prop(target, &prop))
@@ -574,7 +636,13 @@ mod tests {
         ))
         .unwrap();
         let layer = b.build(LayerStorage::in_memory());
-        let expected = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
+        let expected = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             layer_admits_witness(&layer, &expected),
             "expected IsDeclaredAs witness for target"
@@ -586,12 +654,15 @@ mod tests {
         // Phase-4 behaviour: no Asserts(iri) default yet (deferred to
         // Phase 5). When the target lacks `canonical_proposition`, the
         // witness emitter skips emission.
-        let mut b = LayerBuilder::new("test", None);
+        let mut b = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         let target = "urn:eigenius:example:bare";
         let mut bare = Resource::new(iri(target));
         bare.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+            Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
         b.add_resource(bare).unwrap();
         b.add_resource(declaration_trace(
@@ -603,8 +674,13 @@ mod tests {
         // No `core:Asserts` in this chain, so the default proposition cannot be built and no
         // witness is admitted at any proposition. Probe the two hashes a caller could plausibly
         // present: the sort the target would carry, and `Asserts`'s own absence.
-        let probe =
-            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &Exp::sort(0)).unwrap();
+        let probe = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &Exp::sort(0),
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             !layer_admits_witness(&layer, &probe),
             "nothing is admitted when canonical_proposition is absent and Asserts is unavailable"
@@ -616,7 +692,10 @@ mod tests {
         // Layer A defines the trace + target with canonical_prop.
         // Layer B (child of A) defines nothing. Lookup against B for
         // the witness key admitted by A succeeds (parent-chain walk).
-        let mut a = LayerBuilder::new("parent", None);
+        let mut a = LayerBuilder::new(
+            "parent",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         let target = "urn:eigenius:example:thing";
         let prop = Exp::sort(0);
         a.add_resource(target_resource_with_canonical_prop(target, &prop))
@@ -631,7 +710,13 @@ mod tests {
         let b = LayerBuilder::new("child", Some(layer_a.clone()));
         let layer_b = b.build(LayerStorage::in_memory());
 
-        let key = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
+        let key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             lookup_chain_witness(&layer_b, &key),
             "lookup must walk parent chain and find the witness in layer A"
@@ -639,8 +724,13 @@ mod tests {
 
         // Lookup of a witness that doesn't exist anywhere correctly misses.
         let other_prop = Exp::sort(1);
-        let other_key =
-            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &other_prop).unwrap();
+        let other_key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &other_prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             !lookup_chain_witness(&layer_b, &other_key),
             "lookup must miss when the (iri, prop) pair was never admitted"
@@ -651,16 +741,14 @@ mod tests {
 
     use crate::nbe::term::Patt;
 
+    /// The chain these fixtures decode against.
+    ///
+    /// It built its own `core` layer from `core-ontology.json` until D85 §5 step 4, which is
+    /// what `crate::testing::term_chain()` already is — and a hand-built copy can no longer
+    /// sit anywhere useful: a layer minting `core:` names must be a root, and a root does not
+    /// carry `eigentt:Term`, so nothing on it can decode a term.
     fn layer_with_core_ontology() -> Arc<crate::layer::Layer> {
-        // Load the real core ontology so `core:Asserts` resolves.
-        use crate::ontology::eigon_json;
-        let core_json = include_str!("../../../ontologies/core/core-ontology.json");
-        let core_resources = eigon_json::parse_document(core_json).unwrap();
-        let mut core_builder = LayerBuilder::new("core", None);
-        for r in core_resources {
-            core_builder.add_resource(r).unwrap();
-        }
-        Arc::new(core_builder.build(LayerStorage::in_memory()))
+        Arc::clone(crate::testing::term_chain())
     }
 
     #[test]
@@ -692,7 +780,7 @@ mod tests {
         let mut bare = Resource::new(iri(target));
         bare.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(wk::DECLARED_RESOURCE.to_string())]),
+            Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
         user.add_resource(bare).unwrap();
         user.add_resource(declaration_trace(
@@ -735,8 +823,13 @@ mod tests {
         .unwrap();
         let user_layer = user.build(LayerStorage::in_memory());
 
-        let explicit_key =
-            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &explicit_prop).unwrap();
+        let explicit_key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &explicit_prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             layer_admits_witness(&user_layer, &explicit_key),
             "explicit canonical_proposition witness must be admitted"
@@ -775,7 +868,7 @@ mod tests {
         );
         assert!(
             is_witness_candidate(&reasoning_sentence("urn:eigenius:example:s", &prop)),
-            "ReasoningSentence must be a candidate (D54)"
+            "justification:Conclusion must be a candidate (D54)"
         );
         // A target resource carrying a canonical_proposition is NOT itself a candidate — the
         // trace pointing at it is. Getting this backwards would stamp claim-only layers as
@@ -791,11 +884,94 @@ mod tests {
 
     /// A layer stamped witness-free is skipped even when it does define a matching trace. This is
     /// the failure mode of the hint being wrong, pinned so the stamping side stays honest.
+    /// **P3's gate.** Written failing, then closed.
+    ///
+    /// A conclusion grounded only by a DECLARATION must not be admitted as a
+    /// `Verified` witness. It used to be: the emitter read the certificate
+    /// judgement, took the proposition out of `Certificate(j, P)`, and minted
+    /// `WitnessCategory::Verified` without ever looking at `j` — the binding
+    /// was literally `let (_j, prop) = …`.
+    ///
+    /// Why that is a soundness defect rather than a cosmetic one: the witness
+    /// it mints is what a LATER conclusion's `Certificate.verified(iri, P)`
+    /// consumes. So a claim resting on nothing but "an agent asserted it"
+    /// launders into `Verified` one citation downstream, and
+    /// `is_fully_verified` on the citing term answers true. That is the
+    /// substitution of grounds for a proof that the two-layer separation
+    /// exists to make inexpressible.
+    ///
+    /// `Judgement(kernel, c, Certificate(j, P))` says *a checker verified the
+    /// certificate c*. It does NOT say `P`. Only `Judgement(L, t, P)` — a
+    /// proof term checked against the proposition itself, which is what
+    /// `justification:proof` carries — establishes `Verified`.
+    ///
+    /// Closed by keying the `Verified` witness off `justification:proof` —
+    /// a proof of the proposition — rather than off the certificate judgement.
+    #[test]
+    fn a_declared_grounded_conclusion_is_not_admitted_as_verified() {
+        use crate::program::eigentt_type_mirror::{
+            certificate_type, encode_judgement, encode_type,
+        };
+
+        let head = std::sync::Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let conclusion_iri = "urn:eigenius:test:p3:concl";
+        let prop = Exp::sort(0);
+
+        // The justification term is a bare DECLARATION — an agent asserted the
+        // premise. Nothing here is proved.
+        let j = encode_type(
+            &Exp::InductiveCtor(
+                iri("urn:eigenius:justification:Term"),
+                "Declared".into(),
+                vec![Exp::LitString("urn:eigenius:test:p3:premise".into())],
+            ),
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        let p = encode_type(&prop, crate::testing::codec_names()).unwrap();
+        let typ = certificate_type(&j, &p, crate::testing::codec_names()).unwrap();
+        let judgement = encode_judgement(
+            "urn:eigenius:eigentt:logic_kernel",
+            &j,
+            &typ,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+
+        let mut r = Resource::new(iri(conclusion_iri));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(REASONING_SENTENCE.to_string())]),
+        );
+        r.set(iri(CONCLUSION_JUDGEMENT), judgement);
+
+        let mut b = LayerBuilder::new("p3_gate", Some(head));
+        b.add_resource(r).unwrap();
+        let layer = b.build(LayerStorage::in_memory());
+
+        let verified = WitnessKey::from_exp(
+            WitnessCategory::Verified,
+            iri(conclusion_iri),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        assert!(
+            !lookup_chain_witness(&layer, &verified),
+            "a conclusion whose only ground is Declared must NOT be admitted as Verified — \
+             the witness it mints is what a later `Certificate.verified(iri, P)` consumes, so \
+             admitting it launders a declaration into a proof one citation downstream"
+        );
+    }
+
     #[test]
     fn skip_hint_short_circuits_the_lookup() {
         let target = "urn:eigenius:example:thing";
         let prop = Exp::sort(0);
-        let mut b = LayerBuilder::new("test", None);
+        let mut b = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         b.add_resource(target_resource_with_canonical_prop(target, &prop))
             .unwrap();
         b.add_resource(declaration_trace(
@@ -804,7 +980,13 @@ mod tests {
         ))
         .unwrap();
         let layer = b.build(LayerStorage::in_memory());
-        let key = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
+        let key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
 
         // Freshly built layers are conservatively `true`, so the witness is found.
         assert!(layer.has_witness_candidates());
@@ -829,6 +1011,87 @@ mod tests {
     ///
     /// That reasoning is exactly what D66 says to verify rather than assume, so this asserts the
     /// agreement directly instead of arguing for it.
+    /// The projection out of a judgement must hash IDENTICALLY to the same
+    /// proposition stored flat.
+    ///
+    /// This is the one failure the collapse can produce silently. A citing
+    /// certificate's `verified(iri, P)` supplies `P` directly, while the emit
+    /// side now recovers `P` by walking `holds(kernel, c, Certificate(j, P))`.
+    /// If those two ever disagree — a stray annotation, a different binder
+    /// name, an encoding that does not round-trip — nothing errors: the
+    /// witness-index lookup simply misses, no `IsVerifiedAs` is admitted, and
+    /// a conclusion that should Hold reports an unsatisfied citation with no
+    /// indication that the proposition was the problem.
+    ///
+    /// Asserting hash equality is what turns that into a test failure.
+    #[test]
+    fn a_projected_proposition_hashes_as_the_same_proposition_stored_flat() {
+        use crate::program::eigentt_type_mirror::{
+            certificate_indices, certificate_type, decode_judgement, encode_judgement, encode_type,
+        };
+
+        let head = std::sync::Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let layer = LayerBuilder::new("projection", Some(head)).build(LayerStorage::in_memory());
+
+        // Shapes with structure worth losing: binders, arrows, a literal.
+        let cases: Vec<(&str, Exp)> = vec![
+            ("bare sort", Exp::sort(0)),
+            (
+                "arrow",
+                Exp::Arrow(Box::new(Exp::sort(0)), Box::new(Exp::sort(0))),
+            ),
+            (
+                "pi with a named binder",
+                Exp::Pi(
+                    Patt::Var("x".into()),
+                    Box::new(Exp::sort(1)),
+                    Box::new(Exp::sort(0)),
+                ),
+            ),
+        ];
+
+        for (label, prop) in cases {
+            // The check side: the proposition as a certificate would supply it.
+            let flat = hash_proposition_exp(&prop, crate::testing::codec_names())
+                .expect("flat proposition hashes");
+
+            // The emit side: the same proposition, reached through a judgement.
+            let p = encode_type(&prop, crate::testing::codec_names()).unwrap();
+            let j = encode_type(
+                &Exp::InductiveCtor(
+                    iri("urn:eigenius:justification:Term"),
+                    "Declared".into(),
+                    vec![Exp::LitString("urn:eigenius:test:premise".into())],
+                ),
+                crate::testing::codec_names(),
+            )
+            .unwrap();
+            let typ = certificate_type(&j, &p, crate::testing::codec_names())
+                .expect("certificate type encodes");
+            let stored = encode_judgement(
+                "urn:eigenius:eigentt:logic_kernel",
+                &j,
+                &typ,
+                crate::testing::codec_names(),
+            )
+            .expect("judgement encodes");
+
+            let judgement = decode_judgement(&stored, &layer)
+                .unwrap_or_else(|e| panic!("{label}: judgement must decode: {e}"));
+            let (_, projected) = certificate_indices(&judgement.typ)
+                .unwrap_or_else(|| panic!("{label}: judgement type must be a Certificate"));
+            let via_judgement = hash_proposition_exp(projected, crate::testing::codec_names())
+                .expect("projected proposition hashes");
+
+            assert_eq!(
+                flat, via_judgement,
+                "{label}: a proposition projected out of a judgement must hash as the same \
+                 proposition stored flat, or the emit and check sides drift and the witness \
+                 silently fails to be admitted"
+            );
+        }
+    }
+
     #[test]
     fn emit_and_check_sides_agree_on_the_hash() {
         use crate::nbe::env::Rho;
@@ -863,13 +1126,13 @@ mod tests {
             // `ontology:` axiom, so the shape is not constructible against a core-only layer, and
             // `Fst` of a bare `Sig` is ill-typed (a projection of a *type*, not of a pair). That
             // shape is covered where parse-shaped propositions already exist —
-            // `crates/eigenius-reasoning/tests/justification_routes.rs`.
+            // the reasoning crate's `justification_routes.rs` (deleted at P7).
             ("class reference", cls(crate::ontology::well_known::CLASS)),
         ];
 
         let mut broken = Vec::new();
         for (label, exp) in &cases {
-            let Ok(stored) = encode_type(exp) else {
+            let Ok(stored) = encode_type(exp, crate::testing::codec_names()) else {
                 broken.push(format!("{label}: does not encode"));
                 continue;
             };
@@ -881,13 +1144,17 @@ mod tests {
                 }
             };
             // Emit side, after slice 1.
-            let emit = crate::witness::hash_proposition_exp(&decoded);
+            let emit =
+                crate::witness::hash_proposition_exp(&decoded, crate::testing::codec_names());
             // Check side, as it already behaves.
             let check = eval(&decoded, &Rho::Nil)
                 .map_err(|e| format!("{e:?}"))
                 .and_then(|v| {
-                    crate::witness::hash_proposition_exp(&readback_val(0, &v))
-                        .map_err(|e| format!("{e:?}"))
+                    crate::witness::hash_proposition_exp(
+                        &readback_val(0, &v),
+                        crate::testing::codec_names(),
+                    )
+                    .map_err(|e| format!("{e:?}"))
                 });
             match (emit, check) {
                 (Ok(a), Ok(b)) if a == b => {}
@@ -922,14 +1189,15 @@ mod tests {
     fn lam_bearing_propositions_cannot_round_trip_on_either_side() {
         let lam = Exp::Lam(Patt::Var("x".into()), Box::new(Exp::sort(0)));
         assert!(
-            encode_type(&lam).is_err(),
+            encode_type(&lam, crate::testing::codec_names()).is_err(),
             "a bare Lam must not encode — decode cannot recover its domain"
         );
         assert!(
             WitnessKey::from_exp(
                 WitnessCategory::Declared,
                 iri("urn:eigenius:example:l"),
-                &lam
+                &lam,
+                crate::testing::codec_names()
             )
             .is_err(),
             "so the CHECK side already cannot key a Lam-bearing proposition today"
@@ -940,7 +1208,10 @@ mod tests {
 
     #[test]
     fn synthesize_chain_witness_succeeds_when_admitted() {
-        let mut b = LayerBuilder::new("test", None);
+        let mut b = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         let target = "urn:eigenius:example:thing";
         let prop = Exp::sort(0);
         b.add_resource(target_resource_with_canonical_prop(target, &prop))
@@ -966,7 +1237,11 @@ mod tests {
 
     #[test]
     fn synthesize_chain_witness_fails_with_diagnostic_when_missing() {
-        let layer = LayerBuilder::new("test", None).build(LayerStorage::in_memory());
+        let layer = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        )
+        .build(LayerStorage::in_memory());
         let target_iri = iri("urn:eigenius:example:unfounded");
         let prop = Exp::sort(0);
         let err = synthesize_chain_witness(&layer, WitnessCategory::Declared, &target_iri, &prop)
@@ -980,14 +1255,17 @@ mod tests {
             "diagnostic should hint at canonical_proposition: {err}"
         );
         assert!(
-            err.contains("JustifiedBy.declared"),
+            err.contains("justification:Certificate.declared"),
             "diagnostic should name the consuming constructor: {err}"
         );
     }
 
     #[test]
     fn synthesize_chain_witness_walks_parent_chain() {
-        let mut parent = LayerBuilder::new("parent", None);
+        let mut parent = LayerBuilder::new(
+            "parent",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         let target = "urn:eigenius:example:thing";
         let prop = Exp::sort(0);
         parent
@@ -1013,44 +1291,53 @@ mod tests {
     }
 
     #[test]
-    fn verified_witness_coerces_to_derived_at_lookup() {
-        // D49 §4 coercion: VerifiedResource subclass_of DerivedResource
-        // means an `IsVerifiedAs iri P` witness in the index makes
-        // `IsDerivedAs iri P` lookups succeed via the lookup-time
-        // coercion, even though the index doesn't carry the Derived key
-        // directly.
+    fn witness_categories_do_not_coerce_into_one_another() {
+        // The categories are independent families. A `check_layer_with_coercion`
+        // helper used to make a `Derived`-category lookup succeed on a `Verified`
+        // entry at the same `(iri, prop_hash)`, justified by the reflection
+        // ontology's `VerifiedResource subclass_of DerivedResource`. That was the
+        // spend half of the laundering P3 closed the mint half of, and it is gone
+        // along with the `Derived` category. What remains to assert is that no
+        // OTHER pair coerces either — the property the removed helper's existence
+        // made easy to lose sight of.
         //
-        // A committed `reasoning:ReasoningSentence` is admitted as a `Verified` witness on its
-        // own IRI (D54 lemma citation), so the coercion can be exercised against the real
-        // emission path — the predecessor injected a key through a test-only `OnceLock` setter
-        // because it predated D54 emission.
+        // A committed `justification:Conclusion` is admitted as a `Verified`
+        // witness on its own IRI, so this runs against the real emission path.
         let target = "urn:eigenius:example:proof";
         let prop = Exp::sort(0);
-        let verified_key =
-            WitnessKey::from_exp(WitnessCategory::Verified, iri(target), &prop).unwrap();
 
-        let mut b = LayerBuilder::new("test", None);
+        // Parented on the bootstrap: a conclusion's judgement names
+        // `eigentt:logic_kernel` and `justification:Certificate` by reference,
+        // and the emitter resolves both through the chain. A parent-less layer
+        // could carry the old flat proposition (a bare `Sort`, resolving
+        // nothing) but cannot carry a judgement.
+        let head = std::sync::Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let mut b = LayerBuilder::new("test", Some(head));
         b.add_resource(reasoning_sentence(target, &prop)).unwrap();
         let layer = b.build(LayerStorage::in_memory());
 
-        // Direct Verified lookup hits.
+        // The witness that IS admitted.
+        let verified_key = WitnessKey::from_exp(
+            WitnessCategory::Verified,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(lookup_chain_witness(&layer, &verified_key));
 
-        // Coerced Derived lookup at the same (iri, prop_hash) also hits.
-        let derived_key =
-            WitnessKey::from_exp(WitnessCategory::Derived, iri(target), &prop).unwrap();
-        assert!(
-            lookup_chain_witness(&layer, &derived_key),
-            "IsVerifiedAs should coerce to IsDerivedAs at lookup time per D49 §4"
-        );
-
-        // But a Declared lookup at the same prop does NOT coerce.
-        let declared_key =
-            WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
-        assert!(
-            !lookup_chain_witness(&layer, &declared_key),
-            "IsVerifiedAs must not coerce to IsDeclaredAs (no such subclass relation)"
-        );
+        // Neither remaining category is reachable from it at the same
+        // (iri, prop_hash).
+        for category in [WitnessCategory::Declared, WitnessCategory::Observed] {
+            let key =
+                WitnessKey::from_exp(category, iri(target), &prop, crate::testing::codec_names())
+                    .unwrap();
+            assert!(
+                !lookup_chain_witness(&layer, &key),
+                "IsVerifiedAs must not coerce to {} — the families are independent",
+                category.label()
+            );
+        }
     }
 
     // ─── Environment-blindness of proposition identity (see
@@ -1061,16 +1348,11 @@ mod tests {
         let mut r = Resource::new(iri(class_iri));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         r.set(
             iri(wk::REQUIRES),
-            Value::Array(
-                requires
-                    .iter()
-                    .map(|p| Value::ResourceRef(iri(p)))
-                    .collect(),
-            ),
+            Value::Array(requires.iter().map(|p| Value::iri(&iri(p))).collect()),
         );
         r
     }
@@ -1100,10 +1382,13 @@ mod tests {
         // after `Dog` is redefined — the term is unchanged while its meaning is
         // not.
         let prop = quantified_over_subject_class();
-        let encoded = encode_type(&prop).unwrap();
+        let encoded = encode_type(&prop, crate::testing::codec_names()).unwrap();
         let owner = iri("urn:eigenius:example:claim");
 
-        let mut b1 = LayerBuilder::new("dog-v1", None);
+        let mut b1 = LayerBuilder::new(
+            "dog-v1",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         b1.add_resource(class_requiring(SUBJECT_CLASS, NARROW))
             .unwrap();
         let l1 = Arc::new(b1.build(LayerStorage::in_memory()));
@@ -1157,7 +1442,10 @@ mod tests {
         let prop = quantified_over_subject_class();
         let target = "urn:eigenius:example:every-dog-claim";
 
-        let mut b1 = LayerBuilder::new("credit-v1", None);
+        let mut b1 = LayerBuilder::new(
+            "credit-v1",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
         b1.add_resource(class_requiring(SUBJECT_CLASS, NARROW))
             .unwrap();
         b1.add_resource(target_resource_with_canonical_prop(target, &prop))
@@ -1169,7 +1457,13 @@ mod tests {
         .unwrap();
         let l1 = Arc::new(b1.build(LayerStorage::in_memory()));
 
-        let key = WitnessKey::from_exp(WitnessCategory::Declared, iri(target), &prop).unwrap();
+        let key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert!(
             layer_admits_witness(&l1, &key),
             "test setup: the witness must be admitted against Dog-v1"

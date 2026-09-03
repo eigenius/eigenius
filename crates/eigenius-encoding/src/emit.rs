@@ -21,7 +21,7 @@
 //!   enc:DiscourseUnit    prose + character span in the source
 //!   enc:ScopedUnit       (thin — unscoped; the whole chain is the scope)
 //!   enc:EncodedClaim     reflection:canonical_proposition = the parsed Prop, D47-encoded
-//!   reflection:DeclarationTrace ─▶ IsDeclaredAs claim_iri P   ← the witness downstream cites
+//!   prov:DeclarationTrace ─▶ IsDeclaredAs claim_iri P   ← the witness downstream cites
 //!   enc:DecisionPoint    which reading was taken, out of how many, and on whose authority
 //! ```
 //!
@@ -30,7 +30,7 @@
 //! ```text
 //!   reference:Reference       the source work every unit hangs off (minted, or cited by IRI)
 //!   enc:ReasoningStructure    the artifact ROOT — the claims, the source, the bytes parsed
-//!   reflection:ProgramTrace ─▶ IsDerivedAs structure   ← the RUN, recorded once
+//!   prov:ProgramTrace                            ← the RUN, recorded once (grounds nothing)
 //! ```
 //!
 //! The root exists so the artifact has a HANDLE: a service returns it, a notebook cell re-opens it,
@@ -53,6 +53,7 @@
 //! parser produces a different `P` — the witness key hashes the proposition — which is the whole
 //! point and is unaffected by the grade.
 
+use crate::ParsedClaimGrader;
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::skeleton::skeleton_of;
 use eigenius_kernel::dcg::{Candidate, ResolvedBinding, SelectionOutcome};
@@ -60,12 +61,12 @@ use eigenius_kernel::ontology::eigon_json::serialize_document;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::program::eigentt_type_mirror::encode_type;
-use eigenius_reasoning::ParsedClaimGrader;
 
 use crate::select::Pin;
 
 const CORE: &str = "urn:eigenius:core";
-const REFL: &str = "urn:eigenius:reflection";
+/// The provenance axis. Split out of `reflection`; see `ontologies/prov/prov.esl`.
+const PROV: &str = "urn:eigenius:prov";
 const ENC: &str = "urn:eigenius:encoding";
 const REF: &str = "urn:eigenius:reference";
 
@@ -92,13 +93,13 @@ pub struct DocumentMeta<'a> {
     /// SHA-256 of the parsed bytes. A prose edit is then visible on the chain, not only in the
     /// propositions it changed.
     pub source_sha256: &'a str,
-    /// The `reflection:timestamp` on each DeclarationTrace. Caller-fixed so emission is reproducible.
+    /// The `prov:timestamp` on each DeclarationTrace. Caller-fixed so emission is reproducible.
     pub timestamp: &'a str,
-    /// `reflection:declared_by` — the agent taking responsibility for every claim this document
+    /// `prov:was_attributed_to` — the agent taking responsibility for every claim this document
     /// lands. REQUIRED since eigenius#201 made `enc:EncodedClaim` a `reflection:DeclaredResource`:
     /// a parse establishes form, not warrant, so a landed claim must name who asserts it (D73 §6).
     ///
-    /// Must be the IRI of a resolvable `reflection:Agent` (D72). For an encoded paper that is the
+    /// Must be the IRI of a resolvable `prov:Agent` (D72). For an encoded paper that is the
     /// paper's authors; for an agent formulating its own claims it is that agent.
     /// [`UNATTRIBUTED_AGENT`] is the honest value when the caller knows of no agent — it names the
     /// absence rather than hiding it behind the program that did the parsing.
@@ -149,7 +150,7 @@ pub struct ParsedSentence<'a> {
     /// landed claim carries its DISCOURSE KIND as a second `is_a` class, and a later sentence's
     /// proposition may USE that claim as a term (an anaphor resolved to it). A rebuilt cluster
     /// has no kind, so the claim no longer inhabits the lexicon class the kind aligns to, and
-    /// the artifact fails to load — `TypeExprIllTyped: … does not inhabit lexicon:Entity`,
+    /// the artifact fails to load — `TermIllTyped: … does not inhabit lexicon:Entity`,
     /// witnessed 2026-08-12. One claim, one resource.
     pub cluster: Option<(Resource, Resource)>,
 }
@@ -211,10 +212,11 @@ pub fn emit_document(
     glossary: &[Resource],
     sentences: &[ParsedSentence<'_>],
     cuts: &[CutSentence],
+    names: &eigenius_kernel::program::eigentt_type_mirror::CodecNames,
 ) -> Result<String, EmitError> {
     Ok(
         serde_json::to_string_pretty(&serialize_document(&emit_resources(
-            meta, glossary, sentences, cuts,
+            meta, glossary, sentences, cuts, names,
         )?))
         .expect("serialize Eigon-JSON"),
     )
@@ -231,6 +233,7 @@ pub fn emit_resources(
     glossary: &[Resource],
     sentences: &[ParsedSentence<'_>],
     cuts: &[CutSentence],
+    names: &eigenius_kernel::program::eigentt_type_mirror::CodecNames,
 ) -> Result<Vec<Resource>, EmitError> {
     let DocumentMeta {
         ns,
@@ -272,7 +275,7 @@ pub fn emit_resources(
         let mut scoped = res(&scoped_iri, &[&format!("{ENC}:ScopedUnit")]);
         scoped.set(
             iri(&format!("{ENC}:unit")),
-            Value::ResourceRef(iri(&unit_iri)),
+            Value::String(iri(&unit_iri).as_str().to_string()),
         );
         out.push(scoped);
 
@@ -293,6 +296,7 @@ pub fn emit_resources(
                 declared_by,
                 timestamp,
                 &[],
+                names,
             )
             .map_err(|e| EmitError::Encode {
                 ordinal: n,
@@ -301,7 +305,7 @@ pub fn emit_resources(
         };
         claim.set(
             iri(&format!("{ENC}:from_unit")),
-            Value::ResourceRef(iri(&scoped_iri)),
+            Value::String(iri(&scoped_iri).as_str().to_string()),
         );
         let claim_desc = match &s.selection {
             SentenceSelection::Pinned(pin) => format!(
@@ -322,7 +326,7 @@ pub fn emit_resources(
             iri(&format!("{CORE}:description")),
             Value::String(claim_desc),
         );
-        claim_iris.push(Value::ResourceRef(iri(&claim_iri)));
+        claim_iris.push(Value::String(iri(&claim_iri).as_str().to_string()));
         out.push(claim);
         out.push(trace);
 
@@ -338,11 +342,11 @@ pub fn emit_resources(
         );
         dp.set(
             iri(&format!("{ENC}:decision_unit")),
-            Value::ResourceRef(iri(&scoped_iri)),
+            Value::String(iri(&scoped_iri).as_str().to_string()),
         );
         dp.set(
             iri(&format!("{ENC}:selected_claim")),
-            Value::ResourceRef(iri(&claim_iri)),
+            Value::String(iri(&claim_iri).as_str().to_string()),
         );
         dp.set(
             iri(&format!("{ENC}:candidate_count")),
@@ -351,7 +355,7 @@ pub fn emit_resources(
         match &s.selection {
             SentenceSelection::Pinned(pin) => {
                 dp.set(
-                    iri(&format!("{REFL}:rationale")),
+                    iri(&format!("{PROV}:rationale")),
                     Value::String(format!(
                         "Reading selected by SKELETON PIN, not by the pipeline: the one reading whose \
                          sense-erased skeleton equals the human-verified pin. Structural disambiguation \
@@ -364,7 +368,7 @@ pub fn emit_resources(
             SentenceSelection::Ranked(sel) => {
                 dp.set(
                     iri(&format!("{ENC}:selected_by")),
-                    Value::ResourceRef(iri(&format!("{ENC}:authority_ranker"))),
+                    Value::String(iri(&format!("{ENC}:authority_ranker")).as_str().to_string()),
                 );
                 if !sel.runner_up_skeletons.is_empty() {
                     dp.set(
@@ -378,7 +382,7 @@ pub fn emit_resources(
                     );
                 }
                 dp.set(
-                    iri(&format!("{REFL}:rationale")),
+                    iri(&format!("{PROV}:rationale")),
                     Value::String(format!(
                         "Reading selected by the READING RANKER (d63-reading-selection): an \
                          untrusted choice in document context, recorded for audit — every \
@@ -391,10 +395,10 @@ pub fn emit_resources(
             SentenceSelection::Sole => {
                 dp.set(
                     iri(&format!("{ENC}:selected_by")),
-                    Value::ResourceRef(iri(&format!("{ENC}:authority_sole"))),
+                    Value::String(iri(&format!("{ENC}:authority_sole")).as_str().to_string()),
                 );
                 dp.set(
-                    iri(&format!("{REFL}:rationale")),
+                    iri(&format!("{PROV}:rationale")),
                     Value::String(
                         "Sole surviving reading — the forest offered exactly one felicitous \
                          parse; no selection existed to make."
@@ -406,7 +410,7 @@ pub fn emit_resources(
         out.push(dp);
 
         // Anaphora bindings (D67 §3) — one `enc:AnaphorBinding` per resolved hole: the accepted
-        // antecedent, machine-readable (a ResourceRef for individuals/claims, the D47 encoding
+        // antecedent, machine-readable (an IRI reference for individuals/claims, the D47 encoding
         // for kind terms), plus the proposing authority and the proposer's audit fields.
         for (k, b) in s.bindings.iter().enumerate() {
             let mut ab = res(
@@ -415,7 +419,7 @@ pub fn emit_resources(
             );
             ab.set(
                 iri(&format!("{ENC}:binding_unit")),
-                Value::ResourceRef(iri(&scoped_iri)),
+                Value::String(iri(&scoped_iri).as_str().to_string()),
             );
             ab.set(
                 iri(&format!("{ENC}:hole_var")),
@@ -429,11 +433,11 @@ pub fn emit_resources(
                 Candidate::Individual { iri: ante, .. } => {
                     ab.set(
                         iri(&format!("{ENC}:antecedent_resource")),
-                        Value::ResourceRef(ante.clone()),
+                        Value::iri(&ante.clone()),
                     );
                 }
                 Candidate::Kind { term, .. } => {
-                    let encoded = encode_type(term).map_err(|e| EmitError::Encode {
+                    let encoded = encode_type(term, names).map_err(|e| EmitError::Encode {
                         ordinal: n,
                         detail: format!("kind antecedent: {e:?}"),
                     })?;
@@ -443,7 +447,7 @@ pub fn emit_resources(
                     if let Some(id) = resource.id() {
                         ab.set(
                             iri(&format!("{ENC}:antecedent_resource")),
-                            Value::ResourceRef(id.clone()),
+                            Value::iri(&id.clone()),
                         );
                     }
                 }
@@ -452,7 +456,7 @@ pub fn emit_resources(
                     let refs: Vec<Value> = members
                         .iter()
                         .filter_map(|r| r.id())
-                        .map(|id| Value::ResourceRef(id.clone()))
+                        .map(|id| Value::iri(&id.clone()))
                         .collect();
                     ab.set(
                         iri(&format!("{ENC}:antecedent_resources")),
@@ -463,11 +467,11 @@ pub fn emit_resources(
             if let Some(a) = s.binding_authority {
                 ab.set(
                     iri(&format!("{ENC}:bound_by")),
-                    Value::ResourceRef(iri(&format!("{ENC}:{a}"))),
+                    Value::String(iri(&format!("{ENC}:{a}")).as_str().to_string()),
                 );
             }
             if let Some(r) = &b.rationale {
-                ab.set(iri(&format!("{REFL}:rationale")), Value::String(r.clone()));
+                ab.set(iri(&format!("{PROV}:rationale")), Value::String(r.clone()));
             }
             if let Some(c) = b.confidence {
                 ab.set(iri(&format!("{ENC}:confidence")), Value::Float(c));
@@ -514,13 +518,13 @@ pub fn emit_resources(
         let mut cut = res(&format!("{ns}:cut_{n}"), &[&format!("{ENC}:CutItem")]);
         cut.set(
             iri(&format!("{ENC}:cut_unit")),
-            Value::ResourceRef(iri(&unit_iri)),
+            Value::String(iri(&unit_iri).as_str().to_string()),
         );
         cut.set(
             iri(&format!("{ENC}:cut_kind")),
-            Value::ResourceRef(iri(&format!("{ENC}:{kind}"))),
+            Value::String(iri(&format!("{ENC}:{kind}")).as_str().to_string()),
         );
-        cut.set(iri(&format!("{REFL}:rationale")), Value::String(rationale));
+        cut.set(iri(&format!("{PROV}:rationale")), Value::String(rationale));
         out.push(cut);
     }
 
@@ -535,7 +539,7 @@ pub fn emit_resources(
     structure.set(iri(&format!("{ENC}:claims")), Value::Array(claim_iris));
     structure.set(
         iri(&format!("{ENC}:document")),
-        Value::ResourceRef(iri(&doc_iri)),
+        Value::String(iri(&doc_iri).as_str().to_string()),
     );
     structure.set(
         iri(&format!("{ENC}:source_path")),
@@ -562,27 +566,57 @@ pub fn emit_resources(
     // Emitted BEFORE the structure so the IRI it references is defined above it, matching the
     // ordering discipline the root already follows for `enc:claims`.
     let run_trace_iri = format!("{ns}:run_trace");
-    let mut run_trace = res(&run_trace_iri, &[&format!("{REFL}:ProgramTrace")]);
+    let mut run_trace = res(&run_trace_iri, &[&format!("{PROV}:ProgramTrace")]);
     run_trace.set(
-        iri(&format!("{REFL}:resource")),
-        Value::ResourceRef(iri(&format!("{ns}:structure"))),
+        iri(&format!("{PROV}:resource")),
+        Value::String(iri(&format!("{ns}:structure")).as_str().to_string()),
     );
-    run_trace.set(
-        iri(&format!("{REFL}:source")),
+    // `prov:was_generated_by` is `data_type: core:resource` at `class_types: [prov:Activity]`,
+    // so the trace NAMES the activity that produced it. It does not describe one.
+    //
+    // P5 (2/n) moved this slot from `reflection:source` and carried the payload across
+    // unchanged — but `reflection:source` took a string and this takes a reference, so every
+    // artifact the emitter produced from then on failed Rule 22 at load with
+    // `UnresolvedClassReference` and NOTHING landed. The description is not wrong, it was
+    // simply in the reference's place; it belongs to the activity, which is minted here.
+    //
+    // Document-local rather than a bootstrap declaration like the kernel's
+    // `prov:activity:kernel_run_program`: that one is a permanent facility, while this is ONE
+    // encoding run over one document's bytes, and minting it in the artifact keeps the
+    // artifact self-contained — it loads against any chain, and moves no manifest.
+    let activity_iri = format!("{ns}:encoding_run");
+    let mut activity = res(&activity_iri, &[&format!("{PROV}:Activity")]);
+    activity.set(
+        iri(&format!("{CORE}:short_name")),
+        Value::String("encoding_run".to_string()),
+    );
+    activity.set(
+        iri(&format!("{CORE}:description")),
         Value::String(format!(
             "eigenius-encoding prose-to-eigon: DCG parse (D63) of {source_path} \
              (source sha256 {source_sha256})"
         )),
     );
+    // `prov:used` is `core:resource_array` — the resources an activity consumed, plural.
+    activity.set(
+        iri(&format!("{PROV}:used")),
+        Value::Array(vec![Value::String(iri(&doc_iri).as_str().to_string())]),
+    );
+    out.push(activity);
+
     run_trace.set(
-        iri(&format!("{REFL}:timestamp")),
+        iri(&format!("{PROV}:was_generated_by")),
+        Value::String(iri(&activity_iri).as_str().to_string()),
+    );
+    run_trace.set(
+        iri(&format!("{PROV}:timestamp")),
         Value::String(timestamp.to_string()),
     );
     out.push(run_trace);
 
     structure.set(
-        iri(&format!("{REFL}:derivation")),
-        Value::ResourceRef(iri(&run_trace_iri)),
+        iri(&format!("{PROV}:derivation")),
+        Value::String(iri(&run_trace_iri).as_str().to_string()),
     );
     out.push(structure);
 
@@ -613,7 +647,7 @@ fn discourse_unit(
     );
     unit.set(
         iri(&format!("{ENC}:unit_kind")),
-        Value::ResourceRef(iri(&format!("{ENC}:kind_prose"))),
+        Value::String(iri(&format!("{ENC}:kind_prose")).as_str().to_string()),
     );
     unit.set(
         iri(&format!("{ENC}:span_start")),
@@ -625,7 +659,7 @@ fn discourse_unit(
     );
     unit.set(
         iri(&format!("{ENC}:source_document")),
-        Value::ResourceRef(iri(doc_iri)),
+        Value::iri(&iri(doc_iri)),
     );
     unit
 }
@@ -643,7 +677,7 @@ fn res(id: &str, classes: &[&str]) -> Resource {
     let mut r = Resource::new(iri(id));
     r.set(
         iri(&format!("{CORE}:is_a")),
-        Value::Array(classes.iter().map(|c| Value::ResourceRef(iri(c))).collect()),
+        Value::Array(classes.iter().map(|c| Value::iri(&iri(c))).collect()),
     );
     r
 }
@@ -686,14 +720,83 @@ mod tests {
                 source_path: "test.txt",
                 source_sha256: "deadbeef",
                 timestamp: "2026-08-11T00:00:00Z",
-                declared_by: eigenius_reasoning::UNATTRIBUTED_AGENT,
+                declared_by: crate::UNATTRIBUTED_AGENT,
                 source_ref: None,
             },
             glossary,
             s,
             cuts,
+            &eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+                eigenius_kernel::bootstrap::bootstrap()
+                    .expect("bootstrap")
+                    .head(),
+            ),
         )
         .expect("emits")
+    }
+
+    /// **Every artifact this emitter produces must LOAD.**
+    ///
+    /// It did not, from `2026-08-30` until this test was written. P5 (2/n) moved the run
+    /// trace's provenance from `reflection:source` — a string slot — to
+    /// `prov:was_generated_by`, which is `data_type: core:resource` at
+    /// `class_types: [prov:Activity]`, and carried the description string across unchanged. So
+    /// Rule 22 refused the whole layer with `UnresolvedClassReference` and every claim, unit and
+    /// binding in the artifact was rejected along with it. Three sentences would parse and
+    /// encode perfectly, the banner would say "3 claims", and nothing would reach the chain.
+    ///
+    /// Nothing caught it because the only test that loads an artifact through the kernel is
+    /// `artifact_completeness`, which is `#[ignore]`d behind a DB snapshot. This one needs no
+    /// snapshot: the defect is in the artifact's PROVENANCE resources, which do not depend on
+    /// the lexicon at all, so the bootstrap chain is enough to validate against.
+    #[test]
+    fn the_emitted_artifact_validates_against_the_bootstrap_chain() {
+        use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
+
+        let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+        let names =
+            eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(ctx.head());
+        // NO sentences and no cuts. A document that encoded nothing still emits its
+        // provenance spine — reference, activity, run trace, structure — and that spine is
+        // where the defect was. Adding a claim would need a Prop-typed sem built from chain
+        // vocabulary, which is what the DB-backed `artifact_completeness` test is for; here it
+        // would only add a way for this test to fail for an unrelated reason.
+        let resources = emit_resources(
+            &DocumentMeta {
+                ns: "urn:eigenius:test:doc",
+                source_path: "test.txt",
+                source_sha256: "deadbeef",
+                timestamp: "2026-08-11T00:00:00Z",
+                declared_by: crate::UNATTRIBUTED_AGENT,
+                source_ref: None,
+            },
+            &[],
+            &[],
+            &[],
+            &names,
+        )
+        .expect("emits");
+
+        let mut b = LayerBuilder::new("artifact", Some(std::sync::Arc::clone(ctx.head())));
+        for r in resources {
+            b.add_resource(r).expect("adds");
+        }
+        let layer = std::sync::Arc::new(b.build(LayerStorage::in_memory()));
+        let errors = eigenius_kernel::validation::Validator::new(layer).validate();
+        assert!(
+            errors.is_empty(),
+            "the artifact must load: {}",
+            errors
+                .iter()
+                .map(|e| format!(
+                    "{:?} {} — {}",
+                    e.rule,
+                    e.resource_id.as_ref().map(|i| i.as_str()).unwrap_or(""),
+                    e.message
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
     }
 
     #[test]
@@ -812,12 +915,17 @@ mod tests {
                 source_path: "test.txt",
                 source_sha256: "deadbeef",
                 timestamp: "2026-08-11T00:00:00Z",
-                declared_by: eigenius_reasoning::UNATTRIBUTED_AGENT,
+                declared_by: crate::UNATTRIBUTED_AGENT,
                 source_ref: Some("urn:eigenius:reference:lit:chan_2019"),
             },
             &[],
             &s,
             &[],
+            &eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+                eigenius_kernel::bootstrap::bootstrap()
+                    .expect("bootstrap")
+                    .head(),
+            ),
         )
         .expect("emits");
         assert!(json.contains(
@@ -940,7 +1048,7 @@ mod tests {
         // one ProgramTrace per SENTENCE — here that would be three.
         let program_traces: Vec<_> = resources
             .iter()
-            .filter(|r| class_is(r, "urn:eigenius:reflection:ProgramTrace"))
+            .filter(|r| class_is(r, "urn:eigenius:prov:ProgramTrace"))
             .collect();
         assert_eq!(
             program_traces.len(),
@@ -952,7 +1060,7 @@ mod tests {
         // ...and it is on the RUN's output, not on a claim.
         let structure_iri = "urn:eigenius:test:doc:structure";
         assert_eq!(
-            program_traces[0]["urn:eigenius:reflection:resource"].as_str(),
+            program_traces[0]["urn:eigenius:prov:resource"].as_str(),
             Some(structure_iri),
             "the run's trace targets the ReasoningStructure"
         );
@@ -966,15 +1074,15 @@ mod tests {
             "urn:eigenius:encoding:ReasoningStructure"
         ));
         assert!(
-            structure["urn:eigenius:reflection:derivation"].is_string()
-                || structure["urn:eigenius:reflection:derivation"].is_object(),
+            structure["urn:eigenius:prov:derivation"].is_string()
+                || structure["urn:eigenius:prov:derivation"].is_object(),
             "the structure points at its ProgramTrace (required by DerivedResource)"
         );
 
         // The propositions are Declared, one trace each, each naming an agent.
         let decl_traces: Vec<_> = resources
             .iter()
-            .filter(|r| class_is(r, "urn:eigenius:reflection:DeclarationTrace"))
+            .filter(|r| class_is(r, "urn:eigenius:prov:DeclarationTrace"))
             .collect();
         assert_eq!(
             decl_traces.len(),
@@ -983,7 +1091,7 @@ mod tests {
         );
         for t in &decl_traces {
             assert!(
-                !t["urn:eigenius:reflection:declared_by"].is_null(),
+                !t["urn:eigenius:prov:was_attributed_to"].is_null(),
                 "a DeclarationTrace names who declared: {t}"
             );
         }

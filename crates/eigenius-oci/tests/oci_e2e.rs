@@ -178,9 +178,11 @@ fn oci_runtime_converts_schemaorg_through_a_real_container() {
     let mut input = Resource::new(iri("urn:eigenius:obj:d57:gen_input"));
     input.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:ingest:PinnedExternalFile",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:ingest:PinnedExternalFile")
+                .as_str()
+                .to_string(),
+        )]),
     );
     input.set(
         iri("urn:eigenius:ingest:materialized_path"),
@@ -211,8 +213,8 @@ fn oci_runtime_converts_schemaorg_through_a_real_container() {
     assert_eq!(j["classes"], serde_json::json!(1));
 
     // The worker set its canonical_proposition (GeneratorConforms("schema_org"))
-    // and it survived the real container round-trip — this is what the kernel's
-    // ProgramTrace turns into IsDerivedAs for the chain's derived(...) certificate.
+    // and it survived the real container round-trip — this is the proposition a
+    // chain declaration about the generator is written against.
     let Some(Value::Json(prop)) = report.get(&iri("urn:eigenius:reflection:canonical_proposition"))
     else {
         panic!("report must carry canonical_proposition");

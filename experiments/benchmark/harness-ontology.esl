@@ -25,14 +25,16 @@ namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
 namespace reflection = "urn:eigenius:reflection";
 namespace bench      = "urn:eigenius:benchmark";
+namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
 
 class bench:TaskOutput {
-    description = "Chain-resident deliverable handle for a benchmark task (D50 §5b): the artifact the task asked for, plus the ReasoningSentences that justified its construction. EPISTEMICALLY NEUTRAL, like bench:ToolArtifact (eigenius#166): a deliverable an agent loop produced declares `reflection:DerivedResource` beside this class; one an author records declares `reflection:DeclaredResource`. `reflection:derivation` stays REQUIRED either way — every deliverable has a production record — and since eigenius#205 that property is typed at reflection:ProductionTrace, so the record may be a ProgramTrace or an ExternalExecutionTrace. Which it is says what kind of actor produced the deliverable; this class no longer prejudges it.";
+    description = "Chain-resident deliverable handle for a benchmark task (D50 §5b): the artifact the task asked for, plus the Conclusions that justified its construction. EPISTEMICALLY NEUTRAL, and it no longer needs a class to say so: it required prov:derivation, typed at prov:ProductionTrace, and a deliverable an AUTHOR transcribes has no production trace — only an assertion that a run happened, which is a prov:DeclarationTrace. eigenius#205 answered that by minting reflection:ExternalExecutionTrace as a second ProductionTrace subclass so the required slot could be filled; the requirement is what forced the class into existence. It requires prov:was_generated_by instead: the ACTIVITY that produced the deliverable, which is the same relation whether the kernel ran it or an author records that someone else did. Which kind of actor it was is then read off the trace pointing back through prov:resource, not off the artifact's own type.";
     requires bench:task,
              bench:deliverable_kind,
              bench:payload,
              bench:reasoning_chain,
-             reflection:derivation;
+             prov:was_generated_by;
     recommends bench:deliverable_resources;
 }
 
@@ -53,7 +55,7 @@ property bench:payload : core:string {
 }
 
 property bench:reasoning_chain : core:value_array {
-    description = "IRIs of the reasoning:ReasoningSentences this output rests on, in commit order. Auditors trace from the deliverable to its warrants. (Commit-time validation that each IRI resolves to a ReasoningSentence on chain is a follow-on validator rule, D50 §5b.)";
+    description = "IRIs of the justification:Conclusions this output rests on, in commit order. Auditors trace from the deliverable to its warrants. (Commit-time validation that each IRI resolves to a justification:Conclusion on chain is a follow-on validator rule, D50 §5b.)";
     element_type = core:string;
     domain bench:TaskOutput;
 }

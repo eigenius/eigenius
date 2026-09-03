@@ -22,8 +22,8 @@
 //! dispatch — kept in the lib (not the bin's serve loop) so it is unit-testable
 //! in-process without Docker. It returns the conversion-report `Resource` as
 //! Eigon-CBOR (`Response::DispatchOk.output`); the kernel stamps the
-//! invocation-declared `canonical_proposition` and applies the `ProgramTrace` /
-//! `IsDerivedAs` witness.
+//! invocation-declared `canonical_proposition` and applies the `ProgramTrace`
+//! recording the run.
 
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::eigon_json;
@@ -94,9 +94,11 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:obj:d57:gen_input"));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:ingest:PinnedExternalFile",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:ingest:PinnedExternalFile")
+                    .as_str()
+                    .to_string(),
+            )]),
         );
         r.set(iri(MATERIALIZED_PATH), Value::String(path.to_string()));
         ByteBuf::from(eigon_cbor::serialize_resource(&r))
@@ -145,9 +147,11 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:obj:d57:gen_input"));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:ingest:PinnedExternalFile",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:ingest:PinnedExternalFile")
+                    .as_str()
+                    .to_string(),
+            )]),
         );
         let inputs = vec![ByteBuf::from(eigon_cbor::serialize_resource(&r))];
         let err =

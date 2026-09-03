@@ -28,14 +28,11 @@ use crate::ontology::well_known as wk;
 impl Validator {
     /// Rule 8: Class type checking.
     ///
-    /// `class_types` may name either a `Class` (the historical case —
-    /// the value must be a ResourceRef/Embedded whose `is_a` matches)
-    /// or an `InductiveType` (Option A unification — the value is a
-    /// tagged-dict tree carried by `Value::Json`, and we dispatch to
-    /// the inductive walker). Per the singleton constraint that
-    /// already applies to `data_type: core:inductive`, an
-    /// InductiveType `class_types` must be the sole entry; mixed
-    /// Class/InductiveType lists are not a defined shape.
+    /// `class_types` may name either a `Class` — the value is an IRI reference, or an
+    /// `Embedded` whose `is_a` matches — or an `InductiveType`, which needs no separate
+    /// path: an inductive value is a resource whose `is_a` names the constructor's class,
+    /// and that class lists the inductive in `parent_classes` (D85 §6.1), so the ordinary
+    /// `Embedded` check admits exactly the constructors of the declared inductive.
     pub(in crate::validation) fn check_class_types(
         &self,
         prop_def: &Resource,
@@ -52,66 +49,18 @@ impl Validator {
             return vec![];
         }
 
-        // InductiveType branch: walk the tagged-dict tree(s).
-        // Skipping non-Json elements here is intentional — wire-shape
-        // (`check_type`) handles whether a Ref/Embedded is admissible
-        // for the property's data_type; deep class-membership of
-        // stored inductive instances is not a v1 use case.
-        //
-        // For `data_type: core:inductive`, `check_inductive_value`
-        // (rule 16) owns the walk + the singleton precondition; we
-        // defer to it to avoid duplicate diagnostics.
-        let dt_is_inductive = self
-            .get_data_type_str(prop_def)
-            .map(|dt| dt == wk::INDUCTIVE)
-            .unwrap_or(false);
-        if !dt_is_inductive {
-            if let Some(inductive_type) = self.class_types_inductive_target(prop_def) {
-                let mut errors = Vec::new();
-                match value {
-                    Value::Json(_) => {
-                        self.walk_inductive_value(
-                            value,
-                            &inductive_type,
-                            prop_iri.as_str().to_string(),
-                            res_id,
-                            &mut errors,
-                        );
-                    }
-                    Value::Array(arr) => {
-                        for (i, v) in arr.iter().enumerate() {
-                            if matches!(v, Value::Json(_)) {
-                                let path = format!("{prop_iri}[{i}]");
-                                self.walk_inductive_value(
-                                    v,
-                                    &inductive_type,
-                                    path,
-                                    res_id,
-                                    &mut errors,
-                                );
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                return errors;
-            }
-        }
-
         let allowed_refs: Vec<&Iri> = allowed_classes.iter().collect();
 
         let mut errors = Vec::new();
         let values_to_check = match value {
-            Value::String(_) | Value::ResourceRef(_) | Value::Embedded(_) => vec![value],
+            Value::String(_) | Value::Embedded(_) => vec![value],
             Value::Array(arr) => arr.iter().collect(),
             _ => return vec![],
         };
 
         for v in values_to_check {
-            // Embedded resources are checked directly against the
-            // allowed-class set; IRI references (in either canonical
-            // `ResourceRef` or pre-canonical `String` shape) are
-            // resolved through the chain first.
+            // Embedded resources are checked directly against the allowed-class set;
+            // IRI references are resolved through the chain first.
             if let Value::Embedded(embedded) = v {
                 if !self.is_instance_of_any(embedded, &allowed_refs) {
                     let actual = format_is_a_list(embedded.is_a());

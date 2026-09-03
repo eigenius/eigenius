@@ -105,7 +105,7 @@ fn make_resource(id: &str, class_iri: &str, props: Vec<(&str, Value)>) -> Resour
     let mut r = Resource::new(iri(id));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+        Value::Array(vec![Value::iri(&iri(class_iri))]),
     );
     for (k, v) in props {
         r.set(iri(k), v);
@@ -144,7 +144,7 @@ fn build_se_corpus() -> (Arc<Layer>, EmbedderRegistry) {
         wk::PROPERTY,
         vec![
             (wk::SHORT_NAME, Value::String("se_description".into())),
-            (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::STRING))),
+            (wk::DATA_TYPE_PROP, Value::iri(&iri(wk::STRING))),
         ],
     ))
     .unwrap();
@@ -153,7 +153,7 @@ fn build_se_corpus() -> (Arc<Layer>, EmbedderRegistry) {
         wk::PROPERTY,
         vec![
             (wk::SHORT_NAME, Value::String("contracted_by".into())),
-            (wk::DATA_TYPE_PROP, Value::ResourceRef(iri(wk::RESOURCE))),
+            (wk::DATA_TYPE_PROP, Value::iri(&iri(wk::RESOURCE))),
         ],
     ))
     .unwrap();
@@ -163,10 +163,7 @@ fn build_se_corpus() -> (Arc<Layer>, EmbedderRegistry) {
         TEXT_INDEX_IRI,
         wk::TEXT_INDEX_CLASS,
         vec![
-            (
-                wk::TARGET_PROPERTY,
-                Value::ResourceRef(iri(DESCRIPTION_PROP)),
-            ),
+            (wk::TARGET_PROPERTY, Value::iri(&iri(DESCRIPTION_PROP))),
             (wk::TEXT_ANALYZER, Value::String("en-stem-v1".into())),
         ],
     ))
@@ -175,15 +172,16 @@ fn build_se_corpus() -> (Arc<Layer>, EmbedderRegistry) {
         VECTOR_INDEX_IRI,
         wk::VECTOR_INDEX_CLASS,
         vec![
-            (
-                wk::TARGET_PROPERTY,
-                Value::ResourceRef(iri(DESCRIPTION_PROP)),
-            ),
-            (wk::VEC_MODEL, Value::ResourceRef(iri(EMBED_MODEL_IRI))),
+            (wk::TARGET_PROPERTY, Value::iri(&iri(DESCRIPTION_PROP))),
+            (wk::VEC_MODEL, Value::iri(&iri(EMBED_MODEL_IRI))),
             (wk::VEC_DIM, Value::Integer(8)),
             (
                 wk::VEC_DISTANCE,
-                Value::ResourceRef(iri("urn:eigenius:core:distances:cosine")),
+                Value::String(
+                    iri("urn:eigenius:core:distances:cosine")
+                        .as_str()
+                        .to_string(),
+                ),
             ),
         ],
     ))
@@ -208,7 +206,7 @@ fn build_se_corpus() -> (Arc<Layer>, EmbedderRegistry) {
         let mut props: Vec<(&str, Value)> =
             vec![(DESCRIPTION_PROP, Value::String(description.into()))];
         if let Some(bc) = contract {
-            props.push((CONTRACTED_BY_PROP, Value::ResourceRef(iri(bc))));
+            props.push((CONTRACTED_BY_PROP, Value::iri(&iri(bc))));
         }
         b.add_resource(make_resource(artifact_iri, CODE_ARTIFACT_CLASS, props))
             .unwrap();
@@ -259,7 +257,6 @@ fn rows_for_slot(wrapped: &[Resource], slot: &str) -> Vec<String> {
             _ => None,
         })
         .filter_map(|v| match v {
-            Value::ResourceRef(i) => Some(i.as_str().to_string()),
             Value::String(s) => Some(s),
             _ => None,
         })

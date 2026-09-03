@@ -18,14 +18,15 @@
 //!   → statistics → ic50-fixture → d39-composition-fixture.
 //!
 //! Validates that:
-//!  1. The IC50 confirmatory StatisticalAnalysisPlan's IsDerivedAs witness
+//!  1. The IC50 confirmatory plan's reproducibility declaration and its input's
+//!     observation, the two witnesses
 //!     (admitted via its ProgramTrace, exercised in
 //!     `ic50_measurement.rs`) is visible to the D39 reasoning
 //!     validator when it processes a sentence using
-//!     `DerivedEvidence(claim_iri)`.
-//!  2. The reasoning sentence `App(SpecStr(DeclaredEvidence(rule),
-//!     EIG_0291), DerivedEvidence(claim))` type-checks against
-//!     `JustifiedBy(_, StrongInhibitor(EIG_0291))`.
+//!     `App(Declared(plan_iri), Observed(sample_set_iri))` consumes.
+//!  2. The reasoning sentence `App(Declared(rule),
+//!     App(Declared(plan), Observed(s)))` type-checks against
+//!     `justification:Certificate(_, StrongInhibitor(EIG_0291))`.
 //!
 //! This is the proof point that D52 §8 actually works end-to-end —
 //! the statistics institution produces a chain artifact that D39
@@ -38,10 +39,6 @@ use eigenius_kernel::esl;
 use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
-use eigenius_kernel::ontology::resource::Value;
-use eigenius_kernel::ontology::well_known as wk;
-use eigenius_reasoning::validate::do_validate_justification;
-use eigenius_reasoning::ReasoningInstitution;
 
 fn build_composition_chain() -> ExecutionContext {
     // Core + reflection + eigentt + institution.
@@ -72,10 +69,13 @@ fn build_composition_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    // Reasoning layer — provides JustifiedBy + JustificationTerm
+    // Reasoning layer — provides justification:Certificate + justification:Term
     // inductives the certificate type-checks against.
-    let reasoning_source = include_str!("../../../ontologies/reasoning/reasoning.esl");
-    let reasoning_resources = esl::compile(reasoning_source).expect("reasoning.esl compiles");
+    let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
+    // Compiled against `reflection`, the layer it sits on: D85 §6.1 values name their
+    // constructors' arguments, and `eigentt:Term` declares those names down the chain.
+    let reasoning_resources =
+        esl::compile(reasoning_source, &reflection).expect("reasoning.esl compiles");
     let mut reasoning_builder = LayerBuilder::new("reasoning", Some(reflection));
     for r in reasoning_resources {
         reasoning_builder.add_resource(r).unwrap();
@@ -86,7 +86,7 @@ fn build_composition_chain() -> ExecutionContext {
     // enums, and the PopulationLevel scope marker class the
     // composition fixture references.
     let stats_source = include_str!("../../../ontologies/statistics/statistics.esl");
-    let stats_resources = esl::compile_against_layer(stats_source, &reasoning)
+    let stats_resources = esl::compile(stats_source, &reasoning)
         .expect("statistics.esl compiles against reasoning layer");
     let mut stats_builder = LayerBuilder::new("statistics", Some(reasoning));
     for r in stats_resources {
@@ -96,19 +96,19 @@ fn build_composition_chain() -> ExecutionContext {
 
     // IC50 fixture layer — provides the screening + confirmatory
     // SampleSets + claims + traces. The confirmatory StatisticalAnalysisPlan
-    // is the IsDerivedAs witness target for the DerivedEvidence used
-    // by the composition fixture's ReasoningSentence.
+    // records what the run produced; the plan declaration written against that
+    // proposition is what the computed ground actually consumes, as used
+    // by the composition fixture's justification:Conclusion.
     let ic50_source = include_str!("fixtures/ic50_measurement.esl");
-    let ic50_resources =
-        esl::compile_against_layer(ic50_source, &stats_layer).unwrap_or_else(|errs| {
-            panic!(
-                "ic50_measurement.esl failed to compile: {}",
-                errs.into_iter()
-                    .map(|e| format!("{e:?}"))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            )
-        });
+    let ic50_resources = esl::compile(ic50_source, &stats_layer).unwrap_or_else(|errs| {
+        panic!(
+            "ic50_measurement.esl failed to compile: {}",
+            errs.into_iter()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    });
     let mut ic50_builder = LayerBuilder::new("ic50-fixture", Some(stats_layer));
     for r in ic50_resources {
         ic50_builder.add_resource(r).unwrap();
@@ -116,11 +116,11 @@ fn build_composition_chain() -> ExecutionContext {
     let ic50_layer = Arc::new(ic50_builder.build(LayerStorage::in_memory()));
 
     // Composition fixture layer — adds the literature rule (universal)
-    // + its DeclarationTrace + the ReasoningSentence that derives
-    // StrongInhibitor(EIG_0291) via App(SpecStr, DerivedEvidence).
+    // + its DeclarationTrace + the justification:Conclusion that derives
+    // StrongInhibitor(EIG_0291) via App(Declared(rule), App(Declared(plan), Observed(s))).
     let composition_source = include_str!("fixtures/d39_composition.esl");
-    let composition_resources = esl::compile_against_layer(composition_source, &ic50_layer)
-        .unwrap_or_else(|errs| {
+    let composition_resources =
+        esl::compile(composition_source, &ic50_layer).unwrap_or_else(|errs| {
             panic!(
                 "d39_composition.esl failed to compile: {}",
                 errs.into_iter()
@@ -148,40 +148,29 @@ fn statistics_verdict_composes_with_universal_rule_via_d39() {
     let ctx = build_composition_chain();
     let sentence_iri =
         Iri::parse("urn:eigenius:demo:screen:concl_eig0291_strong").expect("sentence IRI");
-    let sentence_arc = ctx
-        .resolve(&sentence_iri)
-        .unwrap_or_else(|| panic!("sentence `{sentence_iri}` should be on chain"));
-    let sentence = (*sentence_arc).clone();
+    assert!(
+        ctx.resolve(&sentence_iri).is_some(),
+        "sentence `{sentence_iri}` should be on chain"
+    );
+    let errors: Vec<String> = eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .filter(|e| e.resource_id.as_ref().is_some_and(|i| *i == sentence_iri))
+        .map(|e| e.message)
+        .collect();
 
-    let inst = ReasoningInstitution::new();
-    let outcome = do_validate_justification(&inst, &sentence, &ctx)
-        .expect("validate handler returns an outcome");
-
-    let ctor = outcome
-        .output
-        .get(&Iri::parse(wk::CTOR_NAME).unwrap())
-        .and_then(Value::as_str)
-        .expect("verdict carries ctor_name")
-        .to_string();
-    let diagnostic = outcome
-        .output
-        .get(&Iri::parse("urn:eigenius:institution:diagnostic").unwrap())
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-
-    // The IsDerivedAs witness for the confirmatory claim is admitted
+    // The IsDeclaredAs witness for the confirmatory plan is admitted
     // by its ProgramTrace (see ic50_measurement.rs's
     // `claim_admits_is_derived_as_witness_via_program_trace` test).
     // The IsDeclaredAs witness for the universal rule is admitted by
-    // its DeclarationTrace. SpecStr specializes the rule at
+    // its DeclarationTrace. spec_poly specializes the rule at
     // EIG_0291; App composes the specialized implication with the
     // derived evidence; the result type-checks against
-    // `JustifiedBy(_, StrongInhibitor(EIG_0291))`. Holds.
-    assert_eq!(
-        ctor,
-        wk::VERDICT_HOLDS,
-        "expected Holds — the universal rule applied to the confirmatory \
-         IC50 claim should derive StrongInhibitor(EIG_0291); got {ctor}, \
-         diagnostic: {diagnostic:?}"
+    // `justification:Certificate(_, StrongInhibitor(EIG_0291))`. Holds.
+    assert!(
+        errors.is_empty(),
+        "the universal rule applied to the confirmatory IC50 claim should derive \
+         StrongInhibitor(EIG_0291); got:\n{}",
+        errors.join("\n")
     );
 }

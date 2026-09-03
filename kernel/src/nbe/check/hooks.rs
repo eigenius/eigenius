@@ -37,7 +37,7 @@ pub trait CheckHooks: Send + Sync {
     fn resolve_class(&self, iri: &Iri, layer: &Arc<Layer>) -> Result<Val, CheckError>;
 
     /// Synthesise a D49 `ChainWitness` inhabitant for a
-    /// `JustifiedBy.*` predicate whose expected type is `expected_typ`
+    /// `justification:Certificate.*` predicate whose expected type is `expected_typ`
     /// (a `Val::InductiveType` over a witness-category inductive).
     /// Returns `Ok(None)` when the type is not a chain-witness
     /// predicate; `Err` when it *is* one but synthesis fails (no

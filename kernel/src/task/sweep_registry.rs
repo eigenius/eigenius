@@ -575,18 +575,20 @@ mod tests {
         let mut prop = Resource::new(iri(body_iri));
         prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
-        prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
         b.add_resource(prop).unwrap();
 
         let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
         vi.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(body_iri)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_iri)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         b.add_resource(vi).unwrap();
 
@@ -687,17 +689,19 @@ mod tests {
         let mut prop = Resource::new(iri(body_iri));
         prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
-        prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
         b.add_resource(prop).unwrap();
         let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
         vi.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(body_iri)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         b.add_resource(vi).unwrap();
         for i in 0..3 {
@@ -770,17 +774,19 @@ mod tests {
             let mut prop = Resource::new(iri(body_iri));
             prop.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+                Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
             );
-            prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+            prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
             b.add_resource(prop).unwrap();
             let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
             vi.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+                Value::Array(vec![Value::String(
+                    iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+                )]),
             );
-            vi.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
-            vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model)));
+            vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(body_iri)));
+            vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model)));
             vi.set(iri(wk::VEC_DIM), Value::Integer(8));
             b.add_resource(vi).unwrap();
             let mut d = Resource::new(iri(&format!("urn:eigenius:test:{label}_doc")));
@@ -881,18 +887,20 @@ mod tests {
         let mut prop = Resource::new(iri(body_iri));
         prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
-        prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
         b.add_resource(prop).unwrap();
 
         let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
         vi.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(body_iri)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_iri)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         b.add_resource(vi).unwrap();
 
@@ -992,21 +1000,23 @@ mod tests {
         let mut prop = Resource::new(iri(body_iri));
         prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
-        prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
         b.add_resource(prop).unwrap();
 
         let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
         vi.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(body_iri)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_iri)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         if let Some(s) = strategy_iri {
-            vi.set(iri(wk::VEC_STRATEGY), Value::ResourceRef(iri(s)));
+            vi.set(iri(wk::VEC_STRATEGY), Value::iri(&iri(s)));
         }
         b.add_resource(vi).unwrap();
 
@@ -1132,20 +1142,19 @@ mod tests {
         let mut prop = Resource::new(iri(target_prop));
         prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
-        prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
         l1.add_resource(prop).unwrap();
         let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
         vi.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_prop)),
-        );
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_a)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_a)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         l1.add_resource(vi).unwrap();
         let l1 = Arc::new(l1.build(storage.clone()));
@@ -1164,13 +1173,12 @@ mod tests {
         let mut vi2 = Resource::new(iri("urn:eigenius:test:vi"));
         vi2.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi2.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_prop)),
-        );
-        vi2.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_b)));
+        vi2.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
+        vi2.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_b)));
         vi2.set(iri(wk::VEC_DIM), Value::Integer(8));
         l3.add_resource(vi2).unwrap();
         let l3 = Arc::new(l3.build(storage));
@@ -1261,20 +1269,19 @@ mod tests {
         let mut prop = Resource::new(iri(target_prop));
         prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
-        prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
         l1.add_resource(prop).unwrap();
         let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
         vi.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_prop)),
-        );
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_a)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_a)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         l1.add_resource(vi).unwrap();
         let l1 = Arc::new(l1.build(storage.clone()));
@@ -1293,13 +1300,12 @@ mod tests {
         let mut vi2 = Resource::new(iri("urn:eigenius:test:vi"));
         vi2.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi2.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_prop)),
-        );
-        vi2.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_b)));
+        vi2.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
+        vi2.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_b)));
         vi2.set(iri(wk::VEC_DIM), Value::Integer(8));
         l3.add_resource(vi2).unwrap();
         let head = Arc::new(l3.build(storage));

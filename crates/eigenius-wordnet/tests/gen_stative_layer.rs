@@ -96,7 +96,6 @@ fn generate_stative_participle_layer() {
          // over a 2-place axiom. Frame 14 (true double-object) is excluded. ADDITIVE: the existing\n\
          // preposition-less `Ditransitive` entries stay, so the ledger decides.\n\
          namespace core      = \"urn:eigenius:core\";\n\
-         namespace epistemic = \"urn:eigenius:reflection:epistemic\";\n\
          namespace lexicon   = \"urn:eigenius:lexicon\";\n\
          namespace wn        = \"urn:eigenius:wn\";\n\n",
     );
@@ -137,7 +136,6 @@ fn generate_stative_participle_layer() {
                        lexicon:sem        = wn:v{off}_rel;\n    \
                        lexicon:sem_type   = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );\n    \
                        lexicon:sense      = \"wn:{}.v.{off}\";\n    \
-                       lexicon:grade      = epistemic:declared;\n    \
                        lexicon:in_lexicon = lexicon:wordnet;\n\
                      }}\n\n",
                     esc(&syn.gloss),

@@ -3516,7 +3516,7 @@ fn resolve_document_discourse_close_out() {
                 include_str!("../../../ontologies/encoding/claim-kind-alignment.esl"),
             ),
         ] {
-            let resources = eigenius_kernel::esl::compile_against_layer(src, &head)
+            let resources = eigenius_kernel::esl::compile(src, &head)
                 .unwrap_or_else(|e| panic!("{name} compiles against the chain: {e:?}"));
             let mut b = eigenius_kernel::layer::LayerBuilder::new(name, Some(Arc::clone(&head)));
             for r in resources {
@@ -3619,10 +3619,10 @@ fn resolve_document_discourse_close_out() {
     //                                unreferable — the deterministic floor)
     let kinds_path = std::env::var("EIGENIUS_KINDS").ok().map(PathBuf::from);
     let mut kinds_arm = "none";
-    let mut kinds_replay: Option<Arc<eigenius_reasoning::ReplayKindClassifier>> = None;
-    let inner_kinds: Box<dyn eigenius_reasoning::KindClassifier> = match &kinds_path {
+    let mut kinds_replay: Option<Arc<eigenius_encoding::ReplayKindClassifier>> = None;
+    let inner_kinds: Box<dyn eigenius_encoding::KindClassifier> = match &kinds_path {
         Some(p) if p.exists() => {
-            let r = eigenius_reasoning::ReplayKindClassifier::load(p).unwrap_or_else(|e| {
+            let r = eigenius_encoding::ReplayKindClassifier::load(p).unwrap_or_else(|e| {
                 panic!(
                     "EIGENIUS_KINDS={} exists but could not be read: {e}",
                     p.display()
@@ -3640,7 +3640,7 @@ fn resolve_document_discourse_close_out() {
         Some(p) => {
             #[cfg(feature = "use-llm")]
             {
-                let Some(c) = eigenius_reasoning::AnthropicKindClassifier::from_env(&page) else {
+                let Some(c) = eigenius_encoding::AnthropicKindClassifier::from_env(&page) else {
                     panic!(
                         "EIGENIUS_KINDS={} does not exist and ANTHROPIC_API_KEY is unset — \
                          cannot record a live kind draw",
@@ -3663,11 +3663,15 @@ fn resolve_document_discourse_close_out() {
         }
         None => {
             eprintln!("kind classifier: none (frame table only — unmarked claims land Assertion)");
-            Box::new(eigenius_reasoning::NoKindClassifier)
+            Box::new(eigenius_encoding::NoKindClassifier)
         }
     };
-    let kinds = eigenius_reasoning::RecordingKindClassifier::new(inner_kinds);
-    let lander = eigenius_reasoning::DerivedClaimLander::new("wrn-first-page", &kinds);
+    let kinds = eigenius_encoding::RecordingKindClassifier::new(inner_kinds);
+    let lander = eigenius_encoding::DerivedClaimLander::new(
+        "wrn-first-page",
+        &kinds,
+        eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(&head),
+    );
 
     // ── Reading-ranker arm — the COMPOSED configuration (plan §1.3 + §2.2: selection lives
     // INSIDE the discourse loop, choosing over the pool of closed ∪ resolved-open readings).
@@ -4178,11 +4182,13 @@ fn describe_probe_value(
 ) -> String {
     use eigenius_kernel::ontology::resource::Value;
     match value {
-        Value::ResourceRef(iri) => match eigenius_kernel::dcg::resource_label(iri, head) {
-            Some(l) => format!("{iri} «{l}»"),
-            None => iri.to_string(),
+        Value::String(s) => match eigenius_kernel::ontology::iri::Iri::parse(s)
+            .ok()
+            .and_then(|i| eigenius_kernel::dcg::resource_label(&i, head).map(|l| (i, l)))
+        {
+            Some((i, l)) => format!("{i} «{l}»"),
+            None => format!("{s:?}"),
         },
-        Value::String(s) => format!("{s:?}"),
         other => format!("{other:?}"),
     }
 }
@@ -5381,7 +5387,9 @@ fn spike_named_entity_closes_unit4() {
         let mut ni = Resource::new(p(&format!("urn:eigenius:doc:ni_{key}")));
         ni.set(
             p(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(p("urn:eigenius:lexicon:Entity"))]),
+            Value::Array(vec![Value::String(
+                p("urn:eigenius:lexicon:Entity").as_str().to_string(),
+            )]),
         );
         ni.set(
             p(wk::DESCRIPTION),
@@ -7217,14 +7225,21 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
 
     // Every bootstrap layer (the term-bearing ontologies, all small), plus the
     // largest lexicon layer (the bulk population).
+    // `defined_iris().len()`, not `iter_resources().count()`. The latter is
+    // `defined_iris.iter().filter_map(|i| self.get_resource(i))` — one RocksDB fetch and a
+    // full deserialisation per resource, 9.4M of them, to produce a number the IRI set
+    // already knows. Measured `2026-09-01`: that single traversal ran over 12 minutes against
+    // the wordnet+UMLS snapshot, against 55s for the entire resume, and the test performed it
+    // three times before validating anything. The counts agree by construction — `get_resource`
+    // returns `None` for any IRI outside `defined_iris` and is consulted for no other.
     let biggest = chain
         .iter()
-        .max_by_key(|l| l.iter_resources().count())
+        .max_by_key(|l| l.defined_iris().len())
         .map(|l| l.id().clone());
     let sample: Vec<&Arc<Layer>> = chain
         .iter()
         .filter(|l| {
-            let n = l.iter_resources().count();
+            let n = l.defined_iris().len();
             n > 0 && (n < 5_000 || Some(l.id().clone()) == biggest)
         })
         .collect();
@@ -7233,7 +7248,7 @@ fn the_global_memo_is_bounded_by_declarations_not_resources() {
     let mut worst_entries = 0usize;
     let mut biggest_sample: Option<(usize, usize)> = None;
     for layer in sample {
-        let resources = layer.iter_resources().count();
+        let resources = layer.defined_iris().len();
         let validator = eigenius_kernel::validation::Validator::new(Arc::clone(layer));
 
         // `Validator::validate`'s body, inlined so the scope is OURS and nothing

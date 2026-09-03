@@ -26,13 +26,15 @@
 // file is loaded by the live demo (demo/wrn-helicase/run.sh) after that step —
 // not by the in-process recompute tests.
 
-namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace stats      = "urn:eigenius:measurements";
-namespace onco       = "urn:eigenius:benchmark:onco";
-namespace bench      = "urn:eigenius:benchmark";
-namespace wrn        = "urn:eigenius:pub:wrn";
+namespace core          = "urn:eigenius:core";
+namespace reflection    = "urn:eigenius:reflection";
+namespace stats         = "urn:eigenius:measurements";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace bench         = "urn:eigenius:benchmark";
+namespace wrn           = "urn:eigenius:pub:wrn";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace prov       = "urn:eigenius:prov";
 
 // The KM12 day-10 competition-assay table consumed by the lme4 biological-unit
 // RuntimeScript program (D56). Columns: viab_value (the Firefly:Renilla
@@ -40,23 +42,25 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // the script via grepl("WRN", guide)). Same source data as
 // wrn:viab_KM12_sampleset (ED Fig 3b, Nature Source Data, pinned); here modeled
 // with the guide as the biological replication unit.
-class wrn:CompetitionTable : reflection:ObservedResource {
+class wrn:CompetitionTable {
     description = "KM12 day-10 competition-assay relative-ratio table (ED Fig 3b) consumed by the biological-unit lme4 RuntimeScript program. Columns: viab_value, viab_guide. An ObservedResource so it carries the same tier-1 extraction pins (bench:extracted_from_*) as the SampleSets — the input data is traced to the pinned source slice via a re-runnable recipe, not trusted as typed-in numbers.";
 }
 
 // The biological-unit viability warrant: discharges the IsDerivedAs witness the
 // lme4 program commits (onco:ViabilityDependenceAtBiologicalUnit("WRN","KM12")).
 // Mirrors concl_vivo's shape (D54 certificate over a wrapped-R derived result).
-resource wrn:concl_viab_KM12_biological : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
-        onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")
-    );
-    reasoning:justification = DerivedEvidence("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result");
-    reasoning:certificate = type_expr(
-        derived("urn:eigenius:pub:wrn:viab_KM12_bio_lme4:result",
-                onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12"))
-    );
+resource wrn:concl_viab_KM12_biological : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table"), onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12"), Declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:viab_KM12_competition_table"),
+                       declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table") -> onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")),
+                       observed("urn:eigenius:pub:wrn:viab_KM12_competition_table", core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table")))),
+               type_expr(justification:Certificate(
+                   justification:App(Declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:viab_KM12_competition_table")),
+                   onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12") )) );
 }
 
 // F4 as a first-class chain fact: the two SAPs over the same KM12 competition
@@ -65,22 +69,22 @@ resource wrn:concl_viab_KM12_biological : reasoning:ReasoningSentence {
 // nested-ANOVA dispatch, P = 2.74e-19 — to the biological-stratum warrant
 // (wrn:viab_KM12_bio_lme4:result, mixed-model LRT, P ≈ 2.15e-6). The conclusion
 // is robust under both; the published value is a pseudoreplication artifact.
-resource wrn:viab_KM12_dual_sap : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_recompute_findings_f4_competition_assay_pseudoreplication;
-    reflection:rationale   = "The published competition-assay SAP (wrn:viab_KM12_plan, lm(value ~ is_WRN + guide) %>% anova) tests the WRN effect against the technical within-guide residual (25 df, P = 2.74e-19); the biological-unit SAP (wrn:viab_KM12_bio_lme4:result, lmer(value ~ is_WRN + (1|guide)) LRT) tests against the between-guide variance (P ≈ 2.15e-6). Same data; the guide is the biological replication unit and the 6 reps per guide are technical. The conclusion — WRN depletion impairs KM12 viability — is robust under both (p < 0.01), but the published P overstates the evidence by ~13 orders of magnitude (pseudoreplication; Hurlbert 1984, Lazic 2016, Blainey/Krzywinski/Altman 2014). The paper is internally inconsistent: its in-vivo arm (concl_vivo) already uses the mixed-effects approach.";
+resource wrn:viab_KM12_dual_sap : prov:Source {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_recompute_findings_f4_competition_assay_pseudoreplication;
+    prov:rationale   = "The published competition-assay SAP (wrn:viab_KM12_plan, lm(value ~ is_WRN + guide) %>% anova) tests the WRN effect against the technical within-guide residual (25 df, P = 2.74e-19); the biological-unit SAP (wrn:viab_KM12_bio_lme4:result, lmer(value ~ is_WRN + (1|guide)) LRT) tests against the between-guide variance (P ≈ 2.15e-6). Same data; the guide is the biological replication unit and the 6 reps per guide are technical. The conclusion — WRN depletion impairs KM12 viability — is robust under both (p < 0.01), but the published P overstates the evidence by ~13 orders of magnitude (pseudoreplication; Hurlbert 1984, Lazic 2016, Blainey/Krzywinski/Altman 2014). The paper is internally inconsistent: its in-vivo arm (concl_vivo) already uses the mixed-effects approach.";
 }
-resource wrn:viab_KM12_dual_sap_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:viab_KM12_dual_sap;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_recompute_findings_f4_competition_assay_pseudoreplication;
-    reflection:timestamp   = "2026-06-14T00:00:00Z";
+resource wrn:viab_KM12_dual_sap_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:viab_KM12_dual_sap;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_recompute_findings_f4_competition_assay_pseudoreplication;
+    prov:timestamp   = "2026-06-14T00:00:00Z";
 }
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource wrn:warrant_recompute_findings_f4_competition_assay_pseudoreplication : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_recompute_findings_f4_competition_assay_pseudoreplication : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `recompute-findings:F4-competition-assay-pseudoreplication`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_recompute_findings_f4_competition_assay_pseudoreplication";
 }

@@ -246,8 +246,8 @@ fn make_lean_project_cbor(target_theorem_source: &str) -> Vec<u8> {
     let mut r = Resource::new(Iri::parse("urn:eigenius:test:lean_project_1").unwrap());
     r.set(
         Iri::parse(PROP_IS_A).unwrap(),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(LEAN_PROJECT_IRI).unwrap(),
+        Value::Array(vec![Value::String(
+            Iri::parse(LEAN_PROJECT_IRI).unwrap().as_str().to_string(),
         )]),
     );
     r.set(Iri::parse(PROP_LAKEFILE).unwrap(), Value::String(lakefile));

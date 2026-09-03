@@ -76,10 +76,9 @@ const FORMAT: &str = "urn:eigenius:core:format";
 const SOURCE_IRL: &str = "urn:eigenius:core:source_irl";
 const CORE_CLASS: &str = "urn:eigenius:core:Class";
 const CORE_PROPERTY: &str = "urn:eigenius:core:Property";
-const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
-const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
+const DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
 const DECLARED_BY_VALUE: &str = "urn:schema_org";
-const ORGANIZATION: &str = "urn:eigenius:reflection:Organization";
+const ORGANIZATION: &str = "urn:eigenius:prov:Organization";
 
 // core scalars + formats
 const D_STRING: &str = "urn:eigenius:core:string";
@@ -149,7 +148,12 @@ fn map_schema_id(curie: &str) -> Option<(String, String)> {
 }
 
 fn rref(iri: &str) -> Value {
-    Value::ResourceRef(Iri::parse(iri).expect("well-known IRI"))
+    Value::String(
+        Iri::parse(iri)
+            .expect("well-known IRI")
+            .as_str()
+            .to_string(),
+    )
 }
 
 /// Map a schema.org DataType CURIE to (core scalar, optional core:format).
@@ -374,13 +378,13 @@ fn common_meta(r: &mut Resource, n: &Json, https: &str) {
         r.set(iri(DESCRIPTION), Value::String(comment.to_string()));
     }
     r.set(iri(SOURCE_IRL), Value::String(https.to_string()));
-    // A `ResourceRef`, not a `String`: `declared_by` is resource-typed (D72 §3.2), so
+    // `declared_by` is resource-typed (D72 §3.2), so its value is an IRI string and
     // Rule 8 and Rule 22 require the declarer to resolve same-or-lower. `emit_declarer`
     // below puts that resource in this same layer.
-    r.set(iri(DECLARED_BY), Value::ResourceRef(iri(DECLARED_BY_VALUE)));
+    r.set(iri(DECLARED_BY), Value::iri(&iri(DECLARED_BY_VALUE)));
 }
 
-/// The schema.org project as a `reflection:Organization`, emitted into this layer so
+/// The schema.org project as a `prov:Organization`, emitted into this layer so
 /// every term's `declared_by` resolves.
 ///
 /// `urn:schema_org` was already the value every term carried; it is now the IRI of a
@@ -391,7 +395,7 @@ fn emit_declarer(report: &mut ConvertReport) {
     let mut r = Resource::new(iri(DECLARED_BY_VALUE));
     r.set(
         iri(IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(ORGANIZATION))]),
+        Value::Array(vec![Value::iri(&iri(ORGANIZATION))]),
     );
     r.set(
         iri(DESCRIPTION),
@@ -424,10 +428,7 @@ fn emit_class(
 ) {
     let (urn, https) = map_schema_id(id).expect("schema: id");
     let mut r = Resource::new(iri(&urn));
-    r.set(
-        iri(IS_A),
-        Value::Array(vec![rref(CORE_CLASS), rref(DECLARED_RESOURCE)]),
-    );
+    r.set(iri(IS_A), Value::Array(vec![rref(CORE_CLASS)]));
     // subclass_of: in-scope schema: parents only (drop external cross-refs,
     // folded DataTypes, and out-of-scope/pending parents).
     let parents: Vec<Value> = iri_refs(n, K_SUBCLASS_OF)
@@ -466,8 +467,8 @@ fn emit_member(
 ) {
     let (urn, https) = map_schema_id(id).expect("schema: id");
     let mut r = Resource::new(iri(&urn));
-    // is_a = [<every in-scope enum class it instantiates>..., DeclaredResource]
-    let mut is_a: Vec<Value> = types
+    // is_a = [<every in-scope enum class it instantiates>...]
+    let is_a: Vec<Value> = types
         .iter()
         .filter(|t| enum_set.contains(**t))
         .filter_map(|t| map_schema_id(t).map(|(u, _)| u))
@@ -477,7 +478,6 @@ fn emit_member(
     if is_a.is_empty() {
         return; // its enumeration class is out of scope — skip the member
     }
-    is_a.push(rref(DECLARED_RESOURCE));
     r.set(iri(IS_A), Value::Array(is_a));
     common_meta(&mut r, n, &https);
     report.resources.push(r);
@@ -496,10 +496,7 @@ fn emit_property(
 ) {
     let (urn, https) = map_schema_id(id).expect("schema: id");
     let mut r = Resource::new(iri(&urn));
-    r.set(
-        iri(IS_A),
-        Value::Array(vec![rref(CORE_PROPERTY), rref(DECLARED_RESOURCE)]),
-    );
+    r.set(iri(IS_A), Value::Array(vec![rref(CORE_PROPERTY)]));
     // NB: schema.org `domainIncludes` is NOT emitted as `core:domain` (which would
     // restrict usage); it is inverted into each domain class's `core:recommends`
     // (see `convert`), faithfully preserving schema.org's advisory stance.
@@ -662,21 +659,21 @@ mod tests {
         match r.get(&iri(prop)) {
             Some(Value::Array(a)) => a
                 .iter()
-                .filter_map(|v| v.as_iri_str().map(String::from))
+                .filter_map(|v| v.as_str().map(String::from))
                 .collect(),
-            Some(v) => v
-                .as_iri_str()
-                .map(|s| vec![s.to_string()])
-                .unwrap_or_default(),
+            Some(v) => v.as_str().map(|s| vec![s.to_string()]).unwrap_or_default(),
             None => Vec::new(),
         }
     }
 
     #[test]
-    fn class_maps_with_subclass_and_grade() {
+    fn class_maps_with_subclass() {
         let rep = convert(&graph());
         let d = find(&rep, "urn:schema_org:Dataset").expect("Dataset emitted");
-        assert_eq!(refs(d, IS_A), vec![CORE_CLASS, DECLARED_RESOURCE]);
+        // `reflection:DeclaredResource` stood beside `core:Class` here until P5 (2/n)
+        // removed the class from the ontology. The test kept passing because it compared
+        // against this file's own constant, not against anything the chain would accept.
+        assert_eq!(refs(d, IS_A), vec![CORE_CLASS]);
         assert_eq!(refs(d, SUBCLASS_OF), vec!["urn:schema_org:CreativeWork"]);
         assert_eq!(
             d.get(&iri(SOURCE_IRL)).and_then(|v| v.as_str()),

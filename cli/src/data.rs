@@ -116,7 +116,9 @@ pub async fn data_attach(
     let s = |p: &str| Iri::parse(p).expect("static IRI");
     node.set(
         s(PROP_IS_A),
-        Value::Array(vec![Value::ResourceRef(s(PINNED_FILE_CLASS))]),
+        Value::Array(vec![Value::String(
+            s(PINNED_FILE_CLASS).as_str().to_string(),
+        )]),
     );
     node.set(s(PROP_REFERENCE), Value::String(reference.clone()));
     node.set(s(PROP_CONTENT_HASH), Value::String(content_hash.clone()));
@@ -262,7 +264,7 @@ pub async fn data_verify(endpoint: &str, iri: &str, json: bool) {
     }
 }
 
-/// Resolve a schema value (an embedded `DatasetSchema` or a `ResourceRef` to a
+/// Resolve a schema value (an embedded `DatasetSchema` or an IRI reference to a
 /// committed one) to a concrete resource.
 async fn resolve_schema_value(
     client: &mut EigeniusKernelClient<Channel>,
@@ -270,10 +272,9 @@ async fn resolve_schema_value(
 ) -> Option<Resource> {
     match v {
         Value::Embedded(b) => Some((**b).clone()),
-        Value::ResourceRef(i) => fetch_resource(client, i.as_str()).await,
+        Value::String(i) => fetch_resource(client, i.as_str()).await,
         // A schema reference can also arrive as a plain string IRI (e.g. when a
         // resource hasn't been ref-canonicalized on the read path).
-        Value::String(s) => fetch_resource(client, s).await,
         _ => None,
     }
 }

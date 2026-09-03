@@ -21,14 +21,14 @@ deferred alternative (§3). This is the analyze-against-the-lexicon family (fini
 morphology; Koskenniemi 1983, Beesley & Karttunen 2003), and it generalizes the mechanism we already ship
 for `-ly` adverbs:
 
-- **[`is_derived_adverb`](../../kernel/src/dcg/lookup.rs) / [`adverb_items`](../../kernel/src/dcg/lookup.rs)**
-  (`lookup.rs:900–937`): a recognition gate (strip the affix via [`adverb_bases`](../../kernel/src/dcg/lookup.rs)
-  `:2897`, probe the base's cat) shared with [`has_token`](../../kernel/src/dcg/lookup.rs) so a derived
+- **[`is_derived_adverb`](../../kernel/src/dcg/parse/seed.rs) / [`adverb_items`](../../kernel/src/dcg/parse/seed.rs)**
+  (`lookup.rs:900–937`): a recognition gate (strip the affix via [`adverb_bases`](../../kernel/src/dcg/parse/seed.rs)
+  `:2897`, probe the base's cat) shared with [`has_token`](../../kernel/src/dcg/parse/mod.rs) so a derived
   form counts as **known** (not routed to missing-lexeme), plus a seeder that produces `Item`s (cat + sem).
 
 The derived adjectives then modify nouns through the **existing refine rules** —
-[`RefineKind::Attrib`](../../kernel/src/dcg/parser.rs) (`parser.rs:265`, attributive adjective `S[adj]\NP`
-+ `cat_n` → `Σx:C. adj(x)`) and [`RefineKind::PpMod`](../../kernel/src/dcg/parser.rs) (`:272`, `cat_pp`
+[`RefineKind::Attrib`](../../kernel/src/dcg/rules/combinators.rs) (`parser.rs:265`, attributive adjective `S[adj]\NP`
++ `cat_n` → `Σx:C. adj(x)`) and [`RefineKind::PpMod`](../../kernel/src/dcg/rules/combinators.rs) (`:272`, `cat_pp`
 noun-modifier) — so **no new composition machinery**, only affix lexemes + a recognizer.
 
 ## 2. The three patterns (cats + sems)
@@ -230,10 +230,10 @@ The shipped `-based` slice (Slice 2) is **one row** of a productive class (`-lik
 alignment and the passive machinery are separate parked tracks
 ([d63-denominal-suffix-alignment.md](d63-denominal-suffix-alignment.md),
 [d63-passive-voice-handling.md](d63-passive-voice-handling.md)). Two changes in
-[`kernel/src/dcg/lookup.rs`](../../kernel/src/dcg/lookup.rs):
+[`kernel/src/dcg/lookup.rs`](../../kernel/src/dcg/):
 
 **Status: implemented** (`2026-07-05`). Three changes in
-[`kernel/src/dcg/lookup.rs`](../../kernel/src/dcg/lookup.rs):
+[`kernel/src/dcg/lookup.rs`](../../kernel/src/dcg/):
 
 | change | what | anchor |
 |---|---|---|

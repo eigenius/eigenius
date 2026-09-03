@@ -64,7 +64,6 @@ resource lexicon:between_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_between_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "between";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:within_prep : lexicon:LexicalEntry {
     core:description = "grammatical: preposition marking containment ('within the region').";
@@ -73,7 +72,6 @@ resource lexicon:within_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_within_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "within";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:in_prep : lexicon:LexicalEntry {
     core:description = "grammatical: preposition marking location or containment ('in colon cancers').";
@@ -82,7 +80,6 @@ resource lexicon:in_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_in_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "in";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:for_prep : lexicon:LexicalEntry {
     core:description = "grammatical: preposition marking purpose or beneficiary ('essential for growth').";
@@ -91,7 +88,6 @@ resource lexicon:for_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_for_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "for";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:to_prep : lexicon:LexicalEntry {
     core:description = "grammatical: preposition marking a goal or recipient, or the infinitival marker ('lead to death', 'to test').";
@@ -100,7 +96,6 @@ resource lexicon:to_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_to_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "to";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:with_prep : lexicon:LexicalEntry {
     core:description = "grammatical: preposition marking accompaniment or instrument ('cancers with MSI').";
@@ -109,7 +104,6 @@ resource lexicon:with_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_with_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "with";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:on_prep : lexicon:LexicalEntry {
     core:description = "grammatical: preposition marking position or dependence ('depends on').";
@@ -118,7 +112,6 @@ resource lexicon:on_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_on_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "on";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:from_prep : lexicon:LexicalEntry {
     core:description = "grammatical: preposition marking origin or source ('arise from mutations').";
@@ -127,7 +120,6 @@ resource lexicon:from_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_from_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "from";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:without_prep : lexicon:LexicalEntry {
     core:description = "grammatical: preposition as a VP adjunct ('acts without X').";
@@ -136,7 +128,6 @@ resource lexicon:without_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_without_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "without";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:among_prep : lexicon:LexicalEntry {
     core:description = "grammatical: preposition as a VP adjunct ('acts among X').";
@@ -145,7 +136,6 @@ resource lexicon:among_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_among_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "among";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:beyond_prep : lexicon:LexicalEntry {
     core:description = "grammatical: preposition as a VP adjunct ('acts beyond X').";
@@ -154,5 +144,4 @@ resource lexicon:beyond_prep : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:prep_beyond_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "beyond";
-    lexicon:grade    = epistemic:declared;
 }

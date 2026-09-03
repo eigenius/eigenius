@@ -157,6 +157,11 @@ echo "--- Step 3: Run the wrapped-R warrants (lme4, D55/D56) ---"
 # 3a. In-vivo: the authors' own random-slope LRT on the xenograft volumes,
 #     committing wrn:vivo_lme4:result -> InVivoDependence(WRN,MSI) (concl_vivo).
 echo "  3a. xenograft in-vivo lme4 -> InVivoDependence"
+# The input node has to be ON CHAIN, not merely passed by value: `eig run` hands the
+# program its input without committing it, and 08a's `prov:resource` cites the table as
+# the run's subject. Every other R leg below already loads its `*-input.json` this way;
+# 3a and 3b did not, which is invisible until something references the input.
+eig load "$PROGRAMS/invivo/xenograft-input.json"
 run_r_program "$PROGRAMS/invivo/xenograft-lme4-program.json" \
     "$PROGRAMS/invivo/xenograft-input.json" "lrt_p_value|InVivoDependence"
 # 3b. Biological-level competition assay (finding F4): the pseudoreplication-
@@ -166,6 +171,7 @@ run_r_program "$PROGRAMS/invivo/xenograft-lme4-program.json" \
 #     (P ~ 2.15e-6), the honest counterpart of the published nested-ANOVA warrant
 #     (P = 2.74e-19, recomputed by wrn:viab_KM12_plan in the statistics layer).
 echo "  3b. KM12 competition biological-unit lme4 -> ViabilityDependenceAtBiologicalUnit (F4)"
+eig load "$PROGRAMS/invivo/km12-competition-input.json"
 run_r_program "$PROGRAMS/invivo/km12-competition-lme4-program.json" \
     "$PROGRAMS/invivo/km12-competition-input.json" "lrt_p_value|ViabilityDependenceAtBiologicalUnit"
 
@@ -428,6 +434,17 @@ echo
 # wrn-phase1-biological-sap.esl cites the 3b warrant (concl_viab_KM12_biological)
 # and records the F4 dual-SAP fact — loaded here, after 3b committed its witness.
 echo "--- Step 4: Load WRN reasoning chain (biological-SAP, phase2, phase3, phase5) ---"
+# 08a FIRST, and before 06. It declares the `justification:Claim` + `prov:DeclarationTrace`
+# for each program-yields-result warrant, which is where the `IsDeclaredAs` witness comes
+# from; 06's certificate has a `Declared(…)` leaf over
+# `wrn:viab_KM12_bio_lme4_yields_result`, so without this the load fails with
+# "no admitted IsDeclaredAs witness". It also references the program OUTPUT tables, which is
+# why it cannot move above Step 3.
+#
+# This script predates the layer: 08a landed `2026-08-30` (P5 4/n) and this file was last
+# touched `2026-08-22`. `wrn_phase3.rs` and `wrn_phase5.rs` both include it — they were
+# updated, the demo was not, and neither loads 06, so nothing caught the gap.
+eig load "$WRN/chain/08a-program-provenance.esl"
 eig load "$WRN/chain/06-phase1-biological-sap.esl"
 eig load "$WRN/chain/07-phase2-validation.esl"
 eig load "$WRN/chain/08-phase3-invivo-mechanism.esl"

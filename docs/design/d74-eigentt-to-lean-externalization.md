@@ -47,7 +47,7 @@ is the whole reason the design is cheap: it is AST → AST, not AST → text →
 ## 2. Shape
 
 ```
-claim.reflection:canonical_proposition        (D47-encoded eigentt:TypeExpr)
+claim.reflection:canonical_proposition        (D47-encoded eigentt:Term)
         │  decode_type                        (kernel, existing)
         ▼
   EigenTT Exp                                 the kernel's AST
@@ -263,7 +263,7 @@ D74 therefore joins nanoda_lib and D30 in the TCB.
 ## 7. Prior state, for the record
 
 The premise that made D49 §7 choose the inverse is gone. When the Lean institution was built,
-`eigentt:TypeExpr` and the impredicative `Prop` universe did not exist, so Lean's own proposition
+`eigentt:Term` and the impredicative `Prop` universe did not exist, so Lean's own proposition
 was the only representation available and recovering it was the only option. D46 and D47 removed
 that constraint. The design was right for its time; this is the same shape of correction D73 records
 for D39 §8.

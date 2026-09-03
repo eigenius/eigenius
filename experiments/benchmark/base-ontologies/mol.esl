@@ -20,7 +20,7 @@ namespace mol        = "urn:eigenius:benchmark:mol";
 
 // ── Compound ─────────────────────────────────────────────────────────
 
-class mol:Compound : reflection:ObservedResource {
+class mol:Compound {
     description = "A chemical compound from an input dataset, identified by structure. SMILES (16/17/8/18) or an RDKit Mol read from a pickle (94).";
     requires mol:smiles;
     recommends mol:compound_id, mol:inchikey;
@@ -62,7 +62,7 @@ property mol:fingerprint_kind : core:string {
 
 // ── Target ───────────────────────────────────────────────────────────
 
-class mol:Target : reflection:ObservedResource {
+class mol:Target {
     description = "A biological target (receptor/protein) that compound activity is measured against (SAB 17: A2A adenosine receptor, UniProt P29274).";
     requires mol:target_id;
     recommends mol:target_name;

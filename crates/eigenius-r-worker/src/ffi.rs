@@ -625,6 +625,21 @@ pub unsafe extern "C" fn r_eigon_set_str(bid: SEXP, prop: SEXP, val: SEXP) -> SE
     unsafe { rapi::Rf_ScalarInteger(rc) }
 }
 
+const TERM_IRI: &str = "urn:eigenius:eigentt:Term";
+
+/// `eigentt:Term`'s constructor argument names, read from the bootstrap chain once.
+///
+/// An FFI entry point has no caller to take a layer from — R calls it directly — so the chain
+/// is built here rather than threaded. It is the same declaration every other producer reads.
+fn codec_names() -> &'static eigenius_kernel::program::eigentt_type_mirror::CodecNames {
+    static NAMES: std::sync::OnceLock<eigenius_kernel::program::eigentt_type_mirror::CodecNames> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap chain builds");
+        eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(ctx.head())
+    })
+}
+
 /// `r_eigon_set_proposition(bid, pred_iri, args)` → status. Sets the
 /// inherited `reflection:canonical_proposition` slot to a D47-encoded
 /// predicate application `pred(arg₁, …, argₙ)` over string-literal
@@ -647,18 +662,35 @@ pub unsafe extern "C" fn r_eigon_set_proposition(bid: SEXP, pred_iri: SEXP, args
     };
     let args = unsafe { sexp_str_vec(args) };
 
-    // Build the App spine: ConstRef(pred) applied to each LitString(arg).
-    let mut term = serde_json::json!({"ctor": "ConstRef", "args": [pred]});
+    // Build the App spine: ConstRef(pred) applied to each LitString(arg). The result is a
+    // value resource — `canonical_proposition` declares `class_types: [eigentt:Term]`, so its
+    // value names its constructor's class (D85 §6.1) — and the argument names come from
+    // `eigentt:Term`'s declaration through `codec_names()`.
+    let names = codec_names();
+    let build = |ctor: &str, a: Vec<Value>| names.value(TERM_IRI, ctor, a);
+    let mut term = match build(
+        "ConstRef",
+        vec![Value::String(pred), Value::Array(Vec::new())],
+    ) {
+        Ok(v) => v,
+        Err(_) => return unsafe { rapi::Rf_ScalarInteger(ERR) },
+    };
     for arg in &args {
-        let lit = serde_json::json!({"ctor": "LitString", "args": [arg]});
-        term = serde_json::json!({"ctor": "App", "args": [term, lit]});
+        let lit = match build("LitString", vec![Value::String(arg.clone())]) {
+            Ok(v) => v,
+            Err(_) => return unsafe { rapi::Rf_ScalarInteger(ERR) },
+        };
+        term = match build("App", vec![term, lit]) {
+            Ok(v) => v,
+            Err(_) => return unsafe { rapi::Rf_ScalarInteger(ERR) },
+        };
     }
 
     let prop = Iri::parse(CANONICAL_PROPOSITION).expect("CANONICAL_PROPOSITION is a static IRI");
     let mut reg = builder_registry().lock().unwrap();
     let rc = match reg.get_mut(&id) {
         Some(r) => {
-            r.set(prop, Value::Json(term));
+            r.set(prop, term);
             OK
         }
         None => ERR,

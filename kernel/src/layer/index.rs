@@ -232,12 +232,11 @@ pub fn is_indexable_predicate(layer: &Layer, predicate: &Iri) -> bool {
         Some(def) => def,
         None => return false,
     };
-    // `as_iri_str` accepts both `Value::String` (pre-canonicalisation
-    // shape) and `Value::ResourceRef` (post-canonicalisation shape).
-    // Using `as_str` here was a pre-existing bug that broke the
-    // index for every chain that round-tripped through
-    // `canonicalise_resource_refs` — i.e., every production chain.
-    let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_iri_str()) {
+    // Read through an accessor, never by matching a variant. Matching `Value::String` here was
+    // a shipped bug: it returned `None` for the `Value::ResourceRef` that
+    // `canonicalise_resource_refs` produced, breaking the index for every chain that had been
+    // built — i.e. every production chain. Both are retired (D85 §6.2); the discipline is not.
+    let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_str()) {
         Some(t) => t,
         None => return false,
     };
@@ -307,10 +306,9 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 Some(def) => def,
                 None => continue,
             };
-            // `as_iri_str` covers both `Value::String` and
-            // `Value::ResourceRef` shapes — see the matching comment in
-            // `is_indexable_predicate`.
-            let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_iri_str()) {
+            // Read through an accessor, never by matching a variant — see the matching
+            // comment in `is_indexable_predicate`.
+            let data_type = match prop_def.get(&data_type_prop).and_then(|v| v.as_str()) {
                 Some(t) => t,
                 None => continue,
             };
@@ -324,15 +322,10 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 }
             };
             match data_type {
-                wk::RESOURCE => match value {
-                    Value::String(s) => push_iri_value(&mut triples, s),
-                    Value::ResourceRef(iri) => triples.push(OwnedTriple {
-                        subject: subject_iri.clone(),
-                        predicate: predicate_iri.clone(),
-                        object: iri.clone(),
-                    }),
-                    _ => {}
-                },
+                // The slot is `data_type: resource`, so its string IS a reference — this
+                // reader has the schema and needs only to parse. It used to match
+                // `Value::ResourceRef` alongside, for a shape a stored chain never carried.
+                wk::RESOURCE => push_iri_value(&mut triples, value.as_str().unwrap_or("")),
                 // D79 §2.2 — a term-valued property. Its `Value::Json` names
                 // declarations, and before this arm those references produced no
                 // triples at all, so nothing could ask what depends on a term.
@@ -347,14 +340,8 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 wk::RESOURCE_ARRAY => {
                     if let Value::Array(items) = value {
                         for item in items {
-                            match item {
-                                Value::String(s) => push_iri_value(&mut triples, s),
-                                Value::ResourceRef(iri) => triples.push(OwnedTriple {
-                                    subject: subject_iri.clone(),
-                                    predicate: predicate_iri.clone(),
-                                    object: iri.clone(),
-                                }),
-                                _ => {}
+                            if let Value::String(s) = item {
+                                push_iri_value(&mut triples, s);
                             }
                         }
                     }
@@ -371,6 +358,16 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
     // `lexicon:Cat` and `lexicon:Num`. Dropping them keeps the retained edges to the
     // ones a rebinding can actually break, which over the lexicon is the entry's
     // sense class.
+    //
+    // **A constructor class is sealed with its inductive**, and saying so is what keeps this
+    // affordable after D85 §6.1. A value used to name `lexicon:Num` — an `InductiveType`, so
+    // sealed. It now names `lexicon:Num-sg`, a class DERIVED from that inductive's
+    // `core:ctors`, and the test above stopped matching: on the `2026-09-02` reseed the index
+    // went from 35.5M to 76.2M triples in each direction, +1.5 GiB on disk after compaction,
+    // because exactly the millions-of-members posting lists this seal exists to drop came back
+    // under the constructor's IRI. The seal's argument carries over unchanged — Rule 25's
+    // two-sided closedness means such a class exists because `core:ctors` has that entry and
+    // cannot be rebound independently of the inductive, which is itself sealed.
     let inductive_type = Iri::parse(wk::INDUCTIVE_TYPE).ok();
     let sealed: BTreeSet<Iri> = match &inductive_type {
         None => BTreeSet::new(),
@@ -380,6 +377,7 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 layer
                     .resolve(m)
                     .is_some_and(|r| r.is_a().iter().any(|c| c == it))
+                    || crate::layer::ctor_classes::is_constructor_class(m, layer)
             })
             .cloned()
             .collect(),
@@ -1527,25 +1525,24 @@ mod mentions_tests {
         let mut prop = Resource::new(iri("urn:eigenius:test:tx"));
         prop.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         prop.set(iri(wk::SHORT_NAME), Value::String("tx".into()));
-        prop.set(
-            iri(wk::DATA_TYPE_PROP),
-            Value::ResourceRef(iri(wk::INDUCTIVE)),
-        );
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::INDUCTIVE)));
         prop.set(
             iri(wk::CLASS_TYPES),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:eigentt:TypeExpr",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:eigentt:Term").as_str().to_string(),
+            )]),
         );
         b.add_resource(prop).unwrap();
 
         let mut colour = Resource::new(iri("urn:eigenius:test:Colour"));
         colour.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+            Value::Array(vec![Value::String(
+                iri(wk::INDUCTIVE_TYPE).as_str().to_string(),
+            )]),
         );
         colour.set(iri(wk::SHORT_NAME), Value::String("Colour".into()));
         colour.set(iri(wk::TYPE_PARAMS), Value::Array(vec![]));
@@ -1555,21 +1552,31 @@ mod mentions_tests {
         let mut topic = Resource::new(iri("urn:eigenius:test:Topic"));
         topic.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         b.add_resource(topic).unwrap();
 
         Arc::new(b.build(LayerStorage::in_memory()))
     }
 
+    /// The IRIs a term names.
+    ///
+    /// A value states its constructor's class, and that class is sealed with its inductive, so
+    /// the index drops it — which is why these expectations name only the constants and premise
+    /// IRIs the term refers to. This helper filtered the classes out by hand for one commit,
+    /// between D85 §6.1 landing and the seal being taught about derived classes; the filter is
+    /// gone because the thing it hid is fixed.
     fn mentions_of(term: serde_json::Value) -> Vec<String> {
         let mut b = LayerBuilder::new("mentions_top", Some(base()));
         let mut holder = Resource::new(iri("urn:eigenius:test:holder"));
         holder.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::DECLARED_RESOURCE))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
-        holder.set(iri("urn:eigenius:test:tx"), Value::Json(term));
+        holder.set(
+            iri("urn:eigenius:test:tx"),
+            crate::testing::term_value(&term),
+        );
         b.add_resource(holder).unwrap();
         let layer = b.build(LayerStorage::in_memory());
         extract_indexable_triples(&layer)
@@ -1579,11 +1586,29 @@ mod mentions_tests {
             .collect()
     }
 
+    /// **A justification term's premise citations are indexed.** The grounding
+    /// leaves take the premise IRI as a `core:string` argument rather than a
+    /// `ConstRef`, so whether they reach the index is not obvious; the walker matches any
+    /// `urn:`-prefixed string at any depth, so they do. This is what
+    /// lets a commit-time check reach a justification term's premises through the
+    /// triple index rather than by decoding the term.
+    #[test]
+    fn a_grounding_leafs_string_iri_becomes_a_mentions_triple() {
+        let m = mentions_of(serde_json::json!({
+            "ctor": "App",
+            "args": [
+                {"ctor": "Declared", "args": ["urn:eigenius:test:Topic"]},
+                {"ctor": "Observed", "args": ["urn:eigenius:test:Topic"]}
+            ],
+        }));
+        assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");
+    }
+
     /// The case that had no index answer at all.
     #[test]
     fn a_term_reference_becomes_a_mentions_triple() {
         let m = mentions_of(serde_json::json!({
-            "ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"],
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []],
         }));
         assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");
     }
@@ -1595,7 +1620,7 @@ mod mentions_tests {
     #[test]
     fn a_mention_of_a_sealed_inductive_is_dropped() {
         let m = mentions_of(serde_json::json!({
-            "ctor": "ConstRef", "args": ["urn:eigenius:test:Colour"],
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:Colour", []],
         }));
         assert!(m.is_empty(), "sealed objects must not be indexed: {m:?}");
     }
@@ -1606,8 +1631,30 @@ mod mentions_tests {
     fn a_mixed_term_keeps_only_the_rebindable_edge() {
         let m = mentions_of(serde_json::json!({"ctor": "App", "args": [
             {"ctor": "CtorApp", "args": ["urn:eigenius:test:Colour", "red"]},
-            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"]}]}));
+            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []]}]}));
         assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");
+    }
+
+    /// **A constructor's class is sealed with its inductive.** Every value states the class
+    /// of the constructor that built it (D85 §6.1), so if this were not sealed the index would
+    /// carry one edge per value naming a handful of constant IRIs — which is what the seal
+    /// exists to prevent, and what it stopped preventing when the shape changed. Measured on
+    /// the `2026-09-02` lexicon reseed: 35.5M triples became 76.2M in each direction, +1.5 GiB
+    /// on disk after full compaction.
+    ///
+    /// `mentions_of` builds a real `eigentt:Term` value, so the classes at stake here are
+    /// `eigentt:Term-ConstRef` and friends — the same relationship `lexicon:Num-sg` has to
+    /// `lexicon:Num` over the corpus. The assertions above are exact equality; each would carry
+    /// those classes too if this did not hold.
+    #[test]
+    fn a_mention_of_a_constructors_class_is_dropped_with_its_inductive() {
+        let m = mentions_of(serde_json::json!({
+            "ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []],
+        }));
+        assert!(
+            !m.iter().any(|o| o.contains("Term-")),
+            "a constructor class is sealed with its inductive: {m:?}"
+        );
     }
 
     /// Deduplicated per subject: naming the same declaration twice in one term is
@@ -1615,8 +1662,8 @@ mod mentions_tests {
     #[test]
     fn repeated_mentions_of_one_iri_yield_one_triple() {
         let m = mentions_of(serde_json::json!({"ctor": "App", "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"]},
-            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic"]}]}));
+            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:test:Topic", []]}]}));
         assert_eq!(m.len(), 1, "{m:?}");
     }
 }

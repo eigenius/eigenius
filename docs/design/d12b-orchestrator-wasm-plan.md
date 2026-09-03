@@ -5,7 +5,9 @@
 > with the rest of WASM extensibility (see [D12](d12-wasm-extensibility.md)).
 > The orchestrator's runtime substrate (D26/D31 — Docker/OCI external
 > institutions) is a separate mechanism and is unaffected. Retained as
-> historical record.
+> historical record. **The file links below no longer resolve** — `orchestration/native/`,
+> `orchestration/tests/wasm_*`, `crates/wasm-runtime/`, `examples/wasm-*` and the `spikes/`
+> report were deleted with the mechanism. They record what existed; none is a live path.
 
 **Status (historical):** Implemented (2026-04-20). All M1–M5 milestones landed and
 every §12 open question is resolved. Cross-platform builds are declared

@@ -24,7 +24,7 @@
 //!    **It is not on the commit path.** Every call site is an importer binary, one CLI subcommand,
 //!    or a test; nothing under `kernel/src/{validation,layer,commit}` calls it, and in the importers
 //!    it sits behind an opt-in `--validate` flag that `scripts/reseed-lexicon-db.sh` does not pass.
-//!    A production lexicon load is gated by Rule 21 alone, which checks each `eigentt:TypeExpr` slot
+//!    A production lexicon load is gated by Rule 21 alone, which checks each `eigentt:Term` slot
 //!    in isolation and never relates `cat` to `sem_type`. Committing a lexicon does not run this.
 //! 2. **The index.** [`LexicalIndex`] is a `form → entries` map over a layer's committed
 //!    `lexicon:LexicalEntry` resources, resolving each through `entry_to_item` above. Lazy (a probe of
@@ -87,7 +87,6 @@ pub fn resolve_sem(layer: &Arc<Layer>, target: &Iri) -> Exp {
 ///   point at; decoded through the D47 codec.
 pub fn resolve_sem_value(layer: &Arc<Layer>, sem_v: &Value) -> Result<Exp, String> {
     let target = match sem_v {
-        Value::ResourceRef(i) => i.clone(),
         Value::String(s) => Iri::parse(s).map_err(|e| format!("sem iri: {e}"))?,
         // An inline EigenTT term value (rare — references are the norm).
         other => return decode_type(other, layer).map_err(|e| format!("sem decode: {e:?}")),
@@ -334,7 +333,7 @@ enum Source {
 /// for an untagged entry (always-available — e.g. the grammatical closed class).
 fn read_in_lexicon(r: &crate::ontology::resource::Resource) -> Option<Iri> {
     r.get(&iri("urn:eigenius:lexicon:in_lexicon"))
-        .and_then(|v| v.as_iri_str())
+        .and_then(|v| v.as_str())
         .and_then(|s| Iri::parse(s).ok())
 }
 
@@ -368,13 +367,10 @@ pub fn resolve_lexicon_profile(layer: &Layer, profile: &Iri) -> Option<Vec<Iri>>
         Value::Array(items) => Some(
             items
                 .iter()
-                .filter_map(|v| v.as_iri_str().and_then(|s| Iri::parse(s).ok()))
+                .filter_map(|v| v.as_str().and_then(|s| Iri::parse(s).ok()))
                 .collect(),
         ),
-        v => v
-            .as_iri_str()
-            .and_then(|s| Iri::parse(s).ok())
-            .map(|i| vec![i]),
+        v => v.as_str().and_then(|s| Iri::parse(s).ok()).map(|i| vec![i]),
     }
 }
 

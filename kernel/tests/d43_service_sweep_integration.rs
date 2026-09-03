@@ -54,20 +54,22 @@ fn build_corpus_layer(model_iri: &str) -> Arc<Layer> {
     let mut prop = Resource::new(iri(body_iri));
     prop.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+        Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
     );
     prop.set(iri(wk::SHORT_NAME), Value::String("body".into()));
-    prop.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+    prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
     b.add_resource(prop).unwrap();
 
     // VectorIndex Resource pointing at it.
     let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
     vi.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+        )]),
     );
-    vi.set(iri(wk::TARGET_PROPERTY), Value::ResourceRef(iri(body_iri)));
-    vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+    vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(body_iri)));
+    vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_iri)));
     vi.set(iri(wk::VEC_DIM), Value::Integer(8));
     b.add_resource(vi).unwrap();
 

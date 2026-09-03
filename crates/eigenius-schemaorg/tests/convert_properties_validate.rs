@@ -49,7 +49,7 @@ fn json_layer(name: &str, parent: Option<Arc<Layer>>, sources: &[&str]) -> Arc<L
 /// Compile ESL against its parent (the *Expressible* check — a compile error means
 /// the vocabulary cannot express the content) and build the layer.
 fn esl_layer(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(source, parent).unwrap_or_else(|errs| {
+    let resources = esl::compile(source, parent).unwrap_or_else(|errs| {
         panic!(
             "{name} failed to compile (not Expressible):\n{}",
             errs.into_iter()
@@ -83,10 +83,20 @@ fn convert_property_set_is_expressible() {
             include_str!("../../../ontologies/ingest/ingest-ontology.json"),
         ],
     );
+    let prov = esl_layer(
+        include_str!("../../../ontologies/prov/prov.esl"),
+        &reflection,
+        "prov",
+    );
     let reasoning = {
-        let mut b = LayerBuilder::new("reasoning", Some(reflection));
-        for r in esl::compile(include_str!("../../../ontologies/reasoning/reasoning.esl"))
-            .expect("reasoning.esl compiles")
+        // Compiled against the layer it sits on — see D85 §6.1: the values it emits name
+        // their constructors' arguments, and those names come from the chain.
+        let mut b = LayerBuilder::new("reasoning", Some(Arc::clone(&prov)));
+        for r in esl::compile(
+            include_str!("../../../ontologies/justification/justification.esl"),
+            &prov,
+        )
+        .expect("reasoning.esl compiles")
         {
             b.add_resource(r).unwrap();
         }

@@ -462,10 +462,10 @@ ORDER BY ?c
     const resp = branch === undefined
       ? await eigen.query(eigenql)
       : await eigen.query(eigenql, { branch });
-    if (!resp.success) {
-      throw new Error(resp.error || "comorphism query failed");
+    if (!resp.ok) {
+      throw new Error(resp.message || "comorphism query failed");
     }
-    const decoded = decodeResultDocument(resp.document);
+    const decoded = decodeResultDocument(resp.value.document);
     const out: string[] = [];
     for (const row of decoded.rows) {
       for (const [key, value] of row.values) {

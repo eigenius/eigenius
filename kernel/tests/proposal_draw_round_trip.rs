@@ -46,7 +46,7 @@ fn json_layer(name: &str, parent: Option<Arc<Layer>>, sources: &[&str]) -> Arc<L
 }
 
 fn esl_layer(name: &str, src: &str, parent: Arc<Layer>) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(src, &parent)
+    let resources = esl::compile(src, &parent)
         .unwrap_or_else(|errs| panic!("{name} failed to compile: {errs:#?}"));
     let mut b = LayerBuilder::new(name, Some(parent));
     for r in &resources {
@@ -73,10 +73,11 @@ fn encoding_chain() -> Arc<Layer> {
             include_str!("../../ontologies/ingest/ingest-ontology.json"),
         ],
     );
+    let prov = esl_layer("prov", include_str!("../../ontologies/prov/prov.esl"), refl);
     let logic = esl_layer(
         "logic",
         include_str!("../../ontologies/logic/logic.esl"),
-        refl,
+        prov,
     );
     let lexicon = esl_layer(
         "lexicon-schema",
@@ -186,13 +187,14 @@ fn a_recorded_draw_round_trips_through_the_chain_and_replays_with_zero_misses() 
 
 /// The draw survives a CBOR encode/decode cycle.
 ///
-/// **This is NOT the regression test for the shape bug, and saying so matters.** CBOR encodes
-/// `ResourceRef` as plain `Text` (`eigon_cbor.rs:207`), so a decoded value is a `String` — but
-/// `LayerBuilder::add_resource` RE-CANONICALISES it back to a ref against the ontology, which is
-/// why this passes both before and after the fix. The persisted read path (`build_chain` over
-/// stored bytes) never goes through the builder, so a draw read off a committed branch keeps the
-/// string shape, and `draws_from_layer` matching only `ResourceRef` returned `[]` — a silent live
-/// re-ask with no error anywhere.
+/// **This is NOT the regression test for the shape bug, and saying so matters.** CBOR encoded
+/// `Value::ResourceRef` as plain `Text`, so a decoded value was a `String` — but
+/// `LayerBuilder::add_resource` RE-CANONICALISED it back to a ref against the ontology, which is
+/// why this passed both before and after the fix. The persisted read path (`build_chain` over
+/// stored bytes) never goes through the builder, so a draw read off a committed branch kept the
+/// string shape, and `draws_from_layer` matching only the variant returned `[]` — a silent live
+/// re-ask with no error anywhere. The variant is retired (D85 §6.2); the discipline it argued
+/// for — read an IRI through an accessor — is what keeps this from recurring.
 ///
 /// Reproducing that needs a real persisted store, so the witness is live rather than a unit test:
 /// a second `eigenius formalize` on the same doc id reported `11 draw(s) recorded` before the fix

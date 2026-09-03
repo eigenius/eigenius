@@ -110,8 +110,11 @@ pub async fn script_publish(
     let mut script = Resource::new(script_iri.clone());
     script.set(
         Iri::parse("urn:eigenius:core:is_a").expect("static IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse("urn:eigenius:runtime:RuntimeScript").expect("static IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse("urn:eigenius:runtime:RuntimeScript")
+                .expect("static IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     script.set(
@@ -128,7 +131,7 @@ pub async fn script_publish(
     );
     script.set(
         Iri::parse("urn:eigenius:runtime:requires_environment").expect("static IRI"),
-        Value::ResourceRef(env.clone()),
+        Value::iri(&env.clone()),
     );
     if let Some(ep) = entry_point {
         script.set(
@@ -270,8 +273,8 @@ pub async fn script_run(
     let input_type = input_resource
         .get(&Iri::parse("urn:eigenius:core:is_a").expect("static IRI"))
         .and_then(|v| match v {
-            Value::Array(items) => items.first().and_then(|i| i.as_iri_str()),
-            other => other.as_iri_str(),
+            Value::Array(items) => items.first().and_then(|i| i.as_str()),
+            other => other.as_str(),
         })
         .map(str::to_string)
         .unwrap_or_else(|| {
@@ -288,7 +291,12 @@ pub async fn script_run(
         "@id": program_iri,
         "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
         "urn:eigenius:program:input_type": input_type,
-        "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+        // `core:Resource`, the catch-all — every WRN program declares the same. This said
+        // `reflection:DerivedResource` until P5 (2/n) removed that class, which made the
+        // declared output type name nothing that resolves. It matters more than it looks:
+        // `run_program` now reads `program:output_type` to give an output its `is_a` when the
+        // computation states no class, so a dead class here would be stamped onto results.
+        "urn:eigenius:program:output_type": "urn:eigenius:core:Resource",
         "urn:eigenius:program:body": {
             "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
             "urn:eigenius:program:function": "urn:eigenius:program:components:RunRuntimeScript",

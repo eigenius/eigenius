@@ -1,0 +1,457 @@
+// Reasoning ontology — D39 Phase 3.
+//
+// Declares the EigenTT-level vocabulary the Reasoning institution rests on:
+//
+// - Three `ChainWitness.Is*As` predicates (D49 §6) — zero-ctor inductives
+//   in `Prop`. Kernel-internal opaque: ESL exposes no surface constructor
+//   for their inhabitants. The kernel synthesises `Val::ChainWitness`
+//   values at `justification:Certificate.*` type-check sites via the per-Layer witness
+//   index (D49 §5, kernel/src/layer/witness_index.rs).
+//
+// - `justification:Term` (D39 §3) — five-constructor closed inductive:
+//   three categorical groundings (one per epistemic category) and the
+//   paper's two composition operators (Artemov `App`/`Sum`). No further
+//   evolution without a versioned change to the ADT.
+//
+// - `justification:Certificate : justification:Term -> Prop -> Type 0` (D39 §5) — the
+//   indexed inductive predicate whose inhabitants are the certificates
+//   `justification:Conclusion` carries. Seven constructors: three grounding
+//   constructors consume the matching `ChainWitness` witness; `app`
+//   realises Artemov's Application; `sum_l` / `sum_r` jointly realise
+//   Artemov's Sum (no eliminator — `Sum` is a packaging operator, not
+//   a decomposable structure); `spec_poly` eliminates a universal
+//   quantifier at any domain.
+//
+// **No implication introduction.** No rule PRODUCES `justification:Certificate(_, A -> B)`:
+// `app` yields `B`, `sum_*` yield `P`, `spec_*` yield `P(t)`. An implication
+// therefore enters only through a grounding — asserted as a resource, witnessed
+// by a trace. There is no deduction theorem, so a bridge between vocabularies
+// cannot be *derived*; it must be Declared. Quantifying it and eliminating with
+// `spec_poly` is what lets one bridge serve many claims.
+//
+// IRIs match the kernel's `well_known` constants
+// (`CHAIN_WITNESS_IS_*_AS`, etc.) — do not rename without updating
+// `kernel/src/ontology/well_known.rs` in lockstep.
+
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace reflection    = "urn:eigenius:reflection";
+namespace witness       = "urn:eigenius:witness";
+namespace justification = "urn:eigenius:justification";
+namespace prov       = "urn:eigenius:prov";
+
+// ── ChainWitness predicates ──────────────────────────────────────────
+//
+// `witness:IsDeclaredAs`, `witness:IsObservedAs` and `witness:IsVerifiedAs` are declared in
+// CORE (`ontologies/core/core-ontology.json`), not here. The kernel CONSTRUCTS their
+// inhabitants — `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the
+// layer's witness index holds a matching key — and a type the kernel inhabits cannot be
+// owned by a layer above it. While they lived here, an edit to this file could change the
+// arity `check_hooks.rs` assumes or remove the declaration it resolves by IRI, which is why
+// that hook still carries an "the chain ontology drifted from the kernel's expectation"
+// guard. The certificate ctors below reference them across the layer boundary, which is the
+// ordinary direction.
+
+// ── justification:Term ────────────────────────────────────────────────
+//
+// The interlingua. Five ctors: THREE categorical groundings and the paper's
+// two composition operators — *"an algebra of justification terms that supports
+// application and sum."* Adding a constructor is a versioned change.
+//
+// **Three grounds, not four.** `DerivedEvidence(iri)` was the fourth, naming a
+// program's output as a ground in its own right. It is gone because a computed
+// claim does not rest on the fact that a computation ran. It rests on two
+// things a run cannot supply: the assertion that the plan denotes a function
+// `I -> O`, which an accountable agent makes and no execution establishes —
+// determinism is an empirical fact about the environment, not a property
+// recoverable from a run record — and the inputs it was applied to. So a
+// computed ground is `App(Declared(plan), Observed(inputs))`, an application
+// of the two grounds that remain, and `Sampled` is a bare `Observed` leaf.
+// The measurement that forced this: 0 of 21 `stats:StatisticalAnalysisPlan`
+// resources carried a `DeclarationTrace`; every one was traced only by the
+// `ProgramTrace` of its run.
+//
+// **`SpecStr` is gone too, and it was the third operation the paper's algebra
+// does not have.** Its second field was the ONLY unchecked argument anywhere
+// in the algebra: `spec_poly` bound the instance `x : T` and the tag
+// independently with nothing relating them, so the tag was a free string the
+// author picked and no rule validated. Every other constructor argument is
+// checked — a leaf's IRI is consumed by the matching `Is*As`, `App` and `Sum`
+// are structural. Nothing is lost: `support` already discarded the tag
+// (`SpecStr(j, tag) -> support(j)`), and the instance survives in two places
+// that ARE checked — `spec_poly`'s `x : T` binding and the proposition `P(x)`.
+// The RULE stays (see `justification:Certificate.spec_poly`); only the term
+// record goes, and specialization now leaves the term unchanged, which is
+// right: eliminating a quantifier narrows the proposition, it adds no ground.
+
+data justification:Term {
+    description = "The interlingua of justification logic: what a claim RESTS ON, as an algebra rather than a grade. Five constructors — three categorical groundings (Declared, Observed, Verified, each naming a chain resource by IRI) and the paper's two composition operators, Application and Sum. It is retained whole rather than collapsed to a scalar at commit, because a scalar records what the grounds came to and not what they were, so nothing is left to recompute over; every epistemic question is a query over the retained term (D73 §1.2). There is no Derived ground: a computed claim rests on App(Declared(plan), Observed(inputs)), not on the fact that a run happened. Adding a constructor is a versioned change.";
+    Declared(core:string),
+    Observed(core:string),
+    Verified(core:string),
+    App(justification:Term, justification:Term),
+    Sum(justification:Term, justification:Term),
+}
+
+// ── justification:Certificate ──────────────────────────────────────────────────────
+//
+// Indexed inductive predicate `justification:Certificate : justification:Term -> Prop
+// -> Type 2`. Inhabits a Type (not `Prop`) so certificates are stored
+// and re-checkable — D39 §5 §last-paragraph.
+//
+// **Why `Type 2` and not `Type 0`.** A constructor argument's sort may not exceed the inductive's
+// own, or a large type is smuggled into a small one and Girard's paradox follows. `spec_poly` binds
+// `T : Type 1`, and `Type 1` is `Sort 2`, so that argument sits at `Sort 3` — the inductive must be
+// at `Sort 3` or above, which is `Type 2`. `spec_poly`'s own comment predicted this ("a rule
+// quantifying over `Type 1` domains would need `Type 2`, and so on up the ladder") while the
+// declaration said `Type 0`; nothing enforced the constraint until eigenius#188 ported nanoda's
+// `check_ctor` universe check (`references/nanoda_lib/src/inductive.rs:904`). The measurement that
+// found it reported this declaration and no other, across the whole workspace.
+//
+// This costs nothing at use sites: a certificate's TYPE moves up a universe, its VALUES do not
+// change, and nothing checks `justification:Certificate(j, p)` against a fixed sort.
+
+data justification:Certificate : justification:Term -> Prop -> Type 2 {
+    description = "An indexed inductive predicate over (term, proposition): an inhabitant of Certificate(j, P) is a CHECKED WITNESS that the justification term j grounds a claim to P. It does not assert P — a certificate records grounds, and no rule turns Certificate(j, P) into P. Seven constructors: three groundings, each consuming a witness:Is*As the kernel synthesizes from the layer's witness index rather than from anything an author writes; `app` for Artemov Application; `sum_l` / `sum_r`, which require BOTH branches to be justified (departing from LP's axiom, because `support` reads Sum disjunctively and an unchecked branch would answer a counterfactual with a ground nobody established); and `spec_poly`, which narrows a universal proposition to an instance and leaves the term index untouched, since eliminating a quantifier introduces no ground. It inhabits Type 2 rather than Prop so a certificate is stored and re-checkable, and Type 2 rather than Type 0 because spec_poly binds T : Type 1 and a constructor argument's sort may not exceed the inductive's own.";
+
+    declared :
+        forall (iri : core:string, P : Prop) =>
+        witness:IsDeclaredAs(iri, P) ->
+        justification:Certificate(justification:Declared(iri), P),
+
+    observed :
+        forall (iri : core:string, P : Prop) =>
+        witness:IsObservedAs(iri, P) ->
+        justification:Certificate(justification:Observed(iri), P),
+
+    verified :
+        forall (iri : core:string, P : Prop) =>
+        witness:IsVerifiedAs(iri, P) ->
+        justification:Certificate(justification:Verified(iri), P),
+
+    // Artemov Application: `j1 : (A -> B)` and `j2 : A` give
+    // `App(j1, j2) : B`.
+    app :
+        forall (A : Prop, B : Prop,
+                j1 : justification:Term,
+                j2 : justification:Term) =>
+        justification:Certificate(j1, A -> B) ->
+        justification:Certificate(j2, A) ->
+        justification:Certificate(justification:App(j1, j2), B),
+
+    // Artemov Sum. Both constructors take a derivation for EACH branch;
+    // which branch was preferred is still recorded by the choice of `sum_l`
+    // against `sum_r`.
+    //
+    // **This departs from LP's axiom deliberately.** Artemov's `t:F -> (t+s):F`
+    // quantifies over an arbitrary `s`, so the unused summand need not be
+    // justified, groundable, or even name a resource that exists. That is
+    // unsound HERE because `support` reads `Sum` disjunctively and reports the
+    // unchecked branch as a genuine alternative:
+    // `Sum(real_evidence, Declared("urn:does-not-exist"))` type-checked through
+    // the old `sum_l`, and `survives_without(real_evidence_iri)` then returned
+    // TRUE — the conclusion "survives" losing its only grounded evidence, by way
+    // of a branch nothing ever grounded. That is the counterfactual D73 §1.2
+    // calls the whole argument for retaining the polynomial, answered in the
+    // reassuring direction.
+    //
+    // Requiring both branches makes the two objects agree about `Sum`: the term
+    // claims two grounds are available and the certificate now demonstrates
+    // both, so `support`'s term-only reading is sound and
+    // `kernel/src/justification/` stays pure. Under this design an unverified
+    // alternative is not a ground — asserting a fallback obliges you to show the
+    // fallback works.
+    //
+    // Cost, measured: zero at the time of the change. No authored artifact in
+    // the tree used `Sum`; the only occurrences were this declaration and two
+    // synthetic `Exp` values in the reasoning crate's `project.rs` and
+    // `tests/projection.rs`, both deleted at P7. Which is the argument for doing
+    // it before the first real `Sum` is committed.
+    sum_l :
+        forall (P : Prop,
+                j1 : justification:Term,
+                j2 : justification:Term) =>
+        justification:Certificate(j1, P) ->
+        justification:Certificate(j2, P) ->
+        justification:Certificate(justification:Sum(j1, j2), P),
+
+    sum_r :
+        forall (P : Prop,
+                j1 : justification:Term,
+                j2 : justification:Term) =>
+        justification:Certificate(j1, P) ->
+        justification:Certificate(j2, P) ->
+        justification:Certificate(justification:Sum(j1, j2), P),
+
+    // Universal specialization (D39 v2 extension) at ANY domain. Given a
+    // certificate for a universally-quantified proposition `forall y : T, P(y)`,
+    // applying it at a specific instance `x : T` yields a certificate for `P(x)`.
+    // The kernel's NbE beta-reduces `(forall y, P y)(x)` to `P[x/y]` so the
+    // result type matches downstream consumers expecting `P(x)`.
+    //
+    // **The term index is `j`, unchanged.** Specialization narrows the
+    // PROPOSITION; it introduces no ground, so the justification term that
+    // certified the universal certifies the instance. The old result index was
+    // `SpecStr(j, tag)`, whose tag no rule checked — see `justification:Term`'s
+    // header for why that constructor is gone.
+    //
+    // Two consequences, stated rather than discovered later. `spec_poly` is now
+    // a certificate constructor with no corresponding term constructor, so
+    // `spec_poly` and `declared` can both target
+    // `Certificate(Declared(rule), P(x))` — the TERM stops determining which
+    // rule applies at that node. Checking is unaffected because a certificate
+    // names its own constructor, and `app`'s intermediate `A` already made
+    // inferring a certificate from a term undecidable, so this adds no new
+    // limit.
+    //
+    // THE ONLY SPECIALIZATION RULE (eigenius#203). A monomorphic
+    // `spec_str : forall (P : core:string -> Prop, j, t : core:string) => ...`
+    // stood beside this one until 2026-08-21. It was strictly subsumed —
+    // `T := core:string`, `x := t` recovers it exactly — and it was a trap: it
+    // fits rules quantified over IRIs and silently does not fit rules quantified
+    // over classes, which is the shape the DCG parser produces. Someone reaching
+    // for the obvious-looking name got the wrong rule and found out at commit.
+    //
+    // A parsed proposition's arguments are CLASSES (`ontology:compound_kind : lexicon:Entity -> Set -> Prop`),
+    // so a rule shaped
+    //
+    //     forall (g : Set, a : Set) => <parse shape>(g, a) -> onco:RequiresActivity(g, a)
+    //
+    // commits fine — a Set-quantified implication is a `Prop` — but nothing could ELIMINATE the
+    // quantifier, so one bridge was needed per sentence rather than one per parse shape.
+    //
+    // `T : Type 1`, not `T : Set` (eigenius#136). The rule this eliminates may itself
+    // quantify over a KIND — the demo's `forall (m : Set)` over
+    // `HasActivity : Set -> Set -> Prop` — so its domain genuinely is `Set`, and binding
+    // `T : Set` would need `Set : Set` to instantiate. That is impredicative, and an
+    // inconsistent type theory inhabits every `Prop`, so with Rule 21 on the commit gate a
+    // certificate could certify a false claim. Binding one level up costs no expressiveness:
+    // `Set : Type 1` holds by stratification, and every ordinary class `C : Set` satisfies
+    // `C : Type 1` by cumulativity. The level is FIXED at 1, not polymorphic — a rule
+    // quantifying over `Type 1` domains would need `Type 2`, and so on up the ladder.
+    // Genuine universe polymorphism is the standing fix; see the follow-up issue.
+    //
+    // The ladder is not hypothetical, and this comment stated one half of it while the
+    // declaration stated the other: binding `T : Type 1` here is what forces `justification:Certificate`
+    // itself to `Type 2` (see its header). `T : Type 1` is `Sort 2`, so this argument sits at
+    // `Sort 3`, and a constructor argument may not exceed its inductive's universe. The
+    // declaration said `Type 0` and nothing checked, until eigenius#188 ported nanoda's
+    // `check_ctor` universe constraint.
+    spec_poly :
+        forall (T : Type 1,
+                P : T -> Prop,
+                j : justification:Term,
+                x : T) =>
+        justification:Certificate(j, forall (y : T) => P(y)) ->
+        justification:Certificate(j, P(x)),
+}
+
+// ── justification:Claim ─────────────────────────────────────────────
+//
+// A chain-resident resource carrying a proposition: a literature rule, a
+// statistical-to-domain bridge, a claim that an analysis plan denotes a function
+// of its input, an instrument reading put on chain.
+//
+// **Warrant applies to exactly these, and the test is mechanical.** Warrant asks
+// what evidence exists for a proposition, so a resource carrying none cannot be
+// asked the question — asking it is a category error rather than an unanswered
+// question. This class is where that test is enforced, by requiring the
+// proposition.
+//
+// **Ground-neutral, deliberately.** `Certificate.declared(iri, P)` and
+// `Certificate.observed(iri, P)` both cite a resource of this kind; which ground
+// applies is which provenance trace the resource carries, not what class it is.
+// That is the separation the grade classes collapsed: `DeclaredResource` and
+// `ObservedResource` made the ground a KIND OF RESOURCE, so a reading and a rule
+// were different types of thing rather than the same kind of thing with
+// different origins. `enc:EncodedClaim` is the parser-produced special case.
+//
+// The witness a citation consumes is minted from the resource's trace, and
+// `IsDeclaredAs(iri, P)` cannot exist for a resource that states no `P`. Without
+// the requirement below, that failure surfaces as a missing witness at
+// certificate-check time rather than as a missing property at commit — later,
+// and further from the cause.
+
+class justification:Claim {
+    description = "A chain-resident resource carrying a proposition — a literature rule, a statistical-to-domain bridge, a claim that a plan denotes a function of its input, an instrument reading. Cited as a ground by justification:Certificate.declared or .observed through Declared(iri) / Observed(iri). REQUIRES reflection:canonical_proposition: carrying a proposition is what makes a resource citable, and what makes warrant a question that applies to it at all. Ground-neutral by design — which of Declared or Observed applies is which prov trace the resource carries, not which class it is, which is the separation the deleted grade classes collapsed. Who asserted it, or what activity produced it, lives on that trace.";
+    requires reflection:canonical_proposition;
+    recommends prov:had_primary_source, core:description, core:short_name;
+}
+
+// ── justification:Conclusion (D39 §4.2) ─────────────────────────────────────
+//
+// The chain-resident pairing of a proposition with a justification:Term
+// and a justification:Certificate certificate.
+//
+// It stays `subclass_of reflection:DerivedResource` because a conclusion IS
+// derived — it is produced by checking, not measured or asserted. What that
+// subclassing no longer buys is a ground: it used to make a later conclusion's
+// `DerivedEvidence(prior_iri)` resolve, so citing an earlier conclusion by IRI
+// grounded the citing one. With three grounds there is no such citation. A
+// synthesis composes with `justification:Certificate.app`, taking the cited
+// conclusion's CERTIFICATE as its antecedent, which is what `app` was for.
+// Citation by IRI is what goes, and only for unproved conclusions — the IRI was
+// standing in for a proof that did not exist.
+
+class justification:Conclusion {
+    description = "A chain-resident reasoning step: the thing a justification concludes. Carries ONE required judgement — `holds(kernel, c, Certificate(j, P))`, read as `the kernel verified that certificate c grounds a claim to P`. It does NOT assert P: a certificate records grounds, and no rule turns Certificate(j,P) into P. Replaces the three required slots this class used to carry (proposition + term + certificate), which were checked by three separate paths with nothing requiring them to be about the same claim — a certificate for one proposition could sit beside a different proposition and both checked clean. Folding them into the judgement's type is what makes the pairing the thing that gets checked. Named Conclusion rather than Sentence because `sentence` described the three-slot record; `Claim` is taken by enc:EncodedClaim.";
+    requires justification:judgement;
+    recommends justification:proof,
+               justification:subject_iri,
+               justification:refutes;
+}
+
+property justification:judgement : core:inductive {
+    description = "The checked judgement this conclusion rests on: `holds(kernel, c, Certificate(j, P))`. The proposition P and the justification term j both appear inside the TYPE, so checking the judgement checks that the certificate inhabits the certificate type for that proposition — one obligation, discharged by the uniform check-mode rule. Also the source of the conclusion's canonical proposition for witness emission: P is projected out of the judgement's type rather than read from a separate slot.";
+    class_types eigentt:Judgement;
+    domain justification:Conclusion;
+}
+
+property justification:proof : core:inductive {
+    description = "An optional SECOND judgement: `holds(logic, t, P)`, a proof of the conclusion's proposition in a logic the system hosts a checker for. Distinct from `justification:judgement` and never merged with it — that one says `j grounds P`, this one says `t proves P`, and conflating them is the substitution the two-layer separation exists to make inexpressible. Present only where a proof term exists; its absence is the normal case and carries no penalty.";
+    class_types eigentt:Judgement;
+    domain justification:Conclusion;
+}
+
+property justification:subject_iri : core:string {
+    description = "The principal Resource this conclusion is about. Aboutness, not logic: no judgement carries it. First-class EigenQL index — agents querying 'what have I concluded about X?' hit this directly. For decision-shaped reasoning (D39 §6.4), all alternative-consideration conclusions and the final pick share the same subject_iri.";
+    format = formats:iri;
+    domain justification:Conclusion;
+}
+
+property justification:refutes : core:string {
+    description = "IRI of a prior justification:Conclusion this one supersedes. Marks a belief-revision step; full chain-merge semantics handled by the chain-merge work, this property fixes only the structural marker.";
+    format = formats:iri;
+    domain justification:Conclusion;
+}
+
+// ── VerifiedPropositionView (D49 §7) ─────────────────────────────────
+//
+// The chain artifact reified by the Lean → Reasoning comorphism. Carries
+// the EigenTT-form proposition that a Lean VerifiedResource inhabits, so
+// the witness emitter for VerificationTrace reads canonical_proposition
+// from a chain resource uniformly with the other three witness families.
+// The user-authored Lean resource stays intact; this view is derived.
+//
+// Created automatically by the lean_to_justification comorphism (D49 §7);
+// not user-authored. Phase 8 wires the comorphism; this declaration
+// fixes the contract.
+
+class justification:VerifiedPropositionView {
+    description = "Comorphism-reified view of a Lean (or future Coq/Agda/Idris) VerifiedResource's proposition, expressed as an EigenTT Prop term. The witness emitter for prov:VerificationTrace looks up the view by source_verified_resource and reads canonical_proposition to build the IsVerifiedAs witness (D49 §7). Required, not optional: a view without a canonical_proposition is malformed.";
+    requires justification:source_verified_resource,
+             reflection:canonical_proposition;
+}
+
+property justification:source_verified_resource : core:string {
+    description = "IRI of the user-authored VerifiedResource (typically a lean:LeanProofTerm) whose proposition this view exposes in EigenTT form. The IsVerifiedAs witness key's iri slot uses this value (not the view's own IRI) so that justification:Certificate.verified constructors over the user-authored VerifiedResource resolve successfully.";
+    format = formats:iri;
+    domain justification:VerifiedPropositionView;
+}
+
+// ── What P7 deleted here ─────────────────────────────────────────────
+//
+// The Reasoning institution and its surface used to sit between the classes above and the
+// projections below: `reasoning:reasoning_institution`, the `ef_justification` ExportFormat,
+// the `qc_validate_justification` / `qc_entailment_query` / `qc_consistency_check`
+// QueryClasses, and the `justification:EntailmentRequest` / `ConsistencyRequest` input
+// classes with their two properties.
+//
+// ValidateJustification was the only one that did anything at commit, and P2 absorbed it into
+// uniform validation — checking a certificate is type checking, which the kernel does not
+// delegate. EntailmentQuery's question (*has a sentence claiming `P` been committed?*) is a
+// witness-index lookup. ConsistencyCheck returned `Undecidable` for every non-empty input.
+// With the handlers gone the institution hosted nothing, so it went too, and
+// `urn:eigenius:reasoning` now names nothing.
+
+
+// ════════════════════════════════════════════════════════════════════
+// Justification projections (D73 §1.2, eigenius#204)
+// ════════════════════════════════════════════════════════════════════
+//
+// WHAT THE POLYNOMIAL IS FOR. D39 §8 specified collapsing a justification:Term to a scalar grade at
+// commit. It was never implemented and D73 withdrew it — but its replacement was never built
+// either, which left the term retained and nothing able to ask anything of it. These are the
+// questions §1.2 argues the retained term can answer and a stored scalar cannot:
+//
+//   is this fully verified?              every ground of SOME alternative is Verified
+//   what does it rest on unproved?       the Declared grounds
+//   which agents are we trusting?        declared_by of those grounds (expressible since D72)
+//   which measurements?                  the Observed grounds
+//   would it survive losing X?           SOME alternative cites X nowhere
+//
+// The last one is the argument for the whole document. A scalar records what the grounds CAME TO,
+// not what they were, so there is nothing left to recompute over; the polynomial keeps them.
+//
+// ONE QUERY, NOT ONE PER QUESTION. Computing the term's support — its disjunctive normal form — is
+// the whole cost; slicing that support is free. A projection_kind enum to choose a slice would be
+// ceremony, so the result carries every slice and the one genuinely parameterised question (the
+// counterfactual) rides an optional input.
+//
+// SUM IS DISJUNCTIVE, and getting that wrong is exactly what D39 §8's propagation rule did. A
+// conclusion resting on Sum(Verified(a), Declared(b)) IS fully verified — the `a`
+// branch carries it alone. Reading Sum conjunctively understates every conclusion with a fallback,
+// which is the shape a careful author writes.
+
+// ── How warrant is asked, and what cannot ask it ─────────────────────
+//
+// Warrant is COMPUTED from a justification term. Nothing stores it: the grade
+// classes and `epistemic_status` that used to are deleted, because a stored
+// grade conflated the two axes and let the thing being graded nominate its own
+// grade.
+//
+// **EigenQL cannot express the replacement, and saying so is part of the
+// change.** A justification term lands as `Value::Json` — `Value` has no
+// inductive variant (`kernel/src/ontology/resource.rs`) — and `values_equal`
+// (`kernel/src/query/functions.rs`) has no `Json` arm, so two terms never
+// compare equal and a pattern can never bind one. Patterns admit scalars and
+// arrays; no built-in decodes a term. The one epistemic fact EigenQL could
+// filter on was the stored grade, precisely because `is_a` is an array of IRI
+// strings — and that is the fact this design removes.
+//
+// So warrant is a **Rust-API answer**: `support`, `leaves_of`, `is_fully_verified`,
+// `survives_without` and `cited_iris` in `kernel/src/justification/`, called directly on a
+// retained term. There is no chain-resident request or report shape — P7 deleted the pair
+// that existed, because the QueryClass routing between them went with the institution and
+// nothing else ever wrote one. "Warrant becomes a query" must not be read as "an EigenQL
+// query"; it is not one, and pretending otherwise would send a reader to a language that
+// cannot answer. The real fix is the λProlog extension over EigenQL's Datalog foundation,
+// tracked separately.
+//
+// PROVENANCE, by contrast, IS an EigenQL query now, and that is the point of
+// making it relational: `prov:was_attributed_to`, `prov:was_generated_by`,
+// `prov:used` and `prov:had_primary_source` are all resource-typed, so `which
+// claims rest on this instrument` is a join. It was a free-text string, and no
+// query could ask it at all.
+
+// ── What P7 deleted here ─────────────────────────────────────────────
+//
+// `justification:ProjectionRequest`, `justification:Projection` and their eight properties
+// stood here, with `reasoning:qc_project_justification` as the route between them. All three
+// went at P7: the QueryClass with the institution that hosted it, and the two shapes because
+// they existed only to carry that query's input and output. With the route gone they had no
+// producer and no consumer anywhere in the tree.
+//
+// The ALGEBRA is live and unaffected. It moved to `kernel/src/justification/` at P6.0 and is
+// reached as ordinary Rust functions over a retained term: `support`, `is_fully_verified`,
+// `leaves_of`, `survives_without`, `cited_iris`. Every question the section above lists is
+// answerable today; what is gone is a chain-resident request/report pair that nothing built.
+// Re-declaring them is cheap when something needs to persist a projection — and until then a
+// declared shape with no writer is the reserved-IRI pattern this project rejects.
+
+// ── Reasoning → Lean comorphism — deferred to gh #73 ─────────────────
+//
+// Per D39 §7, the Reasoning institution should declare a bidirectional
+// comorphism pair with Lean. The Lean → Reasoning direction (per D49 §7,
+// load-bearing for IsVerifiedAs witness emission) lives in the Lean
+// ontology and is tracked by D51 gap 2. The Reasoning → Lean direction
+// requires a chain-resident `program:Component` implementing the
+// EigenTT → Lean term/type translation, which D30 (current) does not
+// specify — D30 covers the Eigon class → Lean structure mirror, a
+// different translation. See gh #73 for the work item to revise D30
+// with a real term/type translation spec, then author the comorphism
+// transformation Component and the Reasoning → Lean comorphism here.
+// Validation rule 15 (check_comorphism_well_formedness) would reject
+// any stub authoring, so the declaration is correctly absent until the
+// translation Component is built.

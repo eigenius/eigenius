@@ -58,6 +58,9 @@ pub struct ValidationError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationRule {
     MissingRequired,
+    /// Rule 25 — a class named an inductive in `subclass_of` from outside that inductive's
+    /// own layer, or without corresponding to one of its `core:ctors` (D85 §6.1).
+    InductiveNotClosed,
     TypeMismatch,
     FormatViolation,
     PatternViolation,
@@ -69,6 +72,10 @@ pub enum ValidationRule {
     ConditionalRequirement,
     InstitutionValidation,
     UniverseStratificationViolation,
+    /// A conclusion's justification is not well-founded: every alternative in its
+    /// support passes back through the conclusion itself (P6 / the paper §"Well-Foundedness
+    /// Conditions"). Vacuous on a premise with no support to inspect.
+    NotWellFounded,
     /// A class or property declaration references an IRI that doesn't
     /// resolve to a resource of the expected kind in the layer chain.
     /// Examples: `is_a` referencing a missing class, `requires`
@@ -77,11 +84,6 @@ pub enum ValidationRule {
     /// `core:DataType`, `subclass_of` referencing a missing
     /// `core:Class`. See eigenius#26.
     UnresolvedClassReference,
-    /// An inductive value carries a `ctor` not declared on its
-    /// referenced `InductiveType`, an arity mismatch against the
-    /// ctor's `arg_types`, or an arg whose value doesn't match its
-    /// declared `type_name`. D32 §3.5.
-    InductiveValueMismatch,
     /// A FormulaTerm `App` spine doesn't match the leftmost operator's
     /// declared arity. D32 §5.4 / Phase 19d.0.d.
     OperatorArityMismatch,
@@ -134,29 +136,29 @@ pub enum ValidationRule {
     ///
     /// Rule 23, `rules::inductive_decl.rs`. See eigenius#92, eigenius#188.
     InductiveDeclInadmissible,
-    /// An `eigentt:TypeExpr`-valued property carries a term that fails to
+    /// An `eigentt:Term`-valued property carries a term that fails to
     /// decode through the D47 codec — a malformed tree, an unresolved
     /// `ConstRef`, or a `CtorApp` to an unknown ctor. The single decode
     /// diagnostic for every eigentt slot (Rule 21, `eigentt_value.rs`);
     /// generalizes the former canonical-proposition-only check, so malformed
     /// propositions are rejected at commit and never silently absent the
     /// corresponding `ChainWitness`.
-    TypeExprMalformed,
-    /// An `eigentt:TypeExpr`-valued property decodes but does not type-check
+    TermMalformed,
+    /// An `eigentt:Term`-valued property decodes but does not type-check
     /// against the chain — the Semantic Felicity Condition (e.g. a predicate
     /// applied to the wrong argument type, an application of a non-function).
     /// Caught by `check_infer` (Rule 21).
-    TypeExprIllTyped,
+    TermIllTyped,
     /// A slot whose declared role is a **proposition**
-    /// ([`well_known::PROPOSITION_SLOTS`](crate::ontology::well_known::PROPOSITION_SLOTS))
+    /// (its `eigentt:obligation` names `inhabits(Prop)`)
     /// holds a term that type-checks but does not inhabit `Prop` — a type
     /// (`Sort(1)` and up), an unapplied predicate, or a literal. Distinct
-    /// from [`ValidationRule::TypeExprIllTyped`]: the term is well-typed,
+    /// from [`ValidationRule::TermIllTyped`]: the term is well-typed,
     /// it is simply not an assertion. Every downstream consumer of these
-    /// slots — the witness index, `JustifiedBy` certificate checking —
+    /// slots — the witness index, `justification:Certificate` certificate checking —
     /// reads them as propositions by construction, so this is the gate
     /// that makes that construction true. See eigenius#175.
-    TypeExprNotAProposition,
+    TermNotAProposition,
     /// An `eigentt:Definition` is not well-formed (D66 slice 2). One of: its body does not decode;
     /// it is **recursive**, which would make decode's peel-and-substitute non-terminating; its body
     /// is **not in normal form**, breaking D9's rule that a definition's identity is the normal form
@@ -497,12 +499,16 @@ impl Validator {
                 // Rule 17: FormulaTerm App-spine rank check against
                 // the leftmost operator's declared arity (D32 §5.4 /
                 // Phase 19d.0.d). No-op for non-FormulaTerm values.
-                errors.extend(self.check_formula_term_arity(prop_def, value, prop_iri, &res_id));
+                errors.extend(
+                    self.check_formula_term_arity(prop_def, value, prop_iri, &res_id, resource),
+                );
 
-                // Rule 21: eigentt:TypeExpr fields must decode AND type-check
+                // Rule 21: eigentt:Term fields must decode AND type-check
                 // against the chain — generalizes Rule 20's decode-only check
                 // to every type_expr slot; lands the deferred felicity check.
-                errors.extend(self.check_type_expr_well_typed(prop_def, value, prop_iri, &res_id));
+                errors.extend(
+                    self.check_type_expr_well_typed(prop_def, value, prop_iri, &res_id, resource),
+                );
             }
             // Rule 12 (open world): unknown properties are allowed
         }
@@ -517,6 +523,13 @@ impl Validator {
         // property value must resolve to a chain resident (closes the open-world
         // "skip — might be external" hole; enforces the same-or-lower invariant).
         errors.extend(self.check_reference_integrity(resource, &res_id));
+
+        // Rule 23: Well-foundedness — a premise's support may not transitively include
+        // the premise. Evaluated over the DECODED TERM rather than the `core:mentions`
+        // edge set, because support reads `Sum` disjunctively and an edge-set walk would
+        // falsely reject a conclusion one of whose branches avoids the cycle. See
+        // `kernel/src/justification/wellfounded.rs`.
+        errors.extend(self.check_well_founded(resource, &res_id));
 
         // Rule 15: Comorphism well-formedness (D14 §4.5 / §5).
         // For Comorphism resources, verify that `export_format` and
@@ -555,6 +568,12 @@ impl Validator {
         // the resource rather than on a property value — the declaration is the resource.
         errors.extend(self.check_inductive_declaration(resource, &res_id));
         errors.extend(self.check_inductive_not_redefined(resource, &res_id));
+
+        // Rule 25 (D85 §6.1): an inductive stays CLOSED. A constructor class may name its
+        // inductive in `subclass_of` only from that inductive's own layer, and only for a
+        // constructor the inductive declares. Derived classes satisfy both by construction;
+        // this answers one written by hand.
+        errors.extend(self.check_inductive_closure(resource, &res_id));
 
         // Rule 23: Embedded-resource recursion. A `Value::Embedded`
         // whose resource declares an `is_a` is a nested *typed instance*
@@ -623,11 +642,9 @@ impl Validator {
 
     /// Extract the data_type IRI string from a property definition.
     pub(crate) fn get_data_type_str(&self, prop_def: &Resource) -> Option<String> {
-        // `data_type` is a `data_type: resource` property, so after
-        // `LayerBuilder::canonicalise_resource_refs` runs the value is
-        // a `Value::ResourceRef`. Accept the (legacy) `Value::String`
-        // shape too for resources read off the wire before
-        // canonicalisation (RPC payloads, FIBER intermediates).
+        // `data_type` is a `data_type: resource` property, so its value is an IRI string.
+        // Read it through `as_iri` rather than matching a variant — the reading discipline
+        // that outlived `Value::ResourceRef` (D85 §6.2).
         prop_def
             .get(&iri(wk::DATA_TYPE_PROP))
             .and_then(|v| v.as_iri())
@@ -763,7 +780,7 @@ impl Validator {
     ///    triple).
     /// 4. Each binder's `parameter_type` (when populated) matches
     ///    the witness contract:
-    ///    - binders 1 and 2: ResourceRef to `target_class`
+    ///    - binders 1 and 2: an IRI reference to `target_class`
     ///    - binder 3: embedded `InductiveArgType` with
     ///      `type_name = Option` and `type_args = [target_class]`
     ///
@@ -789,7 +806,7 @@ impl Validator {
         let Some(target_class_value) = resource.get(&iri(wk::MERGE_TARGET_CLASS)) else {
             return errors;
         };
-        let Some(target_class_iri_str) = target_class_value.as_iri_str() else {
+        let Some(target_class_iri_str) = target_class_value.as_str() else {
             return errors;
         };
         let Ok(target_class) = Iri::parse(target_class_iri_str) else {
@@ -801,7 +818,7 @@ impl Validator {
         let Some(transformation_value) = resource.get(&iri(wk::MERGE_TRANSFORMATION)) else {
             return errors;
         };
-        let Some(transformation_iri_str) = transformation_value.as_iri_str() else {
+        let Some(transformation_iri_str) = transformation_value.as_str() else {
             return errors;
         };
         let Ok(transformation_iri) = Iri::parse(transformation_iri_str) else {
@@ -921,7 +938,7 @@ impl Validator {
             let (label, ok) = match idx {
                 0 | 1 => (
                     "the class A (merge_target_class)",
-                    value.as_iri_str() == Some(class_iri_str),
+                    value.as_str() == Some(class_iri_str),
                 ),
                 2 => (
                     "Option<A> (Option of merge_target_class)",
@@ -1111,8 +1128,12 @@ impl Validator {
         //    no decode, and is also where a self-reference is visible as itself rather than as
         //    whatever decode turned it into. There is no fuel and no termination argument for
         //    recursion here — see #66.
-        if let (Some(id), crate::ontology::resource::Value::Json(json)) = (res_id, body_value) {
-            if json_mentions_const_ref(json, id.as_str()) {
+        // This was gated on `Value::Json` and stopped matching the moment D85 §5 step 4 made
+        // a definition body a value resource — and a guard that never fires looks exactly
+        // like a guard with nothing to catch. The recursion was still refused, but by a
+        // decode failure with an unrelated message.
+        if let Some(id) = res_id {
+            if mentions_iri(body_value, id) {
                 fail(
                     &mut errors,
                     Some(body_prop.clone()),
@@ -1228,9 +1249,8 @@ impl Validator {
                 continue;
             }
 
-            // Collect IRI references from the value, accepting both
-            // canonical `ResourceRef` and pre-canonical `String`
-            // shapes via `Value::as_iri` / `as_iri_array`.
+            // Collect IRI references from the value via `Value::as_iri` / `as_iri_array`,
+            // which parse rather than matching a variant.
             let ref_iris: Vec<Iri> = match value {
                 Value::Array(_) => value.as_iri_array(),
                 single => single.as_iri().map(|i| vec![i]).unwrap_or_default(),
@@ -1272,13 +1292,9 @@ impl Validator {
 /// import directly from `ontology::well_known`.
 pub(crate) use crate::ontology::well_known::iri;
 
-/// Helper: extract a single resource-IRI from a Value. Accepts both
-/// `Value::ResourceRef` (canonical) and `Value::String` (the JSON
-/// parser stores all strings as `Value::String` — `data_type` is
-/// frequently authored as a bare string in source ontologies).
+/// Helper: extract a single resource-IRI from a Value — any string that parses as one.
 pub(crate) fn value_as_iri(value: &Value) -> Option<Iri> {
     match value {
-        Value::ResourceRef(i) => Some(i.clone()),
         Value::String(s) => Iri::parse(s).ok(),
         _ => None,
     }
@@ -1297,7 +1313,7 @@ fn is_option_of_class(value: &Value, class_iri: &str) -> bool {
     if !resource.is_instance_of(&inductive_arg_type) {
         return false;
     }
-    // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188), so the referenced IRI is the
+    // `core:type_name` is an `eigentt:Term` (eigenius#188), so the referenced IRI is the
     // value's HEAD, not the value itself.
     let Ok(name_str) = crate::program::ground::arg_type_head(resource) else {
         return false;
@@ -1311,7 +1327,7 @@ fn is_option_of_class(value: &Value, class_iri: &str) -> bool {
     if args.len() != 1 {
         return false;
     }
-    args[0].as_iri_str() == Some(class_iri)
+    args[0].as_str() == Some(class_iri)
 }
 
 /// Format a resource's `is_a` list for inclusion in an error message.
@@ -1354,24 +1370,16 @@ struct ComorphismFormatRef<'a> {
     expected_label: &'a str,
 }
 
-/// Does this encoded `eigentt:TypeExpr` tree contain a `ConstRef` to `target`? Used by Rule 24's
-/// recursion check, on the encoded form because that is where a self-reference is visible as itself
-/// rather than as whatever decode turned it into.
-fn json_mentions_const_ref(v: &serde_json::Value, target: &str) -> bool {
-    match v {
-        serde_json::Value::Object(o) => {
-            if o.get("ctor").and_then(|c| c.as_str()) == Some("ConstRef") {
-                if let Some(args) = o.get("args").and_then(|a| a.as_array()) {
-                    if args.first().and_then(|x| x.as_str()) == Some(target) {
-                        return true;
-                    }
-                }
-            }
-            o.values().any(|x| json_mentions_const_ref(x, target))
-        }
-        serde_json::Value::Array(a) => a.iter().any(|x| json_mentions_const_ref(x, target)),
-        _ => false,
-    }
+/// Does this encoded term mention `target`? Used by Rule 24's recursion check, on the encoded
+/// form because that is where a self-reference is visible as itself rather than as whatever
+/// decode turned it into.
+///
+/// Delegates to the one walker that reads both shapes, rather than keeping a second one that
+/// only understood the tagged dict.
+fn mentions_iri(v: &crate::ontology::resource::Value, target: &Iri) -> bool {
+    let mut out = std::collections::BTreeSet::new();
+    crate::layer::term_mentions::json_mentions_of_value(v, &mut out);
+    out.contains(target)
 }
 
 /// The first beta-redex in `e` — an `App` whose head is a `Lam` — rendered for the diagnostic, or
@@ -1514,183 +1522,173 @@ mod tests {
         ctx.head().clone()
     }
 
+    // `derived_resource_without_derivation_passes_with_recommendation` stood here. It
+    // asserted that a resource carrying `reflection:DerivedResource` and no `derivation`
+    // raises no `MissingRequired`, because `derivation` was recommended rather than required
+    // on that class. P5 (2/n) deleted the class, so the test kept passing for a reason it
+    // never claimed: an `is_a` naming nothing resolvable has no `requires` to enforce. It
+    // asserted the absence of an error that can no longer occur.
+
+    // These exercised `requires` enforcement through the four grade classes. Those
+    // are deleted — a stored grade conflated provenance with warrant — so the same
+    // mechanism is exercised through the `prov` trace classes, which require things
+    // for reasons that survive: a declaration nobody stands behind establishes
+    // nothing, and an observation with no activity behind it names no origin.
+
     #[test]
-    fn derived_resource_without_derivation_passes_with_recommendation() {
-        // Per the reflection ontology, `derivation` is *recommended*
-        // (not required) on `DerivedResource`. A resource carrying the
-        // epistemic stamp without a chain-resident trace IRI still
-        // validates — substrate-produced resources from FIBER ... INTO
-        // commits and post-translation comorphism reify outputs are
-        // derived by construction but may not have a kernel-generated
-        // ProgramTrace yet (D14 §9.3 chain reinsertion). When the
-        // kernel does generate a trace (RunProgram, AutoOnLoad fires),
-        // it sets `derivation` so the audit trail is complete.
+    fn a_declaration_trace_with_its_required_properties_passes() {
         let base = build_full_bootstrap_layer();
         let mut builder = LayerBuilder::new("test", Some(base));
+
+        // `prov:resource` is resource-typed, so Rule 22's closed-world check needs the
+        // subject on-chain. That it does is the point of the retype.
         builder
             .add_resource(make_resource(
-                "urn:eigenius:test:bad_derived",
+                "urn:eigenius:test:subject",
                 vec![(
                     wk::IS_A,
-                    Value::Array(vec![Value::String(
-                        "urn:eigenius:reflection:DerivedResource".to_string(),
-                    )]),
+                    Value::Array(vec![Value::String(wk::CLASS.to_string())]),
                 )],
             ))
             .unwrap();
 
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-
-        let derived_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| {
-                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_derived")
-                    && e.rule == ValidationRule::MissingRequired
-            })
-            .collect();
-        assert!(
-            derived_errors.is_empty(),
-            "DerivedResource without 'derivation' should validate (derivation is recommended, not required), got: {derived_errors:?}"
-        );
-    }
-
-    #[test]
-    fn declared_resource_with_declared_by_passes() {
-        let base = build_full_bootstrap_layer();
-        let mut builder = LayerBuilder::new("test", Some(base));
-
         builder
             .add_resource(make_resource(
-                "urn:eigenius:test:good_declared",
+                "urn:eigenius:test:good_trace",
                 vec![
                     (
                         wk::IS_A,
                         Value::Array(vec![Value::String(
-                            "urn:eigenius:reflection:DeclaredResource".to_string(),
+                            "urn:eigenius:prov:DeclarationTrace".to_string(),
                         )]),
                     ),
                     (
-                        "urn:eigenius:reflection:declared_by",
-                        Value::String("test user".into()),
+                        "urn:eigenius:prov:resource",
+                        Value::String("urn:eigenius:test:subject".into()),
+                    ),
+                    (
+                        "urn:eigenius:prov:was_attributed_to",
+                        Value::String("urn:eigenius:prov:agent:unattributed".into()),
+                    ),
+                    (
+                        "urn:eigenius:prov:timestamp",
+                        Value::String("2026-08-30T00:00:00Z".into()),
                     ),
                 ],
             ))
             .unwrap();
 
         let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-
-        let declared_errors: Vec<_> = errors
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        let mine: Vec<_> = errors
             .iter()
             .filter(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:good_trace")
+            })
+            .collect();
+        assert!(
+            mine.is_empty(),
+            "a complete DeclarationTrace should pass: {mine:?}"
+        );
+    }
+
+    #[test]
+    fn a_declaration_trace_without_an_agent_fails() {
+        // The accountability requirement: `prov:was_attributed_to` is required
+        // because a declaration with no agent behind it asserts nothing anybody
+        // can be held to.
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // `prov:resource` is resource-typed, so Rule 22's closed-world check needs the
+        // subject on-chain. That it does is the point of the retype.
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:subject",
+                vec![(
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::CLASS.to_string())]),
+                )],
+            ))
+            .unwrap();
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:bad_trace",
+                vec![
+                    (
+                        wk::IS_A,
+                        Value::Array(vec![Value::String(
+                            "urn:eigenius:prov:DeclarationTrace".to_string(),
+                        )]),
+                    ),
+                    (
+                        "urn:eigenius:prov:resource",
+                        Value::String("urn:eigenius:test:subject".into()),
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        assert!(
+            errors.iter().any(|e| {
+                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_trace")
+                    && e.rule == ValidationRule::MissingRequired
+            }),
+            "a DeclarationTrace without prov:was_attributed_to should fail"
+        );
+    }
+
+    #[test]
+    fn an_observation_trace_without_a_generating_activity_fails() {
+        // `prov:was_generated_by` is required so the instrument, release or run
+        // behind an observation is reachable from every claim that rests on it.
+        // It was a free-text `reflection:source` string, which could name an
+        // origin but not link to one.
+        let base = build_full_bootstrap_layer();
+        let mut builder = LayerBuilder::new("test", Some(base));
+
+        // `prov:resource` is resource-typed, so Rule 22's closed-world check needs the
+        // subject on-chain. That it does is the point of the retype.
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:subject",
+                vec![(
+                    wk::IS_A,
+                    Value::Array(vec![Value::String(wk::CLASS.to_string())]),
+                )],
+            ))
+            .unwrap();
+
+        builder
+            .add_resource(make_resource(
+                "urn:eigenius:test:bad_observation",
+                vec![
+                    (
+                        wk::IS_A,
+                        Value::Array(vec![Value::String(
+                            "urn:eigenius:prov:ObservationTrace".to_string(),
+                        )]),
+                    ),
+                    (
+                        "urn:eigenius:prov:resource",
+                        Value::String("urn:eigenius:test:subject".into()),
+                    ),
+                ],
+            ))
+            .unwrap();
+
+        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
+        let errors = Validator::new(Arc::clone(&layer)).validate();
+        assert!(
+            errors.iter().any(|e| {
                 e.resource_id.as_ref().map(|i| i.as_str())
-                    == Some("urn:eigenius:test:good_declared")
-            })
-            .collect();
-        assert!(
-            declared_errors.is_empty(),
-            "DeclaredResource with 'declared_by' should pass: {declared_errors:?}"
-        );
-    }
-
-    #[test]
-    fn declared_resource_without_declared_by_fails() {
-        let base = build_full_bootstrap_layer();
-        let mut builder = LayerBuilder::new("test", Some(base));
-
-        builder
-            .add_resource(make_resource(
-                "urn:eigenius:test:bad_declared",
-                vec![(
-                    wk::IS_A,
-                    Value::Array(vec![Value::String(
-                        "urn:eigenius:reflection:DeclaredResource".to_string(),
-                    )]),
-                )],
-            ))
-            .unwrap();
-
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-
-        assert!(
-            errors.iter().any(|e| {
-                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_declared")
+                    == Some("urn:eigenius:test:bad_observation")
                     && e.rule == ValidationRule::MissingRequired
             }),
-            "DeclaredResource without 'declared_by' should fail"
-        );
-    }
-
-    #[test]
-    fn observed_resource_without_source_fails() {
-        let base = build_full_bootstrap_layer();
-        let mut builder = LayerBuilder::new("test", Some(base));
-
-        builder
-            .add_resource(make_resource(
-                "urn:eigenius:test:bad_observed",
-                vec![(
-                    wk::IS_A,
-                    Value::Array(vec![Value::String(
-                        "urn:eigenius:reflection:ObservedResource".to_string(),
-                    )]),
-                )],
-            ))
-            .unwrap();
-
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-
-        assert!(
-            errors.iter().any(|e| {
-                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_observed")
-                    && e.rule == ValidationRule::MissingRequired
-            }),
-            "ObservedResource without 'source' should fail"
-        );
-    }
-
-    #[test]
-    fn verified_resource_requires_both_derivation_and_verification() {
-        let base = build_full_bootstrap_layer();
-        let mut builder = LayerBuilder::new("test", Some(base));
-
-        // VerifiedResource subclasses DerivedResource, so needs both
-        // 'derivation' (from DerivedResource) and 'verification' (its own)
-        builder
-            .add_resource(make_resource(
-                "urn:eigenius:test:bad_verified",
-                vec![(
-                    wk::IS_A,
-                    Value::Array(vec![Value::String(
-                        "urn:eigenius:reflection:VerifiedResource".to_string(),
-                    )]),
-                )],
-            ))
-            .unwrap();
-
-        let layer = Arc::new(builder.build(crate::layer::LayerStorage::in_memory()));
-        let validator = Validator::new(Arc::clone(&layer));
-        let errors = validator.validate();
-
-        let verified_errors: Vec<_> = errors
-            .iter()
-            .filter(|e| {
-                e.resource_id.as_ref().map(|i| i.as_str()) == Some("urn:eigenius:test:bad_verified")
-                    && e.rule == ValidationRule::MissingRequired
-            })
-            .collect();
-        // Should require both 'derivation' and 'verification'
-        assert!(
-            verified_errors.len() >= 2,
-            "VerifiedResource should require both 'derivation' and 'verification', got {} errors: {verified_errors:?}",
-            verified_errors.len()
+            "an ObservationTrace without prov:was_generated_by should fail"
         );
     }
 
@@ -1926,7 +1924,7 @@ mod tests {
     // trace metadata (program / started_at / completed_at / trace_tree
     // / output / metrics) lives in `recommends` — kernel-emitted
     // traces typically fill them; user-authored ProgramTraces wired
-    // alongside StatisticalAnalysisPlan / ReasoningSentence / etc. typically
+    // alongside StatisticalAnalysisPlan / justification:Conclusion / etc. typically
     // don't need them.
 
     #[test]
@@ -1941,19 +1939,19 @@ mod tests {
                     (
                         wk::IS_A,
                         Value::Array(vec![Value::String(
-                            "urn:eigenius:reflection:ProgramTrace".to_string(),
+                            "urn:eigenius:prov:ProgramTrace".to_string(),
                         )]),
                     ),
                     (
-                        "urn:eigenius:reflection:resource",
+                        "urn:eigenius:prov:resource",
                         Value::String("urn:eigenius:test:target_resource".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:source",
+                        "urn:eigenius:prov:was_generated_by",
                         Value::String("test-institution:validate".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:timestamp",
+                        "urn:eigenius:prov:timestamp",
                         Value::String("2026-04-23T12:00:00Z".to_string()),
                     ),
                 ],
@@ -1990,25 +1988,25 @@ mod tests {
                 (
                     wk::IS_A,
                     Value::Array(vec![Value::String(
-                        "urn:eigenius:reflection:ProgramTrace".to_string(),
+                        "urn:eigenius:prov:ProgramTrace".to_string(),
                     )]),
                 ),
                 (
-                    "urn:eigenius:reflection:resource",
+                    "urn:eigenius:prov:resource",
                     Value::String("urn:eigenius:test:target_resource".to_string()),
                 ),
                 (
-                    "urn:eigenius:reflection:source",
+                    "urn:eigenius:prov:was_generated_by",
                     Value::String("test-institution:validate".to_string()),
                 ),
                 (
-                    "urn:eigenius:reflection:timestamp",
+                    "urn:eigenius:prov:timestamp",
                     Value::String("2026-04-23T12:00:00Z".to_string()),
                 ),
             ]
             .into_iter()
             .chain(std::iter::once((
-                "urn:eigenius:reflection:trace_tree",
+                "urn:eigenius:prov:trace_tree",
                 Value::Embedded(Box::new(tree)),
             )))
             .collect::<Vec<_>>()
@@ -2094,19 +2092,19 @@ mod tests {
                     (
                         wk::IS_A,
                         Value::Array(vec![Value::String(
-                            "urn:eigenius:reflection:ProgramTrace".to_string(),
+                            "urn:eigenius:prov:ProgramTrace".to_string(),
                         )]),
                     ),
                     (
-                        "urn:eigenius:reflection:source",
+                        "urn:eigenius:prov:was_generated_by",
                         Value::String("test:src".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:timestamp",
+                        "urn:eigenius:prov:timestamp",
                         Value::String("2026-04-23T12:00:00Z".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:trace_tree",
+                        "urn:eigenius:prov:trace_tree",
                         Value::Embedded(Box::new(let_trace)),
                     ),
                 ],
@@ -2140,19 +2138,19 @@ mod tests {
                     (
                         wk::IS_A,
                         Value::Array(vec![Value::String(
-                            "urn:eigenius:reflection:ProgramTrace".to_string(),
+                            "urn:eigenius:prov:ProgramTrace".to_string(),
                         )]),
                     ),
                     (
-                        "urn:eigenius:reflection:resource",
+                        "urn:eigenius:prov:resource",
                         Value::String("urn:eigenius:test:target_resource".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:program",
+                        "urn:eigenius:prov:program",
                         Value::String("urn:eigenius:test:some_program".to_string()),
                     ),
                     (
-                        "urn:eigenius:reflection:started_at",
+                        "urn:eigenius:prov:started_at",
                         Value::String("2026-04-23T12:00:00Z".to_string()),
                     ),
                 ],
@@ -2181,21 +2179,21 @@ mod tests {
             .filter_map(|e| e.property.as_ref().map(|i| i.as_str()))
             .collect();
         assert!(
-            missing_props.contains("urn:eigenius:reflection:source"),
+            missing_props.contains("urn:eigenius:prov:was_generated_by"),
             "expected `source` to be flagged missing; flagged set = {missing_props:?}",
         );
         assert!(
-            missing_props.contains("urn:eigenius:reflection:timestamp"),
+            missing_props.contains("urn:eigenius:prov:timestamp"),
             "expected `timestamp` to be flagged missing; flagged set = {missing_props:?}",
         );
         // started_at is now recommended, not required — a trace with
         // started_at but missing timestamp must not flag started_at.
         assert!(
-            !missing_props.contains("urn:eigenius:reflection:started_at"),
+            !missing_props.contains("urn:eigenius:prov:started_at"),
             "`started_at` is recommended, not required: {missing_props:?}",
         );
         assert!(
-            !missing_props.contains("urn:eigenius:reflection:program"),
+            !missing_props.contains("urn:eigenius:prov:program"),
             "`program` is recommended, not required: {missing_props:?}",
         );
     }
@@ -2494,7 +2492,7 @@ mod tests {
         let mut patient = Resource::new(iri("urn:test:Patient"));
         patient.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         patient.set(iri(wk::SHORT_NAME), Value::String("Patient".to_string()));
         builder.add_resource(patient).unwrap();
@@ -2518,7 +2516,9 @@ mod tests {
             let mut lam = Resource::new_embedded();
             lam.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:program:Lambda").as_str().to_string(),
+                )]),
             );
             lam.set(
                 iri("urn:eigenius:program:parameter"),
@@ -2543,7 +2543,9 @@ mod tests {
         let mut r = Resource::new_embedded();
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Var"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:program:Var").as_str().to_string(),
+            )]),
         );
         r.set(
             iri("urn:eigenius:program:name"),
@@ -2556,16 +2558,20 @@ mod tests {
         let mut r = Resource::new_embedded();
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_ARG_TYPE))]),
+            Value::Array(vec![Value::String(
+                iri(wk::INDUCTIVE_ARG_TYPE).as_str().to_string(),
+            )]),
         );
-        // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
+        // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
         r.set(
             iri(wk::TYPE_NAME),
-            Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [wk::OPTION]})),
+            crate::testing::term_value(&serde_json::json!({
+                "ctor": "ConstRef", "args": [wk::OPTION, []],
+            })),
         );
         r.set(
             iri(wk::TYPE_ARGS),
-            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+            Value::Array(vec![Value::iri(&iri(class_iri))]),
         );
         Value::Embedded(Box::new(r))
     }
@@ -2574,15 +2580,14 @@ mod tests {
         let mut r = Resource::new(iri(iri_str));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::MERGE_COMORPHISM))]),
+            Value::Array(vec![Value::String(
+                iri(wk::MERGE_COMORPHISM).as_str().to_string(),
+            )]),
         );
-        r.set(
-            iri(wk::MERGE_TARGET_CLASS),
-            Value::ResourceRef(iri(target_class)),
-        );
+        r.set(iri(wk::MERGE_TARGET_CLASS), Value::iri(&iri(target_class)));
         r.set(
             iri(wk::MERGE_TRANSFORMATION),
-            Value::ResourceRef(iri(transformation)),
+            Value::iri(&iri(transformation)),
         );
         r
     }
@@ -2592,8 +2597,8 @@ mod tests {
         let lambda = make_witness_lambda_chain(
             "urn:test:take_b_term",
             [
-                Some(Value::ResourceRef(iri("urn:test:Patient"))),
-                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(Value::iri(&iri("urn:test:Patient"))),
+                Some(Value::iri(&iri("urn:test:Patient"))),
                 Some(make_option_of("urn:test:Patient")),
             ],
             make_var_b_body(),
@@ -2669,8 +2674,8 @@ mod tests {
         let lambda = make_witness_lambda_chain(
             "urn:test:wrong_param_term",
             [
-                Some(Value::ResourceRef(iri("urn:test:Visit"))),
-                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(Value::iri(&iri("urn:test:Visit"))),
+                Some(Value::iri(&iri("urn:test:Patient"))),
                 Some(make_option_of("urn:test:Patient")),
             ],
             make_var_b_body(),
@@ -2702,8 +2707,8 @@ mod tests {
         let lambda = make_witness_lambda_chain(
             "urn:test:wrong_opt_term",
             [
-                Some(Value::ResourceRef(iri("urn:test:Patient"))),
-                Some(Value::ResourceRef(iri("urn:test:Patient"))),
+                Some(Value::iri(&iri("urn:test:Patient"))),
+                Some(Value::iri(&iri("urn:test:Patient"))),
                 Some(make_option_of("urn:test:Visit")),
             ],
             make_var_b_body(),
@@ -2736,7 +2741,9 @@ mod tests {
         let mut single_lambda = Resource::new(iri("urn:test:single_term"));
         single_lambda.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:program:Lambda").as_str().to_string(),
+            )]),
         );
         single_lambda.set(
             iri("urn:eigenius:program:parameter"),
@@ -2779,7 +2786,7 @@ mod tests {
         target_class: &str,
         body: Resource,
     ) -> Resource {
-        let class_value = Value::ResourceRef(iri(target_class));
+        let class_value = Value::iri(&iri(target_class));
         let option_value = make_option_of(target_class);
         let param_types = [
             Some(class_value.clone()),
@@ -2801,7 +2808,9 @@ mod tests {
             let mut ar = Resource::new_embedded();
             ar.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri(wk::TYPE_BINDER_ARROW))]),
+                Value::Array(vec![Value::String(
+                    iri(wk::TYPE_BINDER_ARROW).as_str().to_string(),
+                )]),
             );
             ar.set(iri(wk::BINDER_NAME), Value::String(params[i].to_string()));
             ar.set(iri(wk::BINDER_KIND), kinds[i].clone());
@@ -2842,7 +2851,9 @@ mod tests {
         let mut bad_body = Resource::new_embedded();
         bad_body.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Var"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:program:Var").as_str().to_string(),
+            )]),
         );
         bad_body.set(
             iri("urn:eigenius:program:name"),
@@ -2904,7 +2915,9 @@ mod tests {
             let mut lam = Resource::new_embedded();
             lam.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:program:Lambda"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:program:Lambda").as_str().to_string(),
+                )]),
             );
             lam.set(
                 iri("urn:eigenius:program:parameter"),
@@ -2922,7 +2935,7 @@ mod tests {
         let mut wrapper = Resource::new(iri(outer_iri));
         wrapper.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         wrapper.set(iri(wk::SHORT_NAME), Value::String("outer".to_string()));
         // Stash the embedded lambda on a benign property — even if
@@ -2961,6 +2974,7 @@ mod tests {
                 (a, b, opt) => b
             }
             "#,
+            crate::testing::term_chain(),
         )
         .unwrap();
         let layer = build_d37_layer(resources);
@@ -3098,11 +3112,13 @@ mod phase_d_parity {
         let mut prop = Resource::new(Iri::parse("urn:t:some_prop").unwrap());
         prop.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(Iri::parse(wk::PROPERTY).unwrap())]),
+            Value::Array(vec![Value::String(
+                Iri::parse(wk::PROPERTY).unwrap().as_str().to_string(),
+            )]),
         );
         prop.set(
             Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::RESOURCE).unwrap()),
+            Value::iri(&Iri::parse(wk::RESOURCE).unwrap()),
         );
         let classes = prop.is_a();
         let refs: Vec<&Iri> = classes.iter().collect();
@@ -3184,8 +3200,8 @@ mod class_fields_memo {
             let mut r = Resource::new(Iri::parse(&format!("urn:t:inst{n}")).unwrap());
             r.set(
                 Iri::parse(wk::IS_A).unwrap(),
-                Value::Array(vec![Value::ResourceRef(
-                    Iri::parse(wk::DECLARED_RESOURCE).unwrap(),
+                Value::Array(vec![Value::String(
+                    Iri::parse(wk::CLASS).unwrap().as_str().to_string(),
                 )]),
             );
             d.add_resource(r).unwrap();

@@ -244,7 +244,7 @@ sentence group under one `--ns` root:
      walks the full chain).
    - `enc:AnaphorBinding` vocabulary (closed `BindingAuthority` enumeration
      recency/proposer/replay via `allows_only`; `antecedent_resource` for individuals/claims,
-     `antecedent_term` = the D47 `eigentt:TypeExpr` encoding for kinds; `enc:confidence`
+     `antecedent_term` = the D47 `eigentt:Term` encoding for kinds; `enc:confidence`
      domain extended) + emission (one binding resource per resolved hole, after the
      DecisionPoint; empty for closed readings — pin-arm bytes unchanged) +
      `encoding_validates` pins the enumeration.

@@ -106,7 +106,7 @@ reference chain is in [`tracer-chain.esl`](tracer-chain.esl)
 |---|---|---|
 | Decisions | five `Conforms…(solution)` — featurization (ECFP), **label mapping** (4→2), **configs** (the row-range splits + 3 configs), model selection (RF + 5-fold CV), output format (3 CSVs, `{DILI,NoDILI}`) | Declared (each rationale cites the spec) |
 | Acceptance rule | `∀p. ConformsFeaturization(p) → … → ConformsOutputFormat(p) → ImplementsDILIPredictor(p)` | Declared |
-| Conclusion | `ReasoningSentence ImplementsDILIPredictor(solution)` — 5-premise `App`-chain, `SpecStr` core | — |
+| Conclusion | `justification:Conclusion ImplementsDILIPredictor(solution)` — 5-premise `App`-chain, `SpecStr` core | — |
 | Deliverable | `bench:TaskOutput(python_source)` — the program as `payload`, `reasoning_chain` → the conclusion | Derived |
 | Overlay | five `bench:CodeBlock`s linking each `# region:` to its decision; coverage check tested | — |
 

@@ -311,12 +311,11 @@ mod tests {
             Iri::parse(wk::IS_A).unwrap(),
             Value::Array(vec![Value::String("urn:chain:A".to_string())]),
         );
-        // ResourceRef-valued cross-reference. The evaluator's
-        // `values_equal` must treat this as equal to the resource's
-        // String-form IRI so the equi-join across patterns succeeds.
+        // An IRI-valued cross-reference. The evaluator's `values_equal` must treat this as
+        // equal to the resource's own IRI so the equi-join across patterns succeeds.
         a.set(
             Iri::parse("urn:chain:ref").unwrap(),
-            Value::ResourceRef(b_iri.clone()),
+            Value::iri(&b_iri.clone()),
         );
         lb.add_resource(a).unwrap();
 

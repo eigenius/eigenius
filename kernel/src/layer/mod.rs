@@ -30,6 +30,7 @@
 mod bloom;
 mod cache;
 mod consolidate;
+pub(crate) mod ctor_classes;
 pub mod declaration_order;
 mod handle;
 mod index;
@@ -153,8 +154,7 @@ fn attach_redirect_target(layer: &mut std::sync::Arc<Layer>, storage: &LayerStor
 }
 
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::{Resource, Value};
-use crate::ontology::well_known as wk;
+use crate::ontology::resource::Resource;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -798,6 +798,16 @@ impl Layer {
 
     /// Iterate over resources defined directly in this layer.
     /// Yields owned `(Iri, Arc<Resource>)` pairs in IRI order.
+    /// An empty root layer — no resources, no parent.
+    ///
+    /// For a caller that must supply a layer but genuinely has nothing to resolve against: a
+    /// self-contained ESL source in a test, say. `esl::compile` requires a layer precisely so
+    /// that "this compiles against no chain" is a statement at the call site rather than a
+    /// second entry point, and this is how that statement is written.
+    pub fn empty() -> Layer {
+        LayerBuilder::new("empty", None).build(LayerStorage::in_memory())
+    }
+
     pub fn iter_resources(&self) -> impl Iterator<Item = (Iri, Arc<Resource>)> + '_ {
         self.defined_iris
             .iter()
@@ -1058,20 +1068,34 @@ impl LayerBuilder {
     /// commit promptly. The bounded cache (14c) will need coordination with
     /// this lifecycle.
     pub fn build(mut self, storage: LayerStorage) -> Layer {
-        // Canonicalise property values BEFORE computing the layer id /
-        // populating caches: every Eigon-JSON-parsed `Value::String`
-        // that names a `data_type: resource` (or `resource_array`)
-        // property gets upgraded to `Value::ResourceRef` so the
-        // committed shape is uniform regardless of which codec
-        // produced the resource. Downstream readers (validator,
-        // triple index, query evaluator) can then assume one shape
-        // per data_type. Bootstrap is unaffected: the lookup
-        // consults `self.resources` first, so properties defined in
-        // the layer being built (the core ontology's own property
-        // declarations, for instance) are visible to their own
-        // canonicalisation pass.
-        canonicalise_resource_refs(&mut self.resources, &self.parents);
+        // D85 §6.1 — materialise a constructor class per `core:ctors` entry, plus a property
+        // per argument. DERIVED, not authored: `core:ctors` stays the single declaration, so
+        // the classes cannot drift from it and there is no authoring step through which an
+        // inductive could gain a constructor. Done HERE, before the content hash, so they are
+        // ordinary persisted resources rather than a build-time shape that storage normalises
+        // away — the mistake `canonicalise_resource_refs` made, described below.
+        for derived in ctor_classes::derive(&self.resources, &self.parents) {
+            if let Some(id) = derived.id().cloned() {
+                self.resources.insert(id, derived);
+            }
+        }
 
+        // `canonicalise_resource_refs` was called here, upgrading every Eigon-JSON-parsed
+        // `Value::String` on a `data_type: resource` property to `Value::ResourceRef` so that
+        // "downstream readers can then assume one shape per data_type".
+        //
+        // That promise could not be kept. `ResourceRef` is `String` plus a schema lookup, so
+        // no codec produces it — and canonical CBOR writes it as `Text`, which reads back as
+        // `String`. The invariant held only between this call and the next serialisation, and
+        // a reader that relied on it saw nothing at all on a chain loaded from storage. That
+        // is the bug `Value::as_iri_str` was added for: matching `Value::String` "produced an
+        // entirely-empty topology graph for canonicalised chains". That accessor was itself
+        // retired once it became a synonym for `as_str`.
+        //
+        // A reference is an IRI. Which variant carries it is not something to depend on, so
+        // readers go through `Value::as_str` / `as_iri` / `as_iri_array` rather than matching a
+        // variant. Removing the pass moves no bytes: `String` and `ResourceRef` encode
+        // identically in both CBOR (`Text`) and Eigon-JSON.
         let content_hash = compute_content_hash(&self.resources, &self.tombstoned_iris);
         let id = compute_position_hash(&content_hash, &self.parents);
         let defined_iris: BTreeSet<Iri> = self.resources.keys().cloned().collect();
@@ -1277,127 +1301,11 @@ pub fn compute_position_hash(content_hash: &ContentHash, parents: &[Arc<Layer>])
     LayerId(id)
 }
 
-// ─── Canonical resource-reference shape ────────────────────────────────
-//
-// The Eigon-JSON parser is intentionally schema-agnostic: every
-// `"prop": "urn:..."` entry parses as `Value::String` because at parse
-// time the parser doesn't know the property's `data_type`. The
-// Eigon-CBOR codec and substrate-side resource builders use
-// `Value::ResourceRef` for the same role. The chain itself should
-// carry one canonical shape so downstream readers (validator,
-// triple index, query evaluator) don't need a tolerant
-// `String|ResourceRef` accept set everywhere.
-//
-// `canonicalise_resource_refs` runs once per `LayerBuilder::build`,
-// before the layer id is computed and the resources are pushed into
-// the cache. For every property whose declared `data_type` is
-// `resource` or `resource_array`, it rewrites `Value::String` IRIs
-// to `Value::ResourceRef`. Property definitions are looked up first
-// in the layer being built (so a layer that introduces both a
-// property and an instance of it canonicalises consistently — the
-// core ontology's `is_a` is the canonical example) and then in the
-// parent chain. Properties without a known `data_type` (custom
-// extensions, malformed declarations) are left untouched; the
-// validator surfaces the malformed shape via its standard rules.
-
-const PROP_DATA_TYPE: &str = "urn:eigenius:core:data_type";
-
-fn canonicalise_resource_refs(resources: &mut BTreeMap<Iri, Resource>, parents: &[Arc<Layer>]) {
-    let data_type_iri =
-        Iri::parse(PROP_DATA_TYPE).expect("static IRI urn:eigenius:core:data_type must parse");
-    let resource_dt = wk::RESOURCE.to_string();
-    let resource_array_dt = wk::RESOURCE_ARRAY.to_string();
-
-    // Snapshot the `(prop_iri, data_type_iri)` pairs we'll need.
-    // Computing them up front lets us rewrite `resources` without
-    // borrowing it twice (once to look up, once to mutate).
-    let mut prop_data_types: BTreeMap<Iri, String> = BTreeMap::new();
-    let mut all_prop_iris: BTreeSet<Iri> = BTreeSet::new();
-    for resource in resources.values() {
-        for prop_iri in resource.property_iris() {
-            all_prop_iris.insert(prop_iri.clone());
-        }
-    }
-    for prop_iri in &all_prop_iris {
-        if let Some(dt) = lookup_property_data_type(prop_iri, &data_type_iri, resources, parents) {
-            prop_data_types.insert(prop_iri.clone(), dt);
-        }
-    }
-
-    for resource in resources.values_mut() {
-        let prop_iris: Vec<Iri> = resource.property_iris().cloned().collect();
-        for prop_iri in prop_iris {
-            let Some(dt) = prop_data_types.get(&prop_iri) else {
-                continue;
-            };
-            if dt == &resource_dt {
-                if let Some(value) = resource.get(&prop_iri).cloned() {
-                    if let Some(canon) = canonicalise_single_value(value) {
-                        resource.set(prop_iri, canon);
-                    }
-                }
-            } else if dt == &resource_array_dt {
-                if let Some(Value::Array(items)) = resource.get(&prop_iri).cloned() {
-                    let canon = items
-                        .into_iter()
-                        .map(|v| canonicalise_single_value(v.clone()).unwrap_or(v))
-                        .collect();
-                    resource.set(prop_iri, Value::Array(canon));
-                }
-            }
-        }
-    }
-}
-
-/// Upgrade a single `Value::String` IRI to `Value::ResourceRef`.
-/// Returns `None` when the value is already canonical (or isn't a
-/// string at all) so callers can skip the `set` round-trip.
-fn canonicalise_single_value(value: Value) -> Option<Value> {
-    match value {
-        Value::String(s) => Iri::parse(&s).ok().map(Value::ResourceRef),
-        // ResourceRef and Embedded are already canonical for resource
-        // references; other shapes are left for the validator to
-        // flag as type mismatches.
-        _ => None,
-    }
-}
-
-/// Resolve a property IRI to its declared `data_type`, looking up
-/// (in order):
-/// 1. The layer being built (so a layer that introduces both a
-///    property and a resource using it canonicalises consistently).
-/// 2. The parent chain, via `Layer::resolve` (which walks ancestors).
-///
-/// Returns the data_type IRI as a `String` so callers can match
-/// against `wk::RESOURCE` / `wk::RESOURCE_ARRAY` without an extra
-/// `Iri::parse` per resource property.
-fn lookup_property_data_type(
-    prop_iri: &Iri,
-    data_type_iri: &Iri,
-    working: &BTreeMap<Iri, Resource>,
-    parents: &[Arc<Layer>],
-) -> Option<String> {
-    let extract = |r: &Resource| -> Option<String> {
-        match r.get(data_type_iri)? {
-            Value::String(s) => Some(s.clone()),
-            Value::ResourceRef(i) => Some(i.as_str().to_string()),
-            _ => None,
-        }
-    };
-    if let Some(r) = working.get(prop_iri) {
-        if let Some(dt) = extract(r) {
-            return Some(dt);
-        }
-    }
-    for parent in parents {
-        if let Some(r) = parent.resolve(prop_iri) {
-            if let Some(dt) = extract(r.as_ref()) {
-                return Some(dt);
-            }
-        }
-    }
-    None
-}
+// A "Canonical resource-reference shape" section stood here, documenting the
+// `canonicalise_resource_refs` pass. Both are retired (D85 §6.2) — `LayerBuilder::build` above
+// records why the invariant it promised could not be kept. The parser stays schema-agnostic:
+// every `"prop": "urn:..."` parses as `Value::String`, and readers go through
+// `Value::as_str` / `as_iri` / `as_iri_array` rather than matching a variant.
 
 #[cfg(test)]
 mod tests {
@@ -2090,7 +1998,9 @@ mod tests {
             let mut r = Resource::new(iri("urn:eigenius:demo:X"));
             r.set(
                 iri("urn:eigenius:core:is_a"),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:core:ClassA"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:core:ClassA").as_str().to_string(),
+                )]),
             );
             b.add_resource(r).unwrap();
             b.build(storage.clone())

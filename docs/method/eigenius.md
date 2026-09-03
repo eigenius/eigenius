@@ -63,7 +63,9 @@ CLI-only capabilities the `reasoning` protocol uses: **`branch create <task-slug
 --from <head>`** (the per-task branch); **`data attach/verify/validate/provision`**
 (D53 external files); **`env build --language r|oci`** + **`run`** (wrapped-R
 warrants D55/D56, or *any* pinned tool via the generic `oci` runtime D60 — both
-commit a `ProgramTrace → IsDerivedAs` that a `derived(...)` certificate discharges);
+commit a `prov:ProgramTrace`, which is provenance and grounds nothing — a computed
+claim is `App(Declared(plan), Observed(input))`, so declare the plan's
+reproducibility and observe its input);
 **`reflect <trace>`** (record a trace). `validate` / `compile` also run in-process on
 local files (no `--endpoint`).
 
@@ -150,27 +152,41 @@ For real LLM responses, set `ANTHROPIC_API_KEY` instead of the mock flag.
 The chain constructs the **`reasoning`** skill composes. Read the linked spec /
 ontology when authoring witnessed propositions — don't memorize the shapes.
 
-- **Epistemic status + provenance** — the `reflection` ontology
-  (`ontologies/reflection/reflection-ontology.json`): `ObservedResource` /
-  `DeclaredResource` / `DerivedResource`; `DeclarationTrace` / `ProgramTrace`; and
-  `reflection:canonical_proposition` (the proposition a resource carries). Trace
-  schema: [D6b](https://github.com/eigenius/eigenius/blob/main/docs/design/d6b-reasoning-trace-schema.md).
-- **Verified reasoning** — the `reasoning` ontology (`ontologies/reasoning/`) + the
+- **Provenance** — the `prov` ontology (`ontologies/prov/prov.esl`), mapped onto
+  W3C PROV-O: `prov:Agent`, `prov:Activity`, and the four provenance traces
+  (`prov:DeclarationTrace` / `ObservationTrace` / `ProductionTrace` /
+  `VerificationTrace`), related by `prov:was_attributed_to` (who asserted),
+  `prov:was_generated_by` (what activity produced), `prov:used`, and
+  `prov:had_primary_source` (the declared reason). All resource-typed, so provenance
+  is an EigenQL join. Distinct from `reflection`, which keeps the kernel's
+  evaluation-trace family (`LetTrace` / `MapTrace` / …) plus
+  `reflection:canonical_proposition` — the proposition a resource carries, which is
+  the WARRANT axis's input and the mechanical test for whether warrant applies at
+  all. **There are no grade classes**: nothing stores an epistemic status.
+- **Verified reasoning** — the `justification` ontology (`ontologies/justification/`) + the
   justification-logic institution
   ([D39](https://github.com/eigenius/eigenius/blob/main/docs/design/d39-justification-logic.md),
-  guide [reasoning-institution/](https://github.com/eigenius/eigenius/tree/main/docs/guides/platform/reasoning-institution)):
-  a `ReasoningSentence` carries `justification` + `certificate`; the certificate
-  type-checks against `JustifiedBy(justification, proposition)` via
-  `DerivedEvidence`/`DeclaredEvidence`/`VerifiedEvidence`/`App` and the
-  `derived()/declared()/verified()/app()` certificate constructors.
+  guide [justification-logic/](https://github.com/eigenius/eigenius/tree/main/docs/guides/platform/justification-logic)):
+  a `justification:Conclusion` carries ONE judgement — `holds(kernel, c,
+  Certificate(j, P))` — and the certificate type-checks against
+  `justification:Certificate(term, proposition)` via the three grounds
+  `Declared`/`Observed`/`Verified` plus `App`/`Sum`, with the
+  `declared()/observed()/verified()/app()/sum_l()/sum_r()` certificate constructors.
+  A `justification:Claim` is a resource carrying a proposition, which is what
+  `declared()` and `observed()` cite.
 - **Witness index** — [D49](https://github.com/eigenius/eigenius/blob/main/docs/design/d49-chainwitness-machinery.md):
-  how `IsObservedAs`/`IsDeclaredAs`/`IsDerivedAs`/`IsVerifiedAs` witnesses are
-  admitted per layer and consumed by certificates.
-- **Lemma citation** — [D54](https://github.com/eigenius/eigenius/blob/main/docs/design/d54-reasoning-lemma-citation.md):
-  a `Holds` `ReasoningSentence` is citable as a lemma (`verified(<iri>, P)`) →
-  layered proofs.
+  how `IsDeclaredAs`/`IsObservedAs`/`IsVerifiedAs` witnesses are admitted per layer
+  and consumed by certificates. Three families, not four: a run record grounds
+  nothing, so there is no `IsDerivedAs`.
+- **Lemma citation** — a conclusion is citable as `verified(<iri>, P)` ONLY if it
+  carries a `justification:proof`, the judgement `holds(logic, t, P)`. Its
+  `justification:judgement` is `holds(kernel, c, Certificate(j, P))`, which says a
+  checker verified the certificate and does NOT say `P`; minting Verified from that
+  laundered a conclusion resting on nothing but `Declared(…)` into a proof one
+  citation downstream. Compose with `Certificate.app` over the cited conclusion's
+  certificate instead.
 - **The commit gate (fail-closed).** AutoOnLoad **rejects** a layer that adds a
-  `Fails` `ReasoningSentence`, so a later lemma citation of it can't be unsound —
+  `Fails` `justification:Conclusion`, so a later lemma citation of it can't be unsound —
   this is what makes "you can't record an unwitnessed conclusion" structural.
 - **Anchors (third-party knowledge)** — the `reference` ontology
   (`ontologies/reference/reference.esl`): `reference:Reference` (a bibliographic
@@ -179,7 +195,8 @@ ontology when authoring witnessed propositions — don't memorize the shapes.
 - **Recompute / external evidence** — the statistics institution
   ([D52](https://github.com/eigenius/eigenius/blob/main/docs/design/d52-measurement-statistics-institution.md),
   guide [statistics-institution/](https://github.com/eigenius/eigenius/tree/main/docs/guides/platform/statistics-institution)):
-  `SampleSet` + `StatisticalAnalysisPlan` → an `IsDerivedAs` result; large external
+  `SampleSet` + `StatisticalAnalysisPlan` → a result carrying the proposition a plan
+  declaration is written against; large external
   files + the `ingest` ontology ([D53](https://github.com/eigenius/eigenius/blob/main/docs/design/d53-large-data-tracking.md));
   wrapped external tools via the R runtime
   ([D55](https://github.com/eigenius/eigenius/blob/main/docs/design/d55-r-language-runtime.md) /
@@ -203,4 +220,4 @@ ontology when authoring witnessed propositions — don't memorize the shapes.
 
 **Source of truth for the bootstrap ontologies** (always read these rather than memorize):
 - Core platform: `ontologies/core/` `ontologies/program/` `ontologies/reflection/` `ontologies/institution/` `ontologies/formulas/` `ontologies/runtime/`
-- Reasoning stack (the `reasoning` skill): `ontologies/reasoning/` `ontologies/reference/` `ontologies/statistics/` `ontologies/ingest/`
+- Reasoning stack (the `reasoning` skill): `ontologies/justification/` `ontologies/prov/` `ontologies/reference/` `ontologies/statistics/` `ontologies/ingest/`

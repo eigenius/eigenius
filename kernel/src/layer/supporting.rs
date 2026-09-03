@@ -37,7 +37,7 @@
 
 use crate::layer::{Layer, LayerId};
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::{Resource, Value};
+use crate::ontology::resource::Resource;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -113,21 +113,21 @@ pub fn compute_supporting_layer(
 /// References are:
 /// - Every property IRI used as a key on any resource (the property
 ///   definition lives elsewhere in the chain).
-/// - Every IRI carried as a `Value::ResourceRef`, recursively through
+/// - Every IRI carried as an IRI-shaped string, recursively through
 ///   `Value::Array` and `Value::Embedded`. This covers `is_a` class
 ///   refs, `subclass_of` / `requires` / `recommends` / `domain` /
 ///   `class_types` / `data_type` / `format_constraints` /
 ///   inductive-ctor `arg_types` / comorphism `export_format` etc.
 ///   (D33 §4.2's full reference list).
 ///
-/// `Value::String` is *not* treated as a reference even when it looks
-/// like an IRI: the `canonicalise_resource_refs` pass (run before
-/// this computation in `LayerBuilder::build`) has already upgraded
-/// every `String` IRI that lives under a known `resource` /
-/// `resource_array` property to `Value::ResourceRef`. Strings that
-/// remain are properties with unknown `data_type` (custom extensions
-/// the validator hasn't typed) — we don't second-guess their
-/// semantics.
+/// **A `Value::String` that parses as an IRI IS treated as a reference.** This paragraph said
+/// the opposite until `2026-08-31`, and was true of the code it described: a
+/// `canonicalise_resource_refs` pass ran in `LayerBuilder::build` and upgraded every `String`
+/// IRI under a known `resource` / `resource_array` property to `Value::ResourceRef`, so a
+/// surviving `String` meant a property the validator had not typed. That pass and that variant
+/// are both retired (D85 §6.2) — the variant was produced only at build time and never survived
+/// storage, so nothing could rely on it — and this walk is schema-blind by design: it runs
+/// while the layer is being built, before any schema is resolvable.
 fn collect_external_references(
     resources: &BTreeMap<Iri, Resource>,
     defined_iris: &BTreeSet<Iri>,
@@ -149,33 +149,14 @@ fn collect_refs_from_resource(resource: &Resource, out: &mut BTreeSet<Iri>) {
     for (prop, value) in resource.properties() {
         // The property IRI itself is a reference: its definition lives
         // somewhere in the chain (typically the core ontology or a
-        // domain layer above it).
+        // domain layer above it). The same holds for a property key
+        // inside an embedded value, which is why both sites are taken.
         out.insert(prop.clone());
-        collect_refs_from_value(value, out);
-    }
-}
-
-fn collect_refs_from_value(value: &Value, out: &mut BTreeSet<Iri>) {
-    match value {
-        Value::ResourceRef(iri) => {
-            out.insert(iri.clone());
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_refs_from_value(item, out);
+        crate::ontology::value_refs::for_each_ref(value, &mut |_site, s, _path| {
+            if let Ok(iri) = Iri::parse(s) {
+                out.insert(iri);
             }
-        }
-        Value::Embedded(inner) => {
-            collect_refs_from_resource(inner.as_ref(), out);
-        }
-        // String / Integer / Float / Boolean / Json / Vector never
-        // carry typed-reference semantics here (see module docs).
-        Value::String(_)
-        | Value::Integer(_)
-        | Value::Float(_)
-        | Value::Boolean(_)
-        | Value::Json(_)
-        | Value::Vector { .. } => {}
+        });
     }
 }
 
@@ -184,6 +165,7 @@ mod tests {
     use super::*;
     use crate::layer::LayerBuilder;
     use crate::layer::LayerStorage;
+    use crate::ontology::resource::Value;
 
     fn iri(s: &str) -> Iri {
         Iri::parse(s).unwrap()
@@ -254,7 +236,9 @@ mod tests {
         let mut child_resource = Resource::new(iri("urn:eigenius:demo:X"));
         child_resource.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:core:ClassA"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:core:ClassA").as_str().to_string(),
+            )]),
         );
         b.add_resource(child_resource).unwrap();
         let resources = b.resources().clone();
@@ -297,8 +281,8 @@ mod tests {
         child_resource.set(
             iri("urn:eigenius:core:is_a"),
             Value::Array(vec![
-                Value::ResourceRef(iri("urn:eigenius:core:ClassA")),
-                Value::ResourceRef(iri("urn:eigenius:demo:ClassB")),
+                Value::iri(&iri("urn:eigenius:core:ClassA")),
+                Value::iri(&iri("urn:eigenius:demo:ClassB")),
             ]),
         );
         b.add_resource(child_resource).unwrap();
@@ -325,9 +309,9 @@ mod tests {
         let mut bb = Resource::new(iri("urn:eigenius:demo:B"));
         bb.set(
             iri("urn:eigenius:demo:related_to"),
-            Value::ResourceRef(iri("urn:eigenius:demo:A")),
+            Value::iri(&iri("urn:eigenius:demo:A")),
         );
-        // No external refs: the only ResourceRef is to demo:A (also
+        // No external refs: the only reference is to demo:A (also
         // defined here); the only property IRI used is
         // demo:related_to. But demo:related_to itself isn't in
         // defined_iris of this layer — so it IS an external ref. To
@@ -335,7 +319,7 @@ mod tests {
         // IRI to be self-defined too. Drop the related_to property.
         a.set(
             iri("urn:eigenius:demo:A"),
-            Value::ResourceRef(iri("urn:eigenius:demo:A")),
+            Value::iri(&iri("urn:eigenius:demo:A")),
         );
         // Self-referential: A's properties are {demo:A → demo:A}.
         // Both are defined here. So no external refs.
@@ -385,7 +369,9 @@ mod tests {
         let mut child_resource = Resource::new(iri("urn:eigenius:demo:X"));
         child_resource.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:ClassA"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:demo:ClassA").as_str().to_string(),
+            )]),
         );
         b.add_resource(child_resource).unwrap();
         let resources = b.resources().clone();
@@ -434,7 +420,9 @@ mod tests {
         let mut child_resource = Resource::new(iri("urn:eigenius:demo:UsesB"));
         child_resource.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:demo:ClassB"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:demo:ClassB").as_str().to_string(),
+            )]),
         );
         b.add_resource(child_resource).unwrap();
         let resources = b.resources().clone();
@@ -449,7 +437,7 @@ mod tests {
     }
 
     /// References to property IRIs (the map keys) count as external
-    /// even when no ResourceRef appears in the values. Verifies the
+    /// even when no IRI-valued reference appears in the values. Verifies the
     /// "property IRIs are references too" branch.
     #[test]
     fn property_iri_counts_as_reference() {
@@ -461,7 +449,7 @@ mod tests {
         let mut b = LayerBuilder::new("child", Some(Arc::clone(&root)));
         let mut r = Resource::new(iri("urn:eigenius:demo:Note"));
         // The property is core:description — defined in root, not
-        // here. Only String value, no ResourceRef. The property IRI
+        // here. Only a non-IRI string value. The property IRI
         // itself is the external reference.
         r.set(
             iri("urn:eigenius:core:description"),

@@ -8,7 +8,7 @@
 //   5 methodological decisions  (Declared, spec-warranted)
 //        │  composed through a declared acceptance rule
 //        ▼
-//   ImplementsDILIPredictor(solution)   (ReasoningSentence)
+//   ImplementsDILIPredictor(solution)   (justification:Conclusion)
 //        │  binds                              ▲ overlay
 //        ▼                                      │
 //   bench:TaskOutput(python_source)  ◀── 5 bench:CodeBlocks (coverage)
@@ -19,14 +19,26 @@
 //
 // Validated by crates/eigenius-reasoning/tests/sab18_tracer.rs (Holds + coverage).
 
-namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace bench      = "urn:eigenius:benchmark";
-namespace s18        = "urn:eigenius:bench:sab18";
-namespace agent = "urn:eigenius:reflection:agent";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace reflection    = "urn:eigenius:reflection";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace bench         = "urn:eigenius:benchmark";
+namespace s18           = "urn:eigenius:bench:sab18";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace prov       = "urn:eigenius:prov";
+
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource s18:act_sab18_condition_c_loop : prov:Activity {
+    core:description = "agent:sab18-condition-c-loop";
+    core:short_name = "act_sab18_condition_c_loop";
+}
+
 
 // ─── Phase 1: per-task predicate vocabulary ────────────────────────
 
@@ -50,87 +62,87 @@ data s18:ImplementsDILIPredictor : core:string -> Prop {
 
 // ─── Phase 2: the methodological decisions ─────────────────────────
 
-resource s18:conf_featurization : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_agent_sab18_method;
-    reflection:rationale   = "Featurize standardised_smiles with ECFP / Morgan fingerprints (radius 2, 2048 bits). Warrant: the domain knowledge names Morgan fingerprints (spec); radius 2 / 2048 bits is the ECFP4 convention, matching the gold DILI_models_ECFP_RF.py.";
+resource s18:conf_featurization : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_agent_sab18_method;
+    prov:rationale   = "Featurize standardised_smiles with ECFP / Morgan fingerprints (radius 2, 2048 bits). Warrant: the domain knowledge names Morgan fingerprints (spec); radius 2 / 2048 bits is the ECFP4 convention, matching the gold DILI_models_ECFP_RF.py.";
     reflection:canonical_proposition = type_expr(
         s18:ConformsFeaturization("urn:eigenius:bench:sab18:solution")
     );
 }
-resource s18:conf_featurization_trace : reflection:DeclarationTrace {
-    reflection:resource    = s18:conf_featurization;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_agent_sab18_method;
-    reflection:timestamp   = "2026-06-12T11:00:00Z";
+resource s18:conf_featurization_trace : prov:DeclarationTrace {
+    prov:resource    = s18:conf_featurization;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_agent_sab18_method;
+    prov:timestamp   = "2026-06-12T11:00:00Z";
 }
 
-resource s18:conf_label_mapping : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_agent_sab18_method;
-    reflection:rationale   = "Collapse the 4-way vDILIConcern to binary: 'vMost-DILI-Concern' and 'vLess-DILI-Concern' -> DILI (positive); 'vNo-DILI-Concern' and 'sider_inactive' -> NoDILI (negative). Warrant: the instruction states this mapping verbatim (spec). The error-prone reading the discipline pins down: sider_inactive is NEGATIVE (not dropped), and vLess is POSITIVE.";
+resource s18:conf_label_mapping : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_agent_sab18_method;
+    prov:rationale   = "Collapse the 4-way vDILIConcern to binary: 'vMost-DILI-Concern' and 'vLess-DILI-Concern' -> DILI (positive); 'vNo-DILI-Concern' and 'sider_inactive' -> NoDILI (negative). Warrant: the instruction states this mapping verbatim (spec). The error-prone reading the discipline pins down: sider_inactive is NEGATIVE (not dropped), and vLess is POSITIVE.";
     reflection:canonical_proposition = type_expr(
         s18:ConformsLabelMapping("urn:eigenius:bench:sab18:solution")
     );
 }
-resource s18:conf_label_mapping_trace : reflection:DeclarationTrace {
-    reflection:resource    = s18:conf_label_mapping;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_agent_sab18_method;
-    reflection:timestamp   = "2026-06-12T11:00:01Z";
+resource s18:conf_label_mapping_trace : prov:DeclarationTrace {
+    prov:resource    = s18:conf_label_mapping;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_agent_sab18_method;
+    prov:timestamp   = "2026-06-12T11:00:01Z";
 }
 
-resource s18:conf_configs : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_agent_sab18_method;
-    reflection:rationale   = "Build the three configurations from the train.csv row ranges (1-based inclusive: MC 1-173, LC 174-433, NC 434-660, sider 661-923): MCNC = MC+ vs NC-, MCLCNC = MC/LC+ vs NC-, all = MC/LC+ vs NC/sider-. Warrant: the instruction defines the splits and the three configs (spec). The interpretation the discipline pins down: the ranges are row positions, 1-based inclusive.";
+resource s18:conf_configs : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_agent_sab18_method;
+    prov:rationale   = "Build the three configurations from the train.csv row ranges (1-based inclusive: MC 1-173, LC 174-433, NC 434-660, sider 661-923): MCNC = MC+ vs NC-, MCLCNC = MC/LC+ vs NC-, all = MC/LC+ vs NC/sider-. Warrant: the instruction defines the splits and the three configs (spec). The interpretation the discipline pins down: the ranges are row positions, 1-based inclusive.";
     reflection:canonical_proposition = type_expr(
         s18:ConformsConfigs("urn:eigenius:bench:sab18:solution")
     );
 }
-resource s18:conf_configs_trace : reflection:DeclarationTrace {
-    reflection:resource    = s18:conf_configs;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_agent_sab18_method;
-    reflection:timestamp   = "2026-06-12T11:00:02Z";
+resource s18:conf_configs_trace : prov:DeclarationTrace {
+    prov:resource    = s18:conf_configs;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_agent_sab18_method;
+    prov:timestamp   = "2026-06-12T11:00:02Z";
 }
 
-resource s18:conf_model_selection : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_agent_sab18_method;
-    reflection:rationale   = "Per config, train a RandomForest with hyperparameters chosen by 5-fold cross-validated grid search (number of trees, max depth, min samples split/leaf), then refit on the best hyperparameter. Warrant: the instruction requires 5-fold CV + hyperparameter search and 'the model trained on the best hyperparameter' (spec).";
+resource s18:conf_model_selection : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_agent_sab18_method;
+    prov:rationale   = "Per config, train a RandomForest with hyperparameters chosen by 5-fold cross-validated grid search (number of trees, max depth, min samples split/leaf), then refit on the best hyperparameter. Warrant: the instruction requires 5-fold CV + hyperparameter search and 'the model trained on the best hyperparameter' (spec).";
     reflection:canonical_proposition = type_expr(
         s18:ConformsModelSelection("urn:eigenius:bench:sab18:solution")
     );
 }
-resource s18:conf_model_selection_trace : reflection:DeclarationTrace {
-    reflection:resource    = s18:conf_model_selection;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_agent_sab18_method;
-    reflection:timestamp   = "2026-06-12T11:00:03Z";
+resource s18:conf_model_selection_trace : prov:DeclarationTrace {
+    prov:resource    = s18:conf_model_selection;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_agent_sab18_method;
+    prov:timestamp   = "2026-06-12T11:00:03Z";
 }
 
-resource s18:conf_output_format : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_agent_sab18_method;
-    reflection:rationale   = "For each config write pred_results/{config}_RF.csv (MCNC_RF.csv, MCLCNC_RF.csv, all_RF.csv) with columns standardised_smiles and label, label in {DILI, NoDILI}. Warrant: the instruction specifies the filenames, columns, and label vocabulary (spec).";
+resource s18:conf_output_format : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_agent_sab18_method;
+    prov:rationale   = "For each config write pred_results/{config}_RF.csv (MCNC_RF.csv, MCLCNC_RF.csv, all_RF.csv) with columns standardised_smiles and label, label in {DILI, NoDILI}. Warrant: the instruction specifies the filenames, columns, and label vocabulary (spec).";
     reflection:canonical_proposition = type_expr(
         s18:ConformsOutputFormat("urn:eigenius:bench:sab18:solution")
     );
 }
-resource s18:conf_output_format_trace : reflection:DeclarationTrace {
-    reflection:resource    = s18:conf_output_format;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_agent_sab18_method;
-    reflection:timestamp   = "2026-06-12T11:00:04Z";
+resource s18:conf_output_format_trace : prov:DeclarationTrace {
+    prov:resource    = s18:conf_output_format;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_agent_sab18_method;
+    prov:timestamp   = "2026-06-12T11:00:04Z";
 }
 
 // ─── Phase 3: the acceptance rule ──────────────────────────────────
 
-resource s18:impl_rule : reflection:DeclaredResource {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_benchmark_sab18_acceptance;
-    reflection:rationale   = "A solution implements the required DILI predictor iff it conforms on every methodological axis: featurization, label mapping, configurations, model selection, and output format.";
+resource s18:impl_rule : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_benchmark_sab18_acceptance;
+    prov:rationale   = "A solution implements the required DILI predictor iff it conforms on every methodological axis: featurization, label mapping, configurations, model selection, and output format.";
     reflection:canonical_proposition = type_expr(
         forall (p : core:string) =>
             s18:ConformsFeaturization(p) ->
@@ -141,44 +153,23 @@ resource s18:impl_rule : reflection:DeclaredResource {
             s18:ImplementsDILIPredictor(p)
     );
 }
-resource s18:impl_rule_trace : reflection:DeclarationTrace {
-    reflection:resource    = s18:impl_rule;
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = s18:warrant_benchmark_sab18_acceptance;
-    reflection:timestamp   = "2026-06-12T11:00:05Z";
+resource s18:impl_rule_trace : prov:DeclarationTrace {
+    prov:resource    = s18:impl_rule;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = s18:warrant_benchmark_sab18_acceptance;
+    prov:timestamp   = "2026-06-12T11:00:05Z";
 }
 
 // ─── Phase 4: the conclusion ───────────────────────────────────────
 
-resource s18:concl_solution_implements : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:bench:sab18:solution";
+resource s18:concl_solution_implements : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:bench:sab18:solution";
 
-    reasoning:proposition = type_expr(
-        s18:ImplementsDILIPredictor("urn:eigenius:bench:sab18:solution")
-    );
-
-    reasoning:justification = App(
-        App(
-            App(
-                App(
-                    App(
-                        SpecStr(
-                            DeclaredEvidence("urn:eigenius:bench:sab18:impl_rule"),
-                            "urn:eigenius:bench:sab18:solution"
-                        ),
-                        DeclaredEvidence("urn:eigenius:bench:sab18:conf_featurization")
-                    ),
-                    DeclaredEvidence("urn:eigenius:bench:sab18:conf_label_mapping")
-                ),
-                DeclaredEvidence("urn:eigenius:bench:sab18:conf_configs")
-            ),
-            DeclaredEvidence("urn:eigenius:bench:sab18:conf_model_selection")
-        ),
-        DeclaredEvidence("urn:eigenius:bench:sab18:conf_output_format")
-    );
-
-    reasoning:certificate = type_expr(
-        alias
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
             P    = "urn:eigenius:bench:sab18:solution",
             RULE = "urn:eigenius:bench:sab18:impl_rule",
             D1   = "urn:eigenius:bench:sab18:conf_featurization",
@@ -202,11 +193,11 @@ resource s18:concl_solution_implements : reasoning:ReasoningSentence {
                 s18:ConformsOutputFormat(p) ->
                 s18:ImplementsDILIPredictor(p),
 
-            j0 = reasoning:SpecStr(DeclaredEvidence(RULE), P),
-            j1 = reasoning:App(j0, DeclaredEvidence(D1)),
-            j2 = reasoning:App(j1, DeclaredEvidence(D2)),
-            j3 = reasoning:App(j2, DeclaredEvidence(D3)),
-            j4 = reasoning:App(j3, DeclaredEvidence(D4)),
+            j0 = Declared(RULE),
+            j1 = justification:App(j0, Declared(D1)),
+            j2 = justification:App(j1, Declared(D2)),
+            j3 = justification:App(j2, Declared(D3)),
+            j4 = justification:App(j3, Declared(D4)),
 
             rule_cert = spec_poly(
                 // T : the domain
@@ -218,28 +209,94 @@ resource s18:concl_solution_implements : reasoning:ReasoningSentence {
                     s18:ConformsModelSelection(p) ->
                     s18:ConformsOutputFormat(p) ->
                     s18:ImplementsDILIPredictor(p),
-                DeclaredEvidence(RULE),
-                P,
-                // tag : audit label, same IRI as the instance
+                Declared(RULE),
                 P,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, DeclaredEvidence(D1), rule_cert, declared(D1, C1)),
-            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, DeclaredEvidence(D2), cert1, declared(D2, C2)),
-            cert3 = app(C3, C4 -> C5 -> IMPL, j2, DeclaredEvidence(D3), cert2, declared(D3, C3)),
-            cert4 = app(C4, C5 -> IMPL, j3, DeclaredEvidence(D4), cert3, declared(D4, C4))
+            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, Declared(D1), rule_cert, declared(D1, C1)),
+            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, Declared(D2), cert1, declared(D2, C2)),
+            cert3 = app(C3, C4 -> C5 -> IMPL, j2, Declared(D3), cert2, declared(D3, C3)),
+            cert4 = app(C4, C5 -> IMPL, j3, Declared(D4), cert3, declared(D4, C4))
         in
-        app(C5, IMPL, j4, DeclaredEvidence(D5), cert4, declared(D5, C5))
-    );
+        app(C5, IMPL, j4, Declared(D5), cert4, declared(D5, C5))),
+               type_expr(alias
+            P    = "urn:eigenius:bench:sab18:solution",
+            RULE = "urn:eigenius:bench:sab18:impl_rule",
+            D1   = "urn:eigenius:bench:sab18:conf_featurization",
+            D2   = "urn:eigenius:bench:sab18:conf_label_mapping",
+            D3   = "urn:eigenius:bench:sab18:conf_configs",
+            D4   = "urn:eigenius:bench:sab18:conf_model_selection",
+            D5   = "urn:eigenius:bench:sab18:conf_output_format",
+
+            C1   = s18:ConformsFeaturization(P),
+            C2   = s18:ConformsLabelMapping(P),
+            C3   = s18:ConformsConfigs(P),
+            C4   = s18:ConformsModelSelection(P),
+            C5   = s18:ConformsOutputFormat(P),
+            IMPL = s18:ImplementsDILIPredictor(P),
+
+            RULE_P = forall (p : core:string) =>
+                s18:ConformsFeaturization(p) ->
+                s18:ConformsLabelMapping(p) ->
+                s18:ConformsConfigs(p) ->
+                s18:ConformsModelSelection(p) ->
+                s18:ConformsOutputFormat(p) ->
+                s18:ImplementsDILIPredictor(p),
+
+            j0 = Declared(RULE),
+            j1 = justification:App(j0, Declared(D1)),
+            j2 = justification:App(j1, Declared(D2)),
+            j3 = justification:App(j2, Declared(D3)),
+            j4 = justification:App(j3, Declared(D4)),
+
+            rule_cert = spec_poly(
+                // T : the domain
+                core:string,
+                fun (p : core:string) =>
+                    s18:ConformsFeaturization(p) ->
+                    s18:ConformsLabelMapping(p) ->
+                    s18:ConformsConfigs(p) ->
+                    s18:ConformsModelSelection(p) ->
+                    s18:ConformsOutputFormat(p) ->
+                    s18:ImplementsDILIPredictor(p),
+                Declared(RULE),
+                P,
+                declared(RULE, RULE_P)
+            ),
+            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, Declared(D1), rule_cert, declared(D1, C1)),
+            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, Declared(D2), cert1, declared(D2, C2)),
+            cert3 = app(C3, C4 -> C5 -> IMPL, j2, Declared(D3), cert2, declared(D3, C3)),
+            cert4 = app(C4, C5 -> IMPL, j3, Declared(D4), cert3, declared(D4, C4))
+        in
+        justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           justification:App(
+                               justification:App(
+                                   justification:App(
+                                       Declared("urn:eigenius:bench:sab18:impl_rule"),
+                                       Declared("urn:eigenius:bench:sab18:conf_featurization")
+                                   ),
+                                   Declared("urn:eigenius:bench:sab18:conf_label_mapping")
+                               ),
+                               Declared("urn:eigenius:bench:sab18:conf_configs")
+                           ),
+                           Declared("urn:eigenius:bench:sab18:conf_model_selection")
+                       ),
+                       Declared("urn:eigenius:bench:sab18:conf_output_format")
+                   ),
+                   s18:ImplementsDILIPredictor("urn:eigenius:bench:sab18:solution") )) );
+
+
 }
 
 // ─── Phase 5: the deliverable ──────────────────────────────────────
 
-resource s18:solution : bench:TaskOutput, reflection:DerivedResource {
+resource s18:solution : bench:TaskOutput {
     bench:task             = "urn:eigenius:bench:sab18:task";
     bench:deliverable_kind = "python_source";
     bench:reasoning_chain  = ["urn:eigenius:bench:sab18:concl_solution_implements"];
-    reflection:derivation  = s18:solution_trace;
+    prov:derivation  = s18:solution_trace;
 
     bench:payload = "import numpy as np
 import pandas as pd
@@ -322,10 +379,10 @@ for name, (pos, neg) in CONFIGS.items():
 ";
 }
 
-resource s18:solution_trace : reflection:ProgramTrace {
-    reflection:resource  = s18:solution;
-    reflection:source    = "agent:sab18-condition-c-loop";
-    reflection:timestamp = "2026-06-12T11:05:00Z";
+resource s18:solution_trace : prov:ProgramTrace {
+    prov:resource  = s18:solution;
+    prov:was_generated_by    = s18:act_sab18_condition_c_loop;
+    prov:timestamp = "2026-06-12T11:05:00Z";
 }
 
 // ─── Phase 6: decision ↔ code-section overlay ──────────────────────
@@ -362,14 +419,14 @@ resource s18:block_output : bench:CodeBlock {
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource s18:warrant_agent_sab18_method : reflection:DeclaredResource {
-    reflection:declared_by = agent:eigenius_core_team;
+resource s18:warrant_agent_sab18_method : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `agent:sab18-method`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_agent_sab18_method";
 }
 
-resource s18:warrant_benchmark_sab18_acceptance : reflection:DeclaredResource {
-    reflection:declared_by = agent:eigenius_core_team;
+resource s18:warrant_benchmark_sab18_acceptance : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `benchmark:sab18-acceptance`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_benchmark_sab18_acceptance";
 }

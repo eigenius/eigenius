@@ -7,19 +7,39 @@ namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace demo       = "urn:eigenius:demo:nested";
-namespace agent = "urn:eigenius:reflection:agent";
+namespace agent = "urn:eigenius:prov:agent";
+namespace prov       = "urn:eigenius:prov";
+
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource demo:act_wrn_paper_ed_fig_3b_km12_day_10_relative_ratio : prov:Activity {
+    core:description = "wrn-paper ED Fig 3b KM12 day-10 relative ratio";
+    core:short_name = "act_wrn_paper_ed_fig_3b_km12_day_10_relative_ratio";
+}
+resource demo:act_wrn_paper_ed_fig_3b : prov:Activity {
+    core:description = "wrn-paper ED Fig 3b";
+    core:short_name = "act_wrn_paper_ed_fig_3b";
+}
+resource demo:act_wrn_paper_ed_fig_3b_es2_day_10_relative_ratio : prov:Activity {
+    core:description = "wrn-paper ED Fig 3b ES2 day-10 relative ratio";
+    core:short_name = "act_wrn_paper_ed_fig_3b_es2_day_10_relative_ratio";
+}
+
 
 resource demo:viability_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = demo:warrant_wrn_paper_viability_impairment_directionality;
-    reflection:rationale   = "Synthetic lethality predicts WRN depletion IMPAIRS (not enhances) MSI viability; the directional claim is group A (sgWRN) mean below group B (control). The inverse is not the hypothesis, licensing the one-sided test.";
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = demo:warrant_wrn_paper_viability_impairment_directionality;
+    prov:rationale   = "Synthetic lethality predicts WRN depletion IMPAIRS (not enhances) MSI viability; the directional claim is group A (sgWRN) mean below group B (control). The inverse is not the hypothesis, licensing the one-sided test.";
 }
 
 // KM12 (MSI) — competition assay day-10 relative ratio.
 // group A = sgWRN guides (flat, by guide), group B = sgCh2 negative controls.
 resource demo:set_KM12 : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 3b KM12 day-10 relative ratio";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = demo:act_wrn_paper_ed_fig_3b_km12_day_10_relative_ratio;
+    prov:observed_at = "2019-01-01T00:00:00Z";
     stats:sample_set_value = stats:Nested(
         [
         0.268449, 0.248279, 0.280587, 0.291857, 0.381621, 0.304528,
@@ -35,10 +55,10 @@ resource demo:set_KM12 : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource demo:set_KM12_trace : reflection:ObservationTrace {
-    reflection:resource  = demo:set_KM12;
-    reflection:source    = "wrn-paper ED Fig 3b";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource demo:set_KM12_trace : prov:ObservationTrace {
+    prov:resource  = demo:set_KM12;
+    prov:was_generated_by    = demo:act_wrn_paper_ed_fig_3b;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource demo:plan_KM12 : stats:StatisticalAnalysisPlan {
     stats:sample_set         = demo:set_KM12;
@@ -48,17 +68,17 @@ resource demo:plan_KM12 : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion  = Identity();
 }
-resource demo:plan_KM12_trace : reflection:ProgramTrace {
-    reflection:resource  = demo:plan_KM12;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource demo:plan_KM12_trace : prov:ProgramTrace {
+    prov:resource  = demo:plan_KM12;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // ES2 (MSS) — competition assay day-10 relative ratio.
 // group A = sgWRN guides (flat, by guide), group B = sgCh2 negative controls.
 resource demo:set_ES2 : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 3b ES2 day-10 relative ratio";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = demo:act_wrn_paper_ed_fig_3b_es2_day_10_relative_ratio;
+    prov:observed_at = "2019-01-01T00:00:00Z";
     stats:sample_set_value = stats:Nested(
         [
         1.129250, 0.892831, 0.888756, 1.023207, 1.107421, 0.991177,
@@ -74,10 +94,10 @@ resource demo:set_ES2 : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource demo:set_ES2_trace : reflection:ObservationTrace {
-    reflection:resource  = demo:set_ES2;
-    reflection:source    = "wrn-paper ED Fig 3b";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource demo:set_ES2_trace : prov:ObservationTrace {
+    prov:resource  = demo:set_ES2;
+    prov:was_generated_by    = demo:act_wrn_paper_ed_fig_3b;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource demo:plan_ES2 : stats:StatisticalAnalysisPlan {
     stats:sample_set         = demo:set_ES2;
@@ -87,16 +107,16 @@ resource demo:plan_ES2 : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion  = Identity();
 }
-resource demo:plan_ES2_trace : reflection:ProgramTrace {
-    reflection:resource  = demo:plan_ES2;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource demo:plan_ES2_trace : prov:ProgramTrace {
+    prov:resource  = demo:plan_ES2;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource demo:warrant_wrn_paper_viability_impairment_directionality : reflection:DeclaredResource {
-    reflection:declared_by = agent:eigenius_core_team;
+resource demo:warrant_wrn_paper_viability_impairment_directionality : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `wrn-paper:viability-impairment-directionality`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_wrn_paper_viability_impairment_directionality";
 }

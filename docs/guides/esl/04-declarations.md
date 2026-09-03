@@ -142,7 +142,7 @@ axiom ex:propext :
 
 The `axiom` keyword takes a name, a colon, and a type expression. The statement is **postulated** — the kernel admits an inhabitant of the type without requiring a proof term, treating the axiom's name as an opaque constant equal only to itself by symbol identity. Conversion never `delta`-reduces it. The chain validator type-checks the *statement* against the universe ladder at commit and rejects malformed propositions; the inhabitant is granted by fiat.
 
-Axioms are the chain-author surface for the kernel's "admit without proof" mechanism. Anything that lives here becomes a citable chain artifact downstream reasoning can name via `DeclaredEvidence`; anything that doesn't can't enter the trust base silently. (For a named term the kernel *unfolds* instead of postulating — definitional equality rather than fiat — see `def`, [§4.4c](#44c-def--transparent-definitions-d66).)
+Axioms are the chain-author surface for the kernel's "admit without proof" mechanism. Anything that lives here becomes a citable chain artifact downstream reasoning can name via `Declared`; anything that doesn't can't enter the trust base silently. (For a named term the kernel *unfolds* instead of postulating — definitional equality rather than fiat — see `def`, [§4.4c](#44c-def--transparent-definitions-d66).)
 
 ### Type-expression sub-grammar
 
@@ -170,7 +170,7 @@ note: "Folklore; built into the kernel's Prop universe per D46 §5."
 
 The declaration commits a Resource of class `eigentt:Axiom` with:
 
-- `eigentt:axiom_statement` — the type expression, D47-encoded as a chain-resident `eigentt:TypeExpr` value via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs) (see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape);
+- `eigentt:axiom_statement` — the type expression, D47-encoded as a chain-resident `eigentt:Term` value via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs) (see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape);
 - `eigentt:axiom_justification` (optional) — the `note:` string.
 
 At env-build time the kernel's `build_axiom_env` walks every layer in the active chain, decodes each axiom's `axiom_statement` against the universe ladder, and registers the axiom's IRI as an opaque constant in the type-checking environment. From that point the axiom is citable from any program in the chain.
@@ -182,7 +182,7 @@ Two axioms are admitted by the kernel itself in the initial environment — they
 - **`core:propext`** — propositional extensionality: `forall (P Q : Prop), (P <-> Q) -> Id(Prop, P, Q)`. Gives the chain a canonical-assertion identity (logically equivalent propositions are propositionally equal). Conservative over CIC.
 - **`core:Quot_sound`** — quotient soundness: `forall {α : Type} {r : α -> α -> Prop} {a b : α}, r a b -> Id(Quot r, Quot.mk r a, Quot.mk r b)`. Needed for evidence normalization, chain consolidation deduplication, and standard mathematical quotient constructions. The rest of `Quot` (`Quot.mk`, `Quot.lift`) is definitional; only `Quot.sound` is axiomatic.
 
-You can cite either from a `DeclaredEvidence(core:propext)` justification just as you would a user-declared axiom — the witness shape is the same.
+You can cite either from a `Declared(core:propext)` justification just as you would a user-declared axiom — the witness shape is the same.
 
 ### What's rejected at kernel level
 
@@ -194,7 +194,7 @@ The structural property the framework upholds: **every Prop-level belief in a ch
 
 ### Composing with D39 reasoning
 
-To cite an axiom from a [D39 reasoning sentence](09-institutions.md), pair the `axiom` declaration with a [D49](../../design/d49-chainwitness-machinery.md) `DeclarationTrace` pointing at the axiom resource — that admits the `IsDeclaredAs(axiom_iri, statement)` witness the certificate's `JustifiedBy.declared` constructor consumes:
+To cite an axiom from a [D39 reasoning sentence](09-institutions.md), pair the `axiom` declaration with a [D49](../../design/d49-chainwitness-machinery.md) `DeclarationTrace` pointing at the axiom resource — that admits the `IsDeclaredAs(axiom_iri, statement)` witness the certificate's `justification:Certificate.declared` constructor consumes:
 
 ```esl
 axiom ex:strong_inhibitor_implication :
@@ -202,14 +202,14 @@ axiom ex:strong_inhibitor_implication :
         screen:HasLowIC50(c) -> screen:StrongInhibitor(c)
 note: "Standard medicinal-chemistry threshold; CLSI EP09 alignment."
 
-resource ex:strong_inhibitor_implication_trace : reflection:DeclarationTrace {
-    reflection:resource    = ex:strong_inhibitor_implication;
-    reflection:declared_by = "literature:smith_et_al_2024";
-    reflection:timestamp   = "2026-04-10T09:00:00Z";
+resource ex:strong_inhibitor_implication_trace : prov:DeclarationTrace {
+    prov:resource    = ex:strong_inhibitor_implication;
+    prov:was_attributed_to = "literature:smith_et_al_2024";
+    prov:timestamp   = "2026-04-10T09:00:00Z";
 }
 ```
 
-A D39 reasoning sentence then references the axiom via `DeclaredEvidence("urn:eigenius:example:strong_inhibitor_implication")` in its `justification` and `declared(...)` in its certificate. See [§9.10](09-institutions.md) for the full reasoning surface.
+A D39 reasoning sentence then references the axiom via `Declared("urn:eigenius:example:strong_inhibitor_implication")` in its `justification` and `declared(...)` in its certificate. See [§9.10](09-institutions.md) for the full reasoning surface.
 
 ### Voiding semantics
 
@@ -377,7 +377,7 @@ There is no ambiguity with a qualified type: `ex:Tree` lexes as one `QualName` t
 
 ### Indexed — D48 indexed families
 
-Indexed inductives carry an **index telescope** between the parameters and the result sort. Each constructor's conclusion specifies *values* for the indices (not just the types), and pattern matching against an indexed scrutinee can refine the expected type per arm. This is the surface that lets us express length-indexed vectors, equality on a type, the [D39 `JustifiedBy(justification, proposition)`](../../design/d39-justification-logic.md) certificate, and any other family where the conclusion shape depends on the scrutinee.
+Indexed inductives carry an **index telescope** between the parameters and the result sort. Each constructor's conclusion specifies *values* for the indices (not just the types), and pattern matching against an indexed scrutinee can refine the expected type per arm. This is the surface that lets us express length-indexed vectors, equality on a type, the [D39 `justification:Certificate(justification, proposition)`](../../design/d39-justification-logic.md) certificate, and any other family where the conclusion shape depends on the scrutinee.
 
 ```esl
 data ex:Vec(A : core:Set) : core:Nat -> Set {
@@ -404,9 +404,9 @@ Indexed inductives in `Prop` also enable the [singleton-elimination rule](07-typ
 
 ### Wire shape
 
-Indices land on `core:indices` (array of `InductiveParam` resources, parallel to `type_params`), result sort on `core:result_sort` (a `core:Level` value — `{"ctor": "Zero"}` for `Prop`, `Succ(Zero)` for `Set`, and `Param`/`Max`/`IMax` for the polymorphic cases; it carried a *string* `Prop` / `Set` / `Type:N` until eigenius#188, a grammar that could not express a level variable), and each typed ctor on `core:ctor_type` (the full Π-telescope D47-encoded via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs); see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape). Non-indexed declarations omit all three fields, preserving the pre-Layer-2 wire shape.
+Indices land on `core:indices` (array of `InductiveParam` resources, parallel to `type_params`), result sort on `core:result_sort` (a `core:Level` value — `Zero` for `Prop`, `Succ(Zero)` for `Set`, and `Param`/`Max`/`IMax` for the polymorphic cases; it carried a *string* `Prop` / `Set` / `Type:N` until eigenius#188, a grammar that could not express a level variable), and each typed ctor on `core:ctor_type` (the full Π-telescope D47-encoded via the [type-fragment codec](../../../kernel/src/program/eigentt_type_mirror.rs); see [§5.14a](05-expressions.md#5-14a-type_expr-eigentt-type-expressions) for the surface-syntax sibling that produces the same wire shape). Non-indexed declarations omit all three fields, preserving the pre-Layer-2 wire shape.
 
-You don't author the `eigentt:TypeExpr` value directly — the compiler produces it from the `forall (n : core:Nat) => ...` source you write — but understanding that it exists as a first-class chain value explains why indexed inductives can express dependencies in the first place: the constructor's type telescope is *data* the kernel reads back out of the layer at type-check time, not implicit elaboration.
+You don't author the `eigentt:Term` value directly — the compiler produces it from the `forall (n : core:Nat) => ...` source you write — but understanding that it exists as a first-class chain value explains why indexed inductives can express dependencies in the first place: the constructor's type telescope is *data* the kernel reads back out of the layer at type-check time, not implicit elaboration.
 
 Source: [`parse_data_index_telescope`](../../../kernel/src/esl/parser.rs), [`compile_data`](../../../kernel/src/esl/compile.rs), [`decode_indices` and `decode_result_sort`](../../../kernel/src/program/ground.rs).
 
@@ -582,7 +582,7 @@ and the compiler expands it to the full `Bundle(...)` ctor with `CompleteRandom(
 
 ### Restrictions (v1)
 
-- **Body must be a `Value`** (resource-property value AST), not a `TypeExpr` or a program `Expr`. The use case is producing ctor values; programs have their own decl form ([§4.7](#4-7-program)).
+- **Body must be a `Value`** (resource-property value AST), not a `Term` or a program `Expr`. The use case is producing ctor values; programs have their own decl form ([§4.7](#4-7-program)).
 - **No recursion.** Macro expansion is one-shot per call site; recursive calls have no termination guarantee and the smart-constructor use case doesn't need them. Cycles are caught by the compiler with a structured diagnostic.
 - **Positional only, no defaults.** Each call site supplies arguments in declared order; ESL doesn't have keyword arguments or default values. Authors who want to abbreviate further can declare a thinner macro that delegates to the wider one.
 
@@ -616,7 +616,7 @@ Use a `macro` when:
 Use a `program` ([§4.7](#4-7-program)) when:
 - The function takes a real input value and produces a transformed output.
 - The body has computational content the kernel should evaluate.
-- The function may be cited by reasoning sentences via `DerivedEvidence` — programs leave provenance through traces, macros don't.
+- The function's output may be cited by a conclusion once an accountable agent declares that the program denotes a function of its input — programs leave provenance through traces, macros don't.
 
 Source: [`parse_macro`](../../../kernel/src/esl/parser.rs), [`MacroDecl` AST type](../../../kernel/src/esl/ast.rs), [`compile_macro_resource`](../../../kernel/src/esl/compile.rs), [`expand_macro_call`](../../../kernel/src/esl/compile.rs), [`collect_macros_from_layer`](../../../kernel/src/esl/compile.rs) (cross-file visibility).
 

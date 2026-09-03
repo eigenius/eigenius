@@ -1,0 +1,107 @@
+// A class used where a proposition is required (eigenius#191).
+//
+// `justification:Certificate.declared` binds `P : Prop`, so its second argument is
+// checked against `Sort(0)`. `screen:CellLine` is an `Exp::EigonClass`, which
+// inference puts in `Sort(1)`; check mode admitted it against every universe,
+// `Prop` included, so the certificate below type-checked and the sentence
+// validated as Holds with a CLASS standing in for its proposition.
+//
+// `screen:IsInhibitory` is the control: a real `Prop`-sorted inductive in the
+// same slot, which must keep validating.
+
+namespace core          = "urn:eigenius:core";
+namespace reflection    = "urn:eigenius:reflection";
+namespace screen        = "urn:eigenius:demo:screen";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace prov       = "urn:eigenius:prov";
+
+class screen:CellLine : core:Resource {
+    description = "A cell line. A class — not a proposition.";
+}
+
+data screen:IsInhibitory : Prop {
+}
+
+// ── The class-as-proposition sentence ────────────────────────────────
+
+resource screen:rule_class : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_illustrative;
+    prov:rationale   = "Declares a CLASS as though it were a proposition.";
+
+    reflection:canonical_proposition = type_expr(
+        screen:CellLine
+    );
+}
+
+resource screen:rule_class_trace : prov:DeclarationTrace {
+    prov:resource     = screen:rule_class;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_illustrative;
+    prov:timestamp    = "2026-04-10T09:00:00Z";
+}
+
+resource screen:concl_class : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:demo:screen:CellLine";
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(declared(
+                   "urn:eigenius:demo:screen:rule_class",
+                   screen:CellLine,
+                   Prop
+               )),
+               type_expr(justification:Certificate(
+                   Declared("urn:eigenius:demo:screen:rule_class"),
+                   screen:CellLine )) );
+
+
+}
+
+// ── The control: a genuine Prop in the same slot ─────────────────────
+
+resource screen:rule_prop : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_illustrative;
+    prov:rationale   = "Declares a genuine Prop-sorted proposition.";
+
+    reflection:canonical_proposition = type_expr(
+        screen:IsInhibitory
+    );
+}
+
+resource screen:rule_prop_trace : prov:DeclarationTrace {
+    prov:resource     = screen:rule_prop;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_illustrative;
+    prov:timestamp    = "2026-04-10T09:00:00Z";
+}
+
+resource screen:concl_prop : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:demo:screen:IsInhibitory";
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(declared(
+                   "urn:eigenius:demo:screen:rule_prop",
+                   screen:IsInhibitory,
+                   Prop
+               )),
+               type_expr(justification:Certificate(
+                   Declared("urn:eigenius:demo:screen:rule_prop"),
+                   screen:IsInhibitory )) );
+
+
+}
+
+resource screen:warrant_illustrative : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Illustrative warrant for this fixture's declarations. A test fixture, not a real literature warrant.";
+    core:short_name = "warrant_illustrative";
+}

@@ -1377,7 +1377,9 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:demo:X"));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:core:ClassA"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:core:ClassA").as_str().to_string(),
+            )]),
         );
         child_b.add_resource(r).unwrap();
         let child = child_b.build(eigenius_kernel::layer::LayerStorage::in_memory());
@@ -2298,11 +2300,9 @@ mod tests {
         use eigenius_kernel::storage::{BatchOp, ChainInfo};
 
         /// All wire-typed `Value` variants survive `store_layer` →
-        /// `load_resource` through CBOR with structural equality. Variants
-        /// excluded here (`ResourceRef`, `Json`) are in-memory convenience
-        /// shapes that normalize to the wire-typed form on round-trip; their
-        /// behavior is pinned by `value_variants_round_trip_normalizations`
-        /// below.
+        /// `load_resource` through CBOR with structural equality. `Json` is excluded: it is an
+        /// in-memory convenience shape that normalizes to the wire-typed form on round-trip,
+        /// pinned by `value_variants_round_trip_normalizations` below.
         #[test]
         fn value_variants_round_trip() {
             let (store, _dir) = open_temp_store();
@@ -2356,14 +2356,16 @@ mod tests {
             assert_eq!(loaded, original);
         }
 
-        /// Pins the intentional CBOR normalizations: `ResourceRef` and `Json`
-        /// are in-memory convenience variants that the wire layer collapses
-        /// into wire-typed forms (`String` / `Integer` / `Bool` / etc.). The
-        /// String-vs-ResourceRef discrimination happens at validation time
-        /// based on the property's declared `data_type`. If this test starts
-        /// failing, the CBOR layer has changed its typing contract and that
-        /// needs a deliberate decision (and content-addressing implications),
-        /// not a silent drift.
+        /// Pins the intentional CBOR normalizations: `Json` is an in-memory convenience
+        /// variant the wire layer collapses into wire-typed forms (`String` / `Integer` /
+        /// `Bool` / etc.). If this test starts failing, the CBOR layer has changed its typing
+        /// contract and that needs a deliberate decision (and content-addressing
+        /// implications), not a silent drift.
+        ///
+        /// The reference case below is an IDENTITY now, and is kept as a pin: a reference is
+        /// an IRI string and must survive the round trip as one. It was a normalization while
+        /// `Value::ResourceRef` existed — and that this side of it could not be preserved is
+        /// the argument that retired the variant (D85 §6.2).
         #[test]
         fn value_variants_round_trip_normalizations() {
             let (store, _dir) = open_temp_store();
@@ -2371,7 +2373,7 @@ mod tests {
             let mut r = Resource::new(iri("urn:eigenius:test:lossy"));
             r.set(
                 iri("urn:eigenius:test:ref"),
-                Value::ResourceRef(iri("urn:eigenius:test:other")),
+                Value::iri(&iri("urn:eigenius:test:other")),
             );
             r.set(
                 iri("urn:eigenius:test:json_str"),
@@ -2392,8 +2394,8 @@ mod tests {
                 ResourceBackend::load_resource(&store, &layer_id, &iri("urn:eigenius:test:lossy"))
                     .expect("resource present");
 
-            // ResourceRef → String (same wire bytes; discrimination at
-            // validation time using the property's data_type).
+            // A reference survives as the IRI string it is; whether a string IS a reference
+            // is decided at validation time by the property's `data_type`.
             assert_eq!(
                 loaded.get(&iri("urn:eigenius:test:ref")),
                 Some(&Value::String("urn:eigenius:test:other".into()))
@@ -2496,15 +2498,34 @@ mod tests {
                 assert_eq!(&loaded, original, "round-trip mismatch for {iri}");
             }
 
-            // And nothing extra appeared.
+            // And nothing extra appeared BUT the constructor classes `build` derives.
+            //
+            // D85 §6.1: an inductive's `core:ctors` is projected into a class per constructor
+            // and a property per argument, materialised at build time and hashed with the
+            // layer. They are ordinary persisted resources, which is the whole point — a
+            // build-time shape that storage normalised away is the mistake
+            // `canonicalise_resource_refs` made. So they are expected here; what must hold is
+            // that every AUTHORED resource is still present and unchanged, asserted above.
             let loaded_iris = ResourceBackend::list_layer_iris(&store, &id).unwrap();
-            assert_eq!(
-                loaded_iris,
-                originals
-                    .keys()
-                    .cloned()
-                    .collect::<std::collections::BTreeSet<_>>()
+            let authored: std::collections::BTreeSet<_> = originals.keys().cloned().collect();
+            assert!(
+                authored.is_subset(&loaded_iris),
+                "every authored core resource must be stored"
             );
+            for extra in loaded_iris.difference(&authored) {
+                let r = ResourceBackend::load_resource(&store, &id, extra)
+                    .unwrap_or_else(|| panic!("listed but not loadable: {extra}"));
+                let derived = r
+                    .get(&Iri::parse("urn:eigenius:core:subclass_of").unwrap())
+                    .is_some()
+                    || r.get(&Iri::parse("urn:eigenius:core:domain").unwrap())
+                        .is_some();
+                assert!(
+                    derived,
+                    "the only resources `build` may add are derived constructor classes and \
+                     their argument properties; `{extra}` is neither"
+                );
+            }
         }
 
         /// `build_chain` against the live `RocksStore` backend with a fresh

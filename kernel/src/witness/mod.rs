@@ -16,11 +16,11 @@
 //!
 //! Soundness boundary for the D39 Reasoning institution: the four
 //! `ChainWitness.IsXxAs : core:iri → Prop → Prop` predicate families are
-//! consumed by the `JustifiedBy` indexed inductive's grounding constructors
+//! consumed by the `justification:Certificate` indexed inductive's grounding constructors
 //! to project the chain's existing class-membership + Trace-emission facts
 //! into the type system. Witnesses are kernel-internal — ESL has no
 //! constructor for them; the kernel synthesises inhabitants at
-//! `JustifiedBy.declared` / `.observed` / `.derived` / `.verified`
+//! `justification:Certificate.declared` / `.observed` / `.derived` / `.verified`
 //! type-check time by looking up a per-`Layer` witness index that the
 //! Layer builds from its Trace resources.
 //!
@@ -35,19 +35,22 @@ use crate::ontology::{eigon_cbor, Iri, Value};
 use crate::program::eigentt_type_mirror::{encode_type, EncodeError};
 use sha2::{Digest, Sha256};
 
-/// Which of the four epistemic-category predicate families a witness
-/// belongs to. The four families are independent — the kernel does not
-/// silently coerce `IsObservedAs` to `IsDeclaredAs` even when the IRIs
-/// match — but `IsVerifiedAs` propagates to `IsDerivedAs` per the
-/// reflection ontology's `VerifiedResource subclass_of DerivedResource`
-/// relation. The coercion is implemented at lookup time
-/// (see `crate::layer::lookup_chain_witness`), not by populating both
-/// keys in the index.
+/// Which of the three epistemic-category predicate families a witness
+/// belongs to. The families are independent: the kernel does not silently
+/// coerce one to another even when the IRIs match.
+///
+/// A `Derived` variant stood beside these until the three-grounds change, and a
+/// hardcoded `IsVerifiedAs → IsDerivedAs` coercion in `lookup_chain_witness`
+/// let a Verified witness satisfy a `derived(…)` citation. That coercion
+/// implemented a lattice over the categories which the design rejects, and it
+/// was not driven by the ontology's `subclass_of` — it was a match arm. It went
+/// with the category: `Derived` could only be consumed by
+/// `justification:Certificate.derived`, and a computed claim now grounds as
+/// `App(Declared(plan), Observed(inputs))`, which needs no category of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WitnessCategory {
     Declared,
     Observed,
-    Derived,
     Verified,
 }
 
@@ -59,7 +62,6 @@ impl WitnessCategory {
         match self {
             WitnessCategory::Declared => "IsDeclaredAs",
             WitnessCategory::Observed => "IsObservedAs",
-            WitnessCategory::Derived => "IsDerivedAs",
             WitnessCategory::Verified => "IsVerifiedAs",
         }
     }
@@ -84,7 +86,7 @@ impl WitnessCategory {
 /// `reflection:canonical_proposition` property; for `VerifiedResource`,
 /// derived from the reified `VerifiedPropositionView`). Keeping
 /// `prop_hash` in the key still matters: it surfaces "the
-/// `JustifiedBy.declared` constructor was instantiated with the wrong
+/// `justification:Certificate.declared` constructor was instantiated with the wrong
 /// proposition for this IRI" as a type error at type-check time, rather
 /// than silently admitting a witness for a mismatched proposition.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -101,11 +103,12 @@ impl WitnessKey {
         category: WitnessCategory,
         iri: Iri,
         proposition: &Exp,
+        names: &crate::program::eigentt_type_mirror::CodecNames,
     ) -> Result<Self, EncodeError> {
         Ok(Self {
             category,
             iri,
-            prop_hash: hash_proposition_exp(proposition)?,
+            prop_hash: hash_proposition_exp(proposition, names)?,
         })
     }
 
@@ -128,14 +131,17 @@ impl WitnessKey {
 /// `eigon_cbor::serialize_value` to produce a fixed-size content hash.
 ///
 /// The encoded JSON is alpha-canonicalized before CBOR encoding (see
-/// [`alpha_canonicalize_proposition_json`]) so that propositions equal
+/// [`alpha_canonicalize_proposition`]) so that propositions equal
 /// up to binder renaming hash to the same key. Required because the
 /// kernel's NbE readback freshens binder names (`Pi (c : T) => ...`
 /// reads back as `Pi (G#0 : T) => ...`); without canonicalization, a
 /// `canonical_proposition` stored on the chain with author-supplied
 /// binder names would never match the synthesise-side hash.
-pub fn hash_proposition_exp(proposition: &Exp) -> Result<[u8; 32], EncodeError> {
-    let encoded = encode_type(proposition)?;
+pub fn hash_proposition_exp(
+    proposition: &Exp,
+    names: &crate::program::eigentt_type_mirror::CodecNames,
+) -> Result<[u8; 32], EncodeError> {
+    let encoded = encode_type(proposition, names)?;
     Ok(hash_proposition_value(&encoded))
 }
 
@@ -148,12 +154,14 @@ pub fn hash_proposition_exp(proposition: &Exp) -> Result<[u8; 32], EncodeError> 
 /// [`hash_proposition_exp`] for why.
 pub fn hash_proposition_value(encoded: &Value) -> [u8; 32] {
     let canonical = match encoded {
-        Value::Json(j) => {
-            let normalized = alpha_canonicalize_proposition_json(j);
-            Value::Json(normalized)
+        // D85 §6.1 — the same normalisation over the value-resource shape. It has to be here
+        // and not only on the JSON: the emit side hashes an author's binder names and the
+        // check side hashes what NbE readback freshened them to, so a shape the canonicaliser
+        // does not reach produces two different keys for one proposition.
+        v @ Value::Embedded(_) => {
+            let mut env: Vec<(String, String)> = Vec::new();
+            canonicalize_value(v, &mut env)
         }
-        // Non-JSON values aren't D47-encoded propositions; hash as-is so
-        // pre-existing call sites (if any) stay byte-stable.
         other => other.clone(),
     };
     let bytes = eigon_cbor::serialize_value(&canonical);
@@ -178,74 +186,91 @@ pub fn hash_proposition_value(encoded: &Value) -> [u8; 32] {
 /// unchanged — they're either author-level free variables that the
 /// kernel's type-checker will reject independently, or references to
 /// chain identifiers encoded via `ConstRef` rather than `Var`.
-pub fn alpha_canonicalize_proposition_json(value: &serde_json::Value) -> serde_json::Value {
+/// α-canonicalise a term in the D85 §6.1 value-resource shape.
+///
+/// Binders are renamed to `_b<depth>` and every `Var` that resolves to one is rewritten, so
+/// propositions equal up to binder renaming hash alike. Argument names are read structurally —
+/// a property on a value resource is `<class>-<arg>` — so this needs no chain.
+pub fn alpha_canonicalize_proposition(v: &Value) -> Value {
     let mut env: Vec<(String, String)> = Vec::new();
-    canonicalize_inner(value, &mut env)
+    canonicalize_value(v, &mut env)
 }
 
-fn canonicalize_inner(v: &serde_json::Value, env: &mut Vec<(String, String)>) -> serde_json::Value {
-    use serde_json::json;
-    let obj = match v.as_object() {
-        Some(o) => o,
-        None => return v.clone(),
+fn canonicalize_value(v: &Value, env: &mut Vec<(String, String)>) -> Value {
+    const TERM: &str = crate::ontology::well_known::EIGENTT_TERM;
+    let Value::Embedded(r) = v else {
+        return match v {
+            Value::Array(items) => {
+                Value::Array(items.iter().map(|i| canonicalize_value(i, env)).collect())
+            }
+            other => other.clone(),
+        };
     };
-    let ctor = obj.get("ctor").and_then(|c| c.as_str());
-    let args = obj.get("args").and_then(|a| a.as_array());
-    let (ctor, args) = match (ctor, args) {
-        (Some(c), Some(a)) => (c, a),
-        _ => return v.clone(),
+    let Some(class) = r.is_a().first().map(|i| i.as_str().to_string()) else {
+        return v.clone();
     };
-    match (ctor, args.len()) {
-        ("Pi", 3) | ("Sig", 3) | ("Lam", 3) => {
-            let binder = args[0].as_str().unwrap_or("").to_string();
-            // Dom is evaluated in the *outer* scope (before this binder
-            // is in scope), so canonicalize it first without pushing.
-            let dom_canon = canonicalize_inner(&args[1], env);
-            // Push the binder mapping for the body. Anonymous binders
-            // (empty string) push an empty mapping so the depth counter
-            // still advances — required so a later Var lookup sees the
-            // right scoping even when intermediate binders are
-            // anonymous.
-            let depth = env.len();
-            let canonical_binder = if binder.is_empty() {
-                String::new()
-            } else {
-                format!("_b{depth}")
-            };
-            env.push((binder, canonical_binder.clone()));
-            let body_canon = canonicalize_inner(&args[2], env);
-            env.pop();
-            json!({
-                "ctor": ctor,
-                "args": [canonical_binder, dom_canon, body_canon],
-            })
+    let arg = |name: &str| crate::ontology::iri::Iri::parse(&format!("{class}-{name}")).ok();
+    let binder_ctor = ["Pi", "Sig", "Lam"]
+        .iter()
+        .any(|c| class == format!("{TERM}-{c}"));
+
+    let mut out = crate::ontology::resource::Resource::new_embedded();
+    out.set(
+        crate::ontology::well_known::iri(crate::ontology::well_known::IS_A),
+        Value::Array(vec![Value::String(class.clone())]),
+    );
+
+    if binder_ctor {
+        let (Some(name_p), Some(dom_p), Some(body_p)) = (arg("name"), arg("dom"), arg("body"))
+        else {
+            return v.clone();
+        };
+        let binder = r
+            .get(&name_p)
+            .and_then(|x| x.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let dom = r.get(&dom_p).map(|d| canonicalize_value(d, env));
+        let depth = env.len();
+        let canonical_binder = if binder.is_empty() {
+            String::new()
+        } else {
+            format!("_b{depth}")
+        };
+        env.push((binder, canonical_binder.clone()));
+        let body = r.get(&body_p).map(|b| canonicalize_value(b, env));
+        env.pop();
+        out.set(name_p, Value::String(canonical_binder));
+        if let Some(d) = dom {
+            out.set(dom_p, d);
         }
-        ("Var", 1) => {
-            let name = args[0].as_str().unwrap_or("");
-            // Search the stack top-down (most recent binder wins for
-            // shadowing). The level we read is the binder's depth from
-            // the outside, so it's stable across the whole tree.
-            let resolved = env
-                .iter()
-                .rev()
-                .find(|(orig, _)| orig == name && !orig.is_empty())
-                .map(|(_, canon)| canon.clone())
-                .unwrap_or_else(|| name.to_string());
-            json!({
-                "ctor": "Var",
-                "args": [resolved],
-            })
+        if let Some(b) = body {
+            out.set(body_p, b);
         }
-        _ => {
-            // Other ctors: recurse on each arg without changing the env.
-            let canon_args: Vec<serde_json::Value> =
-                args.iter().map(|a| canonicalize_inner(a, env)).collect();
-            json!({
-                "ctor": ctor,
-                "args": canon_args,
-            })
-        }
+        return Value::Embedded(Box::new(out));
     }
+
+    if class == format!("{TERM}-Var") {
+        let Some(name_p) = arg("name") else {
+            return v.clone();
+        };
+        let name = r.get(&name_p).and_then(|x| x.as_str()).unwrap_or("");
+        let resolved = env
+            .iter()
+            .rev()
+            .find(|(orig, _)| orig == name && !orig.is_empty())
+            .map(|(_, canon)| canon.clone())
+            .unwrap_or_else(|| name.to_string());
+        out.set(name_p, Value::String(resolved));
+        return Value::Embedded(Box::new(out));
+    }
+
+    for (k, val) in r.properties() {
+        if k.as_str() == crate::ontology::well_known::IS_A {
+            continue;
+        }
+        out.set(k.clone(), canonicalize_value(val, env));
+    }
+    Value::Embedded(Box::new(out))
 }
 
 #[cfg(test)]
@@ -266,7 +291,6 @@ mod tests {
         for cat in [
             WitnessCategory::Declared,
             WitnessCategory::Observed,
-            WitnessCategory::Derived,
             WitnessCategory::Verified,
         ] {
             assert!(cat.label().starts_with("Is"));
@@ -278,8 +302,20 @@ mod tests {
     fn same_proposition_hashes_to_same_key() {
         let p1 = Exp::sort(0);
         let p2 = Exp::sort(0);
-        let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p1).unwrap();
-        let k2 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p2).unwrap();
+        let k1 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p1,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        let k2 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p2,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert_eq!(k1, k2);
         assert_eq!(k1.prop_hash, k2.prop_hash);
     }
@@ -288,16 +324,40 @@ mod tests {
     fn different_proposition_hashes_differ() {
         let p_prop = Exp::sort(0); // Prop
         let p_set = Exp::sort(1); // Set
-        let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p_prop).unwrap();
-        let k2 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p_set).unwrap();
+        let k1 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p_prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        let k2 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p_set,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert_ne!(k1.prop_hash, k2.prop_hash);
     }
 
     #[test]
     fn different_category_distinct_keys() {
         let p = Exp::sort(0);
-        let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
-        let k2 = WitnessKey::from_exp(WitnessCategory::Observed, ex_iri(), &p).unwrap();
+        let k1 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        let k2 = WitnessKey::from_exp(
+            WitnessCategory::Observed,
+            ex_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert_ne!(k1, k2);
         assert_eq!(k1.prop_hash, k2.prop_hash); // hash same; category differs
     }
@@ -305,17 +365,35 @@ mod tests {
     #[test]
     fn different_iri_distinct_keys() {
         let p = Exp::sort(0);
-        let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
-        let k2 = WitnessKey::from_exp(WitnessCategory::Declared, nat_iri(), &p).unwrap();
+        let k1 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        let k2 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            nat_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         assert_ne!(k1, k2);
     }
 
     #[test]
     fn from_exp_and_from_encoded_agree() {
         let p = Exp::Pi(Patt::Unit, Box::new(Exp::sort(0)), Box::new(Exp::sort(0)));
-        let encoded = encode_type(&p).unwrap();
-        let k_exp = WitnessKey::from_exp(WitnessCategory::Derived, ex_iri(), &p).unwrap();
-        let k_enc = WitnessKey::from_encoded(WitnessCategory::Derived, ex_iri(), &encoded);
+        let encoded = encode_type(&p, crate::testing::codec_names()).unwrap();
+        let k_exp = WitnessKey::from_exp(
+            WitnessCategory::Observed,
+            ex_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        let k_enc = WitnessKey::from_encoded(WitnessCategory::Observed, ex_iri(), &encoded);
         assert_eq!(k_exp, k_enc);
     }
 
@@ -326,7 +404,13 @@ mod tests {
         // Just confirm the impl exists by exercising it.
         let mut keys: std::collections::BTreeMap<WitnessKey, ()> = Default::default();
         let p = Exp::sort(0);
-        let k = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
+        let k = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         keys.insert(k.clone(), ());
         assert!(keys.contains_key(&k));
     }
@@ -338,8 +422,20 @@ mod tests {
         use crate::nbe::check::eq_nf;
         use crate::nbe::val::Val;
         let p = Exp::sort(0);
-        let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
-        let k2 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
+        let k1 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        let k2 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         let v1 = Val::ChainWitness(k1);
         let v2 = Val::ChainWitness(k2);
         assert!(
@@ -353,8 +449,20 @@ mod tests {
         use crate::nbe::check::eq_nf;
         use crate::nbe::val::Val;
         let p = Exp::sort(0);
-        let k1 = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
-        let k2 = WitnessKey::from_exp(WitnessCategory::Declared, nat_iri(), &p).unwrap();
+        let k1 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        let k2 = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            nat_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         let v1 = Val::ChainWitness(k1);
         let v2 = Val::ChainWitness(k2);
         assert!(
@@ -368,7 +476,13 @@ mod tests {
         use crate::nbe::check::eq_nf;
         use crate::nbe::val::Val;
         let p = Exp::sort(0);
-        let k = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
+        let k = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         let v_witness = Val::ChainWitness(k);
         let v_other = Val::sort(0);
         assert!(
@@ -387,7 +501,13 @@ mod tests {
         use crate::nbe::readback::readback_val;
         use crate::nbe::val::Val;
         let p = Exp::sort(0);
-        let k = WitnessKey::from_exp(WitnessCategory::Declared, ex_iri(), &p).unwrap();
+        let k = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            ex_iri(),
+            &p,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
         let v = Val::ChainWitness(k);
         // Witnesses never round-trip to surface syntax — readback panics.
         // This is the contract: any code path that would readback a

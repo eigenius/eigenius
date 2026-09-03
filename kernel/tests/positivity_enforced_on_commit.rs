@@ -40,7 +40,7 @@ use std::sync::Arc;
 fn validate_esl(source: &str) -> Vec<(ValidationRule, String)> {
     let storage = LayerStorage::in_memory();
     let ctx = bootstrap_with_storage(storage.clone()).expect("bootstrap builds");
-    let resources = eigenius_kernel::esl::compile_against_layer(source, ctx.head())
+    let resources = eigenius_kernel::esl::compile(source, ctx.head())
         .unwrap_or_else(|e| panic!("ESL must compile; positivity is a VALIDATION defect: {e:?}"));
     let mut b = LayerBuilder::new("probe", Some(Arc::clone(ctx.head())));
     for r in resources {
@@ -176,7 +176,7 @@ fn parameter_kind_referring_to_a_later_parameter_is_rejected_at_commit() {
 ///
 /// Port of nanoda's `check_ctor` universe check (`src/inductive.rs:904`). An inductive at `Sort n`
 /// storing something from `Sort m` with `m > n` smuggles a large type into a small one, and
-/// Girard's paradox follows. This is the check that forced `reasoning:JustifiedBy` from `Type 0` to
+/// Girard's paradox follows. This is the check that forced `justification:Certificate` from `Type 0` to
 /// `Type 2` — it binds `T : Type 1` in `spec_poly`, and nothing enforced the constraint before.
 ///
 /// The probe that measured this before it rejected anything found exactly one violating

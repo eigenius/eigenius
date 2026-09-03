@@ -17,7 +17,7 @@
 //!
 //! Standalone authoring-side utility: takes verbatim `lean4export`
 //! bytes plus a target theorem name and emits the theorem's *type*
-//! (its proposition) as a `serde_json::Value` tagged-dict tree
+//! (its proposition) as the `lean:LeanExpr` value tree
 //! matching D40 §3's four chain inductives (`lean:LeanName` /
 //! `lean:LeanLevel` / `lean:LeanLevelList` / `lean:LeanExpr`).
 //!
@@ -43,8 +43,6 @@ use nanoda_lib::level::Level;
 use nanoda_lib::name::Name;
 use nanoda_lib::pretty_printer::PpOptions;
 use nanoda_lib::util::{Config, ExprPtr, LevelPtr, LevelsPtr, NamePtr, TcCtx};
-
-use serde_json::{json, Value as JsonValue};
 
 use eigenius_kernel::ontology::resource::Value;
 
@@ -76,14 +74,22 @@ pub enum ChainMirrorError {
 }
 
 /// Translate `bytes` (a verbatim `lean4export` JSON export) into a
-/// chain `lean:LeanExpr` tagged-dict value for the theorem named
+/// chain `lean:LeanExpr` value for the theorem named
 /// `target_name`. The value mirrors the theorem's *type* — its
 /// proposition — per D40 §4.1.
 ///
 /// The returned [`Value::Json`] is suitable for direct assignment
 /// onto a `LeanProofTerm.proposition` property and will validate
 /// against the `lean:LeanExpr` InductiveType once committed.
-pub fn bytes_to_lean_expr(bytes: &[u8], target_name: &str) -> Result<Value, ChainMirrorError> {
+pub fn bytes_to_lean_expr(
+    bytes: &[u8],
+    target_name: &str,
+    layer: &eigenius_kernel::layer::Layer,
+) -> Result<Value, ChainMirrorError> {
+    // The chain declares `LeanName`, `LeanLevel`, `LeanLevelList` and `LeanExpr`; their
+    // constructors' argument names are what a value states (D85 §6.1), so the mirror reads
+    // them rather than carrying a copy.
+    let names = LeanNames::from_layer(layer);
     let mut tmp = tempfile::NamedTempFile::new()?;
     tmp.as_file_mut().write_all(bytes)?;
     tmp.as_file_mut().flush()?;
@@ -93,7 +99,7 @@ pub fn bytes_to_lean_expr(bytes: &[u8], target_name: &str) -> Result<Value, Chai
         .to_export_file()
         .map_err(|e| ChainMirrorError::ParseFailed(format!("{e}")))?;
 
-    let json = export.with_ctx(|ctx| -> Result<JsonValue, ChainMirrorError> {
+    let value = export.with_ctx(|ctx| -> Result<Value, ChainMirrorError> {
         // Linear scan — the declars map is keyed by NamePtr, not by
         // string, so we render each name and compare. Practical
         // exports have hundreds-to-thousands of declarations; this is
@@ -108,10 +114,10 @@ pub fn bytes_to_lean_expr(bytes: &[u8], target_name: &str) -> Result<Value, Chai
         }
         let target_ty =
             target_ty.ok_or_else(|| ChainMirrorError::TargetNotFound(target_name.to_string()))?;
-        encode_expr(ctx, target_ty, "<target>")
+        encode_expr(ctx, target_ty, "<target>", &names)
     })?;
 
-    Ok(Value::Json(json))
+    Ok(value)
 }
 
 /// Construct the nanoda `Config` used by the translator. We don't
@@ -169,86 +175,126 @@ fn rendered_name<'t, 'p: 't>(ctx: &TcCtx<'t, 'p>, name: NamePtr<'t>) -> String {
     parts.join(".")
 }
 
-/// Encode a nanoda `Name` into the `lean:LeanName` tagged-dict shape
+/// Encode a nanoda `Name` into the `lean:LeanName` value shape
 /// per D40 §3.1: `Anon` / `Str(prefix, "suffix")` / `Num(prefix, 42)`.
-fn encode_name<'t, 'p: 't>(ctx: &TcCtx<'t, 'p>, name: NamePtr<'t>) -> JsonValue {
+/// The four inductives this mirror writes, and the argument names each constructor declares.
+///
+/// The values it produces land at `lean:proposition`, which declares
+/// `class_types: [lean:LeanExpr]` — so they are value resources whose `is_a` names the
+/// constructor's class (D85 §6.1), not tagged dicts. The names come from
+/// `lean-expressions.eigon.json` through the chain, so this file does not carry a second copy.
+struct LeanNames {
+    codec: eigenius_kernel::program::eigentt_type_mirror::CodecNames,
+}
+
+impl LeanNames {
+    fn from_layer(layer: &eigenius_kernel::layer::Layer) -> Self {
+        Self {
+            codec: eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(layer),
+        }
+    }
+
+    fn build(&self, inductive: &str, ctor: &str, args: Vec<Value>) -> Value {
+        self.codec.value(inductive, ctor, args).unwrap_or_else(|e| {
+            panic!("`{inductive}` must declare `{ctor}` in the chain this mirror runs against: {e}")
+        })
+    }
+
+    fn name(&self, ctor: &str, args: Vec<Value>) -> Value {
+        self.build("urn:eigenius:lean:LeanName", ctor, args)
+    }
+    fn level(&self, ctor: &str, args: Vec<Value>) -> Value {
+        self.build("urn:eigenius:lean:LeanLevel", ctor, args)
+    }
+    fn levels(&self, ctor: &str, args: Vec<Value>) -> Value {
+        self.build("urn:eigenius:lean:LeanLevelList", ctor, args)
+    }
+    fn expr(&self, ctor: &str, args: Vec<Value>) -> Value {
+        self.build("urn:eigenius:lean:LeanExpr", ctor, args)
+    }
+}
+
+fn encode_name<'t, 'p: 't>(ctx: &TcCtx<'t, 'p>, name: NamePtr<'t>, names: &LeanNames) -> Value {
     match ctx.read_name(name) {
-        Name::Anon => json!({"ctor": "Anon"}),
+        Name::Anon => names.name("Anon", vec![]),
         Name::Str(prefix, suffix, _) => {
-            let pfx = encode_name(ctx, prefix);
+            let pfx = encode_name(ctx, prefix, names);
             let sfx = ctx.read_string(suffix).as_ref().to_string();
-            json!({"ctor": "Str", "args": [pfx, sfx]})
+            names.name("Str", vec![pfx, Value::String(sfx)])
         }
         Name::Num(prefix, suffix, _) => {
-            let pfx = encode_name(ctx, prefix);
-            json!({"ctor": "Num", "args": [pfx, suffix as i64]})
+            let pfx = encode_name(ctx, prefix, names);
+            names.name("Num", vec![pfx, Value::Integer(suffix as i64)])
         }
     }
 }
 
-/// Encode a nanoda `Level` into the `lean:LeanLevel` tagged-dict
+/// Encode a nanoda `Level` into the `lean:LeanLevel` value
 /// shape per D40 §3.2.
-fn encode_level<'t, 'p: 't>(ctx: &TcCtx<'t, 'p>, level: LevelPtr<'t>) -> JsonValue {
+fn encode_level<'t, 'p: 't>(ctx: &TcCtx<'t, 'p>, level: LevelPtr<'t>, names: &LeanNames) -> Value {
     match ctx.read_level(level) {
-        Level::Zero => json!({"ctor": "Zero"}),
+        Level::Zero => names.level("Zero", vec![]),
         Level::Succ(base, _) => {
-            let b = encode_level(ctx, base);
-            json!({"ctor": "Succ", "args": [b]})
+            let b = encode_level(ctx, base, names);
+            names.level("Succ", vec![b])
         }
         Level::Max(left, right, _) => {
-            let l = encode_level(ctx, left);
-            let r = encode_level(ctx, right);
-            json!({"ctor": "Max", "args": [l, r]})
+            let l = encode_level(ctx, left, names);
+            let r = encode_level(ctx, right, names);
+            names.level("Max", vec![l, r])
         }
         Level::IMax(left, right, _) => {
-            let l = encode_level(ctx, left);
-            let r = encode_level(ctx, right);
-            json!({"ctor": "IMax", "args": [l, r]})
+            let l = encode_level(ctx, left, names);
+            let r = encode_level(ctx, right, names);
+            names.level("IMax", vec![l, r])
         }
         Level::Param(name, _) => {
-            let n = encode_name(ctx, name);
-            json!({"ctor": "Param", "args": [n]})
+            let nm = encode_name(ctx, name, names);
+            names.level("Param", vec![nm])
         }
     }
 }
 
 /// Encode a nanoda `LevelsPtr` (flat universe-instantiation array)
 /// into the `lean:LeanLevelList` cons-list shape per D40 §3.3.
-fn encode_levels<'t, 'p: 't>(ctx: &TcCtx<'t, 'p>, levels: LevelsPtr<'t>) -> JsonValue {
+fn encode_levels<'t, 'p: 't>(
+    ctx: &TcCtx<'t, 'p>,
+    levels: LevelsPtr<'t>,
+    names: &LeanNames,
+) -> Value {
     let arr = ctx.read_levels(levels);
-    let mut out = json!({"ctor": "Nil"});
+    let mut out = names.levels("Nil", vec![]);
     for level_ptr in arr.iter().rev() {
-        let head = encode_level(ctx, *level_ptr);
-        out = json!({"ctor": "Cons", "args": [head, out]});
+        let head = encode_level(ctx, *level_ptr, names);
+        out = names.levels("Cons", vec![head, out]);
     }
     out
 }
 
-/// Encode a nanoda `Expr` into the `lean:LeanExpr` tagged-dict shape
+/// Encode a nanoda `Expr` into the `lean:LeanExpr` value shape
 /// per D40 §3.4. `path` accumulates a structured trail for the
 /// `UnexpectedLocal` diagnostic.
 fn encode_expr<'t, 'p: 't>(
     ctx: &TcCtx<'t, 'p>,
     expr: ExprPtr<'t>,
     path: &str,
-) -> Result<JsonValue, ChainMirrorError> {
+    names: &LeanNames,
+) -> Result<Value, ChainMirrorError> {
     Ok(match ctx.read_expr(expr) {
-        Expr::Var { dbj_idx, .. } => {
-            json!({"ctor": "Var", "args": [dbj_idx as i64]})
-        }
+        Expr::Var { dbj_idx, .. } => names.expr("Var", vec![Value::Integer(dbj_idx as i64)]),
         Expr::Sort { level, .. } => {
-            let l = encode_level(ctx, level);
-            json!({"ctor": "Sort", "args": [l]})
+            let l = encode_level(ctx, level, names);
+            names.expr("Sort", vec![l])
         }
         Expr::Const { name, levels, .. } => {
-            let n = encode_name(ctx, name);
-            let ls = encode_levels(ctx, levels);
-            json!({"ctor": "Const", "args": [n, ls]})
+            let n = encode_name(ctx, name, names);
+            let ls = encode_levels(ctx, levels, names);
+            names.expr("Const", vec![n, ls])
         }
         Expr::App { fun, arg, .. } => {
-            let f = encode_expr(ctx, fun, &format!("{path}.fun"))?;
-            let a = encode_expr(ctx, arg, &format!("{path}.arg"))?;
-            json!({"ctor": "App", "args": [f, a]})
+            let f = encode_expr(ctx, fun, &format!("{path}.fun"), names)?;
+            let a = encode_expr(ctx, arg, &format!("{path}.arg"), names)?;
+            names.expr("App", vec![f, a])
         }
         Expr::Pi {
             binder_name,
@@ -257,11 +303,11 @@ fn encode_expr<'t, 'p: 't>(
             body,
             ..
         } => {
-            let bn = encode_name(ctx, binder_name);
+            let bn = encode_name(ctx, binder_name, names);
             let bs = encode_binder_style(binder_style);
-            let bt = encode_expr(ctx, binder_type, &format!("{path}.binder_type"))?;
-            let bd = encode_expr(ctx, body, &format!("{path}.body"))?;
-            json!({"ctor": "Pi", "args": [bn, bs, bt, bd]})
+            let bt = encode_expr(ctx, binder_type, &format!("{path}.binder_type"), names)?;
+            let bd = encode_expr(ctx, body, &format!("{path}.body"), names)?;
+            names.expr("Pi", vec![bn, bs, bt, bd])
         }
         Expr::Lambda {
             binder_name,
@@ -270,11 +316,11 @@ fn encode_expr<'t, 'p: 't>(
             body,
             ..
         } => {
-            let bn = encode_name(ctx, binder_name);
+            let bn = encode_name(ctx, binder_name, names);
             let bs = encode_binder_style(binder_style);
-            let bt = encode_expr(ctx, binder_type, &format!("{path}.binder_type"))?;
-            let bd = encode_expr(ctx, body, &format!("{path}.body"))?;
-            json!({"ctor": "Lambda", "args": [bn, bs, bt, bd]})
+            let bt = encode_expr(ctx, binder_type, &format!("{path}.binder_type"), names)?;
+            let bd = encode_expr(ctx, body, &format!("{path}.body"), names)?;
+            names.expr("Lambda", vec![bn, bs, bt, bd])
         }
         Expr::Let {
             binder_name,
@@ -284,11 +330,11 @@ fn encode_expr<'t, 'p: 't>(
             nondep,
             ..
         } => {
-            let bn = encode_name(ctx, binder_name);
-            let bt = encode_expr(ctx, binder_type, &format!("{path}.binder_type"))?;
-            let v = encode_expr(ctx, val, &format!("{path}.val"))?;
-            let bd = encode_expr(ctx, body, &format!("{path}.body"))?;
-            json!({"ctor": "Let", "args": [bn, bt, v, bd, nondep]})
+            let bn = encode_name(ctx, binder_name, names);
+            let bt = encode_expr(ctx, binder_type, &format!("{path}.binder_type"), names)?;
+            let v = encode_expr(ctx, val, &format!("{path}.val"), names)?;
+            let bd = encode_expr(ctx, body, &format!("{path}.body"), names)?;
+            names.expr("Let", vec![bn, bt, v, bd, Value::Boolean(nondep)])
         }
         Expr::Proj {
             ty_name,
@@ -296,13 +342,13 @@ fn encode_expr<'t, 'p: 't>(
             structure,
             ..
         } => {
-            let tn = encode_name(ctx, ty_name);
-            let s = encode_expr(ctx, structure, &format!("{path}.structure"))?;
-            json!({"ctor": "Proj", "args": [tn, idx as i64, s]})
+            let tn = encode_name(ctx, ty_name, names);
+            let s = encode_expr(ctx, structure, &format!("{path}.structure"), names)?;
+            names.expr("Proj", vec![tn, Value::Integer(idx as i64), s])
         }
         Expr::StringLit { ptr, .. } => {
             let s = ctx.read_string(ptr).as_ref().to_string();
-            json!({"ctor": "StringLit", "args": [s]})
+            names.expr("StringLit", vec![Value::String(s)])
         }
         Expr::NatLit { ptr, .. } => {
             // `BigUint` → decimal digit string. The chain spec
@@ -320,7 +366,7 @@ fn encode_expr<'t, 'p: 't>(
                     ))
                 })?
                 .to_string();
-            json!({"ctor": "NatLit", "args": [s]})
+            names.expr("NatLit", vec![Value::String(s)])
         }
         Expr::Local { .. } => {
             return Err(ChainMirrorError::UnexpectedLocal(path.to_string()));
@@ -331,12 +377,12 @@ fn encode_expr<'t, 'p: 't>(
 /// Map nanoda's `BinderStyle` to the four pinned strings per
 /// D40 §3.4 notes: `default` / `implicit` / `strictImplicit` /
 /// `instImplicit`.
-fn encode_binder_style(style: BinderStyle) -> JsonValue {
+fn encode_binder_style(style: BinderStyle) -> Value {
     let s = match style {
         BinderStyle::Default => "default",
         BinderStyle::Implicit => "implicit",
         BinderStyle::StrictImplicit => "strictImplicit",
         BinderStyle::InstanceImplicit => "instImplicit",
     };
-    JsonValue::String(s.to_string())
+    Value::String(s.to_string())
 }

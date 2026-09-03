@@ -71,7 +71,7 @@ When `serve --db <path>` is used, a SHA-256 manifest of these is written on firs
 
 ### Storage backends
 
-- [`storage/memory/`](../../../storage/memory/) — in-memory backend (default for `serve` without `--db`)
+- [`storage/memory/`](../../../kernel/src/layer/) (`LayerStorage::in_memory`) — in-memory backend (default for `serve` without `--db`)
 - [`storage/rocksdb/`](../../../storage/rocksdb/) — RocksDB backend (`serve --db`)
 - [`storage/tikv/`](../../../storage/tikv/) — TiKV backend (placeholder)
 - [`kernel/src/layer/index.rs`](../../../kernel/src/layer/index.rs) — per-layer triple index trait + in-memory impl (Phase 14h)
@@ -135,8 +135,8 @@ with the rest of WASM extensibility.
 - [**D13 — Durable kernel state**](../../design/d13-durable-kernel-state.md) — `serve --db` spec, restart re-registration
 - [**D21 — Task traces and checkpointing**](../../design/d21-task-traces-and-checkpointing.md) — task model and resume sweep
 - [**D26 — Runtime substrate**](../../design/d26-runtime-substrate.md) — substrate hosting layer, `LanguageRuntime` trait
-- [**D29 — Mirror generator**](../../design/d29-runtime-mirror-generator.md) — closure walker, content-addressed mirror IRIs
-- [**D31 — Runtime-language-substrate institution lifecycle**](../../design/d31-runtime-language-substrate-institution-lifecycle.md) — install flow, env image lifecycle
+- [**D29 — Mirror generator**](../../design/d29-eigon-julia-mirror-spec.md) — closure walker, content-addressed mirror IRIs
+- [**D31 — Runtime-language-substrate institution lifecycle**](../../design/d31-external-institution-lifecycle.md) — install flow, env image lifecycle
 - [**D32 — Chain-mirrored EigenTT inductives**](../../design/d32-chain-mirrored-mini-tt-inductives.md) — `formulas:FormulaTerm` as a EigenTT fragment on the chain
 
 The full design-document set lives in [`docs/design/`](../../design/).

@@ -25,6 +25,7 @@ pub mod eigon_cbor;
 pub mod eigon_json;
 pub mod iri;
 pub mod resource;
+pub mod value_refs;
 pub mod well_known;
 
 pub use iri::Iri;

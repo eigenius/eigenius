@@ -242,8 +242,11 @@ pub fn mirror_to_resource(
     let mut r = Resource::new(mirror_iri);
     r.set(
         Iri::parse(PROP_IS_A_IRI).expect("static IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(CLASS_RUNTIME_PACKAGE_MIRROR).expect("static IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse(CLASS_RUNTIME_PACKAGE_MIRROR)
+                .expect("static IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     r.set(
@@ -264,7 +267,7 @@ pub fn mirror_to_resource(
     );
     r.set(
         Iri::parse(PROP_MIRROR_SOURCE_LAYER).expect("static IRI"),
-        Value::String(source_layer.as_str().to_string()),
+        Value::iri(source_layer),
     );
     r.set(
         Iri::parse(PROP_MIRROR_GEN_ID).expect("static IRI"),
@@ -288,14 +291,7 @@ pub fn mirror_to_resource(
     );
     r.set(
         Iri::parse(PROP_MIRRORED_CLASSES).expect("static IRI"),
-        Value::Array(
-            output
-                .mirrored_classes
-                .iter()
-                .cloned()
-                .map(Value::ResourceRef)
-                .collect(),
-        ),
+        Value::Array(output.mirrored_classes.iter().map(Value::iri).collect()),
     );
     if let Some(ts) = generated_at {
         r.set(
@@ -1224,29 +1220,19 @@ mod tests {
         if !parents.is_empty() {
             r.set(
                 iri(PROP_SUBCLASS_OF),
-                Value::Array(parents.iter().map(|p| Value::ResourceRef(iri(p))).collect()),
+                Value::Array(parents.iter().map(|p| Value::iri(&iri(p))).collect()),
             );
         }
         if !requires.is_empty() {
             r.set(
                 iri(PROP_REQUIRES),
-                Value::Array(
-                    requires
-                        .iter()
-                        .map(|p| Value::ResourceRef(iri(p)))
-                        .collect(),
-                ),
+                Value::Array(requires.iter().map(|p| Value::iri(&iri(p))).collect()),
             );
         }
         if !recommends.is_empty() {
             r.set(
                 iri(PROP_RECOMMENDS),
-                Value::Array(
-                    recommends
-                        .iter()
-                        .map(|p| Value::ResourceRef(iri(p)))
-                        .collect(),
-                ),
+                Value::Array(recommends.iter().map(|p| Value::iri(&iri(p))).collect()),
             );
         }
         r
@@ -1263,20 +1249,15 @@ mod tests {
     ) -> Resource {
         let mut r = Resource::new(iri(iri_str));
         r.set(iri(PROP_SHORT_NAME), Value::String(short_name.to_string()));
-        r.set(iri(PROP_DATA_TYPE), Value::ResourceRef(iri(data_type)));
+        r.set(iri(PROP_DATA_TYPE), Value::iri(&iri(data_type)));
         if !class_types.is_empty() {
             r.set(
                 iri(PROP_CLASS_TYPES),
-                Value::Array(
-                    class_types
-                        .iter()
-                        .map(|c| Value::ResourceRef(iri(c)))
-                        .collect(),
-                ),
+                Value::Array(class_types.iter().map(|c| Value::iri(&iri(c))).collect()),
             );
         }
         if let Some(et) = element_type {
-            r.set(iri(PROP_ELEMENT_TYPE), Value::ResourceRef(iri(et)));
+            r.set(iri(PROP_ELEMENT_TYPE), Value::iri(&iri(et)));
         }
         r
     }

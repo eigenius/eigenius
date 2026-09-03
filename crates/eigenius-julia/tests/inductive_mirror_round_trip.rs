@@ -75,7 +75,9 @@ impl NatChain {
         let mut zero = Resource::new(iri("urn:eigenius:test:Nat:zero"));
         zero.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(CLASS_INDUCTIVE_CTOR))]),
+            Value::Array(vec![Value::String(
+                iri(CLASS_INDUCTIVE_CTOR).as_str().to_string(),
+            )]),
         );
         zero.set(iri(PROP_CTOR_NAME), Value::String("zero".into()));
         zero.set(iri(PROP_ARG_TYPES), Value::Array(vec![]));
@@ -84,21 +86,25 @@ impl NatChain {
         let mut succ_arg = Resource::new(iri("urn:eigenius:test:Nat:succ:pred"));
         succ_arg.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(CLASS_INDUCTIVE_ARG_TYPE))]),
+            Value::Array(vec![Value::String(
+                iri(CLASS_INDUCTIVE_ARG_TYPE).as_str().to_string(),
+            )]),
         );
         succ_arg.set(iri(PROP_ARG_NAME), Value::String("pred".into()));
-        // `core:type_name` is an `eigentt:TypeExpr`, not an IRI string (eigenius#188).
+        // `core:type_name` is an `eigentt:Term`, not an IRI string (eigenius#188).
         succ_arg.set(
             iri(PROP_TYPE_NAME),
-            Value::Json(serde_json::json!({
-                "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat"],
+            eigenius_kernel::testing::term_value(&serde_json::json!({
+                "ctor": "ConstRef", "args": ["urn:eigenius:test:Nat", []],
             })),
         );
 
         let mut succ = Resource::new(iri("urn:eigenius:test:Nat:succ"));
         succ.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(CLASS_INDUCTIVE_CTOR))]),
+            Value::Array(vec![Value::String(
+                iri(CLASS_INDUCTIVE_CTOR).as_str().to_string(),
+            )]),
         );
         succ.set(iri(PROP_CTOR_NAME), Value::String("succ".into()));
         succ.set(
@@ -109,7 +115,9 @@ impl NatChain {
         let mut nat = Resource::new(iri("urn:eigenius:test:Nat"));
         nat.set(
             iri(PROP_IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(CLASS_INDUCTIVE_TYPE))]),
+            Value::Array(vec![Value::String(
+                iri(CLASS_INDUCTIVE_TYPE).as_str().to_string(),
+            )]),
         );
         nat.set(iri(PROP_SHORT_NAME), Value::String("Nat".into()));
         nat.set(

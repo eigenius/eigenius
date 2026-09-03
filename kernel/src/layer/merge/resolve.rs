@@ -300,7 +300,7 @@ pub struct RenameApplication {
 ///     contributions. A collision means the rename would silently
 ///     merge into another resource at the new IRI; reject it.
 ///  3. Walk the renamed branch's contributions, rewriting every
-///     occurrence of `old_iri` (in `@id`, `ResourceRef`, nested
+///     occurrence of `old_iri` (in `@id`, IRI-string references, nested
 ///     `Embedded` resources, and `Array` items) to `new_iri`.
 ///
 /// Returns a [`RenameApplication`] carrying the transformed
@@ -313,11 +313,6 @@ pub fn apply_rename_resolution(
     new_iri: &Iri,
     topology: &LayerTopology,
     backend: &dyn PersistentBackend,
-    // `schema`: the side's head, for reading each property's declared `data_type`.
-    // Needed because whether a `Value::Json` is a **term** (rewrite its references)
-    // or an **opaque payload** (leave it alone) is a fact about the property, not
-    // the value — see `is_term_valued`.
-    schema: &crate::layer::Layer,
 ) -> Result<RenameApplication, MergeError> {
     if old_iri == new_iri {
         return Err(MergeError::RenameIdentity {
@@ -388,12 +383,12 @@ pub fn apply_rename_resolution(
                     "rename: contribution {iri} not loadable from {layer_id}"
                 )))
             })?;
-        let mentions_old = resource_mentions_iri(&resource, old_iri, schema);
+        let mentions_old = resource_mentions_iri(&resource, old_iri);
         let is_target = iri == old_iri;
         if !mentions_old && !is_target {
             continue;
         }
-        let renamed = substitute_iri_in_resource(&resource, old_iri, new_iri, schema);
+        let renamed = substitute_iri_in_resource(&resource, old_iri, new_iri);
         let key = if is_target {
             new_iri.clone()
         } else {
@@ -439,37 +434,8 @@ impl fmt::Display for RenameCollisionSite {
     }
 }
 
-/// Is `prop` declared `core:inductive` — i.e. does its value carry a D47-encoded
-/// **term**, whose IRI-valued strings are references?
-///
-/// **This gate is the whole safety argument for descending into `Value::Json`
-/// below** (D79 §2.2). A `core:json` value is *"an opaque JSON value, not validated
-/// by the ontology"* — a solver payload, a `*_kv` map, an institution's witness blob
-/// — and an IRI-shaped string inside one is **data**. Rewriting it during a rename
-/// would corrupt the payload, and counting it as a mention would pull a resource
-/// into the rename set that does not belong there.
-///
-/// Before D79 §2.1 this distinction was not available: twenty-two term-valued
-/// properties were declared `core:resource` and `core:ctor_type` was `core:json`, so
-/// the carrier's declared type could not tell a term from a blob. A term-aware
-/// rename written then would have had to choose between missing terms and
-/// corrupting payloads.
-fn is_term_valued(prop: &Iri, layer: &crate::layer::Layer) -> bool {
-    let Ok(dt_prop) = Iri::parse(crate::ontology::well_known::DATA_TYPE_PROP) else {
-        return false;
-    };
-    layer
-        .resolve(prop)
-        .and_then(|def| {
-            def.get(&dt_prop)
-                .and_then(|v| v.as_iri_str())
-                .map(String::from)
-        })
-        .is_some_and(|dt| dt == crate::ontology::well_known::INDUCTIVE)
-}
-
 /// Whether a `Resource`'s body (excluding its own `@id`) contains any
-/// reference to `iri`. Walks `ResourceRef`, `Embedded`, and `Array`
+/// reference to `iri`. Walks IRI strings, `Embedded`, and `Array`
 /// recursively — same traversal shape as `iter_iri_values` but with
 /// an early-exit predicate — and, for a term-valued property, the encoded
 /// term as well.
@@ -478,116 +444,33 @@ fn is_term_valued(prop: &Iri, layer: &crate::layer::Layer) -> bool {
 /// the renamed IRI lives inside a proposition is reported as not mentioning it,
 /// `apply_rename_resolution` skips it outright, and the merge commits claiming a
 /// completed rename while the term still names the old IRI (D77 §3.6).
-fn resource_mentions_iri(resource: &Resource, iri: &Iri, layer: &crate::layer::Layer) -> bool {
+fn resource_mentions_iri(resource: &Resource, iri: &Iri) -> bool {
     resource
         .properties()
-        .iter()
-        .any(|(prop, v)| value_mentions_iri(v, iri, layer, is_term_valued(prop, layer)))
+        .values()
+        .any(|v| value_mentions_iri(v, iri))
 }
 
-fn value_mentions_iri(
-    value: &crate::ontology::resource::Value,
-    iri: &Iri,
-    layer: &crate::layer::Layer,
-    term_valued: bool,
-) -> bool {
-    use crate::ontology::resource::Value;
-    match value {
-        Value::ResourceRef(r) => r == iri,
-        Value::Array(items) => items
-            .iter()
-            .any(|v| value_mentions_iri(v, iri, layer, term_valued)),
-        Value::Embedded(resource) => resource_mentions_iri(resource, iri, layer),
-        Value::Json(j) if term_valued => json_mentions_iri(j, iri),
-        _ => false,
-    }
-}
-
-/// Does an encoded term name `iri`? Whole-string match only — a `ConstRef` or
-/// `CtorApp` argument is the exact IRI, never a substring of one.
-fn json_mentions_iri(j: &serde_json::Value, iri: &Iri) -> bool {
-    match j {
-        serde_json::Value::String(s) => s == iri.as_str(),
-        serde_json::Value::Array(items) => items.iter().any(|v| json_mentions_iri(v, iri)),
-        serde_json::Value::Object(map) => map.values().any(|v| json_mentions_iri(v, iri)),
-        _ => false,
-    }
+fn value_mentions_iri(value: &crate::ontology::resource::Value, iri: &Iri) -> bool {
+    use crate::ontology::value_refs::{for_each_ref, RefSite};
+    // Value leaves only: a rename moves a RESOURCE, and the properties pointing at it keep
+    // their own names. `Value::Json` is not visited at all — it is `core:json` and only that,
+    // opaque data where an IRI-shaped string is a string (D85 R5a), and rewriting one would
+    // corrupt a solver payload.
+    let mut found = false;
+    for_each_ref(value, &mut |site, s, _path| {
+        found |= site == RefSite::Value && s == iri.as_str();
+    });
+    found
 }
 
 /// Produce a copy of `resource` with every reference to `old_iri`
-/// (in `@id`, `ResourceRef`, nested `Embedded`, and `Array` items)
+/// (in `@id`, IRI strings, nested `Embedded`, and `Array` items)
 /// rewritten to `new_iri`.
-fn substitute_iri_in_resource(
-    resource: &Resource,
-    old_iri: &Iri,
-    new_iri: &Iri,
-    layer: &crate::layer::Layer,
-) -> Resource {
-    let mut out = match resource.id() {
-        Some(id) if id == old_iri => Resource::new(new_iri.clone()),
-        Some(id) => Resource::new(id.clone()),
-        None => Resource::new_embedded(),
-    };
-    for (prop, value) in resource.properties() {
-        let term_valued = is_term_valued(prop, layer);
-        out.set(
-            prop.clone(),
-            substitute_iri_in_value(value, old_iri, new_iri, layer, term_valued),
-        );
-    }
-    out
-}
-
-fn substitute_iri_in_value(
-    value: &crate::ontology::resource::Value,
-    old_iri: &Iri,
-    new_iri: &Iri,
-    layer: &crate::layer::Layer,
-    term_valued: bool,
-) -> crate::ontology::resource::Value {
-    use crate::ontology::resource::Value;
-    match value {
-        Value::ResourceRef(r) if r == old_iri => Value::ResourceRef(new_iri.clone()),
-        Value::Array(items) => Value::Array(
-            items
-                .iter()
-                .map(|v| substitute_iri_in_value(v, old_iri, new_iri, layer, term_valued))
-                .collect(),
-        ),
-        Value::Embedded(resource) => Value::Embedded(Box::new(substitute_iri_in_resource(
-            resource, old_iri, new_iri, layer,
-        ))),
-        // Only for a `core:inductive` carrier — see `is_term_valued`.
-        Value::Json(j) if term_valued => Value::Json(substitute_iri_in_json(j, old_iri, new_iri)),
-        other => other.clone(),
-    }
-}
-
-/// Rewrite `old_iri` to `new_iri` inside an encoded term. Whole-string equality
-/// only: an IRI occupies a `ConstRef` / `CtorApp` argument entire, so a substring
-/// rewrite could only ever corrupt a longer name that happens to contain this one.
-fn substitute_iri_in_json(
-    j: &serde_json::Value,
-    old_iri: &Iri,
-    new_iri: &Iri,
-) -> serde_json::Value {
-    match j {
-        serde_json::Value::String(s) if s == old_iri.as_str() => {
-            serde_json::Value::String(new_iri.as_str().to_string())
-        }
-        serde_json::Value::Array(items) => serde_json::Value::Array(
-            items
-                .iter()
-                .map(|v| substitute_iri_in_json(v, old_iri, new_iri))
-                .collect(),
-        ),
-        serde_json::Value::Object(map) => serde_json::Value::Object(
-            map.iter()
-                .map(|(k, v)| (k.clone(), substitute_iri_in_json(v, old_iri, new_iri)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
+fn substitute_iri_in_resource(resource: &Resource, old_iri: &Iri, new_iri: &Iri) -> Resource {
+    crate::ontology::value_refs::map_resource_refs(resource, &mut |s| {
+        (s == old_iri.as_str()).then(|| new_iri.as_str().to_string())
+    })
 }
 
 // ─── Schema-quotient application (15d) ─────────────────────────────────────
@@ -1221,12 +1104,7 @@ pub fn commit_resolutions_as_merge_layer(
                 // here rather than letting them slide into a
                 // half-committed layer.
                 let application =
-                    apply_rename_resolution(span, *side, old_iri, new_iri, &topology, backend, {
-                        match side {
-                            Side::A => &head_a,
-                            Side::B => &head_b,
-                        }
-                    })?;
+                    apply_rename_resolution(span, *side, old_iri, new_iri, &topology, backend)?;
 
                 // Commit each renamed resource. The target body is
                 // keyed at `new_iri`; references-in-other-resources
@@ -1425,7 +1303,9 @@ pub fn commit_resolutions_as_merge_layer(
                     if class_iri == &spec.affected_class {
                         body.set(
                             parent_classes_iri.clone(),
-                            Value::Array(vec![Value::ResourceRef(spec.new_parent.clone())]),
+                            Value::Array(vec![Value::String(
+                                spec.new_parent.clone().as_str().to_string(),
+                            )]),
                         );
                     } else {
                         let mut parents: Vec<Iri> = body
@@ -1437,7 +1317,7 @@ pub fn commit_resolutions_as_merge_layer(
                         }
                         body.set(
                             parent_classes_iri.clone(),
-                            Value::Array(parents.into_iter().map(Value::ResourceRef).collect()),
+                            Value::Array(parents.into_iter().map(|i| Value::iri(&i)).collect()),
                         );
                     }
                     builder
@@ -1520,8 +1400,11 @@ fn build_merge_resolution_record(
     let mut record = Resource::new_embedded();
     record.set(
         Iri::parse(wk::IS_A).expect("IS_A IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::MERGE_RESOLUTION_RECORD).expect("MERGE_RESOLUTION_RECORD IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::MERGE_RESOLUTION_RECORD)
+                .expect("MERGE_RESOLUTION_RECORD IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     record.set(
@@ -1569,7 +1452,7 @@ fn build_merge_resolution_record(
         MergeResolution::Witness { comorphism, .. } => {
             record.set(
                 Iri::parse(wk::MERGE_RECORD_WITNESS).expect("MERGE_RECORD_WITNESS IRI"),
-                Value::ResourceRef(comorphism.clone()),
+                Value::iri(&comorphism.clone()),
             );
             if let Some(layer_id) = witness_source_layer {
                 record.set(
@@ -1592,11 +1475,11 @@ fn build_merge_resolution_record(
             record.set(
                 Iri::parse(wk::MERGE_RECORD_RENAME_FROM_IRI)
                     .expect("MERGE_RECORD_RENAME_FROM_IRI IRI"),
-                Value::ResourceRef(old_iri.clone()),
+                Value::iri(&old_iri.clone()),
             );
             record.set(
                 Iri::parse(wk::MERGE_RECORD_RENAME_TO_IRI).expect("MERGE_RECORD_RENAME_TO_IRI IRI"),
-                Value::ResourceRef(new_iri.clone()),
+                Value::iri(&new_iri.clone()),
             );
         }
         MergeResolution::SchemaQuotient { quotient, .. } => {
@@ -1621,12 +1504,12 @@ fn build_merge_resolution_record(
             record.set(
                 Iri::parse(wk::MERGE_RECORD_RESTRUCTURE_NEW_PARENT)
                     .expect("MERGE_RECORD_RESTRUCTURE_NEW_PARENT IRI"),
-                Value::ResourceRef(spec.new_parent.clone()),
+                Value::iri(&spec.new_parent.clone()),
             );
             record.set(
                 Iri::parse(wk::MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS)
                     .expect("MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS IRI"),
-                Value::ResourceRef(spec.affected_class.clone()),
+                Value::iri(&spec.affected_class.clone()),
             );
         }
     }
@@ -1792,12 +1675,11 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(profile_for_iri, Value::ResourceRef(iri(patient_iri)))],
+            &[(profile_for_iri, Value::iri(&iri(patient_iri)))],
         );
-        let (span, backend, storage) =
+        let (span, backend, _storage) =
             build_span_arc(Vec::new(), Vec::new(), vec![patient, profile]);
         let topology = backend.load_topology().unwrap();
-        let schema = load_head_layer(&span.head_b, storage, &*backend).unwrap();
 
         let result = apply_rename_resolution(
             &span,
@@ -1806,7 +1688,6 @@ mod tests {
             &iri(renamed_iri),
             &topology,
             &*backend,
-            &schema,
         )
         .expect("rename should validate + apply cleanly");
 
@@ -1836,10 +1717,10 @@ mod tests {
             .get(&iri(profile_for_iri))
             .expect("profile_for ref should still exist");
         match profile_for {
-            Value::ResourceRef(r) => {
+            Value::String(r) => {
                 assert_eq!(r.as_str(), renamed_iri, "ref should be rewritten");
             }
-            other => panic!("expected ResourceRef, got {other:?}"),
+            other => panic!("expected an IRI string, got {other:?}"),
         }
     }
 
@@ -1848,17 +1729,14 @@ mod tests {
         // The target IRI is referenced inside an Array containing an
         // Embedded resource whose body references it. The walker
         // must descend through both shapes to find and rewrite the
-        // inner ResourceRef.
+        // inner reference.
         let patient_iri = "urn:project:Patient";
         let renamed_iri = "urn:project:billing:Patient";
         let report_iri = "urn:project:report";
 
         let patient = make_resource(patient_iri, &[wk::CLASS], &[]);
         let mut embedded = Resource::new_embedded();
-        embedded.set(
-            iri("urn:project:about"),
-            Value::ResourceRef(iri(patient_iri)),
-        );
+        embedded.set(iri("urn:project:about"), Value::iri(&iri(patient_iri)));
         let report = make_resource(
             report_iri,
             &[wk::CLASS],
@@ -1868,10 +1746,9 @@ mod tests {
             )],
         );
 
-        let (span, backend, storage) =
+        let (span, backend, _storage) =
             build_span_arc(Vec::new(), Vec::new(), vec![patient, report]);
         let topology = backend.load_topology().unwrap();
-        let schema = load_head_layer(&span.head_b, storage, &*backend).unwrap();
 
         let result = apply_rename_resolution(
             &span,
@@ -1880,7 +1757,6 @@ mod tests {
             &iri(renamed_iri),
             &topology,
             &*backend,
-            &schema,
         )
         .expect("nested rename should succeed");
 
@@ -1903,8 +1779,8 @@ mod tests {
             .get(&iri("urn:project:about"))
             .expect("nested about ref should still exist");
         match about {
-            Value::ResourceRef(r) => assert_eq!(r.as_str(), renamed_iri),
-            other => panic!("expected ResourceRef, got {other:?}"),
+            Value::String(r) => assert_eq!(r.as_str(), renamed_iri),
+            other => panic!("expected an IRI string, got {other:?}"),
         }
     }
 
@@ -1919,9 +1795,8 @@ mod tests {
 
         let a_resources = vec![make_resource(conflicting_iri, &[wk::CLASS], &[])];
         let b_resources = vec![make_resource(patient_iri, &[wk::CLASS], &[])];
-        let (span, backend, storage) = build_span_arc(Vec::new(), a_resources, b_resources);
+        let (span, backend, _storage) = build_span_arc(Vec::new(), a_resources, b_resources);
         let topology = backend.load_topology().unwrap();
-        let schema = load_head_layer(&span.head_b, storage, &*backend).unwrap();
 
         let result = apply_rename_resolution(
             &span,
@@ -1930,7 +1805,6 @@ mod tests {
             &iri(conflicting_iri),
             &topology,
             &*backend,
-            &schema,
         );
         match result {
             Err(MergeError::RenameCollision {
@@ -1953,13 +1827,12 @@ mod tests {
         let conflicting_iri = "urn:project:billing:Patient";
         let patient_iri = "urn:project:Patient";
 
-        let (span, backend, storage) = build_span_arc(
+        let (span, backend, _storage) = build_span_arc(
             vec![make_resource(conflicting_iri, &[wk::CLASS], &[])],
             Vec::new(),
             vec![make_resource(patient_iri, &[wk::CLASS], &[])],
         );
         let topology = backend.load_topology().unwrap();
-        let schema = load_head_layer(&span.head_b, storage, &*backend).unwrap();
 
         let result = apply_rename_resolution(
             &span,
@@ -1968,7 +1841,6 @@ mod tests {
             &iri(conflicting_iri),
             &topology,
             &*backend,
-            &schema,
         );
         match result {
             Err(MergeError::RenameCollision {
@@ -1989,7 +1861,7 @@ mod tests {
         // same branch.
         let patient_iri = "urn:project:Patient";
         let billing_iri = "urn:project:billing:Patient";
-        let (span, backend, storage) = build_span_arc(
+        let (span, backend, _storage) = build_span_arc(
             Vec::new(),
             Vec::new(),
             vec![
@@ -1998,7 +1870,6 @@ mod tests {
             ],
         );
         let topology = backend.load_topology().unwrap();
-        let schema = load_head_layer(&span.head_b, storage, &*backend).unwrap();
 
         let result = apply_rename_resolution(
             &span,
@@ -2007,7 +1878,6 @@ mod tests {
             &iri(billing_iri),
             &topology,
             &*backend,
-            &schema,
         );
         match result {
             Err(MergeError::RenameCollision {
@@ -2027,13 +1897,12 @@ mod tests {
         // rename it via Side::B is nonsense — B never touched it,
         // so there's nothing to transform.
         let patient_iri = "urn:project:Patient";
-        let (span, backend, storage) = build_span_arc(
+        let (span, backend, _storage) = build_span_arc(
             Vec::new(),
             vec![make_resource(patient_iri, &[wk::CLASS], &[])],
             Vec::new(),
         );
         let topology = backend.load_topology().unwrap();
-        let schema = load_head_layer(&span.head_b, storage, &*backend).unwrap();
 
         let result = apply_rename_resolution(
             &span,
@@ -2042,7 +1911,6 @@ mod tests {
             &iri("urn:project:billing:Patient"),
             &topology,
             &*backend,
-            &schema,
         );
         match result {
             Err(MergeError::RenameTargetNotInBranch { old_iri, side }) => {
@@ -2058,13 +1926,12 @@ mod tests {
         // old_iri == new_iri makes the rename a no-op. Surface as a
         // typed error so client intent stays explicit.
         let patient_iri = "urn:project:Patient";
-        let (span, backend, storage) = build_span_arc(
+        let (span, backend, _storage) = build_span_arc(
             Vec::new(),
             Vec::new(),
             vec![make_resource(patient_iri, &[wk::CLASS], &[])],
         );
         let topology = backend.load_topology().unwrap();
-        let schema = load_head_layer(&span.head_b, storage, &*backend).unwrap();
 
         let result = apply_rename_resolution(
             &span,
@@ -2073,7 +1940,6 @@ mod tests {
             &iri(patient_iri),
             &topology,
             &*backend,
-            &schema,
         );
         match result {
             Err(MergeError::RenameIdentity { iri: i }) => {
@@ -2095,7 +1961,7 @@ mod tests {
         let renamed_iri = "urn:project:billing:Patient";
         let visit_iri = "urn:project:Visit";
 
-        let (span, backend, storage) = build_span_arc(
+        let (span, backend, _storage) = build_span_arc(
             Vec::new(),
             Vec::new(),
             vec![
@@ -2104,7 +1970,6 @@ mod tests {
             ],
         );
         let topology = backend.load_topology().unwrap();
-        let schema = load_head_layer(&span.head_b, storage, &*backend).unwrap();
 
         let result = apply_rename_resolution(
             &span,
@@ -2113,7 +1978,6 @@ mod tests {
             &iri(renamed_iri),
             &topology,
             &*backend,
-            &schema,
         )
         .expect("rename should succeed");
 
@@ -2176,12 +2040,12 @@ mod tests {
         let prop_a = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::INTEGER)))],
         );
         let prop_b = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::STRING)))],
         );
         let (span, backend) = build_span(Vec::new(), vec![prop_a], vec![prop_b]);
         let conflicts = classify_conflicts(&span, &backend).unwrap();
@@ -2393,7 +2257,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Mammal").as_str().to_string(),
+                )]),
             )],
         );
         let dog_b = make_resource(
@@ -2401,7 +2267,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Reptile"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Reptile").as_str().to_string(),
+                )]),
             )],
         );
         build_span(vec![mammal, reptile], vec![dog_a], vec![dog_b])
@@ -2712,7 +2580,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Mammal").as_str().to_string(),
+                )]),
             )],
         );
         let dog_b = make_resource(
@@ -2720,7 +2590,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Reptile"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Reptile").as_str().to_string(),
+                )]),
             )],
         );
         let (span, backend, storage) =
@@ -2893,10 +2765,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(
-                "urn:project:profile_for",
-                Value::ResourceRef(iri(patient_iri)),
-            )],
+            &[("urn:project:profile_for", Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
 
@@ -3036,8 +2905,8 @@ mod tests {
             Some(conflict_id.0.as_str()),
         );
         match record.get(&iri(wk::MERGE_RECORD_WITNESS)) {
-            Some(Value::ResourceRef(r)) => assert_eq!(r, &handle.iri),
-            other => panic!("merge_record_witness should be a ResourceRef, got {other:?}"),
+            Some(Value::String(r)) => assert_eq!(r.as_str(), handle.iri.as_str()),
+            other => panic!("merge_record_witness should be an IRI string, got {other:?}"),
         }
         assert_eq!(
             record
@@ -3259,12 +3128,12 @@ mod tests {
             Some("a"),
         );
         match record.get(&iri(wk::MERGE_RECORD_RENAME_FROM_IRI)) {
-            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), patient_iri),
-            other => panic!("rename_from_iri should be ResourceRef, got {other:?}"),
+            Some(Value::String(r)) => assert_eq!(r.as_str(), patient_iri),
+            other => panic!("rename_from_iri should be an IRI string, got {other:?}"),
         }
         match record.get(&iri(wk::MERGE_RECORD_RENAME_TO_IRI)) {
-            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), renamed_iri),
-            other => panic!("rename_to_iri should be ResourceRef, got {other:?}"),
+            Some(Value::String(r)) => assert_eq!(r.as_str(), renamed_iri),
+            other => panic!("rename_to_iri should be an IRI string, got {other:?}"),
         }
         let _ = conflict_id;
     }
@@ -3334,7 +3203,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Mammal"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Mammal").as_str().to_string(),
+                )]),
             )],
         );
         let dog_b = make_resource(
@@ -3342,7 +3213,9 @@ mod tests {
             &[wk::CLASS],
             &[(
                 wk::PARENT_CLASSES,
-                Value::Array(vec![Value::ResourceRef(iri("urn:test:Reptile"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:test:Reptile").as_str().to_string(),
+                )]),
             )],
         );
         let (span, backend, storage) =
@@ -3378,12 +3251,12 @@ mod tests {
             Some("Restructure"),
         );
         match record.get(&iri(wk::MERGE_RECORD_RESTRUCTURE_NEW_PARENT)) {
-            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), "urn:test:Animal"),
-            other => panic!("restructure_new_parent should be ResourceRef, got {other:?}"),
+            Some(Value::String(r)) => assert_eq!(r.as_str(), "urn:test:Animal"),
+            other => panic!("restructure_new_parent should be an IRI string, got {other:?}"),
         }
         match record.get(&iri(wk::MERGE_RECORD_RESTRUCTURE_AFFECTED_CLASS)) {
-            Some(Value::ResourceRef(r)) => assert_eq!(r.as_str(), "urn:test:Dog"),
-            other => panic!("restructure_affected_class should be ResourceRef, got {other:?}"),
+            Some(Value::String(r)) => assert_eq!(r.as_str(), "urn:test:Dog"),
+            other => panic!("restructure_affected_class should be an IRI string, got {other:?}"),
         }
     }
 
@@ -3477,7 +3350,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(profile_for_iri, Value::ResourceRef(iri(patient_iri)))],
+            &[(profile_for_iri, Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, storage) =
             build_span_arc(Vec::new(), vec![patient_a, profile], vec![patient_b]);
@@ -3518,14 +3391,14 @@ mod tests {
             .resolve(&iri(profile_iri))
             .expect("Profile should resolve");
         match resolved_profile.get(&iri(profile_for_iri)) {
-            Some(Value::ResourceRef(r)) => {
+            Some(Value::String(r)) => {
                 assert_eq!(
                     r.as_str(),
                     renamed_iri,
                     "Profile.profile_for should point at the renamed IRI"
                 );
             }
-            other => panic!("expected ResourceRef to renamed IRI, got {other:?}"),
+            other => panic!("expected an IRI string naming the renamed IRI, got {other:?}"),
         }
     }
 
@@ -3741,22 +3614,22 @@ mod tests {
         let prop_a = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::INTEGER)))],
         );
         let prop_b = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::STRING)))],
         );
         let other_prop_a = make_resource(
             "urn:test:height",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::INTEGER)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::INTEGER)))],
         );
         let other_prop_b = make_resource(
             "urn:test:height",
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE, Value::ResourceRef(iri(wk::STRING)))],
+            &[(wk::DATA_TYPE, Value::iri(&iri(wk::STRING)))],
         );
         let (span, backend, storage) = build_span_arc(
             Vec::new(),
@@ -3797,12 +3670,13 @@ mod rename_reaches_terms {
     //! anyway. The merge committed reporting a completed rename while the term still
     //! named the old IRI — a dangling reference written into the chain.
     //!
-    //! **Only fixable after D79 §2.1.** The rule is *descend into `Value::Json` only
-    //! when the carrying property is declared `core:inductive`*, and before that
-    //! cleanup the declared type could not tell a term from an opaque payload:
-    //! twenty-two term-valued properties were declared `core:resource` and
-    //! `core:ctor_type` was `core:json`. A term-aware rename written then would have
-    //! had to choose between missing terms and corrupting solver payloads.
+    //! **The fix was a gate, and D85 removed the need for it.** D77 descended into
+    //! `Value::Json` only when the carrying property was declared `core:inductive`,
+    //! because the variant carried both jobs and only the schema could tell a term
+    //! from an opaque payload. A term is now a resource (D85 §6.1, R5a): it arrives
+    //! `Embedded`, which both halves already descend, and `Value::Json` is opaque
+    //! data with no arm at all. These two tests still pin both outcomes — the schema
+    //! is simply no longer consulted to reach them.
     use super::super::test_support::{build_span_arc, make_resource};
     use super::*;
     use crate::ontology::resource::Value;
@@ -3817,25 +3691,30 @@ mod rename_reaches_terms {
         make_resource(
             id,
             &[wk::PROPERTY],
-            &[(wk::DATA_TYPE_PROP, Value::ResourceRef(iri(data_type)))],
+            &[(wk::DATA_TYPE_PROP, Value::iri(&iri(data_type)))],
         )
     }
 
     const OLD: &str = "urn:project:Patient";
     const NEW: &str = "urn:project:Subject";
 
-    /// `term_prop` is `core:inductive`; `blob_prop` is `core:json`. Same value shape
-    /// in both — the *declaration* is the only difference.
+    /// `term_prop` carries the term as the value resource it is; `blob_prop` carries
+    /// the same tree as opaque JSON. The two shapes are what separate them.
     fn run(carrier_prop: &str) -> Option<Resource> {
-        let term = serde_json::json!({"ctor": "App", "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:logic:And"]},
-            {"ctor": "ConstRef", "args": [OLD]}]});
+        let tagged = serde_json::json!({"ctor": "App", "args": [
+            {"ctor": "ConstRef", "args": ["urn:eigenius:logic:And", []]},
+            {"ctor": "ConstRef", "args": [OLD, []]}]});
+        let carried = if carrier_prop.ends_with("term_prop") {
+            crate::testing::term_value(&tagged)
+        } else {
+            Value::Json(tagged)
+        };
         let holder = make_resource(
             "urn:project:claim",
             &[wk::CLASS],
-            &[(carrier_prop, Value::Json(term))],
+            &[(carrier_prop, carried)],
         );
-        let (span, backend, storage) = build_span_arc(
+        let (span, backend, _storage) = build_span_arc(
             Vec::new(),
             Vec::new(),
             vec![
@@ -3846,17 +3725,9 @@ mod rename_reaches_terms {
             ],
         );
         let topology = backend.load_topology().unwrap();
-        let schema = load_head_layer(&span.head_b, storage, &*backend).unwrap();
-        let applied = apply_rename_resolution(
-            &span,
-            Side::B,
-            &iri(OLD),
-            &iri(NEW),
-            &topology,
-            &*backend,
-            &schema,
-        )
-        .expect("rename applies");
+        let applied =
+            apply_rename_resolution(&span, Side::B, &iri(OLD), &iri(NEW), &topology, &*backend)
+                .expect("rename applies");
         applied.resources.get(&iri("urn:project:claim")).cloned()
     }
 
@@ -3876,10 +3747,10 @@ mod rename_reaches_terms {
         );
     }
 
-    /// **The other half of the rule, and the reason it is a rule.** The identical
-    /// value under a `core:json` property is an opaque payload — a solver result, a
-    /// `*_kv` map — whose IRI-shaped strings are *data*. Rewriting it would corrupt
-    /// the payload, so the holder is not selected and the value is untouched.
+    /// **The other half, and the reason it is a rule.** The same tree as opaque JSON
+    /// is a payload — a solver result, a `*_kv` map — whose IRI-shaped strings are
+    /// *data*. Rewriting it would corrupt the payload, so the holder is not selected
+    /// and the value is untouched.
     #[test]
     fn an_iri_shaped_string_in_an_opaque_json_payload_is_left_alone() {
         assert!(

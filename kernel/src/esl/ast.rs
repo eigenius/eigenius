@@ -126,7 +126,7 @@ pub enum Declaration {
 ///
 /// Two restrictions in v1:
 /// - The body must be a `Value` (resource-property value AST), not
-///   a `TypeExpr` or `Expr` (program body). Smart constructors
+///   a `Term` or `Expr` (program body). Smart constructors
 ///   produce ctor values; that's their use case.
 /// - No recursion. The compile-time expansion has no termination
 ///   guarantee for recursive calls and the use case (named-design
@@ -135,7 +135,7 @@ pub enum Declaration {
 pub struct MacroDecl {
     pub name: QualifiedName,
     pub params: Vec<MacroParam>,
-    pub return_type: TypeExpr,
+    pub return_type: Term,
     pub body: Value,
     pub pos: Position,
 }
@@ -144,7 +144,7 @@ pub struct MacroDecl {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MacroParam {
     pub name: String,
-    pub typ: TypeExpr,
+    pub typ: Term,
     pub pos: Position,
 }
 
@@ -158,7 +158,7 @@ pub struct MacroParam {
 #[derive(Debug)]
 pub struct AxiomDecl {
     pub name: QualifiedName,
-    pub statement: TypeExpr,
+    pub statement: Term,
     pub description: Option<String>,
     pub justification: Option<String>,
     pub pos: Position,
@@ -181,9 +181,9 @@ pub struct DefDecl {
     /// as [`DataParam`] allows.
     pub params: Vec<TypedParam>,
     /// The result type, after the `:`.
-    pub result: TypeExpr,
+    pub result: Term,
     /// The right-hand side, after the `=`.
-    pub body: TypeExpr,
+    pub body: Term,
     pub description: Option<String>,
     pub pos: Position,
 }
@@ -232,6 +232,14 @@ pub enum PropertyItem {
     Domain(Vec<QualifiedName>),
     ClassTypes(Vec<QualifiedName>),
     ElementType(QualifiedName),
+    /// `expected_type <term>;` — the type this property's values must check
+    /// against. The validator forms `Ann(value, <term>)`, so the kernel's
+    /// existing annotation rule does the checking.
+    ExpectedType(Term),
+    /// `is_a_type;` — the values must themselves be types (`check_type`).
+    /// Separate from `ExpectedType` because the sorts vary within a slot and
+    /// `ExpectedType` holds one term.
+    IsAType,
 }
 
 /// `resource ex:rex : ex:Dog { ... }` or `resource ex:rex : ex:Dog, ex:Pet { ... }`.
@@ -294,10 +302,10 @@ pub enum Value {
     /// matching what a programmatic `encode_type` caller produces.
     /// Surface counterpart of `formula(...)` for D32 §3.7
     /// inductive values — same purpose (write the expression
-    /// readably instead of the tagged-dict tree the codec emits),
+    /// readably instead of the value tree the codec emits),
     /// different codec.
-    TypeExpr {
-        typ: TypeExpr,
+    Term {
+        typ: Term,
         pos: Position,
     },
     /// D52 §12 — call to a [`MacroDecl`] smart constructor declared
@@ -364,7 +372,7 @@ pub struct DataDecl {
     ///
     /// Indices use [`DataIndex`] rather than [`DataParam`] because
     /// index kinds can be Sort literals (e.g., D39 §5's
-    /// `JustifiedBy : JustificationTerm → Prop → Type` has `Prop` as
+    /// `justification:Certificate : justification:Term → Prop → Type` has `Prop` as
     /// its second index kind). Type params have no such use case in
     /// v1 — they're always Set-kinded today.
     pub indices: Vec<DataIndex>,
@@ -403,7 +411,7 @@ pub struct DataParam {
 /// (eigenius#72 Layer 2). Differs from [`DataParam`] in that the kind
 /// can be a Sort literal (`Prop` / `Set` / `Type N`) as well as a
 /// qualified-name reference — D39 §5's
-/// `JustifiedBy : JustificationTerm → Prop → Type` has `Prop` as its
+/// `justification:Certificate : justification:Term → Prop → Type` has `Prop` as its
 /// second index kind, which `DataParam`'s `QualifiedName`-only kind
 /// field can't express.
 #[derive(Debug)]
@@ -443,7 +451,7 @@ pub enum IndexKind {
 /// - `Typed` — the indexed-aware form: `cons : forall (n : Nat) => A
 ///   -> Vec(A, n) -> Vec(A, succ(n))`. The full Π-telescope including
 ///   the conclusion (with explicit indices) is supplied as a single
-///   `TypeExpr`. Required when the declaration has indices.
+///   `Term`. Required when the declaration has indices.
 #[derive(Debug)]
 pub enum CtorDecl {
     Positional {
@@ -456,7 +464,7 @@ pub enum CtorDecl {
         name: String,
         /// Full Π-telescope of the constructor type, ending in an
         /// application of the parent inductive to its params and indices.
-        typ: TypeExpr,
+        typ: Term,
         pos: Position,
     },
 }
@@ -531,7 +539,7 @@ pub struct CtorArgType {
 #[derive(Debug)]
 pub struct ObservationDecl {
     pub name: String,
-    pub typ: TypeExpr,
+    pub typ: Term,
     pub pos: Position,
 }
 
@@ -543,37 +551,40 @@ pub struct ObservationDecl {
 /// - Function types with optional bounded size binder
 ///   (`{j < i} -> ex:Stream(j, A)` or `A -> B`)
 ///
-/// Purposely restricted — this isn't a full type-expression grammar,
-/// just enough for the codata observation-type surface. Data ctor
-/// arg types still use the simpler `CtorArgType` shape.
+/// This IS the full term grammar — it is what `type_expr( … )` and an
+/// `axiom` statement parse into, and it carries Pi/`forall`, Sigma/`exists`,
+/// lambdas, applications and literals. It began as the restricted
+/// codata-observation surface and grew; the comment saying so outlived the
+/// truth, exactly as the name `TypeExpr` outlived the class it mirrored.
+/// Data ctor arg types still use the simpler `CtorArgType` shape.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TypeExpr {
+pub enum Term {
     /// Type reference with zero or more type args: `Name` or
     /// `Name(arg, arg, ...)`. Bare identifiers (no namespace) are
     /// resolved as: declared param / `Inf` / `Size` first, otherwise
     /// namespace lookup.
     Ref {
         name: QualifiedName,
-        args: Vec<TypeExpr>,
+        args: Vec<Term>,
         pos: Position,
     },
     /// Non-dependent arrow `A -> B` — used when the user writes a
     /// plain function type without a named binder.
     Arrow {
-        domain: Box<TypeExpr>,
-        codomain: Box<TypeExpr>,
+        domain: Box<Term>,
+        codomain: Box<Term>,
         pos: Position,
     },
-    /// Size-binder arrow `{j < bound} -> body` (sized) or
-    /// `{j : Kind} -> body` (unbounded) or
-    /// `{j : Kind < bound} -> body`.
-    /// Compiles to `Exp::SizedPi` when bound is present and kind is
-    /// `Size`; to plain `Exp::Pi` otherwise.
+    /// Dependent binder arrow `{j : Kind} -> body`. Compiles to `Exp::Pi`.
+    ///
+    /// It also carried a `bound`, for `{j : Kind < b}` and its shorthand `{j < b}`, which
+    /// compiled to `Exp::SizedPi`. Both went with sized types (eigenius#218) — and the bound
+    /// was already unwritable before that: it emitted a `core:binder_bound` property that
+    /// `core-ontology.json` never declared, so Rule 22 rejected any resource carrying one.
     BinderArrow {
         name: String,
         kind: QualifiedName,
-        bound: Option<QualifiedName>,
-        body: Box<TypeExpr>,
+        body: Box<Term>,
         pos: Position,
     },
     /// Dependent PAIR binder: `exists x_1 : T_1, ..., x_N : T_N . B`.
@@ -596,7 +607,7 @@ pub enum TypeExpr {
     },
     Sigma {
         params: Vec<TypedParam>,
-        body: Box<TypeExpr>,
+        body: Box<Term>,
         pos: Position,
     },
     /// D37 §3.5 — value-typed Pi binder:
@@ -612,7 +623,7 @@ pub enum TypeExpr {
     /// `Forall` keyword. Both parse into this variant.
     Pi {
         params: Vec<TypedParam>,
-        codomain: Box<TypeExpr>,
+        codomain: Box<Term>,
         pos: Position,
     },
     /// eigenius#72 — sort literal in type position. `Prop` is
@@ -656,7 +667,7 @@ pub enum TypeExpr {
     /// to nested `Exp::Pi` chains.
     Lambda {
         params: Vec<TypedParam>,
-        body: Box<TypeExpr>,
+        body: Box<Term>,
         pos: Position,
     },
     /// Compile-time aliases in type-expression position:
@@ -664,7 +675,7 @@ pub enum TypeExpr {
     /// bindings are textual substitutions resolved at lowering time
     /// — they shadow no chain-resident identifier and produce no D47
     /// encoding of their own. The body's free references to each
-    /// binding name (as bare `TypeExpr::Ref`) inline the bound
+    /// binding name (as bare `Term::Ref`) inline the bound
     /// expression. Earlier bindings are in scope inside later
     /// bindings (sequential lexical scoping). Pure ESL surface
     /// sugar; the kernel's NbE never sees these.
@@ -676,7 +687,7 @@ pub enum TypeExpr {
     /// lands.
     Alias {
         bindings: Vec<AliasBinding>,
-        body: Box<TypeExpr>,
+        body: Box<Term>,
         pos: Position,
     },
     /// Type annotation `(e : T)` — the bidirectional mode switch. Compiles to
@@ -684,8 +695,8 @@ pub enum TypeExpr {
     /// synthesizable type) appear where a type is inferred — e.g. a determiner's
     /// λ-semantics in `lexicon:sem` (D63 §8.2).
     Ann {
-        expr: Box<TypeExpr>,
-        typ: Box<TypeExpr>,
+        expr: Box<Term>,
+        typ: Box<Term>,
         pos: Position,
     },
 }
@@ -694,7 +705,7 @@ pub enum TypeExpr {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AliasBinding {
     pub name: String,
-    pub value: TypeExpr,
+    pub value: Term,
     pub pos: Position,
 }
 
@@ -760,35 +771,35 @@ pub enum LevelExpr {
     IMax(Box<LevelExpr>, Box<LevelExpr>),
 }
 
-impl TypeExpr {
+impl Term {
     /// Position of the type-expression's root for error reporting.
     pub fn pos(&self) -> &Position {
         match self {
-            TypeExpr::Ref { pos, .. }
-            | TypeExpr::Arrow { pos, .. }
-            | TypeExpr::BinderArrow { pos, .. }
-            | TypeExpr::Pi { pos, .. }
-            | TypeExpr::Sigma { pos, .. }
-            | TypeExpr::Unit { pos, .. }
-            | TypeExpr::Sort { pos, .. }
-            | TypeExpr::Lambda { pos, .. }
-            | TypeExpr::Alias { pos, .. }
-            | TypeExpr::Ann { pos, .. }
-            | TypeExpr::LitString { pos, .. }
-            | TypeExpr::LitInt { pos, .. }
-            | TypeExpr::LitFloat { pos, .. }
-            | TypeExpr::LitBool { pos, .. } => pos,
+            Term::Ref { pos, .. }
+            | Term::Arrow { pos, .. }
+            | Term::BinderArrow { pos, .. }
+            | Term::Pi { pos, .. }
+            | Term::Sigma { pos, .. }
+            | Term::Unit { pos, .. }
+            | Term::Sort { pos, .. }
+            | Term::Lambda { pos, .. }
+            | Term::Alias { pos, .. }
+            | Term::Ann { pos, .. }
+            | Term::LitString { pos, .. }
+            | Term::LitInt { pos, .. }
+            | Term::LitFloat { pos, .. }
+            | Term::LitBool { pos, .. } => pos,
         }
     }
 }
 
-/// A typed binder: `name : type`. Used by `TypeExpr::Pi` and by the
+/// A typed binder: `name : type`. Used by `Term::Pi` and by the
 /// new typed `lambda` literal (D37 §3.1). The type can be any
-/// `TypeExpr`, including nested `Pi` / `Ref` / `Arrow` forms.
+/// `Term`, including nested `Pi` / `Ref` / `Arrow` forms.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypedParam {
     pub name: String,
-    pub typ: TypeExpr,
+    pub typ: Term,
     pub pos: Position,
 }
 
@@ -896,7 +907,7 @@ pub enum Expr {
     /// => body` parses to N nested single-parameter `Lambda` nodes.
     Lambda {
         param: String,
-        param_type: Option<TypeExpr>,
+        param_type: Option<Term>,
         body: Box<Expr>,
         pos: Position,
     },
@@ -955,16 +966,16 @@ pub enum Expr {
     /// error with a clear diagnostic.
     ///
     /// Two motive shapes are accepted in source:
-    /// - A bare `TypeExpr::Ref` (qualified name) — desugars to the
+    /// - A bare `Term::Ref` (qualified name) — desugars to the
     ///   constant motive `λ_. T`. This is the pre-Layer-3 surface and
     ///   stays supported for non-indexed inductives.
-    /// - A `TypeExpr::Lambda` (`fun (i : T) => body`) — used as the
+    /// - A `Term::Lambda` (`fun (i : T) => body`) — used as the
     ///   motive directly, abstracting over the scrutinee's indices.
     ///   Required when matching on an indexed inductive whose result
     ///   type depends on those indices.
     Match {
         scrutinee: Box<Expr>,
-        returning: Option<TypeExpr>,
+        returning: Option<Term>,
         arms: Vec<MatchArm>,
         pos: Position,
     },

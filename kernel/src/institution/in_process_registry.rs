@@ -200,8 +200,11 @@ impl Institution for EchoInstitution {
         let mut r = Resource::new(verdict_iri);
         r.set(
             Iri::parse(wk::IS_A).expect("IS_A IRI"),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse(wk::VERDICT).expect("VERDICT IRI"),
+            Value::Array(vec![Value::String(
+                Iri::parse(wk::VERDICT)
+                    .expect("VERDICT IRI")
+                    .as_str()
+                    .to_string(),
             )]),
         );
         r.set(

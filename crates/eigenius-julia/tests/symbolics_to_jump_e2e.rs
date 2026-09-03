@@ -186,7 +186,9 @@ fn build_symbolic_expression() -> Resource {
     let mut r = Resource::new_embedded();
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(SYMBOLIC_EXPRESSION_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(SYMBOLIC_EXPRESSION_CLASS).as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:core:short_name"),
@@ -203,7 +205,9 @@ fn build_variable_bound(name: &str, lower: f64, upper: f64) -> Resource {
     let mut r = Resource::new_embedded();
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(VARIABLE_BOUND_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(VARIABLE_BOUND_CLASS).as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:jump:variable_name"),
@@ -221,7 +225,9 @@ fn build_symbolics_to_jump_input_cbor() -> Vec<u8> {
     let mut req = Resource::new_embedded();
     req.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(SYMBOLICS_TO_JUMP_INPUT_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(SYMBOLICS_TO_JUMP_INPUT_CLASS).as_str().to_string(),
+        )]),
     );
     req.set(
         iri("urn:eigenius:core:short_name"),

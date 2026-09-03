@@ -12,12 +12,166 @@
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
 namespace reflection = "urn:eigenius:reflection";
+namespace prov       = "urn:eigenius:prov";
+namespace wrnact     = "urn:eigenius:pub:wrn:activity";
 namespace bench      = "urn:eigenius:benchmark";
 namespace onco       = "urn:eigenius:benchmark:onco";
 
+
+// ── Provenance activities (prov:Activity) ────────────────────────────
+//
+// Every observation in this chain names the event that produced it through
+// `prov:was_generated_by`. That property is resource-typed, so the event has to
+// BE something on the chain. It used to be a free-text string —
+// "depmap:18Q4 avg WRN dependency, common-MSI lineages (Supp Table 1)" — which
+// named the right thing and reached nothing, so `which claims rest on the DepMap
+// 18Q4 release` had no answer and a provenance walk had nothing to walk.
+//
+// The ACTIVITY is the measurement occasion: a data release, one figure panel's
+// assay, one recompute run. The detail those strings carried after the occasion
+// ("avg WRN dependency, common-MSI lineages") describes the ENTITY that was
+// taken from it, not the event, and belongs on the observed resource. Fifty
+// distinct strings collapse to twenty-five activities on that reading, which is
+// the measure of how much of each string was slice rather than source.
+
+resource wrnact:dd_recompute : prov:Activity {
+    core:description = "Differential-dependency recompute: limma moderated-t over the pinned Achilles matrix, via programs/differential-dependency/dd-achilles-limma-program.json under R 4.3.3 (D56 wrapped-R, substrate-spawned worker), against the snapshot data/MANIFEST.md pins.";
+    core:short_name = "dd_recompute";
+}
+
+resource wrnact:depmap_18q4 : prov:Activity {
+    core:description = "DepMap 18Q4 release — the Achilles CRISPR-CERES gene-effect matrix, the DEMETER2 RNAi scores, the curated omics bundle and Supplementary Table 1, as a pinned snapshot.";
+    core:short_name = "depmap_18q4";
+}
+
+resource wrnact:dsb_marker_if : prov:Activity {
+    core:description = "Fig 4 / ED Fig 6,7 DSB-marker immunofluorescence panel, run outside the kernel.";
+    core:short_name = "dsb_marker_if";
+}
+
+resource wrnact:ed_fig_10a : prov:Activity {
+    core:description = "ED Fig 10a host-cell reactivation assay: HCT116 parental vs Ch3+5.";
+    core:short_name = "ed_fig_10a";
+}
+
+resource wrnact:ed_fig_10c : prov:Activity {
+    core:description = "ED Fig 10c relative-viability assay: HCT116 MLH1 restoration under shWRN1+shWRN2.";
+    core:short_name = "ed_fig_10c";
+}
+
+resource wrnact:ed_fig_3b : prov:Activity {
+    core:description = "ED Fig 3b day-10 competition assay: Firefly:Renilla ratio normalised to the mean of negatives.";
+    core:short_name = "ed_fig_3b";
+}
+
+resource wrnact:ed_fig_4b : prov:Activity {
+    core:description = "ED Fig 4b cell-cycle assay: %S-phase by sgRNA.";
+    core:short_name = "ed_fig_4b";
+}
+
+resource wrnact:ed_fig_4c : prov:Activity {
+    core:description = "ED Fig 4c apoptosis assay: total apoptosis by sgRNA.";
+    core:short_name = "ed_fig_4c";
+}
+
+resource wrnact:ed_fig_4d : prov:Activity {
+    core:description = "ED Fig 4d apoptotic-death assay: KM12 % apoptotic death by shRNA.";
+    core:short_name = "ed_fig_4d";
+}
+
+resource wrnact:ed_fig_5 : prov:Activity {
+    core:description = "ED Fig 5 immunofluorescence, panels 5b/5d: p-p53 and p21 lsmeans.";
+    core:short_name = "ed_fig_5";
+}
+
+resource wrnact:ed_fig_6a_6d : prov:Activity {
+    core:description = "ED Fig 6a/6d gammaH2AX foci counts, with pan-nuclear saturated cells counted at a ceiling.";
+    core:short_name = "ed_fig_6a_6d";
+}
+
+resource wrnact:ed_fig_6c : prov:Activity {
+    core:description = "ED Fig 6c gammaH2AX intensity by emmeans.";
+    core:short_name = "ed_fig_6c";
+}
+
+resource wrnact:ed_fig_6f_6h : prov:Activity {
+    core:description = "ED Fig 6f/6h 53BP1 DSB-foci counts.";
+    core:short_name = "ed_fig_6f_6h";
+}
+
+resource wrnact:ed_fig_7b_7d : prov:Activity {
+    core:description = "ED Fig 7b/7d pATM(S1981) foci counts.";
+    core:short_name = "ed_fig_7b_7d";
+}
+
+resource wrnact:ed_fig_8a : prov:Activity {
+    core:description = "Fig 4d,e / ED Fig 8a telomere-FISH assay, run outside the kernel.";
+    core:short_name = "ed_fig_8a";
+}
+
+resource wrnact:ed_fig_8d : prov:Activity {
+    core:description = "ED Fig 8d WRN-fibrillarin Pearson colocalization, MSI vs lineage-matched MSS.";
+    core:short_name = "ed_fig_8d";
+}
+
+resource wrnact:fig_2b_2c_rescue : prov:Activity {
+    core:description = "Fig 2b,c rescue assay, run outside the kernel.";
+    core:short_name = "fig_2b_2c_rescue";
+}
+
+resource wrnact:fig_2c : prov:Activity {
+    core:description = "Fig 2c relative-viability assay: KM12 sgWRN-EIJ against GFP, WT-cDNA and E84A-cDNA backgrounds.";
+    core:short_name = "fig_2c";
+}
+
+resource wrnact:fig_2d_seed_control : prov:Activity {
+    core:description = "Fig 2d C911 seed control, run outside the kernel.";
+    core:short_name = "fig_2d_seed_control";
+}
+
+resource wrnact:fig_2d_xenograft : prov:Activity {
+    core:description = "Fig 2d KM12 shWRN1 xenograft: tumour volumes, Dox-on vs Dox-off.";
+    core:short_name = "fig_2d_xenograft";
+}
+
+resource wrnact:figshare_achilles : prov:Activity {
+    core:description = "Download of DepMap Achilles 18Q4 CERES gene-effect scores, figshare 7270880 / gene_effect.csv.";
+    core:short_name = "figshare_achilles";
+}
+
+resource wrnact:figshare_drive : prov:Activity {
+    core:description = "Download of Project DRIVE DEMETER2 dependency scores, figshare 6025238 / D2_DRIVE_gene_dep_scores.csv.";
+    core:short_name = "figshare_drive";
+}
+
+resource wrnact:geo_gse126464 : prov:Activity {
+    core:description = "Download of GEO GSE126464 WRN-KO RNA-seq STAR gene counts (genes x 12 samples), the mechanism arm's expression input.";
+    core:short_name = "geo_gse126464";
+}
+
+resource wrnact:msigdb_hallmark : prov:Activity {
+    core:description = "Download of MSigDB Hallmark v6.2 (50 gene sets, gene symbols), the collection fgsea tests the WRN-KO signature against.";
+    core:short_name = "msigdb_hallmark";
+}
+
+resource wrnact:nihms_supp_table1 : prov:Activity {
+    core:description = "Extraction from NIHMS1522798 Supplementary Table 1 — the paper's own cell-line table.";
+    core:short_name = "nihms_supp_table1";
+}
+
+resource wrnact:phase1_encoding : prov:Activity {
+    core:description = "The wrn-phase1 encoding run that produced this chain's phase-1 resources.";
+    core:short_name = "phase1_encoding";
+}
+
+resource wrnact:program_input_extraction : prov:Activity {
+    core:description = "Extraction of a content-addressed input slice for a wrapped-R program; the slice each run consumed is pinned under programs/*/**-input.json.";
+    core:short_name = "program_input_extraction";
+}
+
 // ── Entities (Observed anchors) ──────────────────────────────────────
 
-class onco:Gene : reflection:ObservedResource {
+class onco:Gene {
     description = "A gene, identified by symbol + external IDs (HGNC/Entrez/UniProt).";
     requires onco:symbol;
     recommends onco:entrez, onco:uniprot;
@@ -26,7 +180,7 @@ property onco:symbol  : core:string { description = "HGNC gene symbol, e.g. 'WRN
 property onco:entrez  : core:string { description = "Entrez gene ID, e.g. '7486'."; domain onco:Gene; }
 property onco:uniprot : core:string { description = "UniProt accession, e.g. 'Q14191'."; domain onco:Gene; }
 
-class onco:CellLine : reflection:ObservedResource {
+class onco:CellLine {
     description = "A cancer cell line, identified by DepMap_ID / CCLE_name, with lineage.";
     requires onco:cell_line_id;
     recommends onco:ccle_name, onco:lineage, onco:cellosaurus;

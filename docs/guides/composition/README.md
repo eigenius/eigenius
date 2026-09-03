@@ -63,10 +63,10 @@ The chapters build on each other:
 7. **[Statistics + reasoning walkthrough](07-stats-and-reasoning-walkthrough.md)**
    — the second composition shape, traced end-to-end: raw IC50 readings
    → D52 `StatisticalAnalysisPlan` Holds → witness-index admission →
-   D39 `ReasoningSentence` certificate consumes the witness via
-   `DerivedEvidence` → `StrongInhibitor` conclusion. No comorphism
+   D39 `justification:Conclusion` certificate consumes the witness via
+   `App(Declared(plan), Observed(input))` → `StrongInhibitor` conclusion. No comorphism
    between the institutions; the composition runs through the shared
-   `eigentt:TypeExpr` proposition slot.
+   `eigentt:Term` proposition slot.
 8. **[Composition patterns](08-patterns.md)** — when to share a payload
    language, when to declare a comorphism, when an OnDemand FIBER
    suffices, when chain reinsertion matters. Identity comorphisms
@@ -81,7 +81,7 @@ The chapters build on each other:
 10. **[Appendix](10-appendix.md)** — references, source index, related
     design docs (D14 §4–§6 + §9.3, D26, D27, D32, D39, D46, D47, D48,
     D49, D52), pointer to the
-    [SHACL-comparison note](../../notes/note-for-a-shacl-user.md) for
+    SHACL-comparison note for
     the conceptual pitch.
 
 ## Most important chapters
@@ -106,7 +106,7 @@ The chapters build on each other:
   This guide assumes you've internalised at least the intervals
   tutorial.
 - **Not the conceptual pitch.** The
-  [SHACL-comparison note](../../notes/note-for-a-shacl-user.md) frames
+  SHACL-comparison note frames
   the broad story for someone coming from the W3C semantic web stack.
   This guide is the structured reference once that framing has landed.
 
@@ -116,7 +116,7 @@ The chapters build on each other:
 - [**Platform §11** — Runtime substrate](../platform/11-runtime-substrate.md)
 - [**Platform `julia-institutions/`**](../platform/julia-institutions/) — per-institution Julia tutorials
 - [**ESL §9** — Institutions in ESL](../esl/09-institutions.md)
-- [**EigenQL §7** — FIBER clauses](../eigenql/07-fiber-clauses.md), [**§8** — Institutions in EigenQL](../eigenql/08-institutions.md)
+- [**EigenQL §7** — FIBER clauses](../eigenql/08-fiber-clauses.md), [**§8** — Institutions in EigenQL](../eigenql/09-institutions.md)
 - [**Formula language guide**](../formula/README.md)
 - [**D14** — Institution Realisation](../../design/d14-institution-realisation.md) — the canonical spec
 - [**D26** — Runtime substrate](../../design/d26-runtime-substrate.md), [**D27** — Julia institutions](../../design/d27-julia-institutions.md), [**D32** — Chain-mirrored EigenTT inductives](../../design/d32-chain-mirrored-mini-tt-inductives.md)

@@ -68,6 +68,19 @@ const TERM_IRI: &str = "urn:eigenius:demo:lean:proof_term";
 
 const OUTPUT_REL: &str = "notebooks/examples/lean-verification-demo.eigon.json";
 
+/// The bootstrap chain — the mirror reads `LeanExpr`'s constructor argument names from it.
+fn chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
 fn main() {
     let workspace = workspace_root();
     let proof_bytes_path =
@@ -106,7 +119,7 @@ fn main() {
     eprintln!("Bootstrap head layer ID: {bootstrap_head_id}");
 
     eprintln!("Decoding proposition for theorem `{TARGET_THEOREM}`");
-    let proposition = bytes_to_lean_expr(&proof_bytes, TARGET_THEOREM)
+    let proposition = bytes_to_lean_expr(&proof_bytes, TARGET_THEOREM, chain())
         .expect("chain-mirror translator must decode the capstone proposition");
 
     let resources = vec![
@@ -144,7 +157,7 @@ fn patient_class_resource() -> Resource {
     let mut r = Resource::new(iri(PATIENT_CLASS_IRI));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+        Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
     );
     r.set(iri(wk::SHORT_NAME), Value::String("Patient".to_string()));
     r.set(
@@ -164,7 +177,9 @@ fn patient_instance_resource() -> Resource {
     let mut r = Resource::new(iri(PATIENT_INSTANCE_IRI));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(PATIENT_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(PATIENT_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     r
 }
@@ -187,9 +202,11 @@ fn mirror_resource(
     let mut r = Resource::new(iri(MIRROR_IRI));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:runtime:RuntimePackageMirror",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:runtime:RuntimePackageMirror")
+                .as_str()
+                .to_string(),
+        )]),
     );
     // `short_name` is required by `RuntimePackageMirror` and the
     // value matches what the real LeanMirrorGenerator emits: the
@@ -246,7 +263,9 @@ fn mirror_resource(
     );
     r.set(
         iri(lean_iris::PROP_MIRRORED_CLASSES),
-        Value::Array(vec![Value::ResourceRef(iri(PATIENT_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(PATIENT_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     r
 }
@@ -256,9 +275,11 @@ fn proof_payload_resource(bytes: &[u8]) -> Resource {
     let mut r = Resource::new(iri(PAYLOAD_IRI));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofPayload",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofPayload")
+                .as_str()
+                .to_string(),
+        )]),
     );
     r.set(
         iri(lean_iris::PROP_PAYLOAD_BYTES),
@@ -271,13 +292,13 @@ fn proof_term_resource(proposition: Value) -> Resource {
     let mut r = Resource::new(iri(TERM_IRI));
     r.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofTerm",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofTerm").as_str().to_string(),
+        )]),
     );
     r.set(
         iri(lean_iris::PROP_PROOF_PAYLOAD),
-        Value::ResourceRef(iri(PAYLOAD_IRI)),
+        Value::iri(&iri(PAYLOAD_IRI)),
     );
     r.set(
         iri(lean_iris::PROP_TARGET_NAME),

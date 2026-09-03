@@ -4,9 +4,12 @@
 > institution *framework* (D14) is intact — institutions are still declared
 > as ontology resources and implemented as runtimes — but the WASM backend
 > is gone. Implement institutions as in-process Rust (`runtime: in_process`,
-> e.g. `eigenius-reasoning`, `eigenius-lean`) or as external institutions via
+> e.g. `eigenius-lean`, `eigenius-statistics`) or as external institutions via
 > the runtime substrate (`runtime: external`, D31). This chapter is retained
-> as historical record only. Background:
+> as historical record only. **The file links in the body no longer resolve** — `examples/wasm-d14-*`,
+> `sdk/wasm-sdk/`, `kernel/src/capability/wasm_institution_d14.rs` and the `d14_dock_assay_demo*`
+> tests were deleted with the mechanism. They are left as they were, because they record what
+> existed; nothing below is a live path. Background:
 > [D12](../../design/d12-wasm-extensibility.md).
 >
 > **How to read the rest of this chapter.** The body below is preserved
@@ -32,7 +35,7 @@
 
 Institutions are domain-specific reasoning systems — typed reasoners that contribute structured fibres to the knowledge graph. Under D14 ([Institution Realisation](../../design/d14-institution-realisation.md)) they are *declared* as ontology resources committed to the layer chain (`Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism`) and *implemented* as a runtime that handles boundary translations and any opaque reasoning. The same WASM hosting machinery that runs components also hosts institutions, but against the dedicated `eigenius-institution-d14` WIT world (D14 §13).
 
-Cross-link: this chapter is the **implementer** view. The **user** view (how programs and queries invoke institutions) is in [ESL §9](../esl/09-institutions.md) and [EigenQL §8](../eigenql/08-institutions.md).
+Cross-link: this chapter is the **implementer** view. The **user** view (how programs and queries invoke institutions) is in [ESL §9](../esl/09-institutions.md) and [EigenQL §8](../eigenql/09-institutions.md).
 
 ## 10.1. The institution model under D14
 
@@ -281,8 +284,8 @@ Trade-offs vs. WASM:
 For the *user* perspective on what institutions look like from the surface languages:
 
 - [**ESL §9 — Institutions in ESL**](../esl/09-institutions.md) — invoking Decidable QueryClasses from program bodies; how comorphisms surface (and don't) in ESL.
-- [**EigenQL §7 — FIBER clauses**](../eigenql/07-fiber-clauses.md) — invoking OnDemand QueryClasses from EigenQL.
-- [**EigenQL §8 — Institutions in EigenQL**](../eigenql/08-institutions.md) — the full classification table, postfix Verdict predicates, comorphism coercion in FIBER params.
+- [**EigenQL §7 — FIBER clauses**](../eigenql/08-fiber-clauses.md) — invoking OnDemand QueryClasses from EigenQL.
+- [**EigenQL §8 — Institutions in EigenQL**](../eigenql/09-institutions.md) — the full classification table, postfix Verdict predicates, comorphism coercion in FIBER params.
 
 For the *protocol* specification:
 

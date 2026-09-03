@@ -145,14 +145,14 @@ export function CreateTagDialog({
         layerId = target.layerId.trim();
       }
       const resp = await eigen.createTag(name.trim(), layerId);
-      if (!resp.success) {
+      if (!resp.ok) {
         // The kernel populates `already_exists` only on the name
         // collision path; everything else surfaces as a free-form
         // error string.
         setError(
-          resp.alreadyExists
+          resp.response?.alreadyExists
             ? `A tag named "${name.trim()}" already exists. Tags are immutable — choose a different name, or delete the existing tag first.`
-            : resp.error || "tag creation failed",
+            : resp.message || "tag creation failed",
         );
         setBusy(false);
         return;

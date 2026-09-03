@@ -70,7 +70,7 @@ pub struct MergeComorphismHandle {
 /// 2. Confirm the resource's `is_a` includes
 ///    `urn:eigenius:core:MergeComorphism`.
 /// 3. Extract the `merge_transformation` property value; reject if
-///    missing or if it isn't a `ResourceRef`.
+///    missing or if it isn't an IRI string.
 ///
 /// On success, returns a [`MergeComorphismHandle`] the application
 /// path consumes. On any structural failure, returns the matching
@@ -142,12 +142,10 @@ pub fn resolve_merge_comorphism(
     // eventually fail anyway, but the diagnostic surfaces deep
     // inside the evaluator with an opaque message; the typed
     // up-front error is much more actionable.
-    // Accept both `ResourceRef` (canonical post-`canonicalise_resource_refs`)
-    // and `String` (the shape that survives CBOR storage round-trips —
-    // `Value::ResourceRef` serialises as a plain text node, so any
-    // resource re-loaded from disk via `try_load_resource` comes back
-    // with `Value::String` for IRI-typed properties). `Value::as_iri()`
-    // unifies the two shapes.
+    // An IRI-typed property holds a `String`, read through `Value::as_iri()`. There were two
+    // shapes to reconcile here until `ResourceRef` was retired — and the reason it had to go is
+    // visible in what this comment used to say: it serialised as a plain text node, so any
+    // resource re-loaded from disk came back as `Value::String` regardless.
     let target_class = match resource
         .get(&merge_target_class_iri)
         .and_then(|v| v.as_iri())
@@ -155,7 +153,7 @@ pub fn resolve_merge_comorphism(
         Some(c) => c,
         None => {
             let reason = if resource.get(&merge_target_class_iri).is_some() {
-                "merge_target_class must be a Class IRI (ResourceRef or String)"
+                "merge_target_class must be a Class IRI string"
             } else {
                 "merge_target_class property is required"
             };
@@ -504,11 +502,11 @@ mod tests {
             &[
                 (
                     wk::MERGE_TRANSFORMATION,
-                    Value::ResourceRef(Iri::parse(transformation).unwrap()),
+                    Value::iri(&Iri::parse(transformation).unwrap()),
                 ),
                 (
                     wk::MERGE_TARGET_CLASS,
-                    Value::ResourceRef(Iri::parse("urn:test:Patient").unwrap()),
+                    Value::iri(&Iri::parse("urn:test:Patient").unwrap()),
                 ),
             ],
         )
@@ -625,11 +623,16 @@ mod tests {
             &[
                 (
                     wk::MERGE_TRANSFORMATION,
-                    Value::ResourceRef(Iri::parse("urn:test:term_placeholder").unwrap()),
+                    Value::String(
+                        Iri::parse("urn:test:term_placeholder")
+                            .unwrap()
+                            .as_str()
+                            .to_string(),
+                    ),
                 ),
                 (
                     wk::MERGE_TARGET_CLASS,
-                    Value::ResourceRef(Iri::parse("urn:test:Visit").unwrap()),
+                    Value::iri(&Iri::parse("urn:test:Visit").unwrap()),
                 ),
             ],
         );
@@ -675,7 +678,12 @@ mod tests {
             &[wk::MERGE_COMORPHISM],
             &[(
                 wk::MERGE_TRANSFORMATION,
-                Value::ResourceRef(Iri::parse("urn:test:term_placeholder").unwrap()),
+                Value::String(
+                    Iri::parse("urn:test:term_placeholder")
+                        .unwrap()
+                        .as_str()
+                        .to_string(),
+                ),
             )],
         );
         let (span, backend) =
@@ -759,7 +767,7 @@ mod tests {
             &[wk::MERGE_COMORPHISM],
             &[(
                 wk::MERGE_TARGET_CLASS,
-                Value::ResourceRef(Iri::parse("urn:test:Patient").unwrap()),
+                Value::iri(&Iri::parse("urn:test:Patient").unwrap()),
             )],
         );
         let (span, backend) = build_span_with_iri_collision_and_optional_witness(Some(malformed));
@@ -976,12 +984,9 @@ mod tests {
             &[
                 (
                     wk::MERGE_TRANSFORMATION,
-                    Value::ResourceRef(iri(transformation_iri)),
+                    Value::iri(&iri(transformation_iri)),
                 ),
-                (
-                    wk::MERGE_TARGET_CLASS,
-                    Value::ResourceRef(iri("urn:test:Patient")),
-                ),
+                (wk::MERGE_TARGET_CLASS, Value::iri(&iri("urn:test:Patient"))),
             ],
         );
 
@@ -1051,12 +1056,9 @@ mod tests {
             &[
                 (
                     wk::MERGE_TRANSFORMATION,
-                    Value::ResourceRef(iri(transformation_iri)),
+                    Value::iri(&iri(transformation_iri)),
                 ),
-                (
-                    wk::MERGE_TARGET_CLASS,
-                    Value::ResourceRef(iri("urn:test:Patient")),
-                ),
+                (wk::MERGE_TARGET_CLASS, Value::iri(&iri("urn:test:Patient"))),
             ],
         );
 

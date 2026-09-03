@@ -15,7 +15,7 @@
 //! D47 — chain-mirrored EigenTT type fragment codec.
 //!
 //! Encodes closed EigenTT type expressions ([`Exp`]) as chain-resident
-//! values conforming to the `urn:eigenius:eigentt:TypeExpr` inductive
+//! values conforming to the `urn:eigenius:eigentt:Term` inductive
 //! type. Decoder is the inverse, resolving `ConstRef`s through the
 //! supplied chain layers.
 //!
@@ -27,8 +27,12 @@
 use crate::layer::Layer;
 use crate::nbe::term::{Exp, Patt};
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::Value;
-use serde_json::json;
+use crate::ontology::resource::{Resource, Value};
+use crate::ontology::well_known as wk;
+use std::collections::BTreeMap;
+
+/// `eigentt:Judgement` — a `holds(logic, term, type)` value, not a term.
+const JUDGEMENT_IRI: &str = "urn:eigenius:eigentt:Judgement";
 
 /// Encoding errors raised when an `Exp` cannot be expressed in the
 /// chain-mirrored type-fragment language.
@@ -37,6 +41,9 @@ pub enum EncodeError {
     /// The given `Exp` variant is not a type-level form (its term-level
     /// content cannot appear in a closed type expression).
     NotATypeLevelExp(String),
+    /// The chain does not declare something the codec needs: `eigentt:Term` or `core:Level`
+    /// itself, or a constructor the codec emits that the declaration does not have.
+    Undeclared(String),
     /// A `Lam` was encountered at type level without an accompanying
     /// type annotation in the encoder context. v1 rejects this case;
     /// type-level Lam is rare in practice (only motives / parametric
@@ -51,6 +58,7 @@ impl std::fmt::Display for EncodeError {
             EncodeError::NotATypeLevelExp(s) => {
                 write!(f, "Exp variant is not a type-level form: {s}")
             }
+            EncodeError::Undeclared(s) => write!(f, "{s}"),
             EncodeError::LamWithoutAnnotation => write!(
                 f,
                 "type-level Lam encountered without binder-type annotation in context"
@@ -62,18 +70,201 @@ impl std::fmt::Display for EncodeError {
 impl std::error::Error for EncodeError {}
 
 /// Encode an EigenTT type expression as a chain-resident
-/// `eigentt:TypeExpr` value.
+/// `eigentt:Term` value.
 ///
-/// The output is a [`Value::Json`] wrapping a `{"ctor": ..., "args": [...]}`
-/// tree shape (D32 §3.7). The validator at commit time walks the tree
-/// against the ctor schema declared in
-/// `ontologies/eigentt/eigentt-type-fragment.json`.
+/// The output is a [`Value::Embedded`] resource whose `is_a` names the constructor's class
+/// and which carries each argument under that class's property (D85 §6.1). The validator at
+/// commit time checks it as a resource: its class against the slot, its arity against the
+/// class's `requires`, and each argument against the property that declares it.
 ///
 /// Multi-arg type-former references (e.g., `InductiveType(List, [Nat])`)
 /// are encoded by App currying — `App(ConstRef(List), ConstRef(Nat))` —
 /// per D47 §3.1.
-pub fn encode_type(exp: &Exp) -> Result<Value, EncodeError> {
-    Ok(Value::Json(encode_type_json(exp)?))
+pub fn encode_type(exp: &Exp, names: &CodecNames) -> Result<Value, EncodeError> {
+    encode_term(exp, names)
+}
+
+/// The argument names of every constructor this codec writes, read from the chain.
+///
+/// The codec encodes into exactly two inductives — `eigentt:Term` and `core:Level` — and their
+/// constructor names do not collide, so one flat table serves both. Reading the names here
+/// rather than hard-coding them keeps the declaration the only place a constructor's arguments
+/// are named; eigenius#218 is what a second copy costs when the two drift.
+#[derive(Debug, Default, Clone)]
+pub struct CodecNames {
+    /// `<inductive>-<ctor>` → (inductive IRI, argument names in declaration order). Keyed by
+    /// the CLASS, not the constructor's short name: two inductives may share one.
+    by_class: BTreeMap<String, (String, Vec<String>)>,
+}
+
+impl CodecNames {
+    /// Read the table from a chain: EVERY inductive it declares, keyed by
+    /// `<inductive>-<ctor>`.
+    ///
+    /// It carried only `eigentt:Term` and `core:Level` while a constructor application of any
+    /// other inductive was App-curried over `CtorApp` — three inductives sufficed because the
+    /// spine was written in the term language. `Exp::InductiveCtor(I, c, args)` now writes a
+    /// value of `I`'s constructor `c` (D85 §6.1), so the encoder needs `I`'s argument names,
+    /// whichever `I` is.
+    ///
+    /// A chain declaring none of them yields an EMPTY table rather than an error: a source
+    /// that encodes no term is a legitimate compile, and the failure belongs where a term
+    /// would actually be built.
+    pub fn from_layer(layer: &crate::layer::Layer) -> Self {
+        let mut by_class = BTreeMap::new();
+        for ind in crate::layer::resolve_typed_resources(layer, &[wk::INDUCTIVE_TYPE]) {
+            let Some(ind_iri) = ind.id().cloned() else {
+                continue;
+            };
+            let Some(table) = crate::layer::ctor_classes::arg_names_of(layer, &ind_iri) else {
+                continue;
+            };
+            for (ctor, args) in table {
+                by_class.insert(
+                    crate::layer::ctor_classes::class_iri(ind_iri.as_str(), &ctor),
+                    (ind_iri.as_str().to_string(), args),
+                );
+            }
+        }
+        Self { by_class }
+    }
+
+    /// The argument names of `ctor` on a NAMED inductive, for a caller that knows which one
+    /// it means. `lookup` keys on the constructor name alone, which is enough for the term
+    /// language but not for a value of some other inductive.
+    /// Build from a class table — `<inductive>-<ctor>` → argument names — as the ESL compiler
+    /// already holds, chain-resident declarations MERGED with the ones in the file being
+    /// compiled. A file declares an inductive and then writes values of it in the same breath,
+    /// so a table read from the parent chain alone cannot encode them.
+    pub fn from_class_table(table: &BTreeMap<String, Vec<String>>) -> Self {
+        let by_class = table
+            .iter()
+            .filter_map(|(class, args)| {
+                let (ind, _) = class.rsplit_once('-')?;
+                Some((class.clone(), (ind.to_string(), args.clone())))
+            })
+            .collect();
+        Self { by_class }
+    }
+
+    /// Build a value of `inductive`'s constructor `ctor` from already-encoded arguments.
+    ///
+    /// The public face of the layout authority: a producer outside this module — the Lean
+    /// chain mirror, say — says which constructor it means and hands over the arguments, and
+    /// the names and arity come from the declaration this table read.
+    /// Build the value a `{ctor, args}` literal denotes, arguments and all.
+    ///
+    /// A tagged literal reads well in source, so several producers write one and hand it here
+    /// rather than assembling resources by hand. `prefer` is the inductives to resolve each
+    /// constructor against, in order — a term producer passes `eigentt:Term` and `core:Level`,
+    /// whose constructors are the term language and share names with other inductives
+    /// (`Zero` belongs to `core:Level` and to `lean:LeanLevel`). A constructor none of them
+    /// declares resolves against the whole chain, and a name more than one inductive declares
+    /// is an error rather than a guess.
+    ///
+    /// A node with no `ctor` is a leaf: a string, number, boolean, or a list of nodes.
+    pub fn value_of_tagged(
+        &self,
+        prefer: &[&str],
+        tagged: &serde_json::Value,
+    ) -> Result<Value, EncodeError> {
+        let Some(ctor) = tagged.get("ctor").and_then(serde_json::Value::as_str) else {
+            return Ok(match tagged {
+                serde_json::Value::String(s) => Value::String(s.clone()),
+                serde_json::Value::Bool(b) => Value::Boolean(*b),
+                serde_json::Value::Array(a) => Value::Array(
+                    a.iter()
+                        .map(|e| self.value_of_tagged(prefer, e))
+                        .collect::<Result<_, _>>()?,
+                ),
+                serde_json::Value::Number(n) => match n.as_i64() {
+                    Some(i) => Value::Integer(i),
+                    None => Value::Float(n.as_f64().unwrap_or_default()),
+                },
+                other => {
+                    return Err(EncodeError::Undeclared(format!(
+                        "a tagged literal has no leaf form for {other}"
+                    )))
+                }
+            });
+        };
+        let empty = Vec::new();
+        let args: Vec<Value> = tagged
+            .get("args")
+            .and_then(serde_json::Value::as_array)
+            .unwrap_or(&empty)
+            .iter()
+            .map(|a| self.value_of_tagged(prefer, a))
+            .collect::<Result<_, _>>()?;
+        let inductive = match prefer.iter().find(|p| self.lookup_declares(p, ctor)) {
+            Some(p) => (*p).to_string(),
+            None => self.find(ctor)?.to_string(),
+        };
+        self.value(&inductive, ctor, args)
+    }
+
+    pub fn value(
+        &self,
+        inductive: &str,
+        ctor: &str,
+        args: Vec<Value>,
+    ) -> Result<Value, EncodeError> {
+        let (inductive, names) = self.lookup_in(inductive, ctor)?;
+        if names.len() != args.len() {
+            return Err(EncodeError::Undeclared(format!(
+                "`{ctor}` of `{inductive}` takes {} argument(s), got {}",
+                names.len(),
+                args.len()
+            )));
+        }
+        Ok(crate::layer::ctor_classes::value_resource(
+            inductive, ctor, names, &args,
+        ))
+    }
+
+    /// Find the one inductive declaring `ctor`, for a caller that has only the name.
+    ///
+    /// Ambiguity is an error, not a guess: `App` belongs to `eigentt:Term`,
+    /// `justification:Term` AND `formulas:FormulaTerm`, and picking one silently is how a
+    /// value ends up stating a class its slot does not admit.
+    /// Does `inductive` declare `ctor`?
+    pub fn lookup_declares(&self, inductive: &str, ctor: &str) -> bool {
+        self.by_class
+            .contains_key(&crate::layer::ctor_classes::class_iri(inductive, ctor))
+    }
+
+    pub fn find(&self, ctor: &str) -> Result<&str, EncodeError> {
+        let mut hits = self
+            .by_class
+            .iter()
+            .filter(|(class, _)| class.rsplit_once('-').is_some_and(|(_, c)| c == ctor))
+            .map(|(_, (ind, _))| ind.as_str());
+        let Some(first) = hits.next() else {
+            return Err(EncodeError::Undeclared(format!(
+                "no inductive in this chain declares a constructor `{ctor}`"
+            )));
+        };
+        let rest: Vec<&str> = hits.collect();
+        if rest.is_empty() {
+            Ok(first)
+        } else {
+            Err(EncodeError::Undeclared(format!(
+                "`{ctor}` is declared by more than one inductive ({first}, {}) — name the one \
+                 you mean",
+                rest.join(", ")
+            )))
+        }
+    }
+
+    fn lookup_in(&self, inductive: &str, ctor: &str) -> Result<(&str, &[String]), EncodeError> {
+        let class = crate::layer::ctor_classes::class_iri(inductive, ctor);
+        match self.by_class.get(&class) {
+            Some((ind, args)) => Ok((ind.as_str(), args.as_slice())),
+            None => Err(EncodeError::Undeclared(format!(
+                "`{inductive}` does not declare a constructor `{ctor}` in this layer chain"
+            ))),
+        }
+    }
 }
 
 /// Encode a Lambda chain `λ (x_1 : T_1) … (x_n : T_n). body` with the
@@ -83,201 +274,192 @@ pub fn encode_type(exp: &Exp) -> Result<Value, EncodeError> {
 /// discarded by the kernel decoder (D47 §3) but is preserved here for
 /// round-trip fidelity. Used by the ESL compiler when emitting motives
 /// for `match … returning fun (i : T) => body` (eigenius#72 Layer 3).
-pub fn encode_lam_chain(binders: &[(Patt, Exp)], body: &Exp) -> Result<Value, EncodeError> {
-    let body_json = encode_type_json(body)?;
-    let mut acc = body_json;
+pub fn encode_lam_chain(
+    binders: &[(Patt, Exp)],
+    body: &Exp,
+    names: &CodecNames,
+) -> Result<Value, EncodeError> {
+    let mut acc = encode_term(body, names)?;
     for (patt, dom) in binders.iter().rev() {
-        let dom_json = encode_type_json(dom)?;
-        acc = ctor("Lam", vec![json!(binder_name(patt)), dom_json, acc]);
+        let dom = encode_term(dom, names)?;
+        acc = term(
+            names,
+            "Lam",
+            vec![Value::String(binder_name(patt)), dom, acc],
+        )?;
     }
-    Ok(Value::Json(acc))
+    Ok(acc)
 }
 
-fn encode_type_json(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
+/// Encode an `Exp` as a chain-resident value (D85 §6.1).
+///
+/// **One representation.** Each arm names its constructor and its arguments; the argument
+/// NAMES come from the inductive's declaration through `names`, and `ctor_classes::value_resource`
+/// is the only thing that knows how a value is laid out. There is no intermediate tagged tree
+/// and so no translation: `Exp::InductiveCtor(I, c, args)` is a value of `I`'s constructor `c`,
+/// written directly, rather than App-curried over a `CtorApp` because JSON could not spell a
+/// constructor with named arguments.
+pub(crate) fn encode_term(exp: &Exp, names: &CodecNames) -> Result<Value, EncodeError> {
+    let enc = |e: &Exp| encode_term(e, names);
     match exp {
-        Exp::Sort(n) => Ok(ctor("Sort", vec![encode_level_json(n)])),
-        Exp::Var(name) => Ok(ctor("Var", vec![json!(name)])),
-        Exp::App(h, a) => Ok(ctor(
-            "App",
-            vec![encode_type_json(h)?, encode_type_json(a)?],
-        )),
-        // Type annotation `(e : T)` — the bidirectional mode switch. (A bare
-        // inner `Lam` still needs its own per-binder annotations to encode; this
-        // arm round-trips any encodable `e`.)
-        Exp::Ann(e, t) => Ok(ctor(
-            "Ann",
-            vec![encode_type_json(e)?, encode_type_json(t)?],
-        )),
-        Exp::Pi(p, dom, body) => Ok(ctor(
+        Exp::Sort(n) => term(names, "Sort", vec![encode_level(n, names)?]),
+        Exp::Var(name) => term(names, "Var", vec![Value::String(name.clone())]),
+        Exp::App(h, a) => term(names, "App", vec![enc(h)?, enc(a)?]),
+        Exp::Ann(e, ty) => term(names, "Ann", vec![enc(e)?, enc(ty)?]),
+        Exp::Pi(p, dom, body) => term(
+            names,
             "Pi",
-            vec![
-                json!(binder_name(p)),
-                encode_type_json(dom)?,
-                encode_type_json(body)?,
-            ],
-        )),
-        Exp::Sig(p, dom, body) => Ok(ctor(
+            vec![Value::String(binder_name(p)), enc(dom)?, enc(body)?],
+        ),
+        Exp::Sig(p, dom, body) => term(
+            names,
             "Sig",
-            vec![
-                json!(binder_name(p)),
-                encode_type_json(dom)?,
-                encode_type_json(body)?,
-            ],
-        )),
-        // D78 §1 — a record encodes as a flat list of `[iri, binder, type]`
-        // triples, in the canonical order the term already carries. Decode
-        // rebuilds through `Exp::record`, which re-establishes that order, so a
-        // hand-written or corrupted encoding cannot introduce a non-canonical
-        // one.
+            vec![Value::String(binder_name(p)), enc(dom)?, enc(body)?],
+        ),
         Exp::Record(fields) => {
             let mut items = Vec::with_capacity(fields.len());
             for (iri, patt, ty) in fields {
-                items.push(json!([
-                    iri.as_str(),
-                    binder_name(patt),
-                    encode_type_json(ty)?
+                items.push(Value::Array(vec![
+                    Value::String(iri.as_str().to_string()),
+                    Value::String(binder_name(patt)),
+                    enc(ty)?,
                 ]));
             }
-            Ok(ctor("Record", vec![json!(items)]))
+            term(names, "Record", vec![Value::Array(items)])
         }
-        // D78 §3 — the constraint set encodes as a sorted IRI array. `BTreeSet`
-        // already gives one order, so the wire form is canonical for free.
-        Exp::Refine(carrier, classes) => Ok(ctor(
+        Exp::Refine(carrier, classes) => term(
+            names,
             "Refine",
             vec![
-                encode_type_json(carrier)?,
-                json!(classes.iter().map(|i| i.as_str()).collect::<Vec<_>>()),
+                enc(carrier)?,
+                Value::Array(
+                    classes
+                        .iter()
+                        .map(|i| Value::String(i.as_str().to_string()))
+                        .collect(),
+                ),
             ],
-        )),
-        Exp::Arrow(a, b) => encode_type_json(&Exp::Pi(Patt::Unit, a.clone(), b.clone())),
-        Exp::Times(a, b) => encode_type_json(&Exp::Sig(Patt::Unit, a.clone(), b.clone())),
+        ),
+        Exp::Arrow(a, b) => enc(&Exp::Pi(Patt::Unit, a.clone(), b.clone())),
+        Exp::Times(a, b) => enc(&Exp::Sig(Patt::Unit, a.clone(), b.clone())),
         Exp::Lam(_, _) => Err(EncodeError::LamWithoutAnnotation),
-        Exp::One => Ok(ctor("One", vec![])),
-        Exp::Id(ty, x, y) => Ok(ctor(
-            "Id",
-            vec![
-                encode_type_json(ty)?,
-                encode_type_json(x)?,
-                encode_type_json(y)?,
-            ],
-        )),
-        Exp::EigonClass(iri) => Ok(ctor("ConstRef", vec![json!(iri.as_str())])),
-        // D46 §10 — axiom reference. Same on-wire shape as `EigonClass`:
-        // a bare `ConstRef(iri)`. Decode discriminates between them by
-        // querying the layer for the IRI's class (eigentt:Axiom vs
-        // core:Class), so the encoder need not introduce a different
-        // ctor name.
-        Exp::EigonAxiom(iri) => Ok(ctor("ConstRef", vec![json!(iri.as_str())])),
-        // A term-level resource *individual* (a named instance — an `Entity` value), the third sibling
-        // of `EigonClass`/`EigonAxiom`. Same on-wire shape: a bare `ConstRef(iri)`. Decode discriminates
-        // it from class/axiom by the resolved resource's class (see `resolve_const_ref`'s tail). This is
-        // what lets a proposition reference an individual, e.g. `affects(kind_of(Instability), hela)`.
+        Exp::One => term(names, "One", vec![]),
+        Exp::Id(ty, x, y) => term(names, "Id", vec![enc(ty)?, enc(x)?, enc(y)?]),
+        Exp::EigonClass(iri) | Exp::EigonAxiom(iri) => const_ref(names, iri.as_str(), &[]),
         Exp::EigonResource(res) => {
             let iri = res.id().ok_or_else(|| {
-                EncodeError::NotATypeLevelExp("EigonResource without an IRI".to_string())
+                EncodeError::NotATypeLevelExp("an EigonResource without an @id".to_string())
             })?;
-            Ok(ctor("ConstRef", vec![json!(iri.as_str())]))
+            const_ref(names, iri.as_str(), &[])
         }
-        Exp::EigonPrimitive(p) => {
+        Exp::EigonPrimitive(prim) => {
             use crate::nbe::term::PrimitiveType;
-            use crate::ontology::well_known as wk;
-            let iri_str = match p {
+            let iri_str = match prim {
                 PrimitiveType::String => wk::STRING,
                 PrimitiveType::Integer => wk::INTEGER,
                 PrimitiveType::Float => wk::FLOAT,
                 PrimitiveType::Boolean => wk::BOOLEAN,
                 PrimitiveType::Json => wk::JSON,
             };
-            Ok(ctor("ConstRef", vec![json!(iri_str)]))
+            const_ref(names, iri_str, &[])
         }
-        // D76 Phase B1 — a named reference encodes as the `ConstRef` the wire
-        // already uses. This is why de-inlining is *not* a chain-format change
-        // (D76 §8 Phase E): these are the bytes `InductiveType` has always
-        // produced for its head.
-        Exp::Const(iri, levels) => {
-            // **Level arguments are an OPTIONAL TRAILING argument** (eigenius#188,
-            // D76 Phase E2): `ConstRef(iri)` when the reference is monomorphic,
-            // `ConstRef(iri, [l₁, …])` when it is not.
-            //
-            // Emitting `[]` unconditionally would have been more uniform and is not
-            // taken, because it rewrites every `ConstRef` already on the chain —
-            // and every one of them is monomorphic. Keeping those bytes identical
-            // is what lets the reseed's parity check stay a comparison rather than
-            // becoming a wholesale rewrite in which nothing could be noticed.
-            if levels.is_empty() {
-                Ok(ctor("ConstRef", vec![json!(iri.as_str())]))
-            } else {
-                Ok(ctor(
-                    "ConstRef",
-                    vec![
-                        json!(iri.as_str()),
-                        serde_json::Value::Array(levels.iter().map(encode_level_json).collect()),
-                    ],
-                ))
-            }
-        }
-        // ── D48 / eigenius#71 — term-level value encoding ─────────
-        // Lets indexed inductive applications with concrete index values
-        // (Vec Nat 3, AssayShape 3, etc.) round-trip through the codec.
-        Exp::Unit => Ok(ctor("UnitVal", vec![])),
-        Exp::Pair(a, b) => Ok(ctor(
-            "Pair",
-            vec![encode_type_json(a)?, encode_type_json(b)?],
-        )),
-        // Σ-ELIMINATION. `Pair` (introduction) shipped with D48 but the projections did not, so the
-        // fragment covered only half of Σ and any term that *used* a pair was inexpressible. That
-        // is not an edge case for the D62 encoding pipeline: the DCG renders every definite
-        // description as `the(Σx:C. P(x)).1`, so before this arm existed NO parsed sentence
-        // containing a definite NP could be committed to a chain (found 2026-08-03 building
-        // `demo/prose-to-chain`, on «MSI cancer models required the helicase activity of WRN»).
-        Exp::Fst(p) => Ok(ctor("Fst", vec![encode_type_json(p)?])),
-        Exp::Snd(p) => Ok(ctor("Snd", vec![encode_type_json(p)?])),
+        Exp::Const(iri, levels) => const_ref(names, iri.as_str(), levels),
+        Exp::Unit => term(names, "UnitVal", vec![]),
+        Exp::Pair(a, b) => term(names, "Pair", vec![enc(a)?, enc(b)?]),
+        Exp::Fst(p) => term(names, "Fst", vec![enc(p)?]),
+        Exp::Snd(p) => term(names, "Snd", vec![enc(p)?]),
+        // **Inside a term, a constructor application is a TERM.** `CtorApp` names the
+        // constructor and `App` applies it, which is what `eigentt:Term` declares and what
+        // `Term-App-arg`'s `class_types: [eigentt:Term]` admits.
+        //
+        // This is not a second representation of a constructor value. THE SLOT'S DECLARED
+        // TYPE decides the shape: a slot typed `eigentt:Judgement` holds a `Judgement-holds`
+        // value (`encode_judgement`), an ESL value at a slot typed by its own inductive holds
+        // that inductive's constructor class (`Compiler::ctor_application`), and a subterm of
+        // a term is a term. Each position has ONE shape; none of them is converted into
+        // another.
         Exp::InductiveCtor(iri, ctor_name, args) => {
-            // Encode `D.c(a1, ..., aN)` as
-            //   App(App(...App(CtorApp(D.iri, c), a1)..., a_{N-1}), aN)
-            // gh #75: the stable identifier is the IRI, which the node now carries
-            // directly (D76 Phase B) instead of inside a declaration.
-            let mut current = ctor("CtorApp", vec![json!(iri.as_str()), json!(ctor_name)]);
+            let mut acc = term(
+                names,
+                "CtorApp",
+                vec![
+                    Value::String(iri.as_str().to_string()),
+                    Value::String(ctor_name.clone()),
+                ],
+            )?;
             for arg in args {
-                current = ctor("App", vec![current, encode_type_json(arg)?]);
+                acc = term(names, "App", vec![acc, enc(arg)?])?;
             }
-            Ok(current)
+            Ok(acc)
         }
-        // eigenius#71 — literal primitive values. The `LitString` /
-        // `LitInt` / `LitFloat` ctors land on the chain as
-        // `{"ctor": "LitString", "args": [<json-value>]}` etc. and
-        // round-trip with the matching decode arm below. This is what
-        // makes `Asserts(iri_str)` and any other value-parameter
-        // inductive applications encodable end-to-end (D49 §6 / D39
-        // §4.1).
-        Exp::LitString(s) => Ok(ctor("LitString", vec![json!(s)])),
-        Exp::LitInt(n) => Ok(ctor("LitInt", vec![json!(*n)])),
-        Exp::LitFloat(f) => Ok(ctor("LitFloat", vec![json!(*f)])),
-        // eigenius#142 — the boolean counterpart, added so
-        // `program:Literal` booleans have a value-carrying term.
-        Exp::LitBool(b) => Ok(ctor("LitBool", vec![json!(*b)])),
-        // Note: Exp::Con (anonymous Sum constructor) is intentionally
-        // not yet encoded — chain-resident axioms reference declared
-        // inductives via Exp::InductiveCtor; anonymous Sum ctors don't
-        // arise in axiom statements today. Add when a consumer needs it.
+        Exp::LitString(s) => term(names, "LitString", vec![Value::String(s.clone())]),
+        Exp::LitInt(n) => term(names, "LitInt", vec![Value::Integer(*n)]),
+        Exp::LitFloat(f) => term(names, "LitFloat", vec![Value::Float(*f)]),
+        Exp::LitBool(b) => term(names, "LitBool", vec![Value::Boolean(*b)]),
         other => Err(EncodeError::NotATypeLevelExp(format!("{other:?}"))),
     }
 }
 
-/// Encode a universe level as an `eigentt:Level` value tree (eigenius#188).
+/// One `eigentt:Term` value.
+fn term(names: &CodecNames, ctor: &str, args: Vec<Value>) -> Result<Value, EncodeError> {
+    let (inductive, arg_names) = names.lookup_in(wk::EIGENTT_TERM, ctor)?;
+    if arg_names.len() != args.len() {
+        return Err(EncodeError::Undeclared(format!(
+            "the codec emits `{ctor}` with {} argument(s); its declaration has {}",
+            args.len(),
+            arg_names.len()
+        )));
+    }
+    Ok(crate::layer::ctor_classes::value_resource(
+        inductive, ctor, arg_names, &args,
+    ))
+}
+
+/// `ConstRef(iri, levels)` — a reference, at the universe levels it is instantiated at.
+fn const_ref(
+    names: &CodecNames,
+    iri: &str,
+    levels: &[crate::nbe::level::Level],
+) -> Result<Value, EncodeError> {
+    let levels: Result<Vec<Value>, EncodeError> =
+        levels.iter().map(|l| encode_level(l, names)).collect();
+    term(
+        names,
+        "ConstRef",
+        vec![Value::String(iri.to_string()), Value::Array(levels?)],
+    )
+}
+
+/// Encode a universe level as a `core:Level` value (eigenius#188).
 ///
-/// The chain ctor took a bare integer until slice 4; it now takes a `Level`, so a `Max`, `IMax`
-/// or `Param` survives the round trip instead of being unrepresentable. Numerals encode as the
-/// `Succ`-chain they are — `Set` is `Succ(Zero)` — which is more verbose than `1` and is the
-/// price of one ctor able to carry every level rather than one declaration per rung.
-pub(crate) fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Value {
+/// The chain ctor took a bare integer until slice 4; it now takes a `Level`, so a `Max`,
+/// `IMax` or `Param` survives the round trip instead of being unrepresentable. Numerals
+/// encode as the `Succ`-chain they are — `Set` is `Succ(Zero)` — which is more verbose than
+/// `1` and is the price of one ctor able to carry every level rather than one declaration
+/// per rung.
+pub(crate) fn encode_level(
+    l: &crate::nbe::level::Level,
+    names: &CodecNames,
+) -> Result<Value, EncodeError> {
     use crate::nbe::level::Level;
+    let lvl = |ctor: &str, args: Vec<Value>| -> Result<Value, EncodeError> {
+        let (inductive, arg_names) = names.lookup_in(wk::LEVEL, ctor)?;
+        Ok(crate::layer::ctor_classes::value_resource(
+            inductive, ctor, arg_names, &args,
+        ))
+    };
     match l {
-        Level::Zero => ctor("Zero", vec![]),
-        Level::Succ(a) => ctor("Succ", vec![encode_level_json(a)]),
-        Level::Max(a, b) => ctor("Max", vec![encode_level_json(a), encode_level_json(b)]),
-        Level::IMax(a, b) => ctor("IMax", vec![encode_level_json(a), encode_level_json(b)]),
-        Level::Param(n) => ctor("Param", vec![json!(n)]),
+        Level::Zero => lvl("Zero", vec![]),
+        Level::Succ(a) => lvl("Succ", vec![encode_level(a, names)?]),
+        Level::Max(a, b) => lvl(
+            "Max",
+            vec![encode_level(a, names)?, encode_level(b, names)?],
+        ),
+        Level::IMax(a, b) => lvl(
+            "IMax",
+            vec![encode_level(a, names)?, encode_level(b, names)?],
+        ),
+        Level::Param(n) => lvl("Param", vec![Value::String(n.clone())]),
     }
 }
 
@@ -288,75 +470,17 @@ pub(crate) fn encode_level_json(l: &crate::nbe::level::Level) -> serde_json::Val
 /// then fails to resume with `ManifestDrift`, and the reseed that answers it rewrites the chain
 /// from source with this encoder. So no term in the old form can ever reach this function — the
 /// arm was a compatibility layer for a state that cannot occur.
-pub(crate) fn decode_level_json(
-    v: &serde_json::Value,
+/// Decode a `core:Level` value, in either shape.
+///
+/// The sibling of [`decode_type`] for levels: a tagged dict decodes directly, a value resource
+/// (D85 §1) is translated to the tagged form first. Needs the layer for the same reason
+/// `decode_type` does — the constructor is a class the layer derived, and the ARGUMENT ORDER
+/// comes from that constructor's declaration rather than from the value.
+pub fn decode_level(
+    value: &Value,
+    _layer: &Layer,
 ) -> Result<crate::nbe::level::Level, DecodeError> {
-    use crate::nbe::level::Level;
-    let obj = v
-        .as_object()
-        .ok_or_else(|| wrong_shape("Sort", 0, "expected an eigentt:Level value"))?;
-    let name = obj
-        .get("ctor")
-        .and_then(|c| c.as_str())
-        .ok_or(DecodeError::MissingCtor)?;
-    let args = obj
-        .get("args")
-        .and_then(|a| a.as_array())
-        .ok_or(DecodeError::MissingArgs)?;
-    let arity = |n: usize| -> Result<(), DecodeError> {
-        if args.len() == n {
-            Ok(())
-        } else {
-            Err(wrong_shape(
-                "Sort",
-                0,
-                &format!("`{name}` takes {n} argument(s), got {}", args.len()),
-            ))
-        }
-    };
-    match name {
-        "Zero" => {
-            arity(0)?;
-            Ok(Level::Zero)
-        }
-        "Succ" => {
-            arity(1)?;
-            Ok(Level::Succ(Box::new(decode_level_json(&args[0])?)))
-        }
-        "Max" => {
-            arity(2)?;
-            Ok(Level::Max(
-                Box::new(decode_level_json(&args[0])?),
-                Box::new(decode_level_json(&args[1])?),
-            ))
-        }
-        "IMax" => {
-            arity(2)?;
-            Ok(Level::IMax(
-                Box::new(decode_level_json(&args[0])?),
-                Box::new(decode_level_json(&args[1])?),
-            ))
-        }
-        "Param" => {
-            arity(1)?;
-            let n = args[0]
-                .as_str()
-                .ok_or_else(|| wrong_shape("Sort", 0, "`Param` takes a string name"))?;
-            Ok(Level::Param(n.to_string()))
-        }
-        other => Err(wrong_shape(
-            "Sort",
-            0,
-            &format!("`{other}` is not an eigentt:Level constructor"),
-        )),
-    }
-}
-
-fn ctor(name: &str, args: Vec<serde_json::Value>) -> serde_json::Value {
-    json!({
-        "ctor": name,
-        "args": args,
-    })
+    decode_level_value(value)
 }
 
 /// A `Patt::Var(name)` becomes the binder name; `Patt::Unit` encodes
@@ -370,11 +494,11 @@ fn binder_name(p: &Patt) -> String {
     }
 }
 
-/// Errors raised when a chain-resident `eigentt:TypeExpr` value cannot
+/// Errors raised when a chain-resident `eigentt:Term` value cannot
 /// be decoded back to an `Exp`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecodeError {
-    /// The value isn't a JSON-shaped chain inductive (`Value::Json`).
+    /// The value isn't a well-formed inductive value resource.
     MalformedValue(String),
     /// The `ctor` field is missing or not a string.
     MissingCtor,
@@ -417,23 +541,23 @@ pub enum DecodeError {
 impl std::fmt::Display for DecodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DecodeError::MalformedValue(s) => write!(f, "malformed eigentt:TypeExpr value: {s}"),
-            DecodeError::MissingCtor => write!(f, "eigentt:TypeExpr value missing `ctor` field"),
-            DecodeError::MissingArgs => write!(f, "eigentt:TypeExpr value missing `args` field"),
-            DecodeError::UnknownCtor(c) => write!(f, "unknown eigentt:TypeExpr ctor: `{c}`"),
+            DecodeError::MalformedValue(s) => write!(f, "malformed eigentt:Term value: {s}"),
+            DecodeError::MissingCtor => write!(f, "eigentt:Term value missing `ctor` field"),
+            DecodeError::MissingArgs => write!(f, "eigentt:Term value missing `args` field"),
+            DecodeError::UnknownCtor(c) => write!(f, "unknown eigentt:Term ctor: `{c}`"),
             DecodeError::WrongArgCount {
                 ctor,
                 expected,
                 actual,
             } => write!(
                 f,
-                "eigentt:TypeExpr ctor `{ctor}` expects {expected} arg(s), got {actual}"
+                "eigentt:Term ctor `{ctor}` expects {expected} arg(s), got {actual}"
             ),
             DecodeError::WrongArgShape {
                 ctor,
                 slot,
                 details,
-            } => write!(f, "eigentt:TypeExpr ctor `{ctor}` arg {slot}: {details}"),
+            } => write!(f, "eigentt:Term ctor `{ctor}` arg {slot}: {details}"),
             DecodeError::UnresolvedConstRef(iri) => {
                 write!(f, "ConstRef references unresolved IRI: {iri}")
             }
@@ -474,52 +598,212 @@ struct DecodeCtx<'a> {
     layer: &'a Layer,
 }
 
-/// Decode a chain-resident `eigentt:TypeExpr` value back to an
+/// Decode a chain-resident `eigentt:Term` value back to an
 /// EigenTT `Exp`.
 ///
 /// An `App` spine over a `ConstRef` decodes to the same spine over an
 /// `Exp::Const` — the wire's currying convention (D47 §3.1) and the term's are the
 /// same shape since D76 Phase B, so no folding happens here any more.
 pub fn decode_type(value: &Value, layer: &Layer) -> Result<Exp, DecodeError> {
-    let json = match value {
-        Value::Json(j) => j,
-        other => {
-            return Err(DecodeError::MalformedValue(format!(
-                "expected Value::Json, got {other:?}"
-            )));
-        }
-    };
     let ctx = DecodeCtx { layer };
-    decode_type_json(json, &ctx)
+    match value {
+        Value::Embedded(r) => decode_value(r, &ctx),
+        other => Err(DecodeError::MalformedValue(format!(
+            "expected a value resource, got {other:?}"
+        ))),
+    }
 }
 
-fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
-    let obj = v
-        .as_object()
-        .ok_or_else(|| DecodeError::MalformedValue(format!("expected object, got {v:?}")))?;
-    let ctor = obj
-        .get("ctor")
-        .and_then(|c| c.as_str())
-        .ok_or(DecodeError::MissingCtor)?;
-    let args = obj
-        .get("args")
-        .and_then(|a| a.as_array())
-        .ok_or(DecodeError::MissingArgs)?;
+/// One argument of a constructor, decoded as a term.
+fn decode_arg(v: &Value, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
+    match v {
+        Value::Embedded(r) => decode_value(r, ctx),
+        other => Err(DecodeError::MalformedValue(format!(
+            "expected a term argument, got {other:?}"
+        ))),
+    }
+}
+
+/// A `core:Level` value.
+fn decode_level_value(v: &Value) -> Result<crate::nbe::level::Level, DecodeError> {
+    use crate::nbe::level::Level;
+    let bad = |m: String| DecodeError::MalformedValue(m);
+    let Value::Embedded(r) = v else {
+        return Err(bad(format!("expected a level value, got {v:?}")));
+    };
+    let class = r
+        .is_a()
+        .first()
+        .map(|c| c.as_str().to_string())
+        .ok_or_else(|| bad("a level value must name its constructor's class".into()))?;
+    let ctor = class
+        .rsplit_once('-')
+        .map(|(_, c)| c.to_string())
+        .ok_or_else(|| bad(format!("`{class}` is not `<inductive>-<ctor>`")))?;
+    let arg = |name: &str| -> Result<Value, DecodeError> {
+        Iri::parse(&format!("{class}-{name}"))
+            .ok()
+            .and_then(|k| r.get(&k).cloned())
+            .ok_or_else(|| bad(format!("`{ctor}` is missing argument `{name}`")))
+    };
+    Ok(match ctor.as_str() {
+        "Zero" => Level::Zero,
+        "Succ" => Level::Succ(Box::new(decode_level_value(&arg("base")?)?)),
+        "Max" => Level::Max(
+            Box::new(decode_level_value(&arg("left")?)?),
+            Box::new(decode_level_value(&arg("right")?)?),
+        ),
+        "IMax" => Level::IMax(
+            Box::new(decode_level_value(&arg("left")?)?),
+            Box::new(decode_level_value(&arg("right")?)?),
+        ),
+        "Param" => Level::Param(
+            arg("name")?
+                .as_str()
+                .ok_or_else(|| bad("`Param`'s name must be a string".into()))?
+                .to_string(),
+        ),
+        other => return Err(bad(format!("`{other}` is not a `core:Level` constructor"))),
+    })
+}
+
+/// The constructor a value states, and its arguments in DECLARATION order.
+///
+/// The one read of an inductive value: `is_a` names the constructor's class, the class names
+/// its inductive, and the inductive's `core:ctors` gives the argument names and their order.
+/// Everything that consumes a value goes through here — the decoder, the printer, the
+/// institutions — so there is one description of how a value is taken apart.
+pub fn ctor_and_args<'a>(
+    r: &'a Resource,
+    layer: &Layer,
+) -> Result<(String, Vec<&'a Value>), DecodeError> {
+    use crate::ontology::well_known as wk;
+    let bad = |m: String| DecodeError::MalformedValue(m);
+
+    let class_iri = r.is_a().first().cloned().ok_or_else(|| {
+        bad("a value resource must name its constructor's class in `is_a`".to_string())
+    })?;
+    let class = layer.resolve(&class_iri).ok_or_else(|| {
+        bad(format!(
+            "`is_a` names `{class_iri}`, which does not resolve"
+        ))
+    })?;
+
+    let inductive_iri = class
+        .get(&wk::iri(wk::PARENT_CLASSES))
+        .and_then(|v| v.as_iri_array().first().cloned())
+        .ok_or_else(|| {
+            bad(format!(
+                "`{class_iri}` is not a constructor class — no `subclass_of`"
+            ))
+        })?;
+    let ctor_name = class_iri
+        .as_str()
+        .strip_prefix(&format!("{inductive_iri}-"))
+        .ok_or_else(|| {
+            bad(format!(
+                "`{class_iri}` is not named `{inductive_iri}-<ctor>`"
+            ))
+        })?
+        .to_string();
+
+    let inductive = layer
+        .resolve(&inductive_iri)
+        .ok_or_else(|| bad(format!("`{inductive_iri}` does not resolve")))?;
+    let ctor = match inductive.get(&wk::iri(wk::CTORS)) {
+        Some(Value::Array(cs)) => cs.iter().find_map(|c| match c {
+            Value::Embedded(d)
+                if d.get(&wk::iri(wk::CTOR_NAME)).and_then(|v| v.as_str())
+                    == Some(ctor_name.as_str()) =>
+            {
+                Some(d.clone())
+            }
+            _ => None,
+        }),
+        _ => None,
+    }
+    .ok_or_else(|| bad(format!("`{inductive_iri}` declares no ctor `{ctor_name}`")))?;
+
+    let mut args = Vec::new();
+    if let Some(Value::Array(arg_types)) = ctor.get(&wk::iri(wk::ARG_TYPES)) {
+        for (i, at) in arg_types.iter().enumerate() {
+            let arg_name = match at {
+                Value::Embedded(a) => a
+                    .get(&wk::iri(wk::ARG_NAME))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("arg_{i}")),
+                _ => format!("arg_{i}"),
+            };
+            let prop = Iri::parse(&format!("{class_iri}-{arg_name}"))
+                .map_err(|e| bad(format!("bad derived property IRI: {e}")))?;
+            let v = r.get(&prop).ok_or_else(|| {
+                bad(format!(
+                    "value of `{ctor_name}` is missing argument `{arg_name}`"
+                ))
+            })?;
+            args.push(v);
+        }
+    }
+    Ok((ctor_name, args))
+}
+
+/// The constructor view as JSON: `{ctor, args}`, for consumers written against that shape.
+pub fn ctor_view(r: &Resource, layer: &Layer) -> Result<serde_json::Value, DecodeError> {
+    let (ctor_name, args) = ctor_and_args(r, layer)?;
+    let args: Result<Vec<serde_json::Value>, DecodeError> =
+        args.iter().map(|a| arg_value_to_json(a, layer)).collect();
+    Ok(serde_json::json!({ "ctor": ctor_name, "args": args? }))
+}
+
+/// One argument of a value resource, as the `{ctor, args}` view expects it.
+///
+/// A nested inductive value recurses; a primitive passes through.
+fn arg_value_to_json(v: &Value, layer: &Layer) -> Result<serde_json::Value, DecodeError> {
+    Ok(match v {
+        Value::Embedded(r) => ctor_view(r, layer)?,
+        Value::String(s) => serde_json::Value::String(s.clone()),
+        Value::Integer(i) => serde_json::Value::from(*i),
+        Value::Float(f) => serde_json::Value::from(*f),
+        Value::Boolean(b) => serde_json::Value::Bool(*b),
+        Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .map(|x| arg_value_to_json(x, layer))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        other => {
+            return Err(DecodeError::MalformedValue(format!(
+                "argument value has no tagged-dict form: {other:?}"
+            )))
+        }
+    })
+}
+
+/// Decode a value resource into an `Exp`.
+///
+/// Reads the constructor and its arguments through `ctor_and_args` — the one read of an
+/// inductive value — and dispatches. Arguments arrive as `Value`, not JSON: a resource is
+/// destructured directly, so nothing is serialised on the way in and no number loses its type.
+fn decode_value(r: &Resource, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
+    let (ctor, args) = ctor_and_args(r, ctx.layer)?;
+    let ctor = ctor.as_str();
+    let args: &[&Value] = &args;
     match ctor {
         "Sort" => {
             expect_arg_count("Sort", 1, args)?;
-            Ok(Exp::Sort(decode_level_json(&args[0])?))
+            Ok(Exp::Sort(decode_level_value(args[0])?))
         }
         "Var" => {
             expect_arg_count("Var", 1, args)?;
-            let name = arg_string("Var", 0, &args[0])?;
+            let name = arg_string("Var", 0, args[0])?;
             Ok(Exp::Var(name))
         }
         "Ann" => {
             // Type annotation `(e : T)` — the bidirectional mode switch.
             expect_arg_count("Ann", 2, args)?;
-            let e = decode_type_json(&args[0], ctx)?;
-            let t = decode_type_json(&args[1], ctx)?;
+            let e = decode_arg(args[0], ctx)?;
+            let t = decode_arg(args[1], ctx)?;
             Ok(Exp::Ann(Box::new(e), Box::new(t)))
         }
         "One" => {
@@ -528,9 +812,9 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Pi" => {
             expect_arg_count("Pi", 3, args)?;
-            let name = arg_string("Pi", 0, &args[0])?;
-            let dom = decode_type_json(&args[1], ctx)?;
-            let body = decode_type_json(&args[2], ctx)?;
+            let name = arg_string("Pi", 0, args[0])?;
+            let dom = decode_arg(args[1], ctx)?;
+            let body = decode_arg(args[2], ctx)?;
             let patt = if name.is_empty() {
                 Patt::Unit
             } else {
@@ -540,9 +824,9 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Sig" => {
             expect_arg_count("Sig", 3, args)?;
-            let name = arg_string("Sig", 0, &args[0])?;
-            let dom = decode_type_json(&args[1], ctx)?;
-            let body = decode_type_json(&args[2], ctx)?;
+            let name = arg_string("Sig", 0, args[0])?;
+            let dom = decode_arg(args[1], ctx)?;
+            let body = decode_arg(args[2], ctx)?;
             let patt = if name.is_empty() {
                 Patt::Unit
             } else {
@@ -594,7 +878,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
                 } else {
                     Patt::Var(name.to_string())
                 };
-                fields.push((iri, patt, decode_type_json(&triple[2], ctx)?));
+                fields.push((iri, patt, decode_arg(&triple[2], ctx)?));
             }
             // Rebuild through the canonicalising constructor rather than
             // trusting the wire order (D78 §1).
@@ -608,7 +892,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Refine" => {
             expect_arg_count("Refine", 2, args)?;
-            let carrier = decode_type_json(&args[0], ctx)?;
+            let carrier = decode_arg(args[0], ctx)?;
             let names = args[1]
                 .as_array()
                 .ok_or_else(|| DecodeError::WrongArgShape {
@@ -640,11 +924,11 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Lam" => {
             expect_arg_count("Lam", 3, args)?;
-            let name = arg_string("Lam", 0, &args[0])?;
+            let name = arg_string("Lam", 0, args[0])?;
             // The dom annotation is decoded for round-trip-fidelity validation
             // but discarded — Exp::Lam doesn't carry a type slot.
-            let _dom = decode_type_json(&args[1], ctx)?;
-            let body = decode_type_json(&args[2], ctx)?;
+            let _dom = decode_arg(args[1], ctx)?;
+            let body = decode_arg(args[2], ctx)?;
             let patt = if name.is_empty() {
                 Patt::Unit
             } else {
@@ -654,19 +938,19 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Id" => {
             expect_arg_count("Id", 3, args)?;
-            let ty = decode_type_json(&args[0], ctx)?;
-            let lhs = decode_type_json(&args[1], ctx)?;
-            let rhs = decode_type_json(&args[2], ctx)?;
+            let ty = decode_arg(args[0], ctx)?;
+            let lhs = decode_arg(args[1], ctx)?;
+            let rhs = decode_arg(args[2], ctx)?;
             Ok(Exp::Id(Box::new(ty), Box::new(lhs), Box::new(rhs)))
         }
         "App" => {
             expect_arg_count("App", 2, args)?;
-            let head = decode_type_json(&args[0], ctx)?;
-            let arg = decode_type_json(&args[1], ctx)?;
+            let head = decode_arg(args[0], ctx)?;
+            let arg = decode_arg(args[1], ctx)?;
             // D66: the head resolved from a transparent `eigentt:Definition`, so it is that
             // definition's lambda chain. Peel and substitute instead of building an `App` — the
             // redex is never formed, so the result is normal (§2.4).
-            if is_definition_head(&args[0], ctx) {
+            if is_definition_head(args[0], ctx) {
                 return peel_and_substitute(head, arg);
             }
             // Spine folding: if head is an InductiveType / CodataType /
@@ -701,21 +985,21 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
                     actual: args.len(),
                 });
             }
-            let iri_str = arg_string("ConstRef", 0, &args[0])?;
+            let iri_str = arg_string("ConstRef", 0, args[0])?;
             let iri = Iri::parse(&iri_str).map_err(|e| {
                 wrong_shape("ConstRef", 0, &format!("invalid IRI `{iri_str}`: {e}"))
             })?;
             let levels: Vec<crate::nbe::level::Level> = match args.get(1) {
                 None => Vec::new(),
-                Some(serde_json::Value::Array(ls)) => ls
+                Some(Value::Array(ls)) => ls
                     .iter()
-                    .map(decode_level_json)
+                    .map(decode_level_value)
                     .collect::<Result<Vec<_>, _>>()?,
                 Some(other) => {
                     return Err(wrong_shape(
                         "ConstRef",
                         1,
-                        &format!("level arguments must be an array, got {other}"),
+                        &format!("level arguments must be an array, got {other:?}"),
                     ))
                 }
             };
@@ -738,22 +1022,22 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "Pair" => {
             expect_arg_count("Pair", 2, args)?;
-            let fst = decode_type_json(&args[0], ctx)?;
-            let snd = decode_type_json(&args[1], ctx)?;
+            let fst = decode_arg(args[0], ctx)?;
+            let snd = decode_arg(args[1], ctx)?;
             Ok(Exp::Pair(Box::new(fst), Box::new(snd)))
         }
         "Fst" => {
             expect_arg_count("Fst", 1, args)?;
-            Ok(Exp::Fst(Box::new(decode_type_json(&args[0], ctx)?)))
+            Ok(Exp::Fst(Box::new(decode_arg(args[0], ctx)?)))
         }
         "Snd" => {
             expect_arg_count("Snd", 1, args)?;
-            Ok(Exp::Snd(Box::new(decode_type_json(&args[0], ctx)?)))
+            Ok(Exp::Snd(Box::new(decode_arg(args[0], ctx)?)))
         }
         "CtorApp" => {
             expect_arg_count("CtorApp", 2, args)?;
-            let decl_iri_str = arg_string("CtorApp", 0, &args[0])?;
-            let ctor_name = arg_string("CtorApp", 1, &args[1])?;
+            let decl_iri_str = arg_string("CtorApp", 0, args[0])?;
+            let ctor_name = arg_string("CtorApp", 1, args[1])?;
             let decl_iri = Iri::parse(&decl_iri_str).map_err(|e| {
                 wrong_shape(
                     "CtorApp",
@@ -803,7 +1087,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "LitInt" => {
             expect_arg_count("LitInt", 1, args)?;
-            let n = args[0].as_i64().ok_or_else(|| {
+            let n = args[0].as_integer().ok_or_else(|| {
                 DecodeError::MalformedValue(format!(
                     "LitInt arg must be a JSON integer, got {:?}",
                     args[0]
@@ -813,7 +1097,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "LitFloat" => {
             expect_arg_count("LitFloat", 1, args)?;
-            let f = args[0].as_f64().ok_or_else(|| {
+            let f = args[0].as_float().ok_or_else(|| {
                 DecodeError::MalformedValue(format!(
                     "LitFloat arg must be a JSON number, got {:?}",
                     args[0]
@@ -823,7 +1107,7 @@ fn decode_type_json(v: &serde_json::Value, ctx: &DecodeCtx<'_>) -> Result<Exp, D
         }
         "LitBool" => {
             expect_arg_count("LitBool", 1, args)?;
-            let b = args[0].as_bool().ok_or_else(|| {
+            let b = args[0].as_boolean().ok_or_else(|| {
                 DecodeError::MalformedValue(format!(
                     "LitBool arg must be a JSON boolean, got {:?}",
                     args[0]
@@ -862,30 +1146,24 @@ fn definition_is_opaque(resource: &crate::ontology::resource::Resource) -> bool 
 /// Reducing any `App(Lam, _)` at decode would change the hash of every stored proposition that
 /// happens to contain a redex, which is a separate decision from this feature (D66 §2.4 specifies
 /// the narrower rule).
-fn is_definition_head(head_json: &serde_json::Value, ctx: &DecodeCtx<'_>) -> bool {
-    let mut cursor = head_json;
-    // Walk down the App spine to its innermost head.
+fn is_definition_head(head: &Value, ctx: &DecodeCtx<'_>) -> bool {
+    let mut cursor = head;
     loop {
-        let Some(obj) = cursor.as_object() else {
+        let Value::Embedded(r) = cursor else {
             return false;
         };
-        match obj.get("ctor").and_then(|c| c.as_str()) {
-            Some("App") => {
-                let Some(args) = obj.get("args").and_then(|a| a.as_array()) else {
-                    return false;
-                };
+        let Ok((ctor, args)) = ctor_and_args(r, ctx.layer) else {
+            return false;
+        };
+        match ctor.as_str() {
+            "App" => {
                 let Some(next) = args.first() else {
                     return false;
                 };
                 cursor = next;
             }
-            Some("ConstRef") => {
-                let Some(iri_str) = obj
-                    .get("args")
-                    .and_then(|a| a.as_array())
-                    .and_then(|a| a.first())
-                    .and_then(|v| v.as_str())
-                else {
+            "ConstRef" => {
+                let Some(iri_str) = args.first().and_then(|v| v.as_str()) else {
                     return false;
                 };
                 let Ok(iri) = Iri::parse(iri_str) else {
@@ -1004,7 +1282,7 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
 fn expect_arg_count(
     ctor: &'static str,
     expected: usize,
-    args: &[serde_json::Value],
+    args: &[&Value],
 ) -> Result<(), DecodeError> {
     if args.len() != expected {
         Err(DecodeError::WrongArgCount {
@@ -1017,11 +1295,7 @@ fn expect_arg_count(
     }
 }
 
-fn arg_string(
-    ctor: &'static str,
-    slot: usize,
-    v: &serde_json::Value,
-) -> Result<String, DecodeError> {
+fn arg_string(ctor: &'static str, slot: usize, v: &Value) -> Result<String, DecodeError> {
     v.as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| wrong_shape(ctor, slot, "expected string"))
@@ -1035,8 +1309,218 @@ fn wrong_shape(ctor: &'static str, slot: usize, details: &str) -> DecodeError {
     }
 }
 
+/// Build a `justification:Certificate(j, P)` TYPE from encoded indices.
+///
+/// The inverse of [`certificate_indices`]. An indexed inductive applied to its
+/// indices encodes as nested `App`s over a `ConstRef` head.
+pub fn certificate_type(j: &Value, p: &Value, names: &CodecNames) -> Result<Value, EncodeError> {
+    let head = const_ref(names, "urn:eigenius:justification:Certificate", &[])?;
+    let one = term(names, "App", vec![head, j.clone()])?;
+    term(names, "App", vec![one, p.clone()])
+}
+
+/// Build an `eigentt:Judgement` value — `holds(logic, term, type)` — from an
+/// `eigentt:Logic` individual and two encoded terms.
+///
+/// The inverse of [`decode_judgement`]. A constructor application encodes as
+/// `App`s folded over a `CtorApp` base, which is the D47 shape for any
+/// chain-declared inductive.
+pub fn encode_judgement(
+    logic_iri: &str,
+    term: &Value,
+    typ: &Value,
+    names: &CodecNames,
+) -> Result<Value, EncodeError> {
+    // `holds(logic, term, typ)`, App-curried. `term` and `typ` arrive ALREADY encoded, so this
+    // one assembles value resources directly rather than going through the tagged form —
+    // there is no tagged tree to convert, only two encoded operands to apply.
+    // `logic` is declared `eigentt:Logic` — a REFERENCE to the logic individual, not a term —
+    // so it is the IRI, not a `ConstRef` around it. In the tagged form the distinction had
+    // nowhere to live; the derived property carries `class_types: [eigentt:Logic]` and Rule 8
+    // checks it.
+    let logic = Value::String(logic_iri.to_string());
+    let (inductive, arg_names) = names.lookup_in(JUDGEMENT_IRI, "holds")?;
+    Ok(crate::layer::ctor_classes::value_resource(
+        inductive,
+        "holds",
+        arg_names,
+        &[logic, term.clone(), typ.clone()],
+    ))
+}
+
+/// The three fields of a committed `eigentt:Judgement` value: the logic whose
+/// checker ran, the term it checked, and the type it checked against.
+#[derive(Debug, Clone)]
+pub struct Judgement {
+    /// IRI of the `eigentt:Logic` individual naming the checker.
+    pub logic: Iri,
+    /// The checked term.
+    pub term: Exp,
+    /// The type it was checked against.
+    pub typ: Exp,
+}
+
+/// Decode a stored `eigentt:Judgement` value into its three fields.
+///
+/// A judgement is `holds(logic, term, type)` — an ordinary constructor
+/// application, so it decodes through [`decode_type`] like any other term and
+/// this only names the parts.
+pub fn decode_judgement(value: &Value, layer: &Layer) -> Result<Judgement, DecodeError> {
+    // A judgement VALUE names its own constructor (D85 §6.1) and its three arguments are
+    // properties, so it is read here rather than folded through the term language and matched
+    // back out of an `App` spine.
+    if let Value::Embedded(r) = value {
+        let holds = crate::layer::ctor_classes::class_iri(JUDGEMENT_IRI, "holds");
+        if r.is_a().iter().any(|i| i.as_str() == holds) {
+            let arg = |n: &str| {
+                Iri::parse(&crate::layer::ctor_classes::arg_property_iri(&holds, n))
+                    .ok()
+                    .and_then(|k| r.get(&k).cloned())
+            };
+            let logic_v = arg("logic").ok_or_else(|| {
+                DecodeError::MalformedValue("a judgement is missing `logic`".into())
+            })?;
+            let logic = logic_v
+                .as_str()
+                .and_then(|s| Iri::parse(s).ok())
+                .ok_or_else(|| {
+                    DecodeError::MalformedValue(format!(
+                        "a judgement's `logic` must be an IRI reference, got {logic_v:?}"
+                    ))
+                })?;
+            let term_v = arg("term").ok_or_else(|| {
+                DecodeError::MalformedValue("a judgement is missing `term`".into())
+            })?;
+            let type_v = arg("type").ok_or_else(|| {
+                DecodeError::MalformedValue("a judgement is missing `type`".into())
+            })?;
+            return Ok(Judgement {
+                logic,
+                term: decode_type(&term_v, layer)?,
+                typ: decode_type(&type_v, layer)?,
+            });
+        }
+    }
+    let exp = decode_type(value, layer)?;
+    match &exp {
+        Exp::InductiveCtor(_, name, args) if name.as_str() == "holds" && args.len() == 3 => {
+            let logic = match &args[0] {
+                // An `eigentt:Logic` inhabitant is a RESOURCE, so a reference
+                // to one decodes to `EigonResource` carrying the whole record —
+                // not to a `Const`. That is a consequence of Logic being a
+                // class with individuals rather than an inductive with nullary
+                // constructors, and it is the shape this has to read.
+                Exp::EigonResource(r) => match r.id() {
+                    Some(iri) => iri.clone(),
+                    None => {
+                        return Err(DecodeError::MalformedValue(
+                            "a judgement's logic names an embedded resource with no @id"
+                                .to_string(),
+                        ))
+                    }
+                },
+                Exp::Const(iri, _) | Exp::EigonClass(iri) => iri.clone(),
+                Exp::InductiveCtor(iri, _, _) => iri.clone(),
+                other => {
+                    return Err(DecodeError::MalformedValue(format!(
+                        "a judgement's logic must name an eigentt:Logic individual, got {other:?}"
+                    )))
+                }
+            };
+            Ok(Judgement {
+                logic,
+                term: args[1].clone(),
+                typ: args[2].clone(),
+            })
+        }
+        other => Err(DecodeError::MalformedValue(format!(
+            "expected a judgement `holds(logic, term, type)`, got {other:?}"
+        ))),
+    }
+}
+
+/// Project the two indices out of a `justification:Certificate(j, P)` type.
+///
+/// A certificate type is the indexed inductive applied to its two indices, so
+/// it reaches here as `App(App(Const(Certificate), j), P)` — the shape D76
+/// Phase B leaves for a type former applied to arguments.
+///
+/// This is what lets a conclusion's proposition be recovered from its
+/// judgement rather than stored in a second slot. The emit and check sides
+/// must agree on the result: the witness index hashes `P` projected out here,
+/// while a citing certificate's `verified(iri, P)` supplies `P` directly, and
+/// a mismatch does not error — it silently fails to admit the witness.
+pub fn certificate_indices(typ: &Exp) -> Option<(&Exp, &Exp)> {
+    let (inner, p) = match typ {
+        Exp::App(f, a) => (f.as_ref(), a.as_ref()),
+        _ => return None,
+    };
+    let (head, j) = match inner {
+        Exp::App(f, a) => (f.as_ref(), a.as_ref()),
+        _ => return None,
+    };
+    let names_certificate = matches!(
+        head,
+        Exp::Const(iri, _) | Exp::EigonClass(iri) | Exp::EigonAxiom(iri)
+            if iri.as_str() == "urn:eigenius:justification:Certificate"
+    );
+    names_certificate.then_some((j, p))
+}
+
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+    /// Materialise a tagged literal as the value resources it denotes — a FIXTURE builder.
+    ///
+    /// These tests describe terms as `{"ctor": …, "args": […]}` because that reads well in a
+    /// literal. The values themselves are resources (D85 §6.1), so the literal is built out
+    /// through the declaration, which means a fixture cannot name a constructor or an arity
+    /// the chain does not have.
+    pub(super) fn value_of(tagged: &serde_json::Value) -> Value {
+        let names = crate::testing::codec_names();
+        let Some(ctor) = tagged.get("ctor").and_then(serde_json::Value::as_str) else {
+            return match tagged {
+                serde_json::Value::String(s) => Value::String(s.clone()),
+                serde_json::Value::Bool(b) => Value::Boolean(*b),
+                serde_json::Value::Array(a) => Value::Array(a.iter().map(value_of).collect()),
+                serde_json::Value::Number(n) => match n.as_i64() {
+                    Some(i) => Value::Integer(i),
+                    None => Value::Float(n.as_f64().unwrap_or_default()),
+                },
+                other => Value::Json(other.clone()),
+            };
+        };
+        let empty = Vec::new();
+        let args: Vec<Value> = tagged
+            .get("args")
+            .and_then(serde_json::Value::as_array)
+            .unwrap_or(&empty)
+            .iter()
+            .map(value_of)
+            .collect();
+        let inductive = if ["Zero", "Succ", "Max", "IMax", "Param"].contains(&ctor) {
+            wk::LEVEL
+        } else {
+            wk::EIGENTT_TERM
+        };
+        names
+            .value(inductive, ctor, args)
+            .unwrap_or_else(|e| panic!("fixture names a constructor the chain lacks: {e}"))
+    }
+
+    /// Encode, then project to `{ctor, args}` — for assertions written as `j["ctor"]`.
+    ///
+    /// The encoder produces value resources; [`ctor_view`] reads one back. It is a test
+    /// convenience, not a second encoding.
+    fn tagged(exp: &Exp) -> Result<serde_json::Value, EncodeError> {
+        let v = encode_type(exp, crate::testing::codec_names())?;
+        match &v {
+            Value::Embedded(r) => Ok(ctor_view(r, crate::testing::term_chain())
+                .expect("a freshly encoded value projects")),
+            other => Ok(serde_json::json!(format!("{other:?}"))),
+        }
+    }
+
     use super::*;
     use crate::nbe::term::{InductiveCtorDecl, InductiveDecl};
     use std::sync::Arc;
@@ -1049,18 +1533,15 @@ mod tests {
     fn encodes_sort() {
         // eigenius#188: `Sort`'s argument is an `eigentt:Level` tree, not a numeral. `Prop` is
         // `Zero`; `Set` is `Succ(Zero)`.
-        let v = encode_type(&Exp::sort(0)).unwrap();
+        let v = tagged(&Exp::sort(0)).unwrap();
+        assert_eq!(v, ctor_obj("Sort", vec![ctor_obj("Zero", vec![])]));
+        let v = tagged(&Exp::sort(1)).unwrap();
         assert_eq!(
             v,
-            Value::Json(ctor_obj("Sort", vec![ctor_obj("Zero", vec![])]))
-        );
-        let v = encode_type(&Exp::sort(1)).unwrap();
-        assert_eq!(
-            v,
-            Value::Json(ctor_obj(
+            ctor_obj(
                 "Sort",
                 vec![ctor_obj("Succ", vec![ctor_obj("Zero", vec![])])]
-            ))
+            )
         );
     }
 
@@ -1077,7 +1558,7 @@ mod tests {
             )),
         );
         let layer = empty_layer();
-        let encoded = encode_type(&Exp::Sort(l.clone())).unwrap();
+        let encoded = encode_type(&Exp::Sort(l.clone()), crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&encoded, &layer).unwrap();
         assert_eq!(decoded, Exp::Sort(l));
     }
@@ -1086,32 +1567,29 @@ mod tests {
 
     #[test]
     fn encodes_lit_string() {
-        let v = encode_type(&Exp::LitString("urn:eigenius:example:thing".to_string())).unwrap();
+        let v = tagged(&Exp::LitString("urn:eigenius:example:thing".to_string())).unwrap();
         assert_eq!(
             v,
-            Value::Json(ctor_obj(
-                "LitString",
-                vec![json!("urn:eigenius:example:thing")]
-            ))
+            ctor_obj("LitString", vec![json!("urn:eigenius:example:thing")])
         );
     }
 
     #[test]
     fn encodes_lit_int() {
-        let v = encode_type(&Exp::LitInt(42)).unwrap();
-        assert_eq!(v, Value::Json(ctor_obj("LitInt", vec![json!(42)])));
+        let v = tagged(&Exp::LitInt(42)).unwrap();
+        assert_eq!(v, ctor_obj("LitInt", vec![json!(42)]));
     }
 
     #[test]
     fn encodes_lit_float() {
-        let v = encode_type(&Exp::LitFloat(1.5)).unwrap();
-        assert_eq!(v, Value::Json(ctor_obj("LitFloat", vec![json!(1.5)])));
+        let v = tagged(&Exp::LitFloat(1.5)).unwrap();
+        assert_eq!(v, ctor_obj("LitFloat", vec![json!(1.5)]));
     }
 
     #[test]
     fn encodes_lit_bool() {
-        let v = encode_type(&Exp::LitBool(true)).unwrap();
-        assert_eq!(v, Value::Json(ctor_obj("LitBool", vec![json!(true)])));
+        let v = tagged(&Exp::LitBool(true)).unwrap();
+        assert_eq!(v, ctor_obj("LitBool", vec![json!(true)]));
     }
 
     #[test]
@@ -1120,7 +1598,7 @@ mod tests {
         // never touching the chain.
         let layer = empty_layer();
         let original = Exp::LitString("urn:eigenius:example:thing".to_string());
-        let encoded = encode_type(&original).unwrap();
+        let encoded = encode_type(&original, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&encoded, &layer).unwrap();
         assert_eq!(decoded, original);
     }
@@ -1130,7 +1608,7 @@ mod tests {
         // `(P : Prop)` — the bidirectional annotation round-trips through D47.
         let layer = empty_layer();
         let original = Exp::Ann(Box::new(Exp::Var("P".to_string())), Box::new(Exp::sort(0)));
-        let encoded = encode_type(&original).unwrap();
+        let encoded = encode_type(&original, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&encoded, &layer).unwrap();
         assert_eq!(decoded, original);
     }
@@ -1139,7 +1617,7 @@ mod tests {
     fn lit_int_roundtrip() {
         let layer = empty_layer();
         let original = Exp::LitInt(-42);
-        let encoded = encode_type(&original).unwrap();
+        let encoded = encode_type(&original, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&encoded, &layer).unwrap();
         assert_eq!(decoded, original);
     }
@@ -1148,7 +1626,7 @@ mod tests {
     fn lit_float_roundtrip() {
         let layer = empty_layer();
         let original = Exp::LitFloat(1.25);
-        let encoded = encode_type(&original).unwrap();
+        let encoded = encode_type(&original, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&encoded, &layer).unwrap();
         assert_eq!(decoded, original);
     }
@@ -1157,7 +1635,7 @@ mod tests {
     fn lit_bool_roundtrip() {
         let layer = empty_layer();
         for original in [Exp::LitBool(true), Exp::LitBool(false)] {
-            let encoded = encode_type(&original).unwrap();
+            let encoded = encode_type(&original, crate::testing::codec_names()).unwrap();
             let decoded = decode_type(&encoded, &layer).unwrap();
             assert_eq!(decoded, original);
         }
@@ -1180,11 +1658,11 @@ mod tests {
             ),
             ctor_obj("UnitVal", vec![]),
         ] {
-            decode_type(&Value::Json(pre_existing.clone()), &layer)
+            decode_type(&value_of(&pre_existing.clone()), &layer)
                 .unwrap_or_else(|e| panic!("{pre_existing} no longer decodes: {e}"));
         }
-        let malformed = Value::Json(ctor_obj("LitBool", vec![json!("true")]));
-        match decode_type(&malformed, &layer) {
+        let malformed = ctor_obj("LitBool", vec![json!("true")]);
+        match decode_type(&value_of(&malformed), &layer) {
             Err(DecodeError::MalformedValue(msg)) => assert!(msg.contains("LitBool"), "{msg}"),
             other => panic!("expected MalformedValue, got {other:?}"),
         }
@@ -1194,8 +1672,8 @@ mod tests {
     fn lit_string_decode_rejects_non_string_arg() {
         let layer = empty_layer();
         // Authored-by-hand malformed payload: LitString with an int arg.
-        let malformed = Value::Json(ctor_obj("LitString", vec![json!(42)]));
-        let result = decode_type(&malformed, &layer);
+        let malformed = ctor_obj("LitString", vec![json!(42)]);
+        let result = decode_type(&value_of(&malformed), &layer);
         assert!(result.is_err(), "LitString with int arg must reject");
         match result.unwrap_err() {
             DecodeError::MalformedValue(msg) => {
@@ -1207,26 +1685,23 @@ mod tests {
 
     #[test]
     fn encodes_var() {
-        let v = encode_type(&Exp::Var("P".to_string())).unwrap();
-        assert_eq!(v, Value::Json(ctor_obj("Var", vec![json!("P")])));
+        let v = tagged(&Exp::Var("P".to_string())).unwrap();
+        assert_eq!(v, ctor_obj("Var", vec![json!("P")]));
     }
 
     #[test]
     fn encodes_one() {
-        let v = encode_type(&Exp::One).unwrap();
-        assert_eq!(v, Value::Json(ctor_obj("One", vec![])));
+        let v = tagged(&Exp::One).unwrap();
+        assert_eq!(v, ctor_obj("One", vec![]));
     }
 
     #[test]
     fn encodes_arrow_as_pi_with_empty_binder() {
         // 1 → 1 desugars to Pi(_, 1, 1)
         let exp = Exp::Arrow(Box::new(Exp::One), Box::new(Exp::One));
-        let v = encode_type(&exp).unwrap();
+        let v = tagged(&exp).unwrap();
         let one = ctor_obj("One", vec![]);
-        assert_eq!(
-            v,
-            Value::Json(ctor_obj("Pi", vec![json!(""), one.clone(), one],))
-        );
+        assert_eq!(v, ctor_obj("Pi", vec![json!(""), one.clone(), one],));
     }
 
     #[test]
@@ -1236,11 +1711,11 @@ mod tests {
             Box::new(Exp::Var("x".to_string())),
             Box::new(Exp::Var("y".to_string())),
         );
-        let v = encode_type(&exp).unwrap();
+        let v = tagged(&exp).unwrap();
         let one = ctor_obj("One", vec![]);
         let vx = ctor_obj("Var", vec![json!("x")]);
         let vy = ctor_obj("Var", vec![json!("y")]);
-        assert_eq!(v, Value::Json(ctor_obj("Id", vec![one, vx, vy])));
+        assert_eq!(v, ctor_obj("Id", vec![one, vx, vy]));
     }
 
     #[test]
@@ -1266,10 +1741,8 @@ mod tests {
             Box::new(outer_q),
         );
         // Just verify the round-trip succeeds and produces a Pi-headed tree.
-        let v = encode_type(&propext).unwrap();
-        let Value::Json(j) = v else {
-            panic!("expected Json")
-        };
+        let v = tagged(&propext).unwrap();
+        let j = v;
         assert_eq!(j["ctor"], "Pi");
         assert_eq!(j["args"][0], json!("P"));
     }
@@ -1280,7 +1753,7 @@ mod tests {
             Patt::Var("x".to_string()),
             Box::new(Exp::Var("x".to_string())),
         );
-        let err = encode_type(&lam).unwrap_err();
+        let err = encode_type(&lam, crate::testing::codec_names()).unwrap_err();
         assert!(matches!(err, EncodeError::LamWithoutAnnotation));
     }
 
@@ -1288,17 +1761,21 @@ mod tests {
     fn rejects_non_type_level_exp() {
         // Refl is a term-level form, not a type. Should be rejected.
         let refl = Exp::Refl(Box::new(Exp::Unit));
-        let err = encode_type(&refl).unwrap_err();
+        let err = encode_type(&refl, crate::testing::codec_names()).unwrap_err();
         assert!(matches!(err, EncodeError::NotATypeLevelExp(_)));
     }
 
     // ---------- decoder tests ----------
 
+    /// The chain a decode needs.
+    ///
+    /// It was a genuinely empty root layer while terms were opaque JSON. A term is now a
+    /// resource whose `is_a` names its constructor's class (D85 §6.1), and that class is
+    /// DERIVED from `eigentt:Term`'s declaration — so a layer without the declaration cannot
+    /// decode any term at all, and every one of these round-trips would fail on
+    /// "`Term-Ann` does not resolve" rather than on anything the test is about.
     pub(super) fn empty_layer() -> std::sync::Arc<Layer> {
-        std::sync::Arc::new(
-            crate::layer::LayerBuilder::new("decoder-test-empty", None)
-                .build(crate::layer::LayerStorage::in_memory()),
-        )
+        std::sync::Arc::clone(crate::testing::term_chain())
     }
 
     fn bootstrap_head() -> std::sync::Arc<Layer> {
@@ -1307,7 +1784,7 @@ mod tests {
 
     #[test]
     fn decodes_sort() {
-        let v = encode_type(&Exp::sort(2)).unwrap();
+        let v = encode_type(&Exp::sort(2), crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
         assert_eq!(decoded, Exp::sort(2));
     }
@@ -1319,7 +1796,7 @@ mod tests {
             Box::new(Exp::One),
             Box::new(Exp::Var("x".to_string())),
         );
-        let v = encode_type(&exp).unwrap();
+        let v = encode_type(&exp, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
         assert_eq!(decoded, exp);
     }
@@ -1327,7 +1804,7 @@ mod tests {
     #[test]
     fn decodes_arrow_round_trips_as_pi_unit() {
         let exp = Exp::Arrow(Box::new(Exp::One), Box::new(Exp::One));
-        let v = encode_type(&exp).unwrap();
+        let v = encode_type(&exp, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
         // Round-trips to the desugared Pi shape per D47 §4.3.
         assert_eq!(
@@ -1343,7 +1820,7 @@ mod tests {
             Box::new(Exp::Var("x".to_string())),
             Box::new(Exp::Var("y".to_string())),
         );
-        let v = encode_type(&exp).unwrap();
+        let v = encode_type(&exp, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
         assert_eq!(decoded, exp);
     }
@@ -1370,42 +1847,46 @@ mod tests {
             Box::new(prop()),
             Box::new(outer_q),
         );
-        let v = encode_type(&propext).unwrap();
+        let v = encode_type(&propext, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
         // The decoded form is the desugared Pi/Sig version of the input.
         // For this round-trip, encode the desugared form and compare values.
-        let v2 = encode_type(&decoded).unwrap();
+        let v2 = encode_type(&decoded, crate::testing::codec_names()).unwrap();
         assert_eq!(v, v2);
     }
 
     #[test]
-    fn decoder_rejects_unknown_ctor() {
-        let bad = Value::Json(json!({"ctor": "Nonsense", "args": []}));
-        let err = decode_type(&bad, &empty_layer()).unwrap_err();
-        assert!(matches!(err, DecodeError::UnknownCtor(c) if c == "Nonsense"));
+    /// **The rejection moved from decode to construction.** A term used to be a tagged dict,
+    /// which could name any constructor at all, so the decoder had to refuse the ones
+    /// `eigentt:Term` does not declare. A value states its constructor's CLASS (D85 §6.1), and
+    /// there is no class for `Nonsense` — the term cannot be built in the first place.
+    fn an_undeclared_ctor_cannot_be_built() {
+        let err = crate::testing::codec_names()
+            .value(wk::EIGENTT_TERM, "Nonsense", vec![])
+            .expect_err("`eigentt:Term` declares no `Nonsense`");
+        assert!(format!("{err}").contains("Nonsense"), "{err}");
     }
 
     #[test]
-    fn decoder_rejects_wrong_arg_count() {
-        let bad = Value::Json(json!({"ctor": "Sort", "args": []}));
-        let err = decode_type(&bad, &empty_layer()).unwrap_err();
-        assert!(matches!(
-            err,
-            DecodeError::WrongArgCount {
-                ctor: "Sort",
-                expected: 1,
-                actual: 0,
-            }
-        ));
+    /// Arity likewise: a value carries its arguments as NAMED properties, so a `Sort` with no
+    /// level is not a term the builder will make.
+    fn a_wrong_arity_cannot_be_built() {
+        let err = crate::testing::codec_names()
+            .value(wk::EIGENTT_TERM, "Sort", vec![])
+            .expect_err("`Sort` takes one argument");
+        assert!(
+            format!("{err}").contains("takes 1 argument"),
+            "expected an arity diagnostic, got {err}"
+        );
     }
 
     #[test]
     fn decoder_rejects_unresolved_constref() {
-        let bad = Value::Json(json!({
+        let bad = json!({
             "ctor": "ConstRef",
-            "args": ["urn:eigenius:nonexistent:Foo"]
-        }));
-        let err = decode_type(&bad, &empty_layer()).unwrap_err();
+            "args": ["urn:eigenius:nonexistent:Foo", []]
+        });
+        let err = decode_type(&value_of(&bad.clone()), &empty_layer()).unwrap_err();
         assert!(matches!(err, DecodeError::UnresolvedConstRef(_)));
     }
 
@@ -1414,11 +1895,11 @@ mod tests {
         // urn:eigenius:core:Class is an is_a-of-Class resource in the
         // core ontology.
         let head = bootstrap_head();
-        let v = Value::Json(json!({
+        let v = json!({
             "ctor": "ConstRef",
-            "args": ["urn:eigenius:core:Class"]
-        }));
-        let decoded = decode_type(&v, &head).unwrap();
+            "args": ["urn:eigenius:core:Class", []]
+        });
+        let decoded = decode_type(&value_of(&v), &head).unwrap();
         match decoded {
             Exp::EigonClass(iri) => {
                 assert_eq!(iri.as_str(), "urn:eigenius:core:Class");
@@ -1464,10 +1945,8 @@ mod tests {
                 Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:Other").unwrap()),
             ],
         );
-        let encoded = encode_type(&app_form).expect("encode indexed inductive");
-        let Value::Json(j) = encoded else {
-            panic!("expected Value::Json");
-        };
+        let encoded = tagged(&app_form).expect("encode indexed inductive");
+        let j = encoded;
         assert_eq!(j["ctor"], "App", "outermost should be App-curried");
         // Walk the App spine to verify the structure: 2 App layers
         // (one per param + index) bottoming at ConstRef(IxClassFamily).
@@ -1528,12 +2007,12 @@ mod tests {
         });
         let nat = Exp::const_applied(nat_decl.iri.clone(), Vec::new(), Vec::new());
         let list_nat = Exp::const_applied(list_decl.iri.clone(), Vec::new(), vec![nat]);
-        let v = encode_type(&list_nat).unwrap();
+        let v = tagged(&list_nat).unwrap();
 
-        let const_nat = ctor_obj("ConstRef", vec![json!("urn:_:Nat")]);
-        let const_list = ctor_obj("ConstRef", vec![json!("urn:_:List")]);
+        let const_nat = ctor_obj("ConstRef", vec![json!("urn:_:Nat"), json!([])]);
+        let const_list = ctor_obj("ConstRef", vec![json!("urn:_:List"), json!([])]);
         let expected = ctor_obj("App", vec![const_list, const_nat]);
-        assert_eq!(v, Value::Json(expected));
+        assert_eq!(v, expected);
     }
 
     // ──────────────────────────────────────────────────────────────────
@@ -1542,16 +2021,16 @@ mod tests {
 
     #[test]
     fn encodes_unit_value() {
-        let v = encode_type(&Exp::Unit).unwrap();
-        assert_eq!(v, Value::Json(ctor_obj("UnitVal", vec![])));
+        let v = tagged(&Exp::Unit).unwrap();
+        assert_eq!(v, ctor_obj("UnitVal", vec![]));
     }
 
     #[test]
     fn encodes_pair_value() {
         let pair = Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Unit));
-        let v = encode_type(&pair).unwrap();
+        let v = tagged(&pair).unwrap();
         let unit = ctor_obj("UnitVal", vec![]);
-        assert_eq!(v, Value::Json(ctor_obj("Pair", vec![unit.clone(), unit])));
+        assert_eq!(v, ctor_obj("Pair", vec![unit.clone(), unit]));
     }
 
     #[test]
@@ -1570,10 +2049,10 @@ mod tests {
             }],
         });
         let zero = Exp::InductiveCtor(nat_decl.iri.clone(), "zero".to_string(), Vec::new());
-        let v = encode_type(&zero).unwrap();
+        let v = tagged(&zero).unwrap();
         assert_eq!(
             v,
-            Value::Json(ctor_obj("CtorApp", vec![json!("urn:_:Nat"), json!("zero")]))
+            ctor_obj("CtorApp", vec![json!("urn:_:Nat"), json!("zero")])
         );
     }
 
@@ -1597,15 +2076,15 @@ mod tests {
             "succ".to_string(),
             vec![Exp::Var("x".to_string())],
         );
-        let v = encode_type(&succ_x).unwrap();
+        let v = tagged(&succ_x).unwrap();
         let ctor_app = ctor_obj("CtorApp", vec![json!("urn:_:Nat"), json!("succ")]);
         let var_x = ctor_obj("Var", vec![json!("x")]);
-        assert_eq!(v, Value::Json(ctor_obj("App", vec![ctor_app, var_x])));
+        assert_eq!(v, ctor_obj("App", vec![ctor_app, var_x]));
     }
 
     #[test]
     fn unit_value_round_trips_via_decode() {
-        let v = encode_type(&Exp::Unit).unwrap();
+        let v = encode_type(&Exp::Unit, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
         assert_eq!(decoded, Exp::Unit);
     }
@@ -1613,7 +2092,7 @@ mod tests {
     #[test]
     fn pair_value_round_trips_via_decode() {
         let pair = Exp::Pair(Box::new(Exp::Unit), Box::new(Exp::Unit));
-        let v = encode_type(&pair).unwrap();
+        let v = encode_type(&pair, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
         assert_eq!(decoded, pair);
     }
@@ -1633,7 +2112,7 @@ mod tests {
             Exp::Fst(Box::new(sig.clone())),
             Exp::Snd(Box::new(sig.clone())),
         ] {
-            let v = encode_type(&proj).unwrap();
+            let v = encode_type(&proj, crate::testing::codec_names()).unwrap();
             assert_eq!(decode_type(&v, &empty_layer()).unwrap(), proj);
         }
     }
@@ -1686,10 +2165,8 @@ mod tests {
         let assay_succ_zero =
             Exp::const_applied(assay_decl.iri.clone(), Vec::new(), vec![succ_zero]);
 
-        let encoded = encode_type(&assay_succ_zero).expect("encode AssayShape (succ zero)");
-        let Value::Json(j) = encoded else {
-            panic!("expected Value::Json");
-        };
+        let encoded = tagged(&assay_succ_zero).expect("encode AssayShape (succ zero)");
+        let j = encoded;
 
         // Walk the outer App to verify shape:
         //   App(ConstRef(AssayShape), App(CtorApp(Nat, succ), CtorApp(Nat, zero)))
@@ -1721,13 +2198,16 @@ mod record_codec {
 
     fn round_trip(e: &Exp) -> Exp {
         let layer = super::tests::empty_layer();
-        let encoded = encode_type(e).expect("encode");
+        let encoded = encode_type(e, crate::testing::codec_names()).expect("encode");
         decode_type(&encoded, &layer).expect("decode")
     }
 
+    /// Decode a hand-written term. The literal is a readable description; the value it
+    /// denotes is built through the declaration (see `tests::value_of`), so a fixture cannot
+    /// name a constructor or an arity the chain does not have.
     fn decode_raw(j: serde_json::Value) -> Result<Exp, DecodeError> {
         let layer = super::tests::empty_layer();
-        decode_type(&crate::ontology::resource::Value::Json(j), &layer)
+        decode_type(&super::tests::value_of(&j), &layer)
     }
 
     #[test]

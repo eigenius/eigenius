@@ -1,8 +1,8 @@
 # 7. Statistics + reasoning walkthrough
 
-The [kinase walkthrough (chapter 6)](06-kinase-walkthrough.md) traces the platform's first composition shape: five Julia institutions coordinating over `formulas:FormulaTerm`, bridged by declared comorphisms, AutoOnLoad gates firing as data flows through the typed pipeline. This chapter traces the second composition shape: the [D52 measurement-statistics institution](../platform/statistics-institution/README.md) and the [D39 reasoning institution](../platform/reasoning-institution/README.md), bridged by the [D49 chain-witness index](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) over a shared `eigentt:TypeExpr` proposition slot. The two shapes use the same chain primitives — typed resources, AutoOnLoad cascades, deterministic verifiers — but with a different bridge mechanism. Reading both walkthroughs side by side surfaces the choice space: comorphism-mediated translation when one runtime's output needs to be reshaped for another's consumption, witness-index admission when one institution's verdict is being cited as evidence rather than re-processed.
+The [kinase walkthrough (chapter 6)](06-kinase-walkthrough.md) traces the platform's first composition shape: five Julia institutions coordinating over `formulas:FormulaTerm`, bridged by declared comorphisms, AutoOnLoad gates firing as data flows through the typed pipeline. This chapter traces the second composition shape: the [D52 measurement-statistics institution](../platform/statistics-institution/README.md) and the [D39 justification logic tutorial](../platform/justification-logic/README.md), bridged by the [D49 chain-witness index](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) over a shared `eigentt:Term` proposition slot. The two shapes use the same chain primitives — typed resources, AutoOnLoad cascades, deterministic verifiers — but with a different bridge mechanism. Reading both walkthroughs side by side surfaces the choice space: comorphism-mediated translation when one runtime's output needs to be reshaped for another's consumption, witness-index admission when one institution's verdict is being cited as evidence rather than re-processed.
 
-The fixture this chapter traces lives at [`crates/eigenius-reasoning/tests/fixtures/drug_screening.esl`](../../../crates/eigenius-reasoning/tests/fixtures/drug_screening.esl). The end-to-end test that exercises it is [`crates/eigenius-reasoning/tests/drug_screening.rs`](../../../crates/eigenius-reasoning/tests/drug_screening.rs).
+The fixture this chapter traces lives at [`kernel/tests/fixtures/drug_screening.esl`](../../../kernel/tests/fixtures/drug_screening.esl). The end-to-end test that exercises it is [`kernel/tests/drug_screening.rs`](../../../kernel/tests/drug_screening.rs).
 
 ## 7.1. The scenario
 
@@ -12,11 +12,11 @@ Five chain commits accomplish this:
 
 1. Declare the domain predicates (`HasLowIC50`, `StrongInhibitor`) in the chain ontology, both marked `is_a stats:PopulationLevel` per [D52 §7.4](../platform/statistics-institution/README.md#7-4-opinionated-stance-technicalonly-replicates-cannot-support-populationlevel-propositions).
 2. Commit a `stats:SampleSetResource` carrying the three raw IC50 readings via `stats:SingleSampleEstimate(...)`, paired with an `ObservationTrace`.
-3. Commit a `stats:StatisticalAnalysisPlan` against the SampleSet asserting the 100 nM threshold (alpha = 0.05, TwoSided, WelchUnequal, Identity exclusion), paired with a `ProgramTrace`. The D52 institution's AutoOnLoad gate recomputes the claim and emits a `Verdict::Holds`; the chain-witness index admits `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))`.
-4. Commit the literature rule as a `reflection:DeclaredResource` whose `canonical_proposition` is `HasLowIC50(EIG_0291) -> StrongInhibitor(EIG_0291)`, paired with a `DeclarationTrace`. The chain-witness index admits `IsDeclaredAs(rule_iri, HasLowIC50 -> StrongInhibitor)`.
-5. Commit a `reasoning:ReasoningSentence` whose justification is `App(DeclaredEvidence(rule_iri), DerivedEvidence(claim_iri))` and whose certificate is the matching `JustifiedBy.app` term. The D39 institution's AutoOnLoad gate type-checks the certificate against `JustifiedBy(justification, StrongInhibitor(EIG_0291))`; both grounding constructors consume the admitted witnesses; verdict is Holds; the sentence is admitted.
+3. Commit a `stats:StatisticalAnalysisPlan` against the SampleSet asserting the 100 nM threshold (alpha = 0.05, TwoSided, WelchUnequal, Identity exclusion), paired with a `ProgramTrace`. The D52 institution's AutoOnLoad gate recomputes the claim and emits a `Verdict::Holds` plus a per-effect result carrying `HasLowIC50(EIG_0291)`. That result records the run and admits no witness.
+4. Commit the literature rule as a `justification:Claim` whose `canonical_proposition` is `HasLowIC50(EIG_0291) -> StrongInhibitor(EIG_0291)`, and the plan's reproducibility claim (`Asserts(s) -> HasLowIC50(EIG_0291)`), each paired with a `DeclarationTrace`. The chain-witness index admits `IsDeclaredAs(rule_iri, HasLowIC50 -> StrongInhibitor)`.
+5. Commit a `justification:Conclusion` whose judgement pairs the term `App(Declared(rule_iri), App(Declared(plan_yields_iri), Observed(sampleset_iri)))` with the matching `justification:Certificate.app` term. The D39 institution's AutoOnLoad gate type-checks the certificate against `justification:Certificate(justification, StrongInhibitor(EIG_0291))`; both grounding constructors consume the admitted witnesses; verdict is Holds; the sentence is admitted.
 
-No comorphism is declared between the two institutions. No bridge code runs to translate the statistics verdict into a reasoning input. The composition works because both institutions honour the same chain artifact shape (`DerivedResource` + `ProgramTrace` + `canonical_proposition`), and the witness index reads from that shape uniformly.
+No comorphism is declared between the two institutions. No bridge code runs to translate the statistics verdict into a reasoning input. The composition works because both institutions honour the same chain artifact shape (a resource carrying `canonical_proposition`, plus the `prov` trace attesting how it came to exist), and the witness index reads from that shape uniformly.
 
 ## 7.2. The five chain shapes at a glance
 
@@ -24,12 +24,13 @@ No comorphism is declared between the two institutions. No bridge code runs to t
 |---|---|
 | `screen:HasLowIC50`, `screen:StrongInhibitor` (`data : ... -> Prop, stats:PopulationLevel`) | Domain predicates. The multi-class header puts both `is_a InductiveType` (implicit) and `is_a stats:PopulationLevel` on the resource so D52's §7.4 check admits the claim under BiologicalReplication. |
 | `screen:m_eig0291_sampleset` (`stats:SampleSetResource`) | Holds the three raw IC50 reads. `stats:SingleSampleEstimate([72.0, 85.0, 100.0], BiologicalReplication())` lands at the SingleSampleEstimate dispatch position. |
-| `screen:m_eig0291_sampleset_trace` (`reflection:ObservationTrace`) | Pairs the SampleSet with its bench provenance. Admits `IsObservedAs` for downstream auditability (D49 §6). |
+| `screen:m_eig0291_sampleset_trace` (`prov:ObservationTrace`) | Pairs the SampleSet with its bench provenance. Admits `IsObservedAs` for downstream auditability (D49 §6). |
 | `screen:claim_eig0291_lowic50` (`stats:StatisticalAnalysisPlan`) | The universal-claim schema: alpha, effect_size, directionality, variance_assumption, outlier_exclusion. Its `canonical_proposition` is `HasLowIC50(EIG_0291)`. AutoOnLoad-gated by D52. |
-| `screen:claim_eig0291_lowic50_trace` (`reflection:ProgramTrace`) | Pairs the claim with the statistics-institution validator. Admits `IsDerivedAs(claim_iri, HasLowIC50(EIG_0291))` once the claim's canonical_proposition is on chain. |
-| `screen:rule_strong` (`reflection:DeclaredResource`) | The literature rule. `canonical_proposition` is `HasLowIC50 -> StrongInhibitor`. |
-| `screen:rule_strong_trace` (`reflection:DeclarationTrace`) | Admits `IsDeclaredAs(rule_iri, HasLowIC50 -> StrongInhibitor)`. |
-| `screen:concl_eig0291_strong` (`reasoning:ReasoningSentence`) | The reasoning step. Proposition: `StrongInhibitor(EIG_0291)`. Justification: `App(DeclaredEvidence(rule), DerivedEvidence(claim))`. Certificate: `JustifiedBy.app(declared(rule, ...), derived(claim, ...))`. AutoOnLoad-gated by D39. |
+| `screen:claim_eig0291_lowic50_trace` (`prov:ProgramTrace`) | Records that the statistics-institution validator ran. Admits NO witness — the fact that a computation ran grounds nothing. |
+| `screen:rule_strong` (`justification:Claim`) | The literature rule. `canonical_proposition` is `HasLowIC50 -> StrongInhibitor`. |
+| `screen:plan_yields_lowic50` (`justification:Claim`) + its `prov:DeclarationTrace` | The plan's reproducibility claim: `Asserts(s) -> HasLowIC50(EIG_0291)`. Admits `IsDeclaredAs`, and is the DECLARED half of the computed ground. |
+| `screen:rule_strong_trace` (`prov:DeclarationTrace`) | Admits `IsDeclaredAs(rule_iri, HasLowIC50 -> StrongInhibitor)`. |
+| `screen:concl_eig0291_strong` (`justification:Conclusion`) | The reasoning step. One judgement: `holds(kernel, c, Certificate(App(Declared(rule), App(Declared(plan_yields), Observed(sampleset))), StrongInhibitor(EIG_0291)))`. AutoOnLoad-gated by D39. |
 
 The fixture commits all of these in one ESL document; the AutoOnLoad cascades fire in commit order ([§4.2](04-dispatch-roles-in-concert.md#42-autoonload-cascades-single-commit-multiple-gates)).
 
@@ -50,8 +51,8 @@ The `stats:PopulationLevel` marker is what D52's §7.4 epistemic-scope check wil
 
 ```esl
 resource screen:m_eig0291_sampleset : stats:SampleSetResource {
-    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
-    reflection:observed_at = "2026-03-04T14:22:11Z";
+    prov:was_generated_by      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    prov:observed_at = "2026-03-04T14:22:11Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
         [72.0, 85.0, 100.0],
@@ -59,16 +60,16 @@ resource screen:m_eig0291_sampleset : stats:SampleSetResource {
     );
 }
 
-resource screen:m_eig0291_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = screen:m_eig0291_sampleset;
-    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
-    reflection:timestamp = "2026-03-04T14:22:11Z";
+resource screen:m_eig0291_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = screen:m_eig0291_sampleset;
+    prov:was_generated_by    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    prov:timestamp = "2026-03-04T14:22:11Z";
 }
 ```
 
 `stats:SingleSampleEstimate(...)` is a [macro](../esl/04-declarations.md#4-9-macro-compile-time-smart-constructors-d52-12) declared in the statistics ontology layer; the compiler picks it up via `compile_against_layer` ([§6.5.4](../esl/06-resources-types-and-the-layer.md#6-5-4-cross-file-macro-and-axiom-visibility-compile_against_layer)) and expands it at compile time to a `Bundle(CompleteRandom(), Unblocked(), NoFactor(), BiologicalReplication(), CrossSectional(), Units([]), Columns([]), Entries([]), [72.0, 85.0, 100.0])`. That's the chain wire shape the SampleSetResource carries.
 
-No AutoOnLoad fires on the SampleSetResource itself — D52's gate is on `StatisticalAnalysisPlan`, not on `SampleSetResource`. The trace pairing it admits `IsObservedAs(sampleset_iri, ...)` in the witness index, but no D39 sentence in this fixture cites the SampleSet directly via `ObservedEvidence` (the reasoning chain goes through the claim's `DerivedEvidence` instead), so the IsObservedAs witness is unused.
+No AutoOnLoad fires on the SampleSetResource itself — D52's gate is on `StatisticalAnalysisPlan`, not on `SampleSetResource`. The trace pairing it admits `IsObservedAs(sampleset_iri, ...)` in the witness index, but no D39 sentence in this fixture cites the SampleSet directly via `Observed` — but the computed ground does, since `App(Declared(plan), Observed(sample_set))` cites the sample set as its observed half.
 
 ### Step 3 — StatisticalAnalysisPlan + ProgramTrace land; D52 AutoOnLoad fires
 
@@ -93,10 +94,10 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion = Identity();
 }
 
-resource screen:claim_eig0291_lowic50_trace : reflection:ProgramTrace {
-    reflection:resource  = screen:claim_eig0291_lowic50;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2026-03-04T14:22:11Z";
+resource screen:claim_eig0291_lowic50_trace : prov:ProgramTrace {
+    prov:resource  = screen:claim_eig0291_lowic50;
+    prov:was_generated_by    = "statistics-institution:validate_analysis_plan";
+    prov:timestamp = "2026-03-04T14:22:11Z";
 }
 ```
 
@@ -119,14 +120,15 @@ WitnessKey {
 }
 ```
 
-This entry is what the D39 sentence's `JustifiedBy.derived` constructor will consume in step 5.
+This entry is what the D39 sentence's `justification:Certificate.derived` constructor will consume in step 5.
 
 ### Step 4 — Rule + DeclarationTrace land
 
 ```esl
-resource screen:rule_strong : reflection:DeclaredResource {
-    reflection:declared_by = "literature:smith_et_al_2024_3.2";
-    reflection:rationale   = "IC50 < 100 nM at a kinase target is the standard strong-inhibitor threshold.";
+resource screen:rule_strong : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_smith_et_al_2024;
+    prov:rationale   = "IC50 < 100 nM at a kinase target is the standard strong-inhibitor threshold.";
 
     reflection:canonical_proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
@@ -135,14 +137,14 @@ resource screen:rule_strong : reflection:DeclaredResource {
     );
 }
 
-resource screen:rule_strong_trace : reflection:DeclarationTrace {
-    reflection:resource    = screen:rule_strong;
-    reflection:declared_by = "literature:smith_et_al_2024_3.2";
-    reflection:timestamp   = "2026-04-10T09:00:00Z";
+resource screen:rule_strong_trace : prov:DeclarationTrace {
+    prov:resource          = screen:rule_strong;
+    prov:was_attributed_to = agent:eigenius_core_team;
+    prov:timestamp   = "2026-04-10T09:00:00Z";
 }
 ```
 
-No AutoOnLoad fires — `DeclaredResource` is a chain-shape class, not an institution input. The trace pairs it with the witness index, which admits:
+No AutoOnLoad fires — `justification:Claim` is a chain-shape class, not an institution input. The trace pairs it with the witness index, which admits:
 
 ```
 WitnessKey {
@@ -154,66 +156,65 @@ WitnessKey {
 }
 ```
 
-Two witness keys are now in the index, with corresponding entries for the `IsDerivedAs` (from step 3, in the Holds case) and `IsDeclaredAs` predicates.
+Three witness keys are now in the index: `IsObservedAs` for the sample set (step 2), and `IsDeclaredAs` for the literature rule and for the plan's reproducibility claim. **None for the statistics result.** It records what ran, and a run record grounds nothing — the computed claim's ground is the plan declaration applied to the observed input.
 
-### Step 5 — ReasoningSentence lands; D39 AutoOnLoad fires
+### Step 5 — justification:Conclusion lands; D39 AutoOnLoad fires
 
 ```esl
-resource screen:concl_eig0291_strong : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
+resource screen:concl_eig0291_strong : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
-    reasoning:proposition = type_expr(
-        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
-    );
-
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),
-        DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50")
-    );
-
-    reasoning:certificate = type_expr(
-        app(
-            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),       // A
-            screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),  // B
-            DeclaredEvidence("urn:eigenius:demo:screen:rule_strong"),     // j1
-            DerivedEvidence("urn:eigenius:demo:screen:claim_eig0291_lowic50"), // j2
-            declared(
-                "urn:eigenius:demo:screen:rule_strong",
-                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
-                ->
-                screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
-                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
-            ),
-            derived(
-                "urn:eigenius:demo:screen:claim_eig0291_lowic50",
-                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
-                screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
-            )
-        )
+    justification:judgement = type_expr(
+        alias
+            EIG  = "urn:eigenius:demo:screen:EIG_0291",
+            SS   = "urn:eigenius:demo:screen:m_eig0291_sampleset",
+            PLAN = "urn:eigenius:demo:screen:plan_yields_lowic50",
+            RULE = "urn:eigenius:demo:screen:rule_strong",
+            LOW  = screen:HasLowIC50(EIG),
+            // the COMPUTED ground: the declared plan applied to the observed input
+            computed = justification:App(Declared(PLAN), Observed(SS)),
+            cs = app( core:Asserts(SS), LOW,
+                      Declared(PLAN), Observed(SS),
+                      declared(PLAN, core:Asserts(SS) -> LOW),
+                      observed(SS, core:Asserts(SS)) )
+        in
+        holds( eigentt:logic_kernel,
+               app( LOW, screen:StrongInhibitor(EIG),
+                    Declared(RULE), computed,
+                    declared(RULE, LOW -> screen:StrongInhibitor(EIG)),
+                    cs ),
+               justification:Certificate(
+                   justification:App(Declared(RULE), computed),
+                   screen:StrongInhibitor(EIG) ) )
     );
 }
 ```
 
-The commit triggers D39's `validate_justification` AutoOnLoad gate. The gate's check:
+**One slot, not three.** The proposition and the justification term are not separate fields; they appear inside the judgement's TYPE. They used to be three fields checked by three separate paths with nothing requiring them to be about the same claim, so a certificate for one proposition could sit beside a different proposition and both check clean.
 
-1. **Decode** `proposition`, `justification`, `certificate` from the three property slots into kernel `Exp` values.
-2. **Type-check the proposition.** `StrongInhibitor("urn:...:EIG_0291")` has type `Prop` ✓.
-3. **Type-check the certificate.** Construct the expected type `JustifiedBy(justification, proposition)` = `JustifiedBy(App(DeclaredEvidence("...rule_strong"), DerivedEvidence("...claim_eig0291_lowic50")), StrongInhibitor("...EIG_0291"))`. Walk the certificate's `app(...)` constructor; it requires sub-certificates for:
-   - `JustifiedBy(DeclaredEvidence("...rule_strong"), HasLowIC50 -> StrongInhibitor)` — matched by `declared(...)`. The constructor consumes `IsDeclaredAs("...rule_strong", HasLowIC50 -> StrongInhibitor)`; the kernel hashes the proposition, looks up the witness key in the layer's index, finds the entry admitted in step 4, returns the opaque witness value.
-   - `JustifiedBy(DerivedEvidence("...claim_eig0291_lowic50"), HasLowIC50)` — matched by `derived(...)`. The constructor consumes `IsDerivedAs("...claim_eig0291_lowic50", HasLowIC50)`; the kernel hashes, looks up, finds the entry admitted in step 3 (in the Holds case), returns the opaque witness.
-   Both witnesses admit, the `app(...)` constructor type-checks against `JustifiedBy(App(j1, j2), B)`, the outer certificate type-checks against the expected `JustifiedBy(...)` type ✓.
-4. **Emit the verdict.** `Verdict::Holds`. The sentence is admitted; the chain has attested `StrongInhibitor(EIG_0291)`.
+The commit triggers Rule 21, which owns every `eigentt:Term`-ranged slot and so owns this one. (This was D39's `validate_justification` AutoOnLoad gate until P2 moved the check into commit-time validation and P7 deleted the institution.) The check:
 
-The reasoning sentence is itself a `DerivedResource` (the `ReasoningSentence : DerivedResource` declaration in the reasoning ontology), so its `canonical_proposition` (defaulted from `reasoning:proposition`) lands in the witness index as `IsDerivedAs("...concl_eig0291_strong", StrongInhibitor("...EIG_0291"))`. A downstream reasoning sentence can cite *this* one via `DerivedEvidence` and consume the witness — proof composition is just another form of derivation composition.
+1. **Decode** the judgement's three fields — the logic, the certificate term, and its type.
+2. **Check the type is a type**, then **check the certificate against it**. That is the contract `eigentt:Judgement` states, and it means no slot relies on inference.
+3. Checking walks the certificate's outer `app(...)`, which requires sub-certificates for:
+   - `Certificate(Declared("…rule_strong"), HasLowIC50 -> StrongInhibitor)` — matched by `declared(...)`, consuming `IsDeclaredAs("…rule_strong", …)`. The kernel hashes the proposition, looks up the witness key in the layer's index, finds the entry admitted in step 4, and returns the opaque witness value.
+   - `Certificate(App(Declared("…plan_yields_lowic50"), Observed("…m_eig0291_sampleset")), HasLowIC50)` — matched by the inner `app(...)`, which in turn consumes `IsDeclaredAs` for the plan's reproducibility declaration and `IsObservedAs` for the sample set.
+
+   All three witnesses admit, the certificate type-checks ✓.
+4. **Nothing is emitted.** The conclusion is admitted; the chain has attested that this certificate grounds a claim to `StrongInhibitor(EIG_0291)` — not that the proposition is true. A certificate records grounds, and no rule turns `Certificate(j, P)` into `P`.
+
+**Note what the certificate does NOT cite: the `StatisticalAnalysisResult`.** The statistics institution emitted one, and it records what the run produced — which grounds nothing. A computed claim rests on the plan being DECLARED to denote a function of its input, and on that input being OBSERVED. Neither half comes from the run.
+
+**Can a later conclusion cite this one?** Only as `Verified(iri)`, and only if it carries a `justification:proof` — the judgement `holds(logic, t, P)`, which says a checker verified `t` against `P` itself. This conclusion carries no proof term, so it admits no witness. Composing on it means taking its certificate as an antecedent through `Certificate.app`, which is what `app` is for. Citing an unproved conclusion by IRI was the laundering step the two-layer separation exists to forbid.
 
 ## 7.4. The AutoOnLoad cascade in this scenario
 
 Two AutoOnLoad gates fire in this commit sequence:
 
-1. **D52 fires on StatisticalAnalysisPlan commit (step 3).** Recomputes the claim, emits Verdict + RuntimeInvocation. As a side effect of the trace + canonical_proposition pair being on chain, the witness index admits the `IsDerivedAs` entry.
-2. **D39 fires on ReasoningSentence commit (step 5).** Type-checks the certificate, consults the witness index for the `IsDeclaredAs` (from step 4) and `IsDerivedAs` (from step 3) entries, finds both, admits the certificate, emits Verdict + RuntimeInvocation.
+1. **D52 fires on StatisticalAnalysisPlan commit (step 3).** Recomputes the claim, emits Verdict + RuntimeInvocation + a per-effect result carrying the derived proposition. That result admits no witness; what it supplies is the proposition an author's plan-reproducibility claim is written AGAINST, and the two must hash to the same key.
+2. **D39 fires on justification:Conclusion commit (step 5).** Type-checks the certificate, consults the witness index for the two `IsDeclaredAs` entries (step 4) and the `IsObservedAs` entry (step 2), finds all three, admits the certificate, emits Verdict + RuntimeInvocation.
 
-The cascade is mechanical, not coordinated. D52 doesn't know D39 is about to fire; D39 doesn't know D52 ran. They share the chain artifact shape (`DerivedResource` + `ProgramTrace` + `canonical_proposition`) that the witness index reads from. The composition emerges from each institution honouring the shared chain shape independently. See [§4.2 "The D52 → D39 cascade"](04-dispatch-roles-in-concert.md#the-d52--d39-cascade) for the dispatch-role framing of this.
+The cascade is mechanical, not coordinated. D52 doesn't know D39 is about to fire; D39 doesn't know D52 ran. They share the chain artifact shape — a resource carrying `canonical_proposition`, plus the `prov` trace that attests how it came to exist — which the witness index reads from. The composition emerges from each institution honouring the shared chain shape independently. See [§4.2 "The D52 → D39 cascade"](04-dispatch-roles-in-concert.md#the-d52--d39-cascade) for the dispatch-role framing of this.
 
 If the order is reversed (the D39 sentence commits before the D52 claim that grounds it), the sentence's `derived(claim_iri, ...)` constructor would fail to admit the witness — the index entry doesn't exist yet — and the commit would be rejected with a `NoAdmittedChainWitness` diagnostic. The fixture commits in topological order to avoid this, but the platform's transactional commit semantics ensure no partial state is observable; either the whole commit succeeds or none of its resources land.
 
@@ -221,14 +222,14 @@ If the order is reversed (the D39 sentence commits before the D52 claim that gro
 
 | Dimension | Kinase walkthrough (chapter 6) | Stats + reasoning walkthrough (this chapter) |
 |---|---|---|
-| **Shared payload** | `formulas:FormulaTerm` — the chain-mirrored EigenTT numerical-expression fragment. | `eigentt:TypeExpr` — the chain-mirrored EigenTT type-expression fragment ([D47](../../design/d47-chain-mirrored-eigentt-type-fragment.md)). |
+| **Shared payload** | `formulas:FormulaTerm` — the chain-mirrored EigenTT numerical-expression fragment. | `eigentt:Term` — the chain-mirrored EigenTT type-expression fragment ([D47](../../design/d47-chain-mirrored-eigentt-type-fragment.md)). |
 | **Bridge mechanism** | Declared comorphisms (Symbolics → JuMP, Catalyst → DiffEq, Symbolics → IntervalArithmetic). Active translation: extract → transform → reify. | Per-layer chain-witness index over `canonical_proposition` slots ([D49](../../design/d49-chainwitness-machinery.md)). Passive admission: producer emits, consumer reads. |
-| **Coupling** | Each comorphism is a typed bridge with its own implementation. Adding a new institution to the composition requires authoring new comorphisms to/from it. | Each institution honouring the shared chain shape (`DerivedResource` + `ProgramTrace` + `canonical_proposition`) participates automatically. Adding a new institution to the composition requires no new bridge code. |
+| **Coupling** | Each comorphism is a typed bridge with its own implementation. Adding a new institution to the composition requires authoring new comorphisms to/from it. | Each institution honouring the shared chain shape (a resource carrying `canonical_proposition`, plus its `prov` trace) participates automatically. Adding a new institution to the composition requires no new bridge code. |
 | **What runs when** | Comorphism dispatch invokes the source institution's runtime via the extract → transform pipeline; the reify step commits a new chain resource. | The producer's AutoOnLoad gate runs at commit; the witness index is materialized as a side effect; the consumer's AutoOnLoad gate reads the index when type-checking the cited grounding constructor. No reify step. |
 | **Use case** | "Translate this numerical expression from one institution's view into another's, then have the target institution process it." | "Cite this institution's verdict as evidence inside a reasoning chain, without re-processing the value itself." |
 | **Failure mode** | Comorphism failure (extract reject, transform error, reify fail). Surfaces as institutional-error tuples per [§8.2](09-failure-modes.md#9-2-comorphism-dispatch-failures-extract--transform--reify). | `NoAdmittedChainWitness` from the consumer's gate, naming the missing (category, iri, proposition) triple. Surfaces as a type-checking diagnostic. |
 
-Both shapes are first-class. Which one applies depends on whether the downstream institution needs the input *value translated* (comorphism) or just *cited as evidence* (witness index). A future institution could participate in both: produce a `eigentt:TypeExpr` proposition for witness-index consumers AND register comorphisms that translate its outputs into other institutions' payloads for runtime consumption. The platform doesn't mandate one composition shape per institution; the composition is per-edge.
+Both shapes are first-class. Which one applies depends on whether the downstream institution needs the input *value translated* (comorphism) or just *cited as evidence* (witness index). A future institution could participate in both: produce a `eigentt:Term` proposition for witness-index consumers AND register comorphisms that translate its outputs into other institutions' payloads for runtime consumption. The platform doesn't mandate one composition shape per institution; the composition is per-edge.
 
 ## 7.6. Inspecting the audit chain from EigenQL
 
@@ -248,18 +249,18 @@ RETURN [] { verdict: ?c }
 → one row, `verdict = "Holds"`.
 
 ```eigenql
-// Walk back to the claim the sentence's DerivedEvidence cited
-MATCH "urn:eigenius:reasoning:ReasoningSentence"(?s) {
-    "urn:eigenius:reasoning:justification": ?j
+// Walk back to the plan declaration the conclusion's computed ground cited
+MATCH "urn:eigenius:justification:Conclusion"(?s) {
+    "urn:eigenius:justification:term": ?j
 }
 WHERE ?s = "urn:eigenius:demo:screen:concl_eig0291_strong"
 RETURN [] { justification: ?j }
 ```
 
-→ one row, `justification = {ctor: "App", args: [{ctor: "DeclaredEvidence", args: ["...rule_strong"]}, {ctor: "DerivedEvidence", args: ["...claim_eig0291_lowic50"]}]}`.
+→ one row, whose judgement's certificate term is `{ctor: "App", args: [{ctor: "Declared", args: ["...rule_strong"]}, {ctor: "App", args: [{ctor: "Declared", args: ["...plan_yields_lowic50"]}, {ctor: "Observed", args: ["...m_eig0291_sampleset"]}]}]}`.
 
 ```eigenql
-// Walk back to the statistics verdict that admitted the IsDerivedAs witness
+// Walk back to the statistics verdict whose proposition the plan declaration matches
 MATCH "urn:eigenius:institution:Verdict"(?v) {
     "urn:eigenius:institution:verdict_subject": "urn:eigenius:demo:screen:claim_eig0291_lowic50",
     "urn:eigenius:core:ctor_name": ?c,
@@ -299,13 +300,13 @@ Every byte that went into the verification — the raw readings, the claim param
 
 Each of the next chapter's patterns ([chapter 8](08-patterns.md)) has a concrete instance in this walkthrough:
 
-- **Sharing a payload vs. declaring a converter** ([§8.1](08-patterns.md#8-1-sharing-a-payload-vs-declaring-a-converter)) — `eigentt:TypeExpr` as a shared payload between D52 and D39; no comorphism declared.
+- **Sharing a payload vs. declaring a converter** ([§8.1](08-patterns.md#8-1-sharing-a-payload-vs-declaring-a-converter)) — `eigentt:Term` as a shared payload between D52 and D39; no comorphism declared.
 - **AutoOnLoad vs. OnDemand** ([§8.3](08-patterns.md#8-3-autoonload-vs-ondemand)) — both D52 and D39 fire AutoOnLoad; the cascade is the composition.
-- **Chain reinsertion vs. transient overlay** ([§8.4](08-patterns.md#8-4-chain-reinsertion-vs-transient-overlay)) — the D52 verdict is reinserted as a chain resource (the StatisticalAnalysisPlan is itself the DerivedResource), making it citable by D39. Without reinsertion, the witness index would have nothing to read.
+- **Chain reinsertion vs. transient overlay** ([§8.4](08-patterns.md#8-4-chain-reinsertion-vs-transient-overlay)) — the D52 result is reinserted as a chain resource, making its proposition available for a plan declaration to be written against. Without reinsertion, the witness index would have nothing to read.
 
 The corresponding failure modes ([chapter 9](09-failure-modes.md)) also have direct instances:
 
-- **Validation cascade failures** ([§9.1](09-failure-modes.md#9-1-validation-cascade-failures)) — if the D52 verdict fails, the cascade stops before D39 runs; the reasoning sentence's commit is rejected because the `IsDerivedAs` witness isn't in the index.
+- **Validation cascade failures** ([§9.1](09-failure-modes.md#9-1-validation-cascade-failures)) — if the D52 verdict fails, the cascade stops before D39 runs; the reasoning conclusion's commit is rejected because there is no result proposition for its plan declaration to match.
 - **Chain-state races and stale Verdicts** ([§9.3](09-failure-modes.md#9-3-chain-state-races-and-stale-verdicts)) — voiding the claim's layer removes the witness from descendant resolutions; reasoning sentences that cited it become unadmissible in those resolutions.
 
 ---

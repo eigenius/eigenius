@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Rule 21 step 3 (`wk::PROPOSITION_SLOTS`) fires **through a real commit**.
+//! `reflection:canonical_proposition`'s propositionhood fires **through a real
+//! commit**.
 //!
 //! Issue #175. `enc:EncodedClaim` is the artifact of record for the encoding
 //! pipeline: an LLM proposes a formalization, the kernel accepts or rejects
@@ -22,11 +23,17 @@
 //! an integer literal decoded, inferred `core:integer`, and committed as the
 //! proposition a claim asserts.
 //!
+//! The obligation is now carried by the property itself
+//! (`eigentt:expected_type Prop`) rather than by a hardcoded list of slots in
+//! the kernel, so this file tests the shipped declaration. Its companion,
+//! `declared_obligations_enforced.rs`, covers the four slots the list could
+//! never express because it could only ever say "must be a Prop".
+//!
 //! The unit tests in `validation/rules/eigentt_value.rs` drive the validator
 //! directly. This file goes through `commit_layer_default` against a real
 //! bootstrapped chain, because the commit gate is the whole of the guarantee:
 //! nothing downstream re-reads the prose, and no other check inspects the
-//! sort of a decoded `TypeExpr`.
+//! sort of a decoded term.
 
 use eigenius_kernel::lattice::{commit_layer_default, CommitError};
 use eigenius_kernel::layer::LayerStorage;
@@ -96,8 +103,8 @@ fn claim(proposition: Value) -> Resource {
     // REQUIRED since eigenius#201 made `enc:EncodedClaim` a `reflection:DeclaredResource`: a parse
     // establishes form, not warrant, so a landed claim must name the agent who asserts it.
     r.set(
-        iri("urn:eigenius:reflection:declared_by"),
-        Value::String("urn:eigenius:reflection:agent:unattributed".into()),
+        iri("urn:eigenius:prov:was_attributed_to"),
+        Value::String("urn:eigenius:prov:agent:unattributed".into()),
     );
     r.set(iri(wk::CANONICAL_PROPOSITION), proposition);
     r
@@ -105,11 +112,11 @@ fn claim(proposition: Value) -> Resource {
 
 /// `measurements:lt(1.0, 2.0)` — an axiom application, so a term at `Prop`.
 fn a_real_proposition() -> Value {
-    Value::Json(serde_json::json!({
+    eigenius_kernel::testing::term_value(&serde_json::json!({
         "ctor": "App",
         "args": [
             {"ctor": "App", "args": [
-                {"ctor": "ConstRef", "args": ["urn:eigenius:measurements:lt"]},
+                {"ctor": "ConstRef", "args": ["urn:eigenius:measurements:lt", []]},
                 {"ctor": "LitFloat", "args": [1.0]}
             ]},
             {"ctor": "LitFloat", "args": [2.0]}
@@ -146,17 +153,33 @@ fn rejection_errors(
     }
 }
 
+/// The D47 codec's constructor argument names, from the bootstrap chain, built once.
+///
+/// Encoding a term names its constructor's arguments (D85 §6.1), and the names live in
+/// `eigentt:Term` and `core:Level`'s declarations — so an encode needs a chain.
+fn codec() -> &'static eigenius_kernel::program::eigentt_type_mirror::CodecNames {
+    static NAMES: std::sync::OnceLock<eigenius_kernel::program::eigentt_type_mirror::CodecNames> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
 /// The defect in #175, end to end: a literal in the proposition slot.
 #[test]
 fn integer_literal_claim_is_rejected_by_the_commit() {
     let errors = rejection_errors(
-        encode_type(&Exp::LitInt(42)).expect("literal encodes"),
+        encode_type(&Exp::LitInt(42), codec()).expect("literal encodes"),
         "an integer literal",
     );
     let hit = errors
         .iter()
-        .find(|e| e.rule == ValidationRule::TypeExprNotAProposition)
-        .unwrap_or_else(|| panic!("no TypeExprNotAProposition among {errors:?}"));
+        .find(|e| e.rule == ValidationRule::TermNotAProposition)
+        .unwrap_or_else(|| panic!("no TermNotAProposition among {errors:?}"));
     assert_eq!(
         hit.resource_id.as_ref().map(Iri::as_str),
         Some(CLAIM),
@@ -174,16 +197,19 @@ fn integer_literal_claim_is_rejected_by_the_commit() {
 }
 
 /// `Prop` itself decodes and type-checks — it is a legitimate value for the
-/// `eigentt:TypeExpr`-ranged slots that hold types. It asserts nothing, so it
+/// `eigentt:Term`-ranged slots that hold types. It asserts nothing, so it
 /// is not a claim.
 #[test]
 fn a_type_in_the_proposition_slot_is_rejected_by_the_commit() {
-    let errors = rejection_errors(encode_type(&Exp::sort(0)).expect("Prop encodes"), "a type");
+    let errors = rejection_errors(
+        encode_type(&Exp::sort(0), codec()).expect("Prop encodes"),
+        "a type",
+    );
     assert!(
         errors
             .iter()
-            .any(|e| e.rule == ValidationRule::TypeExprNotAProposition),
-        "no TypeExprNotAProposition among {errors:?}"
+            .any(|e| e.rule == ValidationRule::TermNotAProposition),
+        "no TermNotAProposition among {errors:?}"
     );
 }
 
@@ -207,10 +233,10 @@ fn well_formed_claim_commits() {
 /// had to land together, and this test is the evidence.
 #[test]
 fn a_class_annotated_as_a_proposition_is_rejected_by_the_commit() {
-    let annotated = Value::Json(serde_json::json!({
+    let annotated = eigenius_kernel::testing::term_value(&serde_json::json!({
         "ctor": "Ann",
         "args": [
-            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class"]},
+            {"ctor": "ConstRef", "args": ["urn:eigenius:core:Class", []]},
             {"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}
         ]
     }));
@@ -218,8 +244,8 @@ fn a_class_annotated_as_a_proposition_is_rejected_by_the_commit() {
     assert!(
         errors
             .iter()
-            .any(|e| e.rule == ValidationRule::TypeExprNotAProposition
-                || e.rule == ValidationRule::TypeExprIllTyped),
+            .any(|e| e.rule == ValidationRule::TermNotAProposition
+                || e.rule == ValidationRule::TermIllTyped),
         "no propositionhood or typing diagnostic among {errors:?}"
     );
 }

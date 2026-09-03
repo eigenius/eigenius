@@ -66,7 +66,7 @@ The kernel side of the witness story is fully wired.
 
 **Resource shapes (core ontology).** `urn:eigenius:core:MergeComorphism` (with required `merge_transformation` property) and `urn:eigenius:program:Lambda` (with `parameter` + `body` properties) are declared. The `parameter` is a string; the `body` is an embedded expression resource. Lambda's optional `type` slot is not yet declared — D37 adds it.
 
-**Resolver.** `resolve_merge_comorphism` in [kernel/src/layer/merge.rs](../../kernel/src/layer/merge.rs) walks the merge span looking for the comorphism IRI, validates `is_a` includes `MergeComorphism`, extracts `merge_transformation`, returns a typed `MergeComorphismHandle`.
+**Resolver.** `resolve_merge_comorphism` in [kernel/src/layer/merge.rs](../../kernel/src/layer/merge/mod.rs) walks the merge span looking for the comorphism IRI, validates `is_a` includes `MergeComorphism`, extracts `merge_transformation`, returns a typed `MergeComorphismHandle`.
 
 **Apply path.** `apply_witness_resolution` (same file) evaluates the transformation term against `(body_a, body_b, ancestor_body)` using the existing program evaluator, round-trips the resulting `ResourceVal` back into a `Resource`, and returns it for merge-layer construction. Currently the type-check is lazy (against the conflict class A inferred from the span); D37 makes it possible to validate at commit time instead.
 
@@ -195,7 +195,7 @@ Compiles to N nested single-parameter `Pi` AST nodes the same way `lambda` compi
 
 ### 4.1 `lambda` literal
 
-ESL's existing `Expr::Lambda` AST node ([kernel/src/esl/ast.rs](../../kernel/src/esl/ast.rs)) — currently parsed from the untyped `\x -> e` surface — is **extended** rather than replaced: a new `param_type: Option<TypeExpr>` slot becomes `None` for untyped lambdas inside `program` bodies (where types are inferred from context) and `Some(T)` for the new typed surface (`lambda x : T => body`). The existing untyped form continues to work unchanged. A parallel `TypeExpr::Pi` variant is added for the `pi` type expression in §3.5 — `TypeExpr` previously had `Ref`, `Arrow`, and a size-binder-specific `BinderArrow`; the new `Pi` variant is the general value-typed binder. Both deltas are additive; every existing match-site picks up a wildcard arm.
+ESL's existing `Expr::Lambda` AST node ([kernel/src/esl/ast.rs](../../kernel/src/esl/ast.rs)) — currently parsed from the untyped `\x -> e` surface — is **extended** rather than replaced: a new `param_type: Option<Term>` slot becomes `None` for untyped lambdas inside `program` bodies (where types are inferred from context) and `Some(T)` for the new typed surface (`lambda x : T => body`). The existing untyped form continues to work unchanged. A parallel `Term::Pi` variant is added for the `pi` type expression in §3.5 — `Term` previously had `Ref`, `Arrow`, and a size-binder-specific `BinderArrow`; the new `Pi` variant is the general value-typed binder. Both deltas are additive; every existing match-site picks up a wildcard arm.
 
 A `lambda x_1 : T_1, …, x_N : T_N => body` lowers to a right-associated nested chain of `urn:eigenius:program:Lambda` resources:
 
@@ -357,7 +357,7 @@ Realised effort: ~2 days. Slightly under the 3–4 day estimate because two piec
 
 ### PR 2: ESL syntax + commit-time validators
 
-- AST nodes: extend `Expr::Lambda` with an optional `param_type`; add `TypeExpr::Pi` variant; new `MergeComorphismDecl` declaration node.
+- AST nodes: extend `Expr::Lambda` with an optional `param_type`; add `Term::Pi` variant; new `MergeComorphismDecl` declaration node.
 - Parser rules per §3.4.
 - Compiler lowering per §4 (including the inline `merge_comorphism` body sugar that emits the synthesised standalone lambda at a content-hash IRI).
 - **Commit-time validators (folded in from PR 1):**

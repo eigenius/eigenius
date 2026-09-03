@@ -139,7 +139,9 @@ fn build_variable_bound(name: &str, lower: Option<f64>, upper: Option<f64>) -> R
     let mut r = Resource::new_embedded();
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(VARIABLE_BOUND_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(VARIABLE_BOUND_CLASS).as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:jump:variable_name"),
@@ -158,7 +160,9 @@ fn build_constraint(lhs: serde_json::Value, relation: serde_json::Value, rhs: f6
     let mut r = Resource::new_embedded();
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(CONSTRAINT_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(CONSTRAINT_CLASS).as_str().to_string(),
+        )]),
     );
     r.set(iri("urn:eigenius:jump:lhs"), Value::Json(lhs));
     r.set(iri("urn:eigenius:jump:relation"), Value::Json(relation));
@@ -177,7 +181,9 @@ fn build_optimisation_problem(
     let mut r = Resource::new_embedded();
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(OPTIMISATION_PROBLEM_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(OPTIMISATION_PROBLEM_CLASS).as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:core:short_name"),
@@ -235,7 +241,9 @@ fn build_optimises_to_claim(
     let mut r = Resource::new_embedded();
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(OPTIMISES_TO_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(OPTIMISES_TO_CLASS).as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:core:short_name"),

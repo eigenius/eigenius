@@ -486,7 +486,7 @@ Eigon extensions are a lexical-semantics toolkit.*
    not type-checked. The felicity check fires only when a term is routed through the checker — so
    the engine's stage-5 "check" is an **explicit** step, not a side effect of storing the tree.
    At commit it is now the kernel's job: **D49's Rule 21** (`check_type_expr_well_typed`) decodes
-   + `check_infer`s *every* `eigentt:TypeExpr`-valued slot, so a committed proposition is
+   + `check_infer`s *every* `eigentt:Term`-valued slot, so a committed proposition is
    type-checked, not merely decoded. (That rule consolidated three overlapping eigentt checks into
    one type-system-driven validator — see D49 §6.)
 2. **Named entities are not free variables.** A `ResourceRef` in a program body lowers to an

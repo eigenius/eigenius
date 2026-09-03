@@ -82,7 +82,9 @@ pub fn build_recipe_resource(inputs: &RecipeInputs) -> Resource {
     let mut r = Resource::new(iri(&recipe_iri(inputs)));
     r.set(
         iri(IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(BUILD_RECIPE_CLASS))]),
+        Value::Array(vec![Value::String(
+            iri(BUILD_RECIPE_CLASS).as_str().to_string(),
+        )]),
     );
     r.set(iri(SHORT_NAME), Value::String("build_recipe".to_string()));
     r.set(

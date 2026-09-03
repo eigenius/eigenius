@@ -109,10 +109,10 @@ advisory-stance conformance fact) → made checkable by a **CompetencyQuestion**
 ### 5.1 Backbone: reuse the reasoning stack (no parallel epistemics)
 
 Lai et al.'s *queries-as-types, answers-as-proof-carrying-witnesses* (§9) is already Eigenius's
-model: a `Prop` (encoded `eigentt:TypeExpr`) is a type; a `reasoning:ReasoningSentence` certificate
+model: a `Prop` (encoded `eigentt:Term`) is a type; a `reasoning:ReasoningSentence` certificate
 is a proof-carrying witness (D39). So, exactly as D58:
 
-- a **discovery target** carries its question as `objective:proposition` (a `Prop`/`TypeExpr`);
+- a **discovery target** carries its question as `objective:proposition` (a `Prop`/`Term`);
 - a **grounded answer** is a **witness** (`IsObservedAs`/`IsDeclaredAs`/`IsDerivedAs`/`IsVerifiedAs`),
   named by `objective:grounded_by`; an **open** target has none.
 
@@ -240,7 +240,7 @@ property objective:discovery_target : core:resource_array {
 // DecisionPoint / Option
 property objective:options : core:resource_array { description = "The option space."; class_types objective:Option; domain objective:DecisionPoint; }
 property objective:selected : core:resource { description = "The chosen option."; class_types objective:Option; domain objective:DecisionPoint; }
-property objective:option_claim : core:resource { description = "The option's claim, as a Prop."; class_types eigentt:TypeExpr; domain objective:Option; }
+property objective:option_claim : core:resource { description = "The option's claim, as a Prop."; class_types eigentt:Term; domain objective:Option; }
 property objective:warrant : core:resource_array {
     description = "Why the selection holds: the DesirableProperties / CompetencyQuestions / Axioms that justify it.";
     class_types objective:DesirableProperty, objective:CompetencyQuestion, objective:Axiom;
@@ -260,9 +260,9 @@ property objective:disposition : core:resource { description = "How a CutItem is
 // objective:resolved_by is reused on Tension → the resolving DecisionPoint (string IRI).
 ```
 
-### 5.5 `objective:proposition` carries `TypeExpr` already
+### 5.5 `objective:proposition` carries `Term` already
 
-No change to D58's `objective:proposition` (`core:resource`, `class_types eigentt:TypeExpr`) is
+No change to D58's `objective:proposition` (`core:resource`, `class_types eigentt:Term`) is
 needed — it already holds an encoded `Prop`. The new nodes reuse it (and `option_claim` mirrors
 it for Options), which is precisely why the content is *typed* rather than prose.
 

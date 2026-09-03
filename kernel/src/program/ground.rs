@@ -265,9 +265,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
     let resource: &crate::ontology::resource::Resource = &resource_arc;
 
     let dt_iri = Iri::parse(wk::DATA_TYPE_PROP).unwrap();
-    // `data_type` is a `data_type: resource` property — canonical
-    // shape is `ResourceRef`, but `as_iri` also accepts the
-    // pre-canonical `String` shape from intermediate resources.
+    // `data_type` is a `data_type: resource` property, so an IRI string; `as_iri` reads it.
     let data_type_str = match resource.get(&dt_iri).and_then(|v| v.as_iri()) {
         Some(i) => i.as_str().to_string(),
         None => return Ok(Val::sort(1)), // Unknown data type
@@ -313,8 +311,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
 
         wk::VALUE_ARRAY => {
             // Array of values — wrap element type in a list type.
-            // `element_type` is `data_type: resource`, post-canonical
-            // shape is `ResourceRef`.
+            // `element_type` is `data_type: resource`, so an IRI string.
             let et_iri = Iri::parse(wk::ELEMENT_TYPE).unwrap();
             let elem_type = if let Some(et_iri_val) = resource.get(&et_iri).and_then(|v| v.as_iri())
             {
@@ -411,7 +408,7 @@ pub(crate) fn resolve_inductive_type(
 
     let params_telescope = decode_params(class_iri, resource, layer)?;
     let indices_telescope = decode_indices(class_iri, resource, layer)?;
-    let sort = decode_result_sort(class_iri, resource)?;
+    let sort = decode_result_sort(class_iri, resource, layer)?;
     let uparams = decode_universe_params(class_iri, resource)?;
 
     let ctors = decode_ctors(class_iri, resource, &params_telescope, layer)?;
@@ -469,7 +466,7 @@ fn decode_indices(
                 ));
             }
         };
-        // An index kind is a `eigentt:TypeExpr`, decoded exactly like a parameter kind — the two
+        // An index kind is a `eigentt:Term`, decoded exactly like a parameter kind — the two
         // telescopes are the same shape and the ESL compiler emits them through the same code.
         //
         // This read used to be `Some(Value::String(s)) => s, _ => "urn:eigenius:core:Set"`, and the
@@ -478,7 +475,7 @@ fn decode_indices(
         // Every index kind that failed to be a string got it silently, and nothing noticed because
         // nothing type-checked the telescope. `check_type`'s `Exp::Inductive` arm now does
         // (`check_inductive_decl_telescopes`), and the first thing it reported was
-        // `reasoning:JustifiedBy.declared` failing `EigonPrimitive(String) ≠ EigonClass(core:Set)`.
+        // `justification:Certificate.declared` failing `EigonPrimitive(String) ≠ EigonClass(core:Set)`.
         let Some(kind_value) = pr.get(&Iri::parse(wk::PARAM_KIND).unwrap()) else {
             return Err(format!(
                 "inductive type '{class_iri}' index '{name}' missing `param_kind`"
@@ -546,6 +543,7 @@ fn decode_universe_params(
 fn decode_result_sort(
     class_iri: &Iri,
     resource: &crate::ontology::resource::Resource,
+    layer: &Layer,
 ) -> Result<Exp, String> {
     // eigenius#188: `result_sort` is a `core:Level` value, not a string. The old grammar —
     // `"Prop"` / `"Set"` / `"Type:N"`, parsed by hand here — could not express a level VARIABLE,
@@ -553,7 +551,7 @@ fn decode_result_sort(
     // through the same codec as every other level means one representation and one validator.
     let sort_iri = Iri::parse(wk::RESULT_SORT).unwrap();
     match resource.get(&sort_iri) {
-        Some(Value::Json(j)) => crate::program::eigentt_type_mirror::decode_level_json(j)
+        Some(v @ Value::Embedded(_)) => crate::program::eigentt_type_mirror::decode_level(v, layer)
             .map(Exp::Sort)
             .map_err(|e| format!("inductive type '{class_iri}' has malformed `result_sort`: {e}")),
         Some(other) => Err(format!(
@@ -624,7 +622,7 @@ fn decode_params(
 /// inductive named as a constructor argument decoded to an inductive reference
 /// while the *same* inductive named as an index kind decoded to
 /// `Exp::EigonClass`. That disagreement is eigenius#199 — it made
-/// `reasoning:JustifiedBy`'s index #0 (`JustificationTerm`) an `EigonClass` that
+/// `justification:Certificate`'s index #0 (`justification:Term`) an `EigonClass` that
 /// no inhabitant could check against, so the one relation carrying the platform's
 /// guarantee was the one whose type the surface language could not express.
 fn names_an_inductive(arg_iri: &Iri, layer: &Layer) -> bool {
@@ -641,7 +639,7 @@ fn names_an_inductive(arg_iri: &Iri, layer: &Layer) -> bool {
 /// checked and was not. The string could not carry a level variable either, so `data Vec (A : Sort u)`
 /// was inexpressible.
 ///
-/// The kind is a type expression and now says so. Every case the string encoded is a `TypeExpr`
+/// The kind is a type expression and now says so. Every case the string encoded is a `Term`
 /// constructor, and `decode_type` already dispatches all of them — including the `ConstRef`
 /// resolution that distinguishes a primitive from an inductive from a class.
 fn decode_param_kind(value: &Value, class_iri: &Iri, layer: &Layer) -> Result<Exp, String> {
@@ -808,7 +806,7 @@ fn decode_ctor_arg(class_iri: &Iri, value: &Value, layer: &Layer) -> Result<Deco
 /// The head reference an `InductiveArgType`'s `core:type_name` names, as the bare dispatch key the
 /// decoders key on: a parameter name, an IRI, or `"Size"` for the size sort.
 ///
-/// eigenius#188 / N4 retyped `core:type_name` from a string to an `eigentt:TypeExpr`. The HEAD is
+/// eigenius#188 / N4 retyped `core:type_name` from a string to an `eigentt:Term`. The HEAD is
 /// read out rather than the value decoded whole, because `core:type_args` is a SEPARATE property —
 /// an applied type is `type_name` + `type_args`, not one `App` spine — and because a
 /// self-reference must resolve to the in-construction declaration's stub rather than being looked
@@ -822,30 +820,52 @@ pub fn arg_type_head(r: &crate::ontology::resource::Resource) -> Result<String, 
     let value = r
         .get(&Iri::parse(wk::TYPE_NAME).unwrap())
         .ok_or_else(|| "InductiveArgType missing `type_name`".to_string())?;
-    let head = match value {
-        Value::Json(j) => j,
+    // `type_name` is a value resource (D85 §6.1): the constructor is the class `is_a` names,
+    // read off its `-<Ctor>` suffix. The head this function reports is `Var` or `ConstRef`,
+    // and each takes exactly one string argument — `name` and `iri` — so that argument is
+    // the one string-valued property besides `is_a`. Picking it by shape rather than by
+    // position is what lets this run without the layer that fixes argument order: `ConstRef`
+    // also carries `levels`, and a list is not a string.
+    let (ctor, arg0_owned): (String, Option<String>) = match value {
+        Value::Embedded(r) => {
+            let class = r
+                .is_a()
+                .first()
+                .ok_or_else(|| {
+                    "InductiveArgType `type_name` value resource names no class".to_string()
+                })?
+                .as_str()
+                .to_string();
+            let ctor = class
+                .rsplit_once('-')
+                .map(|(_, c)| c.to_string())
+                .ok_or_else(|| format!("`{class}` is not a constructor class"))?;
+            let is_a_iri = Iri::parse(wk::IS_A).unwrap();
+            let arg = r
+                .properties()
+                .iter()
+                .filter(|(k, _)| **k != is_a_iri)
+                .find_map(|(_, v)| v.as_str().map(str::to_string));
+            (ctor, arg)
+        }
         other => {
             return Err(format!(
-                "InductiveArgType `type_name` must be an eigentt:TypeExpr value, got {other:?}"
+                "InductiveArgType `type_name` must be an eigentt:Term value, got {other:?}"
             ))
         }
     };
-    let ctor = head
-        .get("ctor")
-        .and_then(|c| c.as_str())
-        .ok_or_else(|| "InductiveArgType `type_name` has no ctor".to_string())?;
-    let arg0 = || -> Option<&str> { head.get("args")?.as_array()?.first()?.as_str() };
+    let ctor = ctor.as_str();
+    let arg0 = || -> Option<&str> { arg0_owned.as_deref() };
     match ctor {
         "Var" => Ok(arg0()
             .ok_or_else(|| "`Var` type_name takes a name".to_string())?
             .to_string()),
-        "SizeSort" => Ok("Size".to_string()),
         "ConstRef" => Ok(arg0()
             .ok_or_else(|| "`ConstRef` type_name takes an IRI".to_string())?
             .to_string()),
         other => Err(format!(
             "InductiveArgType `type_name` head `{other}` is not a type reference — expected \
-             `Var`, `ConstRef` or `SizeSort`"
+             `Var` or `ConstRef`"
         )),
     }
 }
@@ -1088,7 +1108,8 @@ mod tests {
         }
         let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        let user_resources = crate::esl::compile(esl_source).expect("ESL compile failed");
+        let user_resources = crate::esl::compile(esl_source, crate::testing::term_chain())
+            .expect("ESL compile failed");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -1418,12 +1439,14 @@ mod tests {
     }
 
     /// Build a `core:param_kind` value the way the compiler now does (eigenius#188 / N4).
+    /// A kind fixture: the literal describes a term, the value it denotes is built through
+    /// the declaration (D85 §6.1).
     fn kind_val(j: serde_json::Value) -> Value {
-        Value::Json(j)
+        crate::testing::term_value(&j)
     }
 
     fn const_ref(iri: &str) -> Value {
-        kind_val(serde_json::json!({"ctor": "ConstRef", "args": [iri]}))
+        kind_val(serde_json::json!({"ctor": "ConstRef", "args": [iri, []]}))
     }
 
     fn sort_kind(n: usize) -> Value {
@@ -1439,7 +1462,7 @@ mod tests {
         // D39 §5 / D49 ChainWitness predicates need the kernel decoder
         // to recognise the Sort-literal kind strings the ESL compiler
         // emits for intermediate index positions ("Prop" / "Set" /
-        // "Type:N"). Without this mapping, JustifiedBy and similar
+        // "Type:N"). Without this mapping, justification:Certificate and similar
         // sort-indexed predicates can't round-trip through the codec.
         let layer = build_test_layer();
         assert!(
@@ -1467,7 +1490,7 @@ mod tests {
         // not: an index kind fell through to `EigonClass`, a param kind
         // all the way to `Sort(1)`. Since a value of that inductive
         // infers to `InductiveType`, the index form could never be
-        // satisfied — `reasoning:JustifiedBy`'s type was unwritable.
+        // satisfied — `justification:Certificate`'s type was unwritable.
         //
         // eigenius#188 / N4: index and parameter kinds are now decoded by ONE function, so the
         // two can no longer disagree by construction. The assertions below kept their pairing
@@ -1486,7 +1509,8 @@ mod tests {
             class t:PlainClass { }
         "#;
         let mut b = LayerBuilder::new("t", Some(core));
-        for r in crate::esl::compile(src).expect("test ESL compiles") {
+        for r in crate::esl::compile(src, crate::testing::term_chain()).expect("test ESL compiles")
+        {
             b.add_resource(r).unwrap();
         }
         let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
@@ -1673,10 +1697,7 @@ mod entailment {
     /// Unrelated by declaration is the point: entailment must decide on fields.
     fn cls(id: &str, requires: &[&str]) -> Resource {
         let mut r = Resource::new(i(id));
-        r.set(
-            i(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(i(wk::CLASS))]),
-        );
+        r.set(i(wk::IS_A), Value::Array(vec![Value::iri(&i(wk::CLASS))]));
         r.set(
             i(wk::SHORT_NAME),
             Value::String(id.rsplit(':').next().unwrap().into()),
@@ -1684,7 +1705,7 @@ mod entailment {
         r.set(i(wk::DESCRIPTION), Value::String("test class".into()));
         r.set(
             i(wk::REQUIRES),
-            Value::Array(requires.iter().map(|p| Value::ResourceRef(i(p))).collect()),
+            Value::Array(requires.iter().map(|p| Value::iri(&i(p))).collect()),
         );
         r
     }
@@ -1844,8 +1865,8 @@ mod list_decoder_agreement {
 
         // Decoder 1: the D47 `ConstRef` path.
         let via_const_ref = crate::program::eigentt_type_mirror::decode_type(
-            &Value::Json(serde_json::json!({
-                "ctor": "ConstRef", "args": [wk::LIST],
+            &crate::testing::term_value(&serde_json::json!({
+                "ctor": "ConstRef", "args": [wk::LIST, []],
             })),
             &layer,
         )
@@ -1855,8 +1876,11 @@ mod list_decoder_agreement {
         let mut arg = Resource::new_embedded();
         arg.set(
             Iri::parse(wk::IS_A).unwrap(),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse(wk::INDUCTIVE_ARG_TYPE).unwrap(),
+            Value::Array(vec![Value::String(
+                Iri::parse(wk::INDUCTIVE_ARG_TYPE)
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             )]),
         );
         arg.set(
@@ -1865,7 +1889,9 @@ mod list_decoder_agreement {
         );
         arg.set(
             Iri::parse(wk::TYPE_NAME).unwrap(),
-            Value::Json(serde_json::json!({"ctor": "ConstRef", "args": [wk::LIST]})),
+            crate::testing::term_value(
+                &serde_json::json!({"ctor": "ConstRef", "args": [wk::LIST, []]}),
+            ),
         );
         let holder = Iri::parse("urn:eigenius:test:Holder").unwrap();
         let via_arg_type = decode_arg_type(&holder, &Value::Embedded(Box::new(arg)), &layer)

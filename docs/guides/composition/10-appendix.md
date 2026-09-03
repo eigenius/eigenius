@@ -13,7 +13,7 @@ machinery a reader uses to follow up on the rest of the guide.
 
 - [`kernel/src/institution/`](../../../kernel/src/institution/) — `Institution`
   trait, `InstitutionRuntime`, `InstitutionIndex`, AutoOnLoad dispatch
-- [`kernel/src/nbe/eval.rs`](../../../kernel/src/nbe/eval.rs) — the
+- [`kernel/src/nbe/eval.rs`](../../../kernel/src/nbe/eval/mod.rs) — the
   `Exp::InstitutionInvoke` arm and the four-step pipeline
 - [`kernel/src/program/trace.rs`](../../../kernel/src/program/trace.rs) —
   `Trace::Comorphism` audit variant
@@ -33,9 +33,9 @@ machinery a reader uses to follow up on the rest of the guide.
   — substrate hosting layer
 - [**D27** — Julia institutions](../../design/d27-julia-institutions.md)
   — the v1 Julia institution suite
-- [**D29** — Mirror generator](../../design/d29-runtime-mirror-generator.md)
+- [**D29** — Mirror generator](../../design/d29-eigon-julia-mirror-spec.md)
   — closure walker over chain shapes
-- [**D31** — Institution lifecycle](../../design/d31-runtime-language-substrate-institution-lifecycle.md)
+- [**D31** — Institution lifecycle](../../design/d31-external-institution-lifecycle.md)
   — install + audit lifecycle
 - [**D32** — Chain-mirrored EigenTT inductives](../../design/d32-chain-mirrored-mini-tt-inductives.md)
   — `formulas:FormulaTerm` and the inductive-types-on-the-chain
@@ -43,12 +43,14 @@ machinery a reader uses to follow up on the rest of the guide.
 
 ### §10.3. Companion notes
 
-- [Note for a SHACL user](../../notes/note-for-a-shacl-user.md) — the
-  conceptual pitch for someone coming from the W3C semantic-web
+**Neither of these was ever written.** They are listed because the guide referred to them as though
+they existed, in five places and two respectively; the links were removed on `2026-08-31` and the
+descriptions kept, since they record what someone thought was worth writing.
+
+- *Note for a SHACL user* — the conceptual pitch for someone coming from the W3C semantic-web
   stack. Frames why composition matters in narrative form.
-- [Enterprise supply-chain scenario](../../notes/enterprise-supply-chain-scenario.md)
-  — the same machinery applied to an enterprise setting; useful as a
-  domain-transfer exercise.
+- *Enterprise supply-chain scenario* — the same machinery applied to an enterprise setting; useful
+  as a domain-transfer exercise.
 
 ### §10.4. Cross-language guides
 

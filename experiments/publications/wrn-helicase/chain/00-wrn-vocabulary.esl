@@ -38,6 +38,55 @@ class wrn:CompetitionTable {
     description = "The Fig 4 KM12 competition-assay table (30 observations): per-guide viability across 3 sgWRN and 2 control guides, 6 technical replicates each. The guide is the biological replication unit.";
 }
 
+// ── Input-table COLUMNS ─────────────────────────
+//
+// The two in-vivo inputs INLINE their tables as arrays; every other program's input is a
+// `ingest:PinnedExternalFile` reference, whose properties are already declared. Rule 22 §c
+// requires a property KEY to resolve, so a committed inline table needs its columns declared
+// — and 08a commits these inputs, because a witness needs a trace whose target resolves on
+// chain and `App(Declared(plan), Observed(input))` needs the input to BE something.
+//
+// The marker classes above name the SHAPE; these name the columns. That is not a
+// contradiction: `r_eigon_f64_array` still reads them positionally, and nothing here
+// constrains which columns a table must have. It only makes the keys it does have
+// resolvable, which is what the commit gate asks.
+
+property wrn:vivo_volume : core:value_array {
+    description = "Fig 2d xenograft: per-observation tumour volume (mm³), 73 rows.";
+    element_type = core:float;
+    domain wrn:XenograftTable;
+}
+
+property wrn:vivo_day : core:value_array {
+    description = "Fig 2d xenograft: day of measurement for each observation, 73 rows.";
+    element_type = core:float;
+    domain wrn:XenograftTable;
+}
+
+property wrn:vivo_mouse : core:value_array {
+    description = "Fig 2d xenograft: mouse identifier per observation — the random-effect grouping in `lmer(Volume ~ Day + (0 + Day | Mouse))`, 73 rows.";
+    element_type = core:string;
+    domain wrn:XenograftTable;
+}
+
+property wrn:vivo_dox : core:value_array {
+    description = "Fig 2d xenograft: doxycycline condition per observation — the fixed effect the LRT tests via the `Day:Dox` interaction, 73 rows.";
+    element_type = core:string;
+    domain wrn:XenograftTable;
+}
+
+property wrn:viab_value : core:value_array {
+    description = "Fig 4 KM12 competition: per-observation viability readout, 30 rows.";
+    element_type = core:float;
+    domain wrn:CompetitionTable;
+}
+
+property wrn:viab_guide : core:value_array {
+    description = "Fig 4 KM12 competition: guide identifier per observation — the BIOLOGICAL unit, and the random effect whose omission is the pseudoreplication finding F4 records.";
+    element_type = core:string;
+    domain wrn:CompetitionTable;
+}
+
 // ── Measurement outputs ──────────────────────────────────────────────────────
 
 property wrn:adj_p_value : core:float {

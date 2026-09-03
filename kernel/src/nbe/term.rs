@@ -57,7 +57,7 @@ pub enum Exp {
     /// D19 does not mention it and D48 records it only as a preserved artifact.
     ///
     /// **`levels` is empty until #188's residual.** The wire form already carries
-    /// the IRI — `encode_type_json` emits `ConstRef(iri)` for an
+    /// the IRI — `encode_type` emits `ConstRef(iri)` for an
     /// `InductiveType` — so a level-free `Const` round-trips through the
     /// existing codec unchanged. Levels are what makes this a chain-format
     /// change, and they are Phase E2.
@@ -166,7 +166,7 @@ pub enum Exp {
     /// Authored to support D39 §4.1's `Asserts(iri)` and any other
     /// value-parameter inductive that takes string arguments at the
     /// type level. Round-trips through the D47 codec as the `LitString`
-    /// ctor of `eigentt:TypeExpr` (eigenius#71).
+    /// ctor of `eigentt:Term` (eigenius#71).
     LitString(String),
     /// Literal integer value at the expression level (eigenius#71).
     /// Type: `Exp::EigonPrimitive(PrimitiveType::Integer)`. Same shape
@@ -182,7 +182,7 @@ pub enum Exp {
     /// Type: `Exp::EigonPrimitive(PrimitiveType::Boolean)`. Same shape
     /// as `LitString` / `LitInt` / `LitFloat` — a closed literal that
     /// round-trips through D47 as the `LitBool` ctor of
-    /// `eigentt:TypeExpr`. Added so `program:Literal` booleans decode
+    /// `eigentt:Term`. Added so `program:Literal` booleans decode
     /// to their value rather than to `EigonPrimitive(Boolean)`.
     LitBool(bool),
     /// Property access on a resource: e.property

@@ -49,7 +49,7 @@ pub(super) fn shape_result(
         let class_values: Vec<Value> = classes
             .iter()
             .map(|n| match n {
-                Name::FullIri(iri) => Value::String(iri.as_str().to_string()),
+                Name::FullIri(iri) => Value::iri(iri),
                 Name::ShortName(s) => Value::String(s.clone()),
             })
             .collect();

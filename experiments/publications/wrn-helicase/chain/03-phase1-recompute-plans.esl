@@ -41,12 +41,15 @@
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
 namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace onco       = "urn:eigenius:benchmark:onco";
 namespace bench      = "urn:eigenius:benchmark";
 namespace wrn        = "urn:eigenius:pub:wrn";
+namespace agent      = "urn:eigenius:prov:agent";
+namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
+namespace wrnact     = "urn:eigenius:pub:wrn:activity";
 
 // ─── Directionality witness (D52 §7.1) ───────────────────────────────
 // Licenses the one-sided test: the synthetic-lethal hypothesis is
@@ -54,9 +57,9 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // direction (MSS more dependent) is not the biological claim under test.
 
 resource wrn:msi_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_synthetic_lethal_directionality;
-    reflection:rationale   = "Synthetic lethality predicts MSI-specific WRN dependence: the directional claim is that MSI cells are more WRN-dependent than MSS. The inverse direction (MSS more dependent than MSI) is not the hypothesis, licensing the one-sided p-value.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_synthetic_lethal_directionality;
+    prov:rationale   = "Synthetic lethality predicts MSI-specific WRN dependence: the directional claim is that MSI cells are more WRN-dependent than MSS. The inverse direction (MSS more dependent than MSI) is not the hypothesis, licensing the one-sided p-value.";
 }
 
 // ─── Observed: the WRN dependency SampleSet (MSI vs MSS) ──────────────
@@ -65,8 +68,8 @@ resource wrn:msi_directionality_witness : stats:ImpossibilityWitness {
 // snapshot). Group A = MSI, Group B = MSS.
 
 resource wrn:wrn_dep_sampleset : stats:SampleSetResource {
-    reflection:source      = "depmap:18Q4 avg WRN dependency, common-MSI lineages (Supp Table 1)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:depmap_18q4;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     // Tier-1 extraction pin (verified by extract/extract_samplesets.py).
     bench:extracted_from_slice  = "data/slices/wrn_supplementary_table_1.csv";
@@ -97,10 +100,10 @@ resource wrn:wrn_dep_sampleset : stats:SampleSetResource {
     );
 }
 
-resource wrn:wrn_dep_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:wrn_dep_sampleset;
-    reflection:source    = "depmap:18Q4 (Supp Table 1)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:wrn_dep_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:wrn_dep_sampleset;
+    prov:was_generated_by    = wrnact:depmap_18q4;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // ─── The StatisticalAnalysisPlan (institution recomputes it) ──────────
@@ -120,10 +123,10 @@ resource wrn:wrn_dep_plan : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion   = Identity();
 }
 
-resource wrn:wrn_dep_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:wrn_dep_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:wrn_dep_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:wrn_dep_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // ─── Declared: the statistical→domain bridge ─────────────────────────
@@ -131,10 +134,10 @@ resource wrn:wrn_dep_plan_trace : reflection:ProgramTrace {
 // Monomorphic (specialised to this sample set + WRN/MSI), mirroring the
 // drug_screening.esl bridge.
 
-resource wrn:bridge_msi_selective : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_selective_essentiality_criterion;
-    reflection:rationale   = "If a sample set measuring WRN dependency by MSI status has its MSI-group mean strictly below its MSS-group mean (MSI more dependent), WRN is selectively essential in MSI. The directional statistical claim is the warrant.";
+resource wrn:bridge_msi_selective : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_selective_essentiality_criterion;
+    prov:rationale   = "If a sample set measuring WRN dependency by MSI status has its MSI-group mean strictly below its MSS-group mean (MSI more dependent), WRN is selectively essential in MSI. The directional statistical claim is the warrant.";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.0)
@@ -143,11 +146,11 @@ resource wrn:bridge_msi_selective : reflection:DeclaredResource {
     );
 }
 
-resource wrn:bridge_msi_selective_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_msi_selective;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_selective_essentiality_criterion;
-    reflection:timestamp   = "2026-06-12T14:00:00Z";
+resource wrn:bridge_msi_selective_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_msi_selective;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_selective_essentiality_criterion;
+    prov:timestamp   = "2026-06-12T14:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -162,14 +165,14 @@ resource wrn:bridge_msi_selective_trace : reflection:DeclarationTrace {
 // Pairs: (x = ms_deletions_normed, y = avg_WRN_dep).
 
 resource wrn:mutator_load_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mutator_load_directionality;
-    reflection:rationale   = "The hypothesis is that accumulating MSI deletions increase WRN dependence — a negative correlation between #MS-deletions and WRN dependency score (more deletions ⇒ more negative ⇒ more dependent). The inverse direction is not the claim, licensing the one-sided test.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mutator_load_directionality;
+    prov:rationale   = "The hypothesis is that accumulating MSI deletions increase WRN dependence — a negative correlation between #MS-deletions and WRN dependency score (more deletions ⇒ more negative ⇒ more dependent). The inverse direction is not the claim, licensing the one-sided test.";
 }
 
 resource wrn:wrn_corr_sampleset : stats:SampleSetResource {
-    reflection:source      = "depmap:18Q4 MSI lines — ms_deletions vs avg WRN dependency (Supp Table 1)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:depmap_18q4;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     // Tier-1 extraction pin (verified by extract/extract_samplesets.py).
     bench:extracted_from_slice  = "data/slices/wrn_supplementary_table_1.csv";
@@ -202,14 +205,15 @@ resource wrn:wrn_corr_sampleset : stats:SampleSetResource {
     );
 }
 
-resource wrn:wrn_corr_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:wrn_corr_sampleset;
-    reflection:source    = "depmap:18Q4 (Supp Table 1)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:wrn_corr_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:wrn_corr_sampleset;
+    prov:was_generated_by    = wrnact:depmap_18q4;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:wrn_corr_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set = wrn:wrn_corr_sampleset;
+
 
     stats:alpha               = 0.05;
     stats:effect_size         = Absolute(0.0, "spearman_rho");
@@ -218,16 +222,16 @@ resource wrn:wrn_corr_plan : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion   = Identity();
 }
 
-resource wrn:wrn_corr_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:wrn_corr_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:wrn_corr_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:wrn_corr_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_mutator_load : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mutator_load_criterion;
-    reflection:rationale   = "If WRN dependency negatively correlates with mutator load (#MS deletions) across MSI lines, WRN dependency tracks mutator load — supporting the refinement that a stronger mutator phenotype drives WRN dependence.";
+resource wrn:bridge_mutator_load : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mutator_load_criterion;
+    prov:rationale   = "If WRN dependency negatively correlates with mutator load (#MS deletions) across MSI lines, WRN dependency tracks mutator load — supporting the refinement that a stronger mutator phenotype drives WRN dependence.";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:spearman_rho("urn:eigenius:pub:wrn:wrn_corr_sampleset"), 0.0)
@@ -236,11 +240,11 @@ resource wrn:bridge_mutator_load : reflection:DeclaredResource {
     );
 }
 
-resource wrn:bridge_mutator_load_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_mutator_load;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mutator_load_criterion;
-    reflection:timestamp   = "2026-06-12T14:30:00Z";
+resource wrn:bridge_mutator_load_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_mutator_load;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mutator_load_criterion;
+    prov:timestamp   = "2026-06-12T14:30:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -257,14 +261,14 @@ resource wrn:bridge_mutator_load_trace : reflection:DeclarationTrace {
 // dependence — and the biomarker — is restricted to the common MSI lineages.
 
 resource wrn:lineage_mutator_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_lineage_mutator_directionality;
-    reflection:rationale   = "The hypothesis is that the common MSI lineages carry MORE microsatellite deletions than the uncommon ones (higher mutator load drives the lineage-restricted WRN dependence). The inverse direction is not the claim, licensing the one-sided test.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_lineage_mutator_directionality;
+    prov:rationale   = "The hypothesis is that the common MSI lineages carry MORE microsatellite deletions than the uncommon ones (higher mutator load drives the lineage-restricted WRN dependence). The inverse direction is not the claim, licensing the one-sided test.";
 }
 
 resource wrn:mutator_load_sampleset : stats:SampleSetResource {
-    reflection:source      = "depmap:18Q4 MS-deletion load, MSI lines by lineage commonness (Supp Table 1)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:depmap_18q4;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     // Tier-1 extraction pin (verified by extract/extract_samplesets.py).
     bench:extracted_from_slice  = "data/slices/wrn_supplementary_table_1.csv";
@@ -291,10 +295,10 @@ resource wrn:mutator_load_sampleset : stats:SampleSetResource {
     );
 }
 
-resource wrn:mutator_load_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:mutator_load_sampleset;
-    reflection:source    = "depmap:18Q4 (Supp Table 1)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:mutator_load_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:mutator_load_sampleset;
+    prov:was_generated_by    = wrnact:depmap_18q4;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:mutator_load_plan : stats:StatisticalAnalysisPlan {
@@ -307,16 +311,16 @@ resource wrn:mutator_load_plan : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion   = Identity();
 }
 
-resource wrn:mutator_load_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:mutator_load_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:mutator_load_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:mutator_load_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_lineage_mutator : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_lineage_mutator_criterion;
-    reflection:rationale   = "If among MSI lines the uncommon-lineage group has its mean MS-deletion load strictly below the common-lineage group, the common MSI lineages carry an elevated mutator load. The directional statistical claim is the warrant for the lineage restriction of the biomarker.";
+resource wrn:bridge_lineage_mutator : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_lineage_mutator_criterion;
+    prov:rationale   = "If among MSI lines the uncommon-lineage group has its mean MS-deletion load strictly below the common-lineage group, the common MSI lineages carry an elevated mutator load. The directional statistical claim is the warrant for the lineage restriction of the biomarker.";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mutator_load_sampleset"), 0.0)
@@ -325,11 +329,11 @@ resource wrn:bridge_lineage_mutator : reflection:DeclaredResource {
     );
 }
 
-resource wrn:bridge_lineage_mutator_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_lineage_mutator;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_lineage_mutator_criterion;
-    reflection:timestamp   = "2026-06-16T14:30:00Z";
+resource wrn:bridge_lineage_mutator_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_lineage_mutator;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_lineage_mutator_criterion;
+    prov:timestamp   = "2026-06-16T14:30:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -342,14 +346,14 @@ resource wrn:bridge_lineage_mutator_trace : reflection:DeclarationTrace {
 // (paper two-tailed t-test p = 3.2e-8).
 
 resource wrn:coloc_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_nucleolar_delocalization_directionality;
-    reflection:rationale   = "The hypothesis is that WRN's nucleolar (fibrillarin) colocalization is REDUCED in MSI relative to lineage-matched MSS — a directional decrease. The inverse direction is not the claim, licensing the one-sided test.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_nucleolar_delocalization_directionality;
+    prov:rationale   = "The hypothesis is that WRN's nucleolar (fibrillarin) colocalization is REDUCED in MSI relative to lineage-matched MSS — a directional decrease. The inverse direction is not the claim, licensing the one-sided test.";
 }
 
 resource wrn:coloc_sampleset : stats:SampleSetResource {
-    reflection:source      = "WRN–fibrillarin Pearson colocalization, MSI vs lineage-matched MSS (ED Fig 8d source data)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_8d;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig8_MOESM11.xlsx";
     bench:extracted_from_sha256 = "a8b533a5b506457878a51941455a717b552b69e63900fbc21f277652b3c1c47a";
@@ -366,10 +370,10 @@ resource wrn:coloc_sampleset : stats:SampleSetResource {
     );
 }
 
-resource wrn:coloc_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:coloc_sampleset;
-    reflection:source    = "wrn-paper:ED-Fig-8d source data";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:coloc_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:coloc_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_8d;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:coloc_plan : stats:StatisticalAnalysisPlan {
@@ -382,16 +386,16 @@ resource wrn:coloc_plan : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion   = Identity();
 }
 
-resource wrn:coloc_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:coloc_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:coloc_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:coloc_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_coloc : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_nucleolar_delocalization_criterion;
-    reflection:rationale   = "If WRN–fibrillarin colocalization in MSI lines is strictly below the lineage-matched MSS group, WRN is delocalized from the nucleolus in MSI. The directional statistical claim is the warrant.";
+resource wrn:bridge_coloc : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_nucleolar_delocalization_criterion;
+    prov:rationale   = "If WRN–fibrillarin colocalization in MSI lines is strictly below the lineage-matched MSS group, WRN is delocalized from the nucleolus in MSI. The directional statistical claim is the warrant.";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:coloc_sampleset"), 0.0)
@@ -400,11 +404,11 @@ resource wrn:bridge_coloc : reflection:DeclaredResource {
     );
 }
 
-resource wrn:bridge_coloc_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_coloc;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_nucleolar_delocalization_criterion;
-    reflection:timestamp   = "2026-06-16T15:00:00Z";
+resource wrn:bridge_coloc_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_coloc;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_nucleolar_delocalization_criterion;
+    prov:timestamp   = "2026-06-16T15:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -417,14 +421,14 @@ resource wrn:bridge_coloc_trace : reflection:DeclarationTrace {
 // below group B = Ch3+5 → directional lt(mean_diff_of, 0)); paper t-test p≈2.3e-3.
 
 resource wrn:hcr_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mmr_restoration_directionality;
-    reflection:rationale   = "The hypothesis is that restoring MMR (Ch3+5) INCREASES mismatch-repair capacity over the MMR-deficient parental — a directional increase. The inverse direction is not the claim, licensing the one-sided test.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mmr_restoration_directionality;
+    prov:rationale   = "The hypothesis is that restoring MMR (Ch3+5) INCREASES mismatch-repair capacity over the MMR-deficient parental — a directional increase. The inverse direction is not the claim, licensing the one-sided test.";
 }
 
 resource wrn:hcr_sampleset : stats:SampleSetResource {
-    reflection:source      = "HCT116 host-cell reactivation, parental vs Ch3+5 (ED Fig 10a source data)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_10a;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig10_MOESM12.xlsx";
     bench:extracted_from_sha256 = "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c";
@@ -439,10 +443,10 @@ resource wrn:hcr_sampleset : stats:SampleSetResource {
     );
 }
 
-resource wrn:hcr_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:hcr_sampleset;
-    reflection:source    = "wrn-paper:ED-Fig-10a source data";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:hcr_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:hcr_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_10a;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:hcr_plan : stats:StatisticalAnalysisPlan {
@@ -455,16 +459,16 @@ resource wrn:hcr_plan : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion   = Identity();
 }
 
-resource wrn:hcr_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:hcr_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:hcr_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:hcr_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_hcr : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mmr_restoration_criterion;
-    reflection:rationale   = "If the MMR-deficient parental's mismatch-repair capacity is strictly below the MMR-restored Ch3+5 group, MMR restoration restores functional repair — confirming the model's MMR defect is genuine. The directional statistical claim is the warrant.";
+resource wrn:bridge_hcr : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mmr_restoration_criterion;
+    prov:rationale   = "If the MMR-deficient parental's mismatch-repair capacity is strictly below the MMR-restored Ch3+5 group, MMR restoration restores functional repair — confirming the model's MMR defect is genuine. The directional statistical claim is the warrant.";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:hcr_sampleset"), 0.0)
@@ -473,11 +477,11 @@ resource wrn:bridge_hcr : reflection:DeclaredResource {
     );
 }
 
-resource wrn:bridge_hcr_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_hcr;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mmr_restoration_criterion;
-    reflection:timestamp   = "2026-06-16T15:30:00Z";
+resource wrn:bridge_hcr_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_hcr;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mmr_restoration_criterion;
+    prov:timestamp   = "2026-06-16T15:30:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -496,8 +500,8 @@ resource wrn:bridge_hcr_trace : reflection:DeclarationTrace {
 // of the three kernel-computed n.s. p-values cited in the rule's rationale.
 
 resource wrn:wrn_recq_sampleset : stats:SampleSetResource {
-    reflection:source      = "depmap:18Q4 Achilles CRISPR-CERES WRN gene-effect, all lineages by CCLE_MSI (Supp Table 1)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:depmap_18q4;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     // Tier-1 extraction pin (verified by extract/extract_samplesets.py).
     // Joins three slices: WRN column of the Achilles matrix, keyed by
@@ -573,10 +577,10 @@ resource wrn:wrn_recq_sampleset : stats:SampleSetResource {
     );
 }
 
-resource wrn:wrn_recq_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:wrn_recq_sampleset;
-    reflection:source    = "depmap:18Q4 Achilles gene_effect.csv + Supp Table 1 (pinned snapshot)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:wrn_recq_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:wrn_recq_sampleset;
+    prov:was_generated_by    = wrnact:depmap_18q4;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:wrn_recq_plan : stats:StatisticalAnalysisPlan {
@@ -589,20 +593,20 @@ resource wrn:wrn_recq_plan : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion   = Identity();
 }
 
-resource wrn:wrn_recq_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:wrn_recq_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:wrn_recq_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:wrn_recq_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // The uniqueness rule. Its antecedent is the kernel-recomputed WRN result
 // (MSI mean dependency strictly below MSS in the RecQ cohort); its
 // rationale records the three other RecQ helicases' kernel-computed,
 // non-significant p-values as the declared basis for "only WRN".
-resource wrn:recq_uniqueness_rule : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_recq_family_specificity;
-    reflection:rationale   = "Among the RecQ helicases tested MSI-vs-MSS in the same Achilles CRISPR-CERES cohort (32 MSI / 413 MSS, all lineages): only WRN has a significant MSI-selective dependency (Wilcoxon P = 1.1e-8, median -0.49 vs -0.11; kernel-recomputed via wrn_recq_plan). BLM (P = 0.65), RECQL (P = 0.58) and RECQL5 (P = 0.11) are all non-significant (kernel-computed against the same pinned snapshot); RECQL4 is absent from the 18Q4 CERES matrix (paper Ext Data 1c: n.s.). A null is not derivable, so the non-selectivity of the other three is a declared scientific judgment — at this n and effect scale, their non-significance indicates no MSI-selective dependency. Given WRN's significant selective dependency, WRN is therefore the only MSI-selective RecQ helicase.";
+resource wrn:recq_uniqueness_rule : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_recq_family_specificity;
+    prov:rationale   = "Among the RecQ helicases tested MSI-vs-MSS in the same Achilles CRISPR-CERES cohort (32 MSI / 413 MSS, all lineages): only WRN has a significant MSI-selective dependency (Wilcoxon P = 1.1e-8, median -0.49 vs -0.11; kernel-recomputed via wrn_recq_plan). BLM (P = 0.65), RECQL (P = 0.58) and RECQL5 (P = 0.11) are all non-significant (kernel-computed against the same pinned snapshot); RECQL4 is absent from the 18Q4 CERES matrix (paper Ext Data 1c: n.s.). A null is not derivable, so the non-selectivity of the other three is a declared scientific judgment — at this n and effect scale, their non-significance indicates no MSI-selective dependency. Given WRN's significant selective dependency, WRN is therefore the only MSI-selective RecQ helicase.";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_recq_sampleset"), 0.0)
@@ -611,11 +615,11 @@ resource wrn:recq_uniqueness_rule : reflection:DeclaredResource {
     );
 }
 
-resource wrn:recq_uniqueness_rule_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:recq_uniqueness_rule;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_recq_family_specificity;
-    reflection:timestamp   = "2026-06-12T14:45:00Z";
+resource wrn:recq_uniqueness_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:recq_uniqueness_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_recq_family_specificity;
+    prov:timestamp   = "2026-06-12T14:45:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -637,16 +641,16 @@ resource wrn:biomarker_plan : stats:ClassificationAnalysisPlan {
     stats:min_sensitivity          = 0.9;
 }
 
-resource wrn:biomarker_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:biomarker_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:biomarker_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:biomarker_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_biomarker : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_biomarker_criterion;
-    reflection:rationale   = "If MSI status predicts WRN dependency with PPV >= 0.7 AND sensitivity >= 0.9 (at the dependency < -0.5 threshold), MSI is a strong biomarker for WRN dependency — a predictive relationship comparable to established oncogene dependency biomarkers (KRAS/BRAF). The two classifier-quality facts are the warrant.";
+resource wrn:bridge_biomarker : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_biomarker_criterion;
+    prov:rationale   = "If MSI status predicts WRN dependency with PPV >= 0.7 AND sensitivity >= 0.9 (at the dependency < -0.5 threshold), MSI is a strong biomarker for WRN dependency — a predictive relationship comparable to established oncogene dependency biomarkers (KRAS/BRAF). The two classifier-quality facts are the warrant.";
 
     reflection:canonical_proposition = type_expr(
         stats:ge(stats:ppv("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.7)
@@ -657,11 +661,11 @@ resource wrn:bridge_biomarker : reflection:DeclaredResource {
     );
 }
 
-resource wrn:bridge_biomarker_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_biomarker;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_biomarker_criterion;
-    reflection:timestamp   = "2026-06-12T15:00:00Z";
+resource wrn:bridge_biomarker_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_biomarker;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_biomarker_criterion;
+    prov:timestamp   = "2026-06-12T15:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -678,14 +682,14 @@ resource wrn:bridge_biomarker_trace : reflection:DeclarationTrace {
 // dependence — the "p53 contributes" half of C-MECH's p53 dissection.
 
 resource wrn:p53_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_p53_contribution_directionality;
-    reflection:rationale   = "The mechanistic hypothesis is that WRN loss activates p53, so p53-proficient MSI cells are predicted MORE dependent on WRN than p53-impaired ones. That directional prediction (intact more dependent) is the claim under test; the inverse is not, licensing the one-sided p-value (paper reports two-sided P = 0.02; one-sided ~0.01).";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_p53_contribution_directionality;
+    prov:rationale   = "The mechanistic hypothesis is that WRN loss activates p53, so p53-proficient MSI cells are predicted MORE dependent on WRN than p53-impaired ones. That directional prediction (intact more dependent) is the claim under test; the inverse is not, licensing the one-sided p-value (paper reports two-sided P = 0.02; one-sided ~0.01).";
 }
 
 resource wrn:p53_dep_sampleset : stats:SampleSetResource {
-    reflection:source      = "depmap:18Q4 avg WRN dependency, common-MSI MSI lines by TP53 status (Supp Table 1)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:depmap_18q4;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     // Tier-1 extraction pin (verified by extract/extract_samplesets.py).
     bench:extracted_from_slice  = "data/slices/wrn_supplementary_table_1.csv";
@@ -704,10 +708,10 @@ resource wrn:p53_dep_sampleset : stats:SampleSetResource {
     );
 }
 
-resource wrn:p53_dep_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:p53_dep_sampleset;
-    reflection:source    = "depmap:18Q4 (Supp Table 1)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:p53_dep_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:p53_dep_sampleset;
+    prov:was_generated_by    = wrnact:depmap_18q4;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:p53_dep_plan : stats:StatisticalAnalysisPlan {
@@ -720,16 +724,16 @@ resource wrn:p53_dep_plan : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion   = Identity();
 }
 
-resource wrn:p53_dep_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:p53_dep_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:p53_dep_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:p53_dep_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_p53_modulates : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_p53_contribution_criterion;
-    reflection:rationale   = "If WRN dependence differs by p53 status across MSI lines (p53-intact mean strictly below p53-impaired — more dependent), then p53 status modulates WRN dependence: it contributes to, but does not solely determine, the dependence (both strata remain dependent; DSBs are toxic independent of p53).";
+resource wrn:bridge_p53_modulates : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_p53_contribution_criterion;
+    prov:rationale   = "If WRN dependence differs by p53 status across MSI lines (p53-intact mean strictly below p53-impaired — more dependent), then p53 status modulates WRN dependence: it contributes to, but does not solely determine, the dependence (both strata remain dependent; DSBs are toxic independent of p53).";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:p53_dep_sampleset"), 0.0)
@@ -738,11 +742,11 @@ resource wrn:bridge_p53_modulates : reflection:DeclaredResource {
     );
 }
 
-resource wrn:bridge_p53_modulates_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_p53_modulates;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_p53_contribution_criterion;
-    reflection:timestamp   = "2026-06-13T03:00:00Z";
+resource wrn:bridge_p53_modulates_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_p53_modulates;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_p53_contribution_criterion;
+    prov:timestamp   = "2026-06-13T03:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -762,14 +766,14 @@ resource wrn:bridge_p53_modulates_trace : reflection:DeclarationTrace {
 // va_competition ToolArtifact.
 
 resource wrn:viability_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_viability_impairment_directionality;
-    reflection:rationale   = "Synthetic lethality predicts WRN depletion IMPAIRS (not enhances) MSI viability: the directional claim is sgWRN viability below negative-control viability (group A mean < group B). The inverse is not the hypothesis, licensing the one-sided test.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_viability_impairment_directionality;
+    prov:rationale   = "Synthetic lethality predicts WRN depletion IMPAIRS (not enhances) MSI viability: the directional claim is sgWRN viability below negative-control viability (group A mean < group B). The inverse is not the hypothesis, licensing the one-sided test.";
 }
 
 resource wrn:viab_KM12_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 3b KM12 day-10 competition-assay relative ratio (Firefly:Renilla / mean-of-negatives)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_3b;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig3_MOESM6.xlsx";
     bench:extracted_from_sha256 = "506d7ac0f2517cb6b1e7277dfb175675044ab4b6fbc4a628f8c9ad843ba41fd6";
@@ -792,10 +796,10 @@ resource wrn:viab_KM12_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:viab_KM12_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:viab_KM12_sampleset;
-    reflection:source    = "wrn-paper ED Fig 3b (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:viab_KM12_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:viab_KM12_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_3b;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:viab_KM12_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:viab_KM12_sampleset;
@@ -805,15 +809,15 @@ resource wrn:viab_KM12_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:viab_KM12_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:viab_KM12_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:viab_KM12_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:viab_KM12_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:viab_OVK18_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 3b OVK18 day-10 competition-assay relative ratio (Firefly:Renilla / mean-of-negatives)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_3b;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig3_MOESM6.xlsx";
     bench:extracted_from_sha256 = "506d7ac0f2517cb6b1e7277dfb175675044ab4b6fbc4a628f8c9ad843ba41fd6";
@@ -836,10 +840,10 @@ resource wrn:viab_OVK18_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:viab_OVK18_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:viab_OVK18_sampleset;
-    reflection:source    = "wrn-paper ED Fig 3b (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:viab_OVK18_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:viab_OVK18_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_3b;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:viab_OVK18_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:viab_OVK18_sampleset;
@@ -849,16 +853,16 @@ resource wrn:viab_OVK18_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:viab_OVK18_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:viab_OVK18_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:viab_OVK18_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:viab_OVK18_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_viability : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_selective_viability_criterion;
-    reflection:rationale   = "If WRN depletion significantly impairs viability (sgWRN below negative controls in the competition assay) in MSI lines — recomputed for KM12 (two-way ANOVA P=2.7e-19) and OVK18 (P=1.2e-7) — while sparing MSS lines (ES2 P=0.37, SW620 P=0.23, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion selectively impairs MSI viability.";
+resource wrn:bridge_viability : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_selective_viability_criterion;
+    prov:rationale   = "If WRN depletion significantly impairs viability (sgWRN below negative controls in the competition assay) in MSI lines — recomputed for KM12 (two-way ANOVA P=2.7e-19) and OVK18 (P=1.2e-7) — while sparing MSS lines (ES2 P=0.37, SW620 P=0.23, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion selectively impairs MSI viability.";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)
@@ -868,11 +872,11 @@ resource wrn:bridge_viability : reflection:DeclaredResource {
         onco:SelectiveViabilityDependence("WRN", "MSI")
     );
 }
-resource wrn:bridge_viability_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_viability;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_selective_viability_criterion;
-    reflection:timestamp   = "2026-06-13T05:00:00Z";
+resource wrn:bridge_viability_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_viability;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_selective_viability_criterion;
+    prov:timestamp   = "2026-06-13T05:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -891,14 +895,14 @@ resource wrn:bridge_viability_trace : reflection:DeclarationTrace {
 // pinned Nature ED Fig 4 XLSX (data/MANIFEST.md).
 
 resource wrn:cellcycle_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_cellcycle_arrest_directionality;
-    reflection:rationale   = "DSB-driven cell-cycle arrest reduces the proliferating (S-phase) fraction: the directional claim is sgWRN %S-phase below negative-control %S-phase (group A mean < group B). The inverse (WRN loss increasing S-phase) is not the hypothesis, licensing the one-sided test.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_cellcycle_arrest_directionality;
+    prov:rationale   = "DSB-driven cell-cycle arrest reduces the proliferating (S-phase) fraction: the directional claim is sgWRN %S-phase below negative-control %S-phase (group A mean < group B). The inverse (WRN loss increasing S-phase) is not the hypothesis, licensing the one-sided test.";
 }
 
 resource wrn:cc_KM12_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 4b KM12 cell-cycle %S-phase (sgWRN2,sgWRN3 vs sgCh2-2)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_4b;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
     bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
@@ -914,10 +918,10 @@ resource wrn:cc_KM12_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:cc_KM12_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:cc_KM12_sampleset;
-    reflection:source    = "wrn-paper ED Fig 4b (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:cc_KM12_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:cc_KM12_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_4b;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:cc_KM12_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:cc_KM12_sampleset;
@@ -927,15 +931,15 @@ resource wrn:cc_KM12_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:cc_KM12_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:cc_KM12_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:cc_KM12_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:cc_KM12_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:cc_SW48_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 4b SW48 cell-cycle %S-phase (sgWRN2,sgWRN3 vs sgCh2-2)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_4b;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
     bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
@@ -951,10 +955,10 @@ resource wrn:cc_SW48_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:cc_SW48_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:cc_SW48_sampleset;
-    reflection:source    = "wrn-paper ED Fig 4b (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:cc_SW48_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:cc_SW48_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_4b;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:cc_SW48_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:cc_SW48_sampleset;
@@ -964,15 +968,15 @@ resource wrn:cc_SW48_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:cc_SW48_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:cc_SW48_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:cc_SW48_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:cc_SW48_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:cc_OVK18_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 4b OVK18 cell-cycle %S-phase (sgWRN2,sgWRN3 vs sgCh2-2)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_4b;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
     bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
@@ -988,10 +992,10 @@ resource wrn:cc_OVK18_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:cc_OVK18_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:cc_OVK18_sampleset;
-    reflection:source    = "wrn-paper ED Fig 4b (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:cc_OVK18_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:cc_OVK18_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_4b;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:cc_OVK18_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:cc_OVK18_sampleset;
@@ -1001,16 +1005,16 @@ resource wrn:cc_OVK18_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:cc_OVK18_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:cc_OVK18_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:cc_OVK18_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:cc_OVK18_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_cellcycle : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_cellcycle_arrest_criterion;
-    reflection:rationale   = "If WRN depletion significantly reduces the S-phase fraction (sgWRN %S below negative controls) across MSI lines — recomputed for KM12 (two-way ANOVA P=6.1e-7), SW48 (P=3.5e-4), OVK18 (P=2.6e-6) — while sparing MSS lines (SW620 P=0.16, SW837 P=0.67, ES2 P=0.69, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion causes MSI-selective cell-cycle arrest — a downstream consequence of DSB-driven DDR.";
+resource wrn:bridge_cellcycle : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_cellcycle_arrest_criterion;
+    prov:rationale   = "If WRN depletion significantly reduces the S-phase fraction (sgWRN %S below negative controls) across MSI lines — recomputed for KM12 (two-way ANOVA P=6.1e-7), SW48 (P=3.5e-4), OVK18 (P=2.6e-6) — while sparing MSS lines (SW620 P=0.16, SW837 P=0.67, ES2 P=0.69, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion causes MSI-selective cell-cycle arrest — a downstream consequence of DSB-driven DDR.";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)
@@ -1022,11 +1026,11 @@ resource wrn:bridge_cellcycle : reflection:DeclaredResource {
         onco:CausesCellCycleArrest("WRN", "MSI")
     );
 }
-resource wrn:bridge_cellcycle_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_cellcycle;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_cellcycle_arrest_criterion;
-    reflection:timestamp   = "2026-06-13T06:00:00Z";
+resource wrn:bridge_cellcycle_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_cellcycle;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_cellcycle_arrest_criterion;
+    prov:timestamp   = "2026-06-13T06:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1043,14 +1047,14 @@ resource wrn:bridge_cellcycle_trace : reflection:DeclarationTrace {
 // judgment). Source: pinned Nature ED Fig 4 XLSX (data/MANIFEST.md).
 
 resource wrn:apoptosis_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_apoptosis_induction_directionality;
-    reflection:rationale   = "DSB-driven apoptosis raises the apoptotic fraction: the directional claim is negative-control apoptosis below sgWRN apoptosis (group A = control mean < group B = sgWRN mean). The inverse (WRN loss reducing apoptosis) is not the hypothesis, licensing the one-sided test.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_apoptosis_induction_directionality;
+    prov:rationale   = "DSB-driven apoptosis raises the apoptotic fraction: the directional claim is negative-control apoptosis below sgWRN apoptosis (group A = control mean < group B = sgWRN mean). The inverse (WRN loss reducing apoptosis) is not the hypothesis, licensing the one-sided test.";
 }
 
 resource wrn:apop_KM12_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 4c KM12 total apoptosis (sgCh2-2 vs sgWRN2,sgWRN3)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_4c;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
     bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
@@ -1066,10 +1070,10 @@ resource wrn:apop_KM12_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:apop_KM12_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:apop_KM12_sampleset;
-    reflection:source    = "wrn-paper ED Fig 4c (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:apop_KM12_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:apop_KM12_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_4c;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:apop_KM12_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:apop_KM12_sampleset;
@@ -1079,15 +1083,15 @@ resource wrn:apop_KM12_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:apop_KM12_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:apop_KM12_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:apop_KM12_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:apop_KM12_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:apop_SW48_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 4c SW48 total apoptosis (sgCh2-2 vs sgWRN2,sgWRN3)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_4c;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
     bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
@@ -1103,10 +1107,10 @@ resource wrn:apop_SW48_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:apop_SW48_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:apop_SW48_sampleset;
-    reflection:source    = "wrn-paper ED Fig 4c (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:apop_SW48_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:apop_SW48_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_4c;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:apop_SW48_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:apop_SW48_sampleset;
@@ -1116,15 +1120,15 @@ resource wrn:apop_SW48_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:apop_SW48_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:apop_SW48_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:apop_SW48_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:apop_SW48_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:apop_OVK18_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 4c OVK18 total apoptosis (sgCh2-2 vs sgWRN2,sgWRN3)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_4c;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
     bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
@@ -1140,10 +1144,10 @@ resource wrn:apop_OVK18_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:apop_OVK18_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:apop_OVK18_sampleset;
-    reflection:source    = "wrn-paper ED Fig 4c (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:apop_OVK18_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:apop_OVK18_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_4c;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:apop_OVK18_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:apop_OVK18_sampleset;
@@ -1153,16 +1157,16 @@ resource wrn:apop_OVK18_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:apop_OVK18_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:apop_OVK18_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:apop_OVK18_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:apop_OVK18_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_apoptosis : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_apoptosis_induction_criterion;
-    reflection:rationale   = "If WRN depletion significantly raises the apoptotic fraction (sgWRN apoptosis above negative controls) across MSI lines — recomputed for KM12 (two-way ANOVA P=3.4e-3), SW48 (P=3.6e-4), OVK18 (P=3.6e-5) — while sparing MSS lines (SW620 P=0.10, SW837 P=0.41, ES2 P=0.57, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion causes MSI-selective apoptosis — a downstream consequence of DSB-driven DDR.";
+resource wrn:bridge_apoptosis : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_apoptosis_induction_criterion;
+    prov:rationale   = "If WRN depletion significantly raises the apoptotic fraction (sgWRN apoptosis above negative controls) across MSI lines — recomputed for KM12 (two-way ANOVA P=3.4e-3), SW48 (P=3.6e-4), OVK18 (P=3.6e-5) — while sparing MSS lines (SW620 P=0.10, SW837 P=0.41, ES2 P=0.57, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion causes MSI-selective apoptosis — a downstream consequence of DSB-driven DDR.";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)
@@ -1174,11 +1178,11 @@ resource wrn:bridge_apoptosis : reflection:DeclaredResource {
         onco:CausesApoptosis("WRN", "MSI")
     );
 }
-resource wrn:bridge_apoptosis_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_apoptosis;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_apoptosis_induction_criterion;
-    reflection:timestamp   = "2026-06-13T06:30:00Z";
+resource wrn:bridge_apoptosis_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_apoptosis;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_apoptosis_induction_criterion;
+    prov:timestamp   = "2026-06-13T06:30:00Z";
 }
 
 // ─── C-APOP-shRNA (recomputed, ED Fig 4d): apoptosis via shRNA (orthogonal) ───
@@ -1190,8 +1194,8 @@ resource wrn:bridge_apoptosis_trace : reflection:DeclarationTrace {
 // witness + CausesApoptosis (a second, shRNA-based warrant for the same claim).
 
 resource wrn:apop_shrna_KM12_sampleset : stats:SampleSetResource {
-    reflection:source      = "KM12 % apoptotic death by shRNA, control vs shWRN (ED Fig 4d source data)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_4d;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig4_MOESM7.xlsx";
     bench:extracted_from_sha256 = "bba867f2778ee2ad0c7be4bdd4613e8711614da1c9592d32e90a471855178549";
@@ -1207,10 +1211,10 @@ resource wrn:apop_shrna_KM12_sampleset : stats:SampleSetResource {
     );
 }
 
-resource wrn:apop_shrna_KM12_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:apop_shrna_KM12_sampleset;
-    reflection:source    = "wrn-paper:ED-Fig-4d source data";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:apop_shrna_KM12_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:apop_shrna_KM12_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_4d;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:apop_shrna_KM12_plan : stats:StatisticalAnalysisPlan {
@@ -1222,16 +1226,16 @@ resource wrn:apop_shrna_KM12_plan : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion = Identity();
 }
 
-resource wrn:apop_shrna_KM12_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:apop_shrna_KM12_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:apop_shrna_KM12_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:apop_shrna_KM12_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_apop_shrna : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_apoptosis_shrna_criterion;
-    reflection:rationale   = "If WRN knockDOWN (shWRN) raises the apoptotic fraction above the shRFP control in the MSI line KM12 — recomputed here — while the lineage-matched MSS line SW837 is spared (control ~12 vs shWRN ~8.6, not elevated; a null is not derivable, so 'spared' is the declared judgment), then WRN loss causes MSI apoptosis via an shRNA reagent orthogonal to the CRISPR knockout — establishing the apoptosis is on-target, not a Cas9 artifact.";
+resource wrn:bridge_apop_shrna : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_apoptosis_shrna_criterion;
+    prov:rationale   = "If WRN knockDOWN (shWRN) raises the apoptotic fraction above the shRFP control in the MSI line KM12 — recomputed here — while the lineage-matched MSS line SW837 is spared (control ~12 vs shWRN ~8.6, not elevated; a null is not derivable, so 'spared' is the declared judgment), then WRN loss causes MSI apoptosis via an shRNA reagent orthogonal to the CRISPR knockout — establishing the apoptosis is on-target, not a Cas9 artifact.";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"), 0.0)
@@ -1240,11 +1244,11 @@ resource wrn:bridge_apop_shrna : reflection:DeclaredResource {
     );
 }
 
-resource wrn:bridge_apop_shrna_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_apop_shrna;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_apoptosis_shrna_criterion;
-    reflection:timestamp   = "2026-06-16T16:00:00Z";
+resource wrn:bridge_apop_shrna_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_apop_shrna;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_apoptosis_shrna_criterion;
+    prov:timestamp   = "2026-06-16T16:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1272,15 +1276,15 @@ resource wrn:bridge_apop_shrna_trace : reflection:DeclarationTrace {
 // ToolArtifact (retired in wrn-phase5). Source: pinned Nature ED Fig 10 XLSX.
 
 resource wrn:mmr_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mmr_restoration_directionality;
-    reflection:rationale   = "MMR proficiency sustains WRN-depletion viability: the directional claim is that the MMR-deficient (or MLH1-re-knocked-out) context shows LOWER shWRN viability than the MMR-restored context (group A mean < group B). The inverse (MMR restoration reducing viability) is not the hypothesis, licensing the one-sided test.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mmr_restoration_directionality;
+    prov:rationale   = "MMR proficiency sustains WRN-depletion viability: the directional claim is that the MMR-deficient (or MLH1-re-knocked-out) context shows LOWER shWRN viability than the MMR-restored context (group A mean < group B). The inverse (MMR restoration reducing viability) is not the hypothesis, licensing the one-sided test.";
 }
 
 // ── ∗ vs † : restoring MMR (Ch2 → Ch3+5+sgCh2-2) rescues shWRN viability ──
 resource wrn:mmr_rescue_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 10c relative viability — HCT116 Ch2 (∗) vs Ch3+5+sgCh2-2 (†), shWRN1+shWRN2";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_10c;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig10_MOESM12.xlsx";
     bench:extracted_from_sha256 = "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c";
@@ -1298,10 +1302,10 @@ resource wrn:mmr_rescue_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:mmr_rescue_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:mmr_rescue_sampleset;
-    reflection:source    = "wrn-paper ED Fig 10c (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:mmr_rescue_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:mmr_rescue_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_10c;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:mmr_rescue_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:mmr_rescue_sampleset;
@@ -1311,16 +1315,16 @@ resource wrn:mmr_rescue_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:mmr_rescue_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:mmr_rescue_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:mmr_rescue_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:mmr_rescue_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // ── † vs ‡ : MLH1-KO #1 re-sensitizes (Ch3+5+sgMLH1-1 below Ch3+5+sgCh2-2) ──
 resource wrn:mmr_resens1_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 10c relative viability — HCT116 Ch3+5+sgMLH1-1 (‡) vs Ch3+5+sgCh2-2 (†), shWRN1+shWRN2";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_10c;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig10_MOESM12.xlsx";
     bench:extracted_from_sha256 = "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c";
@@ -1338,10 +1342,10 @@ resource wrn:mmr_resens1_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:mmr_resens1_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:mmr_resens1_sampleset;
-    reflection:source    = "wrn-paper ED Fig 10c (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:mmr_resens1_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:mmr_resens1_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_10c;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:mmr_resens1_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:mmr_resens1_sampleset;
@@ -1351,16 +1355,16 @@ resource wrn:mmr_resens1_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:mmr_resens1_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:mmr_resens1_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:mmr_resens1_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:mmr_resens1_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // ── † vs § : MLH1-KO #2 re-sensitizes (Ch3+5+sgMLH1-2 below Ch3+5+sgCh2-2) ──
 resource wrn:mmr_resens2_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper ED Fig 10c relative viability — HCT116 Ch3+5+sgMLH1-2 (§) vs Ch3+5+sgCh2-2 (†), shWRN1+shWRN2";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:ed_fig_10c;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_EDFig10_MOESM12.xlsx";
     bench:extracted_from_sha256 = "3fc08ebadbc282ac7bdb4f87d73e704e79e216b611e5357302d17e4e32cdb33c";
@@ -1378,10 +1382,10 @@ resource wrn:mmr_resens2_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:mmr_resens2_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:mmr_resens2_sampleset;
-    reflection:source    = "wrn-paper ED Fig 10c (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:mmr_resens2_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:mmr_resens2_sampleset;
+    prov:was_generated_by    = wrnact:ed_fig_10c;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:mmr_resens2_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set        = wrn:mmr_resens2_sampleset;
@@ -1391,17 +1395,17 @@ resource wrn:mmr_resens2_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion = Identity();
 }
-resource wrn:mmr_resens2_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:mmr_resens2_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:mmr_resens2_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:mmr_resens2_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // ── Declared bridge: the three contrasts compose the causal dissection ──
-resource wrn:bridge_mmr_restoration : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mmr_restoration_criterion;
-    reflection:rationale   = "If restoring MMR raises WRN-depletion viability (Ch2 below Ch3+5+sgCh2-2, recomputed two-way ANOVA P=5.7e-20) AND re-knocking-out MLH1 in the restored line re-lowers it (Ch3+5+sgMLH1-1 below Ch3+5+sgCh2-2, P=3.3e-12; Ch3+5+sgMLH1-2 below Ch3+5+sgCh2-2, P=1.6e-16), then the rescue is attributable to MMR (the MLH1-KO controls isolate MMR from the chromosome transfer) and restoring MMR PARTIALLY rescues WRN dependence. 'Partially' is load-bearing: the rescue is modest (Ch3+5 shWRN viability ≈0.71, not restored to 1.0), so dMMR contributes to but does not fully explain WRN dependence (cf. D-REFINE mutator load).";
+resource wrn:bridge_mmr_restoration : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mmr_restoration_criterion;
+    prov:rationale   = "If restoring MMR raises WRN-depletion viability (Ch2 below Ch3+5+sgCh2-2, recomputed two-way ANOVA P=5.7e-20) AND re-knocking-out MLH1 in the restored line re-lowers it (Ch3+5+sgMLH1-1 below Ch3+5+sgCh2-2, P=3.3e-12; Ch3+5+sgMLH1-2 below Ch3+5+sgCh2-2, P=1.6e-16), then the rescue is attributable to MMR (the MLH1-KO controls isolate MMR from the chromosome transfer) and restoring MMR PARTIALLY rescues WRN dependence. 'Partially' is load-bearing: the rescue is modest (Ch3+5 shWRN viability ≈0.71, not restored to 1.0), so dMMR contributes to but does not fully explain WRN dependence (cf. D-REFINE mutator load).";
 
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)
@@ -1413,11 +1417,11 @@ resource wrn:bridge_mmr_restoration : reflection:DeclaredResource {
         onco:RestorationPartiallyRescues("dMMR", "WRN")
     );
 }
-resource wrn:bridge_mmr_restoration_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_mmr_restoration;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mmr_restoration_criterion;
-    reflection:timestamp   = "2026-06-13T07:00:00Z";
+resource wrn:bridge_mmr_restoration_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_mmr_restoration;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mmr_restoration_criterion;
+    prov:timestamp   = "2026-06-13T07:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1438,14 +1442,14 @@ resource wrn:bridge_mmr_restoration_trace : reflection:DeclarationTrace {
 // Nature Fig 2 Source Data. Replaces the linked-external va_rescue_{wt,e84a}.
 
 resource wrn:rescue_directionality_witness : stats:ImpossibilityWitness {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_on_target_rescue_directionality;
-    reflection:rationale   = "An EIJ-spared functional WRN cDNA RAISES sgWRN-EIJ viability above the GFP (no-rescue) control: the directional claim is GFP-background sgWRN-EIJ viability below the cDNA-background (group A mean < group B). The inverse (re-expressing WRN lowering viability) is not the hypothesis, licensing the one-sided test.";
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_on_target_rescue_directionality;
+    prov:rationale   = "An EIJ-spared functional WRN cDNA RAISES sgWRN-EIJ viability above the GFP (no-rescue) control: the directional claim is GFP-background sgWRN-EIJ viability below the cDNA-background (group A mean < group B). The inverse (re-expressing WRN lowering viability) is not the hypothesis, licensing the one-sided test.";
 }
 
 resource wrn:rescue_wt_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper Fig 2c KM12 relative viability — sgWRN-EIJ in GFP (A) vs WT-cDNA (B) background";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:fig_2c;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_Fig2_MOESM3.xlsx";
     bench:extracted_from_sha256 = "e9c006d12398d87a36801d4d2ecee56a9932c3536d3ba780f1bb6234a560c89e";
@@ -1459,10 +1463,10 @@ resource wrn:rescue_wt_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:rescue_wt_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:rescue_wt_sampleset;
-    reflection:source    = "wrn-paper Fig 2c (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:rescue_wt_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:rescue_wt_sampleset;
+    prov:was_generated_by    = wrnact:fig_2c;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:rescue_wt_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set          = wrn:rescue_wt_sampleset;
@@ -1472,15 +1476,15 @@ resource wrn:rescue_wt_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion   = Identity();
 }
-resource wrn:rescue_wt_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:rescue_wt_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:rescue_wt_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:rescue_wt_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:rescue_e84a_sampleset : stats:SampleSetResource {
-    reflection:source      = "wrn-paper Fig 2c KM12 relative viability — sgWRN-EIJ in GFP (A) vs E84A-cDNA (B) background";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrnact:fig_2c;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     bench:extracted_from_slice  = "data/slices/wrn_sourcedata_Fig2_MOESM3.xlsx";
     bench:extracted_from_sha256 = "e9c006d12398d87a36801d4d2ecee56a9932c3536d3ba780f1bb6234a560c89e";
@@ -1494,10 +1498,10 @@ resource wrn:rescue_e84a_sampleset : stats:SampleSetResource {
         BiologicalReplication(),
     );
 }
-resource wrn:rescue_e84a_sampleset_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:rescue_e84a_sampleset;
-    reflection:source    = "wrn-paper Fig 2c (Nature Source Data, pinned)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:rescue_e84a_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = wrn:rescue_e84a_sampleset;
+    prov:was_generated_by    = wrnact:fig_2c;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 resource wrn:rescue_e84a_plan : stats:StatisticalAnalysisPlan {
     stats:sample_set          = wrn:rescue_e84a_sampleset;
@@ -1507,189 +1511,571 @@ resource wrn:rescue_e84a_plan : stats:StatisticalAnalysisPlan {
     stats:variance_assumption = Pooled();
     stats:outlier_exclusion   = Identity();
 }
-resource wrn:rescue_e84a_plan_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:rescue_e84a_plan;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:rescue_e84a_plan_trace : prov:ProgramTrace {
+    prov:resource  = wrn:rescue_e84a_plan;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_rescue_wt : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_on_target_rescue_criterion;
-    reflection:rationale   = "If re-expressing WT WRN cDNA significantly raises sgWRN-EIJ viability above the GFP control (recomputed two-sample t-test P=2.4e-7), the cDNA rescues the depletion — the EIJ reagent spares the cDNA, so functional WRN is restored.";
+resource wrn:bridge_rescue_wt : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_on_target_rescue_criterion;
+    prov:rationale   = "If re-expressing WT WRN cDNA significantly raises sgWRN-EIJ viability above the GFP control (recomputed two-sample t-test P=2.4e-7), the cDNA rescues the depletion — the EIJ reagent spares the cDNA, so functional WRN is restored.";
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)
         ->
         onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
     );
 }
-resource wrn:bridge_rescue_wt_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_rescue_wt;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_on_target_rescue_criterion;
-    reflection:timestamp   = "2026-06-13T08:00:00Z";
+resource wrn:bridge_rescue_wt_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_rescue_wt;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_on_target_rescue_criterion;
+    prov:timestamp   = "2026-06-13T08:00:00Z";
 }
 
-resource wrn:bridge_rescue_e84a : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_exonuclease_dispensable_criterion;
-    reflection:rationale   = "If the exonuclease-dead (E84A) WRN cDNA significantly raises sgWRN-EIJ viability above the GFP control (recomputed two-sample t-test P=3.4e-6), it still rescues — the exonuclease activity is dispensable for the rescue.";
+resource wrn:bridge_rescue_e84a : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_exonuclease_dispensable_criterion;
+    prov:rationale   = "If the exonuclease-dead (E84A) WRN cDNA significantly raises sgWRN-EIJ viability above the GFP control (recomputed two-sample t-test P=3.4e-6), it still rescues — the exonuclease activity is dispensable for the rescue.";
     reflection:canonical_proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)
         ->
         onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
     );
 }
-resource wrn:bridge_rescue_e84a_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:bridge_rescue_e84a;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_exonuclease_dispensable_criterion;
-    reflection:timestamp   = "2026-06-13T08:00:00Z";
+resource wrn:bridge_rescue_e84a_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:bridge_rescue_e84a;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_exonuclease_dispensable_criterion;
+    prov:timestamp   = "2026-06-13T08:00:00Z";
 }
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource wrn:warrant_apoptosis_induction_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_apoptosis_induction_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:apoptosis-induction-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_apoptosis_induction_criterion";
 }
 
-resource wrn:warrant_apoptosis_induction_directionality : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_apoptosis_induction_directionality : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:apoptosis-induction-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_apoptosis_induction_directionality";
 }
 
-resource wrn:warrant_apoptosis_shrna_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_apoptosis_shrna_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:apoptosis-shrna-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_apoptosis_shrna_criterion";
 }
 
-resource wrn:warrant_biomarker_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_biomarker_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:biomarker-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_biomarker_criterion";
 }
 
-resource wrn:warrant_cellcycle_arrest_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_cellcycle_arrest_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:cellcycle-arrest-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_cellcycle_arrest_criterion";
 }
 
-resource wrn:warrant_cellcycle_arrest_directionality : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_cellcycle_arrest_directionality : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:cellcycle-arrest-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_cellcycle_arrest_directionality";
 }
 
-resource wrn:warrant_exonuclease_dispensable_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_exonuclease_dispensable_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:exonuclease-dispensable-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_exonuclease_dispensable_criterion";
 }
 
-resource wrn:warrant_lineage_mutator_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_lineage_mutator_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:lineage-mutator-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_lineage_mutator_criterion";
 }
 
-resource wrn:warrant_lineage_mutator_directionality : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_lineage_mutator_directionality : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:lineage-mutator-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_lineage_mutator_directionality";
 }
 
-resource wrn:warrant_mmr_restoration_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_mmr_restoration_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:mmr-restoration-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_mmr_restoration_criterion";
 }
 
-resource wrn:warrant_mmr_restoration_directionality : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_mmr_restoration_directionality : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:mmr-restoration-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_mmr_restoration_directionality";
 }
 
-resource wrn:warrant_mutator_load_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_mutator_load_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:mutator-load-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_mutator_load_criterion";
 }
 
-resource wrn:warrant_mutator_load_directionality : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_mutator_load_directionality : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:mutator-load-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_mutator_load_directionality";
 }
 
-resource wrn:warrant_nucleolar_delocalization_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_nucleolar_delocalization_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:nucleolar-delocalization-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_nucleolar_delocalization_criterion";
 }
 
-resource wrn:warrant_nucleolar_delocalization_directionality : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_nucleolar_delocalization_directionality : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:nucleolar-delocalization-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_nucleolar_delocalization_directionality";
 }
 
-resource wrn:warrant_on_target_rescue_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_on_target_rescue_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:on-target-rescue-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_on_target_rescue_criterion";
 }
 
-resource wrn:warrant_on_target_rescue_directionality : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_on_target_rescue_directionality : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:on-target-rescue-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_on_target_rescue_directionality";
 }
 
-resource wrn:warrant_p53_contribution_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_p53_contribution_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:p53-contribution-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_p53_contribution_criterion";
 }
 
-resource wrn:warrant_p53_contribution_directionality : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_p53_contribution_directionality : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:p53-contribution-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_p53_contribution_directionality";
 }
 
-resource wrn:warrant_recq_family_specificity : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_recq_family_specificity : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:recq-family-specificity`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_recq_family_specificity";
 }
 
-resource wrn:warrant_selective_essentiality_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_selective_essentiality_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:selective-essentiality-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_selective_essentiality_criterion";
 }
 
-resource wrn:warrant_selective_viability_criterion : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_selective_viability_criterion : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:selective-viability-criterion`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_selective_viability_criterion";
 }
 
-resource wrn:warrant_synthetic_lethal_directionality : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_synthetic_lethal_directionality : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:synthetic-lethal-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_synthetic_lethal_directionality";
 }
 
-resource wrn:warrant_viability_impairment_directionality : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_viability_impairment_directionality : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:viability-impairment-directionality`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_viability_impairment_directionality";
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Reproducibility declarations (P4)
+// ══════════════════════════════════════════════════════════════════════
+//
+// `App(Declared(plan), Observed(inputs))` needs BOTH witnesses, and the plan
+// half did not exist: a plan carried only the ProgramTrace of its run, which
+// mints `IsDerivedAs` — the family this phase deletes.
+//
+// What the composite needs is the assertion that the plan DENOTES A FUNCTION of
+// its input. No run record establishes that: determinism is an empirical fact
+// about the environment, not a property recoverable from having executed once.
+// So it is DECLARED, by an accountable agent.
+//
+// **Pinned at the input, not universally quantified over sample sets.** These
+// were first written as `forall s. Asserts(s) -> STAT(s)`, which reads as a
+// claim about the method and is the shape a universal wants. It is also FALSE:
+// it says every recorded sample set has the stated statistic, which is a claim
+// about data nobody has seen, not about the plan. The true claim is narrower —
+// applying THIS plan to THIS recorded input yields THIS statistic — so each
+// declaration pins its sample set. Nobody asserts a number in advance either
+// way; what the pinning gives up is one declaration serving many inputs, which
+// no chain here needed.
+//
+// One declaration per (plan, EFFECT), not per plan: `IsDeclaredAs` carries one
+// proposition per IRI, and a plan emitting two effects — `biomarker_plan` does —
+// is two functions. That is also the design's own reading of `Declared(f : I -> O)`.
+
+// The ground of the reproducibility declarations below. Distinct from the
+// paper's own warrants (`wrn:warrant_*_criterion`, minted by the D72
+// migration): those record why the AUTHORS asserted a criterion. This one
+// records why the recompute effort asserts that its analysis plans denote
+// functions — a claim about this chain's methods, not about the publication.
+resource wrn:warrant_plan_reproducibility : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Each analysis plan below pins its statistic, alpha, directionality, variance assumption and outlier rule, and runs deterministically over a content-hashed slice. Those together are what make the plan a function of its input rather than of the occasion — which is the claim `Declared(plan)` carries and which no execution record could establish on its own.";
+    core:short_name = "warrant_plan_reproducibility";
+}
+
+resource wrn:wrn_dep_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying wrn_dep_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.0)
+    );
+}
+resource wrn:wrn_dep_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:wrn_dep_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:mutator_load_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying mutator_load_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:mutator_load_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mutator_load_sampleset"), 0.0)
+    );
+}
+resource wrn:mutator_load_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:mutator_load_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:coloc_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying coloc_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:coloc_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:coloc_sampleset"), 0.0)
+    );
+}
+resource wrn:coloc_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:coloc_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:apop_shrna_KM12_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying apop_shrna_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"), 0.0)
+    );
+}
+resource wrn:apop_shrna_KM12_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:apop_shrna_KM12_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:hcr_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying hcr_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:hcr_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:hcr_sampleset"), 0.0)
+    );
+}
+resource wrn:hcr_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:hcr_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:wrn_recq_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying wrn_recq_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:wrn_recq_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_recq_sampleset"), 0.0)
+    );
+}
+resource wrn:wrn_recq_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:wrn_recq_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:biomarker_plan_yields_ppv : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying biomarker_plan to its recorded sample set yields that set's ppv. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset") -> stats:ge(stats:ppv("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.7)
+    );
+}
+resource wrn:biomarker_plan_yields_ppv_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:biomarker_plan_yields_ppv;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:biomarker_plan_yields_sensitivity : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying biomarker_plan to its recorded sample set yields that set's sensitivity. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset") -> stats:ge(stats:sensitivity("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.9)
+    );
+}
+resource wrn:biomarker_plan_yields_sensitivity_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:biomarker_plan_yields_sensitivity;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:p53_dep_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying p53_dep_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:p53_dep_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:p53_dep_sampleset"), 0.0)
+    );
+}
+resource wrn:p53_dep_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:p53_dep_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:viab_KM12_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying viab_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:viab_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)
+    );
+}
+resource wrn:viab_KM12_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:viab_KM12_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:viab_OVK18_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying viab_OVK18_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:viab_OVK18_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0)
+    );
+}
+resource wrn:viab_OVK18_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:viab_OVK18_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:cc_KM12_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying cc_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)
+    );
+}
+resource wrn:cc_KM12_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:cc_KM12_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:cc_SW48_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying cc_SW48_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)
+    );
+}
+resource wrn:cc_SW48_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:cc_SW48_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:cc_OVK18_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying cc_OVK18_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)
+    );
+}
+resource wrn:cc_OVK18_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:cc_OVK18_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:apop_KM12_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying apop_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)
+    );
+}
+resource wrn:apop_KM12_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:apop_KM12_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:apop_SW48_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying apop_SW48_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)
+    );
+}
+resource wrn:apop_SW48_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:apop_SW48_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:apop_OVK18_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying apop_OVK18_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)
+    );
+}
+resource wrn:apop_OVK18_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:apop_OVK18_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:mmr_rescue_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying mmr_rescue_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)
+    );
+}
+resource wrn:mmr_rescue_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:mmr_rescue_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:mmr_resens1_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying mmr_resens1_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)
+    );
+}
+resource wrn:mmr_resens1_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:mmr_resens1_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:mmr_resens2_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying mmr_resens2_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)
+    );
+}
+resource wrn:mmr_resens2_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:mmr_resens2_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:rescue_wt_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying rescue_wt_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:rescue_wt_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)
+    );
+}
+resource wrn:rescue_wt_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:rescue_wt_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:rescue_e84a_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying rescue_e84a_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:rescue_e84a_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)
+    );
+}
+resource wrn:rescue_e84a_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:rescue_e84a_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}
+
+resource wrn:wrn_corr_plan_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:rationale    = "Applying wrn_corr_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:pub:wrn:wrn_corr_sampleset") -> stats:lt(stats:spearman_rho("urn:eigenius:pub:wrn:wrn_corr_sampleset"), 0.0)
+    );
+}
+resource wrn:wrn_corr_plan_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = wrn:wrn_corr_plan_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = wrn:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-08-29T00:00:00Z";
+}

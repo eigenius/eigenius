@@ -9,7 +9,7 @@
 //   - `claim_eig0291_confirmatory_holds` — the n=6 confirmatory read.
 //     One-sided p ≪ 0.05, verifier produces Holds. Exercises the
 //     Holds success path AND is what the D39 composition fixture
-//     cites via `DerivedEvidence(...)`.
+//     grounds against, via this file's plan-reproducibility declaration.
 //
 // Verdict-as-DerivedResource shape (post-step-1 / institution-surface
 // revision):
@@ -28,9 +28,10 @@
 //   - The `StatisticalAnalysisResult` derivation that carries the
 //     verifier-emitted `canonical_proposition` is pre-authored for
 //     the confirmatory SAP at IRI
-//     `{plan_iri}:result:main_effect`. Without it, downstream D39
-//     reasoning citing `DerivedEvidence(...)` couldn't admit a
-//     witness via the chain index. (Tests that DISPATCH the verifier
+//     `{plan_iri}:result:main_effect`. It grounds nothing on its own —
+//     see the plan-reproducibility declarations at the end of this
+//     file — but it is the record of what the statistic came to, and
+//     what the plan declaration is written against. (Tests that DISPATCH the verifier
 //     see the institution emit its own SAR in-test, separate from
 //     this pre-authored chain artefact.)
 //   - No ProgramTrace. The SAR's `is_a` membership in
@@ -52,7 +53,24 @@ namespace screen     = "urn:eigenius:demo:screen";
 // scheme (see `crates/eigenius-statistics/src/validate.rs`).
 namespace screen_confirmatory_result =
     "urn:eigenius:demo:screen:claim_eig0291_confirmatory_holds:result";
-namespace agent = "urn:eigenius:reflection:agent";
+namespace agent = "urn:eigenius:prov:agent";
+namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
+
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource screen:act_kinase_glo_plate_2026_03_04_a1 : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    core:short_name = "act_kinase_glo_plate_2026_03_04_a1";
+}
+resource screen:act_kinase_glo_plate_2026_03_11_confirmatory : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-11-confirmatory";
+    core:short_name = "act_kinase_glo_plate_2026_03_11_confirmatory";
+}
+
 
 // ─── Domain predicate (with PopulationLevel scope marker, §7.4) ────
 
@@ -62,16 +80,16 @@ data screen:HasLowIC50 : core:string -> Prop, stats:PopulationLevel {
 // ─── Impossibility witness for the one-sided directionality ────────
 
 resource screen:witness_kinaseglo_floor : stats:ImpossibilityWitness {
-    reflection:declared_by  = agent:eigenius_core_team;
-    reflection:warranted_by = screen:warrant_methodology_kinase_glo_emax_floor;
-    reflection:rationale   = "Kinase-Glo's E_max plateau and the cell-free target panel jointly exclude the inverse direction: mean IC50 cannot biologically be above the assay-class threshold under this protocol. Licenses the one-sided p-value path.";
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_methodology_kinase_glo_emax_floor;
+    prov:rationale   = "Kinase-Glo's E_max plateau and the cell-free target panel jointly exclude the inverse direction: mean IC50 cannot biologically be above the assay-class threshold under this protocol. Licenses the one-sided p-value path.";
 }
 
 // ─── SampleSet: 3 IC50 replicate readings of EIG_0291 (screening) ──
 
 resource screen:m_eig0291_sampleset : stats:SampleSetResource {
-    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-04-A1";
-    reflection:observed_at = "2026-03-04T14:22:11Z";
+    prov:was_generated_by      = screen:act_kinase_glo_plate_2026_03_04_a1;
+    prov:observed_at = "2026-03-04T14:22:11Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
         [72.0, 85.0, 100.0],
@@ -79,10 +97,10 @@ resource screen:m_eig0291_sampleset : stats:SampleSetResource {
     );
 }
 
-resource screen:m_eig0291_trace : reflection:ObservationTrace {
-    reflection:resource  = screen:m_eig0291_sampleset;
-    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-04-A1";
-    reflection:timestamp = "2026-03-04T14:22:11Z";
+resource screen:m_eig0291_trace : prov:ObservationTrace {
+    prov:resource  = screen:m_eig0291_sampleset;
+    prov:was_generated_by    = screen:act_kinase_glo_plate_2026_03_04_a1;
+    prov:timestamp = "2026-03-04T14:22:11Z";
 }
 
 // ─── Screening SAP ──────────────────────────────────────────────────
@@ -114,8 +132,8 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
 // the hypothesis; the n=6 confirmatory run supports it.
 
 resource screen:m_eig0291_confirmatory_sampleset : stats:SampleSetResource {
-    reflection:source      = "instrument-log:kinase-glo-plate-2026-03-11-confirmatory";
-    reflection:observed_at = "2026-03-11T10:18:42Z";
+    prov:was_generated_by      = screen:act_kinase_glo_plate_2026_03_11_confirmatory;
+    prov:observed_at = "2026-03-11T10:18:42Z";
 
     stats:sample_set_value = stats:SingleSampleEstimate(
         [78.0, 82.0, 85.0, 88.0, 91.0, 86.0],
@@ -123,10 +141,10 @@ resource screen:m_eig0291_confirmatory_sampleset : stats:SampleSetResource {
     );
 }
 
-resource screen:m_eig0291_confirmatory_trace : reflection:ObservationTrace {
-    reflection:resource  = screen:m_eig0291_confirmatory_sampleset;
-    reflection:source    = "instrument-log:kinase-glo-plate-2026-03-11-confirmatory";
-    reflection:timestamp = "2026-03-11T10:18:42Z";
+resource screen:m_eig0291_confirmatory_trace : prov:ObservationTrace {
+    prov:resource  = screen:m_eig0291_confirmatory_sampleset;
+    prov:was_generated_by    = screen:act_kinase_glo_plate_2026_03_11_confirmatory;
+    prov:timestamp = "2026-03-11T10:18:42Z";
 }
 
 // ─── The Holds-producing confirmatory SAP ──────────────────────────
@@ -157,8 +175,7 @@ resource screen:claim_eig0291_confirmatory_holds : stats:StatisticalAnalysisPlan
 
 resource screen_confirmatory_result:main_effect :
     stats:StatisticalAnalysisResult,
-    reflection:InstitutionEmittedDerivation,
-    reflection:DerivedResource
+    reflection:InstitutionEmittedDerivation
 {
     reflection:from_subject          = screen:claim_eig0291_confirmatory_holds;
     stats:verdict_ctor               = "Holds";
@@ -176,9 +193,42 @@ resource screen_confirmatory_result:main_effect :
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource screen:warrant_methodology_kinase_glo_emax_floor : reflection:DeclaredResource {
-    reflection:declared_by = agent:eigenius_core_team;
+resource screen:warrant_methodology_kinase_glo_emax_floor : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
     core:description = "Warrant stub for `methodology:kinase-glo-emax-floor`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_methodology_kinase_glo_emax_floor";
 }
 
+// ─── The plans' reproducibility declarations ───────────────────────
+//
+// A `StatisticalAnalysisResult` records that a computation ran. That is
+// provenance and it grounds nothing: a computed claim rests on the assertion
+// that the PLAN denotes a function of its input — which no execution
+// establishes, since determinism is a fact about the environment rather than
+// something recoverable from having run once — and on the INPUT, which each
+// SampleSet's ObservationTrace already attests. So a computed ground is
+// `App(Declared(plan_yields_effect), Observed(sampleset))`, and these are the
+// declared halves.
+
+resource screen:warrant_plan_reproducibility : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Each analysis plan below pins its statistic, alpha, directionality, variance assumption and outlier rule over a recorded sample set. Those together are what make a plan a function of its input rather than of the occasion — the claim `Declared(plan)` carries, and the one no execution record could establish on its own.";
+    core:short_name = "warrant_plan_reproducibility";
+}
+
+resource screen:claim_eig0291_confirmatory_holds_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_plan_reproducibility;
+    prov:rationale    = "Applying claim_eig0291_confirmatory_holds to the confirmatory sample set yields its main_effect: the one-sample t-test against the 100 nM threshold. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset")
+        -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"), 100.0)
+    );
+}
+
+resource screen:claim_eig0291_confirmatory_holds_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = screen:claim_eig0291_confirmatory_holds_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-04-10T09:00:00Z";
+}

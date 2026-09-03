@@ -44,8 +44,7 @@ const DEMO: &str = include_str!("../../experiments/lexicon/lexicon.esl");
 /// top — so the index sees the committed determiners *and* the demo content.
 fn index_over_bootstrap() -> (Arc<Layer>, Parser) {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let resources =
-        esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles on bootstrap");
+    let resources = esl::compile(DEMO, ctx.head()).expect("demo compiles on bootstrap");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in resources {
         b.add_resource(r).expect("add demo resource");
@@ -65,7 +64,6 @@ fn index_over_bootstrap() -> (Arc<Layer>, Parser) {
 fn linking_verb_takes_a_predicative_adjective() {
     const LINKING_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 axiom lexicon:remain_test : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
 resource lexicon:remained_e : lexicon:LexicalEntry {
     lexicon:form     = "remained";
@@ -73,18 +71,16 @@ resource lexicon:remained_e : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:remain_test;
     lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop );
     lexicon:sense    = "remain";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix =
-        esl::compile_against_layer(LINKING_FIXTURE, &demo_layer).expect("linking fixture compiles");
+    let fix = esl::compile(LINKING_FIXTURE, &demo_layer).expect("linking fixture compiles");
     let mut b2 = LayerBuilder::new("linking", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add linking");
@@ -113,7 +109,6 @@ resource lexicon:remained_e : lexicon:LexicalEntry {
 /// seeds, so a sentence needs widen-on-failure to reach rank-1. (Both gate like a proper name.)
 const ZOB_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:zob_pl : lexicon:LexicalEntry {
     lexicon:form       = "zob";
     lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:pl) );
@@ -121,7 +116,6 @@ resource lexicon:zob_pl : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:Gene );
     lexicon:sense      = "zob.0";
     lexicon:sense_rank = 0;
-    lexicon:grade      = epistemic:declared;
 }
 resource lexicon:zob_sg : lexicon:LexicalEntry {
     lexicon:form       = "zob";
@@ -130,20 +124,19 @@ resource lexicon:zob_sg : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:Gene );
     lexicon:sense      = "zob.1";
     lexicon:sense_rank = 1;
-    lexicon:grade      = epistemic:declared;
 }
 "#;
 
 /// Bootstrap + demo + the two-sense `zob` fixture, with an index carrying `sense_cap`.
 fn zob_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix = esl::compile_against_layer(ZOB_FIXTURE, &demo_layer).expect("zob fixture compiles");
+    let fix = esl::compile(ZOB_FIXTURE, &demo_layer).expect("zob fixture compiles");
     let mut b2 = LayerBuilder::new("zob", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add zob");
@@ -161,7 +154,6 @@ fn index_with_zob(cap: usize) -> Parser {
 /// genuinely diverge from static, forcing the failure that widen-on-failure must then recover.
 const ZWORP_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:zworp_sg : lexicon:LexicalEntry {
     lexicon:form       = "zworp";
     lexicon:cat        = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:sg) );
@@ -169,7 +161,6 @@ resource lexicon:zworp_sg : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:CellLine );
     lexicon:sense      = "zworp.0";
     lexicon:sense_rank = 0;
-    lexicon:grade      = epistemic:declared;
 }
 resource lexicon:zworp_pl : lexicon:LexicalEntry {
     lexicon:form       = "zworp";
@@ -178,20 +169,18 @@ resource lexicon:zworp_pl : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:Gene );
     lexicon:sense      = "zworp.1";
     lexicon:sense_rank = 1;
-    lexicon:grade      = epistemic:declared;
 }
 "#;
 
 fn zworp_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix =
-        esl::compile_against_layer(ZWORP_FIXTURE, &demo_layer).expect("zworp fixture compiles");
+    let fix = esl::compile(ZWORP_FIXTURE, &demo_layer).expect("zworp fixture compiles");
     let mut b2 = LayerBuilder::new("zworp", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add zworp");
@@ -283,7 +272,7 @@ impl SenseRanker for BurySense {
 /// top-16 is positions 0–15) — so cap-widening WITHIN the reranked order can never re-admit it.
 fn zib_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
@@ -291,7 +280,6 @@ fn zib_layer() -> Arc<Layer> {
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
     let mut fixture = String::from(
         "namespace lexicon   = \"urn:eigenius:lexicon\";\n\
-         namespace epistemic = \"urn:eigenius:reflection:epistemic\";\n\
          resource lexicon:zib_needed : lexicon:LexicalEntry {\n\
              lexicon:form       = \"zib\";\n\
              lexicon:cat        = type_expr( lexicon:cat_np(lexicon:CellLine, lexicon:sg) );\n\
@@ -299,7 +287,6 @@ fn zib_layer() -> Arc<Layer> {
              lexicon:sem_type   = type_expr( lexicon:CellLine );\n\
              lexicon:sense      = \"zib.needed\";\n\
              lexicon:sense_rank = 0;\n\
-             lexicon:grade      = epistemic:declared;\n\
          }\n",
     );
     for i in 1..=16 {
@@ -311,11 +298,10 @@ fn zib_layer() -> Arc<Layer> {
                  lexicon:sem_type   = type_expr( lexicon:Gene );\n\
                  lexicon:sense      = \"zib.d{i}\";\n\
                  lexicon:sense_rank = {i};\n\
-                 lexicon:grade      = epistemic:declared;\n\
              }}\n"
         ));
     }
-    let fix = esl::compile_against_layer(&fixture, &demo_layer).expect("zib fixture compiles");
+    let fix = esl::compile(&fixture, &demo_layer).expect("zib fixture compiles");
     let mut b2 = LayerBuilder::new("zib", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add zib");
@@ -361,7 +347,6 @@ fn static_rank_fallback_recovers_a_sense_the_reranker_buried_beyond_widen_max() 
 /// the static cap keeps rank-0 (BRCA1); a reranker preferring `zarg.1` makes the cap keep HeLa.
 const ZARG_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:zarg_gene : lexicon:LexicalEntry {
     lexicon:form       = "zarg";
     lexicon:cat        = type_expr( lexicon:cat_np(lexicon:Gene, lexicon:sg) );
@@ -369,7 +354,6 @@ resource lexicon:zarg_gene : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:Gene );
     lexicon:sense      = "zarg.0";
     lexicon:sense_rank = 0;
-    lexicon:grade      = epistemic:declared;
 }
 resource lexicon:zarg_cell : lexicon:LexicalEntry {
     lexicon:form       = "zarg";
@@ -378,20 +362,19 @@ resource lexicon:zarg_cell : lexicon:LexicalEntry {
     lexicon:sem_type   = type_expr( lexicon:CellLine );
     lexicon:sense      = "zarg.1";
     lexicon:sense_rank = 1;
-    lexicon:grade      = epistemic:declared;
 }
 "#;
 
 /// Bootstrap + demo + the two-sense `zarg` fixture committed as a layer chain.
 fn zarg_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix = esl::compile_against_layer(ZARG_FIXTURE, &demo_layer).expect("zarg fixture compiles");
+    let fix = esl::compile(ZARG_FIXTURE, &demo_layer).expect("zarg fixture compiles");
     let mut b2 = LayerBuilder::new("zarg", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add zarg");
@@ -575,7 +558,6 @@ fn derived_adjective_recognition_requires_a_known_base() {
 /// token could wrongly take the Slice-1 identity reading if the over-generation fix regressed.
 const DENOMINAL_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 axiom lexicon:base_rel : lexicon:Entity -> lexicon:Entity -> Prop
 resource lexicon:e_base : lexicon:LexicalEntry {
     lexicon:form     = "base";
@@ -583,7 +565,6 @@ resource lexicon:e_base : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:base_rel;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:base.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 axiom lexicon:resemble_rel : lexicon:Entity -> lexicon:Entity -> Prop
 resource lexicon:e_resemble : lexicon:LexicalEntry {
@@ -592,7 +573,6 @@ resource lexicon:e_resemble : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:resemble_rel;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:resemble.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 axiom lexicon:like_adj : lexicon:Entity -> Prop
 resource lexicon:e_like : lexicon:LexicalEntry {
@@ -601,20 +581,18 @@ resource lexicon:e_like : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:like_adj;
     lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
     lexicon:sense    = "wn:like.a.01";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
 fn denominal_index() -> Parser {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix = esl::compile_against_layer(DENOMINAL_FIXTURE, &demo_layer)
-        .expect("denominal fixture compiles");
+    let fix = esl::compile(DENOMINAL_FIXTURE, &demo_layer).expect("denominal fixture compiles");
     let mut b2 = LayerBuilder::new("denominal", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add denominal relation");
@@ -929,7 +907,6 @@ fn close_apposition_subject_and_object() {
 /// subsumption (`WidgetConcept ≤ WidgetKind`), which the one-directional `group ≤ head` gate could not.
 const WIDGET_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace demo      = "urn:eigenius:demo";
 class demo:WidgetKind : lexicon:Entity { }
 class demo:WidgetConcept : demo:WidgetKind { }
@@ -941,7 +918,6 @@ resource lexicon:e_widget : lexicon:LexicalEntry {
     lexicon:sem      = demo:WidgetConcept;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "demo:widget";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_wob : lexicon:LexicalEntry {
     lexicon:form     = "Wob";
@@ -949,7 +925,6 @@ resource lexicon:e_wob : lexicon:LexicalEntry {
     lexicon:sem      = demo:wob;
     lexicon:sem_type = type_expr( demo:WidgetKind );
     lexicon:sense    = "demo:wob";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:e_bit : lexicon:LexicalEntry {
     lexicon:form     = "Bit";
@@ -957,20 +932,18 @@ resource lexicon:e_bit : lexicon:LexicalEntry {
     lexicon:sem      = demo:bit;
     lexicon:sem_type = type_expr( demo:WidgetKind );
     lexicon:sense    = "demo:bit";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
 fn widget_index() -> Parser {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix =
-        esl::compile_against_layer(WIDGET_FIXTURE, &demo_layer).expect("widget fixture compiles");
+    let fix = esl::compile(WIDGET_FIXTURE, &demo_layer).expect("widget fixture compiles");
     let mut b2 = LayerBuilder::new("widget", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add widget");
@@ -1031,13 +1004,12 @@ resource lexicon:beside_prep : lexicon:LexicalEntry {
     lexicon:sense       = "beside";
     lexicon:sense_rank  = 5;
     lexicon:in_lexicon  = lexicon:extra_lex;
-    lexicon:grade       = epistemic:declared;
 }
 "#;
 
 fn parser_with_pied_prep() -> Parser {
     let (demo, _) = index_over_bootstrap();
-    let res = esl::compile_against_layer(PIED_PREP_FIXTURE, &demo).expect("fixture compiles");
+    let res = esl::compile(PIED_PREP_FIXTURE, &demo).expect("fixture compiles");
     let mut b = LayerBuilder::new("pied-prep", Some(Arc::clone(&demo)));
     for r in res {
         b.add_resource(r).expect("add fixture resource");
@@ -2614,7 +2586,6 @@ fn resolve_open_substitutes_an_antecedent_and_re_gates() {
 // the Entity-typed pronoun holes cannot express.
 const DEMONSTRATIVE_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace core      = "urn:eigenius:core";
 
 // A SUBCLASS level under CellLine, for the re-gate subsumption probe: does the veto accept an
@@ -2636,7 +2607,6 @@ resource lexicon:yonder_subj : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:dem_ref_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "yonder";
-    lexicon:grade    = epistemic:declared;
 }
 resource lexicon:yonder_obj : lexicon:LexicalEntry {
     core:description = "grammatical: test demonstrative determiner (object, sg).";
@@ -2645,7 +2615,6 @@ resource lexicon:yonder_obj : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:dem_ref_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "yonder";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -2656,7 +2625,6 @@ resource lexicon:yonder_obj : lexicon:LexicalEntry {
 /// assert `closed.is_empty()`).
 const POOLED_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace core      = "urn:eigenius:core";
 resource lexicon:yonder_ne : lexicon:LexicalEntry {
     core:description = "test: named-entity reading of the demonstrative span (pooled-competition probe).";
@@ -2665,14 +2633,12 @@ resource lexicon:yonder_ne : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:hela_s3;
     lexicon:sem_type = type_expr( lexicon:HeLaSubline );
     lexicon:sense    = "urn:eigenius:lexicon:hela_s3";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
 fn index_with_pooled_fixture() -> (Arc<Layer>, Parser) {
     let (base, _) = index_with_demonstratives();
-    let resources =
-        esl::compile_against_layer(POOLED_FIXTURE, &base).expect("pooled fixture compiles");
+    let resources = esl::compile(POOLED_FIXTURE, &base).expect("pooled fixture compiles");
     let mut b = LayerBuilder::new("pooled-fixture", Some(base));
     for r in resources {
         b.add_resource(r).expect("add pooled resource");
@@ -2697,8 +2663,7 @@ class lexicon:TestOther {
 
 fn index_with_claim_kinds() -> (Arc<Layer>, Parser) {
     let (base, _) = index_with_demonstratives();
-    let resources =
-        esl::compile_against_layer(CLAIM_KIND_FIXTURE, &base).expect("claim-kind fixture compiles");
+    let resources = esl::compile(CLAIM_KIND_FIXTURE, &base).expect("claim-kind fixture compiles");
     let mut b = LayerBuilder::new("claim-kind-fixture", Some(base));
     for r in resources {
         b.add_resource(r).expect("add claim-kind resource");
@@ -2861,8 +2826,8 @@ fn a_plural_reference_resolves_distributively_to_a_claim_set() {
 
 fn index_with_demonstratives() -> (Arc<Layer>, Parser) {
     let (base, _) = index_over_bootstrap();
-    let resources = esl::compile_against_layer(DEMONSTRATIVE_FIXTURE, &base)
-        .expect("demonstrative fixture compiles");
+    let resources =
+        esl::compile(DEMONSTRATIVE_FIXTURE, &base).expect("demonstrative fixture compiles");
     let mut b = LayerBuilder::new("dem-fixture", Some(base));
     for r in resources {
         b.add_resource(r).expect("add fixture resource");
@@ -3429,7 +3394,6 @@ fn document_only_augmentation_harvests_bindings_and_flags_oov() {
 /// BM25 index can). The form `core:TextIndex` comes from the lexicon ontology (one per property), not here.
 const RECQ_FORM_INDEX_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 class lexicon:RecqHelicases : lexicon:Entity {
     description = "The RecQ helicase family (test concept, mirrors UMLS C0084304).";
 }
@@ -3438,7 +3402,6 @@ resource lexicon:e_recq_family : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_n(lexicon:RecqHelicases, lexicon:num_any) );
     lexicon:sem      = lexicon:RecqHelicases;
     lexicon:sem_type = type_expr( Set );
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -3452,14 +3415,13 @@ fn lexicon_backed_augmentation_grounds_oov_via_the_form_text_index() {
     // One shared storage across the chain so the bootstrap's `form_text_index` (discovered via the
     // per-storage triple index) is visible to the recq layer — as in production's single backend.
     let storage = ctx.head().storage().clone();
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(storage.clone()));
-    let fix = esl::compile_against_layer(RECQ_FORM_INDEX_FIXTURE, &demo_layer)
-        .expect("recq fixture compiles");
+    let fix = esl::compile(RECQ_FORM_INDEX_FIXTURE, &demo_layer).expect("recq fixture compiles");
     let mut b2 = LayerBuilder::new("recq", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add recq fixture");
@@ -3511,14 +3473,13 @@ fn probe_recq_form_index_active_and_populated() {
     // layer built on the same storage. This mirrors production, where a chain lives on a single
     // backend; a per-layer `LayerStorage::in_memory()` would hide the inherited index.
     let storage = ctx.head().storage().clone();
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(storage.clone()));
-    let fix = esl::compile_against_layer(RECQ_FORM_INDEX_FIXTURE, &demo_layer)
-        .expect("recq fixture compiles");
+    let fix = esl::compile(RECQ_FORM_INDEX_FIXTURE, &demo_layer).expect("recq fixture compiles");
     let mut b2 = LayerBuilder::new("recq", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add recq fixture");
@@ -3567,7 +3528,6 @@ fn probe_recq_form_index_active_and_populated() {
 const DESCRIPTION_GROUNDING_FIXTURE: &str = r#"
 namespace demo      = "urn:eigenius:demo";
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 class demo:Gyrase : lexicon:Entity {
     description = "a bacterial topoisomerase enzyme that supercoils chromosomal dna in living cells";
 }
@@ -3577,7 +3537,6 @@ resource demo:e_supercoil : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = demo:v_supercoil;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
@@ -3586,13 +3545,13 @@ resource demo:e_supercoil : lexicon:LexicalEntry {
 fn description_grounding_base() -> Arc<eigenius_kernel::layer::Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
     let storage = ctx.head().storage().clone();
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(storage.clone()));
-    let fix = esl::compile_against_layer(DESCRIPTION_GROUNDING_FIXTURE, &demo_layer)
+    let fix = esl::compile(DESCRIPTION_GROUNDING_FIXTURE, &demo_layer)
         .expect("description fixture compiles");
     let mut b2 = LayerBuilder::new("fixture", Some(Arc::clone(&demo_layer)));
     for r in fix {
@@ -3680,8 +3639,11 @@ fn lexicon_backed_augmentation_grounds_verb_oov_to_axiom_with_verb_cat() {
     );
     assert_eq!(
         g.proposed.get(&sem_prop),
-        Some(&eigenius_kernel::ontology::resource::Value::ResourceRef(
-            Iri::parse("urn:eigenius:demo:v_supercoil").unwrap()
+        Some(&eigenius_kernel::ontology::resource::Value::String(
+            Iri::parse("urn:eigenius:demo:v_supercoil")
+                .unwrap()
+                .as_str()
+                .to_string()
         )),
         "minted verb entry's sem IS the axiom"
     );
@@ -3794,27 +3756,24 @@ fn non_pp_verb_rejects_a_pp_complement() {
 /// PP-oblique WordNet frames). `prep_any` (the preposition-agnostic verb frame) accepts any marker.
 const CONTRIB_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 resource lexicon:e_contributes : lexicon:LexicalEntry {
     lexicon:form     = "contributes";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:cat_pp_arg(lexicon:prep_any)) );
     lexicon:sem      = lexicon:affects;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:contribute.v.01";
-    lexicon:grade    = epistemic:declared;
 }
 "#;
 
 fn contrib_layer() -> Arc<Layer> {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let demo = esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles");
+    let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix =
-        esl::compile_against_layer(CONTRIB_FIXTURE, &demo_layer).expect("contrib fixture compiles");
+    let fix = esl::compile(CONTRIB_FIXTURE, &demo_layer).expect("contrib fixture compiles");
     let mut b2 = LayerBuilder::new("contrib", Some(Arc::clone(&demo_layer)));
     for r in fix {
         b2.add_resource(r).expect("add contrib");
@@ -5427,8 +5386,7 @@ fn nary_coordination_has_a_single_left_branching_parse() {
 /// index itself (its laziness / coverage) rather than on a parse.
 fn shared_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let resources =
-        esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles on bootstrap");
+    let resources = esl::compile(DEMO, ctx.head()).expect("demo compiles on bootstrap");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in resources {
         b.add_resource(r).expect("add demo resource");
@@ -5441,8 +5399,7 @@ fn shared_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
 /// Same, on ISOLATED storage (so no `ValueIndex` is active and the index takes the eager path).
 fn eager_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
     let ctx = bootstrap::bootstrap().expect("bootstrap");
-    let resources =
-        esl::compile_against_layer(DEMO, ctx.head()).expect("demo compiles on bootstrap");
+    let resources = esl::compile(DEMO, ctx.head()).expect("demo compiles on bootstrap");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in resources {
         b.add_resource(r).expect("add demo resource");
@@ -5511,7 +5468,7 @@ fn lazy_index_is_lazy_and_matches_eager() {
 
 // ── D63 Phase 1 — abbreviation-injection lever (document-preprocessing) ─────────
 fn layer_on(parent: &Arc<Layer>, name: &str, src: &str) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(src, parent).expect("fixture compiles");
+    let resources = esl::compile(src, parent).expect("fixture compiles");
     let mut b = LayerBuilder::new(name, Some(Arc::clone(parent)));
     for r in resources {
         b.add_resource(r).expect("add fixture resource");

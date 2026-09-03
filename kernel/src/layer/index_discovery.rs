@@ -122,8 +122,7 @@ mod vec_defaults {
 // ---------------- Property-value extraction helpers ----------------
 
 /// Read an IRI-valued slot from a Resource. Returns `Some(iri)` iff
-/// the Resource has the property and the value resolves to an IRI
-/// (canonical `ResourceRef` form or the pre-canonical string form).
+/// the Resource has the property and the value resolves to an IRI.
 ///
 /// Uses `Layer::resolve` (not `get_resource`) so that Resources
 /// defined in ancestor layers are visible — the Index Resource
@@ -132,7 +131,7 @@ fn read_iri(layer: &Layer, resource_iri: &Iri, property_iri: &str) -> Option<Iri
     let resource = layer.resolve(resource_iri)?;
     let prop = Iri::parse(property_iri).ok()?;
     let value = resource.get(&prop)?;
-    let iri_str = value.as_iri_str()?;
+    let iri_str = value.as_str()?;
     Iri::parse(iri_str).ok()
 }
 
@@ -512,7 +511,7 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+            Value::Array(vec![Value::iri(&iri(class_iri))]),
         );
         for (k, v) in props {
             r.set(iri(k), v);
@@ -553,7 +552,7 @@ mod tests {
             vec![
                 (
                     "urn:eigenius:core:target_property",
-                    Value::ResourceRef(iri("urn:ex:prop_a")),
+                    Value::iri(&iri("urn:ex:prop_a")),
                 ),
                 (
                     "urn:eigenius:core:text_analyzer",
@@ -568,7 +567,7 @@ mod tests {
             vec![
                 (
                     "urn:eigenius:core:target_property",
-                    Value::ResourceRef(iri("urn:ex:prop_b")),
+                    Value::iri(&iri("urn:ex:prop_b")),
                 ),
                 (
                     "urn:eigenius:core:text_analyzer",
@@ -603,7 +602,7 @@ mod tests {
             "urn:eigenius:core:TextIndex",
             vec![(
                 "urn:eigenius:core:target_property",
-                Value::ResourceRef(iri("urn:ex:prop")),
+                Value::iri(&iri("urn:ex:prop")),
             )],
         ))
         .unwrap();
@@ -625,11 +624,11 @@ mod tests {
             vec![
                 (
                     "urn:eigenius:core:target_property",
-                    Value::ResourceRef(iri("urn:ex:prop")),
+                    Value::iri(&iri("urn:ex:prop")),
                 ),
                 (
                     "urn:eigenius:core:vec_model",
-                    Value::ResourceRef(iri("urn:ex:model")),
+                    Value::iri(&iri("urn:ex:model")),
                 ),
                 ("urn:eigenius:core:vec_dim", Value::Integer(256)),
             ],
@@ -668,7 +667,7 @@ mod tests {
             vec![
                 (
                     "urn:eigenius:core:target_property",
-                    Value::ResourceRef(iri("urn:ex:prop")),
+                    Value::iri(&iri("urn:ex:prop")),
                 ),
                 ("urn:eigenius:core:vec_dim", Value::Integer(256)),
             ],
@@ -692,7 +691,7 @@ mod tests {
                 vec![
                     (
                         "urn:eigenius:core:target_property",
-                        Value::ResourceRef(iri("urn:ex:shared_prop")),
+                        Value::iri(&iri("urn:ex:shared_prop")),
                     ),
                     (
                         "urn:eigenius:core:text_analyzer",
@@ -724,7 +723,7 @@ mod tests {
                 vec![
                     (
                         "urn:eigenius:core:target_property",
-                        Value::ResourceRef(iri("urn:ex:prop_v1")),
+                        Value::iri(&iri("urn:ex:prop_v1")),
                     ),
                     (
                         "urn:eigenius:core:text_analyzer",
@@ -743,7 +742,7 @@ mod tests {
                 vec![
                     (
                         "urn:eigenius:core:target_property",
-                        Value::ResourceRef(iri("urn:ex:prop_v2")),
+                        Value::iri(&iri("urn:ex:prop_v2")),
                     ),
                     (
                         "urn:eigenius:core:text_analyzer",
@@ -776,13 +775,12 @@ mod tests {
         let mut vi = Resource::new(iri(iri_str));
         vi.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_property)),
-        );
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_property)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         builder.add_resource(vi).unwrap();
     }
@@ -791,7 +789,9 @@ mod tests {
         let mut r = Resource::new(iri(iri_str));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri("urn:ex:Document"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:ex:Document").as_str().to_string(),
+            )]),
         );
         r.set(iri(prop), Value::String(value.into()));
         builder.add_resource(r).unwrap();

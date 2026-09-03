@@ -35,35 +35,26 @@ pub enum Value {
     Float(f64),
     /// Boolean true/false.
     Boolean(bool),
-    /// Reference to another resource by IRI.
-    ResourceRef(Iri),
     /// Embedded resource (no `@id`).
     Embedded(Box<Resource>),
     /// Ordered array of values (resource_array or value_array).
     Array(Vec<Value>),
     /// Opaque JSON value, not validated by the ontology.
     Json(serde_json::Value),
-    /// D43 §4.1 — typed embedding vector produced by the `EMBED`
-    /// primitive (M4). Carries the Embedder Component IRI it was
-    /// produced by; dimensionality is `data.len()`. Vector values are
-    /// **transient compute values**, not chain resources: they flow
-    /// from `EMBED` into `VECTOR_NEAR` / `VECTOR_SIM` within a single
-    /// query and do not survive to canonical CBOR or persisted Eigon-
-    /// JSON (serialising one fails with a clear diagnostic — the
-    /// chain stores vectors as `vec_seg:<I>:<L>` blobs per §2.4, not
-    /// as inline property values).
-    Vector {
-        /// IRI of the Embedder Component that produced this vector.
-        /// Used by `VECTOR_NEAR` / `VECTOR_SIM` typecheck (D43 §4.5)
-        /// to verify model agreement against the queried property's
-        /// active VectorIndex.
-        model_iri: Iri,
-        /// Packed `f32` vector data; `len()` is the dimensionality.
-        data: Vec<f32>,
-    },
 }
 
 impl Value {
+    /// A value that REFERENCES a resource, from a parsed IRI.
+    ///
+    /// A reference is a string — the shape both codecs produce and both preserve. This
+    /// constructor exists so that intent is visible where a resource is built in Rust with an
+    /// `Iri` already in hand, which is the one thing the retired `Value::ResourceRef` variant
+    /// was genuinely good for. It differs from that variant in the way that matters: it makes
+    /// no claim a reader could depend on, because the result is an ordinary `Value::String`.
+    pub fn iri(i: &Iri) -> Value {
+        Value::String(i.as_str().to_string())
+    }
+
     /// Returns the value as a string, if it is one.
     pub fn as_str(&self) -> Option<&str> {
         match self {
@@ -96,50 +87,18 @@ impl Value {
         }
     }
 
-    /// Returns the value as a resource reference IRI, if it is one.
-    pub fn as_resource_ref(&self) -> Option<&Iri> {
-        match self {
-            Value::ResourceRef(iri) => Some(iri),
-            _ => None,
-        }
-    }
-
-    /// Read the IRI text from any value that could represent an IRI:
-    /// `Value::ResourceRef(iri)` (the canonical post-
-    /// `canonicalise_resource_refs` shape) or `Value::String(s)` (the
-    /// freshly-parsed pre-canonicalisation shape). Returns `None` for
-    /// anything else.
+    /// The value as a parsed IRI. `None` when it is not a string, or not a valid IRI.
     ///
-    /// Use this — not `as_str` — from any reader that walks
-    /// resource-typed property values (`is_a`, `subclass_of`,
-    /// `requires`, `class_types`, etc.). `as_str` silently drops
-    /// `ResourceRef` values because they aren't strings, which
-    /// produced an entirely-empty topology graph for canonicalised
-    /// chains until this method was added.
-    pub fn as_iri_str(&self) -> Option<&str> {
-        match self {
-            Value::String(s) => Some(s),
-            Value::ResourceRef(iri) => Some(iri.as_str()),
-            _ => None,
-        }
-    }
-
-    /// Read the value as an IRI reference, accepting both
-    /// `ResourceRef` (the canonical post-`canonicalise_resource_refs`
-    /// shape) and `String` (the parse-time shape from
-    /// schema-agnostic Eigon-JSON parsing). Returns `None` when the
-    /// value is neither, or when a `String` value can't be parsed
-    /// as a valid IRI.
+    /// A reference is a string that parses; whether it is *meant* as a reference is the
+    /// property's `data_type`, which this method does not consult and its callers do.
     ///
-    /// Use this from any reader that needs an IRI off a
-    /// resource-typed property and may run against either
-    /// freshly-parsed or chain-canonicalised resources (RPC
-    /// payloads, in-flight intermediates, FIBER-synthesised
-    /// resources). Returns `Cow`-style — owned `Iri` for `String`
-    /// (it had to be parsed), borrowed slice for `ResourceRef`.
+    /// There was an `as_iri_str` beside this one, whose doc said to prefer it over `as_str`
+    /// when walking a resource-typed property. It read `ResourceRef` as well as `String`, and
+    /// once that variant was retired (D85 §6.2) the two were the same match arm — a synonym
+    /// whose documentation claimed a distinction that no longer existed. Its 47 callers read
+    /// `as_str` now; a reader wanting the parsed form uses this.
     pub fn as_iri(&self) -> Option<Iri> {
         match self {
-            Value::ResourceRef(iri) => Some(iri.clone()),
             Value::String(s) => Iri::parse(s).ok(),
             _ => None,
         }
@@ -161,27 +120,15 @@ impl Value {
         }
     }
 
-    /// Returns the value's vector data + Embedder model IRI, if it
-    /// is a `Vector`. The slice length is the dimensionality.
-    pub fn as_vector(&self) -> Option<(&Iri, &[f32])> {
-        match self {
-            Value::Vector { model_iri, data } => Some((model_iri, data)),
-            _ => None,
-        }
-    }
-
     /// Extracts resource reference IRIs from an array value.
-    /// Handles both `ResourceRef` and `String` variants (since the JSON
-    /// parser stores all strings as `Value::String` — the distinction
-    /// between string literals and resource references is made by the
-    /// property's data_type, not at parse time).
-    /// Non-reference/non-string elements are silently skipped.
+    /// The distinction between a string literal and a resource reference is made by the
+    /// property's `data_type`, not at parse time, so this reads any IRI-parseable string.
+    /// Non-string elements are silently skipped.
     pub fn as_iri_array(&self) -> Vec<Iri> {
         match self {
             Value::Array(arr) => arr
                 .iter()
                 .filter_map(|v| match v {
-                    Value::ResourceRef(iri) => Some(iri.clone()),
                     Value::String(s) => Iri::parse(s).ok(),
                     _ => None,
                 })
@@ -357,56 +304,8 @@ mod tests {
         assert_eq!(Value::Integer(42).as_integer(), Some(42));
         assert_eq!(Value::Float(2.72).as_float(), Some(2.72));
         assert_eq!(Value::Boolean(true).as_boolean(), Some(true));
-        assert!(Value::ResourceRef(iri("urn:a:b"))
-            .as_resource_ref()
-            .is_some());
+        assert!(Value::iri(&iri("urn:a:b")).as_iri().is_some());
         assert!(Value::String("hi".into()).as_integer().is_none());
-    }
-
-    #[test]
-    fn vector_variant_construction_and_accessors() {
-        let model = iri("urn:eigenius:embed:dummy:v1");
-        let v = Value::Vector {
-            model_iri: model.clone(),
-            data: vec![0.1f32, 0.2, 0.3],
-        };
-        let (got_model, got_data) = v.as_vector().expect("should be a vector");
-        assert_eq!(got_model.as_str(), model.as_str());
-        assert_eq!(got_data.len(), 3);
-        assert_eq!(got_data, &[0.1f32, 0.2, 0.3]);
-        // Other accessors return None.
-        assert!(v.as_str().is_none());
-        assert!(v.as_integer().is_none());
-        assert!(v.as_float().is_none());
-        assert!(v.as_boolean().is_none());
-        assert!(v.as_resource_ref().is_none());
-        assert!(v.as_embedded().is_none());
-        assert!(v.as_array().is_none());
-    }
-
-    #[test]
-    fn vector_equality_requires_same_model_and_data() {
-        let m1 = iri("urn:eigenius:embed:m1");
-        let m2 = iri("urn:eigenius:embed:m2");
-        let a = Value::Vector {
-            model_iri: m1.clone(),
-            data: vec![1.0, 2.0],
-        };
-        let a2 = Value::Vector {
-            model_iri: m1.clone(),
-            data: vec![1.0, 2.0],
-        };
-        let different_model = Value::Vector {
-            model_iri: m2,
-            data: vec![1.0, 2.0],
-        };
-        let different_data = Value::Vector {
-            model_iri: m1,
-            data: vec![1.0, 2.5],
-        };
-        assert_eq!(a, a2);
-        assert_ne!(a, different_model);
-        assert_ne!(a, different_data);
     }
 
     #[test]

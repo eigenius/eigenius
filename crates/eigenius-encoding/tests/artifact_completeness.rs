@@ -46,7 +46,7 @@ fn load_layer(
     name: &str,
     src: &str,
 ) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(src, head)
+    let resources = esl::compile(src, head)
         .unwrap_or_else(|e| panic!("{name} compiles against the chain: {e:?}"));
     let mut b = LayerBuilder::new(name, Some(Arc::clone(head)));
     for r in resources {
@@ -54,6 +54,28 @@ fn load_layer(
             .unwrap_or_else(|e| panic!("{name}: {e:?}"));
     }
     Arc::new(b.build(LayerStorage::with_persistent(Arc::clone(backend))))
+}
+
+/// The D47 codec's constructor argument names, from the bootstrap chain (D85 §5 step 4).
+fn codec() -> eigenius_kernel::program::eigentt_type_mirror::CodecNames {
+    eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(
+        eigenius_kernel::bootstrap::bootstrap()
+            .expect("bootstrap")
+            .head(),
+    )
+}
+
+/// The bootstrap chain — a printed value names classes the chain declares.
+fn chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
 }
 
 #[test]
@@ -130,12 +152,13 @@ fn glossary_and_cut_records_load_through_the_kernel() {
             source_path: "first-page-cleaned.txt",
             source_sha256: "0000",
             timestamp: "2026-08-12T00:00:00Z",
-            declared_by: eigenius_reasoning::UNATTRIBUTED_AGENT,
+            declared_by: eigenius_encoding::UNATTRIBUTED_AGENT,
             source_ref: None,
         },
         &glossary,
         &[],
         &cuts,
+        &codec(),
     )
     .expect("emits");
     // The committed artifact is ESL — print it back as source, then load THAT (the printer is
@@ -144,6 +167,7 @@ fn glossary_and_cut_records_load_through_the_kernel() {
     let source = eigenius_kernel::esl::print::print_document_with(
         &doc,
         eigenius_kernel::esl::print::Layout::Pretty,
+        chain(),
     )
     .expect("the artifact prints as ESL");
     let layer = load_layer(&backend, &head, "artifact", &source);

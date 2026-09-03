@@ -16,7 +16,7 @@
 //!
 //! Formalizing a document ends in an ARTIFACT: the resource set an `enc:ReasoningStructure` roots.
 //! Building that set needs `emit_document` and `ParsedClaimGrader`, which live in
-//! `eigenius-encoding` and `eigenius-reasoning` — both of which DEPEND ON this crate. The kernel's
+//! `eigenius-encoding` — which DEPENDS ON this crate. The kernel's
 //! gRPC layer therefore cannot call them, and inverting the dependency is not on the table: the
 //! grader belongs above the kernel, not inside it.
 //!
@@ -91,6 +91,7 @@ impl ArtifactFormat {
 pub fn render_artifact(
     resources: &[crate::ontology::resource::Resource],
     format: ArtifactFormat,
+    layer: &Layer,
 ) -> Result<Vec<u8>, String> {
     match format {
         ArtifactFormat::Cbor => Ok(crate::ontology::eigon_cbor::serialize_document(resources)),
@@ -98,7 +99,7 @@ pub fn render_artifact(
         ArtifactFormat::Esl => {
             let doc: serde_json::Value = serde_json::from_slice(&json_bytes(resources))
                 .map_err(|e| format!("emitted document is not valid JSON: {e}"))?;
-            crate::esl::print::print_document_with(&doc, crate::esl::print::Layout::Pretty)
+            crate::esl::print::print_document_with(&doc, crate::esl::print::Layout::Pretty, layer)
                 .map(String::into_bytes)
                 .map_err(|e| format!("cannot render the artifact as ESL: {e}"))
         }
@@ -127,7 +128,7 @@ pub struct FormalizeRequest {
     pub doc_id: String,
     /// IRI prefix for the emitted resources.
     pub ns: String,
-    /// The `reflection:timestamp` on each ProgramTrace. Caller-fixed so emission is reproducible.
+    /// The `prov:timestamp` on each ProgramTrace. Caller-fixed so emission is reproducible.
     pub timestamp: String,
     /// D65 §4 parse scope — ordered `lexicon:Lexicon` IRIs. `None` is the whole chain.
     pub scope: Option<Vec<Iri>>,

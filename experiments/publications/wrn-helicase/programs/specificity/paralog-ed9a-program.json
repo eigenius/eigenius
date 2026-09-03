@@ -5,7 +5,7 @@
       "urn:eigenius:program:Program"
     ],
     "urn:eigenius:program:input_type": "urn:eigenius:ingest:PinnedExternalFile",
-    "urn:eigenius:program:output_type": "urn:eigenius:reflection:DerivedResource",
+    "urn:eigenius:program:output_type": "urn:eigenius:core:Resource",
     "urn:eigenius:program:body": {
       "urn:eigenius:core:is_a": [
         "urn:eigenius:program:Apply"

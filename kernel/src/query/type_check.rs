@@ -812,7 +812,6 @@ fn check_comorphism_coercion(
                         .iter()
                         .filter_map(|v| match v {
                             crate::ontology::resource::Value::String(s) => Iri::parse(s).ok(),
-                            crate::ontology::resource::Value::ResourceRef(i) => Some(i.clone()),
                             _ => None,
                         })
                         .collect();
@@ -1105,12 +1104,10 @@ fn collect_property_iris(class_resource: &Resource, prop_iri: &Iri) -> Vec<Iri> 
             .iter()
             .filter_map(|v| match v {
                 Value::String(s) => Iri::parse(s).ok(),
-                Value::ResourceRef(i) => Some(i.clone()),
                 _ => None,
             })
             .collect(),
-        Some(Value::String(s)) => Iri::parse(s).ok().into_iter().collect(),
-        Some(Value::ResourceRef(i)) => vec![i.clone()],
+        Some(Value::String(v)) => Iri::parse(v).ok().into_iter().collect(),
         _ => Vec::new(),
     }
 }
@@ -1208,9 +1205,9 @@ fn property_is_string_typed(property_iri: &Iri, layer: &Layer) -> bool {
         Err(_) => return false,
     };
     match resource.get(&data_type_prop) {
-        Some(Value::ResourceRef(iri)) => *iri == string_iri,
+        Some(Value::String(v)) => v.as_str() == string_iri.as_str(),
         Some(v) => v
-            .as_iri_str()
+            .as_str()
             .and_then(|s| Iri::parse(s).ok())
             .map(|iri| iri == string_iri)
             .unwrap_or(false),
@@ -1950,7 +1947,7 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri("urn:eigenius:core:is_a"),
-            Value::Array(vec![Value::ResourceRef(iri(class_iri))]),
+            Value::Array(vec![Value::iri(&iri(class_iri))]),
         );
         for (k, v) in props {
             r.set(iri(k), v);
@@ -1978,7 +1975,7 @@ mod tests {
                 ),
                 (
                     "urn:eigenius:core:data_type",
-                    Value::ResourceRef(iri("urn:eigenius:core:string")),
+                    Value::iri(&iri("urn:eigenius:core:string")),
                 ),
             ],
         ))
@@ -1994,7 +1991,7 @@ mod tests {
                 ),
                 (
                     "urn:eigenius:core:data_type",
-                    Value::ResourceRef(iri("urn:eigenius:core:integer")),
+                    Value::iri(&iri("urn:eigenius:core:integer")),
                 ),
             ],
         ))
@@ -2007,7 +2004,7 @@ mod tests {
                 vec![
                     (
                         "urn:eigenius:core:target_property",
-                        Value::ResourceRef(iri("urn:ex:test_body")),
+                        Value::iri(&iri("urn:ex:test_body")),
                     ),
                     (
                         "urn:eigenius:core:text_analyzer",
@@ -2024,16 +2021,20 @@ mod tests {
                 vec![
                     (
                         "urn:eigenius:core:target_property",
-                        Value::ResourceRef(iri("urn:ex:test_body")),
+                        Value::iri(&iri("urn:ex:test_body")),
                     ),
                     (
                         "urn:eigenius:core:vec_model",
-                        Value::ResourceRef(iri("urn:eigenius:embed:m1")),
+                        Value::iri(&iri("urn:eigenius:embed:m1")),
                     ),
                     ("urn:eigenius:core:vec_dim", Value::Integer(8)),
                     (
                         "urn:eigenius:core:vec_distance",
-                        Value::ResourceRef(iri("urn:eigenius:core:distances:cosine")),
+                        Value::String(
+                            iri("urn:eigenius:core:distances:cosine")
+                                .as_str()
+                                .to_string(),
+                        ),
                     ),
                 ],
             ))
@@ -2109,7 +2110,7 @@ mod tests {
                 ),
                 (
                     "urn:eigenius:core:data_type",
-                    Value::ResourceRef(iri("urn:eigenius:core:integer")),
+                    Value::iri(&iri("urn:eigenius:core:integer")),
                 ),
             ],
         ))
@@ -2120,7 +2121,7 @@ mod tests {
             vec![
                 (
                     "urn:eigenius:core:target_property",
-                    Value::ResourceRef(iri("urn:ex:test_count")),
+                    Value::iri(&iri("urn:ex:test_count")),
                 ),
                 (
                     "urn:eigenius:core:text_analyzer",

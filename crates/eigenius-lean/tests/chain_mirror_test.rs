@@ -32,16 +32,32 @@ use eigenius_lean::{bytes_to_lean_expr, ChainMirrorError};
 
 const TOY_HOLDS: &[u8] = include_bytes!("../test_resources/toy_proof_holds.json");
 
+/// The bootstrap chain — the mirror reads `LeanExpr`'s constructor argument names from it.
+fn chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
 #[test]
 fn translate_punit_type_emits_sort_param() {
     // PUnit's type in the vendored export is `Sort u` — universe
     // parameter `u`. The chain mirror should be a `Sort` node
     // wrapping a `Param "u"` level wrapping a name built up from
     // `Anon`.
-    let value = bytes_to_lean_expr(TOY_HOLDS, "PUnit").expect("translation must succeed");
-    let json = match &value {
-        Value::Json(j) => j,
-        other => panic!("expected Value::Json, got {other:?}"),
+    let value = bytes_to_lean_expr(TOY_HOLDS, "PUnit", chain()).expect("translation must succeed");
+    // The constructor view of the value the mirror produced — the assertions below are about
+    // the LeanExpr tree, and a value states its constructor's class (D85 §6.1).
+    let json = &match &value {
+        Value::Embedded(r) => eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, chain())
+            .expect("a mirrored LeanExpr is well formed"),
+        other => panic!("expected a LeanExpr value, got {other:?}"),
     };
 
     let expected = serde_json::json!({
@@ -53,7 +69,7 @@ fn translate_punit_type_emits_sort_param() {
                     {
                         "ctor": "Str",
                         "args": [
-                            {"ctor": "Anon"},
+                            {"ctor": "Anon", "args": []},
                             "u"
                         ]
                     }
@@ -75,8 +91,8 @@ fn translation_is_deterministic_under_cbor_serialisation() {
     // encoding of a Resource that carries the mirrored value as a
     // property. Repeating the translation must not surface any
     // allocation-order or hash-cons-identity nondeterminism.
-    let first = bytes_to_lean_expr(TOY_HOLDS, "PUnit").expect("first translation");
-    let second = bytes_to_lean_expr(TOY_HOLDS, "PUnit").expect("second translation");
+    let first = bytes_to_lean_expr(TOY_HOLDS, "PUnit", chain()).expect("first translation");
+    let second = bytes_to_lean_expr(TOY_HOLDS, "PUnit", chain()).expect("second translation");
 
     let first_bytes = canonical_cbor_for(&first);
     let second_bytes = canonical_cbor_for(&second);
@@ -96,8 +112,8 @@ fn translation_is_deterministic_under_cbor_serialisation() {
 
 #[test]
 fn missing_target_surfaces_target_not_found() {
-    let err =
-        bytes_to_lean_expr(TOY_HOLDS, "DoesNotExist").expect_err("must error on missing target");
+    let err = bytes_to_lean_expr(TOY_HOLDS, "DoesNotExist", chain())
+        .expect_err("must error on missing target");
     match err {
         ChainMirrorError::TargetNotFound(name) => {
             assert_eq!(
@@ -111,7 +127,7 @@ fn missing_target_surfaces_target_not_found() {
 
 #[test]
 fn malformed_bytes_surface_parse_failed() {
-    let err = bytes_to_lean_expr(b"this is not a valid export\n", "x")
+    let err = bytes_to_lean_expr(b"this is not a valid export\n", "x", chain())
         .expect_err("must error on malformed export");
     assert!(
         matches!(err, ChainMirrorError::ParseFailed(_)),

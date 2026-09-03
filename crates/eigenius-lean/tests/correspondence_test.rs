@@ -213,6 +213,8 @@ fn build_test_layer(s: &ScenarioInputs) -> (LayerStorage, Arc<Layer>, Iri) {
     // dispatch index sees their class definitions.
     let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
     let parent = Arc::clone(ctx.head());
+    let names =
+        eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(parent.as_ref());
     let storage = LayerStorage::in_memory();
     let parent_layer_id = parent.id().to_string();
 
@@ -228,9 +230,11 @@ fn build_test_layer(s: &ScenarioInputs) -> (LayerStorage, Arc<Layer>, Iri) {
     let mut payload = Resource::new(iri(payload_iri_str));
     payload.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofPayload",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofPayload")
+                .as_str()
+                .to_string(),
+        )]),
     );
     payload.set(
         iri(lean_iris::PROP_PAYLOAD_BYTES),
@@ -244,7 +248,7 @@ fn build_test_layer(s: &ScenarioInputs) -> (LayerStorage, Arc<Layer>, Iri) {
     let mut claim = Resource::new(iri(claim_iri_str));
     claim.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(s.claim_class))]),
+        Value::Array(vec![Value::iri(&iri(s.claim_class))]),
     );
     builder.add_resource(claim).expect("add claim");
 
@@ -261,7 +265,7 @@ fn build_test_layer(s: &ScenarioInputs) -> (LayerStorage, Arc<Layer>, Iri) {
         let mut class_def = Resource::new(iri(class_iri_str));
         class_def.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         class_def.set(iri(wk::SHORT_NAME), Value::String(short.to_string()));
         builder
@@ -283,9 +287,11 @@ fn build_test_layer(s: &ScenarioInputs) -> (LayerStorage, Arc<Layer>, Iri) {
     let mut mirror = Resource::new(iri(mirror_iri_str));
     mirror.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:runtime:RuntimePackageMirror",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:runtime:RuntimePackageMirror")
+                .as_str()
+                .to_string(),
+        )]),
     );
     mirror.set(
         iri(lean_iris::PROP_MIRROR_SOURCE_LAYER),
@@ -306,7 +312,7 @@ fn build_test_layer(s: &ScenarioInputs) -> (LayerStorage, Arc<Layer>, Iri) {
         Value::Array(
             s.mirrored_classes
                 .iter()
-                .map(|c| Value::ResourceRef(iri(c)))
+                .map(|c| Value::iri(&iri(c)))
                 .collect(),
         ),
     );
@@ -316,13 +322,13 @@ fn build_test_layer(s: &ScenarioInputs) -> (LayerStorage, Arc<Layer>, Iri) {
     let mut term = Resource::new(iri(term_iri_str));
     term.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofTerm",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofTerm").as_str().to_string(),
+        )]),
     );
     term.set(
         iri(lean_iris::PROP_PROOF_PAYLOAD),
-        Value::ResourceRef(iri(payload_iri_str)),
+        Value::iri(&iri(payload_iri_str)),
     );
     term.set(
         iri(lean_iris::PROP_TARGET_NAME),
@@ -337,9 +343,14 @@ fn build_test_layer(s: &ScenarioInputs) -> (LayerStorage, Arc<Layer>, Iri) {
         Value::String(claim_iri_str.to_string()),
     );
     if let Some(prop_json) = &s.proposition {
+        // `lean:proposition` holds a `lean:LeanExpr` VALUE (D85 §6.1). The scenarios below
+        // still describe it as a `{ctor, args}` literal because that is what reads; the
+        // fixture builder is what turns it into the resources it names.
         term.set(
             iri(lean_iris::PROP_PROPOSITION),
-            Value::Json(prop_json.clone()),
+            names
+                .value_of_tagged(&["urn:eigenius:lean:LeanExpr"], prop_json)
+                .expect("the scenario's proposition is a LeanExpr"),
         );
     }
     builder.add_resource(term).expect("add term");
@@ -477,9 +488,11 @@ fn unanchored_proof_skips_correspondence_and_falls_back_to_nanoda_verdict() {
     let mut payload = Resource::new(iri(payload_iri_str));
     payload.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofPayload",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofPayload")
+                .as_str()
+                .to_string(),
+        )]),
     );
     payload.set(
         iri(lean_iris::PROP_PAYLOAD_BYTES),
@@ -490,13 +503,13 @@ fn unanchored_proof_skips_correspondence_and_falls_back_to_nanoda_verdict() {
     let mut term = Resource::new(iri(term_iri_str));
     term.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofTerm",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofTerm").as_str().to_string(),
+        )]),
     );
     term.set(
         iri(lean_iris::PROP_PROOF_PAYLOAD),
-        Value::ResourceRef(iri(payload_iri_str)),
+        Value::iri(&iri(payload_iri_str)),
     );
     term.set(
         iri(lean_iris::PROP_TARGET_NAME),

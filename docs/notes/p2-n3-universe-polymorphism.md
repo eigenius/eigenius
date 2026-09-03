@@ -31,7 +31,7 @@ Measured across `ontologies/`, `experiments/` and `demo/`:
 
 The two `Type 1` uses are the whole of the ladder above `Set`:
 
-- `ontologies/reasoning/reasoning.esl:186` — `spec_poly`'s domain binder, raised from `T : Set` by
+- `ontologies/justification/justification.esl:186` — `spec_poly`'s domain binder, raised from `T : Set` by
   #136/PR #187, which is what prompted #188.
 - `ontologies/lexicon/lexicon-ontology.esl:250` — `data lexicon:Cat : Type 1`.
 
@@ -176,7 +176,7 @@ the ladder count in §1.
 TTR is already load-bearing in the design docs rather than aspirational. D18's "ontology-as-types"
 resolution cites it directly — *"Cooper's TTR is records-first, with a record type's labelled
 fields-of-types matching an Eigenius class's required/recommended properties exactly"* — and the
-`eigentt:TypeExpr` chain mirror already makes types first-class chain objects, which is the half of
+`eigentt:Term` chain mirror already makes types first-class chain objects, which is the half of
 TTR's types-as-objects stance Eigenius has. What it lacks is the other half: **quantifying over
 those types at arbitrary level.**
 

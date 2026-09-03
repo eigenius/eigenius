@@ -19,14 +19,14 @@ work for both.
 
 The substrate is specified by [D26 — Runtime
 Substrate](../../design/d26-runtime-substrate.md), [D29 — Mirror
-Generator](../../design/d29-runtime-mirror-generator.md), and [D31 —
-Institution Lifecycle](../../design/d31-runtime-language-substrate-institution-lifecycle.md);
+Generator](../../design/d29-eigon-julia-mirror-spec.md), and [D31 —
+Institution Lifecycle](../../design/d31-external-institution-lifecycle.md);
 the implementation lives at [`crates/runtime-substrate/`](../../../crates/runtime-substrate/).
 
 Cross-link: this chapter is the **implementer** view from the substrate
 side. The user view (calling institutions from queries and programs) is
 shared with WASM institutions and lives in [ESL §9](../esl/09-institutions.md)
-and [EigenQL §8](../eigenql/08-institutions.md). The Julia v1
+and [EigenQL §8](../eigenql/09-institutions.md). The Julia v1
 instantiation has dedicated tutorials under
 [`julia-institutions/`](julia-institutions/) — start with the
 [intervals tutorial](julia-institutions/intervals-institution-tutorial.md)
@@ -272,7 +272,7 @@ pure transform; the kernel does everything else.
   the tool in its `image_digest`-pinned image (the orchestrator resolves the digest the
   env carries — it does **not** build at dispatch). The substrate provisions inputs by
   `content_hash` (§11 external-file resolver); the tool returns its result as
-  **Eigon-CBOR**, and the kernel commits it under a `ProgramTrace → IsDerivedAs`. A
+  **Eigon-CBOR**, and the kernel commits it under a `prov:ProgramTrace`, which records the run and grounds nothing. A
   downstream reasoning certificate then discharges `derived(result, P)` over it — the
   WRN wrapped-program pattern, **no new institution**.
 - **Kernel-tracked build recipe.** `eigenius env build --language oci
@@ -300,15 +300,15 @@ pure transform; the kernel does everything else.
 - [**Chapter 10 — Building WASM institutions**](10-wasm-institutions.md)
   — the peer surface for sandboxed institutions.
 - [**ESL §9 — Institutions in ESL**](../esl/09-institutions.md),
-  [**EigenQL §8 — Institutions in EigenQL**](../eigenql/08-institutions.md)
+  [**EigenQL §8 — Institutions in EigenQL**](../eigenql/09-institutions.md)
   — the user-facing dispatch surface, identical for WASM- and
   substrate-hosted institutions.
 - [**The formula language guide**](../formula/README.md) — the
   shared payload language for cross-institution numerical work, used
   pervasively by the Julia v1 institutions.
 - [**D26 — Runtime Substrate**](../../design/d26-runtime-substrate.md),
-  [**D29 — Mirror Generator**](../../design/d29-runtime-mirror-generator.md),
-  [**D31 — Institution Lifecycle**](../../design/d31-runtime-language-substrate-institution-lifecycle.md)
+  [**D29 — Mirror Generator**](../../design/d29-eigon-julia-mirror-spec.md),
+  [**D31 — Institution Lifecycle**](../../design/d31-external-institution-lifecycle.md)
   — the protocol specs.
 
 ---

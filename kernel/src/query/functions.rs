@@ -139,32 +139,12 @@ pub fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
         (Value::Integer(a), Value::Float(b)) => (*a as f64) == *b,
         (Value::Float(a), Value::Integer(b)) => *a == (*b as f64),
-        // IRI identity — a ResourceRef to `urn:x:y` equals a String
-        // holding `"urn:x:y"` and another ResourceRef to the same IRI.
-        // Without this, equi-joins over cross-referenced resources
-        // silently miss bindings depending on which Value variant the
-        // loader happened to use (Eigon-JSON generally produces String;
-        // the kernel sometimes produces ResourceRef).
-        (Value::ResourceRef(a), Value::ResourceRef(b)) => a == b,
-        (Value::ResourceRef(r), Value::String(s)) | (Value::String(s), Value::ResourceRef(r)) => {
-            r.as_str() == s
-        }
-        // D43 §4.1: two Vector values are equal iff they were produced
-        // by the same Embedder Component (same `model_iri`) AND carry
-        // bit-identical `f32` data. Cross-model equality is rejected
-        // at typecheck (§4.5) so this arm is mostly defensive — and
-        // because `EMBED` is NonDeterministic (§5.2), repeat calls
-        // even with identical inputs don't reliably hit it.
-        (
-            Value::Vector {
-                model_iri: ma,
-                data: da,
-            },
-            Value::Vector {
-                model_iri: mb,
-                data: db,
-            },
-        ) => ma == mb && da == db,
+        // The IRI-identity special case that used to sit here is gone with `ResourceRef`.
+        // It existed so a `ResourceRef` to `urn:x:y` compared equal to a `String` holding
+        // `"urn:x:y"` — "without this, equi-joins over cross-referenced resources silently
+        // miss bindings depending on which `Value` variant the loader happened to use".
+        // There is now one variant, so the string arm above IS that comparison, and derived
+        // `PartialEq` agrees with this function instead of contradicting it.
         _ => false,
     }
 }

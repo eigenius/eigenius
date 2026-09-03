@@ -51,7 +51,7 @@ const DECIDE_APPLY: &str = "urn:eigenius:program:DecideApply";
 /// - type is `Exp::Pi(input_type, output_type)`
 pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), String> {
     let input_type_iri = get_iri(resource, "urn:eigenius:program:input_type")?;
-    let output_type_iri = get_iri(resource, "urn:eigenius:program:output_type")?;
+    let output_type_iri = get_iri(resource, crate::ontology::well_known::PROGRAM_OUTPUT_TYPE)?;
 
     let input_type = resolve_class_type(&input_type_iri, layer)?;
     let output_type = resolve_class_type(&output_type_iri, layer)?;
@@ -79,10 +79,9 @@ pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), S
 /// shapes (matching what `compile_type_expr` in the ESL compiler
 /// emits for `pi`, `Arrow`, and class-reference type expressions):
 ///
-/// - `Value::ResourceRef(iri)` — a class IRI (the leaf type).
+/// - `Value::iri(iri)` — a class IRI (the leaf type).
 ///   Resolves through the layer chain via `resolve_class_type`.
-/// - `Value::String(iri-str)` — same as ResourceRef, with the IRI
-///   in string form (the pre-canonicalisation shape).
+/// - `Value::String(iri-str)` — the same, with the IRI in string form.
 /// - `Value::Embedded(r)` with `is_a` of `TypeBinderArrow` — a
 ///   value-typed Pi binder `pi name : kind. body`. Recursively
 ///   decodes the kind + body.
@@ -98,10 +97,6 @@ pub fn parse_program(resource: &Resource, layer: &Layer) -> Result<(Exp, Exp), S
 pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> {
     use crate::ontology::well_known as wk;
     match value {
-        Value::ResourceRef(iri) => {
-            let val = resolve_class_type(iri, layer)?;
-            Ok(crate::nbe::readback::readback_val(0, &val))
-        }
         Value::String(s) => {
             let iri = Iri::parse(s)
                 .map_err(|e| format!("decode_program_type: invalid type IRI '{s}': {e}"))?;
@@ -146,7 +141,7 @@ pub fn decode_program_type(value: &Value, layer: &Layer) -> Result<Exp, String> 
                 // args (D76 Phase B); the type checker resolves it through
                 // `Γ_env` at use time. This built a name-only stub declaration
                 // for the same purpose.
-                // `core:type_name` is an `eigentt:TypeExpr` (eigenius#188); the referenced type
+                // `core:type_name` is an `eigentt:Term` (eigenius#188); the referenced type
                 // is its head. Shares `arg_type_head` with `program::ground`'s two readers.
                 let type_name = crate::program::ground::arg_type_head(r)?;
                 let class_iri = Iri::parse(&type_name).map_err(|e| {
@@ -356,11 +351,8 @@ fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     let func_prop = Iri::parse("urn:eigenius:program:function").unwrap();
 
     let func_exp = match resource.get(&func_prop) {
-        // Resource references in function/argument positions are
-        // typed as `data_type: resource`, so the canonical shape is
-        // `ResourceRef`; `String` survives for pre-canonicalisation
-        // intermediates (RPC payloads, FIBER-synthesised programs).
-        Some(Value::ResourceRef(i)) => Exp::Var(i.as_str().to_string()),
+        // Resource references in function/argument positions are typed as
+        // `data_type: resource`, so they arrive as IRI strings.
         Some(Value::String(s)) => Exp::Var(s.clone()),
         Some(Value::Embedded(r)) => parse_expression(r, layer)?,
         _ => return Err("Apply: missing 'function' property".to_string()),
@@ -368,7 +360,6 @@ fn parse_apply(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
 
     let arg_prop = Iri::parse("urn:eigenius:program:argument").unwrap();
     let arg_exp = match resource.get(&arg_prop) {
-        Some(Value::ResourceRef(i)) => Exp::Var(i.as_str().to_string()),
         Some(Value::String(s)) => Exp::Var(s.clone()),
         Some(Value::Embedded(r)) => parse_expression(r, layer)?,
         _ => Exp::Unit, // No argument
@@ -422,7 +413,7 @@ fn expand_runtime_script_argument(comp_arg: &Resource, layer: &Layer) -> Result<
     let read = |r: &Resource, p: &str| -> Option<String> {
         r.get(&Iri::parse(p).unwrap()).and_then(|v| match v {
             Value::String(s) => Some(s.clone()),
-            other => other.as_iri_str().map(str::to_string),
+            other => other.as_str().map(str::to_string),
         })
     };
 
@@ -626,10 +617,9 @@ fn parse_match(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
         let motive = crate::program::eigentt_type_mirror::decode_type(motive_value, layer)
             .map_err(|e| format!("invalid `result_motive` payload: {e:?}"))?;
         build_inductive_rec(parsed_arms, scrutinee_exp, motive, layer)
-    } else if let Some(rt_iri_str) = resource.get(&result_type_prop).and_then(|v| v.as_iri_str()) {
-        // `program:result_type` is `data_type: resource`, so post-
-        // `canonicalise_resource_refs` the value is `ResourceRef`,
-        // not `String`. `as_iri_str` handles both shapes.
+    } else if let Some(rt_iri_str) = resource.get(&result_type_prop).and_then(|v| v.as_str()) {
+        // `program:result_type` is `data_type: resource`, so its value is an IRI string,
+        // read through an accessor rather than by matching a variant.
         let result_type_iri = Iri::parse(rt_iri_str)
             .map_err(|e| format!("invalid `result_type` IRI '{rt_iri_str}': {e}"))?;
         let result_type_val = resolve_class_type(&result_type_iri, layer)?;
@@ -918,11 +908,8 @@ fn parse_reduce(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
 fn parse_literal(resource: &Resource) -> Result<Exp, String> {
     let val_prop = Iri::parse("urn:eigenius:program:value").unwrap();
     match resource.get(&val_prop) {
-        // Canonical IRI reference shape after `canonicalise_resource_refs`.
-        Some(Value::ResourceRef(i)) => Ok(Exp::Var(i.as_str().to_string())),
         Some(Value::String(s)) => {
-            // Pre-canonicalisation: a string literal that *might* be
-            // an IRI reference (heuristic on `urn:` / `http`).
+            // A string literal that *might* be an IRI reference (heuristic on `urn:` / `http`).
             if Iri::parse(s).is_ok() && (s.starts_with("urn:") || s.starts_with("http")) {
                 return Ok(Exp::Var(s.clone())); // Resource reference
             }
@@ -947,9 +934,7 @@ fn get_string(resource: &Resource, prop: &str) -> Result<String, String> {
 
 fn get_iri(resource: &Resource, prop: &str) -> Result<Iri, String> {
     let prop_iri = Iri::parse(prop).unwrap();
-    // IRI-typed property values canonicalise to `ResourceRef`;
-    // `as_iri` accepts both that and the pre-canonical `String`
-    // shape from intermediate (uncommitted) resources.
+    // IRI-typed property values are IRI strings; `as_iri` reads one without matching a variant.
     resource
         .get(&prop_iri)
         .and_then(|v| v.as_iri())
@@ -1094,7 +1079,8 @@ mod tests {
         }
         let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        let user_resources = crate::esl::compile(esl_source).expect("ESL compile failed");
+        let user_resources = crate::esl::compile(esl_source, crate::testing::term_chain())
+            .expect("ESL compile failed");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -1134,7 +1120,7 @@ mod tests {
         );
         script.set(
             prop("urn:eigenius:runtime:requires_environment"),
-            Value::ResourceRef(prop("urn:eigenius:test:env")),
+            Value::iri(&prop("urn:eigenius:test:env")),
         );
 
         let mut b = LayerBuilder::new("runtime", None);
@@ -1149,13 +1135,18 @@ mod tests {
         let mut comp_arg = Resource::new_embedded();
         comp_arg.set(
             Iri::parse(RUNTIME_SCRIPT_REF).unwrap(),
-            Value::ResourceRef(Iri::parse("urn:eigenius:test:script").unwrap()),
+            Value::String(
+                Iri::parse("urn:eigenius:test:script")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+            ),
         );
         let expanded = expand_runtime_script_argument(&comp_arg, &layer).expect("resolves");
         let get = |p: &str| {
             expanded
                 .get(&Iri::parse(p).unwrap())
-                .and_then(|v| v.as_iri_str())
+                .and_then(|v| v.as_str())
                 .map(str::to_string)
         };
         assert_eq!(get(RUNTIME_LANGUAGE).as_deref(), Some("r"));
@@ -1190,7 +1181,12 @@ mod tests {
         let mut comp_arg = Resource::new_embedded();
         comp_arg.set(
             Iri::parse(RUNTIME_SCRIPT_REF).unwrap(),
-            Value::ResourceRef(Iri::parse("urn:eigenius:test:missing").unwrap()),
+            Value::String(
+                Iri::parse("urn:eigenius:test:missing")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+            ),
         );
         let err = expand_runtime_script_argument(&comp_arg, &layer).unwrap_err();
         assert!(err.contains("not found on the chain"), "got: {err}");
@@ -1364,13 +1360,17 @@ mod tests {
                 succ(ex:Nat),
             }
 
+            // `lnil` / `lcons`, not `nil` / `cons`: these fixtures compile against a chain
+            // carrying `core:List`, whose constructors have those short names, and a bare
+            // reference to one would be ambiguous. `ex:NatList:cons` says which is meant, but
+            // only a `def` body resolves that form — a `program` body does not (eigenius#231).
             data ex:NatList {
-                nil,
-                cons(ex:Nat, ex:NatList),
+                lnil,
+                lcons(ex:Nat, ex:NatList),
             }
 
             program ex:two_elem_list : core:string -> ex:NatList {
-                cons(zero, cons(succ(zero), nil))
+                lcons(zero, lcons(succ(zero), lnil))
             }
             "#,
         );
@@ -1382,7 +1382,7 @@ mod tests {
             other => panic!("expected outer InductiveCtor, got {other:?}"),
         };
         assert_eq!(outer_decl.local_name(), "NatList");
-        assert_eq!(outer_name, "cons");
+        assert_eq!(outer_name, "lcons");
         assert_eq!(outer_args.len(), 2, "cons should have 2 args");
         // First arg: zero (Nat)
         match &outer_args[0] {
@@ -1397,7 +1397,7 @@ mod tests {
         match &outer_args[1] {
             Exp::InductiveCtor(d, n, a) => {
                 assert_eq!(d.local_name(), "NatList");
-                assert_eq!(n, "cons");
+                assert_eq!(n, "lcons");
                 assert_eq!(a.len(), 2);
             }
             other => panic!("expected nested cons, got {other:?}"),
@@ -1433,7 +1433,7 @@ mod tests {
             other => panic!("expected InductiveVal, got {other:?}"),
         };
         assert_eq!(decl.local_name(), "NatList");
-        assert_eq!(ctor, "cons");
+        assert_eq!(ctor, "lcons");
         assert_eq!(args.len(), 2);
     }
 
@@ -1451,13 +1451,17 @@ mod tests {
                 succ(ex:Nat),
             }
 
+            // `lnil` / `lcons`, not `nil` / `cons`: these fixtures compile against a chain
+            // carrying `core:List`, whose constructors have those short names, and a bare
+            // reference to one would be ambiguous. `ex:NatList:cons` says which is meant, but
+            // only a `def` body resolves that form — a `program` body does not (eigenius#231).
             data ex:NatList {
-                nil,
-                cons(ex:Nat, ex:NatList),
+                lnil,
+                lcons(ex:Nat, ex:NatList),
             }
 
             program ex:bad : core:string -> ex:NatList {
-                cons(zero)
+                lcons(zero)
             }
             "#,
         );
@@ -1551,6 +1555,7 @@ mod tests {
                 f(a, b, c)
             }
             "#,
+            crate::testing::term_chain(),
         );
         let errs = result.unwrap_err();
         let msg = &errs[0].message;
@@ -1565,6 +1570,9 @@ mod tests {
     }
 
     #[test]
+    // `PassThrough`, not `Identity`: the latter is a constructor of a `statistics` inductive,
+    // so against a real chain it resolves as one and the test would be about `CtorApply`
+    // rather than the legacy sugar it is named for.
     fn non_ctor_two_arg_legacy_sugar_still_works() {
         // Backward compat: `f(a, b)` for a non-ctor function still
         // means "input + component_argument" (legacy sugar for the
@@ -1575,7 +1583,7 @@ mod tests {
             namespace ex = "urn:eigenius:example";
 
             program ex:demo : core:string -> core:string {
-                Identity(input, "config")
+                PassThrough(input, "config")
             }
             "#,
         );
@@ -1724,15 +1732,19 @@ mod tests {
                 succ(ex:Nat),
             }
 
+            // `lnil` / `lcons`, not `nil` / `cons`: these fixtures compile against a chain
+            // carrying `core:List`, whose constructors have those short names, and a bare
+            // reference to one would be ambiguous. `ex:NatList:cons` says which is meant, but
+            // only a `def` body resolves that form — a `program` body does not (eigenius#231).
             data ex:NatList {
-                nil,
-                cons(ex:Nat, ex:NatList),
+                lnil,
+                lcons(ex:Nat, ex:NatList),
             }
 
             program ex:head_or_zero : core:string -> ex:Nat {
-                match cons(succ(zero), nil) returning ex:Nat {
-                    nil -> zero;
-                    cons(x, _) -> x;
+                match lcons(succ(zero), lnil) returning ex:Nat {
+                    lnil -> zero;
+                    lcons(x, _) -> x;
                 }
             }
             "#,
@@ -1812,15 +1824,19 @@ mod tests {
                 succ(ex:Nat),
             }
 
+            // `lnil` / `lcons`, not `nil` / `cons`: these fixtures compile against a chain
+            // carrying `core:List`, whose constructors have those short names, and a bare
+            // reference to one would be ambiguous. `ex:NatList:cons` says which is meant, but
+            // only a `def` body resolves that form — a `program` body does not (eigenius#231).
             data ex:NatList {
-                nil,
-                cons(ex:Nat, ex:NatList),
+                lnil,
+                lcons(ex:Nat, ex:NatList),
             }
 
             program ex:bad : core:string -> ex:Nat {
-                match nil returning ex:Nat {
-                    nil -> zero;
-                    cons(x) -> x;
+                match lnil returning ex:Nat {
+                    lnil -> zero;
+                    lcons(x) -> x;
                 }
             }
             "#,
@@ -2127,7 +2143,8 @@ mod tests {
             }
         "#;
         let user_resources =
-            crate::esl::compile_with_institutions(source, idx.clone()).expect("compile");
+            crate::esl::compile_full(source, idx.clone(), crate::testing::term_chain())
+                .expect("compile");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -2180,7 +2197,8 @@ mod tests {
             }
         "#;
         let user_resources =
-            crate::esl::compile_with_institutions(source, idx.clone()).expect("compile");
+            crate::esl::compile_full(source, idx.clone(), crate::testing::term_chain())
+                .expect("compile");
         let mut user_builder = LayerBuilder::new("user", Some(core));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
@@ -2225,7 +2243,7 @@ mod tests {
                 cap:cap_comorphism(input, input)
             }
         "#;
-        let result = crate::esl::compile_with_institutions(source, idx);
+        let result = crate::esl::compile_full(source, idx, crate::testing::term_chain());
         let errors = result.unwrap_err();
         assert!(
             errors.iter().any(|e| e.to_string().contains("comorphism"))
@@ -2252,7 +2270,8 @@ mod tests {
                 cap:cap_comorphism(input)
             }
         "#;
-        let user_resources = crate::esl::compile(source).expect("compile");
+        let user_resources =
+            crate::esl::compile(source, crate::testing::term_chain()).expect("compile");
         // Find the program and check its body is plain Apply (not
         // ComorphismInvokeApply).
         let prog_res = user_resources

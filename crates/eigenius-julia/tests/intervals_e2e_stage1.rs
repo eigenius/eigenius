@@ -324,9 +324,11 @@ fn build_env_resource(mirror_iri: &Iri) -> Resource {
     let mut env = Resource::new(iri(ENV_IRI));
     env.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:runtime:RuntimeEnvironment",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:runtime:RuntimeEnvironment")
+                .as_str()
+                .to_string(),
+        )]),
     );
     env.set(
         iri("urn:eigenius:core:short_name"),
@@ -353,7 +355,11 @@ fn build_env_resource(mirror_iri: &Iri) -> Resource {
     );
     env.set(
         iri("urn:eigenius:runtime:lifecycle"),
-        Value::ResourceRef(iri("urn:eigenius:runtime:lifecycle:Service")),
+        Value::String(
+            iri("urn:eigenius:runtime:lifecycle:Service")
+                .as_str()
+                .to_string(),
+        ),
     );
     // Reference the mirror so the chain links the env to its typed
     // boundary surface; the property is recommended (D26 §5.3) so
@@ -361,7 +367,7 @@ fn build_env_resource(mirror_iri: &Iri) -> Resource {
     // stage-2 worker dispatch needs the link to resolve mirror codecs.
     env.set(
         iri("urn:eigenius:runtime:mirror_dependency"),
-        Value::ResourceRef(mirror_iri.clone()),
+        Value::iri(&mirror_iri.clone()),
     );
     env
 }

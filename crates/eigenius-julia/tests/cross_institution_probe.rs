@@ -227,7 +227,9 @@ fn build_symbolic_expression_cbor() -> Vec<u8> {
     let mut r = Resource::new(iri("urn:eigenius:test:cross:expr"));
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(SYMBOLIC_EXPRESSION_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(SYMBOLIC_EXPRESSION_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:core:short_name"),
@@ -248,7 +250,9 @@ fn build_domain_cbor(value: f64, lower: f64, upper: f64) -> Vec<u8> {
     let mut r = Resource::new(iri("urn:eigenius:test:cross:domain"));
     r.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(BOUNDED_BY_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(BOUNDED_BY_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     r.set(
         iri("urn:eigenius:core:short_name"),

@@ -1,0 +1,446 @@
+% !TEX program = pdflatex
+%
+% A proposal. Greenfield rework of how the system records the grounds on which a
+% proposition is asserted. Supersedes the D83 markdown draft, now removed; the
+% derivation record is d82-propositions-witnesses-and-logics.md.
+%
+% Build:  pdflatex judgements-and-warrants.tex  (twice, to resolve references)
+
+\documentclass[manuscript,nonacm=true]{acmart}
+
+\setcopyright{none}
+\settopmatter{printacmref=false, printccs=false, printfolios=true}
+
+% acmart already loads amsmath, amssymb and newtxmath; adding amssymb here
+% clashes on \Bbbk.
+\usepackage{amsmath}
+\usepackage{booktabs}
+
+% Block paragraphs. The argument's skeleton is the bold claim opening each
+% paragraph; an indent pushes those openings off a common left edge and makes
+% the page harder to scan.
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.30\baselineskip plus 0.15\baselineskip minus 0.1\baselineskip}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\sem}[1]{[\![#1]\!]}
+\newcommand{\Prop}{\code{Prop}}
+% D83's device: a claim in bold opens the paragraph, and the bold sentences read
+% alone as the argument's skeleton.
+\newcommand{\cl}[1]{\textbf{#1}}
+
+\begin{document}
+
+\title[Judgements, Warrants, and Logics]{Judgements, Warrants, and Logics\\[0.5em]
+\large A proposal for recording the grounds on which a proposition is asserted}
+\author{Hans-Martin Will}
+\affiliation{%
+  \institution{The Eigenius Project}
+  \country{USA}
+}
+\email{hwill@acm.org}
+\renewcommand{\shortauthors}{Will}
+\date{August 2026}
+
+\begin{abstract}
+A system that records how a fact is known holds two objects: a \emph{proof} establishing that a proposition $P$ holds, and a \emph{record of the grounds} on which $P$ is asserted. Both elements are required. They obey different structural rules: a proof is factive and its validity transports across systems, whereas a record of grounds possesses neither property. Consequently, each requires a distinct formal representation, and the transition from grounds to claims must be formally unstatable rather than merely discouraged.
+
+This proposal defines a checkable form for each object and computes all epistemic grades from stored evidence. It introduces the \emph{judgement}, a checked triple of logic, term, and type, which reifies the proof-checker operator of justification logic. The design separates provenance from warrant as independent axes, mapping the former onto W3C PROV and demonstrating that the latter cannot be similarly mapped. It reduces the warrant vocabulary to three grounds and shows that the labels \emph{Computed} and \emph{Sampled} denote term shapes rather than fundamental grounds. Finally, the proposal replaces the theoretical question of whether a participating logic satisfies the definition of an institution with an operational one: whether the system can hold and re-check a witness for the claims established by that logic.
+\end{abstract}
+
+\maketitle
+
+% acmart's \maketitle installs its own running heads; overriding it has to
+% come after, not before.
+
+\section*{Status}
+
+This is a proposal, and the design is currently unimplemented. It does not aim for backwards compatibility: the project is experimental and early enough that replacing the representation costs less than preserving it. Appendix~\ref{sec:replaces} details the components designated for replacement.
+
+\section{Formal Preliminaries and Architecture}
+
+\paragraph{The store.} The storage layer is a typed knowledge graph maintained as an immutable chain of layers. A layer holds resources: records carrying an identity, a set of classes, and typed properties. A layer may declare classes and properties, and a class may state which properties its instances require. Adding a layer constitutes a commit; validation executes at commit time, and a failing layer is rejected. Data remains immutable after a successful commit.
+
+\paragraph{The type theory.} The system employs a dependent type theory in the Martin-L\"of tradition~\cite{mltt}: $\Pi$ and $\Sigma$ types, inductive families, a universe hierarchy, and normalization-by-evaluation for definitional equality. The universe of propositions is denoted by \Prop{}. Under the propositions-as-types interpretation, a proof of a proposition $P$ is a term $t$ such that $t : P$.
+
+\paragraph{Storage integration.} Because terms are storable as resource property values, propositions constitute chain data, allowing the type checker to operate over terms held by the graph. The system inherently stores propositions and artifacts intended as evidence for them. However, it requires a formal specification of what that evidence licenses.
+
+\paragraph{Participating logics.} External logics participate as institutions~\cite{gb92}. Two institutions are relevant here: a verification institution for Lean~4, whose proof terms commit as resources and undergo in-process re-checking by a Lean kernel reimplementation~\cite{nanoda}; and a statistics institution, which executes a declared analysis plan against committed observations.
+
+\paragraph{Justification logic.} Justification logic~\cite{af19} replaces the modality \emph{it is known that $F$} with the explicit typing $t : F$, read as \emph{the term $t$ is a justification for $F$}. The justification is an object in the language rather than external metadata. The system carries this structure as chain vocabulary: an inductive family $\mathrm{JustifiedBy}(j, P)$ defined over an algebra of justification terms that supports application and sum.
+
+\section{Formal Distinction Between Proofs and Grounds}
+
+A proof and a record of grounds are distinct objects. A proof establishes that a term $t$ successfully checks against a type $P$. A record of grounds documents that a claim to $P$ rests on a dataset, a plan, and an attestation.
+
+They differ structurally in factivity and transportability. A proof is factive: if it is well-formed, the proposition $P$ holds. Furthermore, a proof transports: an independent party possessing $t$ and a checker for the corresponding logic reaches an identical verdict. A record of grounds is neither factive nor transportable. It merely reports what materials an agent possessed; a reader who distrusts the author or the instrument must re-evaluate the premises from the start.
+
+Using a single representation for both objects permits unsound deductive steps. If a record of grounds for $P$ and a proof of $P$ share a representation (e.g., a slot, class, or query), a system that evaluates \emph{these are the grounds} may erroneously report \emph{this is proved} without an explicit derivation.
+
+The separation requirement mandates distinct types with no connecting substitution rules. The substitution of grounds for a proof must be formally inexpressible, not merely discouraged.
+
+\section{Judgements as Checkable Units}
+
+The chain mirror of the term language constitutes a single syntactic category. Types, propositions, lambda abstractions, literals, and inductive values all belong to the syntactic category of terms. The theory requires no separate type syntax, and its mirror reflects this design.
+
+A bare term cannot be checked. Bidirectional checking operates in two modes: \emph{inference} synthesizes a type from a term, whereas \emph{checking} verifies a term against an externally supplied type. Inference fails on a lambda abstraction. For example, the term $\lambda x.\,x$ lacks sufficient information to uniquely determine a domain such as $\Prop \rightarrow \Prop$.
+
+In bidirectional type theory, a bare lambda abstraction lacks the domain annotations required to synthesize a type, causing type inference to structurally fail. Consequently, a storage layer holding bare terms is forced to rely on an external schema---a hardcoded ``exemption list'' of specific database slots---to dictate where the system must abandon inference and operate in check mode. To eliminate this fragility, the checkable unit is formalized as the following self-contained triple:
+
+\begin{quote}
+\begin{verbatim}
+data Judgement {
+    holds(logic : Logic, term : Term, type : Term),
+}
+\end{verbatim}
+\end{quote}
+
+A judgement reifies the proof-checker operator of justification logic. The positive-introspection axiom of the Logic of Proofs (LP) is $t{:}F \rightarrow\ !t{:}(t{:}F)$, where the term $!t$ represents evidence that $t$ is a proof of $F$. This operator formalizes the output returned by a checker when verifying $t$ against $F$~\cite{af19}. An algebra equipped with application and sum, but lacking $!$, executes the checker at commit time and discards the result. A judgement persists this result.
+
+This structure locates the proposal precisely within the logic hierarchy:
+
+\begin{table}[h]
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{system} & \textbf{operators} & \textbf{where this design sits} \\
+\midrule
+J & application, sum; no $!$, no factivity & where the algebra sits today \\
+J4 & J $+\ !$ & adding judgements \\
+JT / LP & $+$ factivity & \emph{Verified} only, where $t : P$ exists \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The \code{logic} parameter generalises the judgement across heterogeneous checkers. For the kernel's native theory, the checker is the internal type checker, and no translation is required because the type is identically the proposition. For Lean, the checker is the hosted Lean kernel, requiring a comorphism to relate the native Lean proposition $P'$ to the graph proposition $P$. A logic lacking a hosted checker produces no judgements.
+
+\subsection{Generalization of Native Annotation}
+
+The kernel's native term language already provides the necessary mechanism. The annotation constructor $\mathrm{Ann}(e, T)$ implements the typing rule that a judgement generalizes: infer $T$ while requiring a sort, check $e$ against $T$ in check mode, and return $T$.
+
+Annotation marks the transition from inference to checking. While the bare lambda abstraction $\lambda x.\,x$ cannot be inferred, the annotated term $(\lambda x.\,x : \Prop \rightarrow \Prop)$ can be strictly checked against an externally provided type. Because annotation is erased at runtime, no normal form contains an annotation constructor.
+
+For the kernel's native logic, the necessary change is to mandate annotation rather than introduce a novel pairing construct. Values stored as bare lambda abstractions with their type specified in a neighboring field are treated as annotated terms. The existing inference path processes them without requiring new rules.
+
+However, annotation cannot serve two functions required of a judgement:
+
+\begin{itemize}
+\item \textbf{An annotation cannot specify a logic.} An annotation expresses the relation \emph{this term of this theory inhabits this type of this theory}. A Lean proof term evaluated by a Lean kernel is not a term of the native theory, and standard annotation lacks a mechanism to record which checker executed.
+\item \textbf{An annotation cannot be cited.} An annotation exists as syntax within a term and is erased during evaluation. A committed judgement must act as a distinct object that a witness constructor accepts and that transports off-chain. This requires reification, which annotation is explicitly designed to avoid.
+\end{itemize}
+
+A judgement therefore consists of an annotation, a logic identifier, and standing as a citable object. No other properties separate them for the kernel's native logic. It incurs no storage overhead compared to an annotation, because an annotated term already embeds its type inline.
+
+\subsection{Uniform Check-Mode Verification}
+
+Every slot ranging over a judgement is decoded, its type is checked as a type, and its term is verified against that type strictly in check mode. A single uniform rule evaluates a slot required to hold a proposition, a definition body checked against its declared type, and any property ranging over a judgement. Because no slot relies on inference, no exemptions are necessary.
+
+A property formally declares that its value is a judgement and specifies its semantics; the kernel subsequently discharges the checking obligation. This structural guarantee is safer than declaring an epistemic \emph{grade}: the property rigorously states the conditions its value must satisfy, rather than stipulating an arbitrary status the resource receives.
+
+\section{Stratification of Proofs and Justifications}
+
+The system strictly separates a factive proof layer from a non-factive justification layer.
+
+\begin{table}[h]
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{layer} & \textbf{form} & \textbf{reading} & \textbf{factive} \\
+\midrule
+proof & $\mathrm{Judgement}(L, t, T)$ & $t$ inhabits $T$, and a checker verified it & yes \\
+justification & $\mathrm{JustifiedBy}(j, P)$ & $j$ grounds a claim to $P$ & no \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The type family $\mathrm{JustifiedBy}$ implements the logic J and must remain non-factive. A certificate records grounds; it does not assert the underlying proposition.
+
+The layers compose unidirectionally, where each stratum represents a formal statement about the stratum below it:
+
+\[
+\begin{array}{@{}ll@{}}
+  \mathrm{Judgement}(\mathrm{kernel},\, c,\, \mathrm{JustifiedBy}(j, P))
+    & \text{a checker verified the certificate } c \\[2pt]
+  \mathrm{JustifiedBy}(j, P) & j \text{ grounds } P \\[2pt]
+  P & \text{the proposition}
+\end{array}
+\]
+
+No rewrite rule permits the reduction of $\mathrm{Judgement}(\mathrm{kernel}, c, \mathrm{JustifiedBy}(j,P))$ to $\mathrm{Judgement}(\mathrm{kernel}, t, P)$. The two constructs possess different types, and no valid inference rule connects them. The separation explicitly exists to render such a substitution inexpressible.
+
+The \emph{Verified} state corresponds to the configuration lacking the middle layer: the system holds $\mathrm{Judgement}(L, t, P)$ directly.
+
+\section{Orthogonality of Provenance and Warrant}
+
+Provenance and warrant address orthogonal properties of a resource, necessitating distinct formal vocabularies.
+
+\begin{table}[h]
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{axis} & \textbf{question} & \textbf{applies to} \\
+\midrule
+provenance & how did this artifact come to exist? & every resource \\
+warrant & what evidence exists for its proposition? & resources carrying a proposition \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Most resources possess provenance but lack a warrant. A lexicon entry, a class declaration, or an imported concept carries no proposition. Consequently, asking \emph{what proves this?} is a category error rather than an unanswered question. The test is strictly mechanical: does the resource carry a proposition.
+
+The axes are independent, not hierarchically ordered. A manually authored claim accompanied by a checked proof yields a \emph{Verified} warrant alongside \emph{Declared} provenance. Conversely, a machine-generated claim lacking a proof is not \emph{Verified}. The origin of the term (human or automated prover) does not influence the structural outcome.
+
+The W3C PROV ontology~\cite{provo} standardizes the provenance axis and terminates where warrant begins. The \code{prov:Entity} construct is deliberately opaque, modeling identity and lineage rather than semantic content. While provenance maps directly onto PROV, warrant cannot, because warrant explicitly makes claims about the content that PROV declines to model.
+
+\section{Taxonomy of Epistemic Grounds}
+
+Every warrant establishes a specific proposition, which does not always match the claimed proposition. Consider the assertion \emph{this compound inhibits this enzyme}. A checked proof term establishes the claim itself. Conversely, an instrument reading establishes a narrower proposition: that a specific assay, executed on a specific sample, yielded a specific numeric output. An author's manual assertion establishes only that the author asserted the claim.
+
+When the established proposition differs from the claim, an accountable party must declare the premise bridging the two.
+
+\begin{table}[h]
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{ground} & \textbf{what it establishes} & \textbf{premise needed} \\
+\midrule
+\emph{Verified} & $t : P$ & none --- the same proposition \\
+\emph{Observed} & a recording occurred & supplied by the consumer \\
+\emph{Declared} & agent $a$ asserted $P$ & trust in $a$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The categories \emph{Computed} and \emph{Sampled} are not independent grounds. Instead, they denote whether the term structurally admits an application:
+
+\begin{table}[h]
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{name} & \textbf{shape} & \textbf{condition} \\
+\midrule
+\emph{Computed} & $\mathrm{App}(\mathrm{Declared}(f : I \to O), \mathrm{Observed}(\mathit{input}))$ & the plan is declared a function \\
+\emph{Sampled} & a bare $\mathrm{Observed}$ leaf & no $I \to O$ is assertable \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This distinction is structural. The application operation requires a premise of the form $j_1 : (A \to B)$; thus, a plan is applicable if and only if it is an implication. Neither \emph{Computed} nor \emph{Sampled} are stored as explicit state names.
+
+A computed conclusion remains valid regardless of whether a run occurred. If the analysis plan denotes a function, the output is mathematically determined by the input. The execution record constitutes provenance, not warrant. Conversely, for a stochastic process, the output is not strictly determined by the input. In this case, the execution record \emph{is} the evidence, yielding an observation rather than an application. This structural asymmetry prevents the two from sharing a unified ground.
+
+The foundational design rule dictates that the chain records only the proposition actually established, and every bridging inference constitutes a declared premise attributed to a specific owner.
+
+A single rule resolves three structural defects previously treated independently. Each defect represents an instance of establishing a proposition $P$ but erroneously recording it against a broader claim $Q$. These include: treating $\mathrm{JustifiedBy}(j,P)$ as establishing $P$; treating $p(D, \mathit{spec}) < \alpha$ as establishing a generalized treatment effect; and treating $\mathrm{Commits}(\tau, \varphi)$ as establishing $\varphi$.
+
+The \emph{Sampled} category is not merely the ground for claims lacking a proof. The fact that a specific run produced output $X$ is provable and must be recorded. What is absent is the deductive license to proceed from the execution record to the generalized truth of $X$.
+
+\subsection{Epistemic Scope of Observations}
+\label{sec:epistemic_scope}
+
+The protocol governing a recording constitutes provenance; therefore, a sampled outcome reduces to a single $\mathrm{Observed}$ leaf. Details such as the specific instrument, the configuration parameters, and the execution trace belong in the provenance graph, not within the justification term. Furthermore, the underlying substrate is irrelevant: both a model invocation and a laboratory assay function as recordings under a declared protocol. The criterion separating them from computed conclusions is whether the plan formalizes a deterministic function, not the medium of execution.
+
+The declaration $\mathrm{Declared}(f : I \to O)$ encapsulates the entire reproducibility claim, because a stochastic protocol cannot inhabit that specific function type. A computed conclusion logically rests on two elements: the function declaration and the observed input.
+
+For opaque external procedures, the function declaration is asserted rather than derived. While the kernel's native type checker statically verifies that internal terms denote total functions, determining whether an arbitrary external procedure denotes a mathematical function is Turing-undecidable. Furthermore, this formal limitation is distinct from physical uncertainty: for steps mediated by external generative models or laboratory instruments, determinism constitutes an empirical fact about the environment rather than a logical property of the code. Conditions such as \emph{temperature zero with a fixed seed} represent asserted claims, not properties derivable from a configuration file.
+
+The assertion attaches to the abstract plan, not the concrete program. A program execution is deterministic with respect to its formal operational semantics, but becomes non-deterministic when subjected to environmental side-effects, such as a model-mediated step. A strictly computational protocol can theoretically pin every formal input, rendering the function declaration assertable; a physical or stochastic protocol cannot.
+
+The evidential regress terminates securely. A declaration establishes that a designated agent asserted a proposition; an observation establishes that a specific recording occurred. Neither primitive requires a further supporting premise.
+
+The statistical apparatus applies uniformly to model runs. Concepts such as replication, declared scope boundaries, $\alpha$ thresholds, and effect sizes exist to extrapolate from discrete samples to population-level claims. A single model run constitutes a discrete sample. The assertion \emph{the reranker improves resolution} requires the same bridging logic as \emph{the compound is efficacious}; a single execution establishes the former no better than a single animal establishes the latter.
+
+\subsection{Dynamic Computation of Warrants}
+
+The system explicitly stores provenance relations, justification terms, committed judgements, and the declared premises cited by those terms. From these primitives, the system dynamically computes the provenance summary by traversing the relations and evaluates the warrant directly from the justification term.
+
+A stored grade can contradict its underlying evidence, whereas a dynamically computed grade cannot. If a grade exists as an explicit field, a resource carrying the \emph{Verified} label without a valid proof term constitutes a representable, but fundamentally invalid, state. When such a stored grade contradicts the underlying source relations, the system lacks a definitive formal mechanism to resolve the conflict. Eliminating the explicit grade field guarantees that the warrant acts strictly as a deterministically computed cache derived from a single source of truth; because the contradictory state cannot be represented, complex validation logic is unnecessary.
+
+Furthermore, dynamic computation ensures warrant currency. If an accountable party withdraws the declaration $f : I \to O$, every dependent conclusion automatically reverts to the underlying observations without requiring resource edits. Conversely, maintaining a stored grade would necessitate a complex cascading data migration to ensure consistency.
+
+\subsection{Well-Foundedness Conditions}
+
+Evaluating the warrant against the current chain head, rather than freezing it at commit time, introduces a structural exposure that strict layering does not inherently close:
+
+\begin{enumerate}
+\item A claim $C$ rests on the execution of a plan $f$. Because no function type $f : I \to O$ is declared, $C$ represents a bare observation.
+\item A subsequent layer declares $f : I \to O$, citing $C$ as supporting evidence.
+\item The term $C$ now structurally supports an application, while the declaration's own support graph contains $C$. Consequently, the semantic evaluation of $C$ depends cyclically on the declaration.
+\end{enumerate}
+
+The storage layer stratifies citations, but does not stratify warrants because warrants are computed dynamically.
+
+The necessary well-foundedness condition dictates that a premise's support graph may not transitively include the premise itself. A justification violating this acyclicity condition is rejected at commit time. This check represents a well-formedness condition on justification terms, structurally identical to the positivity check required for inductive type declarations.
+
+This condition holds vacuously where justification logic requires self-reference. A declared premise possesses no support graph to inspect, because its bridge relies on institutional trust rather than a derived proposition. This carve-out is theoretically sound: Artemov's constant specifications permit self-referential axioms of the form $c : A(c)$, and such self-referentiality is strictly necessary for realizing certain S4 theorems in LP~\cite{af19}. Postulated self-reference is logically sound; derived circularity is unsound, and only derived circularity possesses a support graph subject to inspection.
+
+Mutual justification provides no exemption. While a mutual inductive definition is sound because a least fixed point guarantees denotation, mutual justification lacks a theoretical analogue. Interdependent claims establish nothing.
+
+\paragraph{Transitive cycle detection via the knowledge graph.} Evaluating warrants dynamically introduces the theoretical possibility of derivation cycles of length strictly greater than one. Because a subsequent declaration can retroactively upgrade a bare observation into an application, a semantic dependency creates a backward edge in the derivation graph. A single-step structural check cannot detect cycles formed by mutual dynamic upgrades. The system enforces this topological constraint via the existing \code{core:mentions} triple index, which projects internal term references directly into the knowledge graph. When a term cites a premise, the semantic dependency manifests as a directed edge in the index. Well-foundedness is guaranteed mechanically: the commit-phase validator executes standard cycle detection (evaluating the transitive closure) over the \code{core:mentions} index for all incoming resources. Any commit that introduces a cyclic dependency is rejected.
+
+\section{Integration of External Logics}
+
+Institutions and proof systems do not constitute mutually exclusive categories. Meseguer formalizes a \emph{logical system} as an institution paired with an entailment system, linked by a strict soundness condition~\cite{mes89}. Consequently, proof structures and satisfaction structures inhabit a unified theoretical framework. The institution formalism includes variants depending on whether sentences and models carry morphisms. Proof-theoretic variants carry a functor of proofs, and an entailment system lacking models represents a valid instantiation~\cite{whatisalogic}. The kernel constitutes this degenerate case---lacking represented models and utilizing proofs as the entire content---rather than an entity outside the institutional framework.
+
+The operative design question is whether the system can hold and re-check a witness for the claims a logic establishes. A participating logic contributes formal vocabulary, a decision procedure yielding a tri-state verdict, derivation resources, and optionally a formal judgement in its native logic. A participating logic does not assign a system warrant, define a witness type, or unilaterally establish the \emph{Verified} state.
+
+The presence of a transportable, re-checkable witness object defines the architectural boundary. A logic supplies either a verifiable witness or an opaque report. This structural distinction governs which warrants are reachable.
+
+The capability to host a checker is the determinative property for assigning warrants. If the system lacks a hosted checker for a logic's proof language, that logic cannot reach \emph{Verified}; its output takes the \emph{Computed} shape at best. A proof that the system cannot structurally verify is not a proof that the system holds.
+
+A boolean verdict does not establish the \emph{Verified} state; a checked judgement does. The verification institution illustrates this separation: it acts simultaneously as an institution and a proof-term source, yet the roles remain mathematically independent. A verification institution that returns \emph{Holds} but fails to supply a term does not reach \emph{Verified}; its output takes the \emph{Computed} shape. For example, the statistics institution defines a satisfaction relation but provides no proof language. Its output, the inequality $p < \alpha$, constitutes evidence bearing on a claim rather than a formal derivation of the claim; thus, it produces no judgement form.
+
+Trust requirements vary strictly by direction:
+
+\begin{table}[h]
+\small
+\begin{tabular}{@{}lp{0.30\linewidth}p{0.34\linewidth}@{}}
+\toprule
+\textbf{direction} & \textbf{trust required} & \textbf{why the direction is safe} \\
+\midrule
+\emph{Verified} & none --- the kernel re-checks the term & that is the definition \\
+\emph{Computed} / \emph{Sampled} & bounded and attributed: which institution, which invocation, which subject & recorded, so an incorrect result is traceable \\
+a \emph{Fails} verdict blocking a commit & full, on the institution's authority & an incorrect \emph{Fails} loses data; an incorrect \emph{Holds} corrupts \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+An institution may veto a commit on its own authority, but it may not establish the \emph{Verified} state on its own authority.
+
+\subsection{Boundaries of Institutional Authority}
+
+An institution's authority terminates strictly at its declared scope. Three distinct levels exist and must not merge:
+
+\begin{table}[h]
+\small
+\begin{tabular}{@{}lp{0.40\linewidth}p{0.28\linewidth}@{}}
+\toprule
+\textbf{level} & \textbf{content} & \textbf{how carried} \\
+\midrule
+numerics & the statistic and its $p$-value & audit fields on the result \\
+immediate statement & a domain claim at a declared scope, warranted when $p$ crosses $\alpha$ & a witness, gated by the scope check \\
+translation & what that implies for, say, compound efficacy & a further claim across a declared bridge, owned by another party \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The \emph{Computed} shape attaches strictly to the immediate statement. It manifests as an application of the declared plan to the observed sample set, where the plan's formal specification serves as the premise and carries the scope marker. The translation phase is not represented by a primitive shape. It requires a distinct application with its own declared leaf. Consequently, any query assessing whether the translated conclusion is fully verified evaluates to false.
+
+\subsection{The Scope of Inhabitation Semantics}
+
+Institution theory relies on a classical formulation where the satisfaction relation evaluates sentences against models~\cite{gb92}. Under inhabitation semantics, truth corresponds to term inhabitation. By the Brouwer-Heyting-Kolmogorov (BHK) interpretation~\cite{tvd88} and the propositions-as-types principle~\cite{mltt}, the assertion that $P$ holds is equivalent to the statement that $\sem{P}$ possesses an inhabitant. In the initial model, the relations $\vdash$ and $\models$ coincide by construction.
+
+This equivalence provides a concrete structural guarantee: for a type-theoretic checker, the soundness obligation is discharged by construction. When the satisfaction relation is Tarskian, the soundness of $\vdash$ with respect to $\models$ is a theorem requiring explicit proof~\cite{mes89}. When satisfaction is defined by inhabitation and verification is performed by a type checker, the assertion that the checker accepts $t : P'$ and the assertion that $P'$ holds are identical statements. The theoretical obligation transfers entirely to the comorphism. This aligns with practical deployment, as the primary risk in admitting a Lean proof is not that the Lean kernel accepts falsehoods, but that the translated proposition $P'$ fails to denote the target proposition $P$.
+
+This approach sharpens the satisfaction condition to inhabitation-preservation: the translated sentence $\alpha(\varphi)$ is inhabited if and only if the original sentence $\varphi$ is inhabited. This condition is more readily exhibited than model-preservation, although it remains non-executable because the two inhabitants occupy different type theories, and the comorphism maps the proposition rather than the proof term.
+
+Inhabitation semantics does not dictate which logics supply terms, nor does the term-supplying boundary map to the formal division between constructive and classical logic. Classicality is a property of a theory's axioms, which function mechanically as typed constants lacking definitions during verification. While axioms modify the set of inhabited types, they preserve the foundational principle that a proof of $P$ is a term of type $P$.
+
+The determinative distinction is therefore strictly operational: does the logic present proof objects, and does the host system possess a checker capable of verifying them? A logic presenting verifiable proof objects can yield the \emph{Verified} warrant. A logic whose satisfaction relation maps sentences to a dataset, a population, or the physical world lacks a transportable witness object and can only issue reports; it therefore cannot reach \emph{Verified}, and the \emph{Computed} shape is its ceiling. This architectural constraint pertains exclusively to the host system's capabilities and requires no philosophical position on the definition of a logic.
+
+\section{Witnesses and the Trusted Computing Base}
+
+The kernel vocabulary expresses the evidential grounds as propositions about the storage chain. The assertion that a resource is declared as $P$ establishes only that the chain contains evidence to that effect; it does not establish $P$ itself.
+
+The \emph{Verified} state is provable, whereas \emph{Declared} and \emph{Observed} states are postulated. A committed judgement discharges the corresponding witness via a constructor. The kernel asserts the remaining two as proof constants under a defined constant specification. Postulation is the correct semantic operation for attributions: verification is impossible because an attribution merely asserts that an agent made a claim or that a physical recording occurred.
+
+The trusted computing base consists of the kernel's native type checker, each hosted external proof checker, each formal comorphism, and the constant specification governing attributions. It strictly excludes the automated prover that discovered a proof, any unverified institutional verdict, and class membership heuristics.
+
+Admitting a new proof system requires two formal arguments. These correspond to the two failure modes identified in institution literature that could convert a false proposition $P'$ into an accepted proposition $P$: the soundness of the external $\vdash$ with respect to its $\models$~\cite{mes89} (argued per hosted checker), and satisfaction-preservation by its comorphism~\cite{gb92} (ensuring that a \emph{Verified} state established externally transfers correctly).
+
+Hosting a checker is not merely a packaging decision. It formally adds both theoretical obligations and implementation vulnerabilities to the trusted computing base. For example, the verification institution utilizes the \code{nanoda\_lib} type checker~\cite{nanoda} to verify Lean~4 proof terms. Because this checker is statically linked directly into the host kernel, its logic executes entirely within the system's core trust boundary. Consequently, admitting this logic formally expands the trusted computing base to include the complete \code{nanoda\_lib} implementation.
+
+\section{Case Study: Rival-Sensitive Commitments}
+
+The initial external logic proposed for the platform is the $\kappa$--$\tau$ framework for risk-sensitive abduction~\cite{kt}. This logic formalizes reasoning in high-stakes domains by decoupling epistemic likelihood from operational commitment. It introduces two primitives: epistemic interaction among hypotheses ($\kappa$) and a normative commitment threshold ($\tau$). Within a neurosymbolic architecture, neural components estimate the epistemic parameters, while the commitment threshold remains an explicit, human-governed parameter. The satisfaction relation $S \Vdash C_\tau\varphi$ holds if and only if a commitment score for $\varphi$ under the evidence graph $S$ satisfies the threshold $\tau$.
+
+\emph{Attribution.} This analysis follows the pilot proposal supplied by the framework's author via personal communication. The central claim is that the framework \emph{maps correctly} onto the proposed architecture; any divergence from the published paper reflects this document's architectural interpretation.
+
+\paragraph{Institution mapping.} The satisfaction relation requires computations the kernel cannot natively evaluate.
+
+\paragraph{Proof system mapping.} If the evidence graph and parameters commit as formal terms, the threshold comparison becomes decidable by evaluation. Consequently, the framework could supply a proof term establishing the \emph{Verified} warrant for the proposition $\mathrm{Commits}(\tau, \varphi)$. However, this proof does not establish the underlying proposition $\varphi$.
+
+The framework formally establishes $\mathrm{Commits}(\tau,\varphi)$, not $\varphi$. This distinction reflects the framework's core contribution: making the commitment threshold explicit. Recording the threshold against the base proposition $\varphi$ converts a mathematical commitment into an unqualified domain claim. The semantic gap is crossed by a declared bridge $\mathrm{Commits}(\tau,\varphi) \rightarrow \varphi$, attributed to a specific owner. The justification term explicitly exhibits this declared leaf.
+
+The resulting warrant is composite. Because scoring and threshold comparison operate as a deterministic function over the graph and parameters, an application forms over them. However, the neural estimates feeding the score are physical recordings governed by a declared protocol. Consequently, no application forms over the estimates, and the system entails nothing regarding subsequent estimates. This structural separation prevents the sampled data from inheriting the entailment properties of the reproducible computation.
+
+The structural projection answers the framework's internal queries. Questions concerning whether a commitment survives the removal of a specific estimate, or which estimates a conclusion rests upon, map directly to queries over the justification term. This necessitates that the term exists as a composite structure rather than the single opaque leaf typically emitted when an institution collapses an analysis plan and its data into a single node.
+
+The framework holds veto power but should not exercise it. A below-threshold score indicates the imperative \emph{do not commit to $\varphi$}; it does not indicate \emph{this chain is invalid}. The correct institutional behavior is to return \emph{Holds} for $\mathrm{Commits}(\tau,\varphi)$ when above the threshold, and \emph{Undecidable} when below it.
+
+The integration requires no protocol or kernel modifications. It does impose three requirements absent from the original proposal: the framework must declare which steps are strictly reproducible, it must emit a composite justification term rather than an atomic leaf, and it must assert the proposition $\mathrm{Commits}(\tau,\varphi)$ rather than $\varphi$. The final requirement ensures the framework does not silently absorb the semantic gap between a threshold commitment and absolute truth---a gap that forms its primary subject of study.
+
+\section{Conclusion}
+
+This architectural proposal establishes a rigorous formal boundary between mathematical proofs and epistemic grounds. By separating these objects into distinct syntactic types (judgements and justification terms), the system renders the unsound substitution of grounds for a proof formally inexpressible. The design mandates uniform check-mode verification for all judgements, eliminating the necessity for complex bidirectional inference exemptions. Furthermore, it replaces mutable, explicitly stored epistemic grades with dynamically computed warrants, ensuring that a resource's evidential status remains strictly synchronized with its underlying provenance graph. The architecture guarantees well-foundedness by reducing transitive cycle detection to a mechanical graph query over the \code{core:mentions} index at commit time. Finally, the proposal grounds the theoretical integration of external logics in operational mechanics. By defining an institution's authority strictly by the host system's capability to execute its witness objects, the architecture precisely bounds trust and completely specifies the conditions under which a claim achieves the \emph{Verified} warrant.
+
+\begin{thebibliography}{9}
+
+\bibitem[Artemov and Fitting(2019)]{af19}
+Sergei Artemov and Melvin Fitting.
+\newblock \emph{Justification Logic: Reasoning with Reasons}.
+\newblock Cambridge University Press, 2019.
+
+\bibitem[Goguen and Burstall(1992)]{gb92}
+Joseph A. Goguen and Rod M. Burstall.
+\newblock Institutions: abstract model theory for specification and programming.
+\newblock \emph{Journal of the ACM}, 39(1):95--146, 1992.
+
+\bibitem[Pareschi(2026)]{kt}
+Remo Pareschi.
+\newblock A minimal $\kappa$--$\tau$ logic for risk-sensitive abduction.
+\newblock Preprint, arXiv:2608.08192, 2026. \url{https://arxiv.org/abs/2608.08192}
+
+\bibitem[Mossakowski et al.(2004)]{whatisalogic}
+Till Mossakowski, Joseph Goguen, R\u{a}zvan Diaconescu and Andrzej Tarlecki.
+\newblock What is a logic?
+\newblock Draft of 16 October 2004; cited from that draft, which carries unresolved editorial
+  notes. A later version appeared in the \emph{Logica Universalis} collection, which was not
+  available for consultation.
+
+\bibitem[Martin-L\"of(1984)]{mltt}
+Per Martin-L\"of.
+\newblock \emph{Intuitionistic Type Theory}.
+\newblock Bibliopolis, 1984.
+
+\bibitem[Meseguer(1989)]{mes89}
+Jos\'e Meseguer.
+\newblock General logics.
+\newblock In \emph{Logic Colloquium '87}. North-Holland, 1989.
+
+% No optional label: natbib parses \bibitem[...] as Author(Year) and prints any
+% label it cannot parse verbatim, which is why this one rendered as a name.
+\bibitem{nanoda}
+\emph{nanoda\_lib} --- a Lean~4 kernel reimplementation in Rust.
+\newblock \url{https://github.com/ammkrn/nanoda_lib}.
+
+\bibitem[W3C(2013)]{provo}
+W3C.
+\newblock \emph{PROV-O: The PROV Ontology}.
+\newblock W3C Recommendation, 2013. \url{https://www.w3.org/TR/prov-o/}.
+
+\bibitem[Troelstra and van Dalen(1988)]{tvd88}
+Anne S. Troelstra and Dirk van Dalen.
+\newblock \emph{Constructivism in Mathematics: An Introduction}.
+\newblock North-Holland, 1988.
+
+\end{thebibliography}
+
+\appendix
+
+\section{Deprecated Architectural Patterns}
+\label{sec:replaces}
+
+Each item names a present pattern. The replacement stands without knowledge of its details.
+
+\begin{itemize}
+\item \textbf{Grades assigned by class membership, by a trace declaring its own grade, or by the importer that wrote the resource.} Replaced by computation from stored evidence. No path exists by which asserting a class confers evidential standing.
+\item \textbf{One artifact serving as proof term, derivation record and justification at once.} Replaced by the two-layer separation, which makes the substitution inexpressible.
+\item \textbf{A verified resource class declared a subclass of a derived resource class.} Replaced by the two-axis separation: the two answer different questions, so no subsumption exists in either direction.
+\item \textbf{Inference, plus a hardcoded list of proposition-bearing slots, plus per-property exemptions between them.} Replaced by the single check-mode rule.
+\item \textbf{A protocol for institutions to supply their own witness kinds.} Unnecessary: an institution supplies a judgement in a logic the system checks, or its output is \emph{Computed}.
+\end{itemize}
+
+Reducing the grounding vocabulary from four to three represents the largest structural change. The present implementation grounds a certificate on four constructors; this design grounds it on three, with \emph{Computed} and \emph{Sampled} demoted from grounds to readings of term shape. Justification-term constructors fall from seven to six, the witness family from four to three, the certificate's grounding constructors from four to three, and the projection algebra's enumeration from four to three; institution output changes from one atom to a composite application. Every existing composite-as-atom leaf becomes invalid.
+
+\end{document}

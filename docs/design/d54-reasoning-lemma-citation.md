@@ -139,7 +139,7 @@ So the institution's logic choice is not cosmetic: it fixes (a) what inconsisten
 
 **One branch + one helper** in `build_witness_index` (`kernel/src/layer/witness_index.rs`, ~25 lines): admit a `reasoning:ReasoningSentence` as a `Verified` witness keyed on its IRI, reading `reasoning:proposition`. Soundness is the existing commit-rejects-`Fails` boundary (§3.2) — no gate change, no `canonical_proposition` stamping. **No** changes to the type checker, NbE, the D47 codec, the `JustificationTerm` constructors, the reasoning gate, or the `ReasoningSentence` / `Verdict` classes.
 
-**Verified end-to-end:** the WRN `C-MAIN` was converted from inlined leaf proofs to five lemma citations (`verified(concl_X, P)`) and still type-checks to `Holds` (`crates/eigenius-reasoning/tests/wrn_phase5.rs::wrn_phase5_cmmr_and_cmain_validate`); kernel, reasoning, and statistics suites stay green; the change is additive (certificates citing no sentence are unaffected). Appendix A is now the *live* `C-MAIN`, not a sketch. Layered proof — the lemmas → theorems pattern — is available platform-wide.
+**Verified end-to-end:** the WRN `C-MAIN` was converted from inlined leaf proofs to five lemma citations (`verified(concl_X, P)`) and still type-checks to `Holds` (`kernel/tests/wrn_phase5.rs::wrn_phase5_cmmr_and_cmain_validate`); kernel, reasoning, and statistics suites stay green; the change is additive (certificates citing no sentence are unaffected). Appendix A is now the *live* `C-MAIN`, not a sketch. Layered proof — the lemmas → theorems pattern — is available platform-wide.
 
 ---
 

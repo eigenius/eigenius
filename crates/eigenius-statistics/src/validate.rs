@@ -45,9 +45,12 @@
 //!    `{plan_iri}:result:{effect_name}`, whose `verdict_ctor` is Holds
 //!    when that effect's p crossed alpha and Fails (`AlphaNotCrossed`)
 //!    when it did not. Only a per-effect Holds carries a
-//!    `canonical_proposition`, so only a rejecting effect admits an
-//!    `IsDerivedAs` witness. Both outcomes carry the computed numerics
-//!    for audit.
+//!    `canonical_proposition`, so only a rejecting effect records what it
+//!    computed. The result grounds nothing on its own — a computed claim is
+//!    `App(Declared(plan), Observed(inputs))` — but the proposition is what a
+//!    downstream plan-reproducibility declaration is written against, so a
+//!    missing one still stops the composite from being expressible. Both
+//!    outcomes carry the computed numerics for audit.
 //!
 //! Every diagnostic on both paths is a free-form `String` in the one
 //! `institution:diagnostic` slot. `AlphaNotCrossed`,
@@ -60,6 +63,7 @@ use eigenius_kernel::institution::runtime::QueryOutcome;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
+use eigenius_kernel::program::eigentt_type_mirror::CodecNames;
 
 use crate::institution::iris;
 use crate::institution::StatisticsInstitution;
@@ -129,6 +133,10 @@ pub fn do_validate_analysis_plan(
     claim: &Resource,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
+    // The chain: an inductive value's argument ORDER is its declaration's, so projecting one
+    // back positionally needs the layer that declares it.
+    let layer = ctx.head();
+    let names = CodecNames::from_layer(layer);
     // ── Step 1: read sample_set IRI from the claim ────────────────────
     let sample_set_iri_str = match read_iri_property(claim, iris::PROP_SAMPLE_SET)? {
         Some(s) => s,
@@ -168,7 +176,19 @@ pub fn do_validate_analysis_plan(
         }
     };
     let bundle_json = match bundle_value {
-        Value::Json(j) => j,
+        // The `Bundle` value, projected back positionally — its argument order is the
+        // declaration's (D85 §6.1).
+        Value::Embedded(r) => {
+            &match eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, layer) {
+                Ok(j) => j,
+                Err(e) => {
+                    return Ok(gate_fails(format!(
+                        "SampleSetResource `{sample_set_iri}`'s sample_set_value is not a \
+                     well-formed inductive value: {e:?}"
+                    )))
+                }
+            }
+        }
         other => {
             return Ok(gate_fails(format!(
                 "SampleSetResource `{sample_set_iri}`'s sample_set_value is not a chain \
@@ -205,7 +225,7 @@ pub fn do_validate_analysis_plan(
     // before the hypothesis-test parameter reads below.
     let classification_iri = Iri::parse(iris::CLASSIFICATION_ANALYSIS_PLAN).expect("static IRI");
     if claim.is_instance_of(&classification_iri) {
-        return recompute_classification_quality_claim(claim, &bundle, &sample_set_iri_str);
+        return recompute_classification_quality_claim(claim, &bundle, &sample_set_iri_str, &names);
     }
 
     // ── §2.2 SampleSet-based early dispatch: nested two-way ANOVA ────────────
@@ -258,11 +278,11 @@ pub fn do_validate_analysis_plan(
         Some(a) => a,
         None => return Ok(gate_fails("claim missing `alpha`".into())),
     };
-    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY, layer)? {
         Some(j) => j,
         None => return Ok(gate_fails("claim missing `directionality`".into())),
     };
-    let effect_size = match read_json_property(claim, iris::PROP_EFFECT_SIZE)? {
+    let effect_size = match read_json_property(claim, iris::PROP_EFFECT_SIZE, layer)? {
         Some(j) => j,
         None => return Ok(gate_fails("claim missing `effect_size`".into())),
     };
@@ -317,7 +337,7 @@ pub fn do_validate_analysis_plan(
     // Read variance_assumption for the IID dispatch arm (one-sample
     // dispatch ignores it — there's only one variance parameter to
     // estimate there).
-    let variance_assumption = read_json_property(claim, iris::PROP_VARIANCE_ASSUMPTION)?;
+    let variance_assumption = read_json_property(claim, iris::PROP_VARIANCE_ASSUMPTION, layer)?;
 
     // §7.2 outlier-exclusion dispatch matrix. Phase 5 v1 wires the
     // `(SingleSampleEstimate, ESD(k, alpha))` cell — the cell that
@@ -326,7 +346,7 @@ pub fn do_validate_analysis_plan(
     // exclusion) combinations reject up front with a diagnostic
     // referencing the tracked follow-on. Identity exclusion takes the
     // standard single-verdict path on any dispatch.
-    let outlier_exclusion = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION)?;
+    let outlier_exclusion = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION, layer)?;
     let exclusion_ctor = outlier_exclusion
         .as_ref()
         .and_then(json_ctor_name)
@@ -404,10 +424,10 @@ pub fn do_validate_analysis_plan(
     // proposition derivation per effect and returns a gate-Holds
     // outcome carrying N derivations (one per effect).
     if matches!(dispatch, DispatchPos::Factorial) {
-        return do_factorial_per_effect(claim, &bundle, alpha, &effect_size);
+        return do_factorial_per_effect(claim, layer, &bundle, alpha, &effect_size);
     }
     if matches!(dispatch, DispatchPos::SplitPlot) {
-        return do_splitplot_per_effect(claim, &bundle, alpha);
+        return do_splitplot_per_effect(claim, layer, &bundle, alpha);
     }
 
     // ── Step 6: run the test (dispatch-specific) ──────────────────────
@@ -754,7 +774,8 @@ pub fn do_validate_analysis_plan(
                 // Read the claim's `autocorrelation_structure`; absent
                 // defaults to CompoundSymmetry (the assumption a flat
                 // RM-ANOVA implicitly makes).
-                let autocorr = read_json_property(claim, iris::PROP_AUTOCORRELATION_STRUCTURE)?;
+                let autocorr =
+                    read_json_property(claim, iris::PROP_AUTOCORRELATION_STRUCTURE, layer)?;
                 let autocorr_ctor = autocorr.as_ref().and_then(json_ctor_name);
                 let autocorr_name = autocorr_ctor.unwrap_or("CompoundSymmetry");
                 match (autocorr_name, k_between) {
@@ -844,11 +865,10 @@ pub fn do_validate_analysis_plan(
     // stats:lt, stats:False, ...). One source of truth: the alternative
     // hypothesis IS the canonical proposition, derivable deterministically
     // from (dispatch, effect_size, directionality). When the derivation
-    // shape isn't yet wired for a dispatch arm, this returns `None` —
-    // the verdict skips the canonical_proposition slot and the D49
-    // witness emitter won't admit `IsDerivedAs` against it, which is
-    // the correct fail-closed behaviour until those arms' derivations
-    // land.
+    // shape isn't yet wired for a dispatch arm, this returns `None` — the
+    // verdict skips the canonical_proposition slot and there is no recorded
+    // proposition for a plan declaration to be written against, which is the
+    // correct fail-closed behaviour until those arms' derivations land.
     let derived_proposition: Option<serde_json::Value> = match dispatch {
         DispatchPos::SingleSampleEstimate => derive_canonical_proposition_singlesample(
             &sample_set_iri_str,
@@ -970,6 +990,7 @@ pub fn do_validate_analysis_plan(
         result_diag.as_deref(),
         (t_statistic, p_value_for_alpha),
         canonical_for_result,
+        &names,
     ))
 }
 
@@ -999,8 +1020,11 @@ pub fn do_validate_analysis_plan(
 fn recompute_method_comparison_claim(
     claim: &Resource,
     bundle: &DecodedBundle,
-    _ctx: &ExecutionContext,
+    ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
+    // The chain: an inductive value's argument order is its declaration's.
+    let layer = ctx.head();
+    let names = CodecNames::from_layer(layer);
     if bundle.blocking != "PairedBlocking" {
         return Ok(gate_fails(format!(
             "MethodComparisonAnalysisPlan requires a Paired SampleSet (blocking = PairedBlocking, \
@@ -1009,7 +1033,7 @@ fn recompute_method_comparison_claim(
             bundle.blocking, bundle.factor, bundle.repeated_measures,
         )));
     }
-    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY, layer)? {
         Some(j) => j,
         None => return Ok(gate_fails("claim missing `directionality`".into())),
     };
@@ -1021,7 +1045,7 @@ fn recompute_method_comparison_claim(
                 .into(),
         ));
     }
-    let outlier = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION)?;
+    let outlier = read_json_property(claim, iris::PROP_OUTLIER_EXCLUSION, layer)?;
     if let Some(ctor) = outlier.as_ref().and_then(json_ctor_name) {
         if ctor != "Identity" {
             return Ok(gate_fails(format!(
@@ -1091,6 +1115,7 @@ fn recompute_method_comparison_claim(
         Some(&diag_string),
         (res.slope, p_indicator),
         None,
+        &names,
     ))
 }
 
@@ -1112,14 +1137,16 @@ fn recompute_method_comparison_claim(
 ///   - `{plan}:result:ppv`         carrying `stats:ge(stats:ppv(s), min_ppv)`
 ///   - `{plan}:result:sensitivity` carrying `stats:ge(stats:sensitivity(s), min_sensitivity)`
 ///
-/// Each result Holds iff its metric meets the author-declared minimum;
-/// the canonical proposition (and thus the D49 `IsDerivedAs`) attaches
-/// only on Holds. Downstream D39 reasoning composes both via a declared
-/// statistical→domain bridge into a domain biomarker conclusion.
+/// Each result Holds iff its metric meets the author-declared minimum; the
+/// canonical proposition attaches only on Holds. Downstream D39 reasoning
+/// grounds each as `App(Declared(plan_yields_metric), Observed(sample_set))` and
+/// composes both via a declared statistical→domain bridge into a domain
+/// biomarker conclusion.
 fn recompute_classification_quality_claim(
     claim: &Resource,
     bundle: &DecodedBundle,
     sample_set_iri_str: &str,
+    names: &CodecNames,
 ) -> Result<QueryOutcome, InstitutionError> {
     let (group_a, group_b) = match decode_two_group_observations(&bundle.observations_raw) {
         Ok(pair) => pair,
@@ -1211,7 +1238,7 @@ fn recompute_classification_quality_claim(
             canonical_proposition: if sens_holds { Some(sens_prop) } else { None },
         },
     ];
-    Ok(gate_holds_with_results(claim.id(), results))
+    Ok(gate_holds_with_results(claim.id(), results, names))
 }
 
 /// Build `stats:ge(stats:<metric>(s), threshold)` as a D47 type-fragment
@@ -1253,6 +1280,9 @@ fn recompute_nested_anova_claim(
     sample_set_iri_str: &str,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
+    // The chain: an inductive value's argument order is its declaration's.
+    let layer = ctx.head();
+    let names = CodecNames::from_layer(layer);
     let (flat_a, flat_b, sizes_a, sizes_b) =
         match decode_nested_observations(&bundle.observations_raw) {
             Ok(p) => p,
@@ -1270,7 +1300,7 @@ fn recompute_nested_anova_claim(
         Some(a) => a,
         None => return Ok(gate_fails("claim missing `alpha`".into())),
     };
-    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY, layer)? {
         Some(j) => j,
         None => return Ok(gate_fails("claim missing `directionality`".into())),
     };
@@ -1356,6 +1386,7 @@ fn recompute_nested_anova_claim(
         Some(&diag),
         (r.f_group, p_for_alpha),
         canonical,
+        &names,
     ))
 }
 
@@ -1373,6 +1404,9 @@ fn recompute_crossed_anova_claim(
     sample_set_iri_str: &str,
     ctx: &ExecutionContext,
 ) -> Result<QueryOutcome, InstitutionError> {
+    // The chain: an inductive value's argument order is its declaration's.
+    let layer = ctx.head();
+    let names = CodecNames::from_layer(layer);
     let (flat_a, flat_b, sizes_a, sizes_b) =
         match decode_nested_observations(&bundle.observations_raw) {
             Ok(p) => p,
@@ -1400,7 +1434,7 @@ fn recompute_crossed_anova_claim(
         Some(a) => a,
         None => return Ok(gate_fails("claim missing `alpha`".into())),
     };
-    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY)? {
+    let directionality = match read_json_property(claim, iris::PROP_DIRECTIONALITY, layer)? {
         Some(j) => j,
         None => return Ok(gate_fails("claim missing `directionality`".into())),
     };
@@ -1486,6 +1520,7 @@ fn recompute_crossed_anova_claim(
         Some(&diag),
         (r.f_group, p_for_alpha),
         canonical,
+        &names,
     ))
 }
 
@@ -1647,8 +1682,9 @@ impl MultipleComparisonCorrection {
 /// institutional failures.
 fn read_multiple_comparison_correction(
     claim: &Resource,
+    layer: &eigenius_kernel::layer::Layer,
 ) -> Result<Result<MultipleComparisonCorrection, String>, InstitutionError> {
-    let raw = match read_json_property(claim, iris::PROP_MULTIPLE_COMPARISON_CORRECTION)? {
+    let raw = match read_json_property(claim, iris::PROP_MULTIPLE_COMPARISON_CORRECTION, layer)? {
         Some(j) => j,
         None => return Ok(Ok(MultipleComparisonCorrection::NoCorrection)),
     };
@@ -1771,10 +1807,12 @@ fn apply_correction(
 /// SAP's raw alpha.
 fn do_factorial_per_effect(
     claim: &Resource,
+    layer: &eigenius_kernel::layer::Layer,
     bundle: &DecodedBundle,
     alpha: f64,
     effect_size: &serde_json::Value,
 ) -> Result<QueryOutcome, InstitutionError> {
+    let names = CodecNames::from_layer(layer);
     // Factorial requires Absolute / EtaSquared / OmegaSquared / None
     // EffectSize ctors. Standardized Cohen's d / Hedges' g are
     // two-sample shapes; reject those up front so the author sees
@@ -1812,7 +1850,7 @@ fn do_factorial_per_effect(
     // Apply the SAP's multiple-comparison correction (NoCorrection
     // when the slot is absent) to the raw per-effect p-values; the
     // per-effect Holds/Fails decision uses the corrected rejection.
-    let correction = match read_multiple_comparison_correction(claim)? {
+    let correction = match read_multiple_comparison_correction(claim, layer)? {
         Ok(m) => m,
         Err(diag) => return Ok(gate_fails(diag)),
     };
@@ -1870,7 +1908,7 @@ fn do_factorial_per_effect(
             canonical_proposition,
         });
     }
-    Ok(gate_holds_with_results(claim.id(), results))
+    Ok(gate_holds_with_results(claim.id(), results, &names))
 }
 
 /// Validate a SplitPlot-dispatch claim by running the three-F-test
@@ -1891,9 +1929,11 @@ fn do_factorial_per_effect(
 /// itself ran.
 fn do_splitplot_per_effect(
     claim: &Resource,
+    layer: &eigenius_kernel::layer::Layer,
     bundle: &DecodedBundle,
     alpha: f64,
 ) -> Result<QueryOutcome, InstitutionError> {
+    let names = CodecNames::from_layer(layer);
     let (a, r) = match decode_splitplot_blocking(&bundle.blocking_raw) {
         Some(p) => p,
         None => {
@@ -1936,7 +1976,7 @@ fn do_splitplot_per_effect(
         }
     };
 
-    let correction = match read_multiple_comparison_correction(claim)? {
+    let correction = match read_multiple_comparison_correction(claim, layer)? {
         Ok(m) => m,
         Err(diag) => return Ok(gate_fails(diag)),
     };
@@ -2007,7 +2047,7 @@ fn do_splitplot_per_effect(
             canonical_proposition,
         });
     }
-    Ok(gate_holds_with_results(claim.id(), results))
+    Ok(gate_holds_with_results(claim.id(), results, &names))
 }
 
 fn decode_bundle(j: &serde_json::Value) -> Result<DecodedBundle, String> {
@@ -2832,8 +2872,8 @@ fn check_epistemic_scope(
 // proposition per (dispatch, effect_size, directionality) triple.
 // Each value is a D47 chain-mirrored type-fragment JSON tree whose
 // hash the D49 witness index keys on; consumer-side reasoning
-// (D39 reasoning institution + ESL `DerivedEvidence`) reconstructs
-// the same Exp from a proof term, encodes via the same `encode_type`
+// (D39 reasoning institution, through the plan's reproducibility
+// declaration) reconstructs the same Exp from a proof term, encodes via the same `encode_type`
 // path, and arrives at the same hash. The hash equality is the
 // soundness guarantee tying chain-resident verdict to chain-resident
 // citation.
@@ -3027,7 +3067,9 @@ fn effect_canonical_key(factor_indices: &[usize]) -> String {
 }
 
 fn encode_const_ref(iri: &str) -> serde_json::Value {
-    serde_json::json!({"ctor": "ConstRef", "args": [iri]})
+    // `ConstRef(iri, levels)` — the universe-level list is empty for every constant these
+    // propositions name; it is not optional (eigenius#218).
+    serde_json::json!({"ctor": "ConstRef", "args": [iri, []]})
 }
 
 fn encode_lit_string(s: &str) -> serde_json::Value {
@@ -3099,8 +3141,7 @@ fn parse_effect_size_absolute(j: &serde_json::Value) -> Option<(f64, String)> {
 fn read_iri_property(claim: &Resource, prop_iri: &str) -> Result<Option<String>, InstitutionError> {
     let iri = Iri::parse(prop_iri).expect("static IRI");
     match claim.get(&iri) {
-        Some(Value::String(s)) => Ok(Some(s.clone())),
-        Some(Value::ResourceRef(i)) => Ok(Some(i.as_str().to_string())),
+        Some(Value::String(i)) => Ok(Some(i.as_str().to_string())),
         Some(other) => Err(InstitutionError::ComputationFailed(format!(
             "StatisticalAnalysisPlan `{prop_iri}` is not a string/IRI: {other:?}"
         ))),
@@ -3120,13 +3161,29 @@ fn read_float_property(claim: &Resource, prop_iri: &str) -> Result<Option<f64>, 
     }
 }
 
+/// Read an inductive-valued property as `{ctor, args}`.
+///
+/// A value is a resource whose `is_a` names its constructor's class and whose arguments are
+/// named properties (D85 §6.1); this projects it back positionally so the `json_ctor_name` /
+/// `parse_*` readers below are unchanged. The projection needs the chain, because argument
+/// ORDER is the declaration's.
 fn read_json_property(
     claim: &Resource,
     prop_iri: &str,
+    layer: &eigenius_kernel::layer::Layer,
 ) -> Result<Option<serde_json::Value>, InstitutionError> {
     let iri = Iri::parse(prop_iri).expect("static IRI");
     match claim.get(&iri) {
-        Some(Value::Json(j)) => Ok(Some(j.clone())),
+        Some(Value::Embedded(r)) => {
+            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, layer)
+                .map(Some)
+                .map_err(|e| {
+                    InstitutionError::ComputationFailed(format!(
+                        "StatisticalAnalysisPlan `{prop_iri}` is not a well-formed inductive \
+                         value: {e:?}"
+                    ))
+                })
+        }
         Some(other) => Err(InstitutionError::ComputationFailed(format!(
             "StatisticalAnalysisPlan `{prop_iri}` is not a chain-inductive value: {other:?}"
         ))),
@@ -3159,6 +3216,7 @@ fn gate_holds_with_result(
     diagnostic: Option<&str>,
     numerics: (f64, f64),
     canonical_proposition: Option<&serde_json::Value>,
+    names: &CodecNames,
 ) -> QueryOutcome {
     let mut out = QueryOutcome::from_output(gate_verdict_resource(wk::VERDICT_HOLDS, None));
     if let Some(iri) = analysis_iri {
@@ -3169,6 +3227,7 @@ fn gate_holds_with_result(
             diagnostic,
             numerics,
             canonical_proposition,
+            names,
         ));
     }
     out
@@ -3190,12 +3249,12 @@ struct PerEffectResult {
 /// — the shape multi-effect dispatches (Factorial, SplitPlot,
 /// RepeatedMeasures, multi-factor RCBD) produce. The kernel commits
 /// each derivation independently at its own
-/// `{analysis_iri}:result:{effect_name}` IRI and the witness emitter
-/// admits one `IsDerivedAs` witness per derivation that carries a
-/// canonical_proposition (D52 §6 / D49 §6).
+/// `{analysis_iri}:result:{effect_name}` IRI. Each is the RECORD of one effect's
+/// computation and admits no witness of its own (D52 §6 / D49 §6).
 fn gate_holds_with_results(
     analysis_iri: Option<&Iri>,
     results: Vec<PerEffectResult>,
+    names: &CodecNames,
 ) -> QueryOutcome {
     let mut out = QueryOutcome::from_output(gate_verdict_resource(wk::VERDICT_HOLDS, None));
     if let Some(iri) = analysis_iri {
@@ -3207,6 +3266,7 @@ fn gate_holds_with_results(
                 r.diagnostic.as_deref(),
                 r.numerics,
                 r.canonical_proposition.as_ref(),
+                names,
             ));
         }
     }
@@ -3223,8 +3283,11 @@ fn gate_verdict_resource(ctor_name: &str, diagnostic: Option<&str>) -> Resource 
     let mut r = Resource::new_embedded();
     r.set(
         Iri::parse(wk::IS_A).expect("well-known IRI"),
-        Value::Array(vec![Value::ResourceRef(
-            Iri::parse(wk::VERDICT).expect("well-known IRI"),
+        Value::Array(vec![Value::String(
+            Iri::parse(wk::VERDICT)
+                .expect("well-known IRI")
+                .as_str()
+                .to_string(),
         )]),
     );
     r.set(
@@ -3254,6 +3317,7 @@ fn measurement_result_resource(
     diagnostic: Option<&str>,
     (t_statistic, p_value): (f64, f64),
     canonical_proposition: Option<&serde_json::Value>,
+    names: &CodecNames,
 ) -> Resource {
     const DIAGNOSTIC_IRI: &str = "urn:eigenius:institution:diagnostic";
     let result_iri = Iri::parse(&format!("{}:result:{}", analysis_iri.as_str(), effect_name))
@@ -3288,9 +3352,20 @@ fn measurement_result_resource(
         );
     }
     if let Some(prop) = canonical_proposition {
+        // The derivations above build the proposition as `{ctor, args}` because that reads
+        // as the term it denotes. `canonical_proposition` is declared `core:inductive` at
+        // `eigentt:Term`, so it holds the VALUE that literal names (D85 §6.1) — built here,
+        // once, through the same `CodecNames` every other producer writes through.
+        //
+        // The literal comes from the `derive_canonical_proposition_*` functions above, built
+        // out of constants and computed floats — never from the chain — so a constructor the
+        // term language does not declare is a defect in this crate, not bad input.
+        let value = names
+            .value_of_tagged(&[wk::EIGENTT_TERM], prop)
+            .expect("a derived canonical proposition names eigentt:Term constructors");
         r.set(
             Iri::parse(iris::PROP_CANONICAL_PROPOSITION).expect("static IRI"),
-            Value::Json(prop.clone()),
+            value,
         );
     }
     r

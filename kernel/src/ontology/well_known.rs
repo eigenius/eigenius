@@ -128,6 +128,20 @@ pub const MERGE_TARGET_CLASS: &str = "urn:eigenius:core:merge_target_class";
 /// resources.
 pub const PROGRAM_TYPE: &str = "urn:eigenius:program:type";
 
+/// The class a `program:Program` declares it produces (`domain:
+/// [program:Program]`, `class_types: [core:Class]`, declared in
+/// `ontologies/program/program-ontology.json`).
+///
+/// A program is typed `I -> O`, so its output inhabits `O`. `run_program` reads
+/// this to give an output its `is_a` when the computation stated no class of its
+/// own — a wrapped-R script builds its result through `r_eigon_begin` /
+/// `r_eigon_set_*` and need not name one. The runtime substrate used to supply
+/// that class by stamping `reflection:DerivedResource` on every output; P4 (6/n)
+/// deleted the axis (a computed claim rests on `App(Declared(plan),
+/// Observed(inputs))`, not on the fact that a run happened) and P5 (2/n) removed
+/// the class, so the declared type is what fills the slot now.
+pub const PROGRAM_OUTPUT_TYPE: &str = "urn:eigenius:program:output_type";
+
 // --- Merge resolution records (D38 §3) ---
 //
 // One `MergeResolutionRecord` resource is committed alongside the
@@ -195,12 +209,18 @@ pub const MACRO_DECL_JSON: &str = "urn:eigenius:core:macro_decl_json";
 /// introduction (D46 §10). Used by the D49 witness emitter as the
 /// default canonical proposition when a target resource carries no
 /// explicit `reflection:canonical_proposition`. The well-known IRI is
-/// pinned here so emission and the eventual `JustifiedBy.declared`
+/// pinned here so emission and the eventual `justification:Certificate.declared`
 /// consumer share one source of truth.
 pub const ASSERTS: &str = "urn:eigenius:core:Asserts";
 pub const INDUCTIVE_ARG_TYPE: &str = "urn:eigenius:core:InductiveArgType";
 pub const INDUCTIVE_PARAM: &str = "urn:eigenius:core:InductiveParam";
 pub const CTORS: &str = "urn:eigenius:core:ctors";
+
+/// The two inductives the D47 codec writes into, and the only two whose constructor names it
+/// hard-codes. They were spelled as private constants in five places across four modules
+/// before D85 step 4; the codec, the ESL emitters and Rule 21 all mean the same declaration.
+pub const EIGENTT_TERM: &str = "urn:eigenius:eigentt:Term";
+pub const LEVEL: &str = "urn:eigenius:core:Level";
 pub const TYPE_PARAMS: &str = "urn:eigenius:core:type_params";
 pub const CTOR_NAME: &str = "urn:eigenius:core:ctor_name";
 pub const ARG_TYPES: &str = "urn:eigenius:core:arg_types";
@@ -348,12 +368,7 @@ pub const VERDICT_UNDECIDABLE: &str = "Undecidable";
 /// Π/SizedPi binder rather than an anonymous positional type.
 pub const BINDER_NAME: &str = "urn:eigenius:core:binder_name";
 
-/// Upper bound for a bounded size binder (Phase 11b step 15h).
-/// Only meaningful alongside `binder_name` with kind `Size`; carries
-/// the rigid size variable or `Inf` the binder is strictly below.
-pub const BINDER_BOUND: &str = "urn:eigenius:core:binder_bound";
-
-// --- TypeExpr resource shapes for codata observation types (Phase 11b step 15h.3) ---
+// --- Term resource shapes for codata observation types (Phase 11b step 15h.3) ---
 
 /// is_a marker for a non-dependent arrow `A -> B` in a codata
 /// observation type.
@@ -362,7 +377,7 @@ pub const TYPE_ARROW: &str = "urn:eigenius:core:TypeArrow";
 /// `{j : Kind} -> body` in a codata observation type.
 pub const TYPE_BINDER_ARROW: &str = "urn:eigenius:core:TypeBinderArrow";
 
-/// Domain of a `TypeArrow` — embedded TypeExpr resource (or string).
+/// Domain of a `TypeArrow` — embedded Term resource (or string).
 pub const ARROW_DOMAIN: &str = "urn:eigenius:core:arrow_domain";
 /// Codomain of a `TypeArrow`.
 pub const ARROW_CODOMAIN: &str = "urn:eigenius:core:arrow_codomain";
@@ -370,9 +385,9 @@ pub const ARROW_CODOMAIN: &str = "urn:eigenius:core:arrow_codomain";
 /// Kind of a size-binder arrow's bound variable. A name string — the size sort is `"Size"`.
 /// (`urn:eigenius:core:Size` is still ACCEPTED by the decoder's `:Size` suffix match, but it names
 /// no resource on any chain and nothing emits it; see eigenius#188. This property was not retyped
-/// to an `eigentt:TypeExpr` along with `core:param_kind` / `core:type_name`.)
+/// to an `eigentt:Term` along with `core:param_kind` / `core:type_name`.)
 pub const BINDER_KIND: &str = "urn:eigenius:core:binder_kind";
-/// Body of a size-binder arrow — embedded TypeExpr resource or
+/// Body of a size-binder arrow — embedded Term resource or
 /// string.
 pub const BINDER_BODY: &str = "urn:eigenius:core:binder_body";
 
@@ -446,15 +461,22 @@ pub const ENC_BASE64: &str = "urn:eigenius:core:encodings:base64";
 // --- Reflection namespace (D6b, Phase 10b) ---
 
 pub const UNIVERSE_LEVEL: &str = "urn:eigenius:reflection:universe_level";
-pub const DECLARED_RESOURCE: &str = "urn:eigenius:reflection:DeclaredResource";
-pub const DERIVED_RESOURCE: &str = "urn:eigenius:reflection:DerivedResource";
-pub const OBSERVED_RESOURCE: &str = "urn:eigenius:reflection:ObservedResource";
-pub const VERIFIED_RESOURCE: &str = "urn:eigenius:reflection:VerifiedResource";
+// The four grade classes stood here. They stamped a WARRANT grade onto a
+// resource, which conflated the two axes: how a resource came to exist is
+// provenance and applies to everything, while what evidence exists for its
+// proposition is warrant and applies only to a resource carrying one. Warrant is
+// now computed from a justification term and stored nowhere, so there is nothing
+// for a class to name. `VerifiedResource subclass_of DerivedResource` went with
+// them — it asserted an ordering between two grades the design holds to be
+// independent.
 /// `reflection:InstitutionEmittedDerivation` — marker subclass of
 /// `DerivedResource` for resources the kernel commits as side-effects of
-/// AutoOnLoad institution dispatches. The witness emitter walks these
-/// directly (no ProgramTrace required) to admit
-/// `IsDerivedAs(derivation_iri, canonical_proposition)` per D49 §6.
+/// AutoOnLoad institution dispatches. It records what the run produced and
+/// grounds nothing on its own: the witness emitter used to walk these directly
+/// (no ProgramTrace required) to admit
+/// `IsDerivedAs(derivation_iri, canonical_proposition)` per D49 §6, but a
+/// computed claim rests on the plan being DECLARED to denote a function of its
+/// input and on the input being OBSERVED, and no execution establishes either.
 pub const INSTITUTION_EMITTED_DERIVATION: &str =
     "urn:eigenius:reflection:InstitutionEmittedDerivation";
 /// `reflection:from_subject` — the analysis/claim IRI that triggered
@@ -464,10 +486,12 @@ pub const FROM_SUBJECT: &str = "urn:eigenius:reflection:from_subject";
 /// `reflection:runtime_invocation` — back-pointer to the producing
 /// `RuntimeInvocation` on an `InstitutionEmittedDerivation`.
 pub const RUNTIME_INVOCATION: &str = "urn:eigenius:reflection:runtime_invocation";
-pub const DECLARED_BY: &str = "urn:eigenius:reflection:declared_by";
-pub const DERIVATION: &str = "urn:eigenius:reflection:derivation";
-pub const EPISTEMIC_STATUS: &str = "urn:eigenius:reflection:epistemic_status";
-pub const EPISTEMIC_DERIVED: &str = "urn:eigenius:reflection:epistemic:derived";
+pub const DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
+pub const DERIVATION: &str = "urn:eigenius:prov:derivation";
+// `epistemic_status` and the four `epistemic:*` individuals went with the grade
+// classes. The property let a trace nominate the grade of its own output, which
+// is the self-nomination the design forbids: the thing being graded chose its
+// own grade and nothing checked the choice.
 
 // --- D49 ChainWitness: Trace event classes + canonical proposition ---
 //
@@ -477,102 +501,93 @@ pub const EPISTEMIC_DERIVED: &str = "urn:eigenius:reflection:epistemic:derived";
 // materialised into an index (D66 slice 0).
 
 /// Resource recording that a resource was declared by a human/agent.
-/// Carries `reflection:resource` (target IRI). Per D49 §6, a successful
+/// Carries `prov:resource` (target IRI). Per D49 §6, a successful
 /// commit emits an `IsDeclaredAs` witness for the target resource.
-pub const DECLARATION_TRACE: &str = "urn:eigenius:reflection:DeclarationTrace";
+pub const DECLARATION_TRACE: &str = "urn:eigenius:prov:DeclarationTrace";
 /// Resource recording that a resource was observed from external reality.
-/// Carries `reflection:resource` and `reflection:source`. Per D49 §6, a
+/// Carries `prov:resource` and `prov:was_generated_by`. Per D49 §6, a
 /// successful commit emits an `IsObservedAs` witness.
-pub const OBSERVATION_TRACE: &str = "urn:eigenius:reflection:ObservationTrace";
-/// Resource recording a complete program execution. The output resource's
-/// IRI is the witness `iri` key; per D49 §6 commit emits an `IsDerivedAs`
-/// witness.
-pub const PROGRAM_TRACE: &str = "urn:eigenius:reflection:ProgramTrace";
+pub const OBSERVATION_TRACE: &str = "urn:eigenius:prov:ObservationTrace";
+/// Resource recording a complete program execution. Pure provenance: it admits
+/// no witness, because the fact that a computation ran grounds nothing. What a
+/// computed claim rests on is `App(Declared(plan), Observed(inputs))`, whose two
+/// halves come from the plan's [`DECLARATION_TRACE`] and the input's
+/// [`OBSERVATION_TRACE`].
+pub const PROGRAM_TRACE: &str = "urn:eigenius:prov:ProgramTrace";
 /// Resource recording that a proof of a resource's proposition was checked. Two verifiers produce
 /// one, distinguished by [`PROOF_SYSTEM`] rather than by class (eigenius#200): an external prover,
 /// whose exported blob D49 §7's `Lean → Reasoning` comorphism reifies into a
-/// `reasoning:VerifiedPropositionView`, and the kernel, whose type-checked `JustifiedBy`
+/// `justification:VerifiedPropositionView`, and the kernel, whose type-checked `justification:Certificate`
 /// certificate is itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
-pub const VERIFICATION_TRACE: &str = "urn:eigenius:reflection:VerificationTrace";
+pub const VERIFICATION_TRACE: &str = "urn:eigenius:prov:VerificationTrace";
 
 /// Trace recording that an author ASSERTS a computation ran somewhere the kernel did not initiate
-/// (eigenius#205). Admits `IsDeclaredAs`, not `IsDerivedAs`: `Derived` holds a trace tied to a
-/// KERNEL-INITIATED activity, and a transcription has no `f : I -> O`, so no specification, so
-/// nothing entailed (D73 §3.3). Not a weaker [`PROGRAM_TRACE`] — a different claim.
+/// (eigenius#205). Admits `IsDeclaredAs`: a transcription has no `f : I -> O`, so no
+/// specification, so nothing entailed (D73 §3.3). Not a weaker [`PROGRAM_TRACE`] — a different
+/// claim, and the one trace kind that already refused to treat a run record as a ground of its own
+/// kind before the three-grounds change made that uniform.
 pub const EXTERNAL_EXECUTION_TRACE: &str = "urn:eigenius:reflection:ExternalExecutionTrace";
 
-/// `reflection:resource` — the target IRI a Trace points at. Common to
+/// `prov:resource` — the target IRI a Trace points at. Common to
 /// all four Trace classes (semantically; for `ProgramTrace` the role is
 /// played by the output resource's own IRI, not a separate property).
-pub const REFLECTION_RESOURCE: &str = "urn:eigenius:reflection:resource";
+pub const REFLECTION_RESOURCE: &str = "urn:eigenius:prov:resource";
 
-/// `reflection:proof_system` — which verifier checked the proof recorded by a
+/// `prov:proof_system` — which verifier checked the proof recorded by a
 /// [`VERIFICATION_TRACE`]: an external prover (`lean4`, `coq`, `agda`) or `urn:eigenius:kernel`.
-pub const PROOF_SYSTEM: &str = "urn:eigenius:reflection:proof_system";
+pub const PROOF_SYSTEM: &str = "urn:eigenius:prov:proof_system";
 
-/// `reflection:proof_term` — IRI of the proof term a [`VERIFICATION_TRACE`] records. An external
-/// prover's blob, or the chain-resident IRI of the `ReasoningSentence` whose certificate checked.
-pub const PROOF_TERM: &str = "urn:eigenius:reflection:proof_term";
+/// `prov:proof_term` — IRI of the proof term a [`VERIFICATION_TRACE`] records. An external
+/// prover's blob, or the chain-resident IRI of the `justification:Conclusion` whose certificate checked.
+pub const PROOF_TERM: &str = "urn:eigenius:prov:proof_term";
 
-/// `reflection:timestamp` — when a Trace's event occurred. Required by every Trace class.
-pub const TIMESTAMP: &str = "urn:eigenius:reflection:timestamp";
+/// `prov:timestamp` — when a Trace's event occurred. Required by every Trace class.
+pub const TIMESTAMP: &str = "urn:eigenius:prov:timestamp";
 
 /// `reflection:canonical_proposition` — the optional `Prop`-typed
 /// proposition a resource asserts (per D49 §6). Carries a D47-encoded
-/// `eigentt:TypeExpr` payload. Absent value defaults to `Asserts(iri)`
+/// `eigentt:Term` payload. Absent value defaults to `Asserts(iri)`
 /// at witness-emission time. Type-checked at `Prop` at commit by
-/// [`PROPOSITION_SLOTS`] / Rule 21.
+/// its `eigentt:expected_type` (`Prop`) and Rule 21.
 pub const CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
 
-/// The `eigentt:TypeExpr`-ranged properties whose declared role is a
-/// **proposition**: the value must inhabit `Prop` (`Sort(0)`), not merely
-/// type-check. Rule 21 (`validation/rules/eigentt_value.rs`) enforces it.
+/// `eigentt:expected_type` — the type a property's term-valued instances must
+/// check against. Rule 21 forms `Ann(value, expected_type)` and runs the
+/// kernel's existing inference path, whose `Ann` rule *is* the check.
 ///
-/// `eigentt:TypeExpr` is the range of every D47-encoded EigenTT tree, and
-/// most of those trees are legitimately *not* propositions —
-/// `eigentt:axiom_statement` and `eigentt:definition_type` hold types
-/// (`Sort(1)`/`Sort(2)`), `lexicon:cat` holds an inductive value,
-/// `lexicon:term` holds a λ-term, `reasoning:certificate` holds a proof
-/// term whose *type* is a Prop. The range alone therefore cannot carry the
-/// obligation; membership here is what distinguishes a slot that asserts
-/// something from a slot that merely holds a term. Each entry's ontology
-/// declaration already states the obligation in its `core:description`;
-/// this list is where the kernel acts on it (eigenius#175).
-///
-/// Adding a slot is a tightening: every value already committed to it must
-/// infer `Sort(0)` or the chain stops resolving.
-pub const PROPOSITION_SLOTS: &[&str] = &[
-    // "The Prop-typed EigenTT proposition this resource canonically asserts."
-    CANONICAL_PROPOSITION,
-    // "The Prop-typed EigenTT proposition this sentence asserts."
-    "urn:eigenius:reasoning:proposition",
-    // "The Prop-typed EigenTT proposition the EntailmentRequest is asking
-    //  the chain to warrant."
-    "urn:eigenius:reasoning:candidate_proposition",
-    // "The Prop-typed proposition this Milestone TARGETS or this Axiom admits."
-    "urn:eigenius:objective:proposition",
-    // "An Option's claim, as a Prop — never prose."
-    "urn:eigenius:objective:option_claim",
-    // "The assembled proposition — kernel-checked to inhabit Prop."
-    "urn:eigenius:lexicon:prop",
-];
+/// This replaced `PROPOSITION_SLOTS`, a hardcoded list of the slots required to
+/// hold a proposition. That list could say nothing but "must be a Prop", so
+/// every other obligation — a category value being a category — went unstated,
+/// and the rule's `check_infer`-then-discard fallback let a value of the wrong
+/// type commit as long as it had *some* type.
+pub const EXPECTED_TYPE: &str = "urn:eigenius:eigentt:expected_type";
+
+/// `eigentt:is_a_type` — when true, the property's values must themselves be
+/// types (`check_type`, the first step of the same `Ann` rule). Separate from
+/// [`EXPECTED_TYPE`] because the inhabited sorts vary within a single slot and
+/// that property holds one term.
+pub const IS_A_TYPE: &str = "urn:eigenius:eigentt:is_a_type";
 
 // --- D49 ChainWitness: predicate-type IRIs ---
 //
-// The four kernel-internal `ChainWitness.IsXxAs : core:iri → Prop → Prop`
+// The three kernel-internal `ChainWitness.IsXxAs : core:iri → Prop → Prop`
 // predicate types. ESL has no constructors for their inhabitants; the
-// kernel synthesises `Val::ChainWitness` values at `JustifiedBy.*`
+// kernel synthesises `Val::ChainWitness` values at `justification:Certificate.*`
 // constructor type-check time via the per-Layer witness-index lookup.
-// The IRIs are referenced from the `reasoning:JustifiedBy` indexed
+// The IRIs are referenced from the `justification:Certificate` indexed
 // inductive's constructor signatures (D39 §5) and from the witness-
 // synthesis hook in `kernel/src/nbe/check.rs` (D49 §5).
+//
+// `IsDerivedAs` was a fourth until the three-grounds change. It could only ever
+// be consumed by `justification:Certificate.derived`, which is gone with the
+// `DerivedEvidence` term constructor, so no lookup can ask for it — removing the
+// constant is forced by the algebra, not a separate decision.
 
-pub const CHAIN_WITNESS_IS_DECLARED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsDeclaredAs";
-pub const CHAIN_WITNESS_IS_OBSERVED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsObservedAs";
-pub const CHAIN_WITNESS_IS_DERIVED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsDerivedAs";
-pub const CHAIN_WITNESS_IS_VERIFIED_AS: &str = "urn:eigenius:reasoning:ChainWitness:IsVerifiedAs";
+pub const CHAIN_WITNESS_IS_DECLARED_AS: &str = "urn:eigenius:witness:IsDeclaredAs";
+pub const CHAIN_WITNESS_IS_OBSERVED_AS: &str = "urn:eigenius:witness:IsObservedAs";
+pub const CHAIN_WITNESS_IS_VERIFIED_AS: &str = "urn:eigenius:witness:IsVerifiedAs";
 
-/// Helper: map a class IRI for one of the four `ChainWitness.IsXxAs`
+/// Helper: map a class IRI for one of the three `ChainWitness.IsXxAs`
 /// predicate types to its `WitnessCategory`, or `None` if the IRI is
 /// not a ChainWitness predicate.
 pub fn chain_witness_category_for_iri(iri: &str) -> Option<crate::witness::WitnessCategory> {
@@ -580,7 +595,6 @@ pub fn chain_witness_category_for_iri(iri: &str) -> Option<crate::witness::Witne
     match iri {
         CHAIN_WITNESS_IS_DECLARED_AS => Some(WitnessCategory::Declared),
         CHAIN_WITNESS_IS_OBSERVED_AS => Some(WitnessCategory::Observed),
-        CHAIN_WITNESS_IS_DERIVED_AS => Some(WitnessCategory::Derived),
         CHAIN_WITNESS_IS_VERIFIED_AS => Some(WitnessCategory::Verified),
         _ => None,
     }

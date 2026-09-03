@@ -134,12 +134,10 @@ fn collect_candidates<'a>(
             return Ok(derived_bindings
                 .iter()
                 .filter_map(|b| {
-                    // The subject column may be a `Value::String` (a subject
-                    // binding, parse-time) or a `Value::ResourceRef` (a value read
-                    // from a resource-valued property on a canonicalised chain).
-                    // `as_iri` accepts both — a strict `Value::String` match would
-                    // silently drop the ResourceRef case (e.g. a relation derived
-                    // from `Objective { thesis: ?t }`).
+                    // The subject column is an IRI, whether it came from a subject binding
+                    // or from a resource-valued property. Read it with `as_iri`, which parses;
+                    // matching a variant here once dropped the property case entirely (the
+                    // live `Reach(?t) FROM Objective { thesis: ?t }` failure).
                     let iri = b.get("0")?.as_iri()?;
                     let props = layer
                         .resolve(&iri)
@@ -378,7 +376,7 @@ fn try_match_resource(
     // Bind the subject variable.
     let subject_name = &pattern.subject.name;
     if let Some(iri) = resource_iri {
-        let iri_val = Value::String(iri.as_str().to_string());
+        let iri_val = Value::iri(iri);
         if let Some(existing_val) = base.get(subject_name) {
             if !values_equal(existing_val, &iri_val) {
                 return Vec::new(); // conflict with existing binding
@@ -976,12 +974,10 @@ mod tests {
     }
 
     #[test]
-    fn derived_subject_from_resource_ref_property_resolves() {
-        // Regression: a derived relation whose subject column comes from a
-        // resource-VALUED property stored as `Value::ResourceRef` (the
-        // chain-canonicalised shape) must resolve — not only `Value::String`
-        // subject bindings. Reproduces the live `Reach(?t) FROM Objective {
-        // thesis: ?t }` failure where `thesis` is a canonicalised ResourceRef.
+    fn derived_subject_from_a_resource_valued_property_resolves() {
+        // Regression: a derived relation whose subject column comes from a resource-VALUED
+        // property must resolve, not only one from a subject binding. Reproduces the live
+        // `Reach(?t) FROM Objective { thesis: ?t }` failure.
         let storage = crate::layer::LayerStorage::in_memory();
         let core_json = include_str!("../../../../ontologies/core/core-ontology.json");
         let core_resources = eigon_json::parse_document(core_json).unwrap();
@@ -996,11 +992,10 @@ mod tests {
         target.set(iri("urn:eigenius:t:name"), Value::String("T".into()));
         b.add_resource(target).unwrap();
         let mut root = Resource::new(iri("urn:eigenius:t:root"));
-        // stored as a ResourceRef — the canonicalised shape a strict
-        // Value::String match would drop.
+        // A reference stored on a resource-valued property.
         root.set(
             iri("urn:eigenius:t:points_to"),
-            Value::ResourceRef(iri("urn:eigenius:t:target")),
+            Value::iri(&iri("urn:eigenius:t:target")),
         );
         b.add_resource(root).unwrap();
         let layer = Arc::new(b.build(storage));
@@ -1015,7 +1010,7 @@ mod tests {
         assert_eq!(
             results.len(),
             1,
-            "derived subject from a ResourceRef-valued property must resolve"
+            "derived subject from a resource-valued property must resolve"
         );
     }
 

@@ -164,7 +164,9 @@ fn build_chain() -> (Arc<Layer>, LayerStorage) {
     let mut expr = Resource::new(iri(ANCHOR_EXPR_IRI));
     expr.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(SYMBOLIC_EXPRESSION_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(SYMBOLIC_EXPRESSION_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     expr.set(
         iri("urn:eigenius:core:short_name"),
@@ -172,7 +174,7 @@ fn build_chain() -> (Arc<Layer>, LayerStorage) {
     );
     expr.set(
         iri("urn:eigenius:symbolics:term"),
-        Value::Json(serde_json::json!({
+        eigenius_kernel::testing::term_value(&serde_json::json!({
             "ctor": "App",
             "args": [
                 {
@@ -197,7 +199,9 @@ fn build_chain() -> (Arc<Layer>, LayerStorage) {
     let mut domain = Resource::new(iri(ANCHOR_DOMAIN_IRI));
     domain.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(BOUNDED_BY_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(BOUNDED_BY_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     domain.set(
         iri("urn:eigenius:core:short_name"),
@@ -342,11 +346,13 @@ fn build_bounds_request_input() -> Resource {
     let mut expr = Resource::new_embedded();
     expr.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(SYMBOLIC_EXPRESSION_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(SYMBOLIC_EXPRESSION_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     expr.set(
         iri("urn:eigenius:symbolics:term"),
-        Value::Json(serde_json::json!({
+        eigenius_kernel::testing::term_value(&serde_json::json!({
             "ctor": "App",
             "args": [
                 {
@@ -370,7 +376,9 @@ fn build_bounds_request_input() -> Resource {
     let mut domain = Resource::new_embedded();
     domain.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(BOUNDED_BY_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(BOUNDED_BY_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     domain.set(iri("urn:eigenius:intervals:value"), Value::Float(0.0));
     domain.set(iri("urn:eigenius:intervals:lower"), Value::Float(0.0));
@@ -382,7 +390,9 @@ fn build_bounds_request_input() -> Resource {
     let mut req = Resource::new_embedded();
     req.set(
         iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::ResourceRef(iri(BOUNDS_REQUEST_CLASS_IRI))]),
+        Value::Array(vec![Value::String(
+            iri(BOUNDS_REQUEST_CLASS_IRI).as_str().to_string(),
+        )]),
     );
     req.set(
         iri("urn:eigenius:intervals:expr"),

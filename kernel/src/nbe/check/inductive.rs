@@ -160,11 +160,8 @@ enum CtorArg {
 /// returning the remaining binders as `CtorArg`s plus the residual
 /// (final) result-type expression.
 ///
-/// Accepts both `Exp::Pi` and `Exp::SizedPi` at non-parameter
-/// positions. Parameter positions are always `Exp::Pi` by
-/// construction — size parameters have type `SizeSort` but the
-/// binder itself is a plain Pi, so `params_to_skip` only ever
-/// applies to `Pi`.
+/// Every position is an `Exp::Pi`. It also accepted `Exp::SizedPi` at non-parameter positions
+/// until sized types were removed (eigenius#218).
 /// Validate (D48 Phase B) every ctor's terminal application against the
 /// declaration's index telescope.
 ///
@@ -272,10 +269,6 @@ pub(super) fn validate_indexed_ctor_conclusions(
 /// `validate_indexed_ctor_conclusions` so index expressions in a ctor
 /// conclusion may refer to both the params and the ctor's value args.
 ///
-/// Size binders (`CtorArg::Size`) bind a variable of type `SizeSort`
-/// without a TSO hypothesis — sufficient for type-checking index
-/// expressions that mention the size, though such expressions are
-/// uncommon in D48 v1.
 fn ctx_with_param_and_arg_binders(
     ctx: &CheckCtx,
     decl: &InductiveDecl,
@@ -353,8 +346,8 @@ fn peel_ctor_telescope(ctor_typ: &Exp, params_to_skip: usize) -> (Vec<CtorArg>, 
 /// Before this returned a type, the `Exp::InductiveCtor` inference arm passed empty expected
 /// indices and answered `indices: []`, which made **every indexed inductive's constructor
 /// un-inferable** (`index arity mismatch (actual has N, expected has 0)`) and would have answered
-/// with the wrong type had it passed. That is not a corner case: `reasoning:JustifiedBy` is
-/// indexed, so no `reasoning:certificate` could pass validation Rule 21 at commit — including the
+/// with the wrong type had it passed. That is not a corner case: `justification:Certificate` is
+/// indexed, so no `justification:certificate` could pass validation Rule 21 at commit — including the
 /// WRN case study's own `chain/04-phase1-recompute-conclusions.esl` (found 2026-08-03).
 pub(super) fn check_inductive_ctor_args(
     ctx: &mut CheckCtx,
@@ -426,7 +419,7 @@ pub(super) fn check_inductive_ctor_args(
 
                 // D49 Phase 6 hook — when the expected arg type is a
                 // ChainWitness predicate (`IsDeclaredAs` / `IsObservedAs`
-                // / `IsDerivedAs` / `IsVerifiedAs`), synthesize the
+                // / `IsVerifiedAs`), synthesize the
                 // witness from the layer's witness index rather than
                 // type-checking the user's arg. ChainWitness predicates
                 // have zero constructors — the user can't construct an

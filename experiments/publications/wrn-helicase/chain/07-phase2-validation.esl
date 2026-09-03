@@ -24,15 +24,18 @@
 //
 // Validated by crates/eigenius-reasoning/tests/wrn_phase2.rs.
 
-namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace bench      = "urn:eigenius:benchmark";
-namespace onco       = "urn:eigenius:benchmark:onco";
-namespace wrn        = "urn:eigenius:pub:wrn";
-namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace reflection    = "urn:eigenius:reflection";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace bench         = "urn:eigenius:benchmark";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace wrn           = "urn:eigenius:pub:wrn";
+namespace litclaim      = "urn:eigenius:pub:wrn:litclaim";
+namespace justification = "urn:eigenius:justification";
+namespace stats         = "urn:eigenius:measurements";
+namespace prov       = "urn:eigenius:prov";
+namespace wrnact     = "urn:eigenius:pub:wrn:activity";
 
 // ════════════════════════════════════════════════════════════════════
 // Observed (linked-external): the wet-lab readouts
@@ -67,21 +70,27 @@ namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";
 // D-HELICASE evidence (helicase required): helicase-dead (K577M) WRN cDNA
 // FAILS to rescue sgWRN-EIJ — a measured non-rescue, not absence of data
 // (Fig. 2b, c). The dual E84A/K577M also fails (helicase loss is sufficient).
-resource wrn:va_fail_k577m : bench:ToolArtifact, reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:va_fail_k577m : bench:ToolArtifact {
+    prov:was_attributed_to = wrn:authors;
     bench:tool            = "sgWRN-EIJ rescue assay (KM12 + K577M WRN cDNA)";
     bench:produced_from   = ["wrn-paper:Fig-2b", "wrn-paper:Fig-2c"];
     bench:tool_parameters = "Helicase-dead (K577M) WRN cDNA FAILS to rescue KM12 viability from sgWRN-EIJ (viability stayed impaired — a measured non-rescue): the rescue test is non-significant, GFP-EIJ 0.41 vs K577M-EIJ 0.37, kernel-recomputed two-sample t-test P=0.13 (no rise; if anything slightly lower). dual E84A/K577M also fails. The non-rescue is a NULL (not derivable as a positive warrant), so this stays a Declared measured-non-rescue — the recomputed n.s. p grounds the judgment.";
-    reflection:derivation = wrn:va_fail_k577m_trace;
+    // The artifact links to what produced it through the ACTIVITY. It used
+    // `prov:derivation`, which is class_typed at prov:ProductionTrace and so
+    // could not name the DeclarationTrace a transcription carries — the
+    // linkability problem reflection:ExternalExecutionTrace was invented to
+    // dodge. `prov:was_generated_by` is uniform across a kernel run and a
+    // transcribed one, and the trace still points back through prov:resource.
+    prov:was_generated_by = wrnact:fig_2b_2c_rescue;
     reflection:canonical_proposition = type_expr(
         onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ")
     );
 }
-resource wrn:va_fail_k577m_trace : reflection:ExternalExecutionTrace {
-    reflection:declared_by = wrn:authors;
-    reflection:resource  = wrn:va_fail_k577m;
-    reflection:source    = "wrn-paper:Fig-2b,c rescue assay (linked-external)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:va_fail_k577m_trace : prov:DeclarationTrace {
+    prov:was_attributed_to = wrn:authors;
+    prov:resource  = wrn:va_fail_k577m;
+    prov:was_generated_by    = wrnact:fig_2b_2c_rescue;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -94,30 +103,30 @@ resource wrn:va_fail_k577m_trace : reflection:ExternalExecutionTrace {
 // control that sgWRN2 (targeting BOTH endogenous and exogenous WRN) is NOT
 // rescued — attributes the viability loss to WRN inactivation, ruling out
 // off-target effects of the silencing reagent.
-resource wrn:ontarget_rule : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_on_target_rescue_logic;
-    reflection:rationale   = "sgWRN-EIJ silences endogenous WRN but not exogenous WRN cDNA. If re-expressing WRN cDNA rescues the viability loss from sgWRN-EIJ — while a reagent targeting both endogenous and exogenous WRN (sgWRN2) is not rescued — the phenotype is attributable to loss of WRN, not to an off-target effect of the silencing reagent. Hence the depletion phenotype is on-target.";
+resource wrn:ontarget_rule : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_on_target_rescue_logic;
+    prov:rationale   = "sgWRN-EIJ silences endogenous WRN but not exogenous WRN cDNA. If re-expressing WRN cDNA rescues the viability loss from sgWRN-EIJ — while a reagent targeting both endogenous and exogenous WRN (sgWRN2) is not rescued — the phenotype is attributable to loss of WRN, not to an off-target effect of the silencing reagent. Hence the depletion phenotype is on-target.";
     reflection:canonical_proposition = type_expr(
         onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
         ->
         onco:OnTarget("WRN", "MSI_viability")
     );
 }
-resource wrn:ontarget_rule_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:ontarget_rule;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_on_target_rescue_logic;
-    reflection:timestamp   = "2026-06-13T02:00:00Z";
+resource wrn:ontarget_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:ontarget_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_on_target_rescue_logic;
+    prov:timestamp   = "2026-06-13T02:00:00Z";
 }
 
 // Helicase-required rule. A catalytic-dead construct that fails to rescue
 // localises the essential activity: helicase-dead (K577M) failing to rescue
 // means the helicase activity is required for the phenotype.
-resource wrn:helicase_rule : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_structure_function_dissection;
-    reflection:rationale   = "WRN is both a 3'-5' exonuclease and a 3'-5' helicase, and these activities are SEPARABLE — the E84A and K577M point mutants each ablate one without the other (Swanson 2004 [14], a litclaim premise). Given that separability, rescuing sgWRN-EIJ with catalytic-dead constructs localises the essential activity: a helicase-dead (K577M) cDNA that FAILS to rescue (while WT does) shows the helicase activity is required for the MSI viability phenotype.";
+resource wrn:helicase_rule : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_structure_function_dissection;
+    prov:rationale   = "WRN is both a 3'-5' exonuclease and a 3'-5' helicase, and these activities are SEPARABLE — the E84A and K577M point mutants each ablate one without the other (Swanson 2004 [14], a litclaim premise). Given that separability, rescuing sgWRN-EIJ with catalytic-dead constructs localises the essential activity: a helicase-dead (K577M) cDNA that FAILS to rescue (while WT does) shows the helicase activity is required for the MSI viability phenotype.";
     reflection:canonical_proposition = type_expr(
         litclaim:WRNActivitiesSeparable("WRN")
         ->
@@ -126,20 +135,20 @@ resource wrn:helicase_rule : reflection:DeclaredResource {
         onco:RequiresActivity("WRN", "helicase")
     );
 }
-resource wrn:helicase_rule_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:helicase_rule;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_structure_function_dissection;
-    reflection:timestamp   = "2026-06-13T02:00:00Z";
+resource wrn:helicase_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:helicase_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_structure_function_dissection;
+    prov:timestamp   = "2026-06-13T02:00:00Z";
 }
 
 // Exonuclease-dispensable rule. A catalytic-dead construct that STILL
 // rescues shows that activity is dispensable: exonuclease-dead (E84A)
 // rescuing means the exonuclease activity is not required.
-resource wrn:exo_rule : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_structure_function_dissection;
-    reflection:rationale   = "Given that WRN's exonuclease and helicase activities are SEPARABLE (E84A ablates only the exonuclease; Swanson 2004 [14], a litclaim premise), an exonuclease-dead (E84A) WRN cDNA that still rescues sgWRN-EIJ (rescue not attenuated) shows the exonuclease activity is dispensable for the MSI viability phenotype.";
+resource wrn:exo_rule : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_structure_function_dissection;
+    prov:rationale   = "Given that WRN's exonuclease and helicase activities are SEPARABLE (E84A ablates only the exonuclease; Swanson 2004 [14], a litclaim premise), an exonuclease-dead (E84A) WRN cDNA that still rescues sgWRN-EIJ (rescue not attenuated) shows the exonuclease activity is dispensable for the MSI viability phenotype.";
     reflection:canonical_proposition = type_expr(
         litclaim:WRNActivitiesSeparable("WRN")
         ->
@@ -148,11 +157,11 @@ resource wrn:exo_rule : reflection:DeclaredResource {
         onco:DispensableActivity("WRN", "exonuclease")
     );
 }
-resource wrn:exo_rule_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:exo_rule;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_structure_function_dissection;
-    reflection:timestamp   = "2026-06-13T02:00:00Z";
+resource wrn:exo_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:exo_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_structure_function_dissection;
+    prov:timestamp   = "2026-06-13T02:00:00Z";
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -164,42 +173,89 @@ resource wrn:exo_rule_trace : reflection:DeclarationTrace {
 // the recorded concl_val/va_competition pair has been retired.
 
 // D-ONTARGET: the viability loss is attributable to WRN inactivation.
-resource wrn:concl_ontarget : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
-        onco:OnTarget("WRN", "MSI_viability")
-    );
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:ontarget_rule"),
-        VerifiedEvidence("urn:eigenius:pub:wrn:concl_rescue_wt_recomputed")
-    );
-    reasoning:certificate = type_expr(
-        alias
+resource wrn:concl_ontarget : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            c_rescue_wt_re_0_CLAIM = "urn:eigenius:pub:wrn:rescue_wt_plan_yields_main_effect",
+            c_rescue_wt_re_0_OBSP = core:Asserts("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+            c_rescue_wt_re_0_js = justification:App(Declared(c_rescue_wt_re_0_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_wt_sampleset")),
+            c_rescue_wt_re_0_cs = app(c_rescue_wt_re_0_OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0), Declared(c_rescue_wt_re_0_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+                        declared(c_rescue_wt_re_0_CLAIM, c_rescue_wt_re_0_OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_wt_sampleset", c_rescue_wt_re_0_OBSP)),
+            c_rescue_wt_re_0_SS = "urn:eigenius:pub:wrn:rescue_wt_sampleset",
+            c_rescue_wt_re_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_wt",
+            c_rescue_wt_re_0_RESULT = "urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect",
+            c_rescue_wt_re_0_STAT = stats:lt(stats:mean_diff_of(c_rescue_wt_re_0_SS), 0.0),
+            c_rescue_wt_re_0_RD = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ"),
+            c_rescue_wt_re_1_CLAIM = "urn:eigenius:pub:wrn:rescue_wt_plan_yields_main_effect",
+            c_rescue_wt_re_1_OBSP = core:Asserts("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+            c_rescue_wt_re_1_js = justification:App(Declared(c_rescue_wt_re_1_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_wt_sampleset")),
+            c_rescue_wt_re_1_cs = app(c_rescue_wt_re_1_OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0), Declared(c_rescue_wt_re_1_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+                        declared(c_rescue_wt_re_1_CLAIM, c_rescue_wt_re_1_OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_wt_sampleset", c_rescue_wt_re_1_OBSP)),
+            c_rescue_wt_re_1_SS = "urn:eigenius:pub:wrn:rescue_wt_sampleset",
+            c_rescue_wt_re_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_wt",
+            c_rescue_wt_re_1_RESULT = "urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect",
+            c_rescue_wt_re_1_STAT = stats:lt(stats:mean_diff_of(c_rescue_wt_re_1_SS), 0.0),
+            c_rescue_wt_re_1_RD = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ"),
             RULE  = "urn:eigenius:pub:wrn:ontarget_rule",
             CONCL = "urn:eigenius:pub:wrn:concl_rescue_wt_recomputed",
             RES   = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ"),
             OT    = onco:OnTarget("WRN", "MSI_viability")
         in
-        app(RES, OT, DeclaredEvidence(RULE), VerifiedEvidence(CONCL),
-            declared(RULE, RES -> OT), verified(CONCL, RES))
-    );
+        app(RES, OT, Declared(RULE), justification:App(
+                       Declared("urn:eigenius:pub:wrn:bridge_rescue_wt"),
+                       c_rescue_wt_re_0_js
+                   ),
+               declared(RULE, RES -> OT), app(c_rescue_wt_re_0_STAT, c_rescue_wt_re_0_RD, Declared(c_rescue_wt_re_0_BRIDGE), c_rescue_wt_re_0_js,
+               declared(c_rescue_wt_re_0_BRIDGE, c_rescue_wt_re_0_STAT -> c_rescue_wt_re_0_RD), c_rescue_wt_re_0_cs))),
+               type_expr(alias
+            c_rescue_wt_re_0_CLAIM = "urn:eigenius:pub:wrn:rescue_wt_plan_yields_main_effect",
+            c_rescue_wt_re_0_OBSP = core:Asserts("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+            c_rescue_wt_re_0_js = justification:App(Declared(c_rescue_wt_re_0_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_wt_sampleset")),
+            c_rescue_wt_re_0_cs = app(c_rescue_wt_re_0_OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0), Declared(c_rescue_wt_re_0_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+                        declared(c_rescue_wt_re_0_CLAIM, c_rescue_wt_re_0_OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_wt_sampleset", c_rescue_wt_re_0_OBSP)),
+            c_rescue_wt_re_0_SS = "urn:eigenius:pub:wrn:rescue_wt_sampleset",
+            c_rescue_wt_re_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_wt",
+            c_rescue_wt_re_0_RESULT = "urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect",
+            c_rescue_wt_re_0_STAT = stats:lt(stats:mean_diff_of(c_rescue_wt_re_0_SS), 0.0),
+            c_rescue_wt_re_0_RD = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ"),
+            c_rescue_wt_re_1_CLAIM = "urn:eigenius:pub:wrn:rescue_wt_plan_yields_main_effect",
+            c_rescue_wt_re_1_OBSP = core:Asserts("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+            c_rescue_wt_re_1_js = justification:App(Declared(c_rescue_wt_re_1_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_wt_sampleset")),
+            c_rescue_wt_re_1_cs = app(c_rescue_wt_re_1_OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0), Declared(c_rescue_wt_re_1_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_wt_sampleset"),
+                        declared(c_rescue_wt_re_1_CLAIM, c_rescue_wt_re_1_OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_wt_sampleset", c_rescue_wt_re_1_OBSP)),
+            c_rescue_wt_re_1_SS = "urn:eigenius:pub:wrn:rescue_wt_sampleset",
+            c_rescue_wt_re_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_wt",
+            c_rescue_wt_re_1_RESULT = "urn:eigenius:pub:wrn:rescue_wt_plan:result:main_effect",
+            c_rescue_wt_re_1_STAT = stats:lt(stats:mean_diff_of(c_rescue_wt_re_1_SS), 0.0),
+            c_rescue_wt_re_1_RD = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ"),
+            RULE  = "urn:eigenius:pub:wrn:ontarget_rule",
+            CONCL = "urn:eigenius:pub:wrn:concl_rescue_wt_recomputed",
+            RES   = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ"),
+            OT    = onco:OnTarget("WRN", "MSI_viability")
+        in
+        justification:Certificate(
+                   justification:App(
+                       Declared("urn:eigenius:pub:wrn:ontarget_rule"),
+                       justification:App(
+                       Declared("urn:eigenius:pub:wrn:bridge_rescue_wt"),
+                       c_rescue_wt_re_1_js
+                   )
+                   ),
+                   onco:OnTarget("WRN", "MSI_viability") )) );
 }
 
 // D-HELICASE (a): helicase activity is required.
-resource wrn:concl_helicase_required : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
-        onco:RequiresActivity("WRN", "helicase")
-    );
-    reasoning:justification = App(
-        App(
-            DeclaredEvidence("urn:eigenius:pub:wrn:helicase_rule"),
-            DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
-        ),
-        DeclaredEvidence("urn:eigenius:pub:wrn:va_fail_k577m")
-    );
-    reasoning:certificate = type_expr(
-        alias
+resource wrn:concl_helicase_required : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
             RULE = "urn:eigenius:pub:wrn:helicase_rule",
             LIT  = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
             ART  = "urn:eigenius:pub:wrn:va_fail_k577m",
@@ -207,31 +263,65 @@ resource wrn:concl_helicase_required : reasoning:ReasoningSentence {
             FR   = onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ"),
             RA   = onco:RequiresActivity("WRN", "helicase"),
             RULE_P = SEP -> FR -> RA,
-            jSEP = DeclaredEvidence(LIT),
-            jFR  = DeclaredEvidence(ART),
-            cert1 = app(SEP, FR -> RA, DeclaredEvidence(RULE), jSEP,
+            jSEP = Declared(LIT),
+            jFR  = Declared(ART),
+            cert1 = app(SEP, FR -> RA, Declared(RULE), jSEP,
                         declared(RULE, RULE_P), declared(LIT, SEP))
         in
-        app(FR, RA, reasoning:App(DeclaredEvidence(RULE), jSEP), jFR,
-            cert1, declared(ART, FR))
-    );
+        app(FR, RA, justification:App(Declared(RULE), jSEP), jFR,
+               cert1, declared(ART, FR))),
+               type_expr(alias
+            RULE = "urn:eigenius:pub:wrn:helicase_rule",
+            LIT  = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
+            ART  = "urn:eigenius:pub:wrn:va_fail_k577m",
+            SEP  = litclaim:WRNActivitiesSeparable("WRN"),
+            FR   = onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ"),
+            RA   = onco:RequiresActivity("WRN", "helicase"),
+            RULE_P = SEP -> FR -> RA,
+            jSEP = Declared(LIT),
+            jFR  = Declared(ART),
+            cert1 = app(SEP, FR -> RA, Declared(RULE), jSEP,
+                        declared(RULE, RULE_P), declared(LIT, SEP))
+        in
+        justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:helicase_rule"),
+                           Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+                       ),
+                       Declared("urn:eigenius:pub:wrn:va_fail_k577m")
+                   ),
+                   onco:RequiresActivity("WRN", "helicase") )) );
 }
 
 // D-HELICASE (b): exonuclease activity is dispensable.
-resource wrn:concl_exo_dispensable : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
-        onco:DispensableActivity("WRN", "exonuclease")
-    );
-    reasoning:justification = App(
-        App(
-            DeclaredEvidence("urn:eigenius:pub:wrn:exo_rule"),
-            DeclaredEvidence("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
-        ),
-        VerifiedEvidence("urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed")
-    );
-    reasoning:certificate = type_expr(
-        alias
+resource wrn:concl_exo_dispensable : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            c_rescue_e84a__0_CLAIM = "urn:eigenius:pub:wrn:rescue_e84a_plan_yields_main_effect",
+            c_rescue_e84a__0_OBSP = core:Asserts("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+            c_rescue_e84a__0_js = justification:App(Declared(c_rescue_e84a__0_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset")),
+            c_rescue_e84a__0_cs = app(c_rescue_e84a__0_OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0), Declared(c_rescue_e84a__0_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+                        declared(c_rescue_e84a__0_CLAIM, c_rescue_e84a__0_OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset", c_rescue_e84a__0_OBSP)),
+            c_rescue_e84a__0_SS = "urn:eigenius:pub:wrn:rescue_e84a_sampleset",
+            c_rescue_e84a__0_BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_e84a",
+            c_rescue_e84a__0_RESULT = "urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect",
+            c_rescue_e84a__0_STAT = stats:lt(stats:mean_diff_of(c_rescue_e84a__0_SS), 0.0),
+            c_rescue_e84a__0_RD = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ"),
+            c_rescue_e84a__1_CLAIM = "urn:eigenius:pub:wrn:rescue_e84a_plan_yields_main_effect",
+            c_rescue_e84a__1_OBSP = core:Asserts("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+            c_rescue_e84a__1_js = justification:App(Declared(c_rescue_e84a__1_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset")),
+            c_rescue_e84a__1_cs = app(c_rescue_e84a__1_OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0), Declared(c_rescue_e84a__1_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+                        declared(c_rescue_e84a__1_CLAIM, c_rescue_e84a__1_OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset", c_rescue_e84a__1_OBSP)),
+            c_rescue_e84a__1_SS = "urn:eigenius:pub:wrn:rescue_e84a_sampleset",
+            c_rescue_e84a__1_BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_e84a",
+            c_rescue_e84a__1_RESULT = "urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect",
+            c_rescue_e84a__1_STAT = stats:lt(stats:mean_diff_of(c_rescue_e84a__1_SS), 0.0),
+            c_rescue_e84a__1_RD = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ"),
             RULE  = "urn:eigenius:pub:wrn:exo_rule",
             LIT   = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
             CONCL = "urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed",
@@ -239,26 +329,77 @@ resource wrn:concl_exo_dispensable : reasoning:ReasoningSentence {
             RES   = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ"),
             DA    = onco:DispensableActivity("WRN", "exonuclease"),
             RULE_P = SEP -> RES -> DA,
-            jSEP  = DeclaredEvidence(LIT),
-            jRES  = VerifiedEvidence(CONCL),
-            cert1 = app(SEP, RES -> DA, DeclaredEvidence(RULE), jSEP,
+            jSEP  = Declared(LIT),
+            jRES  = justification:App(
+                       Declared("urn:eigenius:pub:wrn:bridge_rescue_e84a"),
+                       c_rescue_e84a__0_js
+                   ),
+            cert1 = app(SEP, RES -> DA, Declared(RULE), jSEP,
                         declared(RULE, RULE_P), declared(LIT, SEP))
         in
-        app(RES, DA, reasoning:App(DeclaredEvidence(RULE), jSEP), jRES,
-            cert1, verified(CONCL, RES))
-    );
+        app(RES, DA, justification:App(Declared(RULE), jSEP), jRES,
+               cert1, app(c_rescue_e84a__0_STAT, c_rescue_e84a__0_RD, Declared(c_rescue_e84a__0_BRIDGE), c_rescue_e84a__0_js,
+               declared(c_rescue_e84a__0_BRIDGE, c_rescue_e84a__0_STAT -> c_rescue_e84a__0_RD), c_rescue_e84a__0_cs))),
+               type_expr(alias
+            c_rescue_e84a__0_CLAIM = "urn:eigenius:pub:wrn:rescue_e84a_plan_yields_main_effect",
+            c_rescue_e84a__0_OBSP = core:Asserts("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+            c_rescue_e84a__0_js = justification:App(Declared(c_rescue_e84a__0_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset")),
+            c_rescue_e84a__0_cs = app(c_rescue_e84a__0_OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0), Declared(c_rescue_e84a__0_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+                        declared(c_rescue_e84a__0_CLAIM, c_rescue_e84a__0_OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset", c_rescue_e84a__0_OBSP)),
+            c_rescue_e84a__0_SS = "urn:eigenius:pub:wrn:rescue_e84a_sampleset",
+            c_rescue_e84a__0_BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_e84a",
+            c_rescue_e84a__0_RESULT = "urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect",
+            c_rescue_e84a__0_STAT = stats:lt(stats:mean_diff_of(c_rescue_e84a__0_SS), 0.0),
+            c_rescue_e84a__0_RD = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ"),
+            c_rescue_e84a__1_CLAIM = "urn:eigenius:pub:wrn:rescue_e84a_plan_yields_main_effect",
+            c_rescue_e84a__1_OBSP = core:Asserts("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+            c_rescue_e84a__1_js = justification:App(Declared(c_rescue_e84a__1_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset")),
+            c_rescue_e84a__1_cs = app(c_rescue_e84a__1_OBSP, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0), Declared(c_rescue_e84a__1_CLAIM), Observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset"),
+                        declared(c_rescue_e84a__1_CLAIM, c_rescue_e84a__1_OBSP -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:rescue_e84a_sampleset", c_rescue_e84a__1_OBSP)),
+            c_rescue_e84a__1_SS = "urn:eigenius:pub:wrn:rescue_e84a_sampleset",
+            c_rescue_e84a__1_BRIDGE = "urn:eigenius:pub:wrn:bridge_rescue_e84a",
+            c_rescue_e84a__1_RESULT = "urn:eigenius:pub:wrn:rescue_e84a_plan:result:main_effect",
+            c_rescue_e84a__1_STAT = stats:lt(stats:mean_diff_of(c_rescue_e84a__1_SS), 0.0),
+            c_rescue_e84a__1_RD = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ"),
+            RULE  = "urn:eigenius:pub:wrn:exo_rule",
+            LIT   = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
+            CONCL = "urn:eigenius:pub:wrn:concl_rescue_e84a_recomputed",
+            SEP   = litclaim:WRNActivitiesSeparable("WRN"),
+            RES   = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ"),
+            DA    = onco:DispensableActivity("WRN", "exonuclease"),
+            RULE_P = SEP -> RES -> DA,
+            jSEP  = Declared(LIT),
+            jRES  = justification:App(
+                       Declared("urn:eigenius:pub:wrn:bridge_rescue_e84a"),
+                       c_rescue_e84a__0_js
+                   ),
+            cert1 = app(SEP, RES -> DA, Declared(RULE), jSEP,
+                        declared(RULE, RULE_P), declared(LIT, SEP))
+        in
+        justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:exo_rule"),
+                           Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+                       ),
+                       justification:App(
+                       Declared("urn:eigenius:pub:wrn:bridge_rescue_e84a"),
+                       c_rescue_e84a__1_js
+                   )
+                   ),
+                   onco:DispensableActivity("WRN", "exonuclease") )) );
 }
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource wrn:warrant_on_target_rescue_logic : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_on_target_rescue_logic : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:on-target-rescue-logic`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_on_target_rescue_logic";
 }
 
-resource wrn:warrant_structure_function_dissection : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_structure_function_dissection : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:structure-function-dissection`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_structure_function_dissection";
 }

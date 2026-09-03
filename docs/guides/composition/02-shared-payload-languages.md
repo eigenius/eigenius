@@ -306,17 +306,17 @@ not remove the second copy. That is exactly the per-institution glue the
 argument is supposed to eliminate, surviving in the one place where two
 institutions needed the same code.
 
-## 2.4a. A second shared payload landed: `eigentt:TypeExpr` propositions (D47)
+## 2.4a. A second shared payload landed: `eigentt:Term` propositions (D47)
 
-`FormulaTerm` covers the numerical institutions. The reasoning + statistics stack (D52 + D39) sits on a *different* shared payload: chain-mirrored EigenTT type expressions, declared at `eigentt:TypeExpr` per [D47](../../../design/d47-chain-mirrored-eigentt-type-fragment.md). Same general mechanism — a chain-resident inductive type that multiple institutions consume directly — but a different semantic domain (typed propositions and dependent types, not numerical expressions) and a different bridge mechanism (the [D49 chain-witness index](../platform/reasoning-institution/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses), not a comorphism extract-transform-reify pipeline).
+`FormulaTerm` covers the numerical institutions. The reasoning + statistics stack (D52 + D39) sits on a *different* shared payload: chain-mirrored EigenTT type expressions, declared at `eigentt:Term` per [D47](../../design/d47-chain-mirrored-eigentt-type-fragment.md). Same general mechanism — a chain-resident inductive type that multiple institutions consume directly — but a different semantic domain (typed propositions and dependent types, not numerical expressions) and a different bridge mechanism (the [D49 chain-witness index](../platform/justification-logic/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses), not a comorphism extract-transform-reify pipeline).
 
 The shape:
 
 ```esl
-data eigentt:TypeExpr : Type 0 {
+data eigentt:Term : Type 0 {
     ConstRef(core:string),                  // IRI of a class, axiom, definition or inductive
-    App(eigentt:TypeExpr, eigentt:TypeExpr), // application
-    Pi(eigentt:TypeExpr, eigentt:TypeExpr),  // dependent function type
+    App(eigentt:Term, eigentt:Term), // application
+    Pi(eigentt:Term, eigentt:Term),  // dependent function type
     LitString(core:string),                  // string literal as a Prop argument
     LitInt(core:integer),
     Sort(core:Level),                        // universe level — a core:Level value, not an
@@ -326,7 +326,7 @@ data eigentt:TypeExpr : Type 0 {
 }
 ```
 
-A chain-resident value of `eigentt:TypeExpr` IS a typed proposition (when it lives in `Prop` per [D46](../../../design/d46-prop-universe-and-proof-irrelevance.md)) or a type expression. The author surface is [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) — the syntactic counterpart of `formula(...)` for the proposition language:
+A chain-resident value of `eigentt:Term` IS a typed proposition (when it lives in `Prop` per [D46](../../design/d46-prop-universe-and-proof-irrelevance.md)) or a type expression. The author surface is [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) — the syntactic counterpart of `formula(...)` for the proposition language:
 
 ```esl
 reflection:canonical_proposition = type_expr(
@@ -334,40 +334,47 @@ reflection:canonical_proposition = type_expr(
 );
 ```
 
-This lowers to a `Value::Json` carrying the tagged-dict tree:
+This lowers to the value resources those constructors denote — `is_a`
+names the constructor's class, and each argument lands on that class's
+property (D85 §6.1):
 
 ```json
 {
-  "ctor": "App",
-  "args": [
-    {"ctor": "ConstRef", "args": ["urn:eigenius:demo:screen:HasLowIC50"]},
-    {"ctor": "LitString", "args": ["urn:eigenius:demo:screen:EIG_0291"]}
-  ]
+  "core:is_a": ["eigentt:Term-App"],
+  "eigentt:Term-App-head": {
+    "core:is_a": ["eigentt:Term-ConstRef"],
+    "eigentt:Term-ConstRef-iri": "urn:eigenius:demo:screen:HasLowIC50",
+    "eigentt:Term-ConstRef-levels": []
+  },
+  "eigentt:Term-App-arg": {
+    "core:is_a": ["eigentt:Term-LitString"],
+    "eigentt:Term-LitString-value": "urn:eigenius:demo:screen:EIG_0291"
+  }
 }
 ```
 
 ### Which institutions consume it
 
-| Institution | What it reads `eigentt:TypeExpr` for |
+| Institution | What it reads `eigentt:Term` for |
 |---|---|
 | **D52 statistics** ([tutorial](../platform/statistics-institution/README.md)) | The `StatisticalAnalysisPlan`'s `null_hypothesis` / `alternative_hypothesis` / `canonical_proposition` slots carry chain-mirrored propositions. The §7.4 epistemic-scope check walks the proposition's head predicate to look up its `is_a` scope markers. |
-| **D39 reasoning** ([tutorial](../platform/reasoning-institution/README.md)) | The `ReasoningSentence`'s `proposition` slot. The certificate's `JustifiedBy(j, P)` indices read it. The grounding constructors (`declared`/`observed`/`derived`/`verified`) hash it to compute the witness-index key. |
-| **D49 chain-witness index** ([§6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state)) | Reads `canonical_proposition` from every chain-resident `DeclaredResource` / `ObservedResource` / `DerivedResource` / `VerifiedResource` and computes a SHA-256 hash to key the witness-admission table. |
-| **Lean institution** ([tutorial](../platform/lean-institution/README.md)) | The `lean_to_reasoning` comorphism reifies a Lean proof's proposition as a `reasoning:VerifiedPropositionView` with a `canonical_proposition` slot — same chain shape, written by the comorphism instead of by the original author. |
+| **D39 reasoning** ([tutorial](../platform/justification-logic/README.md)) | The `justification:Conclusion`'s `proposition` slot. The certificate's `justification:Certificate(j, P)` indices read it. The grounding constructors (`declared`/`observed`/`derived`/`verified`) hash it to compute the witness-index key. |
+| **D49 chain-witness index** ([§6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state)) | Reads `canonical_proposition` from every chain-resident resource carrying one, together with the `prov` trace attesting how it came to exist, and computes a SHA-256 hash to key the witness-admission table. |
+| **Lean institution** ([tutorial](../platform/lean-institution/README.md)) | The `lean_to_reasoning` comorphism reifies a Lean proof's proposition as a `justification:VerifiedPropositionView` with a `canonical_proposition` slot — same chain shape, written by the comorphism instead of by the original author. |
 
 ### The bridge mechanism is different
 
 For `FormulaTerm`, institutions coordinate through declared **comorphisms** — chain-resident bridges that translate one institution's view of a `FormulaTerm` value into another's, with the kernel statically type-checking the alignment ([chapter 3](03-comorphisms.md)). The transformation is *active*: one institution's runtime is invoked, output is reified back into the chain.
 
-For `eigentt:TypeExpr`, institutions coordinate through the **witness index** ([§6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state)). Each institution that emits a chain-resident `DerivedResource` (or `ObservedResource` / `DeclaredResource` / `VerifiedResource`) with a `canonical_proposition` slot automatically populates the per-layer witness index at construction. Each institution that consumes a proposition (notably D39, but in principle any institution that wants to admit a `ChainWitness` predicate at type-check time) reads from the same index. The composition is *passive* — D39 doesn't call D52; it just reads what D52 emitted.
+For `eigentt:Term`, institutions coordinate through the **witness index** ([§6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state)). Each institution that emits a chain-resident resource with a `canonical_proposition` slot, alongside the `prov` trace attesting how it came to exist, automatically populates the per-layer witness index at construction. Each institution that consumes a proposition (notably D39, but in principle any institution that wants to admit a `ChainWitness` predicate at type-check time) reads from the same index. The composition is *passive* — D39 doesn't call D52; it just reads what D52 emitted.
 
-This is the load-bearing structural difference between the two composition shapes. Comorphisms are explicit translation handlers; witness-index composition is implicit through a shared chain artifact shape. Both work; which one applies depends on whether the downstream institution needs the input *value translated* (comorphism, `FormulaTerm` shape) or just *cited as evidence* (witness index, `eigentt:TypeExpr` shape).
+This is the load-bearing structural difference between the two composition shapes. Comorphisms are explicit translation handlers; witness-index composition is implicit through a shared chain artifact shape. Both work; which one applies depends on whether the downstream institution needs the input *value translated* (comorphism, `FormulaTerm` shape) or just *cited as evidence* (witness index, `eigentt:Term` shape).
 
 ### Identity-comorphism collapse, witness-index edition
 
-The `FormulaTerm` story includes the identity middle: when both institutions speak the same payload, the comorphism's declared transformation step is a no-op ([§2.4](#2-4-what-the-shared-payload-buys-interpreters-not-translators)) — though the translation it does not do is done by the export procedure feeding it ([§2.4b](#2-4b-what-the-shared-payload-did-not-buy)). The witness-index analog: when two institutions share the `eigentt:TypeExpr` proposition shape and the `canonical_proposition` slot, *no bridge code at all is required*. The producer institution emits the resource with `canonical_proposition` set; the consumer institution looks up the proposition by hash in the witness index. There is no comorphism to declare, no transformation to write — the shape itself is the protocol.
+The `FormulaTerm` story includes the identity middle: when both institutions speak the same payload, the comorphism's declared transformation step is a no-op ([§2.4](#2-4-what-the-shared-payload-buys-interpreters-not-translators)) — though the translation it does not do is done by the export procedure feeding it ([§2.4b](#2-4b-what-the-shared-payload-did-not-buy)). The witness-index analog: when two institutions share the `eigentt:Term` proposition shape and the `canonical_proposition` slot, *no bridge code at all is required*. The producer institution emits the resource with `canonical_proposition` set; the consumer institution looks up the proposition by hash in the witness index. There is no comorphism to declare, no transformation to write — the shape itself is the protocol.
 
-The drug-screening fixture at [`crates/eigenius-reasoning/tests/fixtures/drug_screening.esl`](../../../crates/eigenius-reasoning/tests/fixtures/drug_screening.esl) exercises this: the `claim_eig0291_lowic50` StatisticalAnalysisPlan's `canonical_proposition = HasLowIC50("urn:...:EIG_0291")` becomes available to the downstream `concl_eig0291_strong` ReasoningSentence's `derived(claim_iri, HasLowIC50(...), ...)` certificate constructor *without any bridge code on either side* — D52 emits the proposition into a chain slot D39 already reads from. See [chapter 7](07-stats-and-reasoning-walkthrough.md) for the full walkthrough.
+The drug-screening fixture at [`kernel/tests/fixtures/drug_screening.esl`](../../../kernel/tests/fixtures/drug_screening.esl) exercises this: the `claim_eig0291_lowic50` StatisticalAnalysisPlan's `canonical_proposition = HasLowIC50("urn:...:EIG_0291")` becomes available to the downstream `concl_eig0291_strong` justification:Conclusion's `derived(claim_iri, HasLowIC50(...), ...)` certificate constructor *without any bridge code on either side* — D52 emits the proposition into a chain slot D39 already reads from. See [chapter 7](07-stats-and-reasoning-walkthrough.md) for the full walkthrough.
 
 ## 2.5. When *not* to share a payload
 
@@ -409,7 +416,7 @@ should — in the comorphism declaration and the ExportFormat it names
 
 ## 2.6. What other shared payloads might look like
 
-`FormulaTerm` and `eigentt:TypeExpr` are v1's two shared payloads —
+`FormulaTerm` and `eigentt:Term` are v1's two shared payloads —
 the first coordinates numerical institutions via comorphisms ([§2.2-§2.4](#2-2-formulaterm-as-a-coordination-mechanism)),
 the second coordinates statistics + reasoning via the witness index
 ([§2.4a](#2-4a-a-second-shared-payload-landed-coreeigentttype-propositions-d47)).
@@ -427,7 +434,7 @@ structure makes natural:
   view of a Q3 plan" → "the routing institution's view of the same plan"
   collapse to identity the way the Symbolics → IntervalArithmetic comorphism
   does. The
-  [enterprise supply-chain scenario note](../../notes/enterprise-supply-chain-scenario.md)
+  enterprise supply-chain scenario note
   explores this shape in a non-science domain.
 
 The one-interpreter-per-consumer property documented in [§2.4](#2-4-what-the-shared-payload-buys-interpreters-not-translators)

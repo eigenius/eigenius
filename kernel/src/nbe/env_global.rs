@@ -353,14 +353,14 @@ mod tests {
         let mut r = Resource::new(i(id));
         r.set(
             i(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(i(
-                "urn:eigenius:eigentt:Definition",
-            ))]),
+            Value::Array(vec![Value::String(
+                i("urn:eigenius:eigentt:Definition").as_str().to_string(),
+            )]),
         );
         // Body: `Sort(1)` in D47 form — a term that decodes and evaluates.
         r.set(
             i("urn:eigenius:eigentt:definition_body"),
-            Value::Json(serde_json::json!({
+            crate::testing::term_value(&serde_json::json!({
                 "ctor": "Sort",
                 "args": [{"ctor": "Succ", "args": [{"ctor": "Zero", "args": []}]}]
             })),

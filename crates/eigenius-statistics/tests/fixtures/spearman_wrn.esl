@@ -14,10 +14,26 @@ namespace core       = "urn:eigenius:core";
 namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace wrn        = "urn:eigenius:demo:wrncorr";
+namespace prov       = "urn:eigenius:prov";
+
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource wrn:act_a_18q4_msi_lines_ms_deletions_vs_avg_wrn_dependency_supp : prov:Activity {
+    core:description = "depmap:18Q4 MSI lines — ms_deletions vs avg WRN dependency (Supp Table 1)";
+    core:short_name = "act_a_18q4_msi_lines_ms_deletions_vs_avg_wrn_dependency_supp";
+}
+resource wrn:act_a_18q4_supp_table_1 : prov:Activity {
+    core:description = "depmap:18Q4 (Supp Table 1)";
+    core:short_name = "act_a_18q4_supp_table_1";
+}
+
 
 resource wrn:wrn_dep_vs_deletions : stats:SampleSetResource {
-    reflection:source      = "depmap:18Q4 MSI lines — ms_deletions vs avg WRN dependency (Supp Table 1)";
-    reflection:observed_at = "2019-01-01T00:00:00Z";
+    prov:was_generated_by      = wrn:act_a_18q4_msi_lines_ms_deletions_vs_avg_wrn_dependency_supp;
+    prov:observed_at = "2019-01-01T00:00:00Z";
 
     stats:sample_set_value = stats:Paired(
         [
@@ -43,10 +59,10 @@ resource wrn:wrn_dep_vs_deletions : stats:SampleSetResource {
     );
 }
 
-resource wrn:wrn_dep_vs_deletions_trace : reflection:ObservationTrace {
-    reflection:resource  = wrn:wrn_dep_vs_deletions;
-    reflection:source    = "depmap:18Q4 (Supp Table 1)";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:wrn_dep_vs_deletions_trace : prov:ObservationTrace {
+    prov:resource  = wrn:wrn_dep_vs_deletions;
+    prov:was_generated_by    = wrn:act_a_18q4_supp_table_1;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
 resource wrn:claim_wrn_dep_tracks_mutator_load : stats:StatisticalAnalysisPlan {
@@ -59,8 +75,8 @@ resource wrn:claim_wrn_dep_tracks_mutator_load : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion   = Identity();
 }
 
-resource wrn:claim_wrn_dep_tracks_mutator_load_trace : reflection:ProgramTrace {
-    reflection:resource  = wrn:claim_wrn_dep_tracks_mutator_load;
-    reflection:source    = "statistics-institution:validate_analysis_plan";
-    reflection:timestamp = "2019-01-01T00:00:00Z";
+resource wrn:claim_wrn_dep_tracks_mutator_load_trace : prov:ProgramTrace {
+    prov:resource  = wrn:claim_wrn_dep_tracks_mutator_load;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2019-01-01T00:00:00Z";
 }

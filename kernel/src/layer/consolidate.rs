@@ -1983,12 +1983,11 @@ mod tests {
         let mut ti = Resource::new(iri("urn:eigenius:test:ti"));
         ti.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::TEXT_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::TEXT_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        ti.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_prop)),
-        );
+        ti.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
         ti.set(iri(wk::TEXT_ANALYZER), Value::String("en-stem-v1".into()));
         ti_layer.add_resource(ti).unwrap();
         let ti_layer = Arc::new(ti_layer.build(storage.clone()));
@@ -2011,7 +2010,9 @@ mod tests {
             let mut r = Resource::new(iri(&format!("urn:eigenius:test:{sid}")));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:test:Doc").as_str().to_string(),
+                )]),
             );
             r.set(iri(target_prop), Value::String(body.to_string()));
             lb.add_resource(r).unwrap();
@@ -2126,12 +2127,11 @@ mod tests {
         let mut ti = Resource::new(iri("urn:eigenius:test:ti"));
         ti.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::TEXT_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::TEXT_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        ti.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_prop)),
-        );
+        ti.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
         ti.set(iri(wk::TEXT_ANALYZER), Value::String("en-stem-v1".into()));
         ti_layer.add_resource(ti).unwrap();
         let ti_layer = Arc::new(ti_layer.build(storage.clone()));
@@ -2151,7 +2151,9 @@ mod tests {
             let mut r = Resource::new(iri(&format!("urn:eigenius:test:{sid}")));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:test:Doc").as_str().to_string(),
+                )]),
             );
             r.set(iri(target_prop), Value::String(body.to_string()));
             lb.add_resource(r).unwrap();
@@ -2165,7 +2167,9 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:test:tail_doc"));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:test:Doc").as_str().to_string(),
+            )]),
         );
         r.set(
             iri(target_prop),
@@ -2277,13 +2281,12 @@ mod tests {
         let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
         vi.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_prop)),
-        );
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_iri)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         vi_layer.add_resource(vi).unwrap();
         let vi_layer = Arc::new(vi_layer.build(storage.clone()));
@@ -2302,7 +2305,9 @@ mod tests {
             let mut r = Resource::new(iri(&format!("urn:eigenius:test:{sid}")));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:test:Doc").as_str().to_string(),
+                )]),
             );
             r.set(iri(target_prop), Value::String(body.to_string()));
             lb.add_resource(r).unwrap();
@@ -2402,13 +2407,12 @@ mod tests {
         let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
         vi.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_prop)),
-        );
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_iri)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         vi_layer.add_resource(vi).unwrap();
         let vi_layer = Arc::new(vi_layer.build(storage.clone()));
@@ -2423,7 +2427,9 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:test:vanishing"));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:test:Doc").as_str().to_string(),
+            )]),
         );
         r.set(iri(target_prop), Value::String("about to vanish".into()));
         l1_b.add_resource(r).unwrap();
@@ -2437,7 +2443,9 @@ mod tests {
         let mut r = Resource::new(iri("urn:eigenius:test:survivor"));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:test:Doc").as_str().to_string(),
+            )]),
         );
         r.set(iri(target_prop), Value::String("survivor body".into()));
         l2_b.add_resource(r).unwrap();
@@ -2507,17 +2515,20 @@ mod tests {
         let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
         vi.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_prop)),
-        );
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_iri)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         vi.set(
             iri(wk::VEC_STRATEGY),
-            Value::ResourceRef(iri("urn:eigenius:core:strategies:hnsw")),
+            Value::String(
+                iri("urn:eigenius:core:strategies:hnsw")
+                    .as_str()
+                    .to_string(),
+            ),
         );
         vi_layer.add_resource(vi).unwrap();
         let vi_layer = Arc::new(vi_layer.build(storage.clone()));
@@ -2534,7 +2545,9 @@ mod tests {
             let mut r = Resource::new(iri(&format!("urn:eigenius:test:doc{i}")));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:test:Doc").as_str().to_string(),
+                )]),
             );
             r.set(iri(target_prop), Value::String(format!("body {i}")));
             lb.add_resource(r).unwrap();
@@ -2619,13 +2632,12 @@ mod tests {
         let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
         vi.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::VECTOR_INDEX_CLASS))]),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
         );
-        vi.set(
-            iri(wk::TARGET_PROPERTY),
-            Value::ResourceRef(iri(target_prop)),
-        );
-        vi.set(iri(wk::VEC_MODEL), Value::ResourceRef(iri(model_iri)));
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_iri)));
         vi.set(iri(wk::VEC_DIM), Value::Integer(8));
         vi_layer.add_resource(vi).unwrap();
         let vi_layer = Arc::new(vi_layer.build(storage.clone()));
@@ -2649,7 +2661,9 @@ mod tests {
             let mut r = Resource::new(iri(&format!("urn:eigenius:test:{sid}")));
             r.set(
                 iri(wk::IS_A),
-                Value::Array(vec![Value::ResourceRef(iri("urn:eigenius:test:Doc"))]),
+                Value::Array(vec![Value::String(
+                    iri("urn:eigenius:test:Doc").as_str().to_string(),
+                )]),
             );
             r.set(iri(target_prop), Value::String(body.to_string()));
             lb.add_resource(r).unwrap();

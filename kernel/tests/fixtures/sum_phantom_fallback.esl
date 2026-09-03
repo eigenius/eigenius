@@ -1,0 +1,70 @@
+// The negative half of the `Sum` exit criterion — see
+// `sum_requires_both_branches.esl` for the shape and the argument.
+//
+// Identical to that fixture's conclusion except that the second summand names
+// `screen:review_absent`, which the chain does not carry. Under the old
+// `sum_l : Certificate(j1, P) -> Certificate(Sum(j1, j2), P)` this committed:
+// `j2` was bound and entirely unconstrained. It must now be refused, because
+// `sum_l` demands a certificate for the second branch too and there is no
+// `IsDeclaredAs` witness to build one from.
+
+namespace core          = "urn:eigenius:core";
+namespace reflection    = "urn:eigenius:reflection";
+namespace screen        = "urn:eigenius:demo:screen";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace prov       = "urn:eigenius:prov";
+
+data screen:StrongInhibitor : core:string -> Prop {
+}
+
+resource screen:warrant_two_source_agreement : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Two independent reviews reach the same designation for EIG_0291.";
+    core:short_name = "warrant_two_source_agreement";
+}
+
+resource screen:review_a : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_two_source_agreement;
+    prov:rationale    = "First independent review designates EIG_0291 a strong inhibitor.";
+    reflection:canonical_proposition = type_expr(
+        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+    );
+}
+
+resource screen:review_a_trace : prov:DeclarationTrace {
+    prov:resource     = screen:review_a;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_two_source_agreement;
+    prov:timestamp    = "2026-04-10T09:00:00Z";
+}
+
+// `screen:review_absent` is deliberately NOT declared anywhere.
+
+resource screen:concl_phantom_fallback : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares. Its
+    // `term` and `type` arguments are declared `eigentt:Term`, so each is a
+    // `type_expr(...)`, and the `alias` bindings — term-surface sugar — scope
+    // inside each one rather than over the judgement.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            A = "urn:eigenius:demo:screen:review_a",
+            B = "urn:eigenius:demo:screen:review_absent",
+            P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+        in
+        sum_l(P, Declared(A), Declared(B),
+                     declared(A, P),
+                     declared(B, P))),
+               type_expr(alias
+            A = "urn:eigenius:demo:screen:review_a",
+            B = "urn:eigenius:demo:screen:review_absent",
+            P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+        in
+        justification:Certificate(
+                   justification:Sum(Declared(A), Declared(B)),
+                   P )) );
+}

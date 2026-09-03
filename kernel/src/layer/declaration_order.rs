@@ -39,7 +39,7 @@
 
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::{Resource, Value};
+use crate::ontology::resource::Resource;
 use crate::ontology::well_known as wk;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -114,34 +114,64 @@ fn is_inductive(r: &Resource) -> bool {
 /// not.** That one documents JSON as never carrying typed-reference semantics,
 /// which is true for its purpose and false here: an inductive's constructor
 /// argument types are stored as D47-encoded JSON —
-/// `{"ctor": "ConstRef", "args": ["urn:…"]}` — so a walker that skips `Json`
+/// `{"ctor": "ConstRef", "args": ["urn:…", []]}` — so a walker that skips `Json`
 /// finds **no inductive-to-inductive edges at all**. Reusing it would produce an
 /// empty graph for precisely the case [`OrderError::MutualInductives`] exists to
 /// catch, and would look like it worked.
-fn references(r: &Resource, out: &mut BTreeSet<Iri>) {
-    for (prop, value) in r.properties() {
-        out.insert(prop.clone());
-        value_refs(value, out);
+/// Is `iri` a constructor class or argument property that D85 §6.1 derived from an inductive
+/// in this layer, rather than something an author declared?
+///
+/// A constructor class names its inductive in `subclass_of`; an argument property names that
+/// class in `domain`. Both exist because `core:ctors` has an entry, so neither is an
+/// independent declaration — which matters when classifying a cycle, since a mutual inductive
+/// pair drags its derived classes in with it.
+fn is_derived_from_inductive(layer: &Layer, iri: &Iri, decls: &BTreeMap<Iri, bool>) -> bool {
+    let Some(r) = layer.get_resource(iri) else {
+        return false;
+    };
+    if let Some(v) = r.get(&crate::ontology::well_known::iri(wk::PARENT_CLASSES)) {
+        if v.as_iri_array().iter().any(|p| decls.get(p) == Some(&true)) {
+            return true;
+        }
     }
+    if let Some(v) = r.get(&crate::ontology::well_known::iri(wk::DOMAIN)) {
+        return v.as_iri_array().iter().any(|owner| {
+            layer
+                .get_resource(owner)
+                .and_then(|c| {
+                    c.get(&crate::ontology::well_known::iri(wk::PARENT_CLASSES))
+                        .cloned()
+                })
+                .map(|p| p.as_iri_array().iter().any(|i| decls.get(i) == Some(&true)))
+                .unwrap_or(false)
+        });
+    }
+    false
 }
 
-fn value_refs(v: &Value, out: &mut BTreeSet<Iri>) {
-    match v {
-        Value::ResourceRef(iri) => {
-            out.insert(iri.clone());
-        }
-        Value::Array(items) => items.iter().for_each(|i| value_refs(i, out)),
-        Value::Embedded(inner) => references(inner.as_ref(), out),
-        // D47-encoded terms. Shared with the indexer since D79 §2.2 — this
-        // descent used to live here, and having one copy is what lets
-        // `core:mentions` and `MutualInductives` agree about what a term names.
-        Value::Json(j) => crate::layer::term_mentions::json_mentions(j, out),
-        Value::String(_)
-        | Value::Integer(_)
-        | Value::Float(_)
-        | Value::Boolean(_)
-        | Value::Vector { .. } => {}
-    }
+fn references(r: &Resource, out: &mut BTreeSet<Iri>) {
+    // `core:domain` is NOT a dependency edge. It says where a property APPLIES; it does not say
+    // the property needs that class declared first. Treating it as one makes every ordinary
+    // class/property pair circular — a class `requires` the property, the property's `domain`
+    // names the class back — which core has had all along (`core:Property requires
+    // core:data_type`, `core:data_type domain core:Property`) and which D85 §6.1's derived
+    // constructor classes make universal, since every inductive now yields such a pair.
+    //
+    // This is a constant, not a schema lookup: the walk stays usable before any schema is
+    // resolvable, which is the reason it is schema-blind in the first place.
+    //
+    // Both SITES count here: a property key is a reference, because its definition lives
+    // somewhere in the chain and has to be declared first. That is what the walk reports and
+    // this does not filter.
+    crate::ontology::value_refs::for_each_resource_ref_where(
+        r,
+        &|prop| prop.as_str() != wk::DOMAIN,
+        &mut |_site, s, _path| {
+            if let Ok(iri) = Iri::parse(s) {
+                out.insert(iri);
+            }
+        },
+    );
 }
 
 /// D76 §6.2 — the order a layer's declarations must be processed in.
@@ -198,11 +228,23 @@ pub fn declaration_order(layer: &Layer) -> Result<Vec<Iri>, OrderError> {
                     .filter(|i| !placed.contains(*i))
                     .cloned()
                     .collect();
-                return Err(if stuck.iter().all(|i| decls[i]) {
-                    OrderError::MutualInductives(stuck)
-                } else {
-                    OrderError::Cycle(stuck)
-                });
+                // A derived constructor class or argument property (D85 §6.1) is not an
+                // independent declaration for this purpose — it is part of the inductive it
+                // was projected from, and it is stuck only because that inductive is. Judge
+                // the cycle by the declarations an author actually wrote, or a mutual pair
+                // would report a generic cycle instead of naming eigenius#20.
+                let authored: Vec<Iri> = stuck
+                    .iter()
+                    .filter(|i| !is_derived_from_inductive(layer, i, &decls))
+                    .cloned()
+                    .collect();
+                return Err(
+                    if !authored.is_empty() && authored.iter().all(|i| decls[i]) {
+                        OrderError::MutualInductives(authored)
+                    } else {
+                        OrderError::Cycle(stuck)
+                    },
+                );
             }
         }
     }
@@ -213,19 +255,20 @@ pub fn declaration_order(layer: &Layer) -> Result<Vec<Iri>, OrderError> {
 mod tests {
     use super::*;
     use crate::layer::{LayerBuilder, LayerStorage};
+    use crate::ontology::resource::Value;
     use std::sync::Arc;
 
     fn iri(s: &str) -> Iri {
         Iri::parse(s).unwrap()
     }
 
-    /// A class requiring the listed properties — `requires` is a `ResourceRef`
-    /// array, so these are ordinary references.
+    /// A class requiring the listed properties — `requires` is a `resource_array`,
+    /// so these are ordinary references.
     fn class(id: &str, requires: &[&str]) -> Resource {
         let mut r = Resource::new(iri(id));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::CLASS))]),
+            Value::Array(vec![Value::iri(&iri(wk::CLASS))]),
         );
         r.set(
             iri(wk::SHORT_NAME),
@@ -234,12 +277,7 @@ mod tests {
         r.set(iri(wk::DESCRIPTION), Value::String("t".into()));
         r.set(
             iri(wk::REQUIRES),
-            Value::Array(
-                requires
-                    .iter()
-                    .map(|p| Value::ResourceRef(iri(p)))
-                    .collect(),
-            ),
+            Value::Array(requires.iter().map(|p| Value::iri(&iri(p))).collect()),
         );
         r
     }
@@ -250,7 +288,9 @@ mod tests {
         let mut r = Resource::new(iri(id));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::INDUCTIVE_TYPE))]),
+            Value::Array(vec![Value::String(
+                iri(wk::INDUCTIVE_TYPE).as_str().to_string(),
+            )]),
         );
         r.set(
             iri(wk::SHORT_NAME),
@@ -272,8 +312,8 @@ mod tests {
                         a.set(iri("urn:eigenius:core:arg_name"), Value::String("x".into()));
                         a.set(
                             iri("urn:eigenius:core:type_name"),
-                            Value::Json(serde_json::json!({
-                                "ctor": "ConstRef", "args": [arg]
+                            crate::testing::term_value(&serde_json::json!({
+                                "ctor": "ConstRef", "args": [arg, []]
                             })),
                         );
                         a
@@ -304,11 +344,11 @@ mod tests {
         let mut p = Resource::new(iri("urn:t:zprop"));
         p.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri(wk::PROPERTY))]),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
         );
         p.set(iri(wk::SHORT_NAME), Value::String("zprop".into()));
         p.set(iri(wk::DESCRIPTION), Value::String("t".into()));
-        p.set(iri(wk::DATA_TYPE_PROP), Value::ResourceRef(iri(wk::STRING)));
+        p.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
 
         let order = declaration_order(&layer_of(vec![class("urn:t:aclass", &["urn:t:zprop"]), p]))
             .expect("acyclic");
@@ -366,12 +406,12 @@ mod tests {
         let mut a = class("urn:t:ca", &[]);
         a.set(
             iri(wk::PARENT_CLASSES),
-            Value::Array(vec![Value::ResourceRef(iri("urn:t:cb"))]),
+            Value::Array(vec![Value::iri(&iri("urn:t:cb"))]),
         );
         let mut b = class("urn:t:cb", &[]);
         b.set(
             iri(wk::PARENT_CLASSES),
-            Value::Array(vec![Value::ResourceRef(iri("urn:t:ca"))]),
+            Value::Array(vec![Value::iri(&iri("urn:t:ca"))]),
         );
 
         let err = declaration_order(&layer_of(vec![a, b])).expect_err("a cycle must be rejected");
@@ -388,7 +428,7 @@ mod tests {
         let mut inst = Resource::new(iri("urn:t:instance"));
         inst.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::ResourceRef(iri("urn:t:a"))]),
+            Value::Array(vec![Value::iri(&iri("urn:t:a"))]),
         );
         let order = declaration_order(&layer_of(vec![class("urn:t:a", &[]), inst])).unwrap();
         assert_eq!(
@@ -407,10 +447,23 @@ mod tests {
             class("urn:t:atarget", &[]),
         ]))
         .expect("acyclic");
+        // The layer also carries the constructor class and argument property `build` derives
+        // from `zind`'s `core:ctors` (D85 §6.1). They are ordered after the inductive they come
+        // from, which is right; what this test is about is the authored pair.
+        let authored: Vec<String> = names(&order)
+            .into_iter()
+            .filter(|n| !n.contains("-mk"))
+            .collect();
         assert_eq!(
-            names(&order),
+            authored,
             ["urn:t:atarget", "urn:t:zind"],
             "the D47-encoded reference must order the inductive after its target"
+        );
+        let all = names(&order);
+        let pos = |s: &str| all.iter().position(|n| n == s).expect(s);
+        assert!(
+            pos("urn:t:zind") < pos("urn:t:zind-mkzind"),
+            "a derived constructor class must be ordered after its inductive"
         );
     }
 }

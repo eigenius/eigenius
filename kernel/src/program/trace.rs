@@ -463,7 +463,7 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
                     set_is_a(&mut entry, "urn:eigenius:reflection:FieldTrace");
                     entry.set(
                         Iri::parse("urn:eigenius:reflection:property").unwrap(),
-                        Value::String(iri.as_str().to_string()),
+                        Value::iri(iri),
                     );
                     let trace_node = match t {
                         Some(t) => trace_to_resource(t),
@@ -496,7 +496,7 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
             }
             r.set(
                 Iri::parse("urn:eigenius:reflection:property").unwrap(),
-                Value::String(property.as_str().to_string()),
+                Value::iri(property),
             );
             r
         }

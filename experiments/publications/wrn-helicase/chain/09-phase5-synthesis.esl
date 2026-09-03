@@ -18,14 +18,17 @@
 //
 // Validated by crates/eigenius-reasoning/tests/wrn_phase5.rs.
 
-namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
-namespace reasoning  = "urn:eigenius:reasoning";
-namespace eigentt    = "urn:eigenius:eigentt";
-namespace bench      = "urn:eigenius:benchmark";
-namespace onco       = "urn:eigenius:benchmark:onco";
-namespace wrn        = "urn:eigenius:pub:wrn";
+namespace core          = "urn:eigenius:core";
+namespace formats       = "urn:eigenius:core:formats";
+namespace reflection    = "urn:eigenius:reflection";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace bench         = "urn:eigenius:benchmark";
+namespace onco          = "urn:eigenius:benchmark:onco";
+namespace wrn           = "urn:eigenius:pub:wrn";
+namespace justification = "urn:eigenius:justification";
+namespace litclaim      = "urn:eigenius:pub:wrn:litclaim";
+namespace stats         = "urn:eigenius:measurements";
+namespace prov       = "urn:eigenius:prov";
 
 // The MMR-restoration causal-dissection experiment is now KERNEL-RECOMPUTED
 // (increment 10): `wrn:concl_mmr_restoration_recomputed` in the statistics
@@ -42,48 +45,186 @@ namespace wrn        = "urn:eigenius:pub:wrn";
 // attributable to that factor — contributes to the dependence. "Partially"
 // (not fully) is the load-bearing qualifier: the rescue being modest means
 // the factor contributes but does not solely determine the dependence.
-resource wrn:mmr_rule : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mmr_causal_dissection;
-    reflection:rationale   = "Restoring MMR (Ch3+5) partially rescues WRN dependence and suppresses DSBs; MLH1-KO re-sensitizes (isolating MMR as the responsible factor, not the chromosome transfer). Because the rescue is only partial/modest, dMMR contributes to but does not fully explain WRN dependence — accumulating MSI lesions (mutator load; cf. D-REFINE) cooperate with dMMR to create WRN-requiring genomic structures (indel/D-loops; yeast Sgs1 precedent).";
+resource wrn:mmr_rule : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mmr_causal_dissection;
+    prov:rationale   = "Restoring MMR (Ch3+5) partially rescues WRN dependence and suppresses DSBs; MLH1-KO re-sensitizes (isolating MMR as the responsible factor, not the chromosome transfer). Because the rescue is only partial/modest, dMMR contributes to but does not fully explain WRN dependence — accumulating MSI lesions (mutator load; cf. D-REFINE) cooperate with dMMR to create WRN-requiring genomic structures (indel/D-loops; yeast Sgs1 precedent).";
     reflection:canonical_proposition = type_expr(
         onco:RestorationPartiallyRescues("dMMR", "WRN")
         ->
         onco:ContributesToDependence("dMMR", "WRN")
     );
 }
-resource wrn:mmr_rule_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:mmr_rule;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_mmr_causal_dissection;
-    reflection:timestamp   = "2026-06-13T04:00:00Z";
+resource wrn:mmr_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:mmr_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_mmr_causal_dissection;
+    prov:timestamp   = "2026-06-13T04:00:00Z";
 }
 
 // C-MMR: dMMR contributes to (but does not fully explain) WRN dependence.
 // Modus ponens over mmr_rule: the antecedent RestorationPartiallyRescues is
 // discharged by CITING the kernel-recomputed conclusion as a lemma (D54: a
-// Holds ReasoningSentence is admitted as a Verified witness keyed on its IRI),
+// Holds justification:Conclusion is admitted as a Verified witness keyed on its IRI),
 // not by a linked-external ToolArtifact. The leaf proof (the three ED Fig 10c
 // crossed-ANOVA (stats:Crossed) contrasts) lives in wrn-phase1-recompute.
-resource wrn:concl_mmr : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
-        onco:ContributesToDependence("dMMR", "WRN")
-    );
-    reasoning:justification = App(
-        DeclaredEvidence("urn:eigenius:pub:wrn:mmr_rule"),
-        VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed")
-    );
-    reasoning:certificate = type_expr(
-        alias
+resource wrn:concl_mmr : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            c_mmr_restorat_0_CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            c_mmr_restorat_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            c_mmr_restorat_0_js_0 = justification:App(Declared(c_mmr_restorat_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset")),
+            c_mmr_restorat_0_cs_0 = app(c_mmr_restorat_0_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0), Declared(c_mmr_restorat_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+                        declared(c_mmr_restorat_0_CLAIM_0, c_mmr_restorat_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", c_mmr_restorat_0_OBSP_0)),
+            c_mmr_restorat_0_CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            c_mmr_restorat_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            c_mmr_restorat_0_js_1 = justification:App(Declared(c_mmr_restorat_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset")),
+            c_mmr_restorat_0_cs_1 = app(c_mmr_restorat_0_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0), Declared(c_mmr_restorat_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+                        declared(c_mmr_restorat_0_CLAIM_1, c_mmr_restorat_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", c_mmr_restorat_0_OBSP_1)),
+            c_mmr_restorat_0_CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            c_mmr_restorat_0_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            c_mmr_restorat_0_js_2 = justification:App(Declared(c_mmr_restorat_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset")),
+            c_mmr_restorat_0_cs_2 = app(c_mmr_restorat_0_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0), Declared(c_mmr_restorat_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+                        declared(c_mmr_restorat_0_CLAIM_2, c_mmr_restorat_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", c_mmr_restorat_0_OBSP_2)),
+            c_mmr_restorat_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            c_mmr_restorat_0_R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            c_mmr_restorat_0_R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            c_mmr_restorat_0_R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            c_mmr_restorat_0_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            c_mmr_restorat_0_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            c_mmr_restorat_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            c_mmr_restorat_0_RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            c_mmr_restorat_0_RULE_P = c_mmr_restorat_0_K -> c_mmr_restorat_0_S -> c_mmr_restorat_0_O -> c_mmr_restorat_0_RP,
+            c_mmr_restorat_0_cert1 = app(c_mmr_restorat_0_K, c_mmr_restorat_0_S -> c_mmr_restorat_0_O -> c_mmr_restorat_0_RP, Declared(c_mmr_restorat_0_BRIDGE), c_mmr_restorat_0_js_0,
+                        declared(c_mmr_restorat_0_BRIDGE, c_mmr_restorat_0_RULE_P), c_mmr_restorat_0_cs_0),
+            c_mmr_restorat_0_cert2 = app(c_mmr_restorat_0_S, c_mmr_restorat_0_O -> c_mmr_restorat_0_RP, justification:App(Declared(c_mmr_restorat_0_BRIDGE), c_mmr_restorat_0_js_0),
+                        c_mmr_restorat_0_js_1, c_mmr_restorat_0_cert1, c_mmr_restorat_0_cs_1),
+            c_mmr_restorat_1_CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            c_mmr_restorat_1_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            c_mmr_restorat_1_js_0 = justification:App(Declared(c_mmr_restorat_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset")),
+            c_mmr_restorat_1_cs_0 = app(c_mmr_restorat_1_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0), Declared(c_mmr_restorat_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+                        declared(c_mmr_restorat_1_CLAIM_0, c_mmr_restorat_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", c_mmr_restorat_1_OBSP_0)),
+            c_mmr_restorat_1_CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            c_mmr_restorat_1_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            c_mmr_restorat_1_js_1 = justification:App(Declared(c_mmr_restorat_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset")),
+            c_mmr_restorat_1_cs_1 = app(c_mmr_restorat_1_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0), Declared(c_mmr_restorat_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+                        declared(c_mmr_restorat_1_CLAIM_1, c_mmr_restorat_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", c_mmr_restorat_1_OBSP_1)),
+            c_mmr_restorat_1_CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            c_mmr_restorat_1_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            c_mmr_restorat_1_js_2 = justification:App(Declared(c_mmr_restorat_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset")),
+            c_mmr_restorat_1_cs_2 = app(c_mmr_restorat_1_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0), Declared(c_mmr_restorat_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+                        declared(c_mmr_restorat_1_CLAIM_2, c_mmr_restorat_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", c_mmr_restorat_1_OBSP_2)),
+            c_mmr_restorat_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            c_mmr_restorat_1_R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            c_mmr_restorat_1_R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            c_mmr_restorat_1_R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            c_mmr_restorat_1_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            c_mmr_restorat_1_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            c_mmr_restorat_1_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            c_mmr_restorat_1_RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            c_mmr_restorat_1_RULE_P = c_mmr_restorat_1_K -> c_mmr_restorat_1_S -> c_mmr_restorat_1_O -> c_mmr_restorat_1_RP,
+            c_mmr_restorat_1_cert1 = app(c_mmr_restorat_1_K, c_mmr_restorat_1_S -> c_mmr_restorat_1_O -> c_mmr_restorat_1_RP, Declared(c_mmr_restorat_1_BRIDGE), c_mmr_restorat_1_js_0,
+                        declared(c_mmr_restorat_1_BRIDGE, c_mmr_restorat_1_RULE_P), c_mmr_restorat_1_cs_0),
+            c_mmr_restorat_1_cert2 = app(c_mmr_restorat_1_S, c_mmr_restorat_1_O -> c_mmr_restorat_1_RP, justification:App(Declared(c_mmr_restorat_1_BRIDGE), c_mmr_restorat_1_js_0),
+                        c_mmr_restorat_1_js_1, c_mmr_restorat_1_cert1, c_mmr_restorat_1_cs_1),
             RULE  = "urn:eigenius:pub:wrn:mmr_rule",
             CONCL = "urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed",
             RP    = onco:RestorationPartiallyRescues("dMMR", "WRN"),
             CD    = onco:ContributesToDependence("dMMR", "WRN")
         in
-        app(RP, CD, DeclaredEvidence(RULE), VerifiedEvidence(CONCL),
-            declared(RULE, RP -> CD), verified(CONCL, RP))
-    );
+        app(RP, CD, Declared(RULE), justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
+                               c_mmr_restorat_0_js_0
+                           ),
+                           c_mmr_restorat_0_js_1
+                       ),
+                       c_mmr_restorat_0_js_2
+                   ),
+               declared(RULE, RP -> CD), app(c_mmr_restorat_0_O, c_mmr_restorat_0_RP, justification:App(justification:App(Declared(c_mmr_restorat_0_BRIDGE), c_mmr_restorat_0_js_0), c_mmr_restorat_0_js_1),
+               c_mmr_restorat_0_js_2, c_mmr_restorat_0_cert2, c_mmr_restorat_0_cs_2))),
+               type_expr(alias
+            c_mmr_restorat_0_CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            c_mmr_restorat_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            c_mmr_restorat_0_js_0 = justification:App(Declared(c_mmr_restorat_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset")),
+            c_mmr_restorat_0_cs_0 = app(c_mmr_restorat_0_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0), Declared(c_mmr_restorat_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+                        declared(c_mmr_restorat_0_CLAIM_0, c_mmr_restorat_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", c_mmr_restorat_0_OBSP_0)),
+            c_mmr_restorat_0_CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            c_mmr_restorat_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            c_mmr_restorat_0_js_1 = justification:App(Declared(c_mmr_restorat_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset")),
+            c_mmr_restorat_0_cs_1 = app(c_mmr_restorat_0_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0), Declared(c_mmr_restorat_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+                        declared(c_mmr_restorat_0_CLAIM_1, c_mmr_restorat_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", c_mmr_restorat_0_OBSP_1)),
+            c_mmr_restorat_0_CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            c_mmr_restorat_0_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            c_mmr_restorat_0_js_2 = justification:App(Declared(c_mmr_restorat_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset")),
+            c_mmr_restorat_0_cs_2 = app(c_mmr_restorat_0_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0), Declared(c_mmr_restorat_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+                        declared(c_mmr_restorat_0_CLAIM_2, c_mmr_restorat_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", c_mmr_restorat_0_OBSP_2)),
+            c_mmr_restorat_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            c_mmr_restorat_0_R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            c_mmr_restorat_0_R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            c_mmr_restorat_0_R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            c_mmr_restorat_0_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            c_mmr_restorat_0_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            c_mmr_restorat_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            c_mmr_restorat_0_RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            c_mmr_restorat_0_RULE_P = c_mmr_restorat_0_K -> c_mmr_restorat_0_S -> c_mmr_restorat_0_O -> c_mmr_restorat_0_RP,
+            c_mmr_restorat_0_cert1 = app(c_mmr_restorat_0_K, c_mmr_restorat_0_S -> c_mmr_restorat_0_O -> c_mmr_restorat_0_RP, Declared(c_mmr_restorat_0_BRIDGE), c_mmr_restorat_0_js_0,
+                        declared(c_mmr_restorat_0_BRIDGE, c_mmr_restorat_0_RULE_P), c_mmr_restorat_0_cs_0),
+            c_mmr_restorat_0_cert2 = app(c_mmr_restorat_0_S, c_mmr_restorat_0_O -> c_mmr_restorat_0_RP, justification:App(Declared(c_mmr_restorat_0_BRIDGE), c_mmr_restorat_0_js_0),
+                        c_mmr_restorat_0_js_1, c_mmr_restorat_0_cert1, c_mmr_restorat_0_cs_1),
+            c_mmr_restorat_1_CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            c_mmr_restorat_1_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            c_mmr_restorat_1_js_0 = justification:App(Declared(c_mmr_restorat_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset")),
+            c_mmr_restorat_1_cs_0 = app(c_mmr_restorat_1_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0), Declared(c_mmr_restorat_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+                        declared(c_mmr_restorat_1_CLAIM_0, c_mmr_restorat_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", c_mmr_restorat_1_OBSP_0)),
+            c_mmr_restorat_1_CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            c_mmr_restorat_1_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            c_mmr_restorat_1_js_1 = justification:App(Declared(c_mmr_restorat_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset")),
+            c_mmr_restorat_1_cs_1 = app(c_mmr_restorat_1_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0), Declared(c_mmr_restorat_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+                        declared(c_mmr_restorat_1_CLAIM_1, c_mmr_restorat_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", c_mmr_restorat_1_OBSP_1)),
+            c_mmr_restorat_1_CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            c_mmr_restorat_1_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            c_mmr_restorat_1_js_2 = justification:App(Declared(c_mmr_restorat_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset")),
+            c_mmr_restorat_1_cs_2 = app(c_mmr_restorat_1_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0), Declared(c_mmr_restorat_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+                        declared(c_mmr_restorat_1_CLAIM_2, c_mmr_restorat_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", c_mmr_restorat_1_OBSP_2)),
+            c_mmr_restorat_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            c_mmr_restorat_1_R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            c_mmr_restorat_1_R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            c_mmr_restorat_1_R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            c_mmr_restorat_1_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            c_mmr_restorat_1_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            c_mmr_restorat_1_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            c_mmr_restorat_1_RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            c_mmr_restorat_1_RULE_P = c_mmr_restorat_1_K -> c_mmr_restorat_1_S -> c_mmr_restorat_1_O -> c_mmr_restorat_1_RP,
+            c_mmr_restorat_1_cert1 = app(c_mmr_restorat_1_K, c_mmr_restorat_1_S -> c_mmr_restorat_1_O -> c_mmr_restorat_1_RP, Declared(c_mmr_restorat_1_BRIDGE), c_mmr_restorat_1_js_0,
+                        declared(c_mmr_restorat_1_BRIDGE, c_mmr_restorat_1_RULE_P), c_mmr_restorat_1_cs_0),
+            c_mmr_restorat_1_cert2 = app(c_mmr_restorat_1_S, c_mmr_restorat_1_O -> c_mmr_restorat_1_RP, justification:App(Declared(c_mmr_restorat_1_BRIDGE), c_mmr_restorat_1_js_0),
+                        c_mmr_restorat_1_js_1, c_mmr_restorat_1_cert1, c_mmr_restorat_1_cs_1),
+            RULE  = "urn:eigenius:pub:wrn:mmr_rule",
+            CONCL = "urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed",
+            RP    = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            CD    = onco:ContributesToDependence("dMMR", "WRN")
+        in
+        justification:Certificate(
+                   justification:App(
+                       Declared("urn:eigenius:pub:wrn:mmr_rule"),
+                       justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
+                               c_mmr_restorat_1_js_0
+                           ),
+                           c_mmr_restorat_1_js_1
+                       ),
+                       c_mmr_restorat_1_js_2
+                   )
+                   ),
+                   onco:ContributesToDependence("dMMR", "WRN") )) );
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -93,16 +234,16 @@ resource wrn:concl_mmr : reasoning:ReasoningSentence {
 // the whole paper builds toward; C-MAIN reaches the thesis by modus ponens
 // (App) over the load-bearing findings (plan §7: C-VAL, C-VIVO, D-HELICASE,
 // C-MECH, C-MMR). Each antecedent is discharged by CITING its phase
-// conclusion as a lemma (D54 lemma citation: a Holds ReasoningSentence is
+// conclusion as a lemma (D54 lemma citation: a Holds justification:Conclusion is
 // admitted as a Verified witness keyed on its IRI). A proven sentence is NOT
 // an evidence atom; it is the antecedent of this implication, discharged by
 // the lemma. (C-VAL is cited as concl_val_recomputed — the kernel-recomputed
 // competition-assay nested ANOVA in the statistics layer.)
 
-resource wrn:synthesis_rule : reflection:DeclaredResource {
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_synthetic_lethality_thesis;
-    reflection:rationale   = "The paper's thesis composes its findings: WRN depletion selectively impairs MSI viability (C-VAL), validated in vivo and in a patient-derived model (C-VIVO); the helicase activity is the required function (D-HELICASE); the lethality is driven by MSI-selective DSB-induced DNA-damage response (C-MECH); dMMR contributes to the dependence (C-MMR); and the MSI-selective dependence is intrinsic to MSI, not a confound of paralogue co-loss (the ED Fig 9a specificity control). Together these establish WRN — specifically its helicase activity — as a synthetic-lethal therapeutic target in MSI cancers.";
+resource wrn:synthesis_rule : justification:Claim {
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_synthetic_lethality_thesis;
+    prov:rationale   = "The paper's thesis composes its findings: WRN depletion selectively impairs MSI viability (C-VAL), validated in vivo and in a patient-derived model (C-VIVO); the helicase activity is the required function (D-HELICASE); the lethality is driven by MSI-selective DSB-induced DNA-damage response (C-MECH); dMMR contributes to the dependence (C-MMR); and the MSI-selective dependence is intrinsic to MSI, not a confound of paralogue co-loss (the ED Fig 9a specificity control). Together these establish WRN — specifically its helicase activity — as a synthetic-lethal therapeutic target in MSI cancers.";
     reflection:canonical_proposition = type_expr(
         onco:SelectiveViabilityDependence("WRN", "MSI") ->
         onco:InVivoDependence("WRN", "MSI") ->
@@ -113,45 +254,256 @@ resource wrn:synthesis_rule : reflection:DeclaredResource {
         onco:SyntheticLethal("WRN", "MSI")
     );
 }
-resource wrn:synthesis_rule_trace : reflection:DeclarationTrace {
-    reflection:resource    = wrn:synthesis_rule;
-    reflection:declared_by  = wrn:authors;
-    reflection:warranted_by = wrn:warrant_synthetic_lethality_thesis;
-    reflection:timestamp   = "2026-06-13T04:30:00Z";
+resource wrn:synthesis_rule_trace : prov:DeclarationTrace {
+    prov:resource    = wrn:synthesis_rule;
+    prov:was_attributed_to  = wrn:authors;
+    prov:had_primary_source = wrn:warrant_synthetic_lethality_thesis;
+    prov:timestamp   = "2026-06-13T04:30:00Z";
 }
 
-resource wrn:concl_main : reasoning:ReasoningSentence {
-    reasoning:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
-    reasoning:proposition = type_expr(
-        onco:SyntheticLethal("WRN", "MSI")
-    );
-
-    // Modus ponens over the five findings — each antecedent discharged by
-    // CITING its phase conclusion as a lemma (D54: a Holds ReasoningSentence
-    // is admitted as a Verified witness keyed on its IRI). The leaf proofs
-    // live in the phase conclusions; C-MAIN references them by name.
-    reasoning:justification = App(
-        App(
-            App(
-                App(
-                    App(
-                        App(
-                            DeclaredEvidence("urn:eigenius:pub:wrn:synthesis_rule"),
-                            VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed")
-                        ),
-                        VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo")
-                    ),
-                    VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required")
-                ),
-                VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech")
-            ),
-            VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr")
-        ),
-        VerifiedEvidence("urn:eigenius:pub:wrn:concl_paralog")
-    );
-
-    reasoning:certificate = type_expr(
-        alias
+resource wrn:concl_main : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(alias
+            c_val_recomput_0_CLAIM_0 = "urn:eigenius:pub:wrn:viab_KM12_plan_yields_main_effect",
+            c_val_recomput_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:viab_KM12_sampleset"),
+            c_val_recomput_0_js_0 = justification:App(Declared(c_val_recomput_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:viab_KM12_sampleset")),
+            c_val_recomput_0_cs_0 = app(c_val_recomput_0_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0), Declared(c_val_recomput_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:viab_KM12_sampleset"),
+                        declared(c_val_recomput_0_CLAIM_0, c_val_recomput_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:viab_KM12_sampleset", c_val_recomput_0_OBSP_0)),
+            c_val_recomput_0_CLAIM_1 = "urn:eigenius:pub:wrn:viab_OVK18_plan_yields_main_effect",
+            c_val_recomput_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:viab_OVK18_sampleset"),
+            c_val_recomput_0_js_1 = justification:App(Declared(c_val_recomput_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset")),
+            c_val_recomput_0_cs_1 = app(c_val_recomput_0_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0), Declared(c_val_recomput_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset"),
+                        declared(c_val_recomput_0_CLAIM_1, c_val_recomput_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset", c_val_recomput_0_OBSP_1)),
+            c_val_recomput_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_viability",
+            c_val_recomput_0_R_KM12 = "urn:eigenius:pub:wrn:viab_KM12_plan:result:main_effect",
+            c_val_recomput_0_R_OVK = "urn:eigenius:pub:wrn:viab_OVK18_plan:result:main_effect",
+            c_val_recomput_0_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0),
+            c_val_recomput_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0),
+            c_val_recomput_0_SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
+            c_val_recomput_0_cert1 = app(c_val_recomput_0_K, c_val_recomput_0_O -> c_val_recomput_0_SVD, Declared(c_val_recomput_0_BRIDGE), c_val_recomput_0_js_0,
+                        declared(c_val_recomput_0_BRIDGE, c_val_recomput_0_K -> c_val_recomput_0_O -> c_val_recomput_0_SVD), c_val_recomput_0_cs_0),
+            c_helicase_req_2_RULE = "urn:eigenius:pub:wrn:helicase_rule",
+            c_helicase_req_2_LIT = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
+            c_helicase_req_2_ART = "urn:eigenius:pub:wrn:va_fail_k577m",
+            c_helicase_req_2_SEP = litclaim:WRNActivitiesSeparable("WRN"),
+            c_helicase_req_2_FR = onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ"),
+            c_helicase_req_2_RA = onco:RequiresActivity("WRN", "helicase"),
+            c_helicase_req_2_RULE_P = c_helicase_req_2_SEP -> c_helicase_req_2_FR -> c_helicase_req_2_RA,
+            c_helicase_req_2_jSEP = Declared(c_helicase_req_2_LIT),
+            c_helicase_req_2_jFR = Declared(c_helicase_req_2_ART),
+            c_helicase_req_2_cert1 = app(c_helicase_req_2_SEP, c_helicase_req_2_FR -> c_helicase_req_2_RA, Declared(c_helicase_req_2_RULE), c_helicase_req_2_jSEP,
+                        declared(c_helicase_req_2_RULE, c_helicase_req_2_RULE_P), declared(c_helicase_req_2_LIT, c_helicase_req_2_SEP)),
+            c_mech_3_c_cellcycle_re_0_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            c_mech_3_c_cellcycle_re_0_js_0 = justification:App(Declared(c_mech_3_c_cellcycle_re_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset")),
+            c_mech_3_c_cellcycle_re_0_cs_0 = app(c_mech_3_c_cellcycle_re_0_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_0_CLAIM_0, c_mech_3_c_cellcycle_re_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_mech_3_c_cellcycle_re_0_OBSP_0)),
+            c_mech_3_c_cellcycle_re_0_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            c_mech_3_c_cellcycle_re_0_js_1 = justification:App(Declared(c_mech_3_c_cellcycle_re_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset")),
+            c_mech_3_c_cellcycle_re_0_cs_1 = app(c_mech_3_c_cellcycle_re_0_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_0_CLAIM_1, c_mech_3_c_cellcycle_re_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_mech_3_c_cellcycle_re_0_OBSP_1)),
+            c_mech_3_c_cellcycle_re_0_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_0_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            c_mech_3_c_cellcycle_re_0_js_2 = justification:App(Declared(c_mech_3_c_cellcycle_re_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset")),
+            c_mech_3_c_cellcycle_re_0_cs_2 = app(c_mech_3_c_cellcycle_re_0_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_0_CLAIM_2, c_mech_3_c_cellcycle_re_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_mech_3_c_cellcycle_re_0_OBSP_2)),
+            c_mech_3_c_cellcycle_re_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            c_mech_3_c_cellcycle_re_0_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_0_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_0_R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_0_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_0_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_0_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            c_mech_3_c_cellcycle_re_0_RULE_P = c_mech_3_c_cellcycle_re_0_K -> c_mech_3_c_cellcycle_re_0_S -> c_mech_3_c_cellcycle_re_0_O -> c_mech_3_c_cellcycle_re_0_CA,
+            c_mech_3_c_cellcycle_re_0_cert1 = app(c_mech_3_c_cellcycle_re_0_K, c_mech_3_c_cellcycle_re_0_S -> c_mech_3_c_cellcycle_re_0_O -> c_mech_3_c_cellcycle_re_0_CA, Declared(c_mech_3_c_cellcycle_re_0_BRIDGE), c_mech_3_c_cellcycle_re_0_js_0,
+                        declared(c_mech_3_c_cellcycle_re_0_BRIDGE, c_mech_3_c_cellcycle_re_0_RULE_P), c_mech_3_c_cellcycle_re_0_cs_0),
+            c_mech_3_c_cellcycle_re_0_cert2 = app(c_mech_3_c_cellcycle_re_0_S, c_mech_3_c_cellcycle_re_0_O -> c_mech_3_c_cellcycle_re_0_CA, justification:App(Declared(c_mech_3_c_cellcycle_re_0_BRIDGE), c_mech_3_c_cellcycle_re_0_js_0),
+                        c_mech_3_c_cellcycle_re_0_js_1, c_mech_3_c_cellcycle_re_0_cert1, c_mech_3_c_cellcycle_re_0_cs_1),
+            c_mech_3_c_apoptosis_re_1_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_1_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            c_mech_3_c_apoptosis_re_1_js_0 = justification:App(Declared(c_mech_3_c_apoptosis_re_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset")),
+            c_mech_3_c_apoptosis_re_1_cs_0 = app(c_mech_3_c_apoptosis_re_1_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_1_CLAIM_0, c_mech_3_c_apoptosis_re_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_mech_3_c_apoptosis_re_1_OBSP_0)),
+            c_mech_3_c_apoptosis_re_1_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_1_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            c_mech_3_c_apoptosis_re_1_js_1 = justification:App(Declared(c_mech_3_c_apoptosis_re_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset")),
+            c_mech_3_c_apoptosis_re_1_cs_1 = app(c_mech_3_c_apoptosis_re_1_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_1_CLAIM_1, c_mech_3_c_apoptosis_re_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_mech_3_c_apoptosis_re_1_OBSP_1)),
+            c_mech_3_c_apoptosis_re_1_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_1_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            c_mech_3_c_apoptosis_re_1_js_2 = justification:App(Declared(c_mech_3_c_apoptosis_re_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset")),
+            c_mech_3_c_apoptosis_re_1_cs_2 = app(c_mech_3_c_apoptosis_re_1_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_1_CLAIM_2, c_mech_3_c_apoptosis_re_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_mech_3_c_apoptosis_re_1_OBSP_2)),
+            c_mech_3_c_apoptosis_re_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            c_mech_3_c_apoptosis_re_1_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_1_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_1_R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_1_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_1_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_1_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_1_CA = onco:CausesApoptosis("WRN", "MSI"),
+            c_mech_3_c_apoptosis_re_1_RULE_P = c_mech_3_c_apoptosis_re_1_K -> c_mech_3_c_apoptosis_re_1_S -> c_mech_3_c_apoptosis_re_1_O -> c_mech_3_c_apoptosis_re_1_CA,
+            c_mech_3_c_apoptosis_re_1_cert1 = app(c_mech_3_c_apoptosis_re_1_K, c_mech_3_c_apoptosis_re_1_S -> c_mech_3_c_apoptosis_re_1_O -> c_mech_3_c_apoptosis_re_1_CA, Declared(c_mech_3_c_apoptosis_re_1_BRIDGE), c_mech_3_c_apoptosis_re_1_js_0,
+                        declared(c_mech_3_c_apoptosis_re_1_BRIDGE, c_mech_3_c_apoptosis_re_1_RULE_P), c_mech_3_c_apoptosis_re_1_cs_0),
+            c_mech_3_c_apoptosis_re_1_cert2 = app(c_mech_3_c_apoptosis_re_1_S, c_mech_3_c_apoptosis_re_1_O -> c_mech_3_c_apoptosis_re_1_CA, justification:App(Declared(c_mech_3_c_apoptosis_re_1_BRIDGE), c_mech_3_c_apoptosis_re_1_js_0),
+                        c_mech_3_c_apoptosis_re_1_js_1, c_mech_3_c_apoptosis_re_1_cert1, c_mech_3_c_apoptosis_re_1_cs_1),
+            c_mech_3_c_cellcycle_re_2_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_2_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            c_mech_3_c_cellcycle_re_2_js_0 = justification:App(Declared(c_mech_3_c_cellcycle_re_2_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset")),
+            c_mech_3_c_cellcycle_re_2_cs_0 = app(c_mech_3_c_cellcycle_re_2_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_2_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_2_CLAIM_0, c_mech_3_c_cellcycle_re_2_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_mech_3_c_cellcycle_re_2_OBSP_0)),
+            c_mech_3_c_cellcycle_re_2_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_2_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            c_mech_3_c_cellcycle_re_2_js_1 = justification:App(Declared(c_mech_3_c_cellcycle_re_2_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset")),
+            c_mech_3_c_cellcycle_re_2_cs_1 = app(c_mech_3_c_cellcycle_re_2_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_2_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_2_CLAIM_1, c_mech_3_c_cellcycle_re_2_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_mech_3_c_cellcycle_re_2_OBSP_1)),
+            c_mech_3_c_cellcycle_re_2_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_2_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            c_mech_3_c_cellcycle_re_2_js_2 = justification:App(Declared(c_mech_3_c_cellcycle_re_2_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset")),
+            c_mech_3_c_cellcycle_re_2_cs_2 = app(c_mech_3_c_cellcycle_re_2_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_2_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_2_CLAIM_2, c_mech_3_c_cellcycle_re_2_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_mech_3_c_cellcycle_re_2_OBSP_2)),
+            c_mech_3_c_cellcycle_re_2_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            c_mech_3_c_cellcycle_re_2_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_2_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_2_R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_2_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_2_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_2_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_2_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            c_mech_3_c_cellcycle_re_2_RULE_P = c_mech_3_c_cellcycle_re_2_K -> c_mech_3_c_cellcycle_re_2_S -> c_mech_3_c_cellcycle_re_2_O -> c_mech_3_c_cellcycle_re_2_CA,
+            c_mech_3_c_cellcycle_re_2_cert1 = app(c_mech_3_c_cellcycle_re_2_K, c_mech_3_c_cellcycle_re_2_S -> c_mech_3_c_cellcycle_re_2_O -> c_mech_3_c_cellcycle_re_2_CA, Declared(c_mech_3_c_cellcycle_re_2_BRIDGE), c_mech_3_c_cellcycle_re_2_js_0,
+                        declared(c_mech_3_c_cellcycle_re_2_BRIDGE, c_mech_3_c_cellcycle_re_2_RULE_P), c_mech_3_c_cellcycle_re_2_cs_0),
+            c_mech_3_c_cellcycle_re_2_cert2 = app(c_mech_3_c_cellcycle_re_2_S, c_mech_3_c_cellcycle_re_2_O -> c_mech_3_c_cellcycle_re_2_CA, justification:App(Declared(c_mech_3_c_cellcycle_re_2_BRIDGE), c_mech_3_c_cellcycle_re_2_js_0),
+                        c_mech_3_c_cellcycle_re_2_js_1, c_mech_3_c_cellcycle_re_2_cert1, c_mech_3_c_cellcycle_re_2_cs_1),
+            c_mech_3_c_apoptosis_re_3_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_3_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            c_mech_3_c_apoptosis_re_3_js_0 = justification:App(Declared(c_mech_3_c_apoptosis_re_3_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset")),
+            c_mech_3_c_apoptosis_re_3_cs_0 = app(c_mech_3_c_apoptosis_re_3_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_3_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_3_CLAIM_0, c_mech_3_c_apoptosis_re_3_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_mech_3_c_apoptosis_re_3_OBSP_0)),
+            c_mech_3_c_apoptosis_re_3_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_3_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            c_mech_3_c_apoptosis_re_3_js_1 = justification:App(Declared(c_mech_3_c_apoptosis_re_3_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset")),
+            c_mech_3_c_apoptosis_re_3_cs_1 = app(c_mech_3_c_apoptosis_re_3_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_3_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_3_CLAIM_1, c_mech_3_c_apoptosis_re_3_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_mech_3_c_apoptosis_re_3_OBSP_1)),
+            c_mech_3_c_apoptosis_re_3_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_3_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            c_mech_3_c_apoptosis_re_3_js_2 = justification:App(Declared(c_mech_3_c_apoptosis_re_3_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset")),
+            c_mech_3_c_apoptosis_re_3_cs_2 = app(c_mech_3_c_apoptosis_re_3_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_3_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_3_CLAIM_2, c_mech_3_c_apoptosis_re_3_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_mech_3_c_apoptosis_re_3_OBSP_2)),
+            c_mech_3_c_apoptosis_re_3_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            c_mech_3_c_apoptosis_re_3_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_3_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_3_R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_3_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_3_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_3_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_3_CA = onco:CausesApoptosis("WRN", "MSI"),
+            c_mech_3_c_apoptosis_re_3_RULE_P = c_mech_3_c_apoptosis_re_3_K -> c_mech_3_c_apoptosis_re_3_S -> c_mech_3_c_apoptosis_re_3_O -> c_mech_3_c_apoptosis_re_3_CA,
+            c_mech_3_c_apoptosis_re_3_cert1 = app(c_mech_3_c_apoptosis_re_3_K, c_mech_3_c_apoptosis_re_3_S -> c_mech_3_c_apoptosis_re_3_O -> c_mech_3_c_apoptosis_re_3_CA, Declared(c_mech_3_c_apoptosis_re_3_BRIDGE), c_mech_3_c_apoptosis_re_3_js_0,
+                        declared(c_mech_3_c_apoptosis_re_3_BRIDGE, c_mech_3_c_apoptosis_re_3_RULE_P), c_mech_3_c_apoptosis_re_3_cs_0),
+            c_mech_3_c_apoptosis_re_3_cert2 = app(c_mech_3_c_apoptosis_re_3_S, c_mech_3_c_apoptosis_re_3_O -> c_mech_3_c_apoptosis_re_3_CA, justification:App(Declared(c_mech_3_c_apoptosis_re_3_BRIDGE), c_mech_3_c_apoptosis_re_3_js_0),
+                        c_mech_3_c_apoptosis_re_3_js_1, c_mech_3_c_apoptosis_re_3_cert1, c_mech_3_c_apoptosis_re_3_cs_1),
+            c_mech_3_RULE = "urn:eigenius:pub:wrn:mech_rule",
+            c_mech_3_ART = "urn:eigenius:pub:wrn:mech_dsb",
+            c_mech_3_CC = "urn:eigenius:pub:wrn:concl_cellcycle_recomputed",
+            c_mech_3_AP = "urn:eigenius:pub:wrn:concl_apoptosis_recomputed",
+            c_mech_3_DSB = onco:CausesDSBs("WRN", "MSI"),
+            c_mech_3_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            c_mech_3_AA = onco:CausesApoptosis("WRN", "MSI"),
+            c_mech_3_DL = onco:DSBDrivenLethality("WRN", "MSI"),
+            c_mech_3_RULE_P = c_mech_3_DSB -> c_mech_3_CA -> c_mech_3_AA -> c_mech_3_DL,
+            c_mech_3_jDSB = Declared(c_mech_3_ART),
+            c_mech_3_jCA = justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_cellcycle"),
+                               c_mech_3_c_cellcycle_re_0_js_0
+                           ),
+                           c_mech_3_c_cellcycle_re_0_js_1
+                       ),
+                       c_mech_3_c_cellcycle_re_0_js_2
+                   ),
+            c_mech_3_jAA = justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_apoptosis"),
+                               c_mech_3_c_apoptosis_re_1_js_0
+                           ),
+                           c_mech_3_c_apoptosis_re_1_js_1
+                       ),
+                       c_mech_3_c_apoptosis_re_1_js_2
+                   ),
+            c_mech_3_cert1 = app(c_mech_3_DSB, c_mech_3_CA -> c_mech_3_AA -> c_mech_3_DL, Declared(c_mech_3_RULE), c_mech_3_jDSB,
+                        declared(c_mech_3_RULE, c_mech_3_RULE_P), declared(c_mech_3_ART, c_mech_3_DSB)),
+            c_mech_3_cert2 = app(c_mech_3_CA, c_mech_3_AA -> c_mech_3_DL, justification:App(Declared(c_mech_3_RULE), c_mech_3_jDSB),
+                        c_mech_3_jCA, c_mech_3_cert1, app(c_mech_3_c_cellcycle_re_0_O, c_mech_3_c_cellcycle_re_0_CA, justification:App(justification:App(Declared(c_mech_3_c_cellcycle_re_0_BRIDGE), c_mech_3_c_cellcycle_re_0_js_0), c_mech_3_c_cellcycle_re_0_js_1),
+               c_mech_3_c_cellcycle_re_0_js_2, c_mech_3_c_cellcycle_re_0_cert2, c_mech_3_c_cellcycle_re_0_cs_2)),
+            c_mmr_4_c_mmr_restorat_0_CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            c_mmr_4_c_mmr_restorat_0_js_0 = justification:App(Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset")),
+            c_mmr_4_c_mmr_restorat_0_cs_0 = app(c_mmr_4_c_mmr_restorat_0_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_0_CLAIM_0, c_mmr_4_c_mmr_restorat_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", c_mmr_4_c_mmr_restorat_0_OBSP_0)),
+            c_mmr_4_c_mmr_restorat_0_CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            c_mmr_4_c_mmr_restorat_0_js_1 = justification:App(Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset")),
+            c_mmr_4_c_mmr_restorat_0_cs_1 = app(c_mmr_4_c_mmr_restorat_0_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_0_CLAIM_1, c_mmr_4_c_mmr_restorat_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", c_mmr_4_c_mmr_restorat_0_OBSP_1)),
+            c_mmr_4_c_mmr_restorat_0_CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_0_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            c_mmr_4_c_mmr_restorat_0_js_2 = justification:App(Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset")),
+            c_mmr_4_c_mmr_restorat_0_cs_2 = app(c_mmr_4_c_mmr_restorat_0_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_0_CLAIM_2, c_mmr_4_c_mmr_restorat_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", c_mmr_4_c_mmr_restorat_0_OBSP_2)),
+            c_mmr_4_c_mmr_restorat_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            c_mmr_4_c_mmr_restorat_0_R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_0_R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_0_R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_0_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_0_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_0_RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            c_mmr_4_c_mmr_restorat_0_RULE_P = c_mmr_4_c_mmr_restorat_0_K -> c_mmr_4_c_mmr_restorat_0_S -> c_mmr_4_c_mmr_restorat_0_O -> c_mmr_4_c_mmr_restorat_0_RP,
+            c_mmr_4_c_mmr_restorat_0_cert1 = app(c_mmr_4_c_mmr_restorat_0_K, c_mmr_4_c_mmr_restorat_0_S -> c_mmr_4_c_mmr_restorat_0_O -> c_mmr_4_c_mmr_restorat_0_RP, Declared(c_mmr_4_c_mmr_restorat_0_BRIDGE), c_mmr_4_c_mmr_restorat_0_js_0,
+                        declared(c_mmr_4_c_mmr_restorat_0_BRIDGE, c_mmr_4_c_mmr_restorat_0_RULE_P), c_mmr_4_c_mmr_restorat_0_cs_0),
+            c_mmr_4_c_mmr_restorat_0_cert2 = app(c_mmr_4_c_mmr_restorat_0_S, c_mmr_4_c_mmr_restorat_0_O -> c_mmr_4_c_mmr_restorat_0_RP, justification:App(Declared(c_mmr_4_c_mmr_restorat_0_BRIDGE), c_mmr_4_c_mmr_restorat_0_js_0),
+                        c_mmr_4_c_mmr_restorat_0_js_1, c_mmr_4_c_mmr_restorat_0_cert1, c_mmr_4_c_mmr_restorat_0_cs_1),
+            c_mmr_4_c_mmr_restorat_1_CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_1_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            c_mmr_4_c_mmr_restorat_1_js_0 = justification:App(Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset")),
+            c_mmr_4_c_mmr_restorat_1_cs_0 = app(c_mmr_4_c_mmr_restorat_1_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_1_CLAIM_0, c_mmr_4_c_mmr_restorat_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", c_mmr_4_c_mmr_restorat_1_OBSP_0)),
+            c_mmr_4_c_mmr_restorat_1_CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_1_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            c_mmr_4_c_mmr_restorat_1_js_1 = justification:App(Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset")),
+            c_mmr_4_c_mmr_restorat_1_cs_1 = app(c_mmr_4_c_mmr_restorat_1_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_1_CLAIM_1, c_mmr_4_c_mmr_restorat_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", c_mmr_4_c_mmr_restorat_1_OBSP_1)),
+            c_mmr_4_c_mmr_restorat_1_CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_1_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            c_mmr_4_c_mmr_restorat_1_js_2 = justification:App(Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset")),
+            c_mmr_4_c_mmr_restorat_1_cs_2 = app(c_mmr_4_c_mmr_restorat_1_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_1_CLAIM_2, c_mmr_4_c_mmr_restorat_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", c_mmr_4_c_mmr_restorat_1_OBSP_2)),
+            c_mmr_4_c_mmr_restorat_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            c_mmr_4_c_mmr_restorat_1_R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_1_R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_1_R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_1_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_1_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_1_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_1_RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            c_mmr_4_c_mmr_restorat_1_RULE_P = c_mmr_4_c_mmr_restorat_1_K -> c_mmr_4_c_mmr_restorat_1_S -> c_mmr_4_c_mmr_restorat_1_O -> c_mmr_4_c_mmr_restorat_1_RP,
+            c_mmr_4_c_mmr_restorat_1_cert1 = app(c_mmr_4_c_mmr_restorat_1_K, c_mmr_4_c_mmr_restorat_1_S -> c_mmr_4_c_mmr_restorat_1_O -> c_mmr_4_c_mmr_restorat_1_RP, Declared(c_mmr_4_c_mmr_restorat_1_BRIDGE), c_mmr_4_c_mmr_restorat_1_js_0,
+                        declared(c_mmr_4_c_mmr_restorat_1_BRIDGE, c_mmr_4_c_mmr_restorat_1_RULE_P), c_mmr_4_c_mmr_restorat_1_cs_0),
+            c_mmr_4_c_mmr_restorat_1_cert2 = app(c_mmr_4_c_mmr_restorat_1_S, c_mmr_4_c_mmr_restorat_1_O -> c_mmr_4_c_mmr_restorat_1_RP, justification:App(Declared(c_mmr_4_c_mmr_restorat_1_BRIDGE), c_mmr_4_c_mmr_restorat_1_js_0),
+                        c_mmr_4_c_mmr_restorat_1_js_1, c_mmr_4_c_mmr_restorat_1_cert1, c_mmr_4_c_mmr_restorat_1_cs_1),
+            c_mmr_4_RULE = "urn:eigenius:pub:wrn:mmr_rule",
+            c_mmr_4_CONCL = "urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed",
+            c_mmr_4_RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            c_mmr_4_CD = onco:ContributesToDependence("dMMR", "WRN"),
             RULE = "urn:eigenius:pub:wrn:synthesis_rule",
             SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
             IVD = onco:InVivoDependence("WRN", "MSI"),
@@ -162,47 +514,536 @@ resource wrn:concl_main : reasoning:ReasoningSentence {
             SL  = onco:SyntheticLethal("WRN", "MSI"),
             RULE_P = SVD -> IVD -> RA -> DL -> CD -> PAR -> SL,
             // antecedent justification terms — lemma citations of conclusions
-            jSVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_val_recomputed"),
-            jIVD = VerifiedEvidence("urn:eigenius:pub:wrn:concl_vivo"),
-            jRA  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_helicase_required"),
-            jDL  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mech"),
-            jCD  = VerifiedEvidence("urn:eigenius:pub:wrn:concl_mmr"),
-            jPAR = VerifiedEvidence("urn:eigenius:pub:wrn:concl_paralog"),
+            jSVD = justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:bridge_viability"),
+                           c_val_recomput_0_js_0
+                       ),
+                       c_val_recomput_0_js_1
+                   ),
+            jIVD = justification:App(Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table")),
+            jRA  = justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:helicase_rule"),
+                           Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+                       ),
+                       Declared("urn:eigenius:pub:wrn:va_fail_k577m")
+                   ),
+            jDL  = justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:mech_rule"),
+                               Declared("urn:eigenius:pub:wrn:mech_dsb")
+                           ),
+                           justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_cellcycle"),
+                               c_mech_3_c_cellcycle_re_2_js_0
+                           ),
+                           c_mech_3_c_cellcycle_re_2_js_1
+                       ),
+                       c_mech_3_c_cellcycle_re_2_js_2
+                   )
+                       ),
+                       justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_apoptosis"),
+                               c_mech_3_c_apoptosis_re_3_js_0
+                           ),
+                           c_mech_3_c_apoptosis_re_3_js_1
+                       ),
+                       c_mech_3_c_apoptosis_re_3_js_2
+                   )
+                   ),
+            jCD  = justification:App(
+                       Declared("urn:eigenius:pub:wrn:mmr_rule"),
+                       justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
+                               c_mmr_4_c_mmr_restorat_1_js_0
+                           ),
+                           c_mmr_4_c_mmr_restorat_1_js_1
+                       ),
+                       c_mmr_4_c_mmr_restorat_1_js_2
+                   )
+                   ),
+            jPAR = justification:App(Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed")),
             // antecedent certificates — one verified(conclusion, P) each
-            cSVD = verified("urn:eigenius:pub:wrn:concl_val_recomputed", SVD),
-            cIVD = verified("urn:eigenius:pub:wrn:concl_vivo", IVD),
-            cRA  = verified("urn:eigenius:pub:wrn:concl_helicase_required", RA),
-            cDL  = verified("urn:eigenius:pub:wrn:concl_mech", DL),
-            cCD  = verified("urn:eigenius:pub:wrn:concl_mmr", CD),
-            cPAR = verified("urn:eigenius:pub:wrn:concl_paralog", PAR),
+            cSVD = app(c_val_recomput_0_O, c_val_recomput_0_SVD, justification:App(Declared(c_val_recomput_0_BRIDGE), c_val_recomput_0_js_0),
+               c_val_recomput_0_js_1, c_val_recomput_0_cert1, c_val_recomput_0_cs_1),
+            cIVD = app(core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table"), onco:InVivoDependence("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table"),
+                       declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table") -> onco:InVivoDependence("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:vivo_xenograft_table", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table"))),
+            cRA  = app(c_helicase_req_2_FR, c_helicase_req_2_RA, justification:App(Declared(c_helicase_req_2_RULE), c_helicase_req_2_jSEP), c_helicase_req_2_jFR,
+               c_helicase_req_2_cert1, declared(c_helicase_req_2_ART, c_helicase_req_2_FR)),
+            cDL  = app(c_mech_3_AA, c_mech_3_DL, justification:App(justification:App(Declared(c_mech_3_RULE), c_mech_3_jDSB), c_mech_3_jCA),
+               c_mech_3_jAA, c_mech_3_cert2, app(c_mech_3_c_apoptosis_re_1_O, c_mech_3_c_apoptosis_re_1_CA, justification:App(justification:App(Declared(c_mech_3_c_apoptosis_re_1_BRIDGE), c_mech_3_c_apoptosis_re_1_js_0), c_mech_3_c_apoptosis_re_1_js_1),
+               c_mech_3_c_apoptosis_re_1_js_2, c_mech_3_c_apoptosis_re_1_cert2, c_mech_3_c_apoptosis_re_1_cs_2)),
+            cCD  = app(c_mmr_4_RP, c_mmr_4_CD, Declared(c_mmr_4_RULE), justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
+                               c_mmr_4_c_mmr_restorat_0_js_0
+                           ),
+                           c_mmr_4_c_mmr_restorat_0_js_1
+                       ),
+                       c_mmr_4_c_mmr_restorat_0_js_2
+                   ),
+               declared(c_mmr_4_RULE, c_mmr_4_RP -> c_mmr_4_CD), app(c_mmr_4_c_mmr_restorat_0_O, c_mmr_4_c_mmr_restorat_0_RP, justification:App(justification:App(Declared(c_mmr_4_c_mmr_restorat_0_BRIDGE), c_mmr_4_c_mmr_restorat_0_js_0), c_mmr_4_c_mmr_restorat_0_js_1),
+               c_mmr_4_c_mmr_restorat_0_js_2, c_mmr_4_c_mmr_restorat_0_cert2, c_mmr_4_c_mmr_restorat_0_cs_2)),
+            cPAR = app(core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"), onco:NotExplainedByParalogLoss("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"),
+                       declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed") -> onco:NotExplainedByParalogLoss("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"))),
             // modus-ponens spine (unchanged — the "from A follows B" backbone)
             c1 = app(SVD, IVD -> RA -> DL -> CD -> PAR -> SL,
-                     DeclaredEvidence(RULE), jSVD, declared(RULE, RULE_P), cSVD),
+                     Declared(RULE), jSVD, declared(RULE, RULE_P), cSVD),
             c2 = app(IVD, RA -> DL -> CD -> PAR -> SL,
-                     reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD, c1, cIVD),
+                     justification:App(Declared(RULE), jSVD), jIVD, c1, cIVD),
             c3 = app(RA, DL -> CD -> PAR -> SL,
-                     reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA, c2, cRA),
+                     justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA, c2, cRA),
             c4 = app(DL, CD -> PAR -> SL,
-                     reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL, c3, cDL),
+                     justification:App(justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA), jDL, c3, cDL),
             c5 = app(CD, PAR -> SL,
-                     reasoning:App(reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL), jCD, c4, cCD)
+                     justification:App(justification:App(justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA), jDL), jCD, c4, cCD)
         in
         app(PAR, SL,
-            reasoning:App(reasoning:App(reasoning:App(reasoning:App(reasoning:App(DeclaredEvidence(RULE), jSVD), jIVD), jRA), jDL), jCD),
-            jPAR, c5, cPAR)
-    );
+               justification:App(justification:App(justification:App(justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA), jDL), jCD),
+               jPAR, c5, cPAR)),
+               type_expr(alias
+            c_val_recomput_0_CLAIM_0 = "urn:eigenius:pub:wrn:viab_KM12_plan_yields_main_effect",
+            c_val_recomput_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:viab_KM12_sampleset"),
+            c_val_recomput_0_js_0 = justification:App(Declared(c_val_recomput_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:viab_KM12_sampleset")),
+            c_val_recomput_0_cs_0 = app(c_val_recomput_0_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0), Declared(c_val_recomput_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:viab_KM12_sampleset"),
+                        declared(c_val_recomput_0_CLAIM_0, c_val_recomput_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:viab_KM12_sampleset", c_val_recomput_0_OBSP_0)),
+            c_val_recomput_0_CLAIM_1 = "urn:eigenius:pub:wrn:viab_OVK18_plan_yields_main_effect",
+            c_val_recomput_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:viab_OVK18_sampleset"),
+            c_val_recomput_0_js_1 = justification:App(Declared(c_val_recomput_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset")),
+            c_val_recomput_0_cs_1 = app(c_val_recomput_0_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0), Declared(c_val_recomput_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset"),
+                        declared(c_val_recomput_0_CLAIM_1, c_val_recomput_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:viab_OVK18_sampleset", c_val_recomput_0_OBSP_1)),
+            c_val_recomput_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_viability",
+            c_val_recomput_0_R_KM12 = "urn:eigenius:pub:wrn:viab_KM12_plan:result:main_effect",
+            c_val_recomput_0_R_OVK = "urn:eigenius:pub:wrn:viab_OVK18_plan:result:main_effect",
+            c_val_recomput_0_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0),
+            c_val_recomput_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0),
+            c_val_recomput_0_SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
+            c_val_recomput_0_cert1 = app(c_val_recomput_0_K, c_val_recomput_0_O -> c_val_recomput_0_SVD, Declared(c_val_recomput_0_BRIDGE), c_val_recomput_0_js_0,
+                        declared(c_val_recomput_0_BRIDGE, c_val_recomput_0_K -> c_val_recomput_0_O -> c_val_recomput_0_SVD), c_val_recomput_0_cs_0),
+            c_helicase_req_2_RULE = "urn:eigenius:pub:wrn:helicase_rule",
+            c_helicase_req_2_LIT = "urn:eigenius:pub:wrn:lit:lit_wrn_separable",
+            c_helicase_req_2_ART = "urn:eigenius:pub:wrn:va_fail_k577m",
+            c_helicase_req_2_SEP = litclaim:WRNActivitiesSeparable("WRN"),
+            c_helicase_req_2_FR = onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ"),
+            c_helicase_req_2_RA = onco:RequiresActivity("WRN", "helicase"),
+            c_helicase_req_2_RULE_P = c_helicase_req_2_SEP -> c_helicase_req_2_FR -> c_helicase_req_2_RA,
+            c_helicase_req_2_jSEP = Declared(c_helicase_req_2_LIT),
+            c_helicase_req_2_jFR = Declared(c_helicase_req_2_ART),
+            c_helicase_req_2_cert1 = app(c_helicase_req_2_SEP, c_helicase_req_2_FR -> c_helicase_req_2_RA, Declared(c_helicase_req_2_RULE), c_helicase_req_2_jSEP,
+                        declared(c_helicase_req_2_RULE, c_helicase_req_2_RULE_P), declared(c_helicase_req_2_LIT, c_helicase_req_2_SEP)),
+            c_mech_3_c_cellcycle_re_0_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            c_mech_3_c_cellcycle_re_0_js_0 = justification:App(Declared(c_mech_3_c_cellcycle_re_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset")),
+            c_mech_3_c_cellcycle_re_0_cs_0 = app(c_mech_3_c_cellcycle_re_0_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_0_CLAIM_0, c_mech_3_c_cellcycle_re_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_mech_3_c_cellcycle_re_0_OBSP_0)),
+            c_mech_3_c_cellcycle_re_0_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            c_mech_3_c_cellcycle_re_0_js_1 = justification:App(Declared(c_mech_3_c_cellcycle_re_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset")),
+            c_mech_3_c_cellcycle_re_0_cs_1 = app(c_mech_3_c_cellcycle_re_0_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_0_CLAIM_1, c_mech_3_c_cellcycle_re_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_mech_3_c_cellcycle_re_0_OBSP_1)),
+            c_mech_3_c_cellcycle_re_0_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_0_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            c_mech_3_c_cellcycle_re_0_js_2 = justification:App(Declared(c_mech_3_c_cellcycle_re_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset")),
+            c_mech_3_c_cellcycle_re_0_cs_2 = app(c_mech_3_c_cellcycle_re_0_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_0_CLAIM_2, c_mech_3_c_cellcycle_re_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_mech_3_c_cellcycle_re_0_OBSP_2)),
+            c_mech_3_c_cellcycle_re_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            c_mech_3_c_cellcycle_re_0_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_0_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_0_R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_0_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_0_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_0_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            c_mech_3_c_cellcycle_re_0_RULE_P = c_mech_3_c_cellcycle_re_0_K -> c_mech_3_c_cellcycle_re_0_S -> c_mech_3_c_cellcycle_re_0_O -> c_mech_3_c_cellcycle_re_0_CA,
+            c_mech_3_c_cellcycle_re_0_cert1 = app(c_mech_3_c_cellcycle_re_0_K, c_mech_3_c_cellcycle_re_0_S -> c_mech_3_c_cellcycle_re_0_O -> c_mech_3_c_cellcycle_re_0_CA, Declared(c_mech_3_c_cellcycle_re_0_BRIDGE), c_mech_3_c_cellcycle_re_0_js_0,
+                        declared(c_mech_3_c_cellcycle_re_0_BRIDGE, c_mech_3_c_cellcycle_re_0_RULE_P), c_mech_3_c_cellcycle_re_0_cs_0),
+            c_mech_3_c_cellcycle_re_0_cert2 = app(c_mech_3_c_cellcycle_re_0_S, c_mech_3_c_cellcycle_re_0_O -> c_mech_3_c_cellcycle_re_0_CA, justification:App(Declared(c_mech_3_c_cellcycle_re_0_BRIDGE), c_mech_3_c_cellcycle_re_0_js_0),
+                        c_mech_3_c_cellcycle_re_0_js_1, c_mech_3_c_cellcycle_re_0_cert1, c_mech_3_c_cellcycle_re_0_cs_1),
+            c_mech_3_c_apoptosis_re_1_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_1_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            c_mech_3_c_apoptosis_re_1_js_0 = justification:App(Declared(c_mech_3_c_apoptosis_re_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset")),
+            c_mech_3_c_apoptosis_re_1_cs_0 = app(c_mech_3_c_apoptosis_re_1_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_1_CLAIM_0, c_mech_3_c_apoptosis_re_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_mech_3_c_apoptosis_re_1_OBSP_0)),
+            c_mech_3_c_apoptosis_re_1_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_1_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            c_mech_3_c_apoptosis_re_1_js_1 = justification:App(Declared(c_mech_3_c_apoptosis_re_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset")),
+            c_mech_3_c_apoptosis_re_1_cs_1 = app(c_mech_3_c_apoptosis_re_1_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_1_CLAIM_1, c_mech_3_c_apoptosis_re_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_mech_3_c_apoptosis_re_1_OBSP_1)),
+            c_mech_3_c_apoptosis_re_1_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_1_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            c_mech_3_c_apoptosis_re_1_js_2 = justification:App(Declared(c_mech_3_c_apoptosis_re_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset")),
+            c_mech_3_c_apoptosis_re_1_cs_2 = app(c_mech_3_c_apoptosis_re_1_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_1_CLAIM_2, c_mech_3_c_apoptosis_re_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_mech_3_c_apoptosis_re_1_OBSP_2)),
+            c_mech_3_c_apoptosis_re_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            c_mech_3_c_apoptosis_re_1_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_1_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_1_R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_1_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_1_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_1_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_1_CA = onco:CausesApoptosis("WRN", "MSI"),
+            c_mech_3_c_apoptosis_re_1_RULE_P = c_mech_3_c_apoptosis_re_1_K -> c_mech_3_c_apoptosis_re_1_S -> c_mech_3_c_apoptosis_re_1_O -> c_mech_3_c_apoptosis_re_1_CA,
+            c_mech_3_c_apoptosis_re_1_cert1 = app(c_mech_3_c_apoptosis_re_1_K, c_mech_3_c_apoptosis_re_1_S -> c_mech_3_c_apoptosis_re_1_O -> c_mech_3_c_apoptosis_re_1_CA, Declared(c_mech_3_c_apoptosis_re_1_BRIDGE), c_mech_3_c_apoptosis_re_1_js_0,
+                        declared(c_mech_3_c_apoptosis_re_1_BRIDGE, c_mech_3_c_apoptosis_re_1_RULE_P), c_mech_3_c_apoptosis_re_1_cs_0),
+            c_mech_3_c_apoptosis_re_1_cert2 = app(c_mech_3_c_apoptosis_re_1_S, c_mech_3_c_apoptosis_re_1_O -> c_mech_3_c_apoptosis_re_1_CA, justification:App(Declared(c_mech_3_c_apoptosis_re_1_BRIDGE), c_mech_3_c_apoptosis_re_1_js_0),
+                        c_mech_3_c_apoptosis_re_1_js_1, c_mech_3_c_apoptosis_re_1_cert1, c_mech_3_c_apoptosis_re_1_cs_1),
+            c_mech_3_c_cellcycle_re_2_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_2_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+            c_mech_3_c_cellcycle_re_2_js_0 = justification:App(Declared(c_mech_3_c_cellcycle_re_2_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset")),
+            c_mech_3_c_cellcycle_re_2_cs_0 = app(c_mech_3_c_cellcycle_re_2_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_2_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_2_CLAIM_0, c_mech_3_c_cellcycle_re_2_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_mech_3_c_cellcycle_re_2_OBSP_0)),
+            c_mech_3_c_cellcycle_re_2_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_2_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+            c_mech_3_c_cellcycle_re_2_js_1 = justification:App(Declared(c_mech_3_c_cellcycle_re_2_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset")),
+            c_mech_3_c_cellcycle_re_2_cs_1 = app(c_mech_3_c_cellcycle_re_2_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_2_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_2_CLAIM_1, c_mech_3_c_cellcycle_re_2_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_mech_3_c_cellcycle_re_2_OBSP_1)),
+            c_mech_3_c_cellcycle_re_2_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
+            c_mech_3_c_cellcycle_re_2_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+            c_mech_3_c_cellcycle_re_2_js_2 = justification:App(Declared(c_mech_3_c_cellcycle_re_2_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset")),
+            c_mech_3_c_cellcycle_re_2_cs_2 = app(c_mech_3_c_cellcycle_re_2_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0), Declared(c_mech_3_c_cellcycle_re_2_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
+                        declared(c_mech_3_c_cellcycle_re_2_CLAIM_2, c_mech_3_c_cellcycle_re_2_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_mech_3_c_cellcycle_re_2_OBSP_2)),
+            c_mech_3_c_cellcycle_re_2_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
+            c_mech_3_c_cellcycle_re_2_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_2_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_2_R_O = "urn:eigenius:pub:wrn:cc_OVK18_plan:result:main_effect",
+            c_mech_3_c_cellcycle_re_2_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_2_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_2_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
+            c_mech_3_c_cellcycle_re_2_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            c_mech_3_c_cellcycle_re_2_RULE_P = c_mech_3_c_cellcycle_re_2_K -> c_mech_3_c_cellcycle_re_2_S -> c_mech_3_c_cellcycle_re_2_O -> c_mech_3_c_cellcycle_re_2_CA,
+            c_mech_3_c_cellcycle_re_2_cert1 = app(c_mech_3_c_cellcycle_re_2_K, c_mech_3_c_cellcycle_re_2_S -> c_mech_3_c_cellcycle_re_2_O -> c_mech_3_c_cellcycle_re_2_CA, Declared(c_mech_3_c_cellcycle_re_2_BRIDGE), c_mech_3_c_cellcycle_re_2_js_0,
+                        declared(c_mech_3_c_cellcycle_re_2_BRIDGE, c_mech_3_c_cellcycle_re_2_RULE_P), c_mech_3_c_cellcycle_re_2_cs_0),
+            c_mech_3_c_cellcycle_re_2_cert2 = app(c_mech_3_c_cellcycle_re_2_S, c_mech_3_c_cellcycle_re_2_O -> c_mech_3_c_cellcycle_re_2_CA, justification:App(Declared(c_mech_3_c_cellcycle_re_2_BRIDGE), c_mech_3_c_cellcycle_re_2_js_0),
+                        c_mech_3_c_cellcycle_re_2_js_1, c_mech_3_c_cellcycle_re_2_cert1, c_mech_3_c_cellcycle_re_2_cs_1),
+            c_mech_3_c_apoptosis_re_3_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_3_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+            c_mech_3_c_apoptosis_re_3_js_0 = justification:App(Declared(c_mech_3_c_apoptosis_re_3_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset")),
+            c_mech_3_c_apoptosis_re_3_cs_0 = app(c_mech_3_c_apoptosis_re_3_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_3_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_3_CLAIM_0, c_mech_3_c_apoptosis_re_3_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_mech_3_c_apoptosis_re_3_OBSP_0)),
+            c_mech_3_c_apoptosis_re_3_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_3_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+            c_mech_3_c_apoptosis_re_3_js_1 = justification:App(Declared(c_mech_3_c_apoptosis_re_3_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset")),
+            c_mech_3_c_apoptosis_re_3_cs_1 = app(c_mech_3_c_apoptosis_re_3_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_3_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_3_CLAIM_1, c_mech_3_c_apoptosis_re_3_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_mech_3_c_apoptosis_re_3_OBSP_1)),
+            c_mech_3_c_apoptosis_re_3_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
+            c_mech_3_c_apoptosis_re_3_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+            c_mech_3_c_apoptosis_re_3_js_2 = justification:App(Declared(c_mech_3_c_apoptosis_re_3_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset")),
+            c_mech_3_c_apoptosis_re_3_cs_2 = app(c_mech_3_c_apoptosis_re_3_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0), Declared(c_mech_3_c_apoptosis_re_3_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
+                        declared(c_mech_3_c_apoptosis_re_3_CLAIM_2, c_mech_3_c_apoptosis_re_3_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_mech_3_c_apoptosis_re_3_OBSP_2)),
+            c_mech_3_c_apoptosis_re_3_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
+            c_mech_3_c_apoptosis_re_3_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_3_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_3_R_O = "urn:eigenius:pub:wrn:apop_OVK18_plan:result:main_effect",
+            c_mech_3_c_apoptosis_re_3_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_3_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_3_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
+            c_mech_3_c_apoptosis_re_3_CA = onco:CausesApoptosis("WRN", "MSI"),
+            c_mech_3_c_apoptosis_re_3_RULE_P = c_mech_3_c_apoptosis_re_3_K -> c_mech_3_c_apoptosis_re_3_S -> c_mech_3_c_apoptosis_re_3_O -> c_mech_3_c_apoptosis_re_3_CA,
+            c_mech_3_c_apoptosis_re_3_cert1 = app(c_mech_3_c_apoptosis_re_3_K, c_mech_3_c_apoptosis_re_3_S -> c_mech_3_c_apoptosis_re_3_O -> c_mech_3_c_apoptosis_re_3_CA, Declared(c_mech_3_c_apoptosis_re_3_BRIDGE), c_mech_3_c_apoptosis_re_3_js_0,
+                        declared(c_mech_3_c_apoptosis_re_3_BRIDGE, c_mech_3_c_apoptosis_re_3_RULE_P), c_mech_3_c_apoptosis_re_3_cs_0),
+            c_mech_3_c_apoptosis_re_3_cert2 = app(c_mech_3_c_apoptosis_re_3_S, c_mech_3_c_apoptosis_re_3_O -> c_mech_3_c_apoptosis_re_3_CA, justification:App(Declared(c_mech_3_c_apoptosis_re_3_BRIDGE), c_mech_3_c_apoptosis_re_3_js_0),
+                        c_mech_3_c_apoptosis_re_3_js_1, c_mech_3_c_apoptosis_re_3_cert1, c_mech_3_c_apoptosis_re_3_cs_1),
+            c_mech_3_RULE = "urn:eigenius:pub:wrn:mech_rule",
+            c_mech_3_ART = "urn:eigenius:pub:wrn:mech_dsb",
+            c_mech_3_CC = "urn:eigenius:pub:wrn:concl_cellcycle_recomputed",
+            c_mech_3_AP = "urn:eigenius:pub:wrn:concl_apoptosis_recomputed",
+            c_mech_3_DSB = onco:CausesDSBs("WRN", "MSI"),
+            c_mech_3_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
+            c_mech_3_AA = onco:CausesApoptosis("WRN", "MSI"),
+            c_mech_3_DL = onco:DSBDrivenLethality("WRN", "MSI"),
+            c_mech_3_RULE_P = c_mech_3_DSB -> c_mech_3_CA -> c_mech_3_AA -> c_mech_3_DL,
+            c_mech_3_jDSB = Declared(c_mech_3_ART),
+            c_mech_3_jCA = justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_cellcycle"),
+                               c_mech_3_c_cellcycle_re_0_js_0
+                           ),
+                           c_mech_3_c_cellcycle_re_0_js_1
+                       ),
+                       c_mech_3_c_cellcycle_re_0_js_2
+                   ),
+            c_mech_3_jAA = justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_apoptosis"),
+                               c_mech_3_c_apoptosis_re_1_js_0
+                           ),
+                           c_mech_3_c_apoptosis_re_1_js_1
+                       ),
+                       c_mech_3_c_apoptosis_re_1_js_2
+                   ),
+            c_mech_3_cert1 = app(c_mech_3_DSB, c_mech_3_CA -> c_mech_3_AA -> c_mech_3_DL, Declared(c_mech_3_RULE), c_mech_3_jDSB,
+                        declared(c_mech_3_RULE, c_mech_3_RULE_P), declared(c_mech_3_ART, c_mech_3_DSB)),
+            c_mech_3_cert2 = app(c_mech_3_CA, c_mech_3_AA -> c_mech_3_DL, justification:App(Declared(c_mech_3_RULE), c_mech_3_jDSB),
+                        c_mech_3_jCA, c_mech_3_cert1, app(c_mech_3_c_cellcycle_re_0_O, c_mech_3_c_cellcycle_re_0_CA, justification:App(justification:App(Declared(c_mech_3_c_cellcycle_re_0_BRIDGE), c_mech_3_c_cellcycle_re_0_js_0), c_mech_3_c_cellcycle_re_0_js_1),
+               c_mech_3_c_cellcycle_re_0_js_2, c_mech_3_c_cellcycle_re_0_cert2, c_mech_3_c_cellcycle_re_0_cs_2)),
+            c_mmr_4_c_mmr_restorat_0_CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            c_mmr_4_c_mmr_restorat_0_js_0 = justification:App(Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset")),
+            c_mmr_4_c_mmr_restorat_0_cs_0 = app(c_mmr_4_c_mmr_restorat_0_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_0_CLAIM_0, c_mmr_4_c_mmr_restorat_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", c_mmr_4_c_mmr_restorat_0_OBSP_0)),
+            c_mmr_4_c_mmr_restorat_0_CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            c_mmr_4_c_mmr_restorat_0_js_1 = justification:App(Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset")),
+            c_mmr_4_c_mmr_restorat_0_cs_1 = app(c_mmr_4_c_mmr_restorat_0_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_0_CLAIM_1, c_mmr_4_c_mmr_restorat_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", c_mmr_4_c_mmr_restorat_0_OBSP_1)),
+            c_mmr_4_c_mmr_restorat_0_CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_0_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            c_mmr_4_c_mmr_restorat_0_js_2 = justification:App(Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset")),
+            c_mmr_4_c_mmr_restorat_0_cs_2 = app(c_mmr_4_c_mmr_restorat_0_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_0_CLAIM_2, c_mmr_4_c_mmr_restorat_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", c_mmr_4_c_mmr_restorat_0_OBSP_2)),
+            c_mmr_4_c_mmr_restorat_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            c_mmr_4_c_mmr_restorat_0_R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_0_R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_0_R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_0_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_0_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_0_RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            c_mmr_4_c_mmr_restorat_0_RULE_P = c_mmr_4_c_mmr_restorat_0_K -> c_mmr_4_c_mmr_restorat_0_S -> c_mmr_4_c_mmr_restorat_0_O -> c_mmr_4_c_mmr_restorat_0_RP,
+            c_mmr_4_c_mmr_restorat_0_cert1 = app(c_mmr_4_c_mmr_restorat_0_K, c_mmr_4_c_mmr_restorat_0_S -> c_mmr_4_c_mmr_restorat_0_O -> c_mmr_4_c_mmr_restorat_0_RP, Declared(c_mmr_4_c_mmr_restorat_0_BRIDGE), c_mmr_4_c_mmr_restorat_0_js_0,
+                        declared(c_mmr_4_c_mmr_restorat_0_BRIDGE, c_mmr_4_c_mmr_restorat_0_RULE_P), c_mmr_4_c_mmr_restorat_0_cs_0),
+            c_mmr_4_c_mmr_restorat_0_cert2 = app(c_mmr_4_c_mmr_restorat_0_S, c_mmr_4_c_mmr_restorat_0_O -> c_mmr_4_c_mmr_restorat_0_RP, justification:App(Declared(c_mmr_4_c_mmr_restorat_0_BRIDGE), c_mmr_4_c_mmr_restorat_0_js_0),
+                        c_mmr_4_c_mmr_restorat_0_js_1, c_mmr_4_c_mmr_restorat_0_cert1, c_mmr_4_c_mmr_restorat_0_cs_1),
+            c_mmr_4_c_mmr_restorat_1_CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_1_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+            c_mmr_4_c_mmr_restorat_1_js_0 = justification:App(Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset")),
+            c_mmr_4_c_mmr_restorat_1_cs_0 = app(c_mmr_4_c_mmr_restorat_1_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_1_CLAIM_0, c_mmr_4_c_mmr_restorat_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_rescue_sampleset", c_mmr_4_c_mmr_restorat_1_OBSP_0)),
+            c_mmr_4_c_mmr_restorat_1_CLAIM_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_1_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+            c_mmr_4_c_mmr_restorat_1_js_1 = justification:App(Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset")),
+            c_mmr_4_c_mmr_restorat_1_cs_1 = app(c_mmr_4_c_mmr_restorat_1_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_1_CLAIM_1, c_mmr_4_c_mmr_restorat_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens1_sampleset", c_mmr_4_c_mmr_restorat_1_OBSP_1)),
+            c_mmr_4_c_mmr_restorat_1_CLAIM_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan_yields_main_effect",
+            c_mmr_4_c_mmr_restorat_1_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+            c_mmr_4_c_mmr_restorat_1_js_2 = justification:App(Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset")),
+            c_mmr_4_c_mmr_restorat_1_cs_2 = app(c_mmr_4_c_mmr_restorat_1_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0), Declared(c_mmr_4_c_mmr_restorat_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset"),
+                        declared(c_mmr_4_c_mmr_restorat_1_CLAIM_2, c_mmr_4_c_mmr_restorat_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:mmr_resens2_sampleset", c_mmr_4_c_mmr_restorat_1_OBSP_2)),
+            c_mmr_4_c_mmr_restorat_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_mmr_restoration",
+            c_mmr_4_c_mmr_restorat_1_R_R = "urn:eigenius:pub:wrn:mmr_rescue_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_1_R_1 = "urn:eigenius:pub:wrn:mmr_resens1_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_1_R_2 = "urn:eigenius:pub:wrn:mmr_resens2_plan:result:main_effect",
+            c_mmr_4_c_mmr_restorat_1_K = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_1_S = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_1_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0),
+            c_mmr_4_c_mmr_restorat_1_RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            c_mmr_4_c_mmr_restorat_1_RULE_P = c_mmr_4_c_mmr_restorat_1_K -> c_mmr_4_c_mmr_restorat_1_S -> c_mmr_4_c_mmr_restorat_1_O -> c_mmr_4_c_mmr_restorat_1_RP,
+            c_mmr_4_c_mmr_restorat_1_cert1 = app(c_mmr_4_c_mmr_restorat_1_K, c_mmr_4_c_mmr_restorat_1_S -> c_mmr_4_c_mmr_restorat_1_O -> c_mmr_4_c_mmr_restorat_1_RP, Declared(c_mmr_4_c_mmr_restorat_1_BRIDGE), c_mmr_4_c_mmr_restorat_1_js_0,
+                        declared(c_mmr_4_c_mmr_restorat_1_BRIDGE, c_mmr_4_c_mmr_restorat_1_RULE_P), c_mmr_4_c_mmr_restorat_1_cs_0),
+            c_mmr_4_c_mmr_restorat_1_cert2 = app(c_mmr_4_c_mmr_restorat_1_S, c_mmr_4_c_mmr_restorat_1_O -> c_mmr_4_c_mmr_restorat_1_RP, justification:App(Declared(c_mmr_4_c_mmr_restorat_1_BRIDGE), c_mmr_4_c_mmr_restorat_1_js_0),
+                        c_mmr_4_c_mmr_restorat_1_js_1, c_mmr_4_c_mmr_restorat_1_cert1, c_mmr_4_c_mmr_restorat_1_cs_1),
+            c_mmr_4_RULE = "urn:eigenius:pub:wrn:mmr_rule",
+            c_mmr_4_CONCL = "urn:eigenius:pub:wrn:concl_mmr_restoration_recomputed",
+            c_mmr_4_RP = onco:RestorationPartiallyRescues("dMMR", "WRN"),
+            c_mmr_4_CD = onco:ContributesToDependence("dMMR", "WRN"),
+            RULE = "urn:eigenius:pub:wrn:synthesis_rule",
+            SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
+            IVD = onco:InVivoDependence("WRN", "MSI"),
+            RA  = onco:RequiresActivity("WRN", "helicase"),
+            DL  = onco:DSBDrivenLethality("WRN", "MSI"),
+            CD  = onco:ContributesToDependence("dMMR", "WRN"),
+            PAR = onco:NotExplainedByParalogLoss("WRN", "MSI"),
+            SL  = onco:SyntheticLethal("WRN", "MSI"),
+            RULE_P = SVD -> IVD -> RA -> DL -> CD -> PAR -> SL,
+            // antecedent justification terms — lemma citations of conclusions
+            jSVD = justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:bridge_viability"),
+                           c_val_recomput_0_js_0
+                       ),
+                       c_val_recomput_0_js_1
+                   ),
+            jIVD = justification:App(Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table")),
+            jRA  = justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:helicase_rule"),
+                           Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+                       ),
+                       Declared("urn:eigenius:pub:wrn:va_fail_k577m")
+                   ),
+            jDL  = justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:mech_rule"),
+                               Declared("urn:eigenius:pub:wrn:mech_dsb")
+                           ),
+                           justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_cellcycle"),
+                               c_mech_3_c_cellcycle_re_2_js_0
+                           ),
+                           c_mech_3_c_cellcycle_re_2_js_1
+                       ),
+                       c_mech_3_c_cellcycle_re_2_js_2
+                   )
+                       ),
+                       justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_apoptosis"),
+                               c_mech_3_c_apoptosis_re_3_js_0
+                           ),
+                           c_mech_3_c_apoptosis_re_3_js_1
+                       ),
+                       c_mech_3_c_apoptosis_re_3_js_2
+                   )
+                   ),
+            jCD  = justification:App(
+                       Declared("urn:eigenius:pub:wrn:mmr_rule"),
+                       justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
+                               c_mmr_4_c_mmr_restorat_1_js_0
+                           ),
+                           c_mmr_4_c_mmr_restorat_1_js_1
+                       ),
+                       c_mmr_4_c_mmr_restorat_1_js_2
+                   )
+                   ),
+            jPAR = justification:App(Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed")),
+            // antecedent certificates — one verified(conclusion, P) each
+            cSVD = app(c_val_recomput_0_O, c_val_recomput_0_SVD, justification:App(Declared(c_val_recomput_0_BRIDGE), c_val_recomput_0_js_0),
+               c_val_recomput_0_js_1, c_val_recomput_0_cert1, c_val_recomput_0_cs_1),
+            cIVD = app(core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table"), onco:InVivoDependence("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table"),
+                       declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table") -> onco:InVivoDependence("WRN", "MSI")),
+                       observed("urn:eigenius:pub:wrn:vivo_xenograft_table", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table"))),
+            cRA  = app(c_helicase_req_2_FR, c_helicase_req_2_RA, justification:App(Declared(c_helicase_req_2_RULE), c_helicase_req_2_jSEP), c_helicase_req_2_jFR,
+               c_helicase_req_2_cert1, declared(c_helicase_req_2_ART, c_helicase_req_2_FR)),
+            cDL  = app(c_mech_3_AA, c_mech_3_DL, justification:App(justification:App(Declared(c_mech_3_RULE), c_mech_3_jDSB), c_mech_3_jCA),
+               c_mech_3_jAA, c_mech_3_cert2, app(c_mech_3_c_apoptosis_re_1_O, c_mech_3_c_apoptosis_re_1_CA, justification:App(justification:App(Declared(c_mech_3_c_apoptosis_re_1_BRIDGE), c_mech_3_c_apoptosis_re_1_js_0), c_mech_3_c_apoptosis_re_1_js_1),
+               c_mech_3_c_apoptosis_re_1_js_2, c_mech_3_c_apoptosis_re_1_cert2, c_mech_3_c_apoptosis_re_1_cs_2)),
+            cCD  = app(c_mmr_4_RP, c_mmr_4_CD, Declared(c_mmr_4_RULE), justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
+                               c_mmr_4_c_mmr_restorat_0_js_0
+                           ),
+                           c_mmr_4_c_mmr_restorat_0_js_1
+                       ),
+                       c_mmr_4_c_mmr_restorat_0_js_2
+                   ),
+               declared(c_mmr_4_RULE, c_mmr_4_RP -> c_mmr_4_CD), app(c_mmr_4_c_mmr_restorat_0_O, c_mmr_4_c_mmr_restorat_0_RP, justification:App(justification:App(Declared(c_mmr_4_c_mmr_restorat_0_BRIDGE), c_mmr_4_c_mmr_restorat_0_js_0), c_mmr_4_c_mmr_restorat_0_js_1),
+               c_mmr_4_c_mmr_restorat_0_js_2, c_mmr_4_c_mmr_restorat_0_cert2, c_mmr_4_c_mmr_restorat_0_cs_2)),
+            cPAR = app(core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"), onco:NotExplainedByParalogLoss("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"),
+                       declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed") -> onco:NotExplainedByParalogLoss("WRN", "MSI")),
+                       observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"))),
+            // modus-ponens spine (unchanged — the "from A follows B" backbone)
+            c1 = app(SVD, IVD -> RA -> DL -> CD -> PAR -> SL,
+                     Declared(RULE), jSVD, declared(RULE, RULE_P), cSVD),
+            c2 = app(IVD, RA -> DL -> CD -> PAR -> SL,
+                     justification:App(Declared(RULE), jSVD), jIVD, c1, cIVD),
+            c3 = app(RA, DL -> CD -> PAR -> SL,
+                     justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA, c2, cRA),
+            c4 = app(DL, CD -> PAR -> SL,
+                     justification:App(justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA), jDL, c3, cDL),
+            c5 = app(CD, PAR -> SL,
+                     justification:App(justification:App(justification:App(justification:App(Declared(RULE), jSVD), jIVD), jRA), jDL), jCD, c4, cCD)
+        in
+        justification:Certificate(
+                   justification:App(
+                       justification:App(
+                           justification:App(
+                               justification:App(
+                                   justification:App(
+                                       justification:App(
+                                           Declared("urn:eigenius:pub:wrn:synthesis_rule"),
+                                           justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:bridge_viability"),
+                           c_val_recomput_0_js_0
+                       ),
+                       c_val_recomput_0_js_1
+                   )
+                                       ),
+                                       justification:App(Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table"))
+                                   ),
+                                   justification:App(
+                       justification:App(
+                           Declared("urn:eigenius:pub:wrn:helicase_rule"),
+                           Declared("urn:eigenius:pub:wrn:lit:lit_wrn_separable")
+                       ),
+                       Declared("urn:eigenius:pub:wrn:va_fail_k577m")
+                   )
+                               ),
+                               justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:mech_rule"),
+                               Declared("urn:eigenius:pub:wrn:mech_dsb")
+                           ),
+                           justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_cellcycle"),
+                               c_mech_3_c_cellcycle_re_2_js_0
+                           ),
+                           c_mech_3_c_cellcycle_re_2_js_1
+                       ),
+                       c_mech_3_c_cellcycle_re_2_js_2
+                   )
+                       ),
+                       justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_apoptosis"),
+                               c_mech_3_c_apoptosis_re_3_js_0
+                           ),
+                           c_mech_3_c_apoptosis_re_3_js_1
+                       ),
+                       c_mech_3_c_apoptosis_re_3_js_2
+                   )
+                   )
+                           ),
+                           justification:App(
+                       Declared("urn:eigenius:pub:wrn:mmr_rule"),
+                       justification:App(
+                       justification:App(
+                           justification:App(
+                               Declared("urn:eigenius:pub:wrn:bridge_mmr_restoration"),
+                               c_mmr_4_c_mmr_restorat_1_js_0
+                           ),
+                           c_mmr_4_c_mmr_restorat_1_js_1
+                       ),
+                       c_mmr_4_c_mmr_restorat_1_js_2
+                   )
+                   )
+                       ),
+                       justification:App(Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"))
+                   ),
+                   onco:SyntheticLethal("WRN", "MSI") )) );
+
+    // Modus ponens over the five findings — each antecedent discharged by
+    // CITING its phase conclusion as a lemma (D54: a Holds justification:Conclusion
+    // is admitted as a Verified witness keyed on its IRI). The leaf proofs
+    // live in the phase conclusions; C-MAIN references them by name.
+
 }
 
 // ── Warrants (D72 §3.3) ──────────────────────────────────────────────
 
-resource wrn:warrant_mmr_causal_dissection : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_mmr_causal_dissection : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:mmr-causal-dissection`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_mmr_causal_dissection";
 }
 
-resource wrn:warrant_synthetic_lethality_thesis : reflection:DeclaredResource {
-    reflection:declared_by = wrn:authors;
+resource wrn:warrant_synthetic_lethality_thesis : prov:Source {
+    prov:was_attributed_to = wrn:authors;
     core:description = "Warrant stub for `wrn-paper:synthetic-lethality-thesis`, minted by the D72 migration. Named as the ground of one or more declarations in this chain; its CONTENT is not recorded here. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
     core:short_name = "warrant_synthetic_lethality_thesis";
 }

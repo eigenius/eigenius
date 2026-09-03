@@ -576,7 +576,7 @@ Plus three `KERNEL_PASSTHROUGH_*` operation constants. The passthrough deliberat
 
 ### 9.3 Chain browser helper
 
-New helper in [`notebooks/src/runtime/chainBrowser.ts`](../../notebooks/src/runtime/chainBrowser.ts):
+New helper in `notebooks/src/runtime/chainBrowser.ts` *(the file does not exist; this section is a design that was not built as written)*:
 
 ```ts
 export type ChainBrowserClient = {
@@ -642,7 +642,7 @@ type MergeResolutionState =
     };
 ```
 
-State transitions are the only mutations. Each transition is an explicit reducer in [`notebooks/src/runtime/chainStore.ts`](../../notebooks/src/runtime/chainStore.ts).
+State transitions are the only mutations. Each transition is an explicit reducer in `notebooks/src/runtime/chainStore.ts` *(does not exist)*.
 
 The store persists `MergeResolutionState` to `localStorage` keyed on `(branch, candidate_head)` so a page reload doesn't lose the user's in-progress picks. Cleared on `done` or explicit cancel.
 

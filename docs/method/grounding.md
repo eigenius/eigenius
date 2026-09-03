@@ -79,7 +79,7 @@ slice*, not all 800 schema.org types / 52k GO classes unless needed; (e)
 - **OBO** — the obograph importer:
   `cargo run --bin obograph_import -- --input <obo-graph.json> --output <x.eigon.json>`
   then `eigenius … load <x.eigon.json>`. It rewrites `http(s)://` → `urn:` IRIs,
-  stamps `core:source_irl` provenance, tags nodes `is_a [..., DeclaredResource]`,
+  stamps `core:source_irl` provenance, attributes nodes with `prov:was_attributed_to`,
   and relies on the shared `ontologies/obo/obo-meta-ontology.json`.
 - **schema.org** — per D57 (**implemented**): own `urn:schema_org:` namespace,
   classes → `core:Class`, properties → `core:Property`, descriptive (`domainIncludes`
@@ -133,7 +133,7 @@ is ungrounded. This is `reasoning`'s *fail-closed* moved upstream into grounding
 3. **Adopt, don't reinvent.** If a standard vocabulary types the domain, align to
    it; reinventing `urn:eigenius:` equivalents is waste and breaks round-trip.
 4. **Minimal slice.** Import the subset the task needs; expand on demand.
-5. **Provenance on every import.** `core:source_irl` + `DeclaredResource` grade —
+5. **Provenance on every import.** `core:source_irl` + `prov:was_attributed_to` —
    adopted knowledge is Declared, not asserted as derived.
 6. **Close the loop.** What you researched becomes a retrievable anchor/term, so
    the work compounds instead of repeating.

@@ -4,10 +4,11 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:ingest:PinnedExternalFile"
     ],
-    "urn:eigenius:reflection:source": "DepMap 18Q4 curated omics bundle (figshare 7712756.v1); the authors' dat list",
+    "urn:eigenius:prov:was_generated_by": "urn:eigenius:pub:wrn:activity:depmap_18q4",
     "urn:eigenius:ingest:reference": "file://wrn-slices/DepMap_18Q4_data.rds",
     "urn:eigenius:ingest:content_hash": "sha256:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed",
     "urn:eigenius:ingest:media_type": "application/octet-stream",
-    "urn:eigenius:ingest:schema": "urn:eigenius:pub:wrn:depmap_rds_schema"
+    "urn:eigenius:ingest:schema": "urn:eigenius:pub:wrn:depmap_rds_schema",
+    "urn:eigenius:core:description": "DepMap 18Q4 curated omics bundle (figshare 7712756.v1); the authors' dat list"
   }
 ]

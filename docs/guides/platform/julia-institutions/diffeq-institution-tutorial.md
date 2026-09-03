@@ -45,19 +45,43 @@ Concrete example: `du/dt = -k·u` (exponential decay). With `state_names = ["u"]
 
 ```json
 {
-  "ctor": "App",
-  "args": [
-    {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:neg"]},
-    {"ctor": "App",
-     "args": [
-       {"ctor": "App",
-        "args": [
-          {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:mul"]},
-          {"ctor": "Var", "args": ["k"]}
-        ]},
-       {"ctor": "Var", "args": ["u"]}
-     ]}
-  ]
+  "core:is_a": [
+    "formulas:FormulaTerm-App"
+  ],
+  "formulas:FormulaTerm-App-head": {
+    "core:is_a": [
+      "formulas:FormulaTerm-OpRef"
+    ],
+    "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:neg"
+  },
+  "formulas:FormulaTerm-App-arg": {
+    "core:is_a": [
+      "formulas:FormulaTerm-App"
+    ],
+    "formulas:FormulaTerm-App-head": {
+      "core:is_a": [
+        "formulas:FormulaTerm-App"
+      ],
+      "formulas:FormulaTerm-App-head": {
+        "core:is_a": [
+          "formulas:FormulaTerm-OpRef"
+        ],
+        "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:mul"
+      },
+      "formulas:FormulaTerm-App-arg": {
+        "core:is_a": [
+          "formulas:FormulaTerm-Var"
+        ],
+        "formulas:FormulaTerm-Var-name": "k"
+      }
+    },
+    "formulas:FormulaTerm-App-arg": {
+      "core:is_a": [
+        "formulas:FormulaTerm-Var"
+      ],
+      "formulas:FormulaTerm-Var-name": "u"
+    }
+  }
 }
 ```
 

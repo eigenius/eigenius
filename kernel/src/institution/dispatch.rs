@@ -81,8 +81,11 @@ pub struct AutoOnLoadDispatch {
     /// validation — committed alongside the Verdict when it Holds,
     /// dropped when it Fails. Each derivation is marked
     /// `reflection:InstitutionEmittedDerivation` and carries a
-    /// `canonical_proposition` the chain attests; the witness emitter
-    /// walks these directly to admit `IsDerivedAs(derivation_iri, P)`.
+    /// `canonical_proposition` recording what the run produced. It grounds
+    /// nothing on its own: the witness emitter used to walk these to admit
+    /// `IsDerivedAs(derivation_iri, P)`, but a computed claim rests on the plan
+    /// being DECLARED to denote a function of its input and on the input being
+    /// OBSERVED, neither of which a run record establishes.
     /// Empty for institutions whose only job is the pass/fail gate.
     pub derivations: Vec<Resource>,
     /// Substrate-captured partial `RuntimeInvocation` (D26 §5.5).
@@ -329,10 +332,7 @@ pub fn build_verdict_resource(
     let mut r = Resource::new(verdict_iri);
     r.set(
         Iri::parse(wk::IS_A).expect("static IRI"),
-        Value::Array(vec![
-            Value::String(wk::VERDICT.to_string()),
-            Value::String(wk::DERIVED_RESOURCE.to_string()),
-        ]),
+        Value::Array(vec![Value::String(wk::VERDICT.to_string())]),
     );
     r.set(
         Iri::parse(wk::CTOR_NAME).expect("static IRI"),
@@ -340,16 +340,16 @@ pub fn build_verdict_resource(
     );
     r.set(
         Iri::parse(VERDICT_SUBJECT_PROP).expect("static IRI"),
-        Value::ResourceRef(subject_iri.clone()),
+        Value::iri(&subject_iri.clone()),
     );
     r.set(
         Iri::parse(VERDICT_QUERY_CLASS_PROP).expect("static IRI"),
-        Value::ResourceRef(dispatch.query_class_iri.clone()),
+        Value::iri(&dispatch.query_class_iri.clone()),
     );
     if let Some(inv) = runtime_invocation_iri {
         r.set(
             Iri::parse(RUNTIME_INVOCATION_PROP).expect("static IRI"),
-            Value::ResourceRef(inv.clone()),
+            Value::iri(&inv.clone()),
         );
     }
     if let Some(d) = dispatched_to {
@@ -425,9 +425,9 @@ fn protected_verdict_properties() -> std::collections::HashSet<&'static str> {
 ///   D28 / Julia institutions keep their per-invocation Verdict IRIs.
 /// - Otherwise (in-process institutions where the verdict is
 ///   a deterministic function of the subject), the Verdict IRI is
-///   `{subject_iri}:verdict` — a deterministic, 1:1 derivation that
-///   lets downstream `DerivedEvidence` consumers cite the Verdict
-///   directly without a UUID-indirection lookup. Re-runs against the
+///   `{subject_iri}:verdict` — a deterministic, 1:1 derivation, so the record
+///   of a given run is addressable without a UUID-indirection lookup.
+///   Re-runs against the
 ///   same claim produce the same Verdict IRI; the chain's append-only
 ///   discipline collapses idempotent re-emission to a no-op.
 pub fn derive_verdict_iri_for(runtime_invocation_iri: Option<&Iri>, subject_iri: &Iri) -> Iri {
@@ -454,10 +454,9 @@ pub fn build_runtime_invocation_resource(
     let mut r = Resource::new(invocation_iri.clone());
     r.set(
         Iri::parse(wk::IS_A).expect("static IRI"),
-        Value::Array(vec![
-            Value::String("urn:eigenius:runtime:RuntimeInvocation".to_string()),
-            Value::String(wk::DERIVED_RESOURCE.to_string()),
-        ]),
+        Value::Array(vec![Value::String(
+            "urn:eigenius:runtime:RuntimeInvocation".to_string(),
+        )]),
     );
     // Carry forward every property the substrate captured (language,
     // image_digest, started_at, completed_at, numerical_metadata,
@@ -472,21 +471,23 @@ pub fn build_runtime_invocation_resource(
     // Now stamp the IRIs only the kernel knows.
     r.set(
         Iri::parse("urn:eigenius:runtime:script").expect("static IRI"),
-        Value::ResourceRef(dispatch.signature_iri.clone()),
+        Value::iri(&dispatch.signature_iri.clone()),
     );
     if let Some(env) = &dispatch.environment_iri {
         r.set(
             Iri::parse("urn:eigenius:runtime:environment").expect("static IRI"),
-            Value::ResourceRef(env.clone()),
+            Value::iri(&env.clone()),
         );
     }
     r.set(
         Iri::parse("urn:eigenius:runtime:inputs").expect("static IRI"),
-        Value::Array(vec![Value::ResourceRef(subject_iri.clone())]),
+        Value::Array(vec![Value::String(
+            subject_iri.clone().as_str().to_string(),
+        )]),
     );
     r.set(
         Iri::parse("urn:eigenius:runtime:output").expect("static IRI"),
-        Value::ResourceRef(verdict_iri.clone()),
+        Value::iri(&verdict_iri.clone()),
     );
     Some(r)
 }
@@ -532,14 +533,10 @@ pub fn finalize_emitted_derivation(
     };
     let has_class = |classes: &[Value], iri: &str| {
         classes.iter().any(|v| match v {
-            Value::String(s) => s == iri,
-            Value::ResourceRef(i) => i.as_str() == iri,
+            Value::String(i) => i.as_str() == iri,
             _ => false,
         })
     };
-    if !has_class(&classes, wk::DERIVED_RESOURCE) {
-        classes.push(Value::String(wk::DERIVED_RESOURCE.to_string()));
-    }
     if !has_class(&classes, wk::INSTITUTION_EMITTED_DERIVATION) {
         classes.push(Value::String(
             wk::INSTITUTION_EMITTED_DERIVATION.to_string(),
@@ -549,12 +546,12 @@ pub fn finalize_emitted_derivation(
 
     derivation.set(
         Iri::parse(wk::FROM_SUBJECT).expect("static IRI"),
-        Value::ResourceRef(subject_iri.clone()),
+        Value::iri(&subject_iri.clone()),
     );
     if let Some(inv) = runtime_invocation_iri {
         derivation.set(
             Iri::parse(wk::RUNTIME_INVOCATION).expect("static IRI"),
-            Value::ResourceRef(inv.clone()),
+            Value::iri(&inv.clone()),
         );
     }
     Some(derivation)
@@ -676,7 +673,7 @@ mod tests {
     ///
     /// Rule 16 (`validation/rules/eigentt_value.rs`) does decode, `check_infer`
     /// and require `Sort(0)` — but it keys off the property's declared **range**
-    /// (`class_types ∋ eigentt:TypeExpr`) and runs at layer-validation time, not
+    /// (`class_types ∋ eigentt:Term`) and runs at layer-validation time, not
     /// at the boundary. So the coverage is incidental: it holds where the
     /// ontology happens to declare that range, and a declared property with any
     /// other range carries a proposition past every type-level check.

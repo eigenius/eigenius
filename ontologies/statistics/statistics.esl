@@ -29,9 +29,10 @@
 //   carries the predicate the claim establishes when Holds. The
 //   institution's `validate_analysis_plan` query class recomputes
 //   the claim from raw replicates and admits the commit on Holds.
-//   Downstream D39 reasoning cites the claim's IRI via
-//   `DerivedEvidence`; the witness index (D49 §6) admits the
-//   IsDerivedAs witness against the canonical_proposition slot.
+//   Downstream D39 reasoning grounds the claim as
+//   `App(Declared(plan_yields_effect), Observed(sample_set))`: the plan's
+//   reproducibility declaration supplies the IsDeclaredAs witness and the
+//   SampleSet's ObservationTrace the IsObservedAs one (D49 §6).
 //
 // - Predicate scope-marker classes `PopulationLevel` /
 //   `MeasurementLevel` (D52 §7.4 / §12 #8): each domain predicate
@@ -53,6 +54,8 @@ namespace eigentt     = "urn:eigenius:eigentt";
 namespace reflection  = "urn:eigenius:reflection";
 namespace institution = "urn:eigenius:institution";
 namespace stats       = "urn:eigenius:measurements";
+namespace agent       = "urn:eigenius:prov:agent";
+namespace prov        = "urn:eigenius:prov";
 namespace dispatch    = "urn:eigenius:institution:dispatch_roles";
 namespace runtimes    = "urn:eigenius:institution:runtimes";
 namespace proc        = "urn:eigenius:measurements:proc";
@@ -65,11 +68,15 @@ namespace proc        = "urn:eigenius:measurements:proc";
 // procedure (D52 §5.4 dispatch table).
 
 data stats:Randomization {
+    description = "How treatment was assigned to units — one of D52 §4.2's five orthogonal design axes. `CompleteRandom` is unrestricted assignment; `Restricted` covers any scheme that constrains it. The verifier dispatches on this axis's position in the SampleSet product to choose a recomputation procedure, so the axis is a fact about the experiment, not a label on it.";
+
     CompleteRandom,
     Restricted,
 }
 
 data stats:Blocking {
+    description = "How units were grouped to absorb a nuisance factor — a D52 §4.2 design axis. `PairedBlocking` is split out from `RCB(k)` deliberately, so the paired-versus-randomised-complete-block distinction is a CONSTRUCTOR IDENTITY the verifier can dispatch on rather than an integer it has to interpret; `RCB` carries block_size ≥ 3 for that reason.";
+
     Unblocked,
     // D52 §12 #3 — paired blocking split out from RCB(k) so the
     // paired-vs-RCBD distinction is a ctor identity rather than an
@@ -107,6 +114,8 @@ data stats:Blocking {
 }
 
 data stats:FactorDesign {
+    description = "The factorial structure of the treatments — a D52 §4.2 design axis. `FullFactorial(k)` names the number of factors; `FractionalFactorial(k, p, generators)` additionally names the fraction and the defining generators, because a fractional design's aliasing structure cannot be recovered from k and p alone.";
+
     // Zero-factor — single-sample estimation (no treatment groups).
     // Required for the IC50-style one-sample threshold claim.
     NoFactor,
@@ -116,6 +125,8 @@ data stats:FactorDesign {
 }
 
 data stats:Replication {
+    description = "What was replicated, and at which level — a D52 §4.2 design axis, and the one that decides what a p-value is ABOUT. `BiologicalReplication` supports a population-level claim; `TechnicalWithinRun` does not, however many replicates there are. `NestedReplication(biological_n, technical_per_biological)` carries both counts, because collapsing them is what produces pseudoreplication.";
+
     // Independent biological samples. Variance reflects biological
     // heterogeneity; population-level propositions admissible.
     BiologicalReplication,
@@ -130,6 +141,8 @@ data stats:Replication {
 }
 
 data stats:RepeatedMeasuresAxis {
+    description = "Whether the same units were measured more than once — a D52 §4.2 design axis. `Longitudinal(n_timepoints)` carries the count; `CrossSectional` asserts each unit was measured once, which is what licenses treating observations as independent.";
+
     CrossSectional,
     Longitudinal(core:integer),                                    // n_timepoints
 }
@@ -137,6 +150,8 @@ data stats:RepeatedMeasuresAxis {
 // ── Universal-claim sum types (D52 §3 / §7) ──────────────────────────
 
 data stats:EffectSize {
+    description = "The magnitude a claim asserts, in the form the claim states it. `Absolute(magnitude, units)` keeps the units, so a threshold is comparable to a measurement; `Relative(fold-change)` is a ratio; the standardized forms are unit-free. Keeping the form rather than normalising to one number is what lets a recomputation check the claim as written.";
+
     Absolute(core:float, core:string),                             // magnitude, units
     Relative(core:float),                                           // fold-change / ratio
     // D52 §12 #4 — standardized effect sizes carry inputs so the
@@ -159,11 +174,15 @@ data stats:EffectSize {
 }
 
 data stats:Directionality {
+    description = "Whether the test was two-sided, and if one-sided, WHY. `OneSidedWitnessed(iri)` requires an impossibility witness — a chain resource arguing the other direction cannot occur (D52 §7.1). A bare one-sided alternative is not expressible: halving a p-value is the easiest way to manufacture significance, so the ontology makes the justification a required argument rather than a convention.";
+
     TwoSided,
     OneSidedWitnessed(core:string),                                // impossibility_witness IRI (D52 §7.1)
 }
 
 data stats:VarianceAssumption {
+    description = "What the analysis assumed about variance. `Pooled` assumes equality across groups; `WelchUnequal` does not; `NonParametric` and `RankBased` assume no parametric form. The assumption is recorded because it is not recoverable from the data, and a recomputation that picked a different one would be answering a different question.";
+
     Pooled,
     WelchUnequal,
     NonParametric,
@@ -171,6 +190,8 @@ data stats:VarianceAssumption {
 }
 
 data stats:AutocorrelationStructure {
+    description = "The covariance structure assumed over repeated measures. `AR1` assumes correlation decaying with lag; `CompoundSymmetry` assumes it constant; `Unstructured` assumes nothing and estimates every entry. Only meaningful alongside a `Longitudinal` repeated-measures axis.";
+
     AR1,
     CompoundSymmetry,
     Unstructured,
@@ -203,6 +224,8 @@ data stats:AutocorrelationStructure {
 //                        many effects are expected to be non-null.
 
 data stats:MultipleComparisonCorrection {
+    description = "How the analysis controlled error across a family of tests. `Bonferroni` and `Holm` control the family-wise error rate, `BenjaminiHochberg` the false-discovery rate — different guarantees, not different strengths of the same one. `NoCorrection` is recorded rather than assumed, so a single-test claim and an uncorrected multiple-test claim are distinguishable.";
+
     NoCorrection,
     Bonferroni,
     Holm,
@@ -210,6 +233,8 @@ data stats:MultipleComparisonCorrection {
 }
 
 data stats:OutlierExclusion {
+    description = "Which observations were dropped, and by what rule. `Identity` drops none. The others each carry their own parameters — a residual threshold, a maximum count and alpha, a manual list — because an exclusion rule that cannot be replayed makes the analysis unreproducible, and a manual exclusion is the one an author must name observation by observation.";
+
     Identity,
     PassingBablokResidual(core:float),                             // threshold_sigma
     ESD(core:integer, core:float),                                 // max_outliers, alpha_esd
@@ -247,7 +272,9 @@ data stats:OutlierExclusion {
 //      Case-A singleton-elim shape per D46 §7.2 — the kernel admits
 //      large elimination from absurd inhabitants vacuously.
 
-data stats:False : Prop { }
+data stats:False : Prop {
+    description = "Bottom in the measurements namespace — the zero-constructor Prop that makes `P -> stats:False` express negation, used for the two-sided alternative hypothesis. Case-A singleton-elim shape per D46 §7.2: the kernel admits large elimination from an absurd inhabitant vacuously. Mirrors `logic:False`, which is the namespace-neutral home for the same idiom.";
+}
 
 axiom stats:mean_of      : core:string -> core:float
 axiom stats:variance_of  : core:string -> core:float
@@ -347,6 +374,8 @@ property stats:treatment_level : core:string {
 // pseudo-replicates and stratify variance components correctly.
 
 data stats:BiologicalUnits {
+    description = "The biological units the sample set is over, as an array of IRIs. A single-constructor wrapper: it exists so the unit list is a TYPED position in the SampleSet product rather than a bare array, which is what lets the verifier find it without knowing the product's shape.";
+
     // List of biological-unit IRIs. Authors typically draw them from
     // a domain ontology (`urn:eigenius:demo:bp:patient_01`,
     // `urn:eigenius:demo:lab:cell_line_HEK293_v3`, etc.). Empty list
@@ -356,6 +385,8 @@ data stats:BiologicalUnits {
 }
 
 data stats:AssayColumns {
+    description = "The assay's column names, as an array. A single-constructor wrapper, for the same reason as `stats:BiologicalUnits`: a typed position in the SampleSet product.";
+
     // List of `(assay_id, column_id)` pairs — encoded as a flat
     // value_array `[assay_0, col_0, assay_1, col_1, ...]`. The
     // assay_id partitions columns across multi-modal assay layers
@@ -365,6 +396,8 @@ data stats:AssayColumns {
 }
 
 data stats:SampleMap {
+    description = "The mapping from assay columns to biological units, as an array of `stats:SampleMapEntry`. This is the sample topology — what makes pseudoreplication detectable, because it says which measurements share a unit.";
+
     // The bipartite graph linking primary biological units to assay
     // columns. Each entry is a `SampleMapEntry` ctor application;
     // the array preserves authoring order so per-observation
@@ -373,6 +406,8 @@ data stats:SampleMap {
 }
 
 data stats:SampleMapEntry {
+    description = "One column's place in the sample topology: which assay layer it belongs to (`assay_id`, which partitions columns across multi-modal assays), which biological unit it measures (`primary`), and its specimen identifier (`col_name`). Two columns naming the same primary are technical replicates, and that is a fact about the entry rather than an inference from the data.";
+
     // A single (assay, primary, column) triple. Many-to-one is
     // expressed by repeating the `primary` IRI across multiple
     // entries with different `col_name`s; cross-modal missingness
@@ -393,6 +428,8 @@ data stats:SampleMapEntry {
 // (`BiologicalUnits`, `AssayColumns`, `SampleMap`).
 
 data stats:SampleSet {
+    description = "The nine-field product of the five design axes plus the sample topology and observations. Authors do not construct it directly — the smart constructors land at canonical positions, and the verifier dispatches on those positions to pick a recomputation procedure (D52 §5.4). The constructor is `Bundle` rather than `Set` because `Set` is a reserved sort keyword in ESL.";
+
     // Nine-field product. Authors don't call this directly — the
     // smart constructors below land here at canonical positions.
     // The constructor is named `Bundle` rather than `Set` because
@@ -775,7 +812,7 @@ macro stats:RepeatedMeasures(
 // their own provenance (ObservationTrace, source, observed_at) and
 // can be cited by multiple claims independently.
 
-class stats:SampleSetResource : reflection:ObservedResource {
+class stats:SampleSetResource {
     description = "Chain-resident wrapper carrying a raw SampleSet inductive value. The StatisticalAnalysisPlan's sample_set property references this resource by IRI; the institution's verifier reads sample_set_value to recompute the claim. Subclassing ObservedResource gives the SampleSet the standard provenance fields (source, observed_at, ObservationTrace witness).";
     requires stats:sample_set_value;
     recommends stats:observations_source, stats:observations_column;
@@ -815,9 +852,10 @@ property stats:observations_column : core:string {
 // canonical proposition mechanically from (effect_size, directionality,
 // dispatch's product position, parameter symbol set) at AutoOnLoad
 // firing time and emits it on the chain-committed Verdict resource at
-// `{claim_iri}:verdict`. Downstream `DerivedEvidence` consumers cite
-// the verdict IRI, not the claim IRI; the chain-witness index keys
-// `IsDerivedAs(verdict_iri, P)` accordingly.
+// `{claim_iri}:verdict`. The verdict is the RECORD of what the institution
+// computed; it grounds nothing on its own, because a computed claim rests on
+// the plan being declared to denote a function of its input and on the input
+// being observed — neither of which a run record establishes.
 //
 // The claim is not itself a DerivedResource. It is the *question* the
 // chain commits an author asked; the *answer* (with its derived
@@ -838,7 +876,7 @@ class stats:AnalysisPlan {
 }
 
 class stats:StatisticalAnalysisPlan : stats:AnalysisPlan {
-    description = "A pre-registered Statistical Analysis Plan (SAP) tied to a specific SampleSet — the chain-resident specification of how a test will be run. Pairs the inherited SampleSet reference with the universal SAP parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The StatisticalAnalysisPlan itself carries no proposition; the chain attests propositions through the StatisticalAnalysisResult derivations the institution emits at validation time. On AutoOnLoad, the statistics institution validates the SAP and emits one StatisticalAnalysisResult per effect (one for single-effect dispatches; 2^k − 1 for k-factor factorial; W/S/W×S for split-plot, etc.) at IRIs `{claim_iri}:result:{effect_name}`. Each StatisticalAnalysisResult is the chain-resident DerivedResource downstream D39 reasoning cites via DerivedEvidence.";
+    description = "A pre-registered Statistical Analysis Plan (SAP) tied to a specific SampleSet — the chain-resident specification of how a test will be run. Pairs the inherited SampleSet reference with the universal SAP parameters (alpha, effect_size, directionality, variance assumption, outlier rule). The StatisticalAnalysisPlan itself carries no proposition; the chain attests propositions through the StatisticalAnalysisResult derivations the institution emits at validation time. On AutoOnLoad, the statistics institution validates the SAP and emits one StatisticalAnalysisResult per effect (one for single-effect dispatches; 2^k − 1 for k-factor factorial; W/S/W×S for split-plot, etc.) at IRIs `{claim_iri}:result:{effect_name}`. Each StatisticalAnalysisResult is the chain-resident DerivedResource recording what the run produced. It is not itself a ground: downstream D39 reasoning grounds a computed claim as App(Declared(plan_yields_effect), Observed(sample_set)), so the plan needs a reproducibility declaration and the sample set its ObservationTrace.";
     requires stats:alpha,
              stats:effect_size,
              stats:directionality,
@@ -1035,7 +1073,7 @@ class stats:ImpossibilityWitness {
 // factorial it's `:result:main_A`, `:result:interaction_AB`, etc.
 
 class stats:StatisticalAnalysisResult : reflection:InstitutionEmittedDerivation {
-    description = "Per-effect derived resource the statistics institution emits as an artefact of validating a StatisticalAnalysisPlan. Carries the canonical_proposition the chain attests (the derived alternative hypothesis), the recomputed numerics, and the per-effect Holds/Fails decision. Linked back to the analysis spec via reflection:from_subject and to its RuntimeInvocation via reflection:runtime_invocation (both stamped by the kernel). Downstream D39 reasoning cites this resource via DerivedEvidence; the D49 §6 witness emitter walks it directly to admit IsDerivedAs(result_iri, canonical_proposition).";
+    description = "Per-effect derived resource the statistics institution emits as an artefact of validating a StatisticalAnalysisPlan. Carries the canonical_proposition the chain attests (the derived alternative hypothesis), the recomputed numerics, and the per-effect Holds/Fails decision. Linked back to the analysis spec via reflection:from_subject and to its RuntimeInvocation via reflection:runtime_invocation (both stamped by the kernel). It is the record of a run, not a ground: a computed claim rests on the assertion that the PLAN denotes a function of its input — which no execution establishes, determinism being a fact about the environment rather than something recoverable from having run once — and on the INPUT. So downstream D39 reasoning grounds it as App(Declared(plan_yields_effect), Observed(sample_set)), and this resource admits no witness of its own.";
     requires stats:verdict_ctor,
              stats:computed_statistic,
              stats:computed_p_value;
@@ -1071,11 +1109,25 @@ property stats:effect_name : core:string {
 
 // ── Statistics institution (D52 §6 / D14) ────────────────────────────
 
+// The institution's validation run, as a prov:Activity.
+//
+// Every StatisticalAnalysisResult the institution emits is generated by this,
+// and `prov:was_generated_by` is resource-typed, so a trace attesting one needs
+// something on-chain to point at. It was the string
+// "statistics-institution:validate_analysis_plan", which named the right thing
+// and reached nothing — the defect resource-typing the property exists to catch.
+
+resource stats:activity_validate_analysis_plan : prov:Activity {
+    core:description = "A run of the statistics institution's validate_analysis_plan query class: it recomputes a StatisticalAnalysisPlan from its SampleSet's raw observations and emits one StatisticalAnalysisResult per effect. The activity that generates those results — not a ground for them, since what a computed claim rests on is the plan being declared to denote a function of its input and the input being observed.";
+    core:short_name = "activity_validate_analysis_plan";
+    prov:was_associated_with = agent:eigenius_core_team;
+}
+
 resource stats:statistics_institution : institution:Institution {
     institution:institution_iri = "urn:eigenius:measurements:statistics_institution";
     institution:institution_name = "MeasurementStatistics";
     institution:runtime = runtimes:in_process;
-    core:description = "Measurement statistics institution (D52). On AutoOnLoad against a StatisticalAnalysisPlan: validates the SAP (sample_set resolves, parameters are well-typed, dispatch matches the SampleSet's product position, the test runs without precondition failures) and emits per-effect StatisticalAnalysisResult derivations carrying the canonical proposition + recomputed numerics. The gate Verdict attests SAP-well-formedness; the StatisticalAnalysisResults are what downstream D39 reasoning cites via DerivedEvidence. Opinionated stances: two-sided default (§7.1), dual-verdict outlier exclusion (§7.2), Passing-Bablok for method comparison (§7.3), epistemic-scope guard against technical-replicate-to-population-claim leakage (§7.4).";
+    core:description = "Measurement statistics institution (D52). On AutoOnLoad against a StatisticalAnalysisPlan: validates the SAP (sample_set resolves, parameters are well-typed, dispatch matches the SampleSet's product position, the test runs without precondition failures) and emits per-effect StatisticalAnalysisResult derivations carrying the canonical proposition + recomputed numerics. The gate Verdict attests SAP-well-formedness; the StatisticalAnalysisResults record what each run produced, and downstream D39 reasoning grounds a computed claim as App(Declared(plan_yields_effect), Observed(sample_set)) rather than by citing a result IRI. Opinionated stances: two-sided default (§7.1), dual-verdict outlier exclusion (§7.2), Passing-Bablok for method comparison (§7.3), epistemic-scope guard against technical-replicate-to-population-claim leakage (§7.4).";
 }
 
 resource stats:qc_validate_analysis_plan : institution:QueryClass {

@@ -26,7 +26,7 @@
 //! ## Why this is restricted to a fragment, and refuses outside it
 //!
 //! `Exp` has forty-odd variants. A definition body, however, arrives by decoding a stored
-//! `eigentt:TypeExpr`, whose nineteen constructors cover a much smaller shape. Two ways to write
+//! `eigentt:Term`, whose nineteen constructors cover a much smaller shape. Two ways to write
 //! this were available and both are wrong:
 //!
 //! - **A catch-all `other => other.clone()`**, the pattern `freshen_anaphor` and `abstract_class`
@@ -45,7 +45,7 @@
 //! Arguments at an instantiation site are closed chain terms, so capture cannot arise in practice.
 //! [`subst`] still checks, and **errors** rather than freshening. Freshening would be the more
 //! general choice, but it renames binders, and binder names reach the witness key through
-//! `alpha_canonicalize_proposition_json`; refusing keeps this function's output a pure function of
+//! `alpha_canonicalize_proposition`; refusing keeps this function's output a pure function of
 //! its inputs with no naming policy of its own. If a real need for capture ever appears, freshening
 //! can be added — deliberately, with the canonicalization interaction thought through.
 

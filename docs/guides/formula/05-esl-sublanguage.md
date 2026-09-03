@@ -153,9 +153,10 @@ A few absent-by-design features worth flagging:
 
 Internally, the parser emits a `Value::CtorApp` AST node — the kernel's
 representation of "a structured constructor application" — that the ESL
-compiler lowers into a chain `Value::Json` carrying the canonical
-`{"ctor", "args"}` tagged-dict shape. From the validator's perspective
-the result is identical to a hand-authored Eigon-JSON value.
+compiler lowers into the value resources the constructors denote: `is_a`
+names the constructor's class, and each argument lands on that class's
+property (D85 §6.1). From the validator's perspective the result is
+identical to a hand-authored Eigon-JSON value.
 
 This means the surface is "free" from a chain-correctness standpoint:
 anything `formula(...)` can produce is a structurally well-formed

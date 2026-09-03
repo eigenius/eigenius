@@ -64,6 +64,7 @@ import {
   type MergeBranchesResponse,
   MergeOutcome,
   type PreviewMergeResponse,
+  type Outcome,
 } from "@eigenius/client";
 import { useEigen } from "../../runtime/EigenProvider";
 import { useNotebookStore } from "../../runtime/notebookStore";
@@ -133,7 +134,7 @@ type PreviewState =
 type MergeState =
   | { kind: "idle" }
   | { kind: "running" }
-  | { kind: "done"; resp: MergeBranchesResponse }
+  | { kind: "done"; resp: Outcome<MergeBranchesResponse> }
   | { kind: "error"; message: string };
 
 export function MergePanel() {
@@ -245,9 +246,10 @@ export function MergePanel() {
     if (!source || !target || source === target) return;
     setMergeState({ kind: "running" });
     try {
-      const resp = await eigen.mergeBranches(source, target);
-      setMergeState({ kind: "done", resp });
-      if (resp.success) {
+      const merged = await eigen.mergeBranches(source, target);
+      setMergeState({ kind: "done", resp: merged });
+      if (merged.ok) {
+        const resp = merged.value;
         await refreshBranches(eigen);
         const outcome = resp.merge?.outcome;
         const friendly = outcome === MergeOutcome.FAST_FORWARD
@@ -556,14 +558,15 @@ function ResultBlock({ state, styles, onResolve }: ResultBlockProps) {
     );
   }
   // done
-  const resp = state.resp;
-  if (!resp.success) {
+  const merged = state.resp;
+  if (!merged.ok) {
     return (
       <MessageBar intent="error">
-        <MessageBarBody>{resp.error || "merge failed"}</MessageBarBody>
+        <MessageBarBody>{merged.message}</MessageBarBody>
       </MessageBar>
     );
   }
+  const resp = merged.value;
   const outcome = resp.merge?.outcome;
   if (outcome === MergeOutcome.NEEDS_WITNESSED_MERGE) {
     const orphanLayerId = resp.merge?.orphanLayerId;

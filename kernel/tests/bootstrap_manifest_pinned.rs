@@ -31,6 +31,49 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED FOR THE PROVENANCE MIGRATION (`2026-08-30`), on TEN layers, which is the whole
+//! provenance axis moving off `reflection` onto `prov` plus the grade classes going away.
+//! `reflection` and `prov`'s consumers (`obo`, `justification`, `statistics`, `ingest`,
+//! `reference`, `lexicon`, `closed-class`, `encoding`) all reference the renamed properties;
+//! `eigentt-type-fragment` moved on a single prose mention of `proof_system`, which is the kind of
+//! one-line description edit that hashes exactly as loudly as a structural one. The four grade
+//! classes, `epistemic_status`, the four `epistemic:*` individuals and `EpistemicStatus` are
+//! deleted, `lexicon:grade` with them — 2,641,713 stamps on the converted chain, all
+//! `epistemic:declared`, on resources that carry no proposition and so have no warrant to grade.
+//!
+//! IT FIRED ON A PROSE FIX (`2026-08-30`), on ONE layer, `lexicon`, for a description string.
+//! `LexicalEntry` still advertised "and an epistemic grade" after the grade migration above deleted
+//! `lexicon:grade` — the property went, the sentence promising it did not. Nothing referenced the
+//! stale half, so no test caught it; it was found while checking an unrelated claim about which
+//! `LexicalEntry` slots hold inductive values (two: `lexicon:cat`, `lexicon:sem_type`). Worth the
+//! entry precisely because it is the cheap case: a class description is the first thing a reader
+//! consults about a class, and this one named a slot that does not exist.
+//!
+//! IT FIRED FOR THE PROVENANCE SPLIT (`2026-08-30`), on ONE new layer, `prov`. The provenance
+//! axis — Agent, Activity, the four provenance Traces and the relations between them — moves out
+//! of `reflection` into its own namespace, because `reflection` had come to hold two unrelated
+//! families under one word: `reflection:Trace` with LetTrace / MapTrace / CaseTrace records how a
+//! PROGRAM EVALUATED, while the parentless DeclarationTrace / ObservationTrace / ProductionTrace /
+//! VerificationTrace record HOW A RESOURCE CAME TO EXIST. `prov` sits ABOVE `reflection` and that
+//! direction is forced: `prov:ProgramTrace` reaches into the evaluation family through
+//! `prov:trace_tree` and `reflection:output`, and nothing in `reflection` reaches back. This entry
+//! records only the layer's ADDITION; the migration that empties the moved declarations out of
+//! `reflection` moves that layer too and is recorded separately.
+//!
+//! IT FIRED ON THE THREE-GROUNDS CHANGE (`2026-08-30`): `justification`, `statistics` and
+//! `reflection`. `justification` is the substantive one — `justification:Term` went from seven
+//! constructors to five (`DerivedEvidence` and `SpecStr` removed), `justification:Certificate`
+//! lost `derived`, `sum_l`/`sum_r` now take a derivation for EACH branch, `spec_poly` dropped its
+//! unchecked audit tag and leaves the term index at `j`, and `witness:IsDerivedAs` is gone. The
+//! other two are description strings only, which move a hash just as surely: `statistics` and
+//! `reflection` described the deleted mechanism in class descriptions, and `prov:proof_term`
+//! carried the wrong account of what admits a Verified witness — a defect P3 stated in the
+//! ontology and deferred to here so it could ride one reseed instead of invalidating P2's
+//! mid-flight. The test named exactly the three files that were edited, which is the check that
+//! the edits were the intended ones. Editing `ontologies/encoding/encoding.esl` in the same pass
+//! moved NOTHING, because those edits were all `//` comments — the compiler strips them, while a
+//! `description = "…"` is a resource property and hashes.
+//!
 //! IT FIRED FOR eigenius#188 A SECOND TIME (`2026-08-23`), on **`core` and
 //! `eigentt-type-fragment`**. The level algebra moved DOWN to `core:Level` and `core:result_sort`
 //! was retyped from a string (`"Prop"` / `"Set"` / `"Type:N"`) to a `core:Level` value. It had to
@@ -77,27 +120,28 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "core:1c79fd45c0cd0c16564a0d54904bac00cddf07c95f7457a179a06101aa13bd4d
-eigentt-type-fragment:304d1a49596612b0a202b5c6417e1e57fd5fa8545a1baf83e7ef8348f627082f
+const EXPECTED: &str = "core:f8c7f18a36095456322d47bc5a6d26264d03e8141cf3b0320f4a7077dbcde333
+eigentt-type-fragment:52bcfe935009fb7f32400dcb344ab884f29937692370aa4e3cc5a24d87250028
 program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
-reflection:9caa85d85e3104b0e612128e8fef1ecef027ee957c327ad18e6f5fbffacea178
-obo:cb157be55245c9ac73385e0ac0c605f0cde8ecb9d1246b07226008cbf8cf4d76
+reflection:2455ee11766bc20134ed820e69c006951de44aa9e486abb36938d1a5361c0569
+prov:742e0152373443a999e8f6562932277fe8b37da64a2ae0ce35f03ab598f9a4d9
+obo:b515192765257daf466b28bb4154d6155461c8c2d1302f945ec785f8a00bb959
 institution:94d7ba70bdb49cde8febceb2cef67d1421076b8c336e05cfe15f6e4c6aae263b
-runtime:5ef02306d25bc1b52e517114c8b7f2280ca20ad1d70607255198b4d54d8b4bfc
-formulas:2073d36b31311e89803a78f20dc28f376197d89eb75a384dbd429d2203455817
-lean-expressions:2b084735d270d8d1078e69e67de342b5d221f5f7a4939598582190f4c017d8f6
+runtime:ada851931aeff9eed036621b306ca3eb25c0044d600c84dcad77c67973c1a22e
+formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023
+lean-expressions:edd0c69f7ac3bdd29b37318bf69a45a5860d574ad0cfc7ebe2c9c685791653b4
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:41c7dce62971e48bd5bdd08e97bac59e72f27fc38a7e36c4afdfcb3edc0e8d34
-reasoning:b49a9cfd74311d782bd3d37d0dab46811029b37bcb59180f423f4ce01d937dc9
-statistics:c46a2a2881ffb120a5b82cb95eff9caff4cc296be67bbcdbb8196c4b7f889bd3
+justification:ee21375589e59a9cfe15e2279e8d75a9c2e706eb442d63e789525ba2f2d482b6
+statistics:3ba48d9b24245a117defab3ff706945907652ce40be0a1b4a6956deb0d0070b8
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
-ingest:6b3b1de79a7b69ffa60337824a82598b26fa2e99166a18f19bb27f1d07e72b0a
-reference:f57afb5d36519ef867ebc8ac974b744992eb0fcf70b45f0cda68c6265976c1fd
-logic:e23ffb70b63f80cea1a7287fa67f47d34f13270118e9c72f5904814470cec36a
-lexicon:bf3e48392eab09c1e298b7a2265dd72eb765c846af8f5c79562bb43c69b6c37c
+ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
+reference:33277845534074177e7c9015b0669c2fad20e35a8adc592f7df362914ecb152b
+logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
+lexicon:520cf5997238198cfa1cae985f77c359c76f95f0d81562f84bd585c6c49a7061
 ontology:7fb72a75946ca50e84df1aa1ae9207dc57676b96ef3c53879e82e4421f1aef43
-closed-class:cbac8f32e15ae7b013a723ccca044dc165099fd8edc7204a7255f095bb04dbc2
-encoding:bdddc2b68ac92a6636a26d5304ce10caf53ed75b43f51b31980ceda813e12350
+closed-class:33288e5e89e02bdf5ae493742599a9da95d9fd949eb665831be8353a93f7eaf4
+encoding:af1273fd9c4103623b79ce16a0ab33ea2269f980c7779fafc80d9a49c9b94f10
 ";
 
 /// Per-layer diff, so the failure says WHICH ontology moved rather than only that something did. On

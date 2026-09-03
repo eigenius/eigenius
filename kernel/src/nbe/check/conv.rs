@@ -274,8 +274,7 @@ pub(super) fn is_propositional_in_ctx(ctx: &mut CheckCtx, typ: &Val) -> Result<b
 /// - `Some(true)` — definitely propositional (`Val::Id`, sort-Sort(0)
 ///   inductive/codata).
 /// - `Some(false)` — definitely not propositional (universes, primitives,
-///   `One`, `SizeSort`, anonymous codata, EigonClass / EigonPrimitive,
-///   inductive/codata at higher sorts).
+///   `One`, EigonClass / EigonPrimitive, inductive at higher sorts).
 /// - `None` — undecidable from shape alone; caller falls back to
 ///   inference. Reaches Pi, Sig, neutrals, lambdas/values reachable
 ///   through the catch-all.
@@ -929,7 +928,7 @@ mod index_conversion_tests {
     }
 
     /// A two-index family rejects a mismatch in the *second* index — the shape
-    /// of `reasoning:JustifiedBy : JustificationTerm -> Prop -> Type 0`, whose
+    /// of `justification:Certificate : justification:Term -> Prop -> Type 0`, whose
     /// index #1 is the proposition the certificate is about.
     #[test]
     fn a_mismatch_in_a_later_index_is_rejected() {

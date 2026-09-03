@@ -128,11 +128,8 @@ pub fn validate_external_institution_chain(
         let Some(iri) = resource.id().cloned() else {
             continue;
         };
-        // `runtime` is `data_type: resource` post-canonicalisation,
-        // so the value is a `ResourceRef`. `Value::as_iri` accepts
-        // both ResourceRef and (legacy/parse-time) String, so this
-        // also handles intermediates that haven't been through
-        // `canonicalise_resource_refs` yet.
+        // `runtime` is `data_type: resource`, so its value is an IRI string. `Value::as_iri`
+        // reads it without matching a variant.
         match resource.get(&runtime_prop).and_then(|v| v.as_iri()) {
             Some(i) if i.as_str() == wk::RUNTIME_EXTERNAL => {}
             _ => continue,
@@ -462,8 +459,11 @@ mod tests {
         let mut inst = Resource::new(inst_iri.clone());
         inst.set(
             Iri::parse(wk::IS_A).expect("IS_A IRI"),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse("urn:eigenius:institution:Institution").expect("IRI"),
+            Value::Array(vec![Value::String(
+                Iri::parse("urn:eigenius:institution:Institution")
+                    .expect("IRI")
+                    .as_str()
+                    .to_string(),
             )]),
         );
         inst.set(
@@ -476,7 +476,12 @@ mod tests {
         );
         inst.set(
             Iri::parse(wk::RUNTIME).expect("RUNTIME IRI"),
-            Value::ResourceRef(Iri::parse(wk::RUNTIME_IN_PROCESS).expect("RUNTIME_IN_PROCESS IRI")),
+            Value::String(
+                Iri::parse(wk::RUNTIME_IN_PROCESS)
+                    .expect("RUNTIME_IN_PROCESS IRI")
+                    .as_str()
+                    .to_string(),
+            ),
         );
         let mut b = LayerBuilder::new("in_process_test", None);
         b.add_resource(inst).unwrap();
@@ -558,8 +563,11 @@ mod tests {
         let mut inst = Resource::new(Iri::parse(ext_iri).unwrap());
         inst.set(
             Iri::parse(wk::IS_A).expect("IS_A IRI"),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse("urn:eigenius:institution:Institution").unwrap(),
+            Value::Array(vec![Value::String(
+                Iri::parse("urn:eigenius:institution:Institution")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             )]),
         );
         inst.set(
@@ -572,7 +580,12 @@ mod tests {
         );
         inst.set(
             Iri::parse(wk::RUNTIME).unwrap(),
-            Value::ResourceRef(Iri::parse(wk::RUNTIME_EXTERNAL).unwrap()),
+            Value::String(
+                Iri::parse(wk::RUNTIME_EXTERNAL)
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+            ),
         );
         let mut b = LayerBuilder::new("external_only", None);
         b.add_resource(inst).unwrap();

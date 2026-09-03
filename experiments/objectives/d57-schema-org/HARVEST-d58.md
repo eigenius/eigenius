@@ -48,11 +48,11 @@ query the kernel can run. D58's gate-query encodings are buildable now; this pas
 gives the worked examples.
 
 **H6 — Milestone ⇆ discharge is a viable identity.** m1 was discharged by a
-`reasoning:ReasoningSentence` (`concl_discipline`) whose proposition is *the same*
+`justification:Conclusion` (`concl_discipline`) whose proposition is *the same*
 `Prop` as the milestone (`MappingDisciplineDefined("schema_org")`). The "milestone
-as a `ReasoningSentence` stub, completed when it Holds" candidate (D58 §5) works:
+as a `justification:Conclusion` stub, completed when it Holds" candidate (D58 §5) works:
 the stub carries the proposition + acceptance metadata; discharge fills in
-justification + certificate. So `objective:Milestone` can *be* a ReasoningSentence
+justification + certificate. So `objective:Milestone` can *be* a justification:Conclusion
 subtype rather than a parallel class. Verified: `concl_discipline` → `Holds`.
 
 **H7 — Branch-per-objective is clean.** `branch create obj-d57 --from <main>` +
@@ -69,7 +69,7 @@ for citations. → fix in `.claude/skills/reasoning.md`.
 ## Net recommendation for D58
 
 `objective:Objective` = a typed wrapper holding the thesis Prop + the intended
-edges (H1); `objective:Milestone` = a `ReasoningSentence` stub + acceptance
+edges (H1); `objective:Milestone` = a `justification:Conclusion` stub + acceptance
 metadata (H2, H6); a `supersedes` edge for revisions with gate re-run (H3); a
 typed frontier status (H4); the four gates as committed `QueryClass`es (H5);
 branch-per-objective isolation (H7). This is enough real grounding to write D58's

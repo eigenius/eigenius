@@ -1,7 +1,7 @@
 # D66 — Definitional lifting: transparent definitions, explicit context, and symmetric witness normalization
 
 *Status: design — **decision-complete** (§6 D1–D10 all ✅); ready to implement (§5 slices). No code yet. Motivated by the shape-rule
-amortisation investigation ([`docs/notes/2026-08-09-shape-rule-amortisation.md`](../notes/2026-08-09-shape-rule-amortisation.md),
+amortisation investigation (`docs/notes/2026-08-09-shape-rule-amortisation.md`, since deleted,
 issues #111/#112): every lift from a parsed sentence to domain vocabulary is currently a **Declared**
 bridge, one per parse shape — measured at ≥61 bridges for 62 sentences. The cause is not the bridge
 generator; it is that domain predicates are declared as **opaque axioms**, so nothing but an assertion
@@ -91,7 +91,7 @@ activity was measured in. The parse does mention it: measured on `rule_1`, the a
 argument holds `umlscui:C0920269` (MSI cancer models) and the consequent holds only `v0`/`v1`.
 
 So the lift discards the experimental context, and a discarding step is an implication. Since
-**no `JustifiedBy` constructor produces `JustifiedBy(_, A -> B)`** (`ontologies/reasoning/reasoning.esl:26-31`;
+**no `JustifiedBy` constructor produces `JustifiedBy(_, A -> B)`** (`ontologies/justification/justification.esl:26-31`;
 the eight constructors are four groundings, `app`, `sum_l`, `sum_r`, `spec_poly`), that
 implication can only enter as a grounding — i.e. Declared.
 
@@ -107,7 +107,7 @@ Both alternatives were investigated and neither addresses §1.2.
   perfect lexical abstraction (§1.1); generalising a rule's antecedent needs a Declared `P → A` per
   parse shape, conserving the cost; and the consequent's arguments are *intra*-argument co-occupants
   related by `prep_of`, not role fillers, so a frame-keyed rule cannot express the conclusion.
-- **#112 — interpret `eigentt:TypeExpr` in the theory.** Needed for rules that *quantify over shapes*
+- **#112 — interpret `eigentt:Term` in the theory.** Needed for rules that *quantify over shapes*
   (case analysis on syntax). A parse-shaped proposition is already a `Prop` and already usable as an
   implication antecedent; what is missing is **abbreviation**, not reification.
 
@@ -159,7 +159,7 @@ independent of corpus size.**
 
 ### 2.4 Instantiating a definition: peel and substitute (D8)
 
-The definition is stored as a λ-body — `Lam(m, Set, Lam(g, Set, Lam(a, Set, B)))`, reusing `TypeExpr`'s
+The definition is stored as a λ-body — `Lam(m, Set, Lam(g, Set, Lam(a, Set, B)))`, reusing `Term`'s
 existing `Lam` (3 args: name, dom, body; `kernel/src/program/eigentt_type_mirror.rs:453-465`). Arity and
 parameter types come from the declared type, so nothing is stored twice.
 
@@ -475,7 +475,7 @@ no longer indistinguishable from an absent witness (§4.2).
 Verified:
 - `cargo test --workspace` — 170 suites, **2747 passed, 0 failed**; clippy clean under `-D warnings`.
   Slice 1 is a no-op on everything currently on chain, which is the point.
-- `crates/eigenius-reasoning/tests/witness_hash_agreement.rs` — the emit and check sides agree on the
+- `kernel/tests/witness_hash_agreement.rs` — the emit and check sides agree on the
   **definite description** `Fst(the(Σx. …))` that every parsed sentence contains, on its negated form
   `⟨parse⟩ → False`, and across binder renaming. The negated and un-negated forms hash **differently**,
   which is what makes the demo's one-word edit detectable. A fourth test asserts the comparison is not
@@ -668,11 +668,11 @@ cannot be deferred.)*
 | **D7** | Cost of decoding on the commit path | ✅ settled — **absorb it**. Every `canonical_proposition` gains a D47 decode at layer build. Correctness comes first; the alternative is two normalization paths kept in step by hand, which is the defect being fixed. Efficiency is follow-up work, taken only if measurement warrants it — see below |
 | **D10** | Is a definition's body stored δ-**folded** or δ-**expanded**? | ✅ settled — **folded**. Both satisfy D9: a use decodes to the fully unfolded term before anything hashes it, so identity is the normal form either way. Only storage differs. Measured on two nested definitions in the demo's own shape (`ActivityOf` referenced once by `HasActivity`): folded **17 nodes / 554 bytes**, expanded **32 nodes / 1104 bytes** — roughly double at one level, and a body referencing another twice inlines it twice. Expanded storage also has a sharper edge: `encode_type` refuses a bare `Exp::Lam` (`LamWithoutAnnotation`), because decode discards a `Lam`'s domain, so anything reading a stored body and writing it back must carry the parameter types separately. **Corrected 2026-08-10:** an earlier draft justified folded storage by `eigenius decompile` printing the folded call. That readability requirement was never set and is not a basis for this decision; it is at most an observation about the printer |
 | **D9** | What is a definition's **identity** for equality and hashing? | ✅ settled — **the normal form of its right-hand side**. *(Refined 2026-08-10 against the implementation: the earlier wording said "normalized once at commit and stored that way", which is not what the kernel does and not what it should do. **Nothing normalizes.** β-normality is enforced at commit by **rejection** — Rule 24 refuses a redex-bearing body rather than rewriting it, because a compiler silently rewriting an author's body is worse than telling them it has a redex. **δ is performed at decode**, recursively, so a body may reference another definition and keep it FOLDED in storage. The storage half of that split is D10. Both ends of the witness key still agree, because both go through the same decode — pinned by `nested_definitions_unfold_all_the_way_at_decode`.)* Anything computing a `prop_hash` therefore hashes the normal form, and the two ends of the witness key agree *by construction* rather than by an argument that decode-only happens to coincide with decode-plus-eval. Normalizing at commit rather than per use matters because slice 0 moved emission to **per lookup**: normalizing at each use would put a full NbE evaluation on every witness probe on every layer of a chain walk, far beyond the "a D47 decode at layer build" D7 accepted. With the RHS already normal, D8's peel-and-substitute drops closed arguments into a normal body without forming a redex, so a use decodes straight to a normal term and neither side evaluates. **Carve-out:** this defines identity for *transparent* definitions; an opaque one does not unfold, so its identity stays the folded name (#95). **Condition to pin, not assume:** substituting normal closed arguments into a normal body yields a normal term |
-| **D8** | Does decode form a redex or substitute through — and what is stored? | ✅ settled — **store the λ-body; decode peels and substitutes; definitions are non-recursive.** §2.4. The real axis is decode behaviour, not storage: forming `App(Lam…, x)` would force the emit side to replicate the evaluator, which is §4's defect relocated from α to β. Peel-and-substitute is bounded and structural, so D5 and D4 both hold. Storage is the λ-body — arity and parameter types come from the declared type, so nothing is duplicated and no new consistency rule is needed; and it avoids a second binding convention in `TypeExpr` that `alpha_canonicalize_proposition_json` would mis-handle, since that function deliberately preserves free `Var`s. Decode distinguishes a definition by the resolved resource's class, as `resolve_const_ref` already does for axiom / class / individual; **no new `Exp` variant** — after substitution the definition leaves no trace. Opacity (#95) hangs off the same resource and is a branch condition at the head. Requires a total capture-avoiding substitution on `Exp`, which does not yet exist (§2.4) |
+| **D8** | Does decode form a redex or substitute through — and what is stored? | ✅ settled — **store the λ-body; decode peels and substitutes; definitions are non-recursive.** §2.4. The real axis is decode behaviour, not storage: forming `App(Lam…, x)` would force the emit side to replicate the evaluator, which is §4's defect relocated from α to β. Peel-and-substitute is bounded and structural, so D5 and D4 both hold. Storage is the λ-body — arity and parameter types come from the declared type, so nothing is duplicated and no new consistency rule is needed; and it avoids a second binding convention in `Term` that `alpha_canonicalize_proposition_json` would mis-handle, since that function deliberately preserves free `Var`s. Decode distinguishes a definition by the resolved resource's class, as `resolve_const_ref` already does for axiom / class / individual; **no new `Exp` variant** — after substitution the definition leaves no trace. Opacity (#95) hangs off the same resource and is a branch condition at the head. Requires a total capture-avoiding substitution on `Exp`, which does not yet exist (§2.4) |
 
 ## 7. Out of scope
 
-- **Rules that quantify over parse shapes.** `⟦_⟧`/`match` over `eigentt:TypeExpr` — issue #112. D66
+- **Rules that quantify over parse shapes.** `⟦_⟧`/`match` over `eigentt:Term` — issue #112. D66
   covers rules over a *fixed* shape, which is what `literature-rules.esl` is. The two are independent;
   #112's stated ordering dependency on #111 does not survive §1.4.
 - **Reducing the definition count.** D66 moves 61 Declared bridges to 61 definitions and 1 Declared
@@ -686,7 +686,7 @@ cannot be deferred.)*
   ingest at 1.05 of 22 cores with no `rayon` anywhere in `kernel/`, `crates/`, or `storage/`. If the
   measurement warrants it, parallelising index population recovers far more than this change costs.
   Two adjacent items compound and are worth folding into the same pass: `Rule 21` already decodes two
-  `eigentt:TypeExpr`-ranged properties per lexical entry (claims-audit B8), and RocksDB is untuned with
+  `eigentt:Term`-ranged properties per lexical entry (claims-audit B8), and RocksDB is untuned with
   Bloom filters off (E5).
 
 ## 8. Source anchors (verified against the tree)
@@ -696,8 +696,8 @@ cannot be deferred.)*
 | Shape rule is a Declared resource, one per (predicate, shape) | `crates/eigenius-reasoning/src/grade.rs:546`; key at `crates/eigenius-encoding/src/emit.rs:350` |
 | 62 sentences → 61 distinct sense-erased skeletons | `experiments/parsing/skeleton-abstraction.py` over `expected-readings.tsv` |
 | Skeletons erase every open-class sense | `kernel/src/dcg/skeleton.rs:53` (`erase_senses`, ≥4-digit token → `§`) |
-| Zero-ctor inductive is opaque | `ontologies/reasoning/reasoning.esl:52` |
-| No implication introduction | `ontologies/reasoning/reasoning.esl:26-31`, ctors at `:97-175` |
+| Zero-ctor inductive is opaque | `ontologies/justification/justification.esl:52` |
+| No implication introduction | `ontologies/justification/justification.esl:26-31`, ctors at `:97-175` |
 | `Decl::Def` never emitted from ESL | only `kernel/src/program/expr.rs:358` |
 | `Let` reserved for type-position δ-binding | `kernel/src/esl/lexer.rs:48-54` |
 | Lookup side normalizes | `kernel/src/program/check_hooks.rs:76` |
@@ -734,7 +734,7 @@ The rule being eliminated quantifies over a kind (`forall (m : Set)`, over
 `HasActivity : Set -> Set -> Prop`), so its domain really is `Set` and eliminating the quantifier
 needs a domain binder strictly above `Set`. Raising `spec_poly`'s binder to `T : Type 1`, with the
 certificate unchanged, restores `Holds`; both ends are pinned in
-`crates/eigenius-reasoning/tests/spec_poly_universe.rs`. Whether the reasoning ontology takes that
+`kernel/tests/spec_poly_universe.rs`. Whether the reasoning ontology takes that
 level-1 bump or universe-polymorphic binders is open — `spec_poly`'s signature is published in
 `docs/spec/ai-computed-provenance-1.0.md`. D66 §2.2 reuses this instantiation and inherits the
 answer.

@@ -9,6 +9,21 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **ACTIVE: entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
+> (`docs/design/judgements-and-warrants.tex`) is the design; **P0 of
+> `docs/notes/judgements-warrants-build-plan.md` is the next task** — measurement only, no code.
+> The paper supersedes the D83 markdown draft (removed) and two of D82's conclusions: the
+> institution criterion and the constructive/classical conjecture. D82 remains the derivation record.
+>
+> This subsumes what entry 1 below scheduled as D80 (witness and institution machinery) and reaches
+> further: the build plan's P3 and P7 cover D80's W-phases, and D77's merge work is downstream of
+> both. Do not start D80 as scheduled below.
+>
+> **Note on a superseded conclusion:** D82 §5b.7 argued the reasoning institution is not an
+> institution and should dissolve. The paper rejects the criterion that rested on — institutions and
+> proof systems are not exclusive, and the kernel is a *degenerate* institution. P7 relocates
+> vocabulary the kernel owns; it does not dissolve anything.
+
 > **ACTIVE: entry 1 (`2026-08-24`, re-scoped `2026-08-25`), pushed on top of P2.** D75 diagnosed the
 > two seams as one problem, so the fusion work outranks the individual P2 issues it subsumes.
 > **D76 and D78 are complete.** D77 was drafted as the third follow-on and turned out to carry three
@@ -30,6 +45,14 @@ any detour.
 >    and verdicts "recheck" was unsettled until D80 — both answers turned out to differ from the
 >    resource one and from each other. §3.6's rename defect was fixed early (D79 P2 unblocked it),
 >    so F1 no longer needs to size it.
+>
+> **Detour taken `2026-08-26`, on top of the above:** D80's W-phases were not started. Instead the
+> stack was analysed first (`docs/notes/d81-epistemic-stack-analysis-plan.md` → **D81**, a
+> description of the epistemic machinery as implemented), and the user then reframed the whole area:
+> the system was anchored on *resources* but is about *propositions and how they came to be
+> warranted*. That produced **D82** (design, no code) with a seven-step sequence S0–S6. **D80 and
+> D77 are now downstream of D82's S1** — the witnessed relation in `WitnessKey` is the fix for the
+> environment-blindness D80 W1 was going to address, so W1 should not be built before S1 lands.
 >
 > **Loose ends from D79, none blocking:** the parse baseline records readings 613 / skeletons 170
 > and a live run now measures 688 / 180 — both within ceiling, gate green, cause unconfirmed (P7's
@@ -225,7 +248,7 @@ reseed rather than paying a standalone one.
 - **`param_kind`'s missing `EigonClass` arm is a live bug**, independent of all the above and of any
   ontology edit: a class-typed inductive parameter is silently typed `Set`, which accepts anything.
 
-- **N4 LANDED `2026-08-23`.** `eigentt:TypeExpr` moved into `core-ontology.json` (IRI unchanged),
+- **N4 LANDED `2026-08-23`.** `eigentt:Term` moved into `core-ontology.json` (IRI unchanged),
   `SizeSort` ctor added, `param_kind` and `type_name` retyped, 85 values migrated by script with the
   equivalence guard, manifest re-pinned on **five** layers (the four predicted, plus `reasoning`),
   full gate green (185 test binaries, clippy, fmt). **The reseed is the only thing left.**

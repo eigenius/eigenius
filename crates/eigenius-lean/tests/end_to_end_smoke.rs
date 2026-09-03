@@ -71,9 +71,11 @@ fn build_proof_term_layer(
     let mut payload = Resource::new(iri(payload_iri));
     payload.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofPayload",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofPayload")
+                .as_str()
+                .to_string(),
+        )]),
     );
     payload.set(
         iri(lean_iris::PROP_PAYLOAD_BYTES),
@@ -89,13 +91,13 @@ fn build_proof_term_layer(
     let mut term = Resource::new(iri(term_iri));
     term.set(
         iri(wk::IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(
-            "urn:eigenius:lean:LeanProofTerm",
-        ))]),
+        Value::Array(vec![Value::String(
+            iri("urn:eigenius:lean:LeanProofTerm").as_str().to_string(),
+        )]),
     );
     term.set(
         iri(lean_iris::PROP_PROOF_PAYLOAD),
-        Value::ResourceRef(iri(payload_iri)),
+        Value::iri(&iri(payload_iri)),
     );
     term.set(
         iri(lean_iris::PROP_TARGET_NAME),
@@ -148,9 +150,8 @@ fn lean_proof_term_with_well_typed_payload_lands_holds() {
     let (storage, layer) = build_proof_term_layer(bytes_str, "PUnit");
     let (index, runtime, ctx) = build_dispatch_setup(Arc::clone(&layer), storage);
 
-    // Pull the LeanProofTerm back off the committed layer so the
-    // AutoOnLoad dispatch sees the canonicalised shape (e.g. `is_a`
-    // entries as `ResourceRef`s, not raw `String`s).
+    // Pull the LeanProofTerm back off the committed layer so the AutoOnLoad dispatch sees the
+    // resource as it lands, not as it was authored.
     let term_iri = iri("urn:eigenius:test:lean:p1_term");
     let term = layer
         .resolve(&term_iri)

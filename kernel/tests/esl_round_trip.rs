@@ -14,7 +14,7 @@
 
 //! `compile(print(t))` is α-equal to `t`, over every D47 term in the committed demo artifacts.
 //!
-//! The comparator is [`alpha_canonicalize_proposition_json`] — the SAME normalisation the witness
+//! The comparator is [`alpha_canonicalize_proposition`] — the SAME normalisation the witness
 //! index hashes to decide whether a chain-resident witness discharges a proposition. So a term that
 //! passes here does not merely "look similar": it is the identical witness as far as the commit
 //! gate is concerned.
@@ -29,7 +29,6 @@ use std::collections::BTreeMap;
 use eigenius_kernel::esl;
 use eigenius_kernel::esl::print::{is_d47_term, print_type_expr, print_value_term, Namespaces};
 use eigenius_kernel::layer::Layer;
-use eigenius_kernel::witness::alpha_canonicalize_proposition_json;
 use serde_json::Value;
 
 /// The demo's committed chain artifacts, relative to the kernel crate root (cargo's CWD for an
@@ -58,23 +57,35 @@ const CORPUS: &[&str] = &[
 ];
 
 /// A D47 node: an object carrying `ctor` + `args`.
-fn is_term(v: &Value) -> bool {
-    v.get("ctor").and_then(Value::as_str).is_some() && v.get("args").is_some()
+/// Is this property value a TERM?
+///
+/// A term is a resource whose `is_a` names an `eigentt:Term` constructor class (D85 §6.1). It
+/// used to be "a JSON object with `ctor` and `args`" — the tagged shape, which no longer
+/// reaches a property.
+fn is_term(v: &eigenius_kernel::ontology::resource::Value) -> bool {
+    use eigenius_kernel::ontology::resource::Value as RV;
+    match v {
+        RV::Embedded(r) => r
+            .is_a()
+            .first()
+            .is_some_and(|c| c.as_str().starts_with("urn:eigenius:eigentt:Term-")),
+        _ => false,
+    }
 }
 
 /// Every term-valued property in a document, keyed `<resource-id> :: <property>`.
-fn terms_in(doc: &Value) -> BTreeMap<String, Value> {
+fn terms_in(
+    resources: &[eigenius_kernel::ontology::resource::Resource],
+) -> BTreeMap<String, Value> {
     let mut out = BTreeMap::new();
-    let rs = match doc {
-        Value::Array(a) => a.clone(),
-        other => vec![other.clone()],
-    };
-    for r in rs {
-        let Some(o) = r.as_object() else { continue };
-        let id = o.get("@id").and_then(Value::as_str).unwrap_or("<anon>");
-        for (k, v) in o {
+    for r in resources {
+        let id = r
+            .id()
+            .map(|i| i.as_str().to_string())
+            .unwrap_or_else(|| "<anon>".to_string());
+        for (k, v) in r.properties() {
             if is_term(v) {
-                out.insert(format!("{id} :: {k}"), v.clone());
+                out.insert(format!("{id} :: {k}"), tagged_of(v));
             }
         }
     }
@@ -105,22 +116,100 @@ fn print_then_compile(term: &Value, prop_ns: &str, layer: &Layer) -> Result<Valu
         ns.preamble()
     );
     // Against a layer, not bare: constructor short names resolve through the chain's ctor table
-    // (`collect_ctors_from_layer`), which is where `reasoning:JustifiedBy`'s ctors live. This is
+    // (`collect_ctors_from_layer`), which is where `justification:Certificate`'s ctors live. This is
     // also how decompiled ESL is meant to be reloaded.
-    let resources = esl::compile_against_layer(&src, layer).map_err(|errs| {
+    let resources = esl::compile(&src, layer).map_err(|errs| {
         let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
         format!("recompile: {}\n--- source ---\n{src}", msgs.join("; "))
     })?;
     let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:roundtrip:term")
         .expect("well-formed IRI");
     for r in &resources {
-        if let Some(eigenius_kernel::ontology::resource::Value::Json(j)) = r.get(&iri) {
-            return Ok(j.clone());
+        if let Some(v) = r.get(&iri) {
+            return Ok(tagged_of(v));
         }
     }
     Err(format!(
         "no rt:term in recompiled output\n--- source ---\n{src}"
     ))
+}
+
+/// The constructor view of a compiled value, for assertions written as `j["ctor"]`.
+///
+/// A term is a resource whose `is_a` names its constructor's class (D85 §6.1); this reads it
+/// back positionally so these assertions stay about the TERM rather than about property names.
+fn tagged_of(v: &eigenius_kernel::ontology::resource::Value) -> serde_json::Value {
+    use eigenius_kernel::ontology::resource::Value;
+    match v {
+        Value::Embedded(r) => {
+            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, bootstrap_chain())
+                .expect("a compiled term is a well-formed value resource")
+        }
+        other => panic!("expected a term value, got {other:?}"),
+    }
+}
+
+/// The bootstrap chain, built once — a value resource names classes the chain declares.
+fn bootstrap_chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
+/// α-canonicalise a term in the tagged PROJECTION these round trips compare.
+///
+/// The kernel canonicalises VALUES — `witness::alpha_canonicalize_proposition`, the one the
+/// witness key hashes through. This file compares projections, because printing and
+/// recompiling is what it exercises, so the same renaming is spelled once here rather than
+/// kept as a second canonicaliser in the kernel.
+fn alpha_canon_tagged(v: &serde_json::Value) -> serde_json::Value {
+    fn go(v: &serde_json::Value, env: &mut Vec<(String, String)>) -> serde_json::Value {
+        let Some(obj) = v.as_object() else {
+            return v.clone();
+        };
+        let (Some(ctor), Some(args)) = (
+            obj.get("ctor").and_then(serde_json::Value::as_str),
+            obj.get("args").and_then(serde_json::Value::as_array),
+        ) else {
+            return v.clone();
+        };
+        match (ctor, args.len()) {
+            ("Pi", 3) | ("Sig", 3) | ("Lam", 3) => {
+                let binder = args[0].as_str().unwrap_or("").to_string();
+                let dom = go(&args[1], env);
+                let canonical = if binder.is_empty() {
+                    String::new()
+                } else {
+                    format!("_b{}", env.len())
+                };
+                env.push((binder, canonical.clone()));
+                let body = go(&args[2], env);
+                env.pop();
+                serde_json::json!({"ctor": ctor, "args": [canonical, dom, body]})
+            }
+            ("Var", 1) => {
+                let name = args[0].as_str().unwrap_or("");
+                let resolved = env
+                    .iter()
+                    .rev()
+                    .find(|(orig, _)| orig == name && !orig.is_empty())
+                    .map(|(_, c)| c.clone())
+                    .unwrap_or_else(|| name.to_string());
+                serde_json::json!({"ctor": "Var", "args": [resolved]})
+            }
+            _ => serde_json::json!({
+                "ctor": ctor,
+                "args": args.iter().map(|a| go(a, env)).collect::<Vec<_>>(),
+            }),
+        }
+    }
+    go(v, &mut Vec::new())
 }
 
 #[test]
@@ -134,15 +223,9 @@ fn every_demo_term_round_trips_through_esl() {
         let Ok(text) = std::fs::read_to_string(path) else {
             panic!("corpus file missing: {path} (run from the kernel crate root)");
         };
-        let resources = esl::compile_against_layer(&text, layer)
-            .unwrap_or_else(|e| panic!("{path} does not compile: {e:?}"));
-        let doc = Value::Array(
-            resources
-                .iter()
-                .map(eigenius_kernel::ontology::eigon_json::serialize_resource)
-                .collect(),
-        );
-        for (label, term) in terms_in(&doc) {
+        let resources =
+            esl::compile(&text, layer).unwrap_or_else(|e| panic!("{path} does not compile: {e:?}"));
+        for (label, term) in terms_in(&resources) {
             checked += 1;
             // The inductive a property's values inhabit is declared in the same ontology as the
             // property, so the property IRI minus its local name is the ctor namespace.
@@ -154,8 +237,8 @@ fn every_demo_term_round_trips_through_esl() {
             match print_then_compile(&term, &prop_ns, layer) {
                 Err(e) => failures.push(format!("{path}\n  {label}\n  {e}")),
                 Ok(back) => {
-                    let a = alpha_canonicalize_proposition_json(&term);
-                    let b = alpha_canonicalize_proposition_json(&back);
+                    let a = alpha_canon_tagged(&term);
+                    let b = alpha_canon_tagged(&back);
                     if a != b {
                         failures.push(format!(
                             "{path}\n  {label}\n  NOT alpha-equal after round trip\n  \
@@ -180,7 +263,7 @@ fn every_demo_term_round_trips_through_esl() {
 
 /// eigenius#142 — a boolean literal survives ESL source → D47 term → printed ESL → D47 term.
 ///
-/// The `LitBool` ctor was added to `eigentt:TypeExpr` for `program:Literal` booleans; without the
+/// The `LitBool` ctor was added to `eigentt:Term` for `program:Literal` booleans; without the
 /// matching `true` / `false` surface in `parse_type_expr` the printer would emit source that does
 /// not reparse, which is exactly what `print_then_compile` catches.
 #[test]
@@ -193,16 +276,13 @@ fn boolean_literal_round_trips_through_esl() {
             "namespace rt = \"urn:eigenius:roundtrip\";\n\n\
              resource rt:probe : rt:Probe {{\n    rt:term = type_expr({literal});\n}}\n"
         );
-        let resources = esl::compile_against_layer(&src, layer)
+        let resources = esl::compile(&src, layer)
             .unwrap_or_else(|e| panic!("{literal} does not compile: {e:?}"));
         let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:roundtrip:term")
             .expect("well-formed IRI");
         let term = resources
             .iter()
-            .find_map(|r| match r.get(&iri) {
-                Some(eigenius_kernel::ontology::resource::Value::Json(j)) => Some(j.clone()),
-                _ => None,
-            })
+            .find_map(|r| r.get(&iri).map(tagged_of))
             .expect("rt:term is a D47 term");
 
         assert_eq!(
@@ -218,8 +298,8 @@ fn boolean_literal_round_trips_through_esl() {
 
         let back = print_then_compile(&term, "rt", layer).expect("reparses");
         assert_eq!(
-            alpha_canonicalize_proposition_json(&term),
-            alpha_canonicalize_proposition_json(&back),
+            alpha_canon_tagged(&term),
+            alpha_canon_tagged(&back),
             "`{literal}` changed across the round trip"
         );
     }
@@ -268,14 +348,8 @@ fn pretty_layout_changes_only_whitespace() {
 
     for path in CORPUS {
         let text = std::fs::read_to_string(path).expect("corpus file");
-        let resources = esl::compile_against_layer(&text, layer).expect("corpus compiles");
-        let doc = Value::Array(
-            resources
-                .iter()
-                .map(eigenius_kernel::ontology::eigon_json::serialize_resource)
-                .collect(),
-        );
-        for (label, term) in terms_in(&doc) {
+        let resources = esl::compile(&text, layer).expect("corpus compiles");
+        for (label, term) in terms_in(&resources) {
             if !is_d47_term(&term) {
                 continue;
             }
@@ -291,8 +365,8 @@ fn pretty_layout_changes_only_whitespace() {
             let b = wrap_and_compile(&pretty, &pns, layer)
                 .unwrap_or_else(|e| panic!("{label}: pretty form does not compile: {e}"));
             assert_eq!(
-                alpha_canonicalize_proposition_json(&a),
-                alpha_canonicalize_proposition_json(&b),
+                alpha_canon_tagged(&a),
+                alpha_canon_tagged(&b),
                 "{label}: pretty and flat compile to different terms"
             );
             checked += 1;
@@ -348,7 +422,7 @@ fn sorts_round_trip_in_every_position() {
             (
                 "App argument",
                 serde_json::json!({"ctor": "App", "args": [
-                    {"ctor": "ConstRef", "args": ["urn:eigenius:core:string"]},
+                    {"ctor": "ConstRef", "args": ["urn:eigenius:core:string", []]},
                     s.clone(),
                 ]}),
             ),
@@ -372,8 +446,8 @@ fn sorts_round_trip_in_every_position() {
             let back = wrap_and_compile(&printed, &ns, layer)
                 .unwrap_or_else(|e| panic!("{label}: printed `{printed}` does not compile: {e}"));
             assert_eq!(
-                alpha_canonicalize_proposition_json(&term),
-                alpha_canonicalize_proposition_json(&back),
+                alpha_canon_tagged(&term),
+                alpha_canon_tagged(&back),
                 "{label}: printed `{printed}`, which compiles to a different term"
             );
             checked += 1;
@@ -391,15 +465,15 @@ fn wrap_and_compile(body: &str, ns: &Namespaces, layer: &Layer) -> Result<Value,
          rt:term = type_expr(\n{body}\n    );\n}}\n",
         ns.preamble()
     );
-    let resources = esl::compile_against_layer(&src, layer).map_err(|errs| {
+    let resources = esl::compile(&src, layer).map_err(|errs| {
         let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
         format!("{}\n--- source ---\n{src}", msgs.join("; "))
     })?;
     let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:roundtrip:term")
         .expect("well-formed IRI");
     for r in &resources {
-        if let Some(eigenius_kernel::ontology::resource::Value::Json(j)) = r.get(&iri) {
-            return Ok(j.clone());
+        if let Some(v) = r.get(&iri) {
+            return Ok(tagged_of(v));
         }
     }
     Err("no rt:term".into())

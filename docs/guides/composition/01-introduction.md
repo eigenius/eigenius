@@ -78,16 +78,16 @@ For a per-cell narrative reading of the notebook, see
 
 ## 1.3a. A second composition shape — D52 statistics + D39 reasoning
 
-The kinase notebook covers cross-numerical-institution composition: five Julia institutions that all consume `formulas:FormulaTerm` and bridge to each other via declared comorphisms. With D52 (the measurement-statistics institution) and D39 (the justification-logic reasoning institution) on the platform, a second composition shape lives alongside it:
+The kinase notebook covers cross-numerical-institution composition: five Julia institutions that all consume `formulas:FormulaTerm` and bridge to each other via declared comorphisms. With D52 (the measurement-statistics institution) and D39 (justification logic, checked by the kernel rather than an institution) on the platform, a second composition shape lives alongside it:
 
 | Composition shape | Bridge mechanism | Worked example |
 |---|---|---|
 | **Numerical → numerical** | Declared comorphisms over `formulas:FormulaTerm` (extract → transformation → reify pipeline). | Kinase notebook — Symbolics → JuMP, Catalyst → DiffEq, Symbolics → IntervalArithmetic. |
-| **Statistics → reasoning** | Per-layer chain-witness index over `eigentt:TypeExpr` propositions. | D52 `StatisticalAnalysisPlan` verdict emits a `DerivedResource` with `canonical_proposition`; a D39 `ReasoningSentence` cites it via `DerivedEvidence` and the witness index admits the grounding. See [chapter 7](07-stats-and-reasoning-walkthrough.md). |
+| **Statistics → reasoning** | Per-layer chain-witness index over `eigentt:Term` propositions. | D52 `StatisticalAnalysisPlan` validation emits a result with `canonical_proposition`; a D39 `justification:Conclusion` grounds on `App(Declared(plan_yields), Observed(sample_set))`, whose halves the witness index admits. See [chapter 7](07-stats-and-reasoning-walkthrough.md). |
 
 The two shapes are structurally different: comorphisms are *active* translations (one institution's runtime is invoked, output is reified back into the chain), while the witness-index path is *passive* — D39 doesn't call D52, it just reads the chain artifact D52 emitted. Both are first-class composition mechanisms; which one applies depends on whether the downstream institution needs the input *value translated* (comorphism) or just *cited as evidence* (witness index).
 
-Chapter 2 covers both shared payload languages — `formulas:FormulaTerm` for the comorphism shape, `eigentt:TypeExpr` for the witness-index shape. Chapter 4 covers how AutoOnLoad gates from the two institutions cascade through a single commit. Chapter 7 walks the full statistics + reasoning pipeline end-to-end.
+Chapter 2 covers both shared payload languages — `formulas:FormulaTerm` for the comorphism shape, `eigentt:Term` for the witness-index shape. Chapter 4 covers how AutoOnLoad gates from the two institutions cascade through a single commit. Chapter 7 walks the full statistics + reasoning pipeline end-to-end.
 
 ## 1.4. Surface vocabulary you should already have
 
@@ -97,15 +97,15 @@ If any are unfamiliar, the cross-link is the right entry point.
 | Term | Where to learn it |
 |---|---|
 | `Institution`, `ExportFormat`, `ImportFormat`, `QueryClass`, `Comorphism` (the five chain shapes) | [ESL §9.1](../esl/09-institutions.md#91-what-an-institution-declares) |
-| `AutoOnLoad` / `OnDemand` / `Decidable` (the three dispatch roles) | [ESL §9.2](../esl/09-institutions.md#92-classification-at-compile-time), [EigenQL §8.2](../eigenql/08-institutions.md#82-the-classification-at-parse-time) |
+| `AutoOnLoad` / `OnDemand` / `Decidable` (the three dispatch roles) | [ESL §9.2](../esl/09-institutions.md#92-classification-at-compile-time), [EigenQL §8.2](../eigenql/09-institutions.md#9-2-the-classification-at-parse-time) |
 | `Verdict` (`Holds` / `Fails` / `Undecidable`) | [ESL §9.3](../esl/09-institutions.md#93-invoking-a-decidable-queryclass) |
 | `formula(...)` ESL sublanguage and `formulas:FormulaTerm` | [Formula language guide](../formula/README.md) |
-| `type_expr(...)` ESL sublanguage and `eigentt:TypeExpr` (D47) | [ESL §5.14a](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) |
+| `type_expr(...)` ESL sublanguage and `eigentt:Term` (D47) | [ESL §5.14a](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) |
 | `Prop` universe and proof irrelevance (D46) | [ESL §7.1](../esl/07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom) |
 | `ChainWitness.Is*As` predicates and the witness index (D49) | [ESL §6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) |
 | `StatisticalAnalysisPlan` / `SampleSet` (D52) | [Statistics institution tutorial](../platform/statistics-institution/README.md) |
-| `JustifiedBy` / `JustificationTerm` / `ReasoningSentence` (D39) | [ESL §9.10](../esl/09-institutions.md#9-10-the-reasoning-institution-d39-justification-logic), [reasoning institution tutorial](../platform/reasoning-institution/README.md) |
-| `FIBER ... AS ?var INTO "<iri>"` | [EigenQL §7.6](../eigenql/07-fiber-clauses.md#76-into--pinning-the-response-iri) |
+| `justification:Certificate` / `justification:Term` / `justification:Conclusion` (D39) | [ESL §9.10](../esl/09-institutions.md#9-10-the-justification-vocabulary--d39-justification-logic), [justification logic tutorial](../platform/justification-logic/README.md) |
+| `FIBER ... AS ?var INTO "<iri>"` | [EigenQL §7.6](../eigenql/08-fiber-clauses.md#8-6-into--pinning-the-response-iri) |
 | Comorphism program-invoke (`comorphisms:foo(input)` in ESL) | [ESL §9.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs) |
 | Runtime substrate (`mirror create → env build → env create → institution install`) | [Platform §11](../platform/11-runtime-substrate.md) |
 
@@ -131,7 +131,7 @@ elsewhere:
   least the [intervals tutorial](../platform/julia-institutions/intervals-institution-tutorial.md)
   before continuing.
 - **The conceptual pitch.** The
-  [SHACL-comparison note](../../notes/note-for-a-shacl-user.md) frames the
+  SHACL-comparison note frames the
   broad story for someone coming from the W3C semantic-web stack. This guide
   is the structured reference once that framing has landed.
 

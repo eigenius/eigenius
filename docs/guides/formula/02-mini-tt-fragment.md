@@ -66,7 +66,7 @@ the dual binders for the same arrow.
 
 The third use (constraints, propositions, predicates carried as typed
 values) is enabled by the same machinery and is the medium-term path
-described in the [SHACL-comparison note](../../notes/note-for-a-shacl-user.md)
+described in the SHACL-comparison note
 for clauses that travel between institutions. v1's institutions don't yet
 exploit this fully, but the chain shapes are in place.
 

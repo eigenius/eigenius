@@ -186,7 +186,6 @@ fn read_iri_property(r: &Resource, prop_iri: &str) -> Result<Iri, RunError> {
     match value {
         Value::String(s) => Iri::parse(s)
             .map_err(|e| boundary_failure(format!("malformed IRI in `{prop_iri}`: {e}"))),
-        Value::ResourceRef(iri) => Ok(iri.clone()),
         _ => Err(boundary_failure(format!(
             "property `{prop_iri}` has wrong type: expected IRI string"
         ))),
@@ -197,7 +196,6 @@ fn read_optional_iri_property(r: &Resource, prop_iri: &str) -> Option<Iri> {
     let prop = Iri::parse(prop_iri).ok()?;
     match r.get(&prop)? {
         Value::String(s) => Iri::parse(s).ok(),
-        Value::ResourceRef(iri) => Some(iri.clone()),
         _ => None,
     }
 }
@@ -353,7 +351,7 @@ mod tests {
     fn env_resource(env_iri: &str, mirror_iri: Option<&str>) -> Resource {
         let mut r = Resource::new(iri(env_iri));
         if let Some(m) = mirror_iri {
-            r.set(iri(props::MIRROR_DEPENDENCY), Value::ResourceRef(iri(m)));
+            r.set(iri(props::MIRROR_DEPENDENCY), Value::iri(&iri(m)));
         }
         r
     }
@@ -373,7 +371,7 @@ mod tests {
             Value::Array(
                 mirrored_classes
                     .iter()
-                    .map(|c| Value::ResourceRef(iri(c)))
+                    .map(|c| Value::iri(&iri(c)))
                     .collect(),
             ),
         );
@@ -382,16 +380,13 @@ mod tests {
 
     fn script_resource(env_iri: &str, requires_classes: &[&str]) -> Resource {
         let mut r = Resource::new(iri("urn:eigenius:test:script:s1"));
-        r.set(
-            iri(props::REQUIRES_ENVIRONMENT),
-            Value::ResourceRef(iri(env_iri)),
-        );
+        r.set(iri(props::REQUIRES_ENVIRONMENT), Value::iri(&iri(env_iri)));
         r.set(
             iri(props::REQUIRES_MIRROR_CLASSES),
             Value::Array(
                 requires_classes
                     .iter()
-                    .map(|c| Value::ResourceRef(iri(c)))
+                    .map(|c| Value::iri(&iri(c)))
                     .collect(),
             ),
         );
@@ -612,13 +607,13 @@ mod tests {
         let mut signature = Resource::new(iri("urn:eigenius:test:sig:s1"));
         signature.set(
             iri(props::INPUT_TYPES),
-            Value::Array(vec![Value::ResourceRef(iri(
-                "urn:eigenius:test:class:Input",
-            ))]),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:test:class:Input").as_str().to_string(),
+            )]),
         );
         signature.set(
             iri(props::OUTPUT_TYPE),
-            Value::ResourceRef(iri("urn:eigenius:test:class:Output")),
+            Value::iri(&iri("urn:eigenius:test:class:Output")),
         );
 
         let err = check_call_method(

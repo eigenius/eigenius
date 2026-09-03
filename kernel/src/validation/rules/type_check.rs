@@ -44,76 +44,52 @@ impl Validator {
             wk::FLOAT => matches!(value, Value::Float(_) | Value::Integer(_)),
             wk::BOOLEAN => matches!(value, Value::Boolean(_)),
             wk::RESOURCE => {
-                // A resource reference is canonically an IRI-valued text.
-                // `LayerBuilder::build` -> `canonicalise_resource_refs`
-                // upgrades a wire `Value::String` IRI to `Value::ResourceRef`
-                // in memory, but that distinction is deliberately NOT durable:
-                // the CBOR codec serialises both as `Text` and the content
-                // hash treats them as identical (`value_to_cbor`), so a
-                // committed layer reloaded from the backend carries
-                // `Value::String` for its resource-typed properties. Rule 3
-                // is the wire-level *shape* gate and must therefore be
-                // invariant under persist/reload: it accepts `String` (the
-                // canonical persisted/wire ref form), `ResourceRef` (the
-                // in-memory canonical form), and `Embedded` (an inlined
-                // Resource). Whether the IRI actually *resolves* is reference
-                // integrity's job (Rule 22), not this rule's.
+                // A resource reference is an IRI-valued text. Rule 3 is the wire-level
+                // *shape* gate and must be invariant under persist/reload, so it accepts
+                // `String` (a reference) and `Embedded` (an inlined Resource). Whether the
+                // IRI actually *resolves* is reference integrity's job (Rule 22), not this
+                // rule's — but whether it IS an IRI is this rule's, and was nobody's.
                 //
-                // When `class_types` declares an `InductiveType`, also
-                // accept `Value::Json` — the tagged-dict carrier for
-                // inductive values. The deeper structural check
-                // (ctor / arg_types) runs in `check_class_types`,
-                // mirroring the `core:inductive` split.
-                if self.class_types_inductive_target(prop_def).is_some() {
-                    matches!(
-                        value,
-                        Value::String(_)
-                            | Value::ResourceRef(_)
-                            | Value::Embedded(_)
-                            | Value::Json(_)
-                    )
-                } else {
-                    matches!(
-                        value,
-                        Value::String(_) | Value::ResourceRef(_) | Value::Embedded(_)
-                    )
+                // The string has to PARSE. Accepting any string here left prose in a
+                // reference slot detectable only by accident: Rule 22 collects targets with
+                // `value.as_iri()`, so a value that does not parse yields no targets and the
+                // resolve loop never runs. `prov:was_generated_by` — `core:resource` at
+                // `class_types: [prov:Activity]` — held a description in 14 places across the
+                // WRN inputs, and exactly ONE was ever reported: the one whose text contains
+                // `Firefly:Renilla`, which parses as an IRI and therefore reached the check.
+                // Thirteen equally wrong values were green because their prose had no colon.
+                //
+                // So the slot's declared type decides the shape, and the downstream rule stops
+                // inferring intent from punctuation.
+                //
+                // A `Value::ResourceRef` was accepted here too, until it was retired on
+                // `2026-08-31` (D85 §6.2). It was exactly the non-durable distinction this
+                // comment warned about: `LayerBuilder::build` produced it in memory, the CBOR
+                // codec serialised it as `Text`, and a reloaded layer carried `String`.
+                //
+                // A slot whose `class_types` names an `InductiveType` needs no separate arm:
+                // an inductive value is a resource (D85 §6.1), so it arrives `Embedded` like
+                // any other, and Rule 6 checks its constructor class against `class_types`.
+                match value {
+                    Value::Embedded(_) => true,
+                    Value::String(_) => value.as_iri().is_some(),
+                    _ => false,
                 }
             }
             wk::RESOURCE_ARRAY => match value {
-                Value::Array(arr) => {
-                    if self.class_types_inductive_target(prop_def).is_some() {
-                        arr.iter().all(|v| {
-                            matches!(
-                                v,
-                                Value::String(_)
-                                    | Value::ResourceRef(_)
-                                    | Value::Embedded(_)
-                                    | Value::Json(_)
-                            )
-                        })
-                    } else {
-                        arr.iter().all(|v| {
-                            matches!(
-                                v,
-                                Value::String(_) | Value::ResourceRef(_) | Value::Embedded(_)
-                            )
-                        })
-                    }
-                }
+                Value::Array(arr) => arr.iter().all(|v| match v {
+                    Value::Embedded(_) => true,
+                    Value::String(_) => v.as_iri().is_some(),
+                    _ => false,
+                }),
                 _ => false,
             },
             wk::VALUE_ARRAY => matches!(value, Value::Array(_)),
             wk::JSON => true, // Any value is valid for JSON
-            wk::INDUCTIVE => {
-                // Wire-level shape check: an inductive value lands as
-                // either a `Value::Json` carrying the tagged-dict tree
-                // or a `Value::Embedded` resource. The deeper
-                // structural type-check (ctor exists on declared
-                // InductiveType, arg shapes match `arg_types`) lives in
-                // `check_inductive_value` (rule 16) — same split as
-                // `check_class_types` for `core:resource`.
-                matches!(value, Value::Json(_) | Value::Embedded(_))
-            }
+            // An inductive value is a resource whose `is_a` names the constructor's class
+            // (D85 §6.1), so it lands `Embedded` and nothing else. Which constructor, and
+            // whether its arguments type-check, is Rule 6's and Rule 23's to say.
+            wk::INDUCTIVE => matches!(value, Value::Embedded(_)),
             _ => true, // Unknown data type, skip
         };
 

@@ -1,0 +1,449 @@
+// End-to-end D39 / D49 / D52 demo — drug screening.
+//
+// Question: Is compound EIG_0291 a strong CDK2 inhibitor?
+//
+// This fixture demonstrates the verdict-as-DerivedResource shape (D52
+// §6 + the institution-surface revision) end-to-end: the chain attests
+// only what the verifier actually proved — a strictly-statistical
+// proposition — and the translation into domain-predicate language
+// (`HasLowIC50` → `StrongInhibitor`) is itself a chain-resident
+// citable artefact rather than something the statistics author folded
+// silently into the SAP.
+//
+// Five chain commits + one justification:Conclusion:
+//
+// 1. Domain vocabulary — two predicates in `Prop`. `HasLowIC50` is
+//    marked `is_a stats:PopulationLevel` per D52 §7.4 so the statistics
+//    epistemic-scope check admits the claim under BiologicalReplication.
+//
+// 2. A literature rule as a `DeclaredResource` whose
+//    `canonical_proposition` is the implication
+//    `HasLowIC50(EIG_0291) -> StrongInhibitor(EIG_0291)`. A
+//    `DeclarationTrace` admits the IsDeclaredAs witness.
+//
+// 3. A SampleSetResource holding the three raw IC50 replicate readings
+//    (72, 85, 100 nM) plus an ObservationTrace pairing it with the
+//    bench instrument log (D49 §6 IsObservedAs witness).
+//
+// 4. The statistical layer:
+//    - A `stats:ImpossibilityWitness` resource encoding the
+//      methodological argument that mean IC50 cannot exceed the
+//      threshold under this assay class — what licenses the
+//      `OneSidedWitnessed` directionality on the SAP (D52 §7.1).
+//    - A `stats:StatisticalAnalysisPlan` with `OneSidedWitnessed(witness_iri)`
+//      directionality, `Absolute(100.0, "nM")` effect size, and the
+//      standard universal-claim parameters. The SAP carries no
+//      `canonical_proposition` — the verifier derives it from
+//      (dispatch, effect_size, directionality).
+//    - A pre-authored `stats:StatisticalAnalysisResult` at
+//      `{plan_iri}:result:main_effect` carrying the
+//      `canonical_proposition` the verifier would emit:
+//      `stats:lt(stats:mean_of("urn:...:m_eig0291_sampleset"), 100.0)`.
+//      Pre-authored because this test loads the chain witness index
+//      directly without dispatching the statistics institution
+//      (institution dispatch is exercised in the eigenius-statistics
+//      crate's own e2e tests). The is_a marker
+//      `reflection:InstitutionEmittedDerivation` is what the D49
+//      witness emitter walks to admit
+//      `IsDerivedAs(result_iri, stats:lt(...))` directly off the
+//      derivation, without needing a separate ProgramTrace.
+//
+// 5. The statistical-to-domain bridge:
+//    - A `reflection:DeclaredResource` whose `canonical_proposition`
+//      is the implication
+//      `stats:lt(stats:mean_of("urn:...:m_eig0291_sampleset"), 100.0)
+//       -> screen:HasLowIC50("urn:...:EIG_0291")`.
+//      Monomorphic — specialised to this (sample-set, compound) pair.
+//      The polymorphic shape (`forall s c, ...`) is the natural
+//      evolution once the SAP authoring workflow reuses a single
+//      bridge across many compounds; lands as a follow-on. A matching
+//      `DeclarationTrace` admits the IsDeclaredAs witness.
+//
+// 6. A `justification:Conclusion` claiming `StrongInhibitor(EIG_0291)`. The
+//    justification composes FOUR evidences via nested `App`:
+//      justification:App(rule,
+//          justification:App(bridge,
+//              justification:App(Declared(plan), Observed(sampleset))))
+//    - `App(Declared(plan), Observed(sampleset))` is the COMPUTED ground and
+//      exposes `stats:lt(mean_of(s), 100.0)` (the statistical claim). It was one
+//      `DerivedEvidence(verdict_iri)` leaf: the fact that a computation ran,
+//      standing in for both the method and the data it was run on.
+//    - The inner `justification:App(bridge, verdict)` yields `HasLowIC50(EIG_0291)`
+//      (the domain claim)
+//    - The outer `justification:App(rule, ...)` yields `StrongInhibitor(EIG_0291)`
+//      (the conclusion).
+//    The certificate is three nested `app(A, B, j1, j2, c1, c2)` calls
+//    composing justification:Certificate.declared (rule) + .declared
+//    (bridge) + .declared (plan) + .observed (sample set), all via
+//    justification:Certificate.app.
+//
+// On commit, ValidateJustification fires AutoOnLoad on the sentence
+// and the kernel type-checks the certificate against
+// `justification:Certificate(justification, proposition)`. The chain-witness index
+// supplies the three witnesses the grounding constructors consume
+// (`IsDerivedAs` on the verdict, `IsDeclaredAs` on the bridge, and
+// `IsDeclaredAs` on the literature rule).
+
+namespace core       = "urn:eigenius:core";
+namespace formats    = "urn:eigenius:core:formats";
+namespace reflection = "urn:eigenius:reflection";
+namespace stats      = "urn:eigenius:measurements";
+namespace eigentt    = "urn:eigenius:eigentt";
+namespace screen     = "urn:eigenius:demo:screen";
+
+// The per-effect `StatisticalAnalysisResult` IRI scheme is
+// `{plan_iri}:result:{effect_name}` (kernel-emitted; see
+// `crates/eigenius-statistics/src/validate.rs::measurement_result_resource`).
+// `screen_result` is the namespace prefix for the result *of*
+// `claim_eig0291_lowic50`, so `screen_result:main_effect` lands at
+// `urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect`.
+namespace screen_result = "urn:eigenius:demo:screen:claim_eig0291_lowic50:result";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace prov       = "urn:eigenius:prov";
+
+// ── Provenance activities ────────────────────────────────────────────
+// `prov:was_generated_by` is resource-typed: the event that produced an
+// observation has to be a node, not a string naming one. Each description below
+// is the string this file used to carry in that slot.
+
+resource screen:act_kinase_glo_plate_2026_03_04_a1 : prov:Activity {
+    core:description = "instrument-log:kinase-glo-plate-2026-03-04-A1";
+    core:short_name = "act_kinase_glo_plate_2026_03_04_a1";
+}
+
+
+// ─── Step 1: domain vocabulary ─────────────────────────────────────
+
+data screen:HasLowIC50 : core:string -> Prop, stats:PopulationLevel {
+}
+
+data screen:StrongInhibitor : core:string -> Prop, stats:PopulationLevel {
+}
+
+// ─── Step 2: literature rule + its DeclarationTrace ────────────────
+//
+// Specialised to EIG_0291. The antecedent is the domain predicate
+// that the bridge lifts the statistical claim into.
+
+resource screen:rule_strong : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_literature_smith_et_al_2024_3_2;
+    prov:rationale   = "IC50 < 100 nM at a kinase target is the standard strong-inhibitor threshold.";
+
+    reflection:canonical_proposition = type_expr(
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+        ->
+        screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+    );
+}
+
+resource screen:rule_strong_trace : prov:DeclarationTrace {
+    prov:resource    = screen:rule_strong;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_literature_smith_et_al_2024_3_2;
+    prov:timestamp   = "2026-04-10T09:00:00Z";
+}
+
+// ─── Step 3: SampleSetResource carrying the raw replicate readings ──
+
+resource screen:m_eig0291_sampleset : stats:SampleSetResource {
+    prov:was_generated_by      = screen:act_kinase_glo_plate_2026_03_04_a1;
+    prov:observed_at = "2026-03-04T14:22:11Z";
+
+    stats:sample_set_value = stats:SingleSampleEstimate(
+        [72.0, 85.0, 100.0],
+        BiologicalReplication(),
+    );
+}
+
+resource screen:m_eig0291_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = screen:m_eig0291_sampleset;
+    prov:was_generated_by    = screen:act_kinase_glo_plate_2026_03_04_a1;
+    prov:timestamp = "2026-03-04T14:22:11Z";
+}
+
+// ─── Step 4: statistical layer (witness + SAP + pre-authored result) ──
+//
+// The impossibility witness encodes the biological argument that the
+// inverse direction (mean IC50 *above* the threshold) is impossible
+// for this assay class. With the witness committed on chain, the
+// statistics institution admits `OneSidedWitnessed` directionality
+// (D52 §7.1) and halves the two-sided p-value before the Holds/Fails
+// decision. The witness itself is a marker resource — no structural
+// requirements beyond the `is_a` membership.
+
+resource screen:witness_kinaseglo_floor : stats:ImpossibilityWitness {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_methodology_kinase_glo_emax_floor;
+    prov:rationale   = "Kinase-Glo's E_max plateau and the cell-free target panel jointly exclude the inverse direction: mean IC50 cannot biologically be above the assay-class threshold under this protocol. This is the chain-resident proof-of-inverse-direction-impossibility that licenses the one-sided p-value path.";
+}
+
+// The SAP carries no propositional content — the verifier derives the
+// canonical proposition from (dispatch, effect_size, directionality).
+// For SingleSampleEstimate + OneSidedWitnessed + Absolute(T) the
+// derived proposition is `stats:lt(stats:mean_of(s), T)`, where T is
+// the effect_size threshold (100.0 nM here).
+
+resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
+    stats:sample_set = screen:m_eig0291_sampleset;
+
+    stats:alpha               = 0.05;
+    stats:effect_size         = Absolute(100.0, "nM");
+    stats:directionality      = OneSidedWitnessed("urn:eigenius:demo:screen:witness_kinaseglo_floor");
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion   = Identity();
+}
+
+// Pre-authored `StatisticalAnalysisResult` carrying the
+// `canonical_proposition` the verifier would emit if dispatched. The
+// multi-class header puts both `stats:StatisticalAnalysisResult` and
+// `reflection:InstitutionEmittedDerivation` on the resource's `is_a`
+// list — the second marker is what the D49 witness emitter walks to
+// admit `IsDerivedAs(result_iri, stats:lt(mean_of(s), 100.0))` against
+// the derivation's own IRI.
+//
+// IRI: `{plan_iri}:result:main_effect` per the kernel's emission scheme
+// (`crates/eigenius-statistics/src/validate.rs`). The
+// `screen_result` namespace prefix handles the multi-segment local IRI.
+//
+// Numerics chosen to mirror what the one-sample t-test on (72, 85,
+// 100) against threshold 100 nM actually produces; included so the
+// shape demonstrates a Holds verdict end-to-end.
+
+resource screen_result:main_effect :
+    stats:StatisticalAnalysisResult,
+    reflection:InstitutionEmittedDerivation
+{
+    reflection:from_subject          = screen:claim_eig0291_lowic50;
+    stats:verdict_ctor               = "Holds";
+    stats:computed_statistic         = -2.49;
+    stats:computed_p_value           = 0.064;
+    stats:effect_name                = "main_effect";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(
+            stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"),
+            100.0
+        )
+    );
+}
+
+// ─── Step 4b: the plan's reproducibility declaration ───────────────
+//
+// The SAR above records that a computation ran. That is provenance, and it
+// grounds nothing: a computed claim rests on the assertion that the PLAN denotes
+// a function of its input — which no execution establishes, since determinism is
+// a fact about the environment rather than something recoverable from having run
+// once — and on the INPUT, which the SampleSet's ObservationTrace already
+// attests. So the statistical claim is grounded by
+// `App(Declared(plan_yields_main_effect), Observed(sampleset))`, and this is the
+// declared half.
+
+resource screen:warrant_plan_reproducibility : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "The analysis plan pins its statistic, alpha, directionality, variance assumption and outlier rule over a recorded sample set. Those together are what make it a function of its input rather than of the occasion — the claim `Declared(plan)` carries, and the one no execution record could establish on its own.";
+    core:short_name = "warrant_plan_reproducibility";
+}
+
+resource screen:claim_eig0291_lowic50_yields_main_effect : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_plan_reproducibility;
+    prov:rationale    = "Applying claim_eig0291_lowic50 to the recorded sample set yields its main_effect: the one-sample t-test against the 100 nM threshold. A claim about the method, pinned at the input it is applied to.";
+    reflection:canonical_proposition = type_expr(
+        core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset")
+        -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"), 100.0)
+    );
+}
+
+resource screen:claim_eig0291_lowic50_yields_main_effect_trace : prov:DeclarationTrace {
+    prov:resource     = screen:claim_eig0291_lowic50_yields_main_effect;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_plan_reproducibility;
+    prov:timestamp    = "2026-04-10T09:00:00Z";
+}
+
+// ─── Step 5: statistical-to-domain bridge + its DeclarationTrace ────
+//
+// The bridge translates the verifier-derived statistical claim into
+// the domain-predicate language. Without it, the computed ground would
+// expose an inherently-statistical proposition that the
+// literature rule's antecedent doesn't match — the chain would have
+// no path from one to the other. With the bridge committed, the
+// certificate's middle `app(...)` step lifts the statistical claim
+// into `HasLowIC50` via a citable, auditable `DeclaredResource`.
+//
+// Monomorphic — one bridge resource per (sample_set, compound) pair.
+
+resource screen:bridge_eig0291_lowic50 : justification:Claim {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_methodology_ic50_classification_convention;
+    prov:rationale   = "The medicinal-chemistry convention that a sample's mean IC50 being statistically below 100 nM justifies classifying the underlying compound as HasLowIC50 at the assayed target. Specialised to the EIG_0291 sample-set / compound pair; the polymorphic shape would universally-quantify over (sample_set, compound) with an explicit `sample_for(s, c)` premise.";
+
+    reflection:canonical_proposition = type_expr(
+        stats:lt(
+            stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"),
+            100.0
+        )
+        ->
+        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+    );
+}
+
+resource screen:bridge_eig0291_lowic50_trace : prov:DeclarationTrace {
+    prov:resource    = screen:bridge_eig0291_lowic50;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = screen:warrant_methodology_ic50_classification_convention;
+    prov:timestamp   = "2026-03-04T14:22:11Z";
+}
+
+// ─── Step 6: the justification:Conclusion ─────────────────────────────────
+//
+// The agent's claim: "EIG_0291 is a strong CDK2 inhibitor."
+//
+// Justification: a two-step chain — first the bridge applied to the
+// statistical claim yields the domain claim (HasLowIC50); then the
+// literature rule applied to the domain claim yields the conclusion
+// (StrongInhibitor).
+//
+//   justification:App(
+//     Declared(rule_iri),         -- literature rule
+//     justification:App(
+//       Declared(bridge_iri),     -- statistical → domain
+//       justification:App(
+//         Declared(plan_iri),     -- the plan denotes a function of its input
+//         Observed(sampleset_iri) -- and this is the input
+//       )
+//     )
+//   )
+//
+// Certificate: nested `app(A, B, j1, j2, c1, c2)`. The outer `app`
+// composes the literature rule with the result of the inner `app`,
+// which itself composes the bridge with the computed statistic — itself
+// an `app` of the declared plan to the observed sample set.
+
+resource screen:concl_eig0291_strong : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
+
+    // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    justification:judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(
+                   // outer A
+                   screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
+                   // outer B
+                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
+                   // outer j1
+                   Declared("urn:eigenius:demo:screen:rule_strong"),
+                   // outer j2 — qualified `justification:App` because the bare
+                   // `App` ctor name collides with `eigentt:Term.App`
+                   // and the type_expr parser resolves to Term otherwise.
+                   justification:App(
+                       Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
+                       justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"))
+                   ),
+                   // outer c1: literature rule — witness slot elided
+                   declared(
+                       "urn:eigenius:demo:screen:rule_strong",
+                       screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+                       -> screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
+                   ),
+                   // outer c2: inner app — bridge applied to verdict
+                   app(
+                       // inner A'
+                       stats:lt(
+                           stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"),
+                           100.0
+                       ),
+                       // inner B'
+                       screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
+                       // inner j1'
+                       Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
+                       // inner j2' — the computed ground: the plan applied to the input
+                       justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset")),
+                       // inner c1': bridge — witness slot elided
+                       declared(
+                           "urn:eigenius:demo:screen:bridge_eig0291_lowic50",
+                           stats:lt(
+                               stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"),
+                               100.0
+                           )
+                           -> screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
+                       ),
+                       // inner c2': the computed statistic. Was `derived(SAR, STAT)`, one
+                       // leaf standing for both halves of what happened; now the
+                       // application of the declared plan to the observed input.
+                       app(
+                           // A' : the input is on record
+                           core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset"),
+                           // B' : what applying the plan to it yields
+                           stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"), 100.0),
+                           // j1', j2'
+                           Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"),
+                           Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"),
+                           // c1' : the plan denotes this function of this input
+                           declared(
+                               "urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect",
+                               core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset") -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"), 100.0)
+                           ),
+                           // c2' : the input was measured
+                           observed("urn:eigenius:demo:screen:m_eig0291_sampleset", core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset"))
+                       )
+                   )
+               )),
+               type_expr(justification:Certificate(
+                   justification:App(
+                       Declared("urn:eigenius:demo:screen:rule_strong"),
+                       justification:App(
+                           Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
+                           justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"))
+                       )
+                   ),
+                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") )) );
+
+
+    // Outer app: applies the literature rule to the result of the
+    // inner app (which produces HasLowIC50(EIG_0291)).
+    //   A  = HasLowIC50(EIG_0291)
+    //   B  = StrongInhibitor(EIG_0291)
+    //   j1 = Declared(rule_iri)
+    //   j2 = justification:App(bridge, computed) — produced by the inner app
+    //   c1 = declared(rule_iri, A -> B)
+    //   c2 = inner app(...) — bridge applied to the computed statistic
+    //
+    // Inner app: applies the bridge to the computed statistic.
+    //   A'  = stats:lt(mean_of(s), 100.0)
+    //   B'  = HasLowIC50(EIG_0291)
+    //   j1' = Declared(bridge_iri)
+    //   j2' = justification:App(Declared(plan_iri), Observed(sampleset_iri))
+    //   c1' = declared(bridge_iri, A' -> B')
+    //   c2' = app(Asserts(s), A', Declared(plan), Observed(s),
+    //             declared(plan, Asserts(s) -> A'), observed(s, Asserts(s)))
+    //
+    // The grounding ctors `declared`/`observed` each take a trailing
+    // `IsXxAs(iri, P)` slot the kernel's synthesize hook fills in
+    // from the chain witness index. ESL admits eliding that slot —
+    // the calls below stop after the (iri, P) pair.
+}
+
+// ── Warrants (D72 §3.3) ──────────────────────────────────────────────
+
+resource screen:warrant_literature_smith_et_al_2024_3_2 : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Warrant stub for `literature:smith_et_al_2024_3.2`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_literature_smith_et_al_2024_3_2";
+}
+
+resource screen:warrant_methodology_ic50_classification_convention : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Warrant stub for `methodology:ic50-classification-convention`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_methodology_ic50_classification_convention";
+}
+
+resource screen:warrant_methodology_kinase_glo_emax_floor : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Warrant stub for `methodology:kinase-glo-emax-floor`, minted by the D72 migration. Named as the ground of one or more declarations here; its CONTENT is not recorded. Before D72 this identifier existed only as an unresolvable string in a declared_by slot.";
+    core:short_name = "warrant_methodology_kinase_glo_emax_floor";
+}
+

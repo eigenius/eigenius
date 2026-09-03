@@ -76,7 +76,7 @@ That is the signal to fix the representation rather than write a third walker.
 `core:inductive` is a declared `core:DataType` whose `class_types` must name exactly one
 `InductiveType` (D32 §3.5). It is not opaque to the kernel: Rule 16 walks the tagged-dict tree against
 the type's ctors and `arg_types`, and Rule 21 (`check_type_expr_well_typed`) decodes and
-**type-checks** every `eigentt:TypeExpr`-ranged value, rejecting unresolved `ConstRef`s
+**type-checks** every `eigentt:Term`-ranged value, rejecting unresolved `ConstRef`s
 (`validation/rules/inductive.rs:171`, `validation/rules/eigentt_value.rs`).
 
 **The misdeclaration is systemic, not a few strays.** A full scan of every property whose
@@ -104,7 +104,7 @@ this section, working from a sample, reported four misdeclared properties rather
 | `core` | `type_name`, `param_kind`, `result_sort` |
 | `reflection` / `enc` | `canonical_proposition`, `antecedent_term` |
 
-Note the range targets are not only `eigentt:TypeExpr`: `core:result_sort` ranges at `core:Level`,
+Note the range targets are not only `eigentt:Term`: `core:result_sort` ranges at `core:Level`,
 `reasoning:justification` at `reasoning:JustificationTerm`, and the seven `stats` properties at their
 own institution inductives. The defect is about the *declared data type*, not about which inductive.
 
@@ -128,7 +128,7 @@ the `declaration_order` walker.
 validates it at all.
 
 **Decision: normalise all 23 onto `core:inductive`**, each keeping its own `class_types` target.
-`core:ctor_type` additionally gains `class_types eigentt:TypeExpr`, which it has never had. This is a
+`core:ctor_type` additionally gains `class_types eigentt:Term`, which it has never had. This is a
 bootstrap-ontology edit and therefore requires a reseed.
 
 **The `stats` block is not incidental.** Seven of the twenty-four are the statistics institution's own
@@ -316,7 +316,7 @@ seven audits corrected something the design had asserted.
   parse gate are unperturbed. **No reseed** — it adds a rule, not an ontology edit.
 - **P2 — the declarations** (§2.1). All 22 `core:resource` properties ranged at an `InductiveType`
   become `core:inductive`, each keeping its own `class_types` target;
-  `core:ctor_type` becomes `core:inductive` + `class_types eigentt:TypeExpr`. **Bootstrap edit, so a
+  `core:ctor_type` becomes `core:inductive` + `class_types eigentt:Term`. **Bootstrap edit, so a
   reseed**; batch with any other pending bootstrap change. Gates: reseed completes at the current
   resource count with 0 errors; `ctor_type` now reaches Rules 16/21, asserted by a malformed
   `ctor_type` that previously loaded and now does not; and the scan that produced §2.1's inventory

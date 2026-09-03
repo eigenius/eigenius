@@ -1293,8 +1293,11 @@ mod tests {
         );
         cls.set(
             Iri::parse("urn:eigenius:core:requires").unwrap(),
-            Value::Array(vec![Value::ResourceRef(
-                Iri::parse("urn:test:tag_name").unwrap(),
+            Value::Array(vec![Value::String(
+                Iri::parse("urn:test:tag_name")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
             )]),
         );
         r.insert(class_iri.clone(), cls);
@@ -1306,7 +1309,12 @@ mod tests {
         );
         prop.set(
             Iri::parse("urn:eigenius:core:data_type").unwrap(),
-            Value::ResourceRef(Iri::parse("urn:eigenius:core:string").unwrap()),
+            Value::String(
+                Iri::parse("urn:eigenius:core:string")
+                    .unwrap()
+                    .as_str()
+                    .to_string(),
+            ),
         );
         r.insert(prop_iri, prop);
         let chain = Chain { r };

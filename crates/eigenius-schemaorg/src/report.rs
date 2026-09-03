@@ -20,7 +20,7 @@
 //! **only the bare data** of the run — the generated ontology's `content_hash`
 //! plus the coverage accounting — encoded as Eigon-CBOR. It does **not** set the
 //! `canonical_proposition` (that is invocation-declared and kernel-stamped), nor
-//! the `ProgramTrace` / `IsDerivedAs` witness (kernel-applied). Keeping the
+//! the `ProgramTrace` recording the run (kernel-applied). Keeping the
 //! proposition off the tool is what lets the runtime stay language-agnostic: a
 //! `Prop` is a D47-encoded term a generic containerized tool has no business
 //! constructing.
@@ -37,8 +37,8 @@ use crate::convert::Coverage;
 pub const RESULT_IRI: &str = "urn:eigenius:obj:d57:generate_result";
 
 const IS_A: &str = "urn:eigenius:core:is_a";
-const DERIVED_RESOURCE: &str = "urn:eigenius:reflection:DerivedResource";
-const SOURCE: &str = "urn:eigenius:reflection:source";
+const CORE_RESOURCE: &str = "urn:eigenius:core:Resource";
+const SOURCE: &str = "urn:eigenius:prov:was_generated_by";
 const OUTPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:output_content_hash";
 const INPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:input_content_hash";
 const COVERAGE: &str = "urn:eigenius:obj:d57:coverage";
@@ -67,7 +67,10 @@ pub fn build_report(
     let mut r = Resource::new(iri(id));
     r.set(
         iri(IS_A),
-        Value::Array(vec![Value::ResourceRef(iri(DERIVED_RESOURCE))]),
+        // `core:Resource`, the catch-all. This was `reflection:DerivedResource` — the
+        // report's only class — until P5 (2/n) removed it from the ontology. What that tag
+        // meant is now carried by the trace and the certificate, not by an `is_a` marker.
+        Value::Array(vec![Value::String(iri(CORE_RESOURCE).as_str().to_string())]),
     );
     r.set(
         iri(INPUT_CONTENT_HASH),
@@ -91,10 +94,11 @@ pub fn build_report(
     // The worker is Eigenius-aware (links the kernel), so it sets its own
     // canonical_proposition — `obj:GeneratorConforms("schema_org")` — exactly as
     // the WRN R worker sets `r_eigon_set_proposition` (D55/D56). The committed
-    // ProgramTrace then mints `IsDerivedAs(<this resource>, GeneratorConforms)`,
-    // which the chain's `concl_generator` discharges via `derived(...)` (D60 §4.1
-    // tool-set path; the generic invocation-declared path is for non-Eigenius
-    // tools). The term shape is the D47 App-spine the reasoning institution reads:
+    // ProgramTrace records the run; it mints no witness, so a chain grounding a
+    // claim on this conversion writes `App(Declared(<the generator denotes this
+    // transform>), Observed(<the pinned schema.org input>))` (D60 §4.1 tool-set
+    // path; the generic invocation-declared path is for non-Eigenius tools).
+    // The term shape is the D47 App-spine the reasoning institution reads:
     // `App(ConstRef(pred), LitString(arg))`.
     r.set(
         iri(CANONICAL_PROPOSITION),
@@ -141,7 +145,7 @@ mod tests {
 
         // The result is identified and typed as a derivation result.
         assert_eq!(back.id().map(|i| i.as_str()), Some(RESULT_IRI));
-        assert!(back.is_a().iter().any(|c| c.as_str() == DERIVED_RESOURCE));
+        assert!(back.is_a().iter().any(|c| c.as_str() == CORE_RESOURCE));
 
         // The input→output provenance survives the round trip exactly.
         assert_eq!(
@@ -154,8 +158,8 @@ mod tests {
         );
 
         // The worker sets its own canonical_proposition — GeneratorConforms("schema_org")
-        // as the D47 App-spine — so the program-run's IsDerivedAs matches the chain's
-        // derived(...) certificate.
+        // as the D47 App-spine — so a chain declaration written against this
+        // proposition hashes to the same key.
         let Some(Value::Json(prop)) = back.get(&iri(CANONICAL_PROPOSITION)) else {
             panic!("report must carry canonical_proposition");
         };

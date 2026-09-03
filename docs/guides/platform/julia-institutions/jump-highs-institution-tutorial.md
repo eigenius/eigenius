@@ -45,23 +45,54 @@ Concrete example for the LP `min x + 2y`:
 ```json
 {
   "urn:eigenius:jump:objective": {
-    "ctor": "App",
-    "args": [
-      {"ctor": "App",
-       "args": [
-         {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"]},
-         {"ctor": "Var", "args": ["x"]}
-       ]},
-      {"ctor": "App",
-       "args": [
-         {"ctor": "App",
-          "args": [
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:mul"]},
-            {"ctor": "LitFloat", "args": [2.0]}
-          ]},
-         {"ctor": "Var", "args": ["y"]}
-       ]}
-    ]
+    "core:is_a": [
+      "formulas:FormulaTerm-App"
+    ],
+    "formulas:FormulaTerm-App-head": {
+      "core:is_a": [
+        "formulas:FormulaTerm-App"
+      ],
+      "formulas:FormulaTerm-App-head": {
+        "core:is_a": [
+          "formulas:FormulaTerm-OpRef"
+        ],
+        "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:add"
+      },
+      "formulas:FormulaTerm-App-arg": {
+        "core:is_a": [
+          "formulas:FormulaTerm-Var"
+        ],
+        "formulas:FormulaTerm-Var-name": "x"
+      }
+    },
+    "formulas:FormulaTerm-App-arg": {
+      "core:is_a": [
+        "formulas:FormulaTerm-App"
+      ],
+      "formulas:FormulaTerm-App-head": {
+        "core:is_a": [
+          "formulas:FormulaTerm-App"
+        ],
+        "formulas:FormulaTerm-App-head": {
+          "core:is_a": [
+            "formulas:FormulaTerm-OpRef"
+          ],
+          "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:mul"
+        },
+        "formulas:FormulaTerm-App-arg": {
+          "core:is_a": [
+            "formulas:FormulaTerm-LitFloat"
+          ],
+          "formulas:FormulaTerm-LitFloat-value": 2.0
+        }
+      },
+      "formulas:FormulaTerm-App-arg": {
+        "core:is_a": [
+          "formulas:FormulaTerm-Var"
+        ],
+        "formulas:FormulaTerm-Var-name": "y"
+      }
+    }
   }
 }
 ```
@@ -76,7 +107,7 @@ Constraints follow the same shape, plus a `ConstraintRelation` ctor and a Float6
 {
   "urn:eigenius:core:is_a": ["urn:eigenius:jump:Constraint"],
   "urn:eigenius:jump:lhs": { /* x + y as FormulaTerm */ },
-  "urn:eigenius:jump:relation": {"ctor": "LE"},
+  "urn:eigenius:jump:relation": {"urn:eigenius:core:is_a": ["urn:eigenius:jump:Relation-LE"]},
   "urn:eigenius:jump:rhs": 10.0
 }
 ```

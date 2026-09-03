@@ -42,7 +42,7 @@ fn json_layer(name: &str, parent: Option<Arc<Layer>>, sources: &[&str]) -> Arc<L
 }
 
 fn esl_layer(name: &str, src: &str, parent: Arc<Layer>) -> Arc<Layer> {
-    let resources = esl::compile_against_layer(src, &parent).unwrap_or_else(|errs| {
+    let resources = esl::compile(src, &parent).unwrap_or_else(|errs| {
         panic!(
             "{name} failed to compile (not Expressible):\n{}",
             errs.into_iter()
@@ -59,7 +59,7 @@ fn esl_layer(name: &str, src: &str, parent: Arc<Layer>) -> Arc<Layer> {
     Arc::new(b.build(LayerStorage::in_memory()))
 }
 
-/// core → reflection(+eigentt, institution, ingest) → logic → lexicon-schema → reference —
+/// core → reflection(+eigentt, institution, ingest) → prov → logic → lexicon-schema → reference —
 /// the chain `ontologies/encoding/encoding.esl`'s header documents it loads after.
 fn parent_chain() -> Arc<Layer> {
     let core = json_layer(
@@ -77,10 +77,13 @@ fn parent_chain() -> Arc<Layer> {
             include_str!("../../ontologies/ingest/ingest-ontology.json"),
         ],
     );
+    // `prov` sits above reflection and below everything that names an agent, a
+    // trace or an attribution — which is most of the stack.
+    let prov = esl_layer("prov", include_str!("../../ontologies/prov/prov.esl"), refl);
     let logic = esl_layer(
         "logic",
         include_str!("../../ontologies/logic/logic.esl"),
-        refl,
+        prov,
     );
     let lexicon = esl_layer(
         "lexicon-schema",
@@ -125,9 +128,13 @@ fn encoding_ontology_is_expressible_and_validates() {
     };
     let mut got: Vec<String> = vals
         .iter()
-        .map(|v| match v {
-            Value::ResourceRef(i) => i.as_str().to_string(),
-            other => panic!("allows_only entry should be a ResourceRef, got {other:?}"),
+        // The IRI, not the variant that carries it — `Value::as_iri` parses. Nothing upgrades
+        // a parsed `String` any more, because that upgrade never survived a storage round trip.
+        .map(|v| {
+            v.as_iri()
+                .unwrap_or_else(|| panic!("allows_only entry should be an IRI, got {v:?}"))
+                .as_str()
+                .to_string()
         })
         .collect();
     got.sort();
@@ -162,9 +169,13 @@ fn encoding_ontology_is_expressible_and_validates() {
     };
     let mut got: Vec<String> = vals
         .iter()
-        .map(|v| match v {
-            Value::ResourceRef(i) => i.as_str().to_string(),
-            other => panic!("allows_only entry should be a ResourceRef, got {other:?}"),
+        // The IRI, not the variant that carries it — `Value::as_iri` parses. Nothing upgrades
+        // a parsed `String` any more, because that upgrade never survived a storage round trip.
+        .map(|v| {
+            v.as_iri()
+                .unwrap_or_else(|| panic!("allows_only entry should be an IRI, got {v:?}"))
+                .as_str()
+                .to_string()
         })
         .collect();
     got.sort();

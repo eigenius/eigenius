@@ -35,42 +35,77 @@ Everything else in this tutorial is downstream of those three claims.
 Before any of the JSON in the upcoming steps will make sense, you need the encoding rule (D32 §3.7). Every `FormulaTerm` value is a tagged-dict tree:
 
 ```json
-{ "ctor": "<CtorName>", "args": [ <arg₀>, <arg₁>, ... ] }
+{
+  "core:is_a": ["formulas:FormulaTerm-<CtorName>"],
+  "formulas:FormulaTerm-<CtorName>-<argName>": <arg>
+}
 ```
 
 `<CtorName>` is one of `Var`, `LitFloat`, `OpRef`, `App`, `Lam`, `Pi` — the six ctors of the `formulas:FormulaTerm` `InductiveType`. `args` is an ordered list whose contents match the ctor's `arg_types` declared in [`formulas-ontology.json`](../../../../ontologies/formulas/formulas-ontology.json):
 
-| Ctor | `args` shape |
+| Ctor | Properties |
 |---|---|
-| `Var(name)` | `["x"]` — one string |
-| `LitFloat(value)` | `[2.5]` — one float |
-| `OpRef(iri)` | `["urn:eigenius:formulas:ops:add"]` — one IRI string |
-| `App(head, arg)` | `[<head FormulaTerm>, <arg FormulaTerm>]` — two recursive nodes |
-| `Lam(name, ty, body)` | `[<string>, <FormulaTerm>, <FormulaTerm>]` |
-| `Pi(name, ty, body)` | `[<string>, <FormulaTerm>, <FormulaTerm>]` |
+| `Var(name)` | `FormulaTerm-Var-name`: a string |
+| `LitFloat(value)` | `FormulaTerm-LitFloat-value`: a float |
+| `OpRef(iri)` | `FormulaTerm-OpRef-iri`: an IRI string |
+| `App(head, arg)` | `FormulaTerm-App-head`, `FormulaTerm-App-arg`: two nested values |
+| `Lam(name, ty, body)` | `FormulaTerm-Lam-name`: a string; `-ty`, `-body`: nested values |
+| `Pi(name, ty, body)` | `FormulaTerm-Pi-name`: a string; `-ty`, `-body`: nested values |
 
 **Multi-arg operators are curried via left-spined `App`s.** `f(a, b)` is `App(App(OpRef("f"), a), b)`; `g(a, b, c)` is `App(App(App(OpRef("g"), a), b), c)`. The chain doesn't have a variadic `App` — it mirrors EigenTT's binary application discipline directly (D32 §4.1, §2.2).
 
 For example, `(x + 0) * 1` expands fully to:
 
 ```json
-{ "ctor": "App",
-  "args": [
-    { "ctor": "App",
-      "args": [
-        { "ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:mul"] },
-        { "ctor": "App",
-          "args": [
-            { "ctor": "App",
-              "args": [
-                { "ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:add"] },
-                { "ctor": "Var", "args": ["x"] }
-              ] },
-            { "ctor": "LitFloat", "args": [0.0] }
-          ] }
-      ] },
-    { "ctor": "LitFloat", "args": [1.0] }
-  ]
+{
+  "core:is_a": [
+    "formulas:FormulaTerm-App"
+  ],
+  "formulas:FormulaTerm-App-head": {
+    "core:is_a": [
+      "formulas:FormulaTerm-App"
+    ],
+    "formulas:FormulaTerm-App-head": {
+      "core:is_a": [
+        "formulas:FormulaTerm-OpRef"
+      ],
+      "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:mul"
+    },
+    "formulas:FormulaTerm-App-arg": {
+      "core:is_a": [
+        "formulas:FormulaTerm-App"
+      ],
+      "formulas:FormulaTerm-App-head": {
+        "core:is_a": [
+          "formulas:FormulaTerm-App"
+        ],
+        "formulas:FormulaTerm-App-head": {
+          "core:is_a": [
+            "formulas:FormulaTerm-OpRef"
+          ],
+          "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:add"
+        },
+        "formulas:FormulaTerm-App-arg": {
+          "core:is_a": [
+            "formulas:FormulaTerm-Var"
+          ],
+          "formulas:FormulaTerm-Var-name": "x"
+        }
+      },
+      "formulas:FormulaTerm-App-arg": {
+        "core:is_a": [
+          "formulas:FormulaTerm-LitFloat"
+        ],
+        "formulas:FormulaTerm-LitFloat-value": 0.0
+      }
+    }
+  },
+  "formulas:FormulaTerm-App-arg": {
+    "core:is_a": [
+      "formulas:FormulaTerm-LitFloat"
+    ],
+    "formulas:FormulaTerm-LitFloat-value": 1.0
+  }
 }
 ```
 
@@ -188,8 +223,8 @@ The mirror generator (D32 §3.6) walks every reachable `Class` *and* `InductiveT
 - `struct SymbolicExpression`, `struct SimplifiesTo`, … for each Class
 - `abstract type FormulaTerm` plus six concrete structs (`FormulaTerm_Var`, `FormulaTerm_LitFloat`, `FormulaTerm_OpRef`, `FormulaTerm_App`, `FormulaTerm_Lam`, `FormulaTerm_Pi`) for each ctor of the FormulaTerm inductive
 - `abstract type ReductionStrategy` plus `ReductionStrategy_Simplify`, `ReductionStrategy_Expand`
-- `decode_FormulaTerm(d::AbstractDict)` that dispatches on `d["ctor"]` and recursively decodes `d["args"]` against the matching ctor's typed slots
-- Symmetric `encode_FormulaTerm(t)` that produces the chain-shaped `{"ctor": "...", "args": [...]}` dict
+- `decode_FormulaTerm(d::AbstractDict)` that dispatches on the constructor class in `d["core:is_a"]` and recursively decodes each argument property against the matching ctor's typed slots
+- Symmetric `encode_FormulaTerm(t)` that produces the chain-shaped value dict — `core:is_a` plus one entry per argument
 
 That last pair — `decode_FormulaTerm` / `encode_FormulaTerm` — is what makes typed Julia dispatch on `FormulaTerm` values *trivial*. The Symbolics handler writes `formula_to_num(t::FormulaTerm_App)` and Julia's multiple dispatch routes to it.
 
@@ -249,20 +284,31 @@ eigenius load <<<'[
       "core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
       "core:short_name": "x_times_0",
       "symbolics:term": {
-        "ctor": "App",
-        "args": [
-          {"ctor": "App", "args": [
-            {"ctor": "OpRef", "args": ["urn:eigenius:formulas:ops:mul"]},
-            {"ctor": "Var", "args": ["x"]}
-          ]},
-          {"ctor": "LitFloat", "args": [0.0]}
-        ]
+        "core:is_a": ["formulas:FormulaTerm-App"],
+        "formulas:FormulaTerm-App-head": {
+          "core:is_a": ["formulas:FormulaTerm-App"],
+          "formulas:FormulaTerm-App-head": {
+            "core:is_a": ["formulas:FormulaTerm-OpRef"],
+            "formulas:FormulaTerm-OpRef-iri": "urn:eigenius:formulas:ops:mul"
+          },
+          "formulas:FormulaTerm-App-arg": {
+            "core:is_a": ["formulas:FormulaTerm-Var"],
+            "formulas:FormulaTerm-Var-name": "x"
+          }
+        },
+        "formulas:FormulaTerm-App-arg": {
+          "core:is_a": ["formulas:FormulaTerm-LitFloat"],
+          "formulas:FormulaTerm-LitFloat-value": 0.0
+        }
       }
     },
     "symbolics:simplified": {
       "core:is_a": ["urn:eigenius:symbolics:SymbolicExpression"],
       "core:short_name": "zero",
-      "symbolics:term": {"ctor": "LitFloat", "args": [0.0]}
+      "symbolics:term": {
+        "core:is_a": ["formulas:FormulaTerm-LitFloat"],
+        "formulas:FormulaTerm-LitFloat-value": 0.0
+      }
     }
   }
 ]'
@@ -343,7 +389,7 @@ The kernel's FIBER eval path (which mirrors the same plumbing the Decidable path
 4. The worker's encoder pipeline walks the returned `SymbolicExpression`, calls `encode_SymbolicExpression` which calls `encode_FormulaTerm` on the term, and produces a CBOR map matching the chain's typed shape.
 5. The kernel parses the response, stamps a synthetic IRI on it (the `?simplified` binding), and threads it into the rest of the query so `?simplified.term` projects to the simplified form.
 
-`(x + 0) * 1` simplifies to `x` under Symbolics. The output's `term` is `Var("x")`, encoded as `{"ctor": "Var", "args": ["x"]}`.
+`(x + 0) * 1` simplifies to `x` under Symbolics. The output's `term` is `Var("x")`, encoded as a resource whose `core:is_a` is `formulas:FormulaTerm-Var` and whose `formulas:FormulaTerm-Var-name` is `"x"`.
 
 ### Why this works without per-institution glue
 
@@ -391,7 +437,7 @@ This particular claim has empty bindings, which collapses to "is `simplify(x + 0
 {
   "core:is_a": ["urn:eigenius:symbolics:SymbolicallyReducesTo"],
   "symbolics:expr": { ...2*(x+1)... },
-  "symbolics:strategy": { "ctor": "Expand", "args": [] },
+  "symbolics:strategy": { "core:is_a": ["symbolics:ReductionStrategy-Expand"] },
   "symbolics:result": { ...2*x + 2... }
 }
 ```

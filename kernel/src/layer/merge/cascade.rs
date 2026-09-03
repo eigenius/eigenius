@@ -361,9 +361,13 @@ fn cascade_for_quotient(
 }
 
 /// Walk every property of `resource`, emitting an `OrphanedReference`
-/// item for each `ResourceRef(target)` hit. Recurses through nested
+/// item for each IRI-string reference to `target`. Recurses through nested
 /// `Embedded` resources and `Array` items, tracking the property
 /// path to the reference site.
+///
+/// The path is why this reads the walk's `path` argument rather than only its leaves: the item
+/// this produces names WHERE the dangling reference sits, and a caller reading
+/// `PropertyPath([justification:judgement, eigentt:Judgement-holds-term])` can find it.
 fn collect_orphaned_refs(
     resource: &Resource,
     resource_iri: &Iri,
@@ -371,42 +375,21 @@ fn collect_orphaned_refs(
     path: &mut Vec<Iri>,
     out: &mut Vec<CascadeItem>,
 ) {
+    use crate::ontology::value_refs::{for_each_ref, RefSite};
     for (prop, value) in resource.properties() {
         path.push(prop.clone());
-        collect_orphaned_refs_in_value(value, resource_iri, target, path, out);
+        for_each_ref(value, &mut |site, s, inner_path| {
+            if site == RefSite::Value && s == target.as_str() {
+                let mut full = path.clone();
+                full.extend_from_slice(inner_path);
+                out.push(CascadeItem::OrphanedReference {
+                    resource: resource_iri.clone(),
+                    dropped_target: target.clone(),
+                    location: PropertyPath(full),
+                });
+            }
+        });
         path.pop();
-    }
-}
-
-fn collect_orphaned_refs_in_value(
-    value: &crate::ontology::resource::Value,
-    resource_iri: &Iri,
-    target: &Iri,
-    path: &mut Vec<Iri>,
-    out: &mut Vec<CascadeItem>,
-) {
-    use crate::ontology::resource::Value;
-    match value {
-        Value::ResourceRef(r) if r == target => {
-            out.push(CascadeItem::OrphanedReference {
-                resource: resource_iri.clone(),
-                dropped_target: target.clone(),
-                location: PropertyPath(path.clone()),
-            });
-        }
-        Value::Array(items) => {
-            for v in items {
-                collect_orphaned_refs_in_value(v, resource_iri, target, path, out);
-            }
-        }
-        Value::Embedded(boxed) => {
-            for (prop, inner_value) in boxed.properties() {
-                path.push(prop.clone());
-                collect_orphaned_refs_in_value(inner_value, resource_iri, target, path, out);
-                path.pop();
-            }
-        }
-        _ => {}
     }
 }
 
@@ -486,7 +469,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(profile_for_iri, Value::ResourceRef(iri(patient_iri)))],
+            &[(profile_for_iri, Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, _storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
 
@@ -531,7 +514,7 @@ mod tests {
 
         let patient = make_resource(patient_iri, &[wk::CLASS], &[]);
         let mut embedded = Resource::new_embedded();
-        embedded.set(iri(about_iri), Value::ResourceRef(iri(patient_iri)));
+        embedded.set(iri(about_iri), Value::iri(&iri(patient_iri)));
         let report = make_resource(
             report_iri,
             &[wk::CLASS],
@@ -641,10 +624,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(
-                "urn:project:profile_for",
-                Value::ResourceRef(iri(patient_iri)),
-            )],
+            &[("urn:project:profile_for", Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, _storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
         let resolution = MergeResolution::Rename {
@@ -669,10 +649,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(
-                "urn:project:profile_for",
-                Value::ResourceRef(iri(patient_iri)),
-            )],
+            &[("urn:project:profile_for", Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
 
@@ -716,10 +693,7 @@ mod tests {
         let profile = make_resource(
             profile_iri,
             &[wk::CLASS],
-            &[(
-                "urn:project:profile_for",
-                Value::ResourceRef(iri(patient_iri)),
-            )],
+            &[("urn:project:profile_for", Value::iri(&iri(patient_iri)))],
         );
         let (span, backend, storage) = build_span_arc(Vec::new(), vec![patient], vec![profile]);
 

@@ -15,7 +15,7 @@
 //! Institution-recompute smoke test — the ClassificationAnalysisPlan
 //! dispatch (D52 §2.2). Confirms the threshold classifier emits two
 //! StatisticalAnalysisResult derivations (`:result:ppv`, `:result:sensitivity`),
-//! each Holds with the metric value and an `IsDerivedAs`-admissible
+//! each Holds with the metric value and a declaration-ready
 //! `stats:ge(...)` canonical proposition.
 
 use std::sync::Arc;
@@ -57,8 +57,7 @@ fn build_chain() -> ExecutionContext {
     };
     let stats_layer: Arc<Layer> = {
         let src = include_str!("../../../ontologies/statistics/statistics.esl");
-        let resources =
-            esl::compile_against_layer(src, &reflection).expect("statistics.esl compiles");
+        let resources = esl::compile(src, &reflection).expect("statistics.esl compiles");
         let mut b = LayerBuilder::new("statistics", Some(reflection));
         for r in resources {
             b.add_resource(r).unwrap();
@@ -67,7 +66,7 @@ fn build_chain() -> ExecutionContext {
     };
     let fixture_layer = {
         let src = include_str!("fixtures/classification_smoke.esl");
-        let resources = esl::compile_against_layer(src, &stats_layer).unwrap_or_else(|errs| {
+        let resources = esl::compile(src, &stats_layer).unwrap_or_else(|errs| {
             panic!(
                 "classification_smoke.esl failed to compile: {}",
                 errs.into_iter()
@@ -145,7 +144,8 @@ fn classification_plan_emits_ppv_and_sensitivity_results() {
         assert!(
             r.get(&Iri::parse(iris::PROP_CANONICAL_PROPOSITION).unwrap())
                 .is_some(),
-            "{suffix} Holds → must carry a canonical proposition (for IsDerivedAs)"
+            "{suffix} Holds → must carry a canonical proposition (a plan declaration \
+             is written against it)"
         );
     }
 }

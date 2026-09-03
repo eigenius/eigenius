@@ -29,7 +29,8 @@ use serde_json::Value;
 
 /// Compile ESL source and return its resources as Eigon-JSON, keyed by `@id`.
 fn compile_to_json(src: &str) -> std::collections::BTreeMap<String, Value> {
-    let resources = esl::compile(src).unwrap_or_else(|e| panic!("source must compile: {e:?}"));
+    let resources =
+        esl::compile(src, chain()).unwrap_or_else(|e| panic!("source must compile: {e:?}"));
     resources
         .iter()
         .filter_map(|r| {
@@ -42,7 +43,7 @@ fn compile_to_json(src: &str) -> std::collections::BTreeMap<String, Value> {
 
 /// Decompile one resource and recompile it, returning the resulting JSON.
 fn round_trip(json: &Value) -> std::collections::BTreeMap<String, Value> {
-    let printed = esl::print::print_document(&Value::Array(vec![json.clone()]))
+    let printed = esl::print::print_document(&Value::Array(vec![json.clone()]), chain())
         .unwrap_or_else(|e| panic!("decompile must succeed: {e:?}"));
     compile_to_json(&printed)
 }
@@ -133,6 +134,43 @@ fn cases() -> Vec<(&'static str, &'static str, &'static str)> {
     ]
 }
 
+/// The bootstrap chain, built once: the declarations these tests print and recompile
+/// reference constructors declared across it.
+fn chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
+    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
+        std::sync::OnceLock::new();
+    CHAIN.get_or_init(|| {
+        std::sync::Arc::clone(
+            eigenius_kernel::bootstrap::bootstrap()
+                .expect("bootstrap")
+                .head(),
+        )
+    })
+}
+
+/// Show WHERE two serialisations diverge, not their first 200 identical bytes. Declarations
+/// are long and share a prefix, so a head-truncated dump of each is unreadable.
+fn first_difference(before: &str, after: &str) -> String {
+    let at = before
+        .char_indices()
+        .zip(after.char_indices())
+        .find(|((_, x), (_, y))| x != y)
+        .map(|((i, _), _)| i)
+        .unwrap_or_else(|| before.len().min(after.len()));
+    let from = before[..at].rfind([',', '{']).map_or(0, |i| i + 1);
+    let cut = |s: &str| -> String {
+        s.char_indices()
+            .nth(from)
+            .map(|(i, _)| s[i..].chars().take(160).collect())
+            .unwrap_or_default()
+    };
+    format!(
+        "  diverge at byte {at}\n  before: …{}\n  after:  …{}",
+        cut(before),
+        cut(after)
+    )
+}
+
 #[test]
 fn every_declaration_form_round_trips_through_esl() {
     let mut failures = Vec::new();
@@ -173,7 +211,7 @@ fn every_declaration_form_round_trips_through_esl() {
 ///
 /// 1. **Compiler-added provenance.** Recompiling mints stable constructor `@id`s
 ///    (`core:Level:Zero`), adds `reflection:DeclaredResource` to `is_a`, and stamps
-///    `reflection:declared_by`. The hand-authored JSON has none of these — it is under-specified
+///    `prov:was_attributed_to`. The hand-authored JSON has none of these — it is under-specified
 ///    relative to compiler output, so the difference runs the other way from a loss.
 ///
 /// `core:description` and `core:arg_name` were on this list until eigenius#221 added the surface
@@ -190,7 +228,7 @@ fn every_shipped_inductive_round_trips_through_esl() {
             match v {
                 Value::Object(o) => {
                     o.remove("@id");
-                    o.remove("urn:eigenius:reflection:declared_by");
+                    o.remove("urn:eigenius:prov:was_attributed_to");
                     o.remove("urn:eigenius:core:is_a");
                     // The compiler writes explicit empty arrays where hand-authored JSON omits
                     // the key. Absent and empty mean the same thing for all three, so normalise.
@@ -236,14 +274,21 @@ fn every_shipped_inductive_round_trips_through_esl() {
             seen += 1;
             let id = r.id().map(|i| i.as_str().to_string()).unwrap_or_default();
             let before = eigon_json::serialize_resource(r);
-            let printed = match esl::print::print_document(&Value::Array(vec![before.clone()])) {
-                Ok(p) => p,
-                Err(e) => {
-                    failures.push(format!("{id}: does not decompile at all: {e:?}"));
-                    continue;
-                }
-            };
-            match esl::compile(&printed) {
+            let printed =
+                match esl::print::print_document(&Value::Array(vec![before.clone()]), chain()) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        failures.push(format!("{id}: does not decompile at all: {e:?}"));
+                        continue;
+                    }
+                };
+            // Compile against the CHAIN. A declaration's values name their constructor's
+            // arguments (D85 §6.1), so reproducing what the ontology authored needs the
+            // argument names of constructors the document only REFERENCES — `eigentt:Term`'s,
+            // say — which live in the chain, not in the printed text. Redeclaring this
+            // document's own inductive on top of the chain is fine: that is layer shadowing,
+            // and D79 §2.3 owns it.
+            match esl::compile(&printed, chain()) {
                 Ok(rs) => {
                     let after = rs
                         .iter()
@@ -252,9 +297,11 @@ fn every_shipped_inductive_round_trips_through_esl() {
                     match after {
                         Some(a) if declaration_content(&a) == declaration_content(&before) => {}
                         Some(a) => failures.push(format!(
-                            "{id}: recompiled to a DIFFERENT declaration\n  before: {}\n  after:  {}",
-                            declaration_content(&before),
-                            declaration_content(&a)
+                            "{id}: recompiled to a DIFFERENT declaration\n{}",
+                            first_difference(
+                                &declaration_content(&before).to_string(),
+                                &declaration_content(&a).to_string()
+                            )
                         )),
                         None => failures.push(format!("{id}: recompiled without that IRI")),
                     }
@@ -333,9 +380,9 @@ fn every_shipped_ontology_document_round_trips() {
                 .map(eigon_json::serialize_resource)
                 .collect(),
         );
-        match esl::print::print_document(&doc) {
+        match esl::print::print_document(&doc, chain()) {
             Err(e) => failures.push(format!("{name}: does not decompile: {}", e.message)),
-            Ok(src) => match esl::compile(&src) {
+            Ok(src) => match esl::compile(&src, chain()) {
                 Ok(_) => ok += 1,
                 Err(e) => failures.push(format!(
                     "{name}: decompiled text does not recompile: {:?}",
@@ -365,7 +412,7 @@ fn quoted_identifiers_admit_hyphens_and_keywords_but_never_hash() {
         namespace ex = "urn:eigenius:ex";
         resource ex:'obo-foundry' : core:Class { core:short_name = "obo"; }
     "#;
-    let rs = esl::compile(hyphen).expect("a hyphenated local name compiles when quoted");
+    let rs = esl::compile(hyphen, chain()).expect("a hyphenated local name compiles when quoted");
     assert!(
         rs.iter().any(|r| r
             .id()
@@ -380,6 +427,7 @@ fn quoted_identifiers_admit_hyphens_and_keywords_but_never_hash() {
         namespace ex = "urn:eigenius:ex";
         resource ex:'14e82c39' : core:Class { core:short_name = "h"; }
         "#,
+        chain(),
     )
     .expect("a leading digit compiles when quoted");
 
@@ -390,6 +438,7 @@ fn quoted_identifiers_admit_hyphens_and_keywords_but_never_hash() {
         namespace program = "urn:eigenius:program";
         resource 'program':Foo : core:Class { core:short_name = "Foo"; }
         "#,
+        chain(),
     )
     .expect("a keyword namespace compiles when quoted");
 
@@ -404,6 +453,7 @@ fn quoted_identifiers_admit_hyphens_and_keywords_but_never_hash() {
         namespace ex = "urn:eigenius:ex";
         resource ex:'HB#0_1' : core:Class { core:short_name = "x"; }
         "#,
+        chain(),
     )
     .expect_err("`#` must not be spellable, quoted or otherwise");
     let msg = err[0].to_string();
@@ -426,9 +476,9 @@ fn the_printer_quotes_only_what_needs_it() {
         resource ex:'obo-foundry' : core:Class { core:short_name = "obo"; }
         resource ex:ordinary : core:Class { core:short_name = "ord"; }
     "#;
-    let rs = esl::compile(src).expect("compiles");
+    let rs = esl::compile(src, chain()).expect("compiles");
     let doc = Value::Array(rs.iter().map(eigon_json::serialize_resource).collect());
-    let printed = esl::print::print_document(&doc).expect("decompiles");
+    let printed = esl::print::print_document(&doc, chain()).expect("decompiles");
 
     assert!(
         printed.contains("'obo-foundry'"),
@@ -438,5 +488,5 @@ fn the_printer_quotes_only_what_needs_it() {
         !printed.contains("'ordinary'"),
         "an ordinary name must NOT be quoted:\n{printed}"
     );
-    esl::compile(&printed).expect("and the printed text recompiles");
+    esl::compile(&printed, chain()).expect("and the printed text recompiles");
 }

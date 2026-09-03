@@ -4,9 +4,10 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:ingest:PinnedExternalFile"
     ],
-    "urn:eigenius:reflection:source": "DepMap Achilles 18Q4 gene_effect (figshare 7270880); CERES dependency matrix",
+    "urn:eigenius:prov:was_generated_by": "urn:eigenius:pub:wrn:activity:figshare_achilles",
     "urn:eigenius:ingest:reference": "file://wrn-slices/achilles_18Q4_gene_effect.csv",
     "urn:eigenius:ingest:content_hash": "sha256:2186669de8ade17bfbf7f2bc3e67e8af59d644800bf793ef103c67a4692eb68b",
-    "urn:eigenius:ingest:media_type": "text/csv"
+    "urn:eigenius:ingest:media_type": "text/csv",
+    "urn:eigenius:core:description": "DepMap Achilles 18Q4 gene_effect (figshare 7270880); CERES dependency matrix"
   }
 ]
