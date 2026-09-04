@@ -94,10 +94,11 @@ pub struct DispatchOutcome {
     /// Side-effect resources the language runtime emitted as artefacts
     /// of dispatch — each Eigon-CBOR-encoded. The kernel's
     /// `ExternalInstitution::query` decodes these into
-    /// `QueryOutcome.derivations`, which the commit pipeline then
-    /// emits as chain-resident
-    /// `reflection:InstitutionEmittedDerivation` resources under the
-    /// gated subject (D52 §6).
+    /// `QueryOutcome.derivations`, which the commit pipeline then emits
+    /// as chain-resident resources under the gated subject (D52 §6) —
+    /// stamped `reflection:InstitutionEmittedDerivation` unless the
+    /// resource is a `prov:Trace`, which records what the check
+    /// established rather than what the run produced.
     pub derivations_cbor: Vec<Vec<u8>>,
     pub partial_invocation_cbor: Vec<u8>,
 }

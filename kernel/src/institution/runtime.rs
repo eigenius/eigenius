@@ -64,22 +64,30 @@ pub struct QueryOutcome {
     /// Verdict carries no `canonical_proposition`; derivations are
     /// separate.
     pub output: Resource,
-    /// Side-effect resources the institution produced *as artefacts
-    /// of validation*. Empty for institutions whose only job is the
-    /// pass/fail gate (e.g. Reasoning / Lean). Statistics emits one
-    /// `StatisticalAnalysisResult` per ANOVA effect; each derivation is a
-    /// `reflection:InstitutionEmittedDerivation` whose
-    /// `canonical_proposition` recording what the run produced — a record, not
-    /// a ground (see `DispatchOutcome::derivations`). The kernel commits each
-    /// derivation alongside the gate-Verdict when the gate Holds;
-    /// derivations are dropped when the gate Fails.
+    /// Side-effect resources the institution produced *as artefacts of
+    /// validation*. Empty for institutions whose only job is the pass/fail gate
+    /// (e.g. Reasoning). Two kinds ride this list, and the kernel tells them
+    /// apart by class:
     ///
-    /// The institution sets each derivation's `@id` to its intended
-    /// chain IRI (typically suffixed off the gated subject — e.g.
+    /// - a **derivation** — what the run PRODUCED, which grounds nothing.
+    ///   Statistics emits one `StatisticalAnalysisResult` per ANOVA effect,
+    ///   carrying a `canonical_proposition` recording the result (see
+    ///   `DispatchOutcome::derivations`). The kernel stamps
+    ///   `reflection:InstitutionEmittedDerivation` on it.
+    /// - a **`prov:Trace`** — what the check ESTABLISHED, which grounds a
+    ///   witness. Lean emits a `prov:VerificationTrace` naming the claim on
+    ///   `Verdict::Holds` (eigenius#160). The marker class is *not* stamped on
+    ///   it, and it lands only when the gate Holds — not on `Undecidable`.
+    ///
+    /// The kernel commits both alongside the gate-Verdict; both are dropped
+    /// when the gate Fails.
+    ///
+    /// The institution sets each resource's `@id` to its intended chain IRI
+    /// (typically suffixed off the gated subject — e.g.
     /// `{analysis_iri}:result:main_A`), and sets the domain-specific
-    /// properties. The kernel stamps the cross-resource linkage
-    /// properties (`reflection:from_subject`, `reflection:runtime_invocation`)
-    /// so every derivation can navigate back to its producer.
+    /// properties. The kernel stamps the cross-resource linkage properties
+    /// (`reflection:from_subject`, `reflection:runtime_invocation`) so every
+    /// emitted resource can navigate back to its producer.
     pub derivations: Vec<Resource>,
     /// Substrate-captured provenance fields, ready to be folded into a
     /// full `RuntimeInvocation` by the kernel commit pipeline. Always

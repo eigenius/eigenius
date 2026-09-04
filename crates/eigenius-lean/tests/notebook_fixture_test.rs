@@ -325,3 +325,96 @@ fn a_claim_without_a_proposition_is_refused() {
         "and must say why a name-level verdict is not enough; got {msg}"
     );
 }
+
+/// A `Verdict::Holds` reaches the **verified** grade — the whole of eigenius#160.
+///
+/// Before this, `do_proof_check` returned a Verdict and nothing else, so a checked Lean proof
+/// left the chain in the same state a failed one did. `verified(X)` in a justification term was
+/// unsatisfiable by any Lean proof, and D28 §1's reason for the institution to exist was not
+/// wired end to end.
+///
+/// Three things have to hold together, and the test asserts each separately because any one of
+/// them failing alone would leave the other two looking correct:
+///
+/// 1. the institution emits a `prov:VerificationTrace` pointing at the claim;
+/// 2. the kernel does **not** stamp `reflection:InstitutionEmittedDerivation` on it — that class
+///    says "grounds nothing", which is the opposite of what a trace is for;
+/// 3. `lookup_chain_witness` answers `true` for `Verified` on the claim's own proposition. This
+///    is the one that matters: (1) and (2) are how it is reached, not what it delivers.
+#[test]
+fn a_holds_verdict_admits_a_verified_witness() {
+    use eigenius_kernel::layer::lookup_chain_witness;
+    use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
+
+    const CLAIM_IRI: &str = "urn:eigenius:demo:lean:patient_1";
+    const PAYLOAD_IRI: &str = "urn:eigenius:demo:lean:proof_payload";
+
+    let resources = fixture_resources();
+    let claim_proposition = resources
+        .iter()
+        .find(|r| r.id().is_some_and(|i| i.as_str() == CLAIM_IRI))
+        .and_then(|r| r.get(&Iri::parse(wk::CANONICAL_PROPOSITION).expect("well-known IRI")))
+        .expect("the demo claim carries a canonical_proposition (eigenius#159)")
+        .clone();
+
+    let outcome = land(resources);
+    assert!(
+        outcome.error.is_none(),
+        "the demo must land cleanly; got {:?}",
+        outcome.error
+    );
+    let provenance: Arc<Layer> = Arc::clone(&outcome.layers[1].layer);
+
+    // 1. The trace is there, and it names the claim rather than the proof term. `prov:resource`
+    //    is what `emit_from_trace` follows to find the proposition the witness keys on, so a
+    //    trace pointing at the `LeanProofTerm` would commit cleanly and attest nothing.
+    let trace = provenance
+        .iter_resources()
+        .map(|(_, r)| r)
+        .find(|r| {
+            r.is_a()
+                .iter()
+                .any(|c| c.as_str() == wk::VERIFICATION_TRACE)
+        })
+        .expect("a Holds verdict must commit a prov:VerificationTrace beside it");
+    assert_eq!(
+        trace.get(&Iri::parse(wk::REFLECTION_RESOURCE).expect("well-known IRI")),
+        Some(&Value::iri(&Iri::parse(CLAIM_IRI).expect("static IRI"))),
+        "the trace must target the CLAIM — that is where the proposition the witness keys on lives"
+    );
+    assert_eq!(
+        trace
+            .get(&Iri::parse(wk::PROOF_SYSTEM).expect("well-known IRI"))
+            .and_then(Value::as_str),
+        Some("lean4"),
+    );
+    assert_eq!(
+        trace
+            .get(&Iri::parse(wk::PROOF_TERM).expect("well-known IRI"))
+            .and_then(Value::as_str),
+        Some(PAYLOAD_IRI),
+        "prov:proof_term names the resource holding the export bytes"
+    );
+
+    // 2. No "grounds nothing" marker on the one resource whose purpose is to be a ground.
+    assert!(
+        !trace
+            .is_a()
+            .iter()
+            .any(|c| c.as_str() == wk::INSTITUTION_EMITTED_DERIVATION),
+        "finalize_emitted_resource must withhold the derivation marker from a prov:Trace; got {:?}",
+        trace.is_a()
+    );
+
+    // 3. The grade itself.
+    let key = WitnessKey::from_encoded(
+        WitnessCategory::Verified,
+        Iri::parse(CLAIM_IRI).expect("static IRI"),
+        &claim_proposition,
+    );
+    assert!(
+        lookup_chain_witness(&provenance, &key),
+        "the chain must admit `Verified` for the claim's own proposition — this is the grade the \
+         Lean institution exists to reach (D28 §1 / eigenius#160)"
+    );
+}

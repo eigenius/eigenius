@@ -77,7 +77,33 @@ The only deferred sub-item is the `VerificationTrace` emit branch (the `IsVerifi
 
 ## 3. Gap 2 — Lean → Reasoning comorphism + `VerifiedPropositionView`
 
-**Status (2026-06-11): 🟡 Partial — off the pilot critical path.** What exists:
+**Status (2026-09-03): ✅ Closed — by a different route than this section specifies (eigenius#160).**
+
+A checked Lean proof now reaches the *verified* grade, and no comorphism, `lean_to_reasoning`
+transformation, or `VerifiedPropositionView` was built to get there. On `Verdict::Holds` the
+institution emits a `prov:VerificationTrace` naming the claim
+(`crates/eigenius-lean/src/institution.rs::verification_trace`); the kernel commits it in the
+`verdict_provenance` layer; `witness_index::emit_from_trace` follows `prov:resource` to the claim
+and reads its `reflection:canonical_proposition` — the same code path that serves
+`IsDeclaredAs` / `IsObservedAs`, with no Verified-specific arm. Asserted end to end by
+`notebook_fixture_test::a_holds_verdict_admits_a_verified_witness`.
+
+**Why the reified view is not needed.** The view existed to carry the Lean proposition into
+EigenTT form so the witness could key on it. D74 inverted the direction: the claim's
+`canonical_proposition` is authored in EigenTT and *externalized to Lean*, where `def_eq` compares
+it against the proof's statement (D74 §6.3). The EigenTT-side proposition is therefore already on
+the chain before the check runs, and there is nothing to translate back. That also removes the
+inverse-D30 transformation this section called load-bearing, along with its universe-polymorphism
+failure mode — an unrepresentable proposition now fails on the *forward* externalization, where
+D74 §4's fragment boundary is stated once.
+
+`justification:VerifiedPropositionView` remains declared and unused. Its class description still
+describes the emitter as reading the view, which is not what the emitter does; that text is queued
+with the next batched ontology edit rather than moved on its own, since an ontology change drifts
+the bootstrap manifest and forces a reseed.
+
+The rest of this section records the design as it stood on `2026-06-11`. What existed then:
+
 - `ontologies/justification/justification.esl` — `reasoning:VerifiedPropositionView : reflection:DerivedResource` is declared (requires `source_verified_resource` + `reflection:canonical_proposition`), ready to receive comorphism-reified views. The file comment notes "Phase 8 wires the comorphism; this declaration goes ahead of it."
 - `kernel/src/layer/witness_index.rs` / `nbe/check.rs` — the `IsVerifiedAs` lookup hook and the `IsVerifiedAs → IsDerivedAs` coercion are wired; no further kernel change is needed on the *consumer* side once the producer lands.
 

@@ -156,9 +156,8 @@ pub enum Val {
     /// The kernel synthesises one during `justification:Certificate.*` constructor
     /// type-checking, via `CheckHooks::synthesize_chain_witness` →
     /// `layer::witness_index::layer_admits_witness`, which reads
-    /// `DeclarationTrace` / `ObservationTrace` / `ProgramTrace`
-    /// resources (and the comorphism-reified `VerifiedPropositionView`
-    /// for the `Verified` family) by **direct lookup on the key's IRI**.
+    /// `DeclarationTrace` / `ObservationTrace` / `VerificationTrace`
+    /// resources by **direct lookup on the key's IRI**.
     /// There is no materialised index — the `OnceLock<BTreeMap<..>>`
     /// this comment used to describe was removed in D66 slice 0; see
     /// `witness_index.rs`'s module docs.

@@ -122,6 +122,21 @@ chain declaration, the two agree because one produced the other; if a human writ
 agree until someone edits one. It is the same v1.1 gap that holds inductives
 (`mirror_gen/mod.rs`: *"`InductiveType` bucket — those land with D30 v1.1"*).
 
+### 5.1 The ontology edit is one reseed, so it carries passengers
+
+Any change to a bootstrap ontology's *content* moves the manifest hash — `description` values
+included; only ESL comments and JSON layout are exempt
+(`bootstrap::tests::the_manifest_hashes_content_not_presentation`). Persisted stores then refuse to
+resume with `ManifestDrift` and have to be reseeded. Four edits are queued behind that cost and
+should land in one pass:
+
+| edit | file | why |
+|---|---|---|
+| declare `≤` and `==` over `core:float` | `ontologies/…` (§6.1 decides where) | row 3 |
+| a permitted-axiom slot on `prov:VerificationTrace` | `ontologies/prov/prov.esl` | the axiom allowlist is the TCB of every Lean verdict and the trace does not record it — two proofs, one leaning on `Classical.choice` and one not, produce byte-identical traces (`institution.rs::do_proof_check`) |
+| `witness:IsVerifiedAs` description | `ontologies/core/core-ontology.json` | says *"Nothing in the tree currently emits one — the producer is the Lean institution under eigenius#160."* The Lean institution emits one as of `2026-09-03` |
+| `justification:VerifiedPropositionView` | `ontologies/justification/justification.esl` | its description says the witness emitter looks the view up by `source_verified_resource`; the emitter reads the claim's `canonical_proposition` and never touches the view. Nothing reads the class at all — declared, bootstrap-registered, referenced by two `esl::compile` tests, and otherwise dead. **Recommend deleting it** rather than rewording: the comorphism route it served was replaced by D74's forward externalization (D51 §3) |
+
 ## 6. Open
 
 1. **Where the primitive correspondence is stated.** A property on the chain axiom, an entry in

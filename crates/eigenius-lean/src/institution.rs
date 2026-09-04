@@ -26,9 +26,10 @@
 //!
 //! - `query(proof_check, LeanProofTerm)` — extracts the
 //!   referenced `LeanProofPayload`'s `payload_bytes`, reads the
-//!   `target_name`, runs `check_proof` against the hard-coded
+//!   `target_name` and the claim's proposition, runs `check_proof` against the hard-coded
 //!   [`DEFAULT_LEAN_AXIOMS`] allowlist, and returns a
-//!   `Verdict::Holds | Fails { diagnostic }` resource. Nothing on this
+//!   `Verdict::Holds | Fails { diagnostic }` resource plus, on `Holds`, a
+//!   `prov:VerificationTrace`. Nothing on this
 //!   path reads a `LeanEnvironment`: `lean:lean_permitted_axioms` is
 //!   read only by the authoring runtime, so a per-environment override
 //!   has no effect on a verdict.
@@ -43,45 +44,29 @@
 //!   construction is authoring-side via the chain-mirror translator,
 //!   not via a kernel `reify` call.
 //!
-//! ## Correspondence check (D28 §5.5)
+//! ## What a `Holds` means
 //!
-//! Three checks run in order:
+//! Two checks, both mandatory (D74 §6.3, eigenius#159):
 //!
-//! 1. **Proof validity** — nanoda's `check_proof`. Same as 20a.4.
-//! 2. **Mirror correspondence** — resolve `mirror_iri` to a
-//!    `runtime:RuntimePackageMirror` (the design documents call it a
-//!    `LeanPackageMirror`; no such class or type exists), verify its
-//!    `source_layer` is reachable
-//!    from `head` (proof anchored to an ancestor-or-equal of the
-//!    layer the check runs against), and confirm the mirror covers
-//!    the claim's class via `mirrored_classes`. Lacking either
-//!    raises `FFIVersionMismatch`.
-//! 3. **Anchor consistency** — recompute the
-//!    `library_content_hash` over the embedded archive and confirm
-//!    it matches the declared hash. Mismatch surfaces as
-//!    `AnchorContentHashMismatch`.
+//! 1. **Proof validity** — nanoda type-checks every declaration in the export and refuses any
+//!    axiom outside the permitted set.
+//! 2. **Statement correspondence** — the claim named by `lean:claim_iri` carries a
+//!    `reflection:canonical_proposition`; it is externalized to a Lean `Expr`
+//!    ([`crate::externalize`]) and compared to the target declaration's type with nanoda's
+//!    `def_eq`. Without this, `Holds` would mean only "a theorem with this name type-checks".
 //!
-//! A `LeanProofTerm` without `mirror_iri` skips checks 2 + 3 — the
-//! verdict reflects nanoda alone, matching the 20a.4 behavior for
-//! proofs not yet pinned to a chain-level claim.
+//! D28 §5.5's three-part correspondence check is gone, along with `lean:mirror_iri` and
+//! `lean:proposition` (D74 §6.3.1). `def_eq` against the claim's own proposition subsumes it: the
+//! mirror-coverage check asked whether the committed proposition *mentioned* the claim's class, a
+//! proxy for what the comparison answers directly, and the version-skew check is implied — a
+//! moved mirror makes the externalized `Const` names disagree with the export's.
 //!
-//! ### Structural correspondence (D28 §5.5 ¶2 final sentence)
+//! ## What a `Holds` produces
 //!
-//! When the `LeanProofTerm` carries a `proposition` — a
-//! chain-mirrored `lean:LeanExpr` (D40) value — the check walks
-//! that tree, collects every `Const` reference under the
-//! `EigeniusFFI` namespace, and verifies at least one maps back
-//! (via the mirror's `mirrored_classes` + each class's
-//! `core:short_name`) to the claim's class IRI. Failure surfaces
-//! as `PropositionMismatch` (D28 §9.1) with a diagnostic listing
-//! what the proposition *does* reference.
-//!
-//! The proposition is recommended-not-required (D28 §6.3). Absent
-//! → structural check is skipped; the covering check (class IRI ∈
-//! `mirrored_classes`) is the only correspondence gate. Once the
-//! orchestrator's commit pipeline guarantees `proposition`
-//! population for every committed proof, a future spec version may
-//! upgrade absent-proposition to a hard rejection.
+//! A `prov:VerificationTrace` naming the claim, emitted beside the Verdict and committed by the
+//! kernel into the `verdict_provenance` layer (eigenius#160). That trace is what makes
+//! `layer_admits_witness` answer `Verified` for the claim's proposition; the verdict resource
+//! itself grounds nothing. On `Fails`, no trace.
 
 use std::sync::Arc;
 
@@ -94,6 +79,7 @@ use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
 use eigenius_kernel::program::eigentt_type_mirror::decode_type;
+use eigenius_kernel::server::helpers::{millis_to_iso8601, now_millis};
 
 use crate::checker::{check_proof, ExpectedStatement, Verdict};
 
@@ -272,16 +258,18 @@ const DEFAULT_LEAN_AXIOMS: &[&str] = &[
     "Lean.trustCompiler",
 ];
 
-/// The claim's `reflection:canonical_proposition`, decoded to an `Exp` (D74 §2).
+/// The claim this proof discharges: its IRI, and its `reflection:canonical_proposition`
+/// decoded to an `Exp` (D74 §2).
 ///
-/// `None` when the proof term names no claim, or the claim carries no proposition — the
-/// statement-level check has nothing to compare against and the caller falls back to the
-/// name-level check alone. An unresolvable `claim_iri`, or a proposition that will not decode,
-/// is an error rather than a skip: the author meant to bind a claim and the binding is broken.
+/// `None` only when the proof term names no claim at all. `lean:claim_iri` is `requires` on
+/// `LeanProofTerm` (D74 §6.3), so validation rejects that shape before dispatch and the arm is
+/// unreachable through the commit pipeline; it stays for a direct `query` call. An unresolvable
+/// `claim_iri`, a claim with no proposition, or a proposition that will not decode is an error
+/// rather than a skip: the author meant to bind a claim and the binding is broken.
 fn claim_proposition(
     input: &Resource,
     ctx: &ExecutionContext,
-) -> Result<Option<Exp>, InstitutionError> {
+) -> Result<Option<(Iri, Exp)>, InstitutionError> {
     let Some(claim_iri) = input
         .get(&Iri::parse(iris::PROP_CLAIM_IRI).expect("static IRI"))
         .and_then(Value::as_str)
@@ -318,7 +306,7 @@ fn claim_proposition(
             "`{claim_iri}`'s canonical_proposition does not decode: {e:?}"
         ))
     })?;
-    Ok(Some(exp))
+    Ok(Some((claim_iri, exp)))
 }
 
 fn do_proof_check(
@@ -343,6 +331,12 @@ fn do_proof_check(
     // property and use it instead — that wiring lands when the
     // authoring runtime's env-resource flow into the kernel
     // commit pipeline (currently the env IRI isn't on the chain).
+    //
+    // This set is the trusted computing base of the verdict, and the `VerificationTrace` below
+    // does not record it: two proofs, one leaning on `Classical.choice` and one not, produce
+    // byte-identical traces. `prov:VerificationTrace` has no slot for it, so closing this needs
+    // an ontology edit, which drifts the bootstrap manifest — batched with D86's chain
+    // declarations rather than moved on its own.
     let permitted_axioms: Vec<String> = DEFAULT_LEAN_AXIOMS
         .iter()
         .map(|s| (*s).to_string())
@@ -350,19 +344,14 @@ fn do_proof_check(
     // D74 / #159 — the statement-level check beside the name-level one. The claim's own
     // proposition becomes the Lean goal, so `Holds` means "this proof proves THIS claim" rather
     // than "a theorem with this name type-checks".
-    //
-    // `claim_iri` is `recommends` today, so an absent one still reaches the name-level check
-    // alone. D74 §6.3 promotes it to `requires`; until that ontology edit lands this is the one
-    // place the check can be skipped, and it is skipped loudly in the diagnostic rather than
-    // silently.
-    let expected = claim_proposition(input, ctx)?;
+    let claim = claim_proposition(input, ctx)?;
     let verdict = check_proof(
         bytes.as_bytes(),
         &target_name,
         &permitted_axioms,
-        expected
+        claim
             .as_ref()
-            .map(|prop| ExpectedStatement {
+            .map(|(_, prop)| ExpectedStatement {
                 proposition: prop,
                 layer: ctx.head(),
             })
@@ -386,10 +375,64 @@ fn do_proof_check(
     // the comparison answers directly, and 2a's version-skew check is implied — a moved mirror
     // makes the externalized `Const` names disagree with the export's.
 
-    Ok(QueryOutcome::from_output(verdict_resource(
-        wk::VERDICT_HOLDS,
-        None,
-    )))
+    // eigenius#160 — a `Holds` that promotes nothing is the verdict this institution existed to
+    // avoid. The trace is what carries the check off this call and onto the chain: committed
+    // beside the Verdict, it makes `layer_admits_witness` answer `Verified` for the claim's own
+    // proposition (`witness_index::emit_from_trace`), which is the grade D28 §1 names as the
+    // reason a proof-checking institution exists.
+    let mut outcome = QueryOutcome::from_output(verdict_resource(wk::VERDICT_HOLDS, None));
+    if let Some((claim_iri, _)) = claim.as_ref() {
+        if let Some(trace) = verification_trace(input, &payload, claim_iri) {
+            outcome.derivations.push(trace);
+        }
+    }
+    Ok(outcome)
+}
+
+/// `prov:proof_system` for a proof this institution checked. The property exists so a
+/// `VerificationTrace` from an external prover and one from the kernel's own certificate checker
+/// are the same class, told apart by value rather than by kind.
+const PROOF_SYSTEM_LEAN4: &str = "lean4";
+
+/// The `prov:VerificationTrace` recording that this proof was checked against this claim.
+///
+/// Four required properties (`prov.esl`): `prov:resource` — the claim, which is what makes the
+/// witness key land on the claim's `canonical_proposition` rather than on the proof term;
+/// `prov:proof_system`; `prov:proof_term`; `prov:timestamp`.
+///
+/// `prov:proof_term` names the resource holding the export bytes — the `LeanProofPayload`'s own
+/// IRI when it is a chain resource, and the `LeanProofTerm`'s when the payload is embedded in it,
+/// which is where the bytes live in that shape.
+///
+/// `None` when the proof term has no `@id`: the trace's IRI is derived from it, and a dispatch
+/// over an embedded resource commits nothing to derive from. `finalize_emitted_resource` drops
+/// such an emission for the same reason.
+fn verification_trace(term: &Resource, payload: &Resource, claim_iri: &Iri) -> Option<Resource> {
+    let term_iri = term.id()?;
+    let proof_term_iri = payload.id().unwrap_or(term_iri);
+
+    let mut trace = Resource::new(Iri::parse(&format!("{term_iri}:verification")).ok()?);
+    trace.set(
+        Iri::parse(wk::IS_A).expect("well-known IRI"),
+        Value::Array(vec![Value::String(wk::VERIFICATION_TRACE.to_string())]),
+    );
+    trace.set(
+        Iri::parse(wk::REFLECTION_RESOURCE).expect("well-known IRI"),
+        Value::iri(claim_iri),
+    );
+    trace.set(
+        Iri::parse(wk::PROOF_SYSTEM).expect("well-known IRI"),
+        Value::String(PROOF_SYSTEM_LEAN4.to_string()),
+    );
+    trace.set(
+        Iri::parse(wk::PROOF_TERM).expect("well-known IRI"),
+        Value::String(proof_term_iri.as_str().to_string()),
+    );
+    trace.set(
+        Iri::parse(wk::TIMESTAMP).expect("well-known IRI"),
+        Value::String(millis_to_iso8601(now_millis())),
+    );
+    Some(trace)
 }
 
 /// Resolve a LeanProofTerm's `proof_payload` reference into the

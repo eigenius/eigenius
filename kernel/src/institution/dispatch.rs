@@ -500,33 +500,42 @@ pub fn allocate_invocation_iri() -> Iri {
         .expect("uuid-derived IRI parses")
 }
 
-/// Stamp the kernel-set linkage properties on each institution-emitted
-/// derivation resource: add
-/// `reflection:InstitutionEmittedDerivation` + `reflection:DerivedResource`
-/// to the `is_a` list, set `reflection:from_subject` to the gated
-/// subject IRI, and set `reflection:runtime_invocation` to the producing
+/// Stamp the kernel-set linkage properties on each resource an institution
+/// emitted alongside its verdict: `reflection:from_subject` to the gated
+/// subject IRI, and `reflection:runtime_invocation` to the producing
 /// RuntimeInvocation IRI (when one was allocated for this dispatch).
 ///
-/// The institution sets the derivation's `@id` (typically a suffix off
-/// the gated subject, e.g. `{analysis_iri}:result:{effect_name}`) and
-/// the domain-specific properties (canonical_proposition, numerics,
-/// per-effect ctor). The kernel adds only the linkage + marker class.
+/// The institution sets the resource's `@id` (typically a suffix off the gated
+/// subject, e.g. `{analysis_iri}:result:{effect_name}`) and the domain-specific
+/// properties. The kernel adds only the linkage, plus — for a derivation — the
+/// `reflection:InstitutionEmittedDerivation` marker class.
 ///
-/// Returns `None` for derivations the kernel can't link (no
-/// `@id` on the derivation, or no `subject_iri` on the dispatch — both
-/// indicate an embedded-resource path that doesn't get a chain commit).
-pub fn finalize_emitted_derivation(
+/// **The marker is not stamped on a `prov:Trace`.** Two kinds come through this
+/// channel. A derivation records WHAT A RUN PRODUCED and grounds nothing, which
+/// is what the marker class asserts. A trace records what the check
+/// ESTABLISHED, and grounds a witness: a `prov:VerificationTrace` from the Lean
+/// institution is what `witness_index::trace_category` reads to admit `Verified`
+/// (eigenius#160). Stamping the marker on one would put "grounds nothing" on the
+/// single resource whose purpose is to be a ground. Decided by
+/// [`Layer::is_subclass_of`], not a list of trace IRIs, so a new `prov:Trace`
+/// subclass is covered by declaring it.
+///
+/// Returns `None` for resources the kernel can't link (no `@id`, or no
+/// `subject_iri` on the dispatch — both indicate an embedded-resource path that
+/// doesn't get a chain commit).
+pub fn finalize_emitted_resource(
+    layer: &Layer,
     dispatch: &AutoOnLoadDispatch,
     runtime_invocation_iri: Option<&Iri>,
-    mut derivation: Resource,
+    mut emitted: Resource,
 ) -> Option<Resource> {
     use crate::ontology::well_known as wk;
 
-    derivation.id()?;
+    emitted.id()?;
     let subject_iri = dispatch.subject_iri.as_ref()?;
 
     let is_a_iri = Iri::parse(wk::IS_A).expect("static IRI");
-    let mut classes: Vec<Value> = match derivation.get(&is_a_iri) {
+    let mut classes: Vec<Value> = match emitted.get(&is_a_iri) {
         Some(Value::Array(arr)) => arr.clone(),
         Some(other) => vec![other.clone()],
         None => Vec::new(),
@@ -537,24 +546,38 @@ pub fn finalize_emitted_derivation(
             _ => false,
         })
     };
-    if !has_class(&classes, wk::INSTITUTION_EMITTED_DERIVATION) {
+    let trace_iri = Iri::parse(wk::TRACE).expect("static IRI");
+    let is_trace = classes.iter().any(|v| match v {
+        Value::String(i) => Iri::parse(i).is_ok_and(|c| layer.is_subclass_of(&c, &trace_iri)),
+        _ => false,
+    });
+
+    // A trace grounds a witness, so it may only land from a dispatch that
+    // decided. `Undecidable` reaches here (the outer loop drops only `Fails`,
+    // because an undecidable analysis still commits its artefacts), and an
+    // undecidable check establishes nothing to attest.
+    if is_trace && !matches!(dispatch.verdict, VerdictReading::Holds) {
+        return None;
+    }
+
+    if !is_trace && !has_class(&classes, wk::INSTITUTION_EMITTED_DERIVATION) {
         classes.push(Value::String(
             wk::INSTITUTION_EMITTED_DERIVATION.to_string(),
         ));
     }
-    derivation.set(is_a_iri, Value::Array(classes));
+    emitted.set(is_a_iri, Value::Array(classes));
 
-    derivation.set(
+    emitted.set(
         Iri::parse(wk::FROM_SUBJECT).expect("static IRI"),
         Value::iri(&subject_iri.clone()),
     );
     if let Some(inv) = runtime_invocation_iri {
-        derivation.set(
+        emitted.set(
             Iri::parse(wk::RUNTIME_INVOCATION).expect("static IRI"),
             Value::iri(&inv.clone()),
         );
     }
-    Some(derivation)
+    Some(emitted)
 }
 
 /// Property IRI for `Verdict.verdict_subject` (D31 §6.3).

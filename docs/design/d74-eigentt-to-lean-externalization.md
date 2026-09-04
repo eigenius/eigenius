@@ -581,7 +581,7 @@ With externalization in place, D28's check becomes:
 
 1. nanoda checks the export — *every declaration is well-typed* (unchanged)
 2. the target's type is compared by `def_eq` against the externalized claim — **new**
-3. `IsVerifiedAs(claim_iri, P)` is admitted with `P` the claim's **own** proposition
+3. `IsVerifiedAs(claim_iri, P)` is admitted with `P` the claim's **own** proposition — **landed `2026-09-03`** (eigenius#160): `institution::verification_trace` emits the trace on `Holds`, the kernel commits it into the `verdict_provenance` layer, and `notebook_fixture_test::a_holds_verdict_admits_a_verified_witness` asserts `lookup_chain_witness` answers for it
 
 `reasoning:VerifiedPropositionView` and the comorphism reify step both disappear: the witness keys
 on the claim's proposition hash, not on a reified view. It composes with eigenius#200 — the

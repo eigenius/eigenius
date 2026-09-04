@@ -500,6 +500,13 @@ pub const DERIVATION: &str = "urn:eigenius:prov:derivation";
 // `trace_category` during `layer_admits_witness`; nothing is
 // materialised into an index (D66 slice 0).
 
+/// The abstract parent of the provenance traces. Used as the subsumption target
+/// when the kernel has to tell a trace from any other emitted resource —
+/// `institution::dispatch::finalize_emitted_resource` withholds the
+/// `InstitutionEmittedDerivation` marker from anything under this class, since a
+/// trace records what a check ESTABLISHED and a derivation records only what a
+/// run produced.
+pub const TRACE: &str = "urn:eigenius:prov:Trace";
 /// Resource recording that a resource was declared by a human/agent.
 /// Carries `prov:resource` (target IRI). Per D49 §6, a successful
 /// commit emits an `IsDeclaredAs` witness for the target resource.
