@@ -33,7 +33,6 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use eigenius_kernel::layer::Layer;
 use eigenius_kernel::nbe::term::Exp;
-use nanoda_lib::env::EnvLimit;
 use nanoda_lib::pretty_printer::PpOptions;
 use nanoda_lib::util::{Config, ExportFile};
 
@@ -215,23 +214,25 @@ fn check_statement(
         };
     };
 
-    // Build the goal in the ctx, then compare inside `with_tc` — `TypeChecker::ctx` is private,
-    // so the expression cannot be built from inside the closure. `ExprPtr` is an arena handle, so
-    // carrying it in costs nothing.
-    export.with_ctx(|ctx| {
-        let uparams: Vec<String> = ctx
+    // One checker for the whole pass. `TypeChecker::ctx` (the accessor this repo's nanoda fork
+    // adds, D74 §4.6) lets externalization build through it, which is what makes a sub-term
+    // inferrable under a binder — `Fst`/`Snd` need that, and `TypeChecker::new` cannot be called
+    // once a binder is open.
+    export.with_tc_and_declar(info, |tc| {
+        let uparams: Vec<String> = tc
+            .ctx()
             .read_levels(info.uparams)
             .iter()
-            .filter_map(|l| match ctx.read_level(*l) {
-                nanoda_lib::level::Level::Param(n, _) => Some(externalize::render_name(ctx, n)),
+            .filter_map(|l| match tc.ctx().read_level(*l) {
+                nanoda_lib::level::Level::Param(n, _) => {
+                    Some(externalize::render_name(tc.ctx(), n))
+                }
                 _ => None,
             })
             .collect();
 
-        // The comparison and any nested inference run under the same environment (§6.5).
-        let target_index = export.declars.get_index_of(&info.name).unwrap_or(0);
         let declared: Vec<_> = export.declars.keys().copied().collect();
-        let names = externalize::NameTable::build(ctx, &declared);
+        let names = externalize::NameTable::build(tc.ctx(), &declared);
 
         // Universe arity per declaration. A `Const` whose level list does not match makes
         // nanoda's `subst_expr_levels` assert — a panic inside `def_eq`, not a `false` — so
@@ -239,17 +240,16 @@ fn check_statement(
         let arities: std::collections::HashMap<_, _> = export
             .declars
             .iter()
-            .map(|(n, d)| (*n, ctx.read_levels(d.info().uparams).len()))
+            .map(|(n, d)| (*n, tc.ctx().read_levels(d.info().uparams).len()))
             .collect();
 
         let goal = match externalize::externalize(
             expected.proposition,
-            ctx,
+            tc,
             &names,
             expected.layer,
             &uparams,
             &arities,
-            target_index,
         ) {
             Ok(g) => g,
             Err(e) => {
@@ -261,8 +261,10 @@ fn check_statement(
 
         // D74 §6.5 — the environment nanoda checks this declaration under, cut off AT it, so
         // δ-unfolding cannot reach anything the proof's own check could not.
-        let holds = ctx.with_tc(EnvLimit::ByName(info.name), |tc| tc.def_eq(goal, info.ty));
-        if holds {
+        // Compared on THIS checker, not a nested one. `TypeChecker::new` asserts
+        // `dbj_level_counter == 0`, and externalizing a binder leaves free variables behind, so
+        // opening a second checker here panics — which is exactly what it did.
+        if tc.def_eq(goal, info.ty) {
             Verdict::Holds
         } else {
             Verdict::Fails {

@@ -239,17 +239,20 @@ fn a_projection_declarations_type_still_matches() {
     assert!(matches!(v, Verdict::Holds), "got {v:?}");
 }
 
-/// `Fst` under a binder is refused, with the reason — the boundary is nanoda's API, not
-/// EigenTT's form.
+/// `Fst` UNDER A BINDER now translates — the case the fork was made for.
 ///
-/// The implicits ARE recoverable in principle: `TypeChecker::infer` is `pub(crate)` but
-/// `is_proof` is public and returns `(is_prop, infer(e))`. What blocks it is going under a
-/// binder. nanoda descends by turning bound variables into FREE ones (`mk_dbj_level`) so
-/// `infer` can run on an open term — `infer` rejects loose bvars. We cannot follow:
-/// `TypeChecker::new` asserts `dbj_level_counter == 0`, so no checker can exist while a binder
-/// is open. nanoda never meets this because its checker is already live when it descends.
+/// The implicits of `Subtype.val : {α} → {p} → Subtype p → α` are recovered by inferring the
+/// scrutinee's type. That needs two things nanoda would not give from outside: `infer` reachable
+/// (via the public `is_proof`, which returns `(is_prop, infer(e))`) and a way to BUILD while a
+/// checker is alive — `TypeChecker::new` asserts `dbj_level_counter == 0`, so no checker can be
+/// created once a binder is open, and the `ctx` field was `pub(crate)`. `eigenius/nanoda_lib`
+/// adds the accessor; externalization then builds locally nameless, as nanoda does internally,
+/// so the scrutinee is closed and `infer` accepts it.
+///
+/// The proposition really contains a `Fst`: `∀ s : (Σ w : Widget. Big w), Big (Fst s)`, checked
+/// against `theorem projects_in_the_type : ∀ s : Subtype Big, Big s.val`.
 #[test]
-fn fst_under_a_binder_is_refused_with_the_reason() {
+fn fst_under_a_binder_recovers_its_implicits_by_inference() {
     let layer = widget_layer();
     let iri = |s: &str| eigenius_kernel::ontology::iri::Iri::parse(s).unwrap();
     let widget = Exp::EigonClass(iri("urn:eigenius:test:Widget"));
@@ -259,7 +262,6 @@ fn fst_under_a_binder_is_refused_with_the_reason() {
         Box::new(widget),
         Box::new(Exp::App(Box::new(big()), Box::new(Exp::Var("w".into())))),
     );
-    // ∀ s : (Σ w : Widget. Big w). Big (Fst s)  — `Fst` sits under the Π.
     let prop = Exp::Pi(
         eigenius_kernel::nbe::term::Patt::Var("s".into()),
         Box::new(sigma),
@@ -278,17 +280,8 @@ fn fst_under_a_binder_is_refused_with_the_reason() {
         }),
     )
     .expect("infrastructure ok");
-    match v {
-        Verdict::Fails { diagnostic } => {
-            assert!(
-                diagnostic.contains("under binder"),
-                "must say the binder is why; got {diagnostic}"
-            );
-            assert!(
-                !diagnostic.contains("panicked"),
-                "and must be a refusal, not a caught panic; got {diagnostic}"
-            );
-        }
-        other => panic!("expected a typed refusal; got {other:?}"),
-    }
+    assert!(
+        matches!(v, Verdict::Holds),
+        "`Fst` under a binder must rebuild `Subtype.val` with inferred implicits; got {v:?}"
+    );
 }

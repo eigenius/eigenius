@@ -229,8 +229,7 @@ resolves to. Read off `decode_type`, the **23 variants decoding can produce** ar
 
 | | |
 |---|---|
-| **translated** | `Sort` `Var` `Const` `EigonClass` `EigonAxiom` `EigonPrimitive` `App` `Pi` `Sig` `One` `Unit` `Id` `LitInt` `LitString` `LitBool` — 15 |
-| **conditional** | `Fst` `Snd` — top level only (§4.6) |
+| **translated** | `Sort` `Var` `Const` `EigonClass` `EigonAxiom` `EigonPrimitive` `App` `Pi` `Sig` `Fst` `Snd` `One` `Unit` `Id` `LitInt` `LitString` `LitBool` — 17 |
 | **refused** | `Ann` `Lam` `LitFloat` `InductiveCtor` `Pair` `Refine` — 6 |
 
 Everything else the fragment classifies — `Map`, `Reduce`, `Construct`, `Template`, `Match`,
@@ -247,7 +246,7 @@ a `Lam`, a `Pair`, a `Record` or a `Refine`.
 Three constructors is a thin corpus, so "everything committed externalizes" says less than it
 sounds. The parser's own output is what will exercise the rest.
 
-### 4.1 Translated (20, two conditionally)
+### 4.1 Translated (20)
 
 | EigenTT | Lean | note |
 |---|---|---|
@@ -267,7 +266,7 @@ sounds. The parser's own output is what will exercise the rest.
 | `Refl(x)` | `rfl` | |
 | `Sig(p, A, B)` | `Subtype A (fun p : A => B)` | §4.5 — **not** `Sigma`; `Exists` cannot work |
 | `Times(A, B)` | `Subtype A (fun _ : A => B)` | a non-dependent `Sig` |
-| `Fst(e)` | `Subtype.val α p e` | §4.6 — implicits inferred; **top level only** |
+| `Fst(e)` | `Subtype.val α p e` | §4.6 — implicits inferred, at any depth |
 | `Snd(e)` | `Subtype.property α p e` | §4.6 — same |
 | `One` | `PUnit` | |
 | `Unit` | `PUnit.unit` | |
@@ -281,7 +280,6 @@ alternative — translating "close enough" — proves a different theorem soundl
 | group | variants | why |
 |---|---|---|
 | **Σ intro** | `Pair` | `Subtype.mk`'s predicate cannot be inferred from `p a` without higher-order unification — the elaborator's job, which a checker does not offer |
-| **Σ elim under a binder** | `Fst`, `Snd` | translated at the top level; refused under an enclosing binder — see §4.6 |
 | **Records (D78)** | `Record`, `Refine` | an anonymous structural type, and one carrying the classes it satisfies. Refused for different reasons and with different prospects — see §4.7 |
 | **Computation** | `Map`, `Reduce`, `NativeDecide`, `DecEq` | computation, not proposition |
 | **Resource-level** | `Template`, `Construct`, `EigonResource`, `PropAccess` | a proposition mentioning a resource *value* rather than its class is outside the fragment. `PropAccess` projects a field off a value |
@@ -394,38 +392,54 @@ needs unification, and `Fst`/`Snd` under a binder need the upstream change in §
 builds all of those. Admitting Σ removes the quantifier from the blocking list, not the whole of
 parser output.
 
-### 4.6 `Fst` / `Snd` — the boundary is nanoda's API, not EigenTT's form
+### 4.6 `Fst` / `Snd` translate — and what it took
 
-The projections were first refused here on the ground that `Subtype.val : {α} → {p} → Subtype p →
-α` takes implicits the EigenTT form does not carry. That reasoning is wrong, and worth correcting
-rather than deleting: the implicits are **recoverable**, because the externalized scrutinee is a
-well-formed term whose type is `Subtype α p`. `TypeChecker::infer` is `pub(crate)`, but `is_proof`
-is public and returns `(is_prop, infer(e))` — destructuring that type gives both.
+The projections were first refused because `Subtype.val : {α} → {p} → Subtype p → α` takes
+implicits the EigenTT form does not carry. That reasoning was wrong twice over, and the
+corrections are the interesting part.
 
-**What actually blocks it is going under a binder.** nanoda is locally nameless: descending into
-a `Pi` body it calls `mk_dbj_level(binder_name, style, ty)`, turning the bound variable into a
-FREE one, precisely so `infer` can run on the open term. `infer` rejects loose bound variables
-outright ("no loose bvars allowed in infer").
+**The implicits are recoverable.** The externalized scrutinee is a well-formed term whose type is
+`Subtype α p`; inferring it and destructuring the spine gives both. `TypeChecker::infer` is
+`pub(crate)`, but `is_proof` is public and returns `(is_prop, infer(e))`.
 
-Externalization cannot follow it there. `TypeChecker::new` opens with
-`assert_eq!(dag.dbj_level_counter, 0)` — **no checker may exist while a binder is open**. nanoda
-never meets this because its checker is already live when it descends; from outside, the only
-public route to inference is constructing one.
+**What blocked it was building with loose bound variables.** `infer` rejects them outright ("no
+loose bvars allowed in infer"), so a term built by emitting `mk_var(depth - 1 - position)` while
+descending — the obvious reading of §3.1 — cannot be inferred under a binder. nanoda's own answer
+is **locally nameless**: descend by turning the binder into a FREE variable (`mk_dbj_level`),
+work on the open term, then `abstr` it closed. Externalization now does the same, so a sub-term
+is inferrable at any depth.
 
-So the boundary is exact, and narrower than "refused": `Fst`/`Snd` translate with no enclosing
-binder and are refused under one, with a diagnostic naming the binders. Lifting it is an
-**upstream change** — a public `infer`, or a relaxed precondition — against a `lean4export` and
-`nanoda_lib` this repo already vendors and pins. It is not a limit of EigenTT's representation,
-which carries everything required.
+**Following it there needed one upstream change.** Inference and construction were mutually
+exclusive from outside nanoda: `TypeChecker::new` asserts `dbj_level_counter == 0`, so no checker
+may be created once a binder is open, and the `ctx` field was `pub(crate)`, so a live checker
+could not be used to build. `eigenius/nanoda_lib` adds the accessor —
 
-`Pair` is different and stays refused: `Subtype.mk` needs the predicate `p`, and recovering it
-from `p a` is higher-order unification. That is the elaborator's work, and nanoda is a checker of
-already-elaborated terms.
+```rust
+pub fn ctx(&mut self) -> &mut TcCtx<'t, 'p> { self.ctx }
+```
 
-### 4.7 `Record` is refused permanently; `Refine` over one class is not
+— and externalization holds **one** checker for the whole pass, building through it. A PR is open
+upstream; the fork exists so the work is not blocked on review. The fork is branched off upstream
+`master`, which also picks up their "prohibit orphan recursors" tightening that the previous pin
+`6ae1f0c` predates.
 
-These two are grouped as "D78 record types" in §4.2, and they should not be — their prospects
-differ.
+Two consequences worth recording. The comparison must run on that same checker — opening a nested
+one after externalizing a binder trips the counter assertion, which is exactly what it did on the
+first attempt. And the `EnvLimit` is now set once, by `with_tc_and_declar(info)`, rather than per
+inference: `Fst`'s inference and the final `def_eq` share one environment by construction, which
+is what §6.5 wanted anyway.
+
+**`Pair` stays refused**, and for two independent reasons — see §4.7. `Subtype.mk : {α} → {p} →
+(val : α) → p val → Subtype p` needs the predicate `p`, and recovering it from the type `p a` is
+higher-order unification, which is the elaborator's work and not something a checker of
+already-elaborated terms offers. And nothing produces one.
+
+### 4.7 Posture on the refusals nothing produces: `Record`, `Pair`, `Refine`
+
+Three refusals share a property that changes what to do about them: **nothing generates the
+shape**. They are not queued features waiting on a decision, and treating them as such invites
+building against a guess — which is what §4's stale table already cost once. Their prospects
+still differ, so they are separated here.
 
 **`Record` can never be translated, and refusing it is the correct answer rather than a deferred
 decision.** A `Record` is an *anonymous* structural type: a canonically-ordered telescope of
@@ -449,12 +463,26 @@ Two things stop that being written today, and neither is a naming question:
 2. **Nothing produces one.** No committed proposition carries a `Refine`, and the DCG formalizer
    never builds one (`Exp::Refine` is constructed only in `nbe/readback.rs` and the D47 codec).
 
-**Posture: refuse both now, and treat them differently when they arrive.** A `Record` reaching
-externalization means a proposition quantified over an anonymous shape, which is a modelling
-error upstream — the refusal should stay and say so. A single-class `Refine` reaching it is
-ordinary and should be implemented as `Const(C)` at that point, measured the way §4.5 measured
-`Sig` rather than assumed. Writing either before something produces one would be building against
-a guess, which is what §4's stale table cost us once already.
+**`Pair` has no producer either, and the reason is structural.** Measured `2026-09-03`: the DCG
+formalizer never originates one. Every `Exp::Pair` under `kernel/src/dcg/` is a traversal —
+rebuilding an existing node during substitution or hole-walking, or destructuring it to
+pretty-print — and ESL's surface has no pair syntax at all. The two real construction sites are
+on the PROGRAM path: `program/expr.rs:378` packs `Pair(arg, EigonResource(resolved))` as a
+dispatcher calling convention, and `parse_pair` reads `program:first` / `program:second` from the
+program AST. Neither lands in `reflection:canonical_proposition`.
+
+That follows from what a proposition is. A pair is an *introduction* form — a value — and a
+proposition is a type. `Sig` appears because a refinement is a type; `Fst`/`Snd` appear because a
+projection can occur inside one (`Big s.val`). A bare `Pair` would be a term embedded in a type,
+which the parser has no reason to build.
+
+**Posture: refuse all three, and read an arrival as a signal rather than a feature request.**
+
+- A `Record` reaching externalization means a proposition quantified over an anonymous shape —
+  a modelling error upstream, and the refusal should say so.
+- A `Pair` reaching it means something is generating a value where a type belongs. Same reading.
+- A single-class `Refine` is the exception: ordinary, and it should be implemented as `Const(C)`
+  at that point — MEASURED the way §4.5 measured `Sig`, not assumed.
 
 ## 5. What this makes true, and what it does not
 

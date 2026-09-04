@@ -63,6 +63,7 @@ use eigenius_kernel::nbe::term::{Exp, Patt};
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::well_known as wk;
 use eigenius_lean_runtime::mirror_gen::lean_name;
+use nanoda_lib::tc::TypeChecker;
 use nanoda_lib::util::{ExprPtr, LevelPtr, NamePtr, TcCtx};
 
 /// Why a proposition could not be externalized.
@@ -112,23 +113,6 @@ pub enum ExternalizeError {
         expected: usize,
         /// Universe arguments available to supply — the target declaration's own.
         available: usize,
-    },
-    /// A `Fst`/`Snd` under an enclosing binder.
-    ///
-    /// Reconstructing `Subtype.val`'s implicits means inferring the scrutinee's type, and
-    /// nanoda's `infer` rejects loose bound variables — it descends under binders by turning
-    /// them into FREE variables (`mk_dbj_level`, de Bruijn levels). We cannot follow it there:
-    /// `TypeChecker::new` asserts `dbj_level_counter == 0`, so a checker cannot be built while a
-    /// binder is open, and `infer` itself is `pub(crate)`. nanoda never meets this because its
-    /// checker is already live when it descends.
-    ///
-    /// Lifting it is an upstream change — a public `infer`, or a relaxed precondition — not a
-    /// limit of EigenTT's form, which carries everything needed.
-    ProjectionUnderBinder {
-        /// `"Fst"` or `"Snd"`.
-        form: &'static str,
-        /// The binders in scope, innermost last.
-        binders: Vec<String>,
     },
     /// A `Fst`/`Snd` whose scrutinee does not have a `Subtype` type.
     ///
@@ -182,13 +166,6 @@ impl std::fmt::Display for ExternalizeError {
                 "`{lean_name}` takes {expected} universe argument(s) and the target declaration \
                  supplies {available}; a universe-polymorphic constant can only be spelled with \
                  the target's own parameters"
-            ),
-            Self::ProjectionUnderBinder { form, binders } => write!(
-                f,
-                "`{form}` appears under binder(s) [{}]; reconstructing the projection's implicit \
-                 arguments needs the scrutinee's type, and nanoda's `infer` cannot run while a \
-                 binder is open",
-                binders.join(", ")
             ),
             Self::NotASubtype { form } => write!(
                 f,
@@ -257,16 +234,27 @@ pub fn render_name<'t, 'p: 't>(ctx: &TcCtx<'t, 'p>, name: NamePtr<'t>) -> String
     parts.join(".")
 }
 
-/// The binders in scope, innermost last. EigenTT names its variables; Lean counts them
-/// (D74 §3.1), so a `Var` becomes `depth - 1 - position`.
-struct Binders(Vec<String>);
+/// The binders in scope, innermost last, each paired with the FREE variable standing for it.
+///
+/// D74 §3.1 maps EigenTT's named variables onto Lean's de Bruijn indices, and the obvious way to
+/// do that is to emit `mk_var(depth - 1 - position)` while descending. This does not, and the
+/// reason is §4.6: nanoda's `infer` rejects loose bound variables, so a term built that way
+/// cannot be inferred under a binder — which is exactly what reconstructing `Subtype.val`'s
+/// implicits needs.
+///
+/// nanoda's own answer is locally nameless: descend by turning the binder into a free variable
+/// (`mk_dbj_level`), work on the open term, then `abstr` it closed. This does the same, so a
+/// sub-term is inferrable at any depth.
+struct Binders<'t>(Vec<(String, ExprPtr<'t>)>);
 
-impl Binders {
-    fn index_of(&self, name: &str) -> Option<u16> {
+impl<'t> Binders<'t> {
+    /// The free variable standing for `name`, innermost first.
+    fn lookup(&self, name: &str) -> Option<ExprPtr<'t>> {
         self.0
             .iter()
-            .rposition(|b| b == name)
-            .map(|pos| (self.0.len() - 1 - pos) as u16)
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| *v)
     }
 }
 
@@ -288,14 +276,13 @@ fn binder_name(p: &Patt) -> String {
 /// `layer` resolves a chain IRI's `core:short_name`, which D30's mangling needs; `names` is the
 /// export's declared names, which is where a `Const` is resolved rather than built; `uparams`
 /// are the target declaration's universe parameters, which a `Level::Param` must name (§6.5).
-pub fn externalize<'t, 'p: 't>(
+pub fn externalize<'x, 't: 'x, 'p: 't>(
     exp: &Exp,
-    ctx: &mut TcCtx<'t, 'p>,
+    tc: &mut TypeChecker<'x, 't, 'p>,
     names: &NameTable<'t>,
     layer: &Layer,
     uparams: &[String],
     arities: &HashMap<NamePtr<'t>, usize>,
-    target_index: usize,
 ) -> Result<ExprPtr<'t>, ExternalizeError> {
     let mut binders = Binders(Vec::new());
     let mut cx = Cx {
@@ -303,9 +290,8 @@ pub fn externalize<'t, 'p: 't>(
         layer,
         uparams,
         arities,
-        target_index,
     };
-    go(exp, ctx, &mut cx, &mut binders)
+    go(exp, tc, &mut cx, &mut binders)
 }
 
 /// What externalization needs besides the arena, bundled so adding a lookup does not re-thread
@@ -316,13 +302,6 @@ struct Cx<'a, 't> {
     uparams: &'a [String],
     /// Universe arity per declared name — see [`const_levels`].
     arities: &'a HashMap<NamePtr<'t>, usize>,
-    /// Index of the declaration being compared against. `Fst`/`Snd` infer a sub-term's type and
-    /// must do it under the same environment the comparison runs under (§6.5).
-    ///
-    /// An INDEX rather than a name: `EnvLimit::ByName` is parameterized by the export's lifetime
-    /// and these pointers are the arena's, which is shorter. `new_env` resolves a name to
-    /// `declars.get_index_of(n)` anyway, so the two limits are the same environment.
-    target_index: usize,
 }
 
 impl<'t> Cx<'_, 't> {
@@ -331,11 +310,11 @@ impl<'t> Cx<'_, 't> {
     }
 }
 
-fn go<'t, 'p: 't>(
+fn go<'x, 't: 'x, 'p: 't>(
     exp: &Exp,
-    ctx: &mut TcCtx<'t, 'p>,
+    tc: &mut TypeChecker<'x, 't, 'p>,
     cx: &mut Cx<'_, 't>,
-    binders: &mut Binders,
+    binders: &mut Binders<'t>,
 ) -> Result<ExprPtr<'t>, ExternalizeError> {
     let outside = |variant: &'static str, note: &'static str| {
         Err(ExternalizeError::OutsideFragment { variant, note })
@@ -346,40 +325,35 @@ fn go<'t, 'p: 't>(
 
         // D74 §3.2 — the universes line up exactly, no shift. D46's `Sort(0)` is Lean's `Prop`.
         Exp::Sort(l) => {
-            let level = externalize_level(l, ctx, cx)?;
-            Ok(ctx.mk_sort(level))
+            let level = externalize_level(l, tc.ctx(), cx)?;
+            Ok(tc.ctx().mk_sort(level))
         }
 
-        Exp::Var(name) => match binders.index_of(name) {
-            Some(idx) => Ok(ctx.mk_var(idx)),
+        Exp::Var(name) => match binders.lookup(name) {
+            Some(fvar) => Ok(fvar),
             None => Err(ExternalizeError::UnboundVar(name.clone())),
         },
 
         Exp::App(f, x) => {
-            let f = go(f, ctx, cx, binders)?;
-            let x = go(x, ctx, cx, binders)?;
-            Ok(ctx.mk_app(f, x))
+            let f = go(f, tc, cx, binders)?;
+            let x = go(x, tc, cx, binders)?;
+            Ok(tc.ctx().mk_app(f, x))
         }
 
         Exp::Pi(p, dom, body) => {
-            let dom = go(dom, ctx, cx, binders)?;
-            let name = binder_name(p);
-            let n = ctx.str1_owned(name.clone());
-            binders.0.push(name);
-            let body = go(body, ctx, cx, binders);
-            binders.0.pop();
-            Ok(ctx.mk_pi(n, default_binder_style(), dom, body?))
+            let dom = go(dom, tc, cx, binders)?;
+            under_binder(tc, cx, binders, binder_name(p), dom, body, |c, n, d, b| {
+                c.mk_pi(n, default_binder_style(), d, b)
+            })
         }
 
         // `Arrow` is a non-dependent `Pi`; the binder is unused, so nothing is pushed and the
         // body's indices are unaffected.
         Exp::Arrow(dom, cod) => {
-            let dom = go(dom, ctx, cx, binders)?;
-            let n = ctx.str1_owned("_".to_string());
-            binders.0.push("_".to_string());
-            let cod = go(cod, ctx, cx, binders);
-            binders.0.pop();
-            Ok(ctx.mk_pi(n, default_binder_style(), dom, cod?))
+            let dom = go(dom, tc, cx, binders)?;
+            under_binder(tc, cx, binders, "_".to_string(), dom, cod, |c, n, d, b| {
+                c.mk_pi(n, default_binder_style(), d, b)
+            })
         }
 
         // D74 §3.3 — a reference to a chain-resident declaration. `Const` replaced
@@ -389,16 +363,16 @@ fn go<'t, 'p: 't>(
             let name = resolve_chain_const(iri, cx)?;
             let ls: Result<Vec<LevelPtr<'t>>, _> = levels
                 .iter()
-                .map(|l| externalize_level(l, ctx, cx))
+                .map(|l| externalize_level(l, tc.ctx(), cx))
                 .collect();
-            let ls = ctx.alloc_levels_slice(&ls?);
-            Ok(ctx.mk_const(name, ls))
+            let ls = tc.ctx().alloc_levels_slice(&ls?);
+            Ok(tc.ctx().mk_const(name, ls))
         }
 
         Exp::EigonClass(iri) | Exp::EigonAxiom(iri) => {
             let name = resolve_chain_const(iri, cx)?;
-            let ls = const_levels(ctx, cx, name, iri.as_str())?;
-            Ok(ctx.mk_const(name, ls))
+            let ls = const_levels(tc.ctx(), cx, name, iri.as_str())?;
+            Ok(tc.ctx().mk_const(name, ls))
         }
 
         // Both literal constructors return `None` when the corresponding parser extension is
@@ -410,12 +384,13 @@ fn go<'t, 'p: 't>(
         // `StringPtr` — `str1_owned` allocates the string internally, and reading the name back
         // recovers the pointer it allocated.
         Exp::LitString(s) => {
-            let n = ctx.str1_owned(s.clone());
-            let sp = match ctx.read_name(n) {
+            let n = tc.ctx().str1_owned(s.clone());
+            let sp = match tc.ctx().read_name(n) {
                 nanoda_lib::name::Name::Str(_, sp, _) => sp,
                 _ => unreachable!("`str1_owned` builds a `Name::Str`"),
             };
-            ctx.mk_string_lit(sp)
+            tc.ctx()
+                .mk_string_lit(sp)
                 .ok_or(ExternalizeError::MissingLeanConstant(
                     "the string literal extension (Config::string_extension)",
                 ))
@@ -424,7 +399,8 @@ fn go<'t, 'p: 't>(
         // D74 §4 — negative is refused, because Lean's `NatLit` holds a `BigUint`. Synthesising
         // `Int.negSucc` would be a different term than the one authored.
         Exp::LitInt(n) if *n < 0 => Err(ExternalizeError::NegativeIntLiteral(*n)),
-        Exp::LitInt(n) => ctx
+        Exp::LitInt(n) => tc
+            .ctx()
             .mk_nat_lit_quick(num_bigint::BigUint::from(*n as u64))
             .ok_or(ExternalizeError::MissingLeanConstant(
                 "the nat literal extension (Config::nat_extension)",
@@ -438,28 +414,28 @@ fn go<'t, 'p: 't>(
                 .ok_or(ExternalizeError::MissingLeanConstant(
                     "Bool.true / Bool.false",
                 ))?;
-            let empty = ctx.alloc_levels_slice(&[]);
-            Ok(ctx.mk_const(name, empty))
+            let empty = tc.ctx().alloc_levels_slice(&[]);
+            Ok(tc.ctx().mk_const(name, empty))
         }
 
         // D46's unit type and its inhabitant.
-        Exp::One => lean_const(ctx, cx, "PUnit"),
-        Exp::Unit => lean_const(ctx, cx, "PUnit.unit"),
+        Exp::One => lean_const(tc.ctx(), cx, "PUnit"),
+        Exp::Unit => lean_const(tc.ctx(), cx, "PUnit.unit"),
 
         Exp::Id(ty, x, y) => {
-            let eq = lean_const(ctx, cx, "Eq")?;
-            let ty = go(ty, ctx, cx, binders)?;
-            let x = go(x, ctx, cx, binders)?;
-            let y = go(y, ctx, cx, binders)?;
-            let e = ctx.mk_app(eq, ty);
-            let e = ctx.mk_app(e, x);
-            Ok(ctx.mk_app(e, y))
+            let eq = lean_const(tc.ctx(), cx, "Eq")?;
+            let ty = go(ty, tc, cx, binders)?;
+            let x = go(x, tc, cx, binders)?;
+            let y = go(y, tc, cx, binders)?;
+            let e = tc.ctx().mk_app(eq, ty);
+            let e = tc.ctx().mk_app(e, x);
+            Ok(tc.ctx().mk_app(e, y))
         }
 
         Exp::Refl(x) => {
-            let rfl = lean_const(ctx, cx, "rfl")?;
-            let x = go(x, ctx, cx, binders)?;
-            Ok(ctx.mk_app(rfl, x))
+            let rfl = lean_const(tc.ctx(), cx, "rfl")?;
+            let x = go(x, tc, cx, binders)?;
+            Ok(tc.ctx().mk_app(rfl, x))
         }
 
         Exp::EigonPrimitive(p) => {
@@ -485,7 +461,7 @@ fn go<'t, 'p: 't>(
                     )
                 }
             };
-            lean_const(ctx, cx, n)
+            lean_const(tc.ctx(), cx, n)
         }
 
         // ─── outside the fragment ───────────────────────────────────────────────────────
@@ -528,25 +504,20 @@ fn go<'t, 'p: 't>(
         // The predicate is a lambda built here, so §4.4's missing-domain problem does not arise:
         // the domain is the Σ's own, in hand.
         Exp::Sig(p, dom, body) => {
-            let a = go(dom, ctx, cx, binders)?;
-            let name = binder_name(p);
-            let n = ctx.str1_owned(name.clone());
-            binders.0.push(name);
-            let b = go(body, ctx, cx, binders);
-            binders.0.pop();
-            let pred = ctx.mk_lambda(n, default_binder_style(), a, b?);
-            subtype_of(ctx, cx, a, pred)
+            let a = go(dom, tc, cx, binders)?;
+            let pred = under_binder(tc, cx, binders, binder_name(p), a, body, |c, n, d, b| {
+                c.mk_lambda(n, default_binder_style(), d, b)
+            })?;
+            subtype_of(tc.ctx(), cx, a, pred)
         }
 
         // A non-dependent `Sig`; the binder is unused, so nothing is pushed.
         Exp::Times(dom, body) => {
-            let a = go(dom, ctx, cx, binders)?;
-            let n = ctx.str1_owned("_".to_string());
-            binders.0.push("_".to_string());
-            let b = go(body, ctx, cx, binders);
-            binders.0.pop();
-            let pred = ctx.mk_lambda(n, default_binder_style(), a, b?);
-            subtype_of(ctx, cx, a, pred)
+            let a = go(dom, tc, cx, binders)?;
+            let pred = under_binder(tc, cx, binders, "_".to_string(), a, body, |c, n, d, b| {
+                c.mk_lambda(n, default_binder_style(), d, b)
+            })?;
+            subtype_of(tc.ctx(), cx, a, pred)
         }
 
         // The introduction and elimination forms stay refused, and NOT for want of a decision.
@@ -565,27 +536,20 @@ fn go<'t, 'p: 't>(
         // must be supplied. `Fst(e)` does not carry them, but they are RECOVERABLE: the
         // externalized scrutinee is a well-formed term, so inferring its type gives `Subtype α p`
         // and destructuring that spine gives both. See `subtype_indices`.
+        // The eliminations, at any depth. `Subtype.val : {α} → {p} → Subtype p → α` takes its
+        // type and predicate implicitly and an elaborated export carries them explicitly, so they
+        // must be supplied — and they are RECOVERABLE by inferring the scrutinee's type. That
+        // works under a binder only because the body is built locally nameless: the scrutinee is
+        // closed, so `infer` accepts it (§4.6).
         Exp::Fst(e) => {
-            if !binders.0.is_empty() {
-                return Err(ExternalizeError::ProjectionUnderBinder {
-                    form: "Fst",
-                    binders: binders.0.clone(),
-                });
-            }
-            let scrutinee = go(e, ctx, cx, binders)?;
-            let (a, pred) = subtype_indices(ctx, cx, scrutinee, "Fst")?;
-            subtype_projection(ctx, cx, "Subtype.val", a, pred, scrutinee)
+            let scrutinee = go(e, tc, cx, binders)?;
+            let (a, pred) = subtype_indices(tc, scrutinee, "Fst")?;
+            subtype_projection(tc.ctx(), cx, "Subtype.val", a, pred, scrutinee)
         }
         Exp::Snd(e) => {
-            if !binders.0.is_empty() {
-                return Err(ExternalizeError::ProjectionUnderBinder {
-                    form: "Snd",
-                    binders: binders.0.clone(),
-                });
-            }
-            let scrutinee = go(e, ctx, cx, binders)?;
-            let (a, pred) = subtype_indices(ctx, cx, scrutinee, "Snd")?;
-            subtype_projection(ctx, cx, "Subtype.property", a, pred, scrutinee)
+            let scrutinee = go(e, tc, cx, binders)?;
+            let (a, pred) = subtype_indices(tc, scrutinee, "Snd")?;
+            subtype_projection(tc.ctx(), cx, "Subtype.property", a, pred, scrutinee)
         }
 
         Exp::Record(_) => outside(
@@ -659,6 +623,34 @@ fn go<'t, 'p: 't>(
     }
 }
 
+/// Build a binder by descending under a FREE variable, then closing it.
+///
+/// The locally-nameless discipline nanoda uses internally (§4.6). `mk_dbj_level` makes the
+/// binder a free variable so the body is a closed term that `infer` accepts; `abstr` turns it
+/// back into a bound occurrence once the body is built. Building the body with a loose bvar
+/// instead would be simpler and would make every sub-term uninferrable.
+fn under_binder<'x, 't: 'x, 'p: 't, F>(
+    tc: &mut TypeChecker<'x, 't, 'p>,
+    cx: &mut Cx<'_, 't>,
+    binders: &mut Binders<'t>,
+    name: String,
+    domain: ExprPtr<'t>,
+    body: &Exp,
+    close: F,
+) -> Result<ExprPtr<'t>, ExternalizeError>
+where
+    F: FnOnce(&mut TcCtx<'t, 'p>, NamePtr<'t>, ExprPtr<'t>, ExprPtr<'t>) -> ExprPtr<'t>,
+{
+    let n = tc.ctx().str1_owned(name.clone());
+    let fvar = tc.ctx().mk_dbj_level(n, default_binder_style(), domain);
+    binders.0.push((name, fvar));
+    let built = go(body, tc, cx, binders);
+    binders.0.pop();
+    let built = built?;
+    let closed = tc.ctx().abstr(built, &[fvar]);
+    Ok(close(tc.ctx(), n, domain, closed))
+}
+
 /// Lean's default binder style — an explicit binder. Externalized statements carry no
 /// implicit/instance binders, because the claim's proposition has no notion of them.
 fn default_binder_style() -> nanoda_lib::expr::BinderStyle {
@@ -676,21 +668,19 @@ fn default_binder_style() -> nanoda_lib::expr::BinderStyle {
 /// `TypeChecker::infer` is `pub(crate)`, but `is_proof` is public and returns
 /// `(is_prop, infer(e))` — its second component is the inferred type. `TcCtx::with_tc` scopes the
 /// checker so the arena is free again afterwards.
-fn subtype_indices<'t, 'p: 't>(
-    ctx: &mut TcCtx<'t, 'p>,
-    cx: &Cx<'_, 't>,
+fn subtype_indices<'x, 't: 'x, 'p: 't>(
+    tc: &mut TypeChecker<'x, 't, 'p>,
     scrutinee: ExprPtr<'t>,
     form: &'static str,
 ) -> Result<(ExprPtr<'t>, ExprPtr<'t>), ExternalizeError> {
-    let ty = ctx.with_tc(nanoda_lib::env::EnvLimit::ByIndex(cx.target_index), |tc| {
-        let inferred = tc.is_proof(scrutinee).1;
-        // The type may be an unreduced application; `whnf` exposes the `Subtype` head.
-        tc.whnf(inferred)
-    });
-    let Some((_, name, _, args)) = ctx.unfold_const_apps(ty) else {
+    // `TypeChecker::infer` is `pub(crate)`; `is_proof` is public and returns `(is_prop, infer(e))`.
+    let inferred = tc.is_proof(scrutinee).1;
+    // The type may be an unreduced application; `whnf` exposes the `Subtype` head.
+    let ty = tc.whnf(inferred);
+    let Some((_, name, _, args)) = tc.ctx().unfold_const_apps(ty) else {
         return Err(ExternalizeError::NotASubtype { form });
     };
-    if render_name(ctx, name) != "Subtype" || args.len() != 2 {
+    if render_name(tc.ctx(), name) != "Subtype" || args.len() != 2 {
         return Err(ExternalizeError::NotASubtype { form });
     }
     Ok((args[0], args[1]))
