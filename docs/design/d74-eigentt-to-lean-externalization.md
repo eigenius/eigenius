@@ -417,7 +417,8 @@ Measured x → Measured x` matches, and `NaN` is refused by name
 **What this changes.** The fragment now expresses a measurement, not merely a quantification
 over one. A claim naming an IC50, a viability value or an effect size can be stated and checked.
 
-What still stands between that and the WRN chain is not the number: it is the RELATION. A claim
+What still stands between that and the WRN chain is not the number: it is the RELATION —
+specified in [D86](d86-the-numeric-primitive-core.md). A claim
 like `0.0 ≤ x` is `@LE.le.{0} Float instLEFloat …`, and nothing maps a chain relation onto a Lean
 typeclass operator at a chosen instance — D30 mirrors classes as `structure`s and stops there.
 Naming one by hand is the naming disagreement §3.3 exists to prevent. A chain axiom
