@@ -93,11 +93,18 @@ fn a_proposition_the_target_does_not_prove_fails() {
 /// variant named, rather than being approximated into a different theorem.
 #[test]
 fn a_proposition_outside_the_fragment_is_refused_by_name() {
-    let v = check("PUnit.unit", &Exp::LitFloat(1.5));
+    // `Lam` and not `LitFloat`: float literals joined the fragment in §4.8.
+    let v = check(
+        "PUnit.unit",
+        &Exp::Lam(
+            eigenius_kernel::nbe::term::Patt::Var("x".into()),
+            Box::new(Exp::Var("x".into())),
+        ),
+    );
     match v {
         Verdict::Fails { diagnostic } => {
             assert!(
-                diagnostic.contains("LitFloat"),
+                diagnostic.contains("Lam"),
                 "the refusal must name the variant; got {diagnostic}"
             );
             assert!(
@@ -195,7 +202,16 @@ fn a_sigma_over_a_class_matches_a_lean_subtype() {
     let v = check_proof(
         SIGMA_SUBTYPE,
         "refined",
-        &["EigeniusFFI.eigenius.test.Big".to_string()],
+        &[
+            // `Float`'s model depends on the standard three (`Float.add depends on axioms:
+            // [propext, Classical.choice, Quot.sound]`), so a fixture using floats needs them —
+            // the same set `DEFAULT_LEAN_AXIOMS` carries.
+            "propext".to_string(),
+            "Classical.choice".to_string(),
+            "Quot.sound".to_string(),
+            "EigeniusFFI.eigenius.test.Big".to_string(),
+            "EigeniusFFI.eigenius.test.Measured".to_string(),
+        ],
         Some(&ExpectedStatement {
             proposition: &prop,
             layer: &layer,
@@ -229,7 +245,16 @@ fn a_projection_declarations_type_still_matches() {
     let v = check_proof(
         SIGMA_SUBTYPE,
         "projected",
-        &["EigeniusFFI.eigenius.test.Big".to_string()],
+        &[
+            // `Float`'s model depends on the standard three (`Float.add depends on axioms:
+            // [propext, Classical.choice, Quot.sound]`), so a fixture using floats needs them —
+            // the same set `DEFAULT_LEAN_AXIOMS` carries.
+            "propext".to_string(),
+            "Classical.choice".to_string(),
+            "Quot.sound".to_string(),
+            "EigeniusFFI.eigenius.test.Big".to_string(),
+            "EigeniusFFI.eigenius.test.Measured".to_string(),
+        ],
         Some(&ExpectedStatement {
             proposition: &prop,
             layer: &layer,
@@ -273,7 +298,16 @@ fn fst_under_a_binder_recovers_its_implicits_by_inference() {
     let v = check_proof(
         SIGMA_SUBTYPE,
         "projects_in_the_type",
-        &["EigeniusFFI.eigenius.test.Big".to_string()],
+        &[
+            // `Float`'s model depends on the standard three (`Float.add depends on axioms:
+            // [propext, Classical.choice, Quot.sound]`), so a fixture using floats needs them —
+            // the same set `DEFAULT_LEAN_AXIOMS` carries.
+            "propext".to_string(),
+            "Classical.choice".to_string(),
+            "Quot.sound".to_string(),
+            "EigeniusFFI.eigenius.test.Big".to_string(),
+            "EigeniusFFI.eigenius.test.Measured".to_string(),
+        ],
         Some(&ExpectedStatement {
             proposition: &prop,
             layer: &layer,
@@ -284,4 +318,121 @@ fn fst_under_a_binder_recovers_its_implicits_by_inference() {
         matches!(v, Verdict::Holds),
         "`Fst` under a binder must rebuild `Subtype.val` with inferred implicits; got {v:?}"
     );
+}
+
+// ─── D74 §4.8 — float literals and the Float type ──────────────────────────────────────────
+//
+// The motivating case for the whole fragment: a measurement claim asserts the value a
+// computation produced. `0.1` is `@OfScientific.ofScientific Float instOfScientificFloat 1 true 1`
+// — a typeclass application over NAT literals — so the externalizer builds it rather than
+// emitting a node, and exactness rests on the shortest round-trip decimal.
+
+fn measured_layer() -> Arc<Layer> {
+    use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
+    use eigenius_kernel::ontology::iri::Iri;
+    use eigenius_kernel::ontology::resource::{Resource, Value};
+    use eigenius_kernel::ontology::well_known as wk;
+
+    let parent = head();
+    let mut b = LayerBuilder::new("measured", Some(Arc::clone(&parent)));
+    let mut r = Resource::new(Iri::parse("urn:eigenius:test:Measured").unwrap());
+    r.set(
+        Iri::parse(wk::IS_A).unwrap(),
+        Value::Array(vec![Value::String(wk::CLASS.to_string())]),
+    );
+    r.set(
+        Iri::parse(wk::SHORT_NAME).unwrap(),
+        Value::String("Measured".to_string()),
+    );
+    b.add_resource(r).expect("add Measured");
+    Arc::new(b.build(LayerStorage::in_memory()))
+}
+
+fn measured(arg: Exp) -> Exp {
+    let iri = eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:test:Measured").unwrap();
+    let p = || {
+        Exp::App(
+            Box::new(Exp::EigonAxiom(iri.clone())),
+            Box::new(arg.clone()),
+        )
+    };
+    Exp::Arrow(Box::new(p()), Box::new(p()))
+}
+
+fn check_measured(target: &str, prop: &Exp) -> Verdict {
+    let layer = measured_layer();
+    check_proof(
+        SIGMA_SUBTYPE,
+        target,
+        &[
+            // `Float`'s model depends on the standard three (`Float.add depends on axioms:
+            // [propext, Classical.choice, Quot.sound]`), so a fixture using floats needs them —
+            // the same set `DEFAULT_LEAN_AXIOMS` carries.
+            "propext".to_string(),
+            "Classical.choice".to_string(),
+            "Quot.sound".to_string(),
+            "EigeniusFFI.eigenius.test.Big".to_string(),
+            "EigeniusFFI.eigenius.test.Measured".to_string(),
+        ],
+        Some(&ExpectedStatement {
+            proposition: prop,
+            layer: &layer,
+        }),
+    )
+    .expect("infrastructure ok")
+}
+
+/// A positive float literal reproduces the exact `f64` Lean elaborated.
+#[test]
+fn a_float_literal_matches_what_lean_elaborated() {
+    let v = check_measured("measured_refl", &measured(Exp::LitFloat(0.1)));
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// Negative literals wrap in `Neg.neg`, which is what Lean itself emits for `-2.5`.
+#[test]
+fn a_negative_float_literal_matches() {
+    let v = check_measured("measured_neg_refl", &measured(Exp::LitFloat(-2.5)));
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// A DIFFERENT float must not match — the check is on the value, not on the shape.
+#[test]
+fn a_different_float_literal_fails() {
+    let v = check_measured("measured_refl", &measured(Exp::LitFloat(0.2)));
+    match v {
+        Verdict::Fails { diagnostic } => assert!(
+            diagnostic.contains("not the claim's proposition"),
+            "got {diagnostic}"
+        ),
+        other => panic!("0.2 must not match a proof about 0.1; got {other:?}"),
+    }
+}
+
+/// The Float TYPE needs no encoding — it is an ordinary `Const`, like `String` and `Int`. This is
+/// the shape most measurement claims take: the quantity is bound, not written out.
+#[test]
+fn a_proposition_quantifying_over_float_matches() {
+    let prop = Exp::Pi(
+        eigenius_kernel::nbe::term::Patt::Var("x".into()),
+        Box::new(Exp::EigonPrimitive(
+            eigenius_kernel::nbe::term::PrimitiveType::Float,
+        )),
+        Box::new(measured(Exp::Var("x".into()))),
+    );
+    let v = check_measured("quantifies_over_float", &prop);
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// NaN and ±∞ have no decimal form, so they are refused rather than approximated.
+#[test]
+fn a_non_finite_float_is_refused() {
+    let v = check_measured("measured_refl", &measured(Exp::LitFloat(f64::NAN)));
+    match v {
+        Verdict::Fails { diagnostic } => assert!(
+            diagnostic.contains("not finite"),
+            "the refusal must say why; got {diagnostic}"
+        ),
+        other => panic!("NaN must be refused; got {other:?}"),
+    }
 }

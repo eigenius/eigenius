@@ -85,8 +85,8 @@ fn fixture_path() -> PathBuf {
         .expect("workspace root must have two ancestor segments from this crate")
 }
 
-#[test]
-fn notebook_demo_fixture_lands_holds() {
+/// The committed fixture's resources.
+fn fixture_resources() -> Vec<eigenius_kernel::ontology::resource::Resource> {
     let path = fixture_path();
     let bytes = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         panic!(
@@ -103,12 +103,18 @@ fn notebook_demo_fixture_lands_holds() {
     });
     assert_eq!(
         resources.len(),
-        5,
-        "demo fixture must carry exactly five resources \
-         (Patient class, instance, mirror, payload, term); got {}",
+        6,
+        "demo fixture must carry exactly six resources (Patient class, the `Healthy` axiom its \
+         proposition applies, the claim instance, mirror, payload, term); got {}",
         resources.len()
     );
+    resources
+}
 
+/// Drive the commit orchestrator over `resources`, exactly as the Load handler does.
+fn land(
+    resources: Vec<eigenius_kernel::ontology::resource::Resource>,
+) -> eigenius_kernel::commit::MultiLayerOutcome {
     // Bootstrap the chain on a memory-backed `PersistentBackend` so
     // the orchestrator's persist phase has somewhere to land layers.
     // The `WithInstitutions` pipeline runs `autoonload_dispatch`,
@@ -192,7 +198,7 @@ fn notebook_demo_fixture_lands_holds() {
     let persister = BackendPersister::new(Some(Arc::clone(&backend) as Arc<dyn PersistentBackend>));
     let host = NoopHost;
     let pool = CommitWorkingSetPool::in_memory();
-    let outcome = {
+    {
         let orchestrator = CommitOrchestrator {
             ctx: &mut ctx,
             pool: &pool,
@@ -208,7 +214,12 @@ fn notebook_demo_fixture_lands_holds() {
             did_drain: CommitOrchestrator::default_did_drain(),
         };
         orchestrator.run(root)
-    };
+    }
+}
+
+#[test]
+fn notebook_demo_fixture_lands_holds() {
+    let outcome = land(fixture_resources());
 
     // On the all-Ok / Holds path the orchestrator returns
     // `outcome.error = None` and the layers vector carries the user
@@ -272,5 +283,45 @@ fn notebook_demo_fixture_lands_holds() {
         ctor, "Holds",
         "demo proof must yield Verdict::Holds (the load-bearing claim of the lean-verification notebook); \
          got `{ctor}`"
+    );
+}
+
+/// A claim carrying no `reflection:canonical_proposition` is REFUSED, not skipped.
+///
+/// This is the fix for eigenius#159. Before it, `claim_proposition` returned `None` for such a
+/// claim and the institution fell back to the name-level check — "a theorem called `target_name`
+/// type-checks" — which is the verdict that issue opened against. The demo itself demonstrated
+/// the hole: its claim carried only `is_a`, so it landed `Holds` with the statement check never
+/// running.
+///
+/// The claim now carries `∀ (p : Patient), Healthy(p) → Healthy(p)`, and stripping it must fail
+/// the commit rather than quietly weaken what `Holds` attests.
+#[test]
+fn a_claim_without_a_proposition_is_refused() {
+    use eigenius_kernel::ontology::iri::Iri;
+    use eigenius_kernel::ontology::well_known as wk;
+
+    let stripped: Vec<_> = fixture_resources()
+        .into_iter()
+        .map(|mut r| {
+            if r.id().is_some_and(|i| i.as_str().ends_with(":patient_1")) {
+                r.remove(&Iri::parse(wk::CANONICAL_PROPOSITION).expect("well-known IRI"));
+            }
+            r
+        })
+        .collect();
+
+    let outcome = land(stripped);
+    let err = outcome
+        .error
+        .expect("a claim with no proposition must not land");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("canonical_proposition"),
+        "the refusal must name what is missing; got {msg}"
+    );
+    assert!(
+        msg.contains("target name alone") || msg.contains("nothing to check"),
+        "and must say why a name-level verdict is not enough; got {msg}"
     );
 }

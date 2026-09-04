@@ -229,8 +229,8 @@ resolves to. Read off `decode_type`, the **23 variants decoding can produce** ar
 
 | | |
 |---|---|
-| **translated** | `Sort` `Var` `Const` `EigonClass` `EigonAxiom` `EigonPrimitive` `App` `Pi` `Sig` `Fst` `Snd` `One` `Unit` `Id` `LitInt` `LitString` `LitBool` — 17 |
-| **refused** | `Ann` `Lam` `LitFloat` `InductiveCtor` `Pair` `Refine` — 6 |
+| **translated** | `Sort` `Var` `Const` `EigonClass` `EigonAxiom` `EigonPrimitive` `App` `Pi` `Sig` `Fst` `Snd` `One` `Unit` `Id` `LitInt` `LitString` `LitBool` `LitFloat` — 18 |
+| **refused** | `Ann` `Lam` `InductiveCtor` `Pair` `Refine` — 5 |
 
 Everything else the fragment classifies — `Map`, `Reduce`, `Construct`, `Template`, `Match`,
 `InstitutionInvoke`, `InductiveRec`, `Case`, `Data`, `Dec`, `IdJ`, `NativeDecide`, `DecEq`,
@@ -246,7 +246,7 @@ a `Lam`, a `Pair`, a `Record` or a `Refine`.
 Three constructors is a thin corpus, so "everything committed externalizes" says less than it
 sounds. The parser's own output is what will exercise the rest.
 
-### 4.1 Translated (20)
+### 4.1 Translated (22)
 
 | EigenTT | Lean | note |
 |---|---|---|
@@ -268,10 +268,12 @@ sounds. The parser's own output is what will exercise the rest.
 | `Times(A, B)` | `Subtype A (fun _ : A => B)` | a non-dependent `Sig` |
 | `Fst(e)` | `Subtype.val α p e` | §4.6 — implicits inferred, at any depth |
 | `Snd(e)` | `Subtype.property α p e` | §4.6 — same |
+| `LitFloat(v)` | `OfScientific` spine, `Neg.neg` if negative | §4.8 — exact via shortest round-trip; NaN / ±∞ refused |
+| `EigonPrimitive(Float)` | `Const(Float)` | §4.8 — IEEE 754/854 binary64 |
 | `One` | `PUnit` | |
 | `Unit` | `PUnit.unit` | |
 
-### 4.2 Refused (23)
+### 4.2 Refused (21)
 
 Refusal is **typed and total**: an `ExternalizeError` naming the variant and the sub-term, never
 a silent approximation. A proposition outside the fragment must fail loudly, since the
@@ -286,7 +288,7 @@ alternative — translating "close enough" — proves a different theorem soundl
 | **Elimination** | `Case`, `Match`, `IdJ`, `InductiveRec` | `Id` and `Refl` are in the fragment; eliminating them is not. `InductiveRec` is a recursor application |
 | **Surface forms** | `Data`, `Dec`, `Ann`, `Con` | declaration, `let`/`letrec`, ascription, and a constructor application whose inductive is implicit — forms the codec does not emit into a proposition slot |
 | **Effects** | `InstitutionInvoke` | dispatches a comorphism; its result is not determined by the proposition alone |
-| **No Lean image** | `LitFloat`, `EigonPrimitive(Float)`, `EigonPrimitive(Json)` | Lean has no float literal, and a proposition over reals needs a `Float` vs `Real` decision v1 does not make. `Json` is a chain-side carrier |
+| **No Lean image** | `EigonPrimitive(Json)` | a chain-side carrier with no Lean counterpart |
 | **Unannotated binder** | `Lam` | see §4.4 |
 | **Open** | `InductiveCtor` | see §4.3 |
 
@@ -339,6 +341,88 @@ change to the shape of §2's pipeline, not a missing row.
 **zero** contain a `Lam`. The four occurrences of "Lam" in `ontologies/` are the *declaration* of
 the constructor in `eigentt:Term`, `lean:LeanExpr` and the formulas term type, not uses. v1 gives
 up nothing that exists.
+
+### 4.8 Float is translated — `2026-09-04`
+
+An earlier reading of this section — *"Lean has no float literal"* — was wrong in a way worth
+correcting, because it made the refusal look permanent when it was neither permanent nor
+expensive. `LitFloat` and `EigonPrimitive(Float)` are both in the fragment now.
+
+**Lean 4 has a proper IEEE 754 binary64 `Float`.** Checked against the pinned toolchain
+(`leanprover/lean4:v4.29.1`):
+
+```lean
+structure Float where toModel : Float.Model
+structure Float.Model where
+  toBits : UInt64
+  valid  : Float.Model.Format.binary64.Valid toBits.toBitVec
+```
+
+A real structure over a bit pattern with a validity proof — not opaque, not axiomatised.
+`Float.add` is an ordinary definition over the model depending only on `propext`,
+`Classical.choice` and `Quot.sound`, and it **computes in the kernel**:
+`example : (1.0 : Float) + 1.0 = 2.0 := by rfl` goes through.
+
+So what actually blocks `LitFloat` is two other things.
+
+**There is no float literal `Expr` node.** Lean's `Expr` carries `StringLit` and `NatLit` and
+nothing else — which is exactly why nanoda exposes `mk_string_lit` and `mk_nat_lit` and no float
+constructor. `(0.0 : Float)` elaborates to
+
+```
+@OfScientific.ofScientific.{0} Float instOfScientificFloat (nat_lit 0) Bool.true (nat_lit 1)
+```
+
+a typeclass application over *nat* literals. Translating a `LitFloat` means synthesising that
+spine and pinning `instOfScientificFloat` — mechanical, but it is elaboration, and §4.6 already
+records where the line between checking and elaborating falls.
+
+**`Float` vs `Real` — decided `2026-09-04`: `Float`, i.e. IEEE 754/854.**
+
+A chain proposition about a measured quantity is a claim about the value a computation actually
+produced, not about an idealised real that the computation approximates. An IC50 on the chain came
+out of a solver operating on doubles; its rounding IS part of what is being asserted, and
+`Real` would state something the pipeline never established. `Real` also lives in Mathlib, absent
+from a bare export, so it would drag a dependency in for a weaker claim.
+
+This is newly reasonable rather than merely convenient. Lean's `Float` is no longer an opaque FFI
+handle — the model above is binary64 *bits with a validity proof*, and arithmetic over it reduces
+in the kernel — so propositions about IEEE arithmetic are checkable there, which is exactly what a
+measurement claim needs.
+
+With that settled the encoding was the only thing left, and it is thirty lines: format the `f64`
+with `{:e}`, fold the decimal point into the exponent, and build the five-argument spine.
+Negative values wrap in `@Neg.neg.{0} Float instNegFloat`, which is what Lean itself emits for
+`-1.5`. NaN and ±∞ are refused — they have no decimal form, so there is nothing to round-trip.
+
+**Three things only building it revealed.**
+
+`Float` pulls in the standard axioms. Its model depends on `propext`, `Classical.choice` and
+`Quot.sound`, so any export using floats needs them permitted — which the institution's
+`DEFAULT_LEAN_AXIOMS` already carries, but a test supplying its own list does not.
+
+The universe must be explicit. `@OfScientific.ofScientific.{0}` sits at level 0 because it builds
+a `Float : Type 0` — fixed by the type it operates on, not by the enclosing declaration. The
+general `const_levels` takes the TARGET's parameters, which is right for a constant standing at
+the target's universe and wrong here; `lean_const_at` supplies a literal level instead.
+
+And a test that used `LitFloat` as its example of an out-of-fragment variant had to change,
+which is the sort of thing that makes a fragment change visible.
+
+**Verified against terms Lean elaborated**, not against the encoding's own idea of itself:
+`0.1` and `-2.5` match their proofs, `0.2` does NOT match a proof about `0.1`, `∀ (x : Float),
+Measured x → Measured x` matches, and `NaN` is refused by name
+(`externalize_test`, five tests, fixture at `lean/research/sigma-fixture/`).
+
+**What this changes.** The fragment now expresses a measurement, not merely a quantification
+over one. A claim naming an IC50, a viability value or an effect size can be stated and checked.
+
+What still stands between that and the WRN chain is not the number: it is the RELATION. A claim
+like `0.0 ≤ x` is `@LE.le.{0} Float instLEFloat …`, and nothing maps a chain relation onto a Lean
+typeclass operator at a chosen instance — D30 mirrors classes as `structure`s and stops there.
+Naming one by hand is the naming disagreement §3.3 exists to prevent. A chain axiom
+`demo:le : Float -> Float -> Prop` works today, but it is not Lean's `≤` and does not inherit its
+lemmas.
 
 ### 4.5 Σ is `Subtype` — settled `2026-09-03` by measurement
 
@@ -485,6 +569,12 @@ which the parser has no reason to build.
   at that point — MEASURED the way §4.5 measured `Sig`, not assumed.
 
 ## 5. What this makes true, and what it does not
+
+**Numbers, but not yet Lean's arithmetic.** §4.8: floats are translated, so a measurement claim
+can be stated and checked against IEEE 754/854 semantics. What is not available is Lean's own
+relational vocabulary — `≤` is `@LE.le.{0} Float instLEFloat`, and nothing maps a chain relation
+onto a typeclass operator at a chosen instance. A claim can say `Measured(0.1)`; it cannot yet
+say `0.0 ≤ x` and mean Lean's `≤`.
 
 With externalization in place, D28's check becomes:
 

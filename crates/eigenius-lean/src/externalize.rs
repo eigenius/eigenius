@@ -70,7 +70,9 @@ use nanoda_lib::util::{ExprPtr, LevelPtr, NamePtr, TcCtx};
 ///
 /// Every arm names the construct and, where there is one, the sub-term — never a silent
 /// approximation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+// No `Eq`: `NonFiniteFloat` carries an `f64`, and NaN is not equal to itself. `PartialEq` is
+// what the tests compare with anyway.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExternalizeError {
     /// The proposition uses a construct outside D74 §4's fragment.
     OutsideFragment {
@@ -114,6 +116,11 @@ pub enum ExternalizeError {
         /// Universe arguments available to supply — the target declaration's own.
         available: usize,
     },
+    /// A non-finite float — NaN or ±∞ (D74 §4.8).
+    ///
+    /// The literal encoding is a decimal round-trip and these have no decimal form. Refused
+    /// rather than approximated.
+    NonFiniteFloat(f64),
     /// A `Fst`/`Snd` whose scrutinee does not have a `Subtype` type.
     ///
     /// EigenTT's Σ maps to `Subtype` (§4.2), so its projections eliminate one. A scrutinee that
@@ -166,6 +173,10 @@ impl std::fmt::Display for ExternalizeError {
                 "`{lean_name}` takes {expected} universe argument(s) and the target declaration \
                  supplies {available}; a universe-polymorphic constant can only be spelled with \
                  the target's own parameters"
+            ),
+            Self::NonFiniteFloat(v) => write!(
+                f,
+                "float literal `{v}` is not finite, so it has no decimal form to encode"
             ),
             Self::NotASubtype { form } => write!(
                 f,
@@ -444,15 +455,9 @@ fn go<'x, 't: 'x, 'p: 't>(
                 PrimitiveType::String => "String",
                 PrimitiveType::Integer => "Int",
                 PrimitiveType::Boolean => "Bool",
+                PrimitiveType::Float => "Float",
                 // `Float` has the same problem `LitFloat` has, and `Json` is a chain-side
                 // carrier with no Lean image at all.
-                PrimitiveType::Float => {
-                    return outside(
-                        "EigonPrimitive(Float)",
-                        "Lean has no `Float` vs `Real` \
-                         decision in v1 — see `LitFloat`",
-                    )
-                }
                 PrimitiveType::Json => {
                     return outside(
                         "EigonPrimitive(Json)",
@@ -578,11 +583,17 @@ fn go<'x, 't: 'x, 'p: 't>(
             "names a resource rather than its class; resource-level",
         ),
 
-        Exp::LitFloat(_) => outside(
-            "LitFloat",
-            "Lean has no float literal, and a proposition over reals needs a `Float` vs `Real` \
-             decision v1 does not make",
-        ),
+        // D74 §4.8. Lean's `Expr` has no float node: `0.0` is
+        // `@OfScientific.ofScientific.{0} Float instOfScientificFloat (nat_lit m) Bool.true
+        // (nat_lit e)`, meaning `m * 10^(-e)` — a DECIMAL scientific form, not binary. So a
+        // literal is built, not emitted.
+        //
+        // Exactness rests on the shortest-round-trip decimal: Rust's `{:e}` produces the shortest
+        // decimal that reads back as the same f64, and Lean's `instOfScientificFloat` rounds it
+        // to the same bits. Verified by `rfl` in the kernel against `0.1`, `1e300` and
+        // `3.141592653589793`, so this is a reproduction of the value rather than an
+        // approximation of it — the distinction §5 turns on.
+        Exp::LitFloat(f) => float_literal(*f, tc.ctx, cx),
 
         Exp::Data(_) => outside(
             "Data",
@@ -710,6 +721,84 @@ fn subtype_projection<'t, 'p: 't>(
     Ok(ctx.mk_app(e, scrutinee))
 }
 
+/// A `Float` literal, as the `OfScientific` application Lean elaborates one to (D74 §4.8).
+///
+/// `@OfScientific.ofScientific.{0} Float instOfScientificFloat (nat_lit m) (b : Bool)
+/// (nat_lit e)` denotes `m * 10^(-e)` when `b`, `m * 10^e` otherwise — DECIMAL scientific, not
+/// binary. Negative values wrap in `@Neg.neg.{0} Float instNegFloat`, which is what Lean itself
+/// emits for `-1.5`.
+///
+/// **Why this is exact.** `{:e}` gives the shortest decimal that reads back as the same `f64`,
+/// and `instOfScientificFloat` rounds that decimal to the same bits. Confirmed by `rfl` in the
+/// kernel for `0.1`, `1e300` and `3.141592653589793`. Anything weaker would be an approximation
+/// of the authored value, which is §5's failure mode wearing a numeric hat.
+///
+/// Non-finite values are refused: NaN and ±∞ have no decimal form, so there is nothing to
+/// round-trip.
+fn float_literal<'t, 'p: 't>(
+    v: f64,
+    ctx: &mut TcCtx<'t, 'p>,
+    cx: &Cx<'_, 't>,
+) -> Result<ExprPtr<'t>, ExternalizeError> {
+    use num_bigint::BigUint;
+    use std::str::FromStr;
+
+    if !v.is_finite() {
+        return Err(ExternalizeError::NonFiniteFloat(v));
+    }
+
+    // `{:e}` -> "<digits>[.<digits>]e<exp>", shortest round-trip, sign on the front.
+    let rendered = format!("{:e}", v);
+    let negative = rendered.starts_with('-');
+    let body = rendered.trim_start_matches('-');
+    let (significand, exp10) = body
+        .split_once('e')
+        .expect("`{:e}` always emits an exponent");
+    let exp10: i64 = exp10.parse().expect("`{:e}` emits a decimal exponent");
+
+    // Fold the decimal point into the exponent: `3.14e0` is `314 * 10^-2`.
+    let (digits, fraction_len) = match significand.split_once('.') {
+        Some((int, frac)) => (format!("{int}{frac}"), frac.len() as i64),
+        None => (significand.to_string(), 0),
+    };
+    let mantissa = BigUint::from_str(&digits).expect("`{:e}` emits decimal digits");
+    let scale = exp10 - fraction_len;
+
+    // `@OfScientific.ofScientific.{0}` — the level is fixed by the type it builds, `Float :
+    // Type 0`, not by the enclosing declaration's parameters. `lean_const` takes the target's,
+    // which is right for a polymorphic constant standing at the target's universe and wrong here.
+    let of_scientific = lean_const_at(ctx, cx, "OfScientific.ofScientific", 0)?;
+    let float_ty = lean_const(ctx, cx, "Float")?;
+    let inst = lean_const(ctx, cx, "instOfScientificFloat")?;
+    let m = ctx
+        .mk_nat_lit_quick(mantissa)
+        .ok_or(ExternalizeError::MissingLeanConstant(
+            "the nat literal extension (Config::nat_extension)",
+        ))?;
+    // The Bool says "negate the exponent", so a NEGATIVE scale is `true`.
+    let sign = lean_const(ctx, cx, if scale < 0 { "Bool.true" } else { "Bool.false" })?;
+    let e = ctx
+        .mk_nat_lit_quick(BigUint::from(scale.unsigned_abs()))
+        .ok_or(ExternalizeError::MissingLeanConstant(
+            "the nat literal extension (Config::nat_extension)",
+        ))?;
+
+    let mut lit = ctx.mk_app(of_scientific, float_ty);
+    for arg in [inst, m, sign, e] {
+        lit = ctx.mk_app(lit, arg);
+    }
+
+    if !negative {
+        return Ok(lit);
+    }
+    let neg = lean_const_at(ctx, cx, "Neg.neg", 0)?;
+    let inst_neg = lean_const(ctx, cx, "instNegFloat")?;
+    let float_ty = lean_const(ctx, cx, "Float")?;
+    let e = ctx.mk_app(neg, float_ty);
+    let e = ctx.mk_app(e, inst_neg);
+    Ok(ctx.mk_app(e, lit))
+}
+
 /// `Subtype α pred` — the Lean image of an EigenTT `Sig` (D74 §4.2).
 ///
 /// `Subtype` binds ONE universe parameter: the one its domain sits at. EigenTT's Σ is predicative
@@ -736,6 +825,30 @@ fn subtype_of<'t, 'p: 't>(
     let head = ctx.mk_const(name, levels);
     let applied = ctx.mk_app(head, domain);
     Ok(ctx.mk_app(applied, predicate))
+}
+
+/// One of Lean's own constants at an EXPLICIT universe level.
+///
+/// For a constant whose level is fixed by the type it operates on rather than by the enclosing
+/// declaration — `@OfScientific.ofScientific.{0}` builds a `Float : Type 0` whatever the target
+/// declares. [`lean_const`] takes the target's parameters, which is right when the constant
+/// stands at the target's universe and wrong when it does not.
+fn lean_const_at<'t, 'p: 't>(
+    ctx: &mut TcCtx<'t, 'p>,
+    cx: &Cx<'_, 't>,
+    n: &'static str,
+    level: usize,
+) -> Result<ExprPtr<'t>, ExternalizeError> {
+    let name = cx
+        .names
+        .get(n)
+        .ok_or(ExternalizeError::MissingLeanConstant(n))?;
+    let mut l = ctx.zero();
+    for _ in 0..level {
+        l = ctx.succ(l);
+    }
+    let levels = ctx.alloc_levels_slice(&[l]);
+    Ok(ctx.mk_const(name, levels))
 }
 
 /// Resolve one of Lean's own constants by name.

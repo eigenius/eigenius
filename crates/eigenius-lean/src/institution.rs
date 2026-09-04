@@ -296,9 +296,22 @@ fn claim_proposition(
             "`claim_iri` `{claim_iri}` does not resolve in the verification context"
         ))
     })?;
+    // REJECT, do not skip. The whole of #159 is that a `Holds` must mean "this proof proves THIS
+    // claim"; a claim carrying no proposition leaves nothing to compare against, and returning
+    // `None` here would fall back to the name-level check — "a theorem with this name
+    // type-checks" — which is the verdict the issue opened against.
+    //
+    // This cannot be expressed in the ontology: `reflection:canonical_proposition` is a
+    // `reflection:` property on an arbitrary claim class, and `lean:LeanProofTerm` cannot require
+    // a property of a resource it merely references. So the institution enforces it, and D74
+    // §6.3's `claim_iri: requires` is necessary but not sufficient on its own.
     let Some(value) = claim.get(&Iri::parse(wk::CANONICAL_PROPOSITION).expect("well-known IRI"))
     else {
-        return Ok(None);
+        return Err(InstitutionError::ComputationFailed(format!(
+            "claim `{claim_iri}` carries no `reflection:canonical_proposition`, so there is \
+             nothing to check the proof against; a Lean verdict must not rest on the target \
+             name alone (D74 / eigenius#159)"
+        )));
     };
     let exp = decode_type(value, ctx.head()).map_err(|e| {
         InstitutionError::ComputationFailed(format!(
