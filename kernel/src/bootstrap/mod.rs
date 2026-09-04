@@ -316,14 +316,11 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         source: include_str!("../../../ontologies/formulas/formulas-ontology.json"),
         format: OntologyFormat::Json,
     },
-    // lean-expressions (Phase 20a.2 / D40) — chain-mirrored Lean expression form
-    // (LeanName / LeanLevel / LeanExpr inductives) the Lean institution's
-    // `LeanProofTerm.proposition` refers to.
-    BootstrapOntology {
-        name: "lean-expressions",
-        source: include_str!("../../../ontologies/lean/lean-expressions.eigon.json"),
-        format: OntologyFormat::Json,
-    },
+    // `lean-expressions` was here — the chain-mirrored Lean expression form (D40's
+    // `LeanName` / `LeanLevel` / `LeanLevelList` / `LeanExpr` inductives) that
+    // `LeanProofTerm.proposition` referred to. D74 §6.3.1 deleted that slot: the Lean goal is
+    // manufactured FROM the claim and compared with `def_eq`, so nothing recovers a proposition
+    // out of Lean any more and the four inductives named nothing.
     // lean-runtime-classes (Phase 20a.5a / D28 §10.3) — the Lean language
     // runtime's authoring-side resource classes (LeanProject / LeanPackage /
     // LeanPackagePin / LeanEnvironment).
@@ -956,12 +953,9 @@ class p:Cat { description = "a dog"; }"#;
         let ctx = bootstrap().unwrap();
         // Head is the encoding layer
         // (on top of lean-institution → lean-runtime-classes →
-        // lean-expressions → formulas → runtime → institution →
-        // reflection → program → core).
+        // formulas → runtime → institution → reflection → program → core).
         // formulas inserted at Phase 19d.0.d / D32 §4 so FormulaTerm
         // and the operator catalog ride above the runtime substrate
-        // ontology. lean-expressions inserted at Phase 20a.2 / D40
-        // for the chain-mirrored Lean expression form.
         // lean-runtime-classes inserted at Phase 20a.5a / D28 §10.3
         // to declare LeanProject / LeanEnvironment subclasses.
         // lean-institution inserted at Phase 20a.4 / D28 to declare
@@ -997,9 +991,8 @@ class p:Cat { description = "a dog"; }"#;
         assert!(!lean_institution.is_root());
         let lean_runtime_classes = lean_institution.parent().unwrap();
         assert!(!lean_runtime_classes.is_root());
-        let lean_expressions = lean_runtime_classes.parent().unwrap();
-        assert!(!lean_expressions.is_root());
-        let formulas = lean_expressions.parent().unwrap();
+        // `lean-expressions` sat here until D74 §6.3.1 removed it.
+        let formulas = lean_runtime_classes.parent().unwrap();
         assert!(!formulas.is_root());
         let runtime = formulas.parent().unwrap();
         assert!(!runtime.is_root());

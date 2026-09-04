@@ -501,7 +501,17 @@ mod tests {
     }
 
     const NAT: &str = "urn:eigenius:test:Nat";
-    const LEAN_EXPR: &str = "urn:eigenius:lean:LeanExpr";
+    /// The inductive these tests exercise the rule against.
+    ///
+    /// Was `lean:LeanExpr` until D74 §6.3.1 retired D40's direction and took the four
+    /// `lean:Lean*` inductives out of the bootstrap with it.
+    ///
+    /// `core:Level` and not `eigentt:Term`, deliberately. These tests exercise the GENERIC
+    /// `core:inductive` + `class_types` dispatch, and `eigentt:Term` is special-cased by Rule 21,
+    /// which decodes it through the D47 codec and type-checks it — a different code path that
+    /// would silently change what they measure. `core:Level` is an ordinary bootstrap inductive
+    /// with five constructors, which is what `lean:LeanExpr` was standing in for.
+    const LEVEL: &str = "urn:eigenius:core:Level";
 
     /// `succ(succ(zero))` as a JSON tagged-dict tree.
     fn nat_succ_succ_zero() -> serde_json::Value {
@@ -1033,27 +1043,16 @@ mod tests {
     // ──────────────────────────────────────────────────────────────────
 
     /// Build a layer chain rooted at the embedded bootstrap (which now
-    /// carries `lean:LeanExpr` + siblings per D40) plus a property
-    /// `proposition_value : core:inductive` typed at `lean:LeanExpr`.
+    /// carries `core:Level`) plus a property
+    /// `proposition_value : core:inductive` typed at `core:Level`.
     /// The chain looks like: core → program → reflection → institution
     /// → runtime → formulas → lean-expressions → <this test layer>.
-    fn build_lean_expr_layer() -> Arc<Layer> {
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap with lean-expressions layer");
-        // After Phase 20a.4 the chain is:
-        //   notebook → lean-institution → lean-expressions → formulas → …
-        // We anchor at lean-institution (`ctx.head().parent()`) so the
-        // test layer has both the lean:LeanExpr InductiveTypes
-        // (resolved through `lean-expressions`) and the
-        // institution-side classes (LeanProofTerm etc.) reachable —
-        // notebook would also work, but anchoring above it keeps the
-        // chain focused.
-        let lean_layer = Arc::clone(
-            ctx.head()
-                .parent()
-                .expect("head has lean-institution parent"),
-        );
-
-        let mut builder = LayerBuilder::new("test_lean_expr", Some(lean_layer));
+    fn build_level_layer() -> Arc<Layer> {
+        // `eigentt:Term` is declared in `core`, so the head resolves it — no anchoring at a
+        // particular layer is needed, unlike the `lean-expressions` chain this replaced.
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let head = Arc::clone(ctx.head());
+        let mut builder = LayerBuilder::new("test_level", Some(head));
         let prop = make_resource(
             "urn:eigenius:test:proposition_value",
             vec![
@@ -1062,9 +1061,7 @@ mod tests {
                 (wk::DATA_TYPE_PROP, Value::iri(&iri(wk::INDUCTIVE))),
                 (
                     wk::CLASS_TYPES,
-                    Value::Array(vec![Value::String(
-                        iri("urn:eigenius:lean:LeanExpr").as_str().to_string(),
-                    )]),
+                    Value::Array(vec![Value::String(iri(LEVEL).as_str().to_string())]),
                 ),
             ],
         );
@@ -1072,46 +1069,24 @@ mod tests {
         Arc::new(builder.build(crate::layer::LayerStorage::in_memory()))
     }
 
-    /// `Lambda { binder_name = Str(Anon, "x"), binder_style = "default",
-    ///           binder_type = Const(Str(Anon, "Nat"), Nil),
-    ///           body = Var(0) }`
-    /// ≈ `λ x : Nat, x` — the smallest non-trivial closed Lean term.
-    fn lambda_x_in_nat() -> serde_json::Value {
-        let anon = serde_json::json!({"ctor": "Anon"});
-        let name_x = serde_json::json!({
-            "ctor": "Str",
-            "args": [anon.clone(), "x"]
-        });
-        let name_nat = serde_json::json!({
-            "ctor": "Str",
-            "args": [anon.clone(), "Nat"]
-        });
-        let nil = serde_json::json!({"ctor": "Nil"});
+    /// `Succ(Zero)` — the smallest `core:Level` with nesting, so Rule 23 has something to
+    /// recurse into and Rules 1/5/6 have an argument to check.
+    fn succ_zero() -> serde_json::Value {
         serde_json::json!({
-            "ctor": "Lambda",
-            "args": [
-                name_x,
-                "default",
-                {
-                    "ctor": "Const",
-                    "args": [name_nat, nil]
-                },
-                {"ctor": "Var", "args": [0]}
-            ]
+            "ctor": "Succ",
+            "args": [{"ctor": "Zero", "args": []}]
         })
     }
 
     #[test]
-    fn lean_expr_lambda_x_in_nat_validates() {
+    fn level_value_succ_zero_validates() {
         // Phase 20a.2 acceptance test: a hand-encoded `λ x : Nat, x`
-        // value commits cleanly against the chain-mirrored LeanExpr
-        // ontology. Each node is a resource stating its constructor's class, so
-        // Rule 23 recurses into it and Rules 1, 5 and 6 check its arguments —
-        // through LeanName / LeanLevelList / LeanExpr. No validator errors means
-        // every cross-reference resolved and the ontology layer is structurally
-        // consistent.
-        let layer = build_lean_expr_layer();
-        let value = value_of(&layer, LEAN_EXPR, &lambda_x_in_nat());
+        // value commits cleanly against a bootstrap inductive. Each node is a
+        // resource stating its constructor's class, so Rule 23 recurses into it and
+        // Rules 1, 5 and 6 check its arguments. No validator errors means every
+        // cross-reference resolved and the ontology layer is structurally consistent.
+        let layer = build_level_layer();
+        let value = value_of(&layer, LEVEL, &succ_zero());
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:p1",
@@ -1127,23 +1102,21 @@ mod tests {
             .collect();
         assert!(
             errors.is_empty(),
-            "well-formed `λ x : Nat, x` must validate as a lean:LeanExpr; got {errors:?}"
+            "a well-formed `Succ(Zero)` must validate as a core:Level; got {errors:?}"
         );
     }
 
-    /// **A constructor the inductive doesn't declare is rejected.** `LeanExpr` has no
+    /// **A constructor the inductive doesn't declare is rejected.** `core:Level` has no
     /// `MetaVar`, so `LayerBuilder::build` derives no class for it and the value's
     /// `is_a` names something that does not resolve.
     #[test]
-    fn lean_expr_unknown_ctor_rejected() {
-        let layer = build_lean_expr_layer();
+    fn level_value_unknown_ctor_rejected() {
+        let layer = build_level_layer();
         let mut meta_var =
             crate::ontology::resource::Resource::new(iri("urn:eigenius:test:meta_var"));
         meta_var.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(
-                "urn:eigenius:lean:LeanExpr-MetaVar".into(),
-            )]),
+            Value::Array(vec![Value::String(format!("{LEVEL}-MetaVar"))]),
         );
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
@@ -1158,44 +1131,17 @@ mod tests {
 
         let errors = Validator::new(Arc::clone(&layer)).validate();
         assert!(
-            errors
-                .iter()
-                .any(|e| e.message.contains("LeanExpr-MetaVar")),
+            errors.iter().any(|e| e.message.contains("Level-MetaVar")),
             "unknown ctor `MetaVar` must be reported; got {errors:?}"
         );
     }
 
-    #[test]
-    fn lean_expr_resolves_lean_layer_inductives() {
-        // Sanity check: after bootstrap, every LeanExpr-related
-        // InductiveType is reachable from the head as
-        // `is_instance_of(core:InductiveType)`. Catches typos in the
-        // ontology JSON or missing entries in the layer chain.
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
-        let head = Arc::clone(ctx.head());
-        for ind_iri in &[
-            "urn:eigenius:lean:LeanName",
-            "urn:eigenius:lean:LeanLevel",
-            "urn:eigenius:lean:LeanLevelList",
-            "urn:eigenius:lean:LeanExpr",
-        ] {
-            let parsed = iri(ind_iri);
-            let resolved = head.resolve(&parsed).unwrap_or_else(|| {
-                panic!("`{ind_iri}` should resolve from the bootstrap chain head")
-            });
-            assert!(
-                resolved.is_instance_of(&iri(wk::INDUCTIVE_TYPE)),
-                "`{ind_iri}` should be an InductiveType"
-            );
-        }
-    }
-
     /// Build a layer with a property `proposition_value` whose
     /// `data_type` is the caller-supplied IRI and whose `class_types`
-    /// references `lean:LeanExpr`. Powers the Option A tests that
+    /// references `core:Level`. Powers the Option A tests that
     /// exercise `core:resource` / `core:resource_array` carrying
     /// inductive values without going through `core:inductive`.
-    fn build_lean_expr_property_layer(data_type_iri: &str) -> Arc<Layer> {
+    fn build_level_property_layer(data_type_iri: &str) -> Arc<Layer> {
         let ctx = crate::bootstrap::bootstrap().expect("bootstrap with lean-expressions layer");
         let lean_layer = Arc::clone(
             ctx.head()
@@ -1212,9 +1158,7 @@ mod tests {
                 (wk::DATA_TYPE_PROP, Value::iri(&iri(data_type_iri))),
                 (
                     wk::CLASS_TYPES,
-                    Value::Array(vec![Value::String(
-                        iri("urn:eigenius:lean:LeanExpr").as_str().to_string(),
-                    )]),
+                    Value::Array(vec![Value::String(iri(LEVEL).as_str().to_string())]),
                 ),
             ],
         );
@@ -1246,8 +1190,8 @@ mod tests {
     /// `data_type: core:inductive`.
     #[test]
     fn option_a_resource_with_inductive_class_types_accepts_a_value() {
-        let layer = build_lean_expr_property_layer(wk::RESOURCE);
-        let value = value_of(&layer, LEAN_EXPR, &lambda_x_in_nat());
+        let layer = build_level_property_layer(wk::RESOURCE);
+        let value = value_of(&layer, LEVEL, &succ_zero());
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:p_single",
@@ -1279,8 +1223,8 @@ mod tests {
     /// declared inductive.
     #[test]
     fn option_a_resource_array_with_inductive_class_types_accepts_a_value_array() {
-        let layer = build_lean_expr_property_layer(wk::RESOURCE_ARRAY);
-        let value = value_of(&layer, LEAN_EXPR, &lambda_x_in_nat());
+        let layer = build_level_property_layer(wk::RESOURCE_ARRAY);
+        let value = value_of(&layer, LEVEL, &succ_zero());
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
             "urn:eigenius:test:p_array",
@@ -1314,13 +1258,13 @@ mod tests {
     /// not resolve is reported like any other.
     #[test]
     fn option_a_resource_array_with_bad_ctor_rejects() {
-        let layer = build_lean_expr_property_layer(wk::RESOURCE_ARRAY);
-        let good = value_of(&layer, LEAN_EXPR, &lambda_x_in_nat());
+        let layer = build_level_property_layer(wk::RESOURCE_ARRAY);
+        let good = value_of(&layer, LEVEL, &succ_zero());
         let mut bogus =
             crate::ontology::resource::Resource::new(iri("urn:eigenius:test:does_not_exist"));
         bogus.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(format!("{LEAN_EXPR}-DoesNotExist"))]),
+            Value::Array(vec![Value::String(format!("{LEVEL}-DoesNotExist"))]),
         );
         let mut top = LayerBuilder::new("test_top", Some(layer));
         let holder = make_resource(
@@ -1337,7 +1281,7 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|e| e.message.contains("LeanExpr-DoesNotExist")),
+                .any(|e| e.message.contains("Level-DoesNotExist")),
             "bad ctor in array must be reported; got {errors:?}"
         );
     }
