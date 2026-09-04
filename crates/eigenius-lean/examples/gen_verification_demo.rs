@@ -50,7 +50,6 @@ use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
-use eigenius_lean::chain_mirror::bytes_to_lean_expr;
 use eigenius_lean::institution::iris as lean_iris;
 use eigenius_lean_runtime::mirror_gen::LeanMirrorGenerator;
 use eigenius_runtime_substrate::mirror_generator::MirrorGenerator;
@@ -67,19 +66,6 @@ const PAYLOAD_IRI: &str = "urn:eigenius:demo:lean:proof_payload";
 const TERM_IRI: &str = "urn:eigenius:demo:lean:proof_term";
 
 const OUTPUT_REL: &str = "notebooks/examples/lean-verification-demo.eigon.json";
-
-/// The bootstrap chain — the mirror reads `LeanExpr`'s constructor argument names from it.
-fn chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
-    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
-        std::sync::OnceLock::new();
-    CHAIN.get_or_init(|| {
-        std::sync::Arc::clone(
-            eigenius_kernel::bootstrap::bootstrap()
-                .expect("bootstrap")
-                .head(),
-        )
-    })
-}
 
 fn main() {
     let workspace = workspace_root();
@@ -118,16 +104,12 @@ fn main() {
     let bootstrap_head_id = bootstrap_head_layer_id();
     eprintln!("Bootstrap head layer ID: {bootstrap_head_id}");
 
-    eprintln!("Decoding proposition for theorem `{TARGET_THEOREM}`");
-    let proposition = bytes_to_lean_expr(&proof_bytes, TARGET_THEOREM, chain())
-        .expect("chain-mirror translator must decode the capstone proposition");
-
     let resources = vec![
         patient_class_resource(),
         patient_instance_resource(),
         mirror_resource(lib_hash, lib_json, bootstrap_head_id),
         proof_payload_resource(&proof_bytes),
-        proof_term_resource(proposition),
+        proof_term_resource(),
     ];
 
     let doc = eigon_json::serialize_document(&resources);
@@ -288,7 +270,7 @@ fn proof_payload_resource(bytes: &[u8]) -> Resource {
     r
 }
 
-fn proof_term_resource(proposition: Value) -> Resource {
+fn proof_term_resource() -> Resource {
     let mut r = Resource::new(iri(TERM_IRI));
     r.set(
         iri(wk::IS_A),
@@ -305,14 +287,9 @@ fn proof_term_resource(proposition: Value) -> Resource {
         Value::String(TARGET_THEOREM.to_string()),
     );
     r.set(
-        iri(lean_iris::PROP_MIRROR_IRI),
-        Value::String(MIRROR_IRI.to_string()),
-    );
-    r.set(
         iri(lean_iris::PROP_CLAIM_IRI),
         Value::String(PATIENT_INSTANCE_IRI.to_string()),
     );
-    r.set(iri(lean_iris::PROP_PROPOSITION), proposition);
     r
 }
 

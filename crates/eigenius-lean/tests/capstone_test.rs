@@ -89,7 +89,6 @@ use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
 
-use eigenius_lean::chain_mirror::bytes_to_lean_expr;
 use eigenius_lean::institution::iris as lean_iris;
 use eigenius_lean::LeanInstitution;
 
@@ -308,8 +307,6 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
     // commit pipeline would do (D28 §6.3); we replicate it here so
     // the proposition reflects the proof's actual type rather than
     // a hand-fabricated tree.
-    let proposition = bytes_to_lean_expr(CAPSTONE_PROOF_BYTES, TARGET_THEOREM, chain())
-        .expect("chain-mirror translator must decode the capstone proposition");
     let mut term = Resource::new(iri(TERM_IRI));
     term.set(
         iri(wk::IS_A),
@@ -326,14 +323,9 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
         Value::String(TARGET_THEOREM.to_string()),
     );
     term.set(
-        iri(lean_iris::PROP_MIRROR_IRI),
-        Value::String(MIRROR_IRI.to_string()),
-    );
-    term.set(
         iri(lean_iris::PROP_CLAIM_IRI),
         Value::String(PATIENT_INSTANCE_IRI.to_string()),
     );
-    term.set(iri(lean_iris::PROP_PROPOSITION), proposition);
     builder.add_resource(term).expect("add term");
 
     let layer = Arc::new(builder.build(storage.clone()));
@@ -341,19 +333,6 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
 }
 
 // ─── The capstone assertion ────────────────────────────────────────
-
-/// The bootstrap chain — the mirror reads `LeanExpr`'s constructor argument names from it.
-fn chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
-    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
-        std::sync::OnceLock::new();
-    CHAIN.get_or_init(|| {
-        std::sync::Arc::clone(
-            eigenius_kernel::bootstrap::bootstrap()
-                .expect("bootstrap")
-                .head(),
-        )
-    })
-}
 
 #[test]
 #[ignore = "heavy: parses ~9 kLoC of lean4export output via nanoda"]
