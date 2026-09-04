@@ -223,7 +223,7 @@ To express reasoning, a system requires content with a decidable identity and a 
 
 Most importantly, PROV graphs are entirely producer-writable. A system can assert a wasDerivedFrom relationship without ever executing the derivation, and the PROV statement remains structurally valid.
 
-**Future integration:** The group intends to publish a downward mapping to ensure records remain consumable by existing PROV tooling. This mapping will be inherently lossy (flattening certificates into standard wasDerivedFrom edges), but it will provide essential backwards compatibility.
+**Future integration:** The group intends to publish a downward mapping to ensure records remain consumable by existing PROV tooling. *(Drafted `2026-09-04`: [`w3c-prov-mapping.md`](w3c-prov-mapping.md).)* This mapping will be inherently lossy (flattening certificates into standard wasDerivedFrom edges), but it will provide essential backwards compatibility.
 
 > **Prior art to verify:** The Proof Markup Language (PML) from the Inference Web project (McGuinness, Pinheiro da Silva, mid-2000s) represents the closest historical precedent for reasoning-level provenance. PML's justification layer modeled inference steps with antecedents and rules. Understanding why the W3C Provenance Incubator Group narrowed its scope away from PML-style justification toward artifact lineage is critical context for this ongoing work.
 
@@ -270,7 +270,7 @@ Summarized from [§11 of the specification](./ai-computed-provenance-1.0.md#11-s
 ## **Open questions**
 
 1. **Cross-binding agreement.** The specification outlines four necessary properties for a proposition language. Whether these are sufficient to guarantee that two independent implementations interpret a proposition's *meaning* identically remains unsettled, though they are currently sufficient for verification within a single binding.  
-2. **The PROV mapping.** The structural mapping to W3C PROV-O must be formally drafted.  
+2. ~~**The PROV mapping.** The structural mapping to W3C PROV-O must be formally drafted.~~ **Drafted `2026-09-04`** — [`w3c-prov-mapping.md`](w3c-prov-mapping.md). Twelve terms map cleanly; the four provenance traces collapse onto one PROV edge, and the epistemic grade has no PROV term at all, which makes the projection one-directional. An *exporter* remains unbuilt and is deliberately a separate question (that document's §5).  
 3. **Attribution integration.** The specification mandates that signing layers bind to content addresses rather than serializations. The group must determine if this constraint is sufficient and which existing attribution model (e.g., VCs, SLSA) should be officially recommended.  
 4. **Registrations.** The reference binding utilizes an unregistered media type and an unassigned CBOR tag. Both require formal IANA registration prior to standardization.  
 5. **Identifiers.** The reference implementation relies on vendor-namespaced IRIs. The working group must decide whether to mint a dedicated namespace, adopt the existing ones, or define a new registry model.  

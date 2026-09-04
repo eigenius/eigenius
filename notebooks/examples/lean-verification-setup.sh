@@ -19,13 +19,17 @@
 #
 # Loads the pre-generated demo fixture
 # (`notebooks/examples/lean-verification-demo.eigon.json`) which
-# bundles the five chain resources the audit chain walks through:
-# Patient class + instance, LeanPackageMirror, LeanProofPayload (the
-# `lean4export` bytes), and LeanProofTerm (with the chain-mirrored
-# proposition). AutoOnLoad fires `qc_proof_check` against the
-# LeanInstitution as the LeanProofTerm lands, nanoda re-checks the
-# proof + the three-part correspondence runs, and a Verdict resource
-# materialises on the chain alongside the term.
+# bundles the six chain resources the audit chain walks through:
+# Patient class, the `Healthy` axiom its proposition applies, the
+# patient_1 instance (carrying the `canonical_proposition` the proof is
+# checked against), RuntimePackageMirror, LeanProofPayload (the
+# `lean4export` bytes), and LeanProofTerm. AutoOnLoad fires
+# `qc_proof_check` against the LeanInstitution as the LeanProofTerm
+# lands; nanoda re-checks the proof and the institution compares the
+# target's type against the claim's externalized proposition with
+# `def_eq` (D74 §6.3). On Holds a Verdict AND a `prov:VerificationTrace`
+# materialise on the chain alongside the term — the trace is what makes
+# the chain admit a `Verified` witness for the claim (eigenius#160).
 #
 # Intended flow:
 #
@@ -142,7 +146,7 @@ echo
 # Step 2: Smoke check. Query for the Verdict resource whose subject
 # is the demo proof_term and confirm it says "Holds". If the proof
 # bytes drifted, the toolchain bumped without regenerating the
-# fixture, or the correspondence check rejected, this surfaces here
+# fixture, or the statement check rejected, this surfaces here
 # rather than from inside the notebook.
 echo "--- Step 2: Smoke check (verdict = Holds) ---"
 $EIGENIUS query \
