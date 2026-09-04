@@ -325,8 +325,8 @@ fn go<'x, 't: 'x, 'p: 't>(
 
         // D74 §3.2 — the universes line up exactly, no shift. D46's `Sort(0)` is Lean's `Prop`.
         Exp::Sort(l) => {
-            let level = externalize_level(l, tc.ctx(), cx)?;
-            Ok(tc.ctx().mk_sort(level))
+            let level = externalize_level(l, tc.ctx, cx)?;
+            Ok(tc.ctx.mk_sort(level))
         }
 
         Exp::Var(name) => match binders.lookup(name) {
@@ -337,7 +337,7 @@ fn go<'x, 't: 'x, 'p: 't>(
         Exp::App(f, x) => {
             let f = go(f, tc, cx, binders)?;
             let x = go(x, tc, cx, binders)?;
-            Ok(tc.ctx().mk_app(f, x))
+            Ok(tc.ctx.mk_app(f, x))
         }
 
         Exp::Pi(p, dom, body) => {
@@ -363,16 +363,16 @@ fn go<'x, 't: 'x, 'p: 't>(
             let name = resolve_chain_const(iri, cx)?;
             let ls: Result<Vec<LevelPtr<'t>>, _> = levels
                 .iter()
-                .map(|l| externalize_level(l, tc.ctx(), cx))
+                .map(|l| externalize_level(l, tc.ctx, cx))
                 .collect();
-            let ls = tc.ctx().alloc_levels_slice(&ls?);
-            Ok(tc.ctx().mk_const(name, ls))
+            let ls = tc.ctx.alloc_levels_slice(&ls?);
+            Ok(tc.ctx.mk_const(name, ls))
         }
 
         Exp::EigonClass(iri) | Exp::EigonAxiom(iri) => {
             let name = resolve_chain_const(iri, cx)?;
-            let ls = const_levels(tc.ctx(), cx, name, iri.as_str())?;
-            Ok(tc.ctx().mk_const(name, ls))
+            let ls = const_levels(tc.ctx, cx, name, iri.as_str())?;
+            Ok(tc.ctx.mk_const(name, ls))
         }
 
         // Both literal constructors return `None` when the corresponding parser extension is
@@ -384,12 +384,12 @@ fn go<'x, 't: 'x, 'p: 't>(
         // `StringPtr` — `str1_owned` allocates the string internally, and reading the name back
         // recovers the pointer it allocated.
         Exp::LitString(s) => {
-            let n = tc.ctx().str1_owned(s.clone());
-            let sp = match tc.ctx().read_name(n) {
+            let n = tc.ctx.str1_owned(s.clone());
+            let sp = match tc.ctx.read_name(n) {
                 nanoda_lib::name::Name::Str(_, sp, _) => sp,
                 _ => unreachable!("`str1_owned` builds a `Name::Str`"),
             };
-            tc.ctx()
+            tc.ctx
                 .mk_string_lit(sp)
                 .ok_or(ExternalizeError::MissingLeanConstant(
                     "the string literal extension (Config::string_extension)",
@@ -400,7 +400,7 @@ fn go<'x, 't: 'x, 'p: 't>(
         // `Int.negSucc` would be a different term than the one authored.
         Exp::LitInt(n) if *n < 0 => Err(ExternalizeError::NegativeIntLiteral(*n)),
         Exp::LitInt(n) => tc
-            .ctx()
+            .ctx
             .mk_nat_lit_quick(num_bigint::BigUint::from(*n as u64))
             .ok_or(ExternalizeError::MissingLeanConstant(
                 "the nat literal extension (Config::nat_extension)",
@@ -414,28 +414,28 @@ fn go<'x, 't: 'x, 'p: 't>(
                 .ok_or(ExternalizeError::MissingLeanConstant(
                     "Bool.true / Bool.false",
                 ))?;
-            let empty = tc.ctx().alloc_levels_slice(&[]);
-            Ok(tc.ctx().mk_const(name, empty))
+            let empty = tc.ctx.alloc_levels_slice(&[]);
+            Ok(tc.ctx.mk_const(name, empty))
         }
 
         // D46's unit type and its inhabitant.
-        Exp::One => lean_const(tc.ctx(), cx, "PUnit"),
-        Exp::Unit => lean_const(tc.ctx(), cx, "PUnit.unit"),
+        Exp::One => lean_const(tc.ctx, cx, "PUnit"),
+        Exp::Unit => lean_const(tc.ctx, cx, "PUnit.unit"),
 
         Exp::Id(ty, x, y) => {
-            let eq = lean_const(tc.ctx(), cx, "Eq")?;
+            let eq = lean_const(tc.ctx, cx, "Eq")?;
             let ty = go(ty, tc, cx, binders)?;
             let x = go(x, tc, cx, binders)?;
             let y = go(y, tc, cx, binders)?;
-            let e = tc.ctx().mk_app(eq, ty);
-            let e = tc.ctx().mk_app(e, x);
-            Ok(tc.ctx().mk_app(e, y))
+            let e = tc.ctx.mk_app(eq, ty);
+            let e = tc.ctx.mk_app(e, x);
+            Ok(tc.ctx.mk_app(e, y))
         }
 
         Exp::Refl(x) => {
-            let rfl = lean_const(tc.ctx(), cx, "rfl")?;
+            let rfl = lean_const(tc.ctx, cx, "rfl")?;
             let x = go(x, tc, cx, binders)?;
-            Ok(tc.ctx().mk_app(rfl, x))
+            Ok(tc.ctx.mk_app(rfl, x))
         }
 
         Exp::EigonPrimitive(p) => {
@@ -461,7 +461,7 @@ fn go<'x, 't: 'x, 'p: 't>(
                     )
                 }
             };
-            lean_const(tc.ctx(), cx, n)
+            lean_const(tc.ctx, cx, n)
         }
 
         // ─── outside the fragment ───────────────────────────────────────────────────────
@@ -508,7 +508,7 @@ fn go<'x, 't: 'x, 'p: 't>(
             let pred = under_binder(tc, cx, binders, binder_name(p), a, body, |c, n, d, b| {
                 c.mk_lambda(n, default_binder_style(), d, b)
             })?;
-            subtype_of(tc.ctx(), cx, a, pred)
+            subtype_of(tc.ctx, cx, a, pred)
         }
 
         // A non-dependent `Sig`; the binder is unused, so nothing is pushed.
@@ -517,7 +517,7 @@ fn go<'x, 't: 'x, 'p: 't>(
             let pred = under_binder(tc, cx, binders, "_".to_string(), a, body, |c, n, d, b| {
                 c.mk_lambda(n, default_binder_style(), d, b)
             })?;
-            subtype_of(tc.ctx(), cx, a, pred)
+            subtype_of(tc.ctx, cx, a, pred)
         }
 
         // The introduction and elimination forms stay refused, and NOT for want of a decision.
@@ -544,12 +544,12 @@ fn go<'x, 't: 'x, 'p: 't>(
         Exp::Fst(e) => {
             let scrutinee = go(e, tc, cx, binders)?;
             let (a, pred) = subtype_indices(tc, scrutinee, "Fst")?;
-            subtype_projection(tc.ctx(), cx, "Subtype.val", a, pred, scrutinee)
+            subtype_projection(tc.ctx, cx, "Subtype.val", a, pred, scrutinee)
         }
         Exp::Snd(e) => {
             let scrutinee = go(e, tc, cx, binders)?;
             let (a, pred) = subtype_indices(tc, scrutinee, "Snd")?;
-            subtype_projection(tc.ctx(), cx, "Subtype.property", a, pred, scrutinee)
+            subtype_projection(tc.ctx, cx, "Subtype.property", a, pred, scrutinee)
         }
 
         Exp::Record(_) => outside(
@@ -641,14 +641,14 @@ fn under_binder<'x, 't: 'x, 'p: 't, F>(
 where
     F: FnOnce(&mut TcCtx<'t, 'p>, NamePtr<'t>, ExprPtr<'t>, ExprPtr<'t>) -> ExprPtr<'t>,
 {
-    let n = tc.ctx().str1_owned(name.clone());
-    let fvar = tc.ctx().mk_dbj_level(n, default_binder_style(), domain);
+    let n = tc.ctx.str1_owned(name.clone());
+    let fvar = tc.ctx.mk_dbj_level(n, default_binder_style(), domain);
     binders.0.push((name, fvar));
     let built = go(body, tc, cx, binders);
     binders.0.pop();
     let built = built?;
-    let closed = tc.ctx().abstr(built, &[fvar]);
-    Ok(close(tc.ctx(), n, domain, closed))
+    let closed = tc.ctx.abstr(built, &[fvar]);
+    Ok(close(tc.ctx, n, domain, closed))
 }
 
 /// Lean's default binder style — an explicit binder. Externalized statements carry no
@@ -677,10 +677,10 @@ fn subtype_indices<'x, 't: 'x, 'p: 't>(
     let inferred = tc.is_proof(scrutinee).1;
     // The type may be an unreduced application; `whnf` exposes the `Subtype` head.
     let ty = tc.whnf(inferred);
-    let Some((_, name, _, args)) = tc.ctx().unfold_const_apps(ty) else {
+    let Some((_, name, _, args)) = tc.ctx.unfold_const_apps(ty) else {
         return Err(ExternalizeError::NotASubtype { form });
     };
-    if render_name(tc.ctx(), name) != "Subtype" || args.len() != 2 {
+    if render_name(tc.ctx, name) != "Subtype" || args.len() != 2 {
         return Err(ExternalizeError::NotASubtype { form });
     }
     Ok((args[0], args[1]))

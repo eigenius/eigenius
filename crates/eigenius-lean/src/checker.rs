@@ -220,19 +220,17 @@ fn check_statement(
     // once a binder is open.
     export.with_tc_and_declar(info, |tc| {
         let uparams: Vec<String> = tc
-            .ctx()
+            .ctx
             .read_levels(info.uparams)
             .iter()
-            .filter_map(|l| match tc.ctx().read_level(*l) {
-                nanoda_lib::level::Level::Param(n, _) => {
-                    Some(externalize::render_name(tc.ctx(), n))
-                }
+            .filter_map(|l| match tc.ctx.read_level(*l) {
+                nanoda_lib::level::Level::Param(n, _) => Some(externalize::render_name(tc.ctx, n)),
                 _ => None,
             })
             .collect();
 
         let declared: Vec<_> = export.declars.keys().copied().collect();
-        let names = externalize::NameTable::build(tc.ctx(), &declared);
+        let names = externalize::NameTable::build(tc.ctx, &declared);
 
         // Universe arity per declaration. A `Const` whose level list does not match makes
         // nanoda's `subst_expr_levels` assert — a panic inside `def_eq`, not a `false` — so
@@ -240,7 +238,7 @@ fn check_statement(
         let arities: std::collections::HashMap<_, _> = export
             .declars
             .iter()
-            .map(|(n, d)| (*n, tc.ctx().read_levels(d.info().uparams).len()))
+            .map(|(n, d)| (*n, tc.ctx.read_levels(d.info().uparams).len()))
             .collect();
 
         let goal = match externalize::externalize(

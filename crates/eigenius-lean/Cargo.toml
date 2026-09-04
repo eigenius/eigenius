@@ -26,7 +26,7 @@ description = "Lean 4 verification institution for Eigenius. Wraps nanoda_lib as
 # takes their "prohibit orphan recursors" tightening, which our previous pin `6ae1f0c` predates.
 #
 # Upstreaming is the intent; the fork exists so the work is not blocked on their review.
-nanoda_lib = { git = "https://github.com/eigenius/nanoda_lib", rev = "fabcaef62a8a9f834f94d5775b527f538fb11a59" }
+nanoda_lib = { git = "https://github.com/eigenius/nanoda_lib", rev = "1e44c4964b5ec916a1508c365af5f0e8a8c736fe" }
 
 # Kernel dep wired in 20a.4: `LeanInstitution` implements
 # `kernel::institution::Institution`.
