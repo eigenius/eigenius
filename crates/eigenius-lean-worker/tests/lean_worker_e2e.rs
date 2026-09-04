@@ -404,7 +404,7 @@ fn lean_worker_real_lean_export_round_trips_through_check_proof() {
     // Round-trip: feed the exported bytes to nanoda's check_proof
     // with target "foo" and assert Holds. This is the real
     // verification proof the milestone is named for.
-    let verdict = check_proof(&export_bytes, "foo", &[]).expect("check_proof infrastructure");
+    let verdict = check_proof(&export_bytes, "foo", &[], None).expect("check_proof infrastructure");
     match verdict {
         Verdict::Holds => {}
         Verdict::Fails { diagnostic } => {

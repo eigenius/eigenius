@@ -1067,7 +1067,7 @@ to break. Eleven files were rewritten to validate a committed layer instead of c
 | 4 malformed-input tests asserting `InstitutionError`/`Verdict` shape | 3 kernel tests asserting the same property through Rule 21 |
 | 1 `ExternalExecutionTrace` category test (eigenius#205) | rehomed unchanged — it was already pure kernel |
 | 2 institution-dispatch, 3 entailment, 3 consistency | deleted; P7 deletes what they test |
-| 3 `VerificationTrace` tests | dropped, recorded on eigenius#160 — the only minter (`validate.rs:228`) goes with the crate |
+| 3 `VerificationTrace` tests | dropped, recorded on eigenius#160 — the only minter (`validate.rs:228`) went with the crate. Re-covered `2026-09-03` by `eigenius-lean/tests/notebook_fixture_test.rs::a_holds_verdict_admits_a_verified_witness`, against the Lean institution as the new minter |
 
 **Two gaps surfaced, both from the change of path.** The handler took a *detached* `Resource`, so
 nothing ever validated the fixtures it was given. Committing them does:

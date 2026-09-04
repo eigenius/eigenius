@@ -41,5 +41,31 @@ correspondence check (20a.7.x) matches against the chain-side
 `urn:eigenius:test:capstone:Patient` class.
 -/
 
-theorem patient_weight_nonneg : ∀ p : EigeniusFFI.Patient, 0.0 ≤ p.weight.val :=
+theorem patient_weight_nonneg :
+    ∀ p : EigeniusFFI.eigenius.test.capstone.Patient, 0.0 ≤ p.weight.val :=
   fun p => p.weight.property
+
+/-- The notebook demo's target, and the reason it is not `patient_weight_nonneg`.
+
+D74's statement check manufactures the Lean goal from the claim's
+`reflection:canonical_proposition`, so the claim's proposition must be expressible in the §4
+fragment. `∀ p, 0.0 ≤ p.weight.val` is not: `p.weight` is a structure-field access
+(`PropAccess`, resource-level) and the comparison is over `Float`, which has no Lean image in v1.
+
+This one is: `Pi` over an `EigonClass`, with an `Arrow` between two applications of an
+`EigonAxiom` — every node in §4.1. It is `Prop`-valued, as Rule 21 requires of a
+`canonical_proposition`, and it is provable without assuming anything, so no permitted-axiom
+entry is needed. -/
+theorem healthy_refl :
+    ∀ (p : EigeniusFFI.eigenius.demo.lean.Patient),
+      EigeniusFFI.eigenius.demo.lean.Healthy p → EigeniusFFI.eigenius.demo.lean.Healthy p :=
+  fun _ h => h
+
+/-- The capstone test's target, for the same reason `healthy_refl` is the demo's: the claim's
+`reflection:canonical_proposition` must be expressible in D74 §4, and `∀ p, 0.0 ≤ p.weight.val`
+is not. -/
+theorem capstone_healthy_refl :
+    ∀ (p : EigeniusFFI.eigenius.test.capstone.Patient),
+      EigeniusFFI.eigenius.test.capstone.Healthy p →
+        EigeniusFFI.eigenius.test.capstone.Healthy p :=
+  fun _ h => h

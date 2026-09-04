@@ -904,7 +904,8 @@ mod tests {
     // D59 Item 3 — the Reachable well-posedness check end to end: recursive
     // transitive closure over an array-valued `dep` edge (Item 2's `[... ?n ...]`)
     // through a derived-relation subject (Item 1's join), with a stratified-
-    // negation `Unreachable` set. This is the D58 Reachable gate in miniature.
+    // negation `Unreachable` set — a reachability query over a dependency graph, which is the
+    // shape this combination exists to support.
     fn build_objgraph_layer(include_orphan: bool) -> Arc<Layer> {
         let storage = crate::layer::LayerStorage::in_memory();
         let core_json = include_str!("../../../../ontologies/core/core-ontology.json");

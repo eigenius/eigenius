@@ -10,73 +10,73 @@ import EigeniusFFI.Basic
 
 namespace EigeniusFFI
 
-structure Tag where
+structure fixture.Tag where
   _id : Option String := none
   tag_name : String
   deriving Repr
 
-def decodeTag (j : Lean.Json) : Except String Tag := do
+def fixture.decodeTag (j : Lean.Json) : Except String fixture.Tag := do
   let _id ← match j.getObjValAs? String "@id" with
     | .ok v => pure (some v)
     | .error _ => pure none
-  let tag_name ← decodeRequiredPrim (α := String) j "Tag" "urn:fixture:tag_name" "tag_name"
+  let tag_name ← decodeRequiredPrim (α := String) j "fixture.Tag" "urn:fixture:tag_name" "tag_name"
   return { _id, tag_name }
 
-def encodeTag (c : Tag) : Lean.Json :=
+def fixture.encodeTag (c : fixture.Tag) : Lean.Json :=
   Lean.Json.mkObj <|
     (match c._id with | some v => [("@id", Lean.Json.str v)] | none => [])
     ++ [("urn:eigenius:core:is_a", Lean.Json.arr #[Lean.Json.str "urn:fixture:Tag"])]
     ++ [("urn:fixture:tag_name", Lean.toJson c.tag_name)]
 
-structure Sample where
+structure fixture.Sample where
   _id : Option String := none
   sample_weight : { x : Float // 0.0 ≤ x ∧ x ≤ 100.0 }
-  sample_tag : Option (Tag) := none
+  sample_tag : Option (fixture.Tag) := none
   deriving Repr
 
-def decodeSample (j : Lean.Json) : Except String Sample := do
+def fixture.decodeSample (j : Lean.Json) : Except String fixture.Sample := do
   let _id ← match j.getObjValAs? String "@id" with
     | .ok v => pure (some v)
     | .error _ => pure none
-  let sample_weight ← decodeRequiredPrim (α := Float) j "Sample" "urn:fixture:sample_weight" "sample_weight"
-  let sample_weight ← withRefinement (fun x => 0.0 ≤ x ∧ x ≤ 100.0) sample_weight "Sample.sample_weight: out of range [0.0, 100.0]"
-  let sample_tag ← decodeOptionalResource j "urn:fixture:sample_tag" decodeTag
+  let sample_weight ← decodeRequiredPrim (α := Float) j "fixture.Sample" "urn:fixture:sample_weight" "sample_weight"
+  let sample_weight ← withRefinement (fun x => 0.0 ≤ x ∧ x ≤ 100.0) sample_weight "fixture.Sample.sample_weight: out of range [0.0, 100.0]"
+  let sample_tag ← decodeOptionalResource j "urn:fixture:sample_tag" fixture.decodeTag
   return { _id, sample_weight, sample_tag }
 
-def encodeSample (c : Sample) : Lean.Json :=
+def fixture.encodeSample (c : fixture.Sample) : Lean.Json :=
   Lean.Json.mkObj <|
     (match c._id with | some v => [("@id", Lean.Json.str v)] | none => [])
     ++ [("urn:eigenius:core:is_a", Lean.Json.arr #[Lean.Json.str "urn:fixture:Sample"])]
     ++ [("urn:fixture:sample_weight", Lean.toJson c.sample_weight.val)]
-    ++ (match c.sample_tag with | some v => [("urn:fixture:sample_tag", encodeTag v)] | none => [])
+    ++ (match c.sample_tag with | some v => [("urn:fixture:sample_tag", fixture.encodeTag v)] | none => [])
 
-structure Document extends Tag where
-  doc_sample : Sample
+structure fixture.Document extends fixture.Tag where
+  doc_sample : fixture.Sample
   doc_keywords : List String
   deriving Repr
 
-instance : CoeOut Document Tag where
+instance : CoeOut fixture.Document fixture.Tag where
   coe c := c.toTag
 
-def decodeDocument (j : Lean.Json) : Except String Document := do
-  let parent_Tag ← decodeTag j
-  let doc_sample ← decodeRequiredResource j "Document" "urn:fixture:doc_sample" "doc_sample" decodeSample
-  let doc_keywords ← decodeRequiredPrimList (α := String) j "Document" "urn:fixture:doc_keywords" "doc_keywords"
+def fixture.decodeDocument (j : Lean.Json) : Except String fixture.Document := do
+  let parent_Tag ← fixture.decodeTag j
+  let doc_sample ← decodeRequiredResource j "fixture.Document" "urn:fixture:doc_sample" "doc_sample" fixture.decodeSample
+  let doc_keywords ← decodeRequiredPrimList (α := String) j "fixture.Document" "urn:fixture:doc_keywords" "doc_keywords"
   return { toTag := parent_Tag, doc_sample, doc_keywords }
 
-def encodeDocument (c : Document) : Lean.Json :=
+def fixture.encodeDocument (c : fixture.Document) : Lean.Json :=
   Lean.Json.mkObj <|
     (match c._id with | some v => [("@id", Lean.Json.str v)] | none => [])
     ++ [("urn:eigenius:core:is_a", Lean.Json.arr #[Lean.Json.str "urn:fixture:Document"])]
     ++ [("urn:fixture:tag_name", Lean.toJson c.tag_name)]
-    ++ [("urn:fixture:doc_sample", encodeSample c.doc_sample)]
+    ++ [("urn:fixture:doc_sample", fixture.encodeSample c.doc_sample)]
     ++ [("urn:fixture:doc_keywords", Lean.toJson c.doc_keywords)]
 
 def eigeniusDecoders : Std.HashMap String (Lean.Json → Except String Lean.Json) :=
   Std.HashMap.ofList [
-    ("urn:fixture:Tag", fun j => encodeTag <$> decodeTag j),
-    ("urn:fixture:Sample", fun j => encodeSample <$> decodeSample j),
-    ("urn:fixture:Document", fun j => encodeDocument <$> decodeDocument j)
+    ("urn:fixture:Tag", fun j => fixture.encodeTag <$> fixture.decodeTag j),
+    ("urn:fixture:Sample", fun j => fixture.encodeSample <$> fixture.decodeSample j),
+    ("urn:fixture:Document", fun j => fixture.encodeDocument <$> fixture.decodeDocument j)
   ]
 
 end EigeniusFFI

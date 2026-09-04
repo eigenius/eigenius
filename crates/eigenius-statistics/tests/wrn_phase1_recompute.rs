@@ -86,7 +86,7 @@ fn esl_against(source: &str, parent: &Arc<Layer>, name: &str) -> Arc<Layer> {
 
 /// Dispatch the statistics institution on `plan_iri`, assert every
 /// emitted derivation Holds, and finalize each (replicating the kernel's
-/// `finalize_emitted_derivation`, which the raw `query()` skips) so the D49
+/// `finalize_emitted_resource`, which the raw `query()` skips) so the D49
 /// proposition a plan declaration is written against. Returns
 /// all finalized result resources — one for single-effect plans, two for
 /// the classification plan (`:result:ppv` + `:result:sensitivity`).

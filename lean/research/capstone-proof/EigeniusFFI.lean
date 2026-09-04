@@ -42,9 +42,31 @@ field carries a refinement (D30 §9.1) lifting the chain-side
 `min_value: 0.0` constraint into Lean's type system; constructing
 a `Patient` from a raw `Float` requires discharging the
 nonnegativity obligation, so any `Patient` value the verifier sees
-has already had that obligation discharged. -/
-structure Patient where
+has already had that obligation discharged.
+
+Named as D74 §3.3's mangling spells the IRI, since eigenius#208: a class's Lean name is its
+namespace path plus its `core:short_name`. The flat `Patient` this replaced is what collided. -/
+structure eigenius.test.capstone.Patient where
   weight : { x : Float // 0.0 ≤ x }
   deriving Repr
+
+/-- Mirror of `urn:eigenius:demo:lean:Patient` — the notebook demo's own class, distinct from the
+capstone test's above. Both live here because both consumers share this one Lake project. -/
+structure eigenius.demo.lean.Patient where
+  weight : { x : Float // 0.0 ≤ x }
+  deriving Repr
+
+/-- Mirror of the chain axiom `urn:eigenius:demo:lean:Healthy : demo:Patient -> Prop`.
+
+A `def`, not a Lean `axiom`, deliberately: an axiom would have to be named in the institution's
+permitted-axiom allowlist, and more to the point a proof that ASSUMES its own predicate
+demonstrates nothing. The body is irrelevant to the statement being checked — `def_eq` compares
+`Healthy p -> Healthy p` on both sides and never needs to unfold it. -/
+def eigenius.demo.lean.Healthy (_p : eigenius.demo.lean.Patient) : Prop := True
+
+/-- The capstone test's counterpart of the above, over its own namespace's `Patient`. Both exist
+because both consumers need a claim whose proposition is inside D74's §4 fragment, and each
+names its own chain class. -/
+def eigenius.test.capstone.Healthy (_p : eigenius.test.capstone.Patient) : Prop := True
 
 end EigeniusFFI

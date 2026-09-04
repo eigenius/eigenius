@@ -286,10 +286,21 @@ So this is not a latent hazard to be resolved before someone trips on it. One si
 documentation for a path that has never run. The naming is the defect — see §11.4.
 
 **D39 §10's factivity sentence describes the first path**: *"`VerifiedEvidence`-grounded justifications imply truth
-(the Lean checker validated the proof, so the proposition holds)."* That path emits nothing. The sentence is not
-merely unearned; it describes a route that does not exist.
+(the Lean checker validated the proof, so the proposition holds)."* When this was written that path emitted nothing,
+and the sentence did not merely lack warrant — it described a route that did not exist.
 
-**The fix is designed, and the design changed on `2026-08-21`.** [D49](d49-chainwitness-machinery.md) §7 specified
+> **The route exists as of `2026-09-03`** (eigenius#159, eigenius#160). The statement check is mandatory: the claim's
+> `canonical_proposition` is externalized to Lean and compared to the target declaration's type with `def_eq`
+> (`crates/eigenius-lean/src/externalize.rs`), and a claim carrying no proposition is refused rather than falling back
+> to the name-level check. On `Holds` the institution emits a `prov:VerificationTrace` naming the claim, which is what
+> makes `layer_admits_witness` answer `Verified` for that claim's own proposition. D39 §10's sentence is now earned —
+> subject to §4.2, which is the part that does not change.
+>
+> The measurement above still holds for the WRN chain: those 22 `VerifiedEvidence` citations target
+> `ReasoningSentence` resources and are kernel-checked certificates, the second row of the table. What changed is that
+> the first row is no longer documentation for a path that has never run.
+
+**The fix was designed here, and the design changed on `2026-08-21`.** [D49](d49-chainwitness-machinery.md) §7 specified
 recovering the EigenTT proposition by **inverting** D30's translation and reifying a
 `reasoning:VerifiedPropositionView`. That section is now superseded. The replacement is **externalize-and-check**:
 the Lean institution translates the claim's existing `canonical_proposition` *into* Lean, Lean returns a proof term,
@@ -312,9 +323,16 @@ against.
 
 ### 4.2 Factivity is relative, and should say so
 
-Even with D49 §7 built, "`VerifiedEvidence` implies truth" is factive **relative to** trusting the external prover's
-kernel and D30's translation. D39 states it unconditionally. This is the one place the platform's guarantees bottom
-out in trusting something outside it, and the document should name that rather than imply absolute factivity.
+"`VerifiedEvidence` implies truth" is factive **relative to** trusting the external prover's kernel and the
+translation. D39 states it unconditionally. This is the one place the platform's guarantees bottom out in trusting
+something outside it, and the document should name that rather than imply absolute factivity.
+
+**Unchanged by eigenius#159, and narrowed by it.** Externalize-and-check leaves *one* trusted translation instead of
+two, and relocates it: the trusted artifact is no longer D30's class mirror alone but
+[D74](d74-eigentt-to-lean-externalization.md)'s forward externalization, whose fragment is fixed by an exhaustive
+match over all 43 `Exp` variants — 22 translated, 21 refused with typed errors. D74 §5 states the consequence in its
+own words: *"If this document's mapping is wrong, the system proves the wrong theorem soundly."* The TCB is
+`nanoda_lib` + D30 + D74.
 
 ## 5. Warrants are proto-justifications
 
@@ -412,6 +430,44 @@ discourse needs it": the resource a demonstrative («these findings») can bind,
 `enc:EncodedClaim : reflection:DeclaredResource` sits on both — Declared by construction (eigenius#201), carrying its
 discourse kind as a second `is_a` (D68 §2). The axes are orthogonal and must stay so: a Finding can be Declared, Derived or Verified,
 and the discourse kind says nothing about the warrant.
+
+## 7a. Why proof irrelevance and justification tracking coexist
+
+D46 gives `Prop` proof irrelevance: for any `P : Prop` and `t1, t2 : P`, `def_eq(t1, t2)` succeeds without
+comparing them, and §6 lets the strong reducer skip `Prop`-typed subterms outright. D73 says the justification
+term must be **retained whole**, because every epistemic summary is a query over it (§1.2). Read quickly these
+look opposed: one erases proofs, the other insists on keeping them.
+
+They are about different objects, and the confusion is worth naming because both live in `Prop`.
+
+**Proof irrelevance is about inhabitants.** `t1` and `t2` are two derivations of the same proposition *inside*
+the type theory. Nothing downstream may branch on which one it got, so the kernel is free to treat them as
+equal — that is what makes `Prop` a proposition universe rather than a data type. Erasing the distinction
+loses nothing, because there was nothing there to lose: a second proof of `P` tells a consumer nothing a first
+proof did not.
+
+**Justification tracking is about the index.** In `JustifiedBy : JustificationTerm -> Prop -> Type`, the
+polynomial `j` is not an inhabitant of the proposition — it is an **argument of the type**, and by §2's
+requirement (b) a different `j` gives a *different type*. Its leaves are chain IRIs naming agents, traces and
+checkers outside the theory. `DeclaredEvidence(iri)` and `VerifiedEvidence(iri)` are not two proofs of one
+thing; they are two different claims about what the world contains.
+
+So the axes are orthogonal in the same way §7's two lattices are:
+
+| | proof irrelevance applies | why |
+|---|---|---|
+| a proof of `JustifiedBy(j, P)` | **yes** | two derivations that `j` warrants `P` are interchangeable |
+| the polynomial `j` itself | **no** | it indexes the type; erasing it changes which proposition is being asserted |
+| the proposition `P` | **no** | same reason — it is the other index |
+
+The practical consequence is that irrelevance costs the audit chain nothing. A consumer asking *"which agents
+are we trusting?"* walks `j`'s `DeclaredEvidence` leaves; nothing in that walk inspects a proof object, so §6's
+reducer gate never reaches it. And the reverse: retaining `j` whole imposes no obligation to retain the
+derivations, which is why `JustifiedBy` can be a `Prop` at all.
+
+This is also why D39 §8's collapse was a real loss rather than an instance of the same erasure. Projecting `j`
+to a four-valued scalar discards *indices*, not inhabitants — the summary is strictly less informative than the
+term, and §1.1 records the wrong rule that followed from treating it as sufficient.
 
 ## 8. Invariants
 

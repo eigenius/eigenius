@@ -55,6 +55,7 @@
 //! produce the per-class block, and the module assembler stitches
 //! the registry at the file footer.
 
+use super::lean_name;
 use super::structure_emitter::{refinement_predicate, render_lean_type, ClassNameLookup};
 use super::{ClassDecl, LeanType, PropertyConstraints, PropertyDecl};
 use eigenius_kernel::ontology::iri::Iri;
@@ -88,10 +89,12 @@ fn push_decoder(
     decls: &BTreeMap<Iri, ClassDecl>,
     lookup: &ClassNameLookup,
 ) {
-    let cn = decl.short_name.as_str();
+    let cn = lookup_or_panic(lookup, &decl.class_iri);
+    let dec = decoder_name(lookup, &decl.class_iri);
     out.push_str(&format!(
-        "def decode{cn} (j : Lean.Json) : Except String {cn} := do\n"
+        "def {dec} (j : Lean.Json) : Except String {cn} := do\n"
     ));
+    let cn = cn.as_str();
 
     // Inheritance: bind each parent's decoded value first. Their
     // decoders also read `@id` (when the parent is a root), so we
@@ -99,7 +102,8 @@ fn push_decoder(
     for parent_iri in &decl.parents {
         let parent_name = lookup_or_panic(lookup, parent_iri);
         let bind = parent_bind_name(&parent_name);
-        out.push_str(&format!("  let {bind} ← decode{parent_name} j\n"));
+        let parent_dec = decoder_name(lookup, parent_iri);
+        out.push_str(&format!("  let {bind} ← {parent_dec} j\n"));
     }
 
     // Root class only: read @id into _id (D30 §7.2 / §8.1). For
@@ -129,7 +133,10 @@ fn push_decoder(
         if needs_comma {
             out.push(',');
         }
-        out.push_str(&format!(" to{parent_name} := {bind}"));
+        out.push_str(&format!(
+            " to{} := {bind}",
+            lean_name::leaf_of(&parent_name)
+        ));
         needs_comma = true;
     }
     if decl.parents.is_empty() {
@@ -178,9 +185,9 @@ fn push_required_field_decode(
             ));
         }
         LeanType::ClassRef(class_iri) => {
-            let cls = lookup_or_panic(lookup, class_iri);
+            let cls = decoder_name(lookup, class_iri);
             out.push_str(&format!(
-                "  let {fname} ← decodeRequiredResource j \"{class_name}\" \"{iri}\" \"{fname}\" decode{cls}\n"
+                "  let {fname} ← decodeRequiredResource j \"{class_name}\" \"{iri}\" \"{fname}\" {cls}\n"
             ));
         }
         LeanType::ListPrimitive(inner) => {
@@ -190,9 +197,9 @@ fn push_required_field_decode(
             ));
         }
         LeanType::ListClassRef(class_iri) => {
-            let cls = lookup_or_panic(lookup, class_iri);
+            let cls = decoder_name(lookup, class_iri);
             out.push_str(&format!(
-                "  let {fname} ← decodeRequiredResourceList j \"{class_name}\" \"{iri}\" \"{fname}\" decode{cls}\n"
+                "  let {fname} ← decodeRequiredResourceList j \"{class_name}\" \"{iri}\" \"{fname}\" {cls}\n"
             ));
         }
         LeanType::Union(iris) => {
@@ -277,9 +284,9 @@ fn push_optional_field_decode(
             }
         }
         LeanType::ClassRef(class_iri) => {
-            let cls = lookup_or_panic(lookup, class_iri);
+            let cls = decoder_name(lookup, class_iri);
             out.push_str(&format!(
-                "  let {fname} ← decodeOptionalResource j \"{iri}\" decode{cls}\n"
+                "  let {fname} ← decodeOptionalResource j \"{iri}\" {cls}\n"
             ));
         }
         LeanType::ListPrimitive(_) | LeanType::ListClassRef(_) | LeanType::ListUnion(_) => {
@@ -318,10 +325,8 @@ fn required_field_expr(class_name: &str, prop: &PropertyDecl, lookup: &ClassName
             format!("decodeRequiredPrimList (α := {ty}) j \"{class_name}\" \"{iri}\" \"{fname}\"")
         }
         LeanType::ListClassRef(class_iri) => {
-            let cls = lookup_or_panic(lookup, class_iri);
-            format!(
-                "decodeRequiredResourceList j \"{class_name}\" \"{iri}\" \"{fname}\" decode{cls}"
-            )
+            let cls = decoder_name(lookup, class_iri);
+            format!("decodeRequiredResourceList j \"{class_name}\" \"{iri}\" \"{fname}\" {cls}")
         }
         LeanType::ListUnion(iris) => {
             format!(
@@ -349,10 +354,10 @@ fn inline_union_decoder(
     s.push_str(&format!("do\n    let disc ← isAHead jv \"{context}\"\n"));
     s.push_str("    match disc with\n");
     for (idx, iri) in iris.iter().enumerate() {
-        let cls = lookup_or_panic(lookup, iri);
+        let cls = decoder_name(lookup, iri);
         let ctor = union_constructor_chain(idx);
         s.push_str(&format!(
-            "    | \"{}\" => do let inner ← decode{cls} jv; pure ({ctor} inner)\n",
+            "    | \"{}\" => do let inner ← {cls} jv; pure ({ctor} inner)\n",
             iri.as_str()
         ));
     }
@@ -397,9 +402,10 @@ fn push_encoder(
     decls: &BTreeMap<Iri, ClassDecl>,
     lookup: &ClassNameLookup,
 ) {
-    let cn = decl.short_name.as_str();
+    let cn = lookup_or_panic(lookup, &decl.class_iri);
+    let enc = encoder_name(lookup, &decl.class_iri);
     let class_iri = decl.class_iri.as_str();
-    out.push_str(&format!("def encode{cn} (c : {cn}) : Lean.Json :=\n"));
+    out.push_str(&format!("def {enc} (c : {cn}) : Lean.Json :=\n"));
     out.push_str("  Lean.Json.mkObj <|\n");
 
     // `@id` first (D30 §8.2 encode order). Inherited from a parent
@@ -464,14 +470,14 @@ fn encode_value_expr(var: &str, ty: &LeanType, lookup: &ClassNameLookup) -> Stri
             format!("Lean.toJson {var}")
         }
         LeanType::ClassRef(class_iri) => {
-            let cls = lookup_or_panic(lookup, class_iri);
-            format!("encode{cls} {var}")
+            let cls = encoder_name(lookup, class_iri);
+            format!("{cls} {var}")
         }
         LeanType::ListClassRef(class_iri) => {
-            let cls = lookup_or_panic(lookup, class_iri);
+            let cls = encoder_name(lookup, class_iri);
             // List → Array → Json.arr by mapping the encoder over
             // each element.
-            format!("Lean.Json.arr (({var}.map encode{cls}).toArray)")
+            format!("Lean.Json.arr (({var}.map {cls}).toArray)")
         }
         LeanType::ListPrimitive(inner) => {
             // List of primitives — round-trip through Lean.toJson
@@ -497,11 +503,11 @@ fn inline_union_encoder(var: &str, iris: &[Iri], lookup: &ClassNameLookup) -> St
     let mut s = String::new();
     s.push_str(&format!("match {var} with\n"));
     for (idx, iri) in iris.iter().enumerate() {
-        let cls = lookup_or_panic(lookup, iri);
+        let cls = encoder_name(lookup, iri);
         s.push_str("        ");
         // Position N → match against `EigeniusUnion.inr (... (.inl x))`.
         let pattern = union_match_pattern(idx);
-        s.push_str(&format!("| {pattern} => encode{cls} x\n"));
+        s.push_str(&format!("| {pattern} => {cls} x\n"));
     }
     // Trim the trailing newline so the caller can place it in a
     // list-literal slot without an extra line.
@@ -568,8 +574,26 @@ fn lookup_or_panic(lookup: &ClassNameLookup, iri: &Iri) -> String {
 /// Generate the parent-decode binding name. For a parent named
 /// `Animal`, we bind the decoded value to `parent_Animal` so the
 /// constructor can reference it via `toAnimal := parent_Animal`.
+///
+/// Keyed on the parent's LAST component since eigenius#208: the name arrives qualified
+/// (`eigenius.reflection.Person`) and a `let` binding cannot carry dots. `toAnimal` is keyed the
+/// same way — that is Lean's own rule for `extends` projections, verified against Lean 4.
 fn parent_bind_name(parent_name: &str) -> String {
-    format!("parent_{parent_name}")
+    format!("parent_{}", lean_name::leaf_of(parent_name))
+}
+
+/// The Lean name of `iri`'s decoder — `eigenius.reflection.decodePerson`.
+///
+/// A codec `def` lives in the same namespace as its structure, so the verb goes before the leaf
+/// and not before the path (eigenius#208). Every call site that used to interpolate
+/// `decode{class_name}` goes through here instead.
+fn decoder_name(lookup: &ClassNameLookup, iri: &Iri) -> String {
+    lean_name::codec_name_for_type(&lookup_or_panic(lookup, iri), "decode")
+}
+
+/// The Lean name of `iri`'s encoder — `eigenius.reflection.encodePerson`. See [`decoder_name`].
+fn encoder_name(lookup: &ClassNameLookup, iri: &Iri) -> String {
+    lean_name::codec_name_for_type(&lookup_or_panic(lookup, iri), "encode")
 }
 
 // ---------------------------------------------------------------------------

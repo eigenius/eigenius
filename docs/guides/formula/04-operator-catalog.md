@@ -163,16 +163,26 @@ invisible is under-application nested inside a longer spine — intermediate
 `App` nodes within a spine are deliberately not re-checked, because within
 a spine they are partial applications rather than complete invocations.
 
-**Three ways for the check to silently not fire.** The resolution is a
-nested `if let` cascade with no `else` arms:
+**Every failed resolution is diagnosed.** `Validator::check_op_ref_head`
+(`kernel/src/validation/rules/inductive.rs:302`) is a flat stage sequence,
+and each stage that cannot proceed reports before returning:
 
-- an `OpRef` naming an IRI the layer cannot resolve produces no error —
-  there is no `unknown operator IRI` diagnostic anywhere in the kernel;
-- an operator resource without `operator_arity` produces no error;
-- a non-integer `operator_arity` produces no error.
+| the operand | rule | message |
+|---|---|---|
+| is not a well-formed IRI | `UnknownOperator` | `` `OpRef` operand `…` is not a well-formed IRI `` |
+| does not resolve in the layer chain | `UnknownOperator` | ``operator `…` does not resolve in the layer chain`` |
+| resolves to something that is not a `formulas:Operator` | `UnknownOperator` | ``resolves to a resource that is not a `formulas:Operator` `` |
+| declares a non-integer or negative `operator_arity` | `OperatorDeclarationMalformed` | ``declares an `operator_arity` that is not a non-negative integer`` |
+| declares an arity ≠ the spine length | `OperatorArityMismatch` | ``declares arity N; App spine supplies M arg(s)`` |
 
-The rule also never checks that what it resolved `is_a formulas:Operator`.
-Any resource carrying an integer `formulas:operator_arity` will satisfy it.
+The class check is subclass-aware — it goes through `is_instance_of_any`,
+so a subclass of `formulas:Operator` passes.
+
+Two stages still return without an error, and both are deliberate. A head
+whose first argument is not a string is Rules 1 and 5's to reject, not this
+one's. An operator resource with **no** `operator_arity` is
+schema-conformant, since the ontology only *recommends* the property —
+declaring it is what makes an operator arity-checkable.
 
 Everything the rule does not recognise it traverses: the non-`App` arm walks
 into whatever `args` array it finds, whatever the constructor is called.

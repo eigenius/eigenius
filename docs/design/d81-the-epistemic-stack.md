@@ -403,7 +403,15 @@ the commit by the same mechanism (§2.4 route A step 2). Lean is not an on-deman
 
 Nothing Lean-side stamps `reflection:VerifiedResource`, mints a `VerificationTrace`, or reifies a
 view — `grep` over `crates/eigenius-lean/` for all three returns nothing. A `Holds` verdict is a
-leaf resource. This is eigenius#160, open.
+leaf resource. This was eigenius#160.
+
+**Closed `2026-09-03`, and rows 2 and 3 stayed unbuilt.** The route the table assumes — reify a
+view, then have the emitter read it — was replaced by D74's forward externalization: the claim's
+`canonical_proposition` is already in EigenTT before the check runs, so there is nothing to
+translate back. `do_proof_check` emits a `prov:VerificationTrace` naming the claim, the kernel
+commits it beside the Verdict, and `target_proposition_hash`'s **first** slot —
+`canonical_proposition` on the claim — is the one that answers. The view remains declared and
+unused.
 
 **So the sharper statement is that the AutoOnLoad gate is used as a veto and not as a promoter.**
 Two institutions share the dispatch role and diverge on what a *pass* means:
@@ -496,8 +504,10 @@ So one untyped channel now carries two semantically different things:
 
 #### 3.1.2 The kernel stamps every passenger as a derivation
 
-`finalize_emitted_derivation` (`kernel/src/institution/dispatch.rs:517`) runs over **every** element
-of `derivations` and unconditionally adds two classes if absent:
+*As of `2026-09-03` it does not — see the note at the end of this section. What follows is the state this analysis found.*
+
+`finalize_emitted_derivation` (`kernel/src/institution/dispatch.rs:517`, since renamed) ran over **every** element
+of `derivations` and unconditionally added two classes if absent:
 
 ```rust
 if !has_class(&classes, wk::DERIVED_RESOURCE)             { classes.push(DERIVED_RESOURCE) }
@@ -515,6 +525,16 @@ labelled as a computed result. `from_subject` is stamped too, so
 (`crates/eigenius-reasoning/src/validate.rs`) does not set one — so the emitter returns `None` and
 no spurious `Derived` witness appears. The trace is spared a second, wrong witness by an omission,
 not by a check.
+
+**Fixed `2026-09-03`**, when eigenius#160 made the Lean institution a second producer of traces on
+this channel. `finalize_emitted_resource` — the same function, renamed off "derivation" — now asks
+`Layer::is_subclass_of(class, prov:Trace)` and withholds the marker from anything under it, so a
+`VerificationTrace` lands as `is_a = [VerificationTrace]` alone. Subsumption, not a list of trace
+IRIs: a new `prov:Trace` subclass is covered by declaring it. The same branch drops a trace whose
+dispatch returned `Undecidable`, which the outer loop lets through (it drops only `Fails`).
+
+The channel still carries both kinds, which §3.1's table says is the seam. What changed is that
+the kernel now reads the class instead of assuming one.
 
 #### 3.1.3 There is no declared post-condition on success
 
@@ -799,11 +819,12 @@ current in a way a code comment does not.
 
 ### 5.5 Untested — where a claim rests on nothing executable
 
-- The **committed shape** of a stamped `VerificationTrace` is untested. Every test took
-  `outcome.derivations[0]` *pre-stamp*, so nothing exercised the resource as it lands with
-  `DerivedResource` + `InstitutionEmittedDerivation` on it. P7 deleted those three tests with
-  their file (`crates/eigenius-reasoning/tests/validate_handler.rs`); the property is now
-  unpinned in either form, and is re-pinned against the Lean institution under eigenius#160.
+- ~~The **committed shape** of a stamped `VerificationTrace` is untested.~~ **Pinned
+  `2026-09-03`.** `notebook_fixture_test::a_holds_verdict_admits_a_verified_witness` reads the
+  trace out of the committed provenance layer, so it sees the resource exactly as it lands. The
+  observation that a stamped trace carries `InstitutionEmittedDerivation` is what prompted the
+  fix rather than the test: `finalize_emitted_resource` now withholds that marker from anything
+  under `prov:Trace`, because the class asserts "grounds nothing" and a trace is a ground.
 - `dispatch_auto_on_load_for_layer` — the commit's actual path — has **no test** (§5.2).
 - ~~`kernel/src/program/check_hooks.rs:93` dispatches witness synthesis on an inductive's **short
   name**, so any inductive anywhere named `IsVerifiedAs` enters the path.~~ **Closed at P7.** The

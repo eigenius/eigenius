@@ -116,15 +116,9 @@ query now surfaces what you just added — that's the loop closing.
 Retrieving and mapping isn't enough: a faithful encoding rests on the *right facts
 having been discovered*, and the failure mode is concluding before checking the spec
 (D57 #9: `domainIncludes` advisory → `core:recommends`, surfaced only when a human
-asked). So make discovery **first-class and gated**. Before a milestone may conclude,
-enumerate the load-bearing **discovery targets** it rests on, phrased as **competency
-questions** (D61 §3's *descent* — turn the goal into typed, runnable targets:
-decisions, desirable properties, the tensions where faithfulness is at risk). Each
-unanswered target is a **blocker**: the **Discovered gate** (D61 §6;
-[`experiments/objectives/well-posed-discovered.eigenql`](../../experiments/objectives/well-posed-discovered.eigenql),
-run alongside the other on-demand gates — empty result = passes) holds a milestone
-open while any `objective:CompetencyQuestion` it names via `objective:discovery_target`
-is ungrounded. This is `reasoning`'s *fail-closed* moved upstream into grounding.
+asked). So enumerate the load-bearing questions a conclusion rests on *before*
+concluding, and treat each unanswered one as a blocker rather than a caveat. This is
+`reasoning`'s *fail-closed* moved upstream into grounding.
 
 ## Disciplines
 

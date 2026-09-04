@@ -59,6 +59,9 @@ COPY cli/ cli/
 COPY proto/ proto/
 COPY ontologies/ ontologies/
 COPY julia/ julia/
+# See `Dockerfile.kernel` — `eigenius-lean-runtime`'s build script reads the pinned Lean toolchain,
+# and that crate is in the CLI's build graph since `eigenius-lean` promoted it (D74 §3.3).
+COPY lean/runtime-worker/lean-toolchain lean/runtime-worker/lean-toolchain
 
 # Build the CLI binary with --features cuda so the linked embedder
 # embeds the CUDA backend. Same cache-mount discipline as the CPU

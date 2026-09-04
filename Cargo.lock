@@ -1126,6 +1126,7 @@ dependencies = [
  "eigenius-lean-runtime",
  "eigenius-runtime-substrate",
  "nanoda_lib",
+ "num-bigint",
  "serde_json",
  "sha2",
  "tempfile",
@@ -2843,8 +2844,8 @@ dependencies = [
 
 [[package]]
 name = "nanoda_lib"
-version = "0.4.15"
-source = "git+https://github.com/ammkrn/nanoda_lib?rev=6ae1f0cd962f081f6c423454c5da729d841236a7#6ae1f0cd962f081f6c423454c5da729d841236a7"
+version = "0.4.16"
+source = "git+https://github.com/eigenius/nanoda_lib?rev=1e44c4964b5ec916a1508c365af5f0e8a8c736fe#1e44c4964b5ec916a1508c365af5f0e8a8c736fe"
 dependencies = [
  "indexmap 2.14.0",
  "num-bigint",

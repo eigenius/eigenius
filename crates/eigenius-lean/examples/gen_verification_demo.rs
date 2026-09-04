@@ -50,12 +50,20 @@ use eigenius_kernel::ontology::eigon_json;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
-use eigenius_lean::chain_mirror::bytes_to_lean_expr;
 use eigenius_lean::institution::iris as lean_iris;
 use eigenius_lean_runtime::mirror_gen::LeanMirrorGenerator;
 use eigenius_runtime_substrate::mirror_generator::MirrorGenerator;
 
-const TARGET_THEOREM: &str = "patient_weight_nonneg";
+/// The theorem the demo's proof discharges.
+///
+/// Not `patient_weight_nonneg`: D74's statement check manufactures the goal from the claim's
+/// `reflection:canonical_proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
+/// (a structure-field access, and `Float`). `healthy_refl` is `Prop`-valued, expressible, and
+/// provable without assuming anything. See `lean/research/capstone-proof/Capstone.lean`.
+const TARGET_THEOREM: &str = "healthy_refl";
+
+/// The chain axiom the proposition applies — `demo:Healthy : demo:Patient -> Prop`.
+const HEALTHY_IRI: &str = "urn:eigenius:demo:lean:Healthy";
 
 // Demo namespace — distinct from `urn:eigenius:test:capstone:*` (the
 // capstone integration-test scope) so a chain that has both committed
@@ -67,19 +75,6 @@ const PAYLOAD_IRI: &str = "urn:eigenius:demo:lean:proof_payload";
 const TERM_IRI: &str = "urn:eigenius:demo:lean:proof_term";
 
 const OUTPUT_REL: &str = "notebooks/examples/lean-verification-demo.eigon.json";
-
-/// The bootstrap chain — the mirror reads `LeanExpr`'s constructor argument names from it.
-fn chain() -> &'static std::sync::Arc<eigenius_kernel::layer::Layer> {
-    static CHAIN: std::sync::OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> =
-        std::sync::OnceLock::new();
-    CHAIN.get_or_init(|| {
-        std::sync::Arc::clone(
-            eigenius_kernel::bootstrap::bootstrap()
-                .expect("bootstrap")
-                .head(),
-        )
-    })
-}
 
 fn main() {
     let workspace = workspace_root();
@@ -118,16 +113,13 @@ fn main() {
     let bootstrap_head_id = bootstrap_head_layer_id();
     eprintln!("Bootstrap head layer ID: {bootstrap_head_id}");
 
-    eprintln!("Decoding proposition for theorem `{TARGET_THEOREM}`");
-    let proposition = bytes_to_lean_expr(&proof_bytes, TARGET_THEOREM, chain())
-        .expect("chain-mirror translator must decode the capstone proposition");
-
     let resources = vec![
         patient_class_resource(),
-        patient_instance_resource(),
+        healthy_axiom_resource(chain()),
+        patient_instance_resource(chain()),
         mirror_resource(lib_hash, lib_json, bootstrap_head_id),
         proof_payload_resource(&proof_bytes),
-        proof_term_resource(proposition),
+        proof_term_resource(),
     ];
 
     let doc = eigon_json::serialize_document(&resources);
@@ -171,15 +163,80 @@ fn patient_class_resource() -> Resource {
     r
 }
 
-fn patient_instance_resource() -> Resource {
-    // The Eigon claim the proof discharges. `is_a[0]` is what the
-    // correspondence check reads.
+fn patient_instance_resource(chain: &Arc<eigenius_kernel::layer::Layer>) -> Resource {
+    use eigenius_kernel::nbe::term::{Exp, Patt};
+    use eigenius_kernel::program::eigentt_type_mirror::{encode_type, CodecNames};
+
+    // The Eigon claim the proof discharges.
     let mut r = Resource::new(iri(PATIENT_INSTANCE_IRI));
     r.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(
             iri(PATIENT_CLASS_IRI).as_str().to_string(),
         )]),
+    );
+
+    // `∀ (p : Patient), Healthy(p) -> Healthy(p)` — what the Lean proof proves, as an EigenTT
+    // term. D74 turns THIS into the Lean goal and compares it to `healthy_refl`'s type with
+    // `def_eq`, which is what binds the proof to this claim (eigenius#159).
+    //
+    // Required, not optional: the institution rejects a claim carrying no
+    // `canonical_proposition` rather than falling back to the name-level check, because "a
+    // theorem with this name type-checks" is the verdict #159 opened against.
+    let healthy = || {
+        Exp::App(
+            Box::new(Exp::EigonAxiom(iri(HEALTHY_IRI))),
+            Box::new(Exp::Var("p".into())),
+        )
+    };
+    let prop = Exp::Pi(
+        Patt::Var("p".into()),
+        Box::new(Exp::EigonClass(iri(PATIENT_CLASS_IRI))),
+        Box::new(Exp::Arrow(Box::new(healthy()), Box::new(healthy()))),
+    );
+    let names = CodecNames::from_layer(chain);
+    let encoded = encode_type(&prop, &names).expect("the demo proposition is inside the D47 codec");
+    r.set(iri(wk::CANONICAL_PROPOSITION), encoded);
+    r
+}
+
+/// `demo:Healthy : demo:Patient -> Prop`, the predicate the proposition applies.
+///
+/// A chain `axiom`, mirrored in Lean as a `def` — see `EigeniusFFI.lean`. The externalizer maps
+/// `EigonAxiom(iri)` to a `Const` under D30's mangling, so the two meet at
+/// `EigeniusFFI.eigenius.demo.lean.Healthy`.
+fn healthy_axiom_resource(chain: &Arc<eigenius_kernel::layer::Layer>) -> Resource {
+    use eigenius_kernel::nbe::term::Exp;
+    use eigenius_kernel::program::eigentt_type_mirror::{encode_type, CodecNames};
+
+    let mut r = Resource::new(iri(HEALTHY_IRI));
+    // An `eigentt:Axiom`, not a `core:Class` — the D47 decoder yields `EigonAxiom` only for
+    // that class, and an `EigonClass` cannot head an application ("App spine applied to
+    // non-parametric head").
+    r.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::String(
+            "urn:eigenius:eigentt:Axiom".to_string(),
+        )]),
+    );
+    r.set(iri(wk::SHORT_NAME), Value::String("Healthy".to_string()));
+    r.set(
+        iri(wk::DESCRIPTION),
+        Value::String(
+            "A predicate over demo:Patient. Mirrored in Lean as a `def` returning `Prop`; the \
+             demo's proposition only ever applies it, never unfolds it."
+                .to_string(),
+        ),
+    );
+    // `eigentt:Axiom` requires its statement — the axiom's TYPE: `Patient -> Prop`.
+    let statement = Exp::Arrow(
+        Box::new(Exp::EigonClass(iri(PATIENT_CLASS_IRI))),
+        Box::new(Exp::Sort(eigenius_kernel::nbe::level::Level::Zero)),
+    );
+    let names = CodecNames::from_layer(chain);
+    r.set(
+        iri("urn:eigenius:eigentt:axiom_statement"),
+        encode_type(&statement, &names).expect("Patient -> Prop encodes"),
     );
     r
 }
@@ -288,7 +345,7 @@ fn proof_payload_resource(bytes: &[u8]) -> Resource {
     r
 }
 
-fn proof_term_resource(proposition: Value) -> Resource {
+fn proof_term_resource() -> Resource {
     let mut r = Resource::new(iri(TERM_IRI));
     r.set(
         iri(wk::IS_A),
@@ -305,14 +362,9 @@ fn proof_term_resource(proposition: Value) -> Resource {
         Value::String(TARGET_THEOREM.to_string()),
     );
     r.set(
-        iri(lean_iris::PROP_MIRROR_IRI),
-        Value::String(MIRROR_IRI.to_string()),
-    );
-    r.set(
         iri(lean_iris::PROP_CLAIM_IRI),
         Value::String(PATIENT_INSTANCE_IRI.to_string()),
     );
-    r.set(iri(lean_iris::PROP_PROPOSITION), proposition);
     r
 }
 
@@ -406,6 +458,19 @@ fn base64_encode(bytes: &[u8]) -> String {
 }
 
 // ─── Bootstrap layer ID ─────────────────────────────────────────────────
+
+/// The bootstrap chain, for the D47 codec's constructor-argument names.
+///
+/// `CodecNames` reads each inductive's ctor argument names off the chain rather than carrying a
+/// copy (D85 §6.1), so encoding the demo's proposition needs a layer.
+fn chain() -> &'static Arc<eigenius_kernel::layer::Layer> {
+    use std::sync::OnceLock;
+    static CHAIN: OnceLock<Arc<eigenius_kernel::layer::Layer>> = OnceLock::new();
+    CHAIN.get_or_init(|| {
+        let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+        Arc::clone(ctx.head())
+    })
+}
 
 fn bootstrap_head_layer_id() -> String {
     // Wrap the hex `LayerId` in the `urn:eigenius:layer:<hex>` IRI

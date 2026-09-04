@@ -273,8 +273,8 @@ Putting the pieces together:
 4. The proof elaborates against a specific `LeanEnvironment` E (image-digest-pinned, §7).
 5. The substrate-hosted `lean_export` entry point produces a `LeanProofTerm` resource carrying the exported term bytes, the target declaration name, the chain-mirrored proposition (decoded from the bytes by the institution's translator at commit time, §6.3), and references to E + the mirror + the Eigenius claim.
 6. The kernel commits the `LeanProofTerm`. Structural validation passes.
-7. The kernel's D14 dispatch fires `qc_proof_check` AutoOnLoad, calling `Institution::query` with `urn:eigenius:lean:proof_check`. The handler runs the three-part correspondence check (§5.5).
-8. On `Verdict::Holds`, the kernel admits the resource and tags its epistemic status *verified*. On `Verdict::Fails`, the Load is aborted with the verdict's diagnostic.
+7. The kernel's D14 dispatch fires `qc_proof_check` AutoOnLoad, calling `Institution::query` with `urn:eigenius:lean:proof_check`. The handler type-checks the export and compares the target declaration's statement against the claim's `reflection:canonical_proposition`, externalized to Lean and compared with `def_eq` (D74 §6.3; §5.5's three-part correspondence check is subsumed by it).
+8. On `Verdict::Holds`, the institution emits a `prov:VerificationTrace` naming the claim, and the kernel commits it beside the Verdict in the `verdict_provenance` layer. Nothing is stamped onto the `LeanProofTerm` itself: the grade is *read*, not stored — `layer_admits_witness` follows the trace's `prov:resource` to the claim and answers `Verified` for the claim's own proposition (eigenius#160). On `Verdict::Fails`, the Load is aborted with the verdict's diagnostic and no trace is emitted.
 
 Every artifact is content-addressed and tracked as a resource within Eigenius. The verification verdict is a pure function of archived inputs.
 
@@ -376,7 +376,7 @@ Consequences:
 
 ### 7.2 Pinning and sharing
 
-Institution registrations pin the `LeanEnvironment` IRI they expect. Prior `LeanProofTerm` resources tagged *verified* remain valid against their original environment IRIs even after newer environments are registered; the substrate doesn't implicitly upgrade and neither does the verification institution.
+Institution registrations pin the `LeanEnvironment` IRI they expect. Prior `LeanProofTerm` resources whose `VerificationTrace` landed remain valid against their original environment IRIs even after newer environments are registered; the substrate doesn't implicitly upgrade and neither does the verification institution.
 
 ### 7.3 Caching
 

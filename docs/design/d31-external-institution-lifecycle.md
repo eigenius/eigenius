@@ -597,9 +597,9 @@ D31's lifecycle is generator-agnostic. The CLI dispatches on `--language` to the
 | Language | Generator | Faithful translation spec | Status |
 |---|---|---|---|
 | Julia | `JuliaMirrorGenerator` (`crates/eigenius-julia/src/mirror_gen.rs`) | [D29 v1.2](d29-eigon-julia-mirror-spec.md) | Shipped (Phase 19a.4) |
-| Rust (for WASM institutions) | `RustMirrorGenerator` (planned) | D32 (planned) | Tracked in [issue #41](https://github.com/eigenius/eigenius/issues/41) |
-| Lean 4 | `eigon-ffi-gen` | [D30](https://example.invalid/) (planned) | Phase 20 |
-| Python | `PythonMirrorGenerator` (future) | TBD | Future |
+| Lean 4 | `LeanMirrorGenerator` (`crates/eigenius-lean-runtime/src/mirror_gen/`) | [D30](d30-eigon-to-lean-faithful-translation.md) | Shipped. Naming made namespace-qualified and injective by eigenius#208; `InductiveType` still out of the closure walk (D30 v1.1), and a chain *definition* still has no emitted `def` (eigenius#236) |
+| Rust | `RustMirrorGenerator` (unbuilt) | none | **Motivation withdrawn `2026-09-03`.** The case for it was typed structs for WASM institution authors; WASM support was removed with eigenius#11, and no WIT interface, `wasmtime`/`wasmer` dependency or `wasm32` target remains. A Rust generator now needs a fresh reason. The D32 slot this table reserved is taken by [D32 chain-mirrored Mini-TT inductives](d32-chain-mirrored-mini-tt-inductives.md) |
+| Python | `PythonMirrorGenerator` (unbuilt) | none | Never scheduled |
 
 Each generator owns:
 - The closure walk over the chain layer.
@@ -614,32 +614,33 @@ The lifecycle in this doc is **identical** across generators. CLI verbs, registr
 
 ## 8. CLI consolidation
 
-D31 introduces three new CLI verbs (`mirror create`, `mirror get`, `institution install` for external) that should harmonise with the existing surfaces. Today's CLI has:
+**Done `2026-09-03`** (eigenius#42), and the WASM removal (eigenius#11) is what finished it: the
+single verb this section was organised around no longer exists.
 
-- `eigenius capability install <wasm_file> --kind component|institution` — WASM-only.
-- `eigenius capability list`, `inspect`, `test`.
-
-The proposed consolidated surface:
+Each resource kind is its own top-level command in `cli/src/main.rs`:
 
 ```
-eigenius component install <wasm_file> --definition <file>
-eigenius component list / inspect / test
+eigenius institution install --definition <file>     # D31 §5.2
+eigenius institution list / inspect
 
-eigenius institution install --definition <file> [--wasm <file>] [--image <digest>] [--mirror <iri>]
-eigenius institution list / inspect / test
-
-eigenius script publish <file> --env <iri>           # D26 §10
-eigenius script list / inspect / run
-
-eigenius mirror create --layer <iri> [--filter <q> | --filter-file <p>] --language <name> --output <dir>
-eigenius mirror get --iri <iri> --output <dir>
-eigenius mirror list / inspect
-
-eigenius env create --lang <name> --project-toml ... --manifest-toml ...   # D26 §10
-eigenius env list / inspect
+eigenius mirror create / get / list / inspect        # D31 §7
+eigenius script publish / run / list / inspect       # D26 §10
+eigenius env build / create / list / inspect         # D26 §10
+eigenius capability list / inspect / test
 ```
 
-`eigenius capability install` would deprecate to an alias for the right `component` / `institution install`. Tracked in [issue #42](https://github.com/eigenius/eigenius/issues/42).
+Three points where the shipped surface differs from the proposal above it:
+
+- **`capability install` was removed, not deprecated to an alias.** It took a WASM binary and a
+  `--kind` switch; with no WASM runtime there is nothing for it to install. No `--kind` flag and no
+  `wasm_file` argument remains anywhere in `cli/src/`. The migration path this section proposed is
+  moot.
+- **There is no `component install`.** It existed to install WASM components. `capability
+  list / inspect / test` covers what is left.
+- **`institution install` takes `--definition` only.** `--wasm` has no runtime behind it; `--image`
+  and `--mirror` are carried *in* the definition file rather than patched in by the CLI, which
+  keeps the chain-resident declaration the single source of truth instead of splitting it between a
+  file and a flag.
 
 The consolidation is operational; it doesn't affect the lifecycle in this doc. The verbs may rename without affecting registration or dispatch.
 

@@ -824,7 +824,9 @@ is the part backed by measurement.
 - **S1 — the witnessed relation** (§3.5). Everything else can be expressed once this exists; nothing
   should be built on a key that cannot say what it witnesses.
 - **S2 — declared post-condition on `Holds`** (§3.3b). Smallest change with the largest reach: it
-  makes the Lean gap (#160) a declaration error rather than an omission nobody notices.
+  makes an omission like the Lean gap (#160) a declaration error rather than something nobody
+  notices. #160 itself was closed `2026-09-03` by having the institution emit the trace, so what
+  S2 now buys is that the *next* institution cannot repeat it silently.
 - ~~**S3 — institution-supplied witness synthesis.**~~ **Superseded by §5b.2.** An institution
   hands over a checkable proof term or it is `Derived`; there is no synthesis to supply.
 - **S4 — derive the grade from the evidence** (§5b.4(ii)). Reversed twice over: not "let
@@ -841,7 +843,7 @@ is the part backed by measurement.
 - **S6 — split `reflection:Trace`** (§5a.2) and move the obligations onto refinements (§5a.3).
   Chain-vocabulary work, gated on S4 having somewhere to declare projections.
 
-S1 before S2 is the only hard ordering. S2 alone would already close #160.
+S1 before S2 is the only hard ordering. S2 would have closed #160 on its own; #160 was instead closed directly, which leaves S2's case resting entirely on the institutions not yet written.
 
 **S1 is smaller than it looks now.** §5a.5 says the relation vocabulary exists as `Warrant`, and
 §5a.1 says trace kinds are the same mechanism — so S1 is generalising one enum and one `match` into

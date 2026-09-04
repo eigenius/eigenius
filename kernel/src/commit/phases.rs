@@ -36,7 +36,7 @@ use std::sync::Arc;
 use crate::context::{ExecutionContext, ExecutionMode};
 use crate::institution::dispatch::{
     allocate_invocation_iri, build_runtime_invocation_resource, build_verdict_resource,
-    dispatch_auto_on_load_for_layer, finalize_emitted_derivation, VerdictReading,
+    dispatch_auto_on_load_for_layer, finalize_emitted_resource, VerdictReading,
 };
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
@@ -479,16 +479,22 @@ pub fn autoonload_dispatch(state: &mut CommitState<'_>) -> Result<PhaseControl, 
             provenance.push(v);
         }
 
-        // Emit institution-side derivations alongside the verdict when
+        // Emit institution-side resources alongside the verdict when
         // the gate Holds (or Undecidable — undecidable verdicts still
         // commit chain artefacts; the orchestrator just doesn't admit
         // the gated subject's commit). On Fails, the per-effect
         // derivations are dropped — a failed analysis attests nothing
         // statistically, so its would-be StatisticalAnalysisResults must not
         // pollute the witness index.
+        //
+        // A `prov:Trace` in the same list is held to the stricter rule:
+        // `finalize_emitted_resource` drops it unless the verdict Holds,
+        // because a trace grounds a witness and an undecidable check
+        // established nothing to ground one with.
         if !matches!(dispatch.verdict, VerdictReading::Fails) {
             for raw_derivation in &dispatch.derivations {
-                if let Some(stamped) = finalize_emitted_derivation(
+                if let Some(stamped) = finalize_emitted_resource(
+                    &layer,
                     dispatch,
                     invocation.as_ref().map(|_| &invocation_iri),
                     raw_derivation.clone(),

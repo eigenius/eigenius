@@ -42,16 +42,18 @@
 //! position the demo's Verdict lands on; we inspect the orchestrator
 //! outcome's `layers` array for it after the drain.
 //!
-//! Heavy (`include_bytes!`-equivalent of a ~675 KB fixture +
-//! nanoda re-checks the capstone proof), so gated `#[ignore]` like
-//! the sibling capstone test.
+//! Reads a ~675 KB fixture and has nanoda re-check the capstone proof, and runs in a few
+//! seconds — it is NOT `#[ignore]`d. It was, and a real failure sat behind the annotation
+//! unnoticed (eigenius#207): the gate stopped being about cost and started hiding a
+//! regression. This is the only test that puts a `lean:proposition` through the validator,
+//! so it is the one that catches a shape change in the chain mirror.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use eigenius_kernel::commit::{
-    BackendStorePersister, CommitOrchestrator, CommitWorkingSetPool, EmissionKind,
-    InstitutionContext, LayerEmission, LayerRole, NoopHost, PipelineKind,
+    BackendPersister, CommitOrchestrator, CommitWorkingSetPool, EmissionKind, InstitutionContext,
+    LayerEmission, LayerRole, NoopHost, PipelineKind,
 };
 use eigenius_kernel::context::{ExecutionContext, ExecutionMode};
 use eigenius_kernel::institution::registry::InstitutionIndex;
@@ -83,9 +85,8 @@ fn fixture_path() -> PathBuf {
         .expect("workspace root must have two ancestor segments from this crate")
 }
 
-#[test]
-#[ignore = "heavy: parses ~9 kLoC of lean4export output via nanoda against the demo fixture"]
-fn notebook_demo_fixture_lands_holds() {
+/// The committed fixture's resources.
+fn fixture_resources() -> Vec<eigenius_kernel::ontology::resource::Resource> {
     let path = fixture_path();
     let bytes = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         panic!(
@@ -102,12 +103,18 @@ fn notebook_demo_fixture_lands_holds() {
     });
     assert_eq!(
         resources.len(),
-        5,
-        "demo fixture must carry exactly five resources \
-         (Patient class, instance, mirror, payload, term); got {}",
+        6,
+        "demo fixture must carry exactly six resources (Patient class, the `Healthy` axiom its \
+         proposition applies, the claim instance, mirror, payload, term); got {}",
         resources.len()
     );
+    resources
+}
 
+/// Drive the commit orchestrator over `resources`, exactly as the Load handler does.
+fn land(
+    resources: Vec<eigenius_kernel::ontology::resource::Resource>,
+) -> eigenius_kernel::commit::MultiLayerOutcome {
     // Bootstrap the chain on a memory-backed `PersistentBackend` so
     // the orchestrator's persist phase has somewhere to land layers.
     // The `WithInstitutions` pipeline runs `autoonload_dispatch`,
@@ -119,6 +126,15 @@ fn notebook_demo_fixture_lands_holds() {
     let bootstrap_ctx = eigenius_kernel::bootstrap::bootstrap_with_storage(storage.clone())
         .expect("bootstrap with memory backend");
     let head = Arc::clone(bootstrap_ctx.head());
+
+    // Seed the `main` ref at the bootstrap head. `BackendPersister`'s CAS passes
+    // `expected_old = layer.parent().id()`; against a store where `main` was never written the
+    // ref reads as the zero LayerId, the CAS mismatches, and the commit comes back
+    // `NeedsWitnessedMerge` with `branch_advanced: false` — which silently drops the Sibling.
+    // A server writes this ref when it bootstraps a fresh store; the test bootstraps its own.
+    backend
+        .put_branch("main", head.id())
+        .expect("seed the main branch ref at the bootstrap head");
 
     let (index, errors) = InstitutionIndex::from_layer(&head);
     assert!(
@@ -154,10 +170,18 @@ fn notebook_demo_fixture_lands_holds() {
     }
 
     // Drive the commit orchestrator the way the Load handler does
-    // (kernel/src/server/mod.rs §2190). `BackendStorePersister` plays
-    // the role of `EigeniusService as LayerPersister` for this
-    // standalone test — no anchored-commit cache, no CAS, but the
-    // pipeline's persist phase still gets a real backend to write to.
+    // (kernel/src/server/mod.rs §2190), through the same persister the
+    // gRPC service holds: `BackendPersister` owns the anchored-commit
+    // cache probe and the branch CAS.
+    //
+    // The lattice-side `BackendStorePersister` cannot stand in here. It
+    // is `store_layer`-only and reports `branch_advanced: false`
+    // unconditionally, and the orchestrator drops a landed layer's
+    // emissions when its parent did not advance the branch
+    // (`orchestrator.rs` §6.4). Under that persister the
+    // `verdict_provenance` Sibling is queued and then discarded, so the
+    // assertion below could never hold however the demo verified.
+    //
     // `NoopHost` satisfies `CommitHookHost` without needing the
     // server's index-rebuild / vector-sweep machinery; the test cares
     // about AutoOnLoad's `verdict_provenance` Sibling.
@@ -171,12 +195,10 @@ fn notebook_demo_fixture_lands_holds() {
         EmissionKind::Child,
         working,
     );
-    let persister = BackendStorePersister {
-        backend: backend.as_ref(),
-    };
+    let persister = BackendPersister::new(Some(Arc::clone(&backend) as Arc<dyn PersistentBackend>));
     let host = NoopHost;
     let pool = CommitWorkingSetPool::in_memory();
-    let outcome = {
+    {
         let orchestrator = CommitOrchestrator {
             ctx: &mut ctx,
             pool: &pool,
@@ -192,7 +214,12 @@ fn notebook_demo_fixture_lands_holds() {
             did_drain: CommitOrchestrator::default_did_drain(),
         };
         orchestrator.run(root)
-    };
+    }
+}
+
+#[test]
+fn notebook_demo_fixture_lands_holds() {
+    let outcome = land(fixture_resources());
 
     // On the all-Ok / Holds path the orchestrator returns
     // `outcome.error = None` and the layers vector carries the user
@@ -256,5 +283,138 @@ fn notebook_demo_fixture_lands_holds() {
         ctor, "Holds",
         "demo proof must yield Verdict::Holds (the load-bearing claim of the lean-verification notebook); \
          got `{ctor}`"
+    );
+}
+
+/// A claim carrying no `reflection:canonical_proposition` is REFUSED, not skipped.
+///
+/// This is the fix for eigenius#159. Before it, `claim_proposition` returned `None` for such a
+/// claim and the institution fell back to the name-level check — "a theorem called `target_name`
+/// type-checks" — which is the verdict that issue opened against. The demo itself demonstrated
+/// the hole: its claim carried only `is_a`, so it landed `Holds` with the statement check never
+/// running.
+///
+/// The claim now carries `∀ (p : Patient), Healthy(p) → Healthy(p)`, and stripping it must fail
+/// the commit rather than quietly weaken what `Holds` attests.
+#[test]
+fn a_claim_without_a_proposition_is_refused() {
+    use eigenius_kernel::ontology::iri::Iri;
+    use eigenius_kernel::ontology::well_known as wk;
+
+    let stripped: Vec<_> = fixture_resources()
+        .into_iter()
+        .map(|mut r| {
+            if r.id().is_some_and(|i| i.as_str().ends_with(":patient_1")) {
+                r.remove(&Iri::parse(wk::CANONICAL_PROPOSITION).expect("well-known IRI"));
+            }
+            r
+        })
+        .collect();
+
+    let outcome = land(stripped);
+    let err = outcome
+        .error
+        .expect("a claim with no proposition must not land");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("canonical_proposition"),
+        "the refusal must name what is missing; got {msg}"
+    );
+    assert!(
+        msg.contains("target name alone") || msg.contains("nothing to check"),
+        "and must say why a name-level verdict is not enough; got {msg}"
+    );
+}
+
+/// A `Verdict::Holds` reaches the **verified** grade — the whole of eigenius#160.
+///
+/// Before this, `do_proof_check` returned a Verdict and nothing else, so a checked Lean proof
+/// left the chain in the same state a failed one did. `verified(X)` in a justification term was
+/// unsatisfiable by any Lean proof, and D28 §1's reason for the institution to exist was not
+/// wired end to end.
+///
+/// Three things have to hold together, and the test asserts each separately because any one of
+/// them failing alone would leave the other two looking correct:
+///
+/// 1. the institution emits a `prov:VerificationTrace` pointing at the claim;
+/// 2. the kernel does **not** stamp `reflection:InstitutionEmittedDerivation` on it — that class
+///    says "grounds nothing", which is the opposite of what a trace is for;
+/// 3. `lookup_chain_witness` answers `true` for `Verified` on the claim's own proposition. This
+///    is the one that matters: (1) and (2) are how it is reached, not what it delivers.
+#[test]
+fn a_holds_verdict_admits_a_verified_witness() {
+    use eigenius_kernel::layer::lookup_chain_witness;
+    use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
+
+    const CLAIM_IRI: &str = "urn:eigenius:demo:lean:patient_1";
+    const PAYLOAD_IRI: &str = "urn:eigenius:demo:lean:proof_payload";
+
+    let resources = fixture_resources();
+    let claim_proposition = resources
+        .iter()
+        .find(|r| r.id().is_some_and(|i| i.as_str() == CLAIM_IRI))
+        .and_then(|r| r.get(&Iri::parse(wk::CANONICAL_PROPOSITION).expect("well-known IRI")))
+        .expect("the demo claim carries a canonical_proposition (eigenius#159)")
+        .clone();
+
+    let outcome = land(resources);
+    assert!(
+        outcome.error.is_none(),
+        "the demo must land cleanly; got {:?}",
+        outcome.error
+    );
+    let provenance: Arc<Layer> = Arc::clone(&outcome.layers[1].layer);
+
+    // 1. The trace is there, and it names the claim rather than the proof term. `prov:resource`
+    //    is what `emit_from_trace` follows to find the proposition the witness keys on, so a
+    //    trace pointing at the `LeanProofTerm` would commit cleanly and attest nothing.
+    let trace = provenance
+        .iter_resources()
+        .map(|(_, r)| r)
+        .find(|r| {
+            r.is_a()
+                .iter()
+                .any(|c| c.as_str() == wk::VERIFICATION_TRACE)
+        })
+        .expect("a Holds verdict must commit a prov:VerificationTrace beside it");
+    assert_eq!(
+        trace.get(&Iri::parse(wk::REFLECTION_RESOURCE).expect("well-known IRI")),
+        Some(&Value::iri(&Iri::parse(CLAIM_IRI).expect("static IRI"))),
+        "the trace must target the CLAIM — that is where the proposition the witness keys on lives"
+    );
+    assert_eq!(
+        trace
+            .get(&Iri::parse(wk::PROOF_SYSTEM).expect("well-known IRI"))
+            .and_then(Value::as_str),
+        Some("lean4"),
+    );
+    assert_eq!(
+        trace
+            .get(&Iri::parse(wk::PROOF_TERM).expect("well-known IRI"))
+            .and_then(Value::as_str),
+        Some(PAYLOAD_IRI),
+        "prov:proof_term names the resource holding the export bytes"
+    );
+
+    // 2. No "grounds nothing" marker on the one resource whose purpose is to be a ground.
+    assert!(
+        !trace
+            .is_a()
+            .iter()
+            .any(|c| c.as_str() == wk::INSTITUTION_EMITTED_DERIVATION),
+        "finalize_emitted_resource must withhold the derivation marker from a prov:Trace; got {:?}",
+        trace.is_a()
+    );
+
+    // 3. The grade itself.
+    let key = WitnessKey::from_encoded(
+        WitnessCategory::Verified,
+        Iri::parse(CLAIM_IRI).expect("static IRI"),
+        &claim_proposition,
+    );
+    assert!(
+        lookup_chain_witness(&provenance, &key),
+        "the chain must admit `Verified` for the claim's own proposition — this is the grade the \
+         Lean institution exists to reach (D28 §1 / eigenius#160)"
     );
 }

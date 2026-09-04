@@ -71,10 +71,9 @@ The per-subsystem design notes, in number order. New documents are added here as
 | D55 | [R language runtime](d55-r-language-runtime.md) |
 | D56 | [Component execution and derivation materialization](d56-component-execution-and-derivation-materialization.md) |
 | D57 | [schema.org vocabulary mapping](d57-schema-org-vocabulary-mapping.md) |
-| D58 | [Objective framing and obligation graphs](d58-objective-framing-and-obligation-graphs.md) |
 | D59 | [EigenQL array patterns and derived joins](d59-eigenql-array-patterns-and-derived-joins.md) |
 | D60 | [Generic OCI tool runtime + kernel-tracked env build](d60-native-runtime-and-tracked-env-build.md) |
-| D61 | [Faithful encoding of reasoning: grounding-discovery + a typed decision layer](d61-llm-based-encoding-methodology.md) |
+| D61 | [Faithful encoding of reasoning: the faithfulness gap and the two oracles](d61-llm-based-encoding-methodology.md) — *partly withdrawn; the typed decision layer is gone* |
 | D62 | [The encoding pipeline: prose → typed reasoning (the driver)](d62-encoding-engine-prose-to-trees.md) |
 | D63 | [The DCG engine: a categorial grammar of English over EigenTT](d63-dcg-engine-english-grammar.md) |
 | D64 | [LLM-based anaphora resolution: pronouns as resolved resource references](d64-llm-anaphora-resolution.md) |

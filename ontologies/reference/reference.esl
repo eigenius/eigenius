@@ -122,8 +122,8 @@ property reference:url : core:string {
 //
 // The rhetorical/evidential role a citation plays, mirroring the CiTO object
 // properties. Individuals (not constructors) so each can carry its canonical
-// CiTO URI for interop, exactly as reflection:EpistemicStatus enumerates
-// observed/derived/verified/declared.
+// CiTO URI for interop — the same shape reflection:EpistemicStatus used for
+// observed/derived/verified/declared before P5 deleted that vocabulary.
 
 class reference:CitationType {
     description = "How a literature warrant uses the work it cites — the CiTO (Citation Typing Ontology, SPAR) citation function. A DeclaredResource names one via reference:citation_type; reference:cito_iri carries the canonical CiTO URI.";

@@ -267,14 +267,17 @@ impl ExternalInstitution {
             }
         };
 
-        // Decode each derivation CBOR into a chain-shaped Resource.
-        // The kernel commit pipeline stamps the
-        // `reflection:InstitutionEmittedDerivation` marker and the
-        // linkage properties before committing — institutions are
-        // responsible only for the domain-specific shape +
-        // `canonical_proposition`. Empty list when the institution
-        // emitted no derivations, which is the common case for
-        // pass/fail-only gates (D52 §6).
+        // Decode each emitted CBOR into a chain-shaped Resource. The
+        // kernel commit pipeline stamps the linkage properties before
+        // committing, plus the
+        // `reflection:InstitutionEmittedDerivation` marker on anything
+        // that is not a `prov:Trace` — institutions are responsible
+        // only for the domain-specific shape + `canonical_proposition`.
+        // An external prover reaches the Verified grade the same way
+        // the in-process Lean institution does (eigenius#160): put a
+        // `prov:VerificationTrace` naming the claim in this list.
+        // Empty list when the institution emitted nothing, which is the
+        // common case for pass/fail-only gates (D52 §6).
         let mut derivations = Vec::with_capacity(resp.derivations_cbor.len());
         for (i, cbor) in resp.derivations_cbor.iter().enumerate() {
             let r = eigon_cbor::parse_resource_lenient(cbor).map_err(|e| {

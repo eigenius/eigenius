@@ -83,8 +83,9 @@ impl WitnessCategory {
 /// The `(category, iri)` pair determines exactly one canonical proposition
 /// per resource per D49 §4 / D39 §4.1's `canonical_proposition` semantics
 /// (default `Asserts(iri)`; explicit value via the optional
-/// `reflection:canonical_proposition` property; for `VerifiedResource`,
-/// derived from the reified `VerifiedPropositionView`). Keeping
+/// `reflection:canonical_proposition` property — including for `Verified`,
+/// which reads the claim's own proposition through the `VerificationTrace`
+/// that names it, not a reified view). Keeping
 /// `prop_hash` in the key still matters: it surfaces "the
 /// `justification:Certificate.declared` constructor was instantiated with the wrong
 /// proposition for this IRI" as a type error at type-check time, rather

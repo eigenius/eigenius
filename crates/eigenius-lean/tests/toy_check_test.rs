@@ -38,7 +38,7 @@ const TOY_FAILS: &[u8] = include_bytes!("../test_resources/toy_proof_fails.json"
 
 #[test]
 fn toy_proof_holds_admits_well_typed_export() {
-    let verdict = check_proof(TOY_HOLDS, "PUnit", &[]).expect("infrastructure ok");
+    let verdict = check_proof(TOY_HOLDS, "PUnit", &[], None).expect("infrastructure ok");
     assert_eq!(
         verdict,
         Verdict::Holds,
@@ -48,7 +48,7 @@ fn toy_proof_holds_admits_well_typed_export() {
 
 #[test]
 fn toy_proof_fails_rejects_broken_proof() {
-    let verdict = check_proof(TOY_FAILS, "explosion", &[]).expect("infrastructure ok");
+    let verdict = check_proof(TOY_FAILS, "explosion", &[], None).expect("infrastructure ok");
     match verdict {
         Verdict::Fails { diagnostic } => {
             assert!(
@@ -65,7 +65,7 @@ fn missing_target_name_returns_fails_not_holds() {
     // Target name not declared in the export — the parser's
     // `unknown_pp_declar_hard_error` precondition catches this
     // before any checking runs.
-    let verdict = check_proof(TOY_HOLDS, "DoesNotExist", &[]).expect("infrastructure ok");
+    let verdict = check_proof(TOY_HOLDS, "DoesNotExist", &[], None).expect("infrastructure ok");
     match verdict {
         Verdict::Fails { diagnostic } => {
             assert!(
@@ -85,7 +85,7 @@ fn malformed_export_returns_fails() {
     // surface parse errors through `Verdict::Fails`, not as a panic
     // or `CheckError`.
     let garbage = b"this is not valid lean4export JSON\n";
-    let verdict = check_proof(garbage, "anything", &[]).expect("infrastructure ok");
+    let verdict = check_proof(garbage, "anything", &[], None).expect("infrastructure ok");
     assert!(
         matches!(verdict, Verdict::Fails { .. }),
         "malformed export must yield Fails, got {verdict:?}"

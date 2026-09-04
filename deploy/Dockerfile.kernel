@@ -37,6 +37,14 @@ COPY ontologies/ ontologies/
 # eigenius-julia (transitive dep of the CLI's `env build` command) does
 # `include_str!`s of julia/common/EigeniusJuliaCommon/ at compile time.
 COPY julia/ julia/
+# `eigenius-lean-runtime`'s build script reads the workspace's pinned Lean toolchain and bakes it
+# into a const, so the Dockerfile composer and every Rust caller see one version with no drift.
+# That crate entered the CLI's build graph when `eigenius-lean` promoted it from a dev-dependency
+# (D74 §3.3 — the IRI -> Lean name mangling must have ONE implementation, called by both D30's
+# emitter and the externalizer). Just the pin, not `lean/`: it is the single source of truth elan
+# reads natively, and the rest of that tree — research projects, the vendored lean4export — has
+# no business in this image.
+COPY lean/runtime-worker/lean-toolchain lean/runtime-worker/lean-toolchain
 COPY patches/ patches/
 
 # Build the CLI binary (includes serve command). Cargo cache mounts persist

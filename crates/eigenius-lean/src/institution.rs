@@ -26,9 +26,10 @@
 //!
 //! - `query(proof_check, LeanProofTerm)` — extracts the
 //!   referenced `LeanProofPayload`'s `payload_bytes`, reads the
-//!   `target_name`, runs `check_proof` against the hard-coded
+//!   `target_name` and the claim's proposition, runs `check_proof` against the hard-coded
 //!   [`DEFAULT_LEAN_AXIOMS`] allowlist, and returns a
-//!   `Verdict::Holds | Fails { diagnostic }` resource. Nothing on this
+//!   `Verdict::Holds | Fails { diagnostic }` resource plus, on `Holds`, a
+//!   `prov:VerificationTrace`. Nothing on this
 //!   path reads a `LeanEnvironment`: `lean:lean_permitted_axioms` is
 //!   read only by the authoring runtime, so a per-environment override
 //!   has no effect on a verdict.
@@ -43,57 +44,44 @@
 //!   construction is authoring-side via the chain-mirror translator,
 //!   not via a kernel `reify` call.
 //!
-//! ## Correspondence check (D28 §5.5)
+//! ## What a `Holds` means
 //!
-//! Three checks run in order:
+//! Two checks, both mandatory (D74 §6.3, eigenius#159):
 //!
-//! 1. **Proof validity** — nanoda's `check_proof`. Same as 20a.4.
-//! 2. **Mirror correspondence** — resolve `mirror_iri` to a
-//!    `runtime:RuntimePackageMirror` (the design documents call it a
-//!    `LeanPackageMirror`; no such class or type exists), verify its
-//!    `source_layer` is reachable
-//!    from `head` (proof anchored to an ancestor-or-equal of the
-//!    layer the check runs against), and confirm the mirror covers
-//!    the claim's class via `mirrored_classes`. Lacking either
-//!    raises `FFIVersionMismatch`.
-//! 3. **Anchor consistency** — recompute the
-//!    `library_content_hash` over the embedded archive and confirm
-//!    it matches the declared hash. Mismatch surfaces as
-//!    `AnchorContentHashMismatch`.
+//! 1. **Proof validity** — nanoda type-checks every declaration in the export and refuses any
+//!    axiom outside the permitted set.
+//! 2. **Statement correspondence** — the claim named by `lean:claim_iri` carries a
+//!    `reflection:canonical_proposition`; it is externalized to a Lean `Expr`
+//!    ([`crate::externalize`]) and compared to the target declaration's type with nanoda's
+//!    `def_eq`. Without this, `Holds` would mean only "a theorem with this name type-checks".
 //!
-//! A `LeanProofTerm` without `mirror_iri` skips checks 2 + 3 — the
-//! verdict reflects nanoda alone, matching the 20a.4 behavior for
-//! proofs not yet pinned to a chain-level claim.
+//! D28 §5.5's three-part correspondence check is gone, along with `lean:mirror_iri` and
+//! `lean:proposition` (D74 §6.3.1). `def_eq` against the claim's own proposition subsumes it: the
+//! mirror-coverage check asked whether the committed proposition *mentioned* the claim's class, a
+//! proxy for what the comparison answers directly, and the version-skew check is implied — a
+//! moved mirror makes the externalized `Const` names disagree with the export's.
 //!
-//! ### Structural correspondence (D28 §5.5 ¶2 final sentence)
+//! ## What a `Holds` produces
 //!
-//! When the `LeanProofTerm` carries a `proposition` — a
-//! chain-mirrored `lean:LeanExpr` (D40) value — the check walks
-//! that tree, collects every `Const` reference under the
-//! `EigeniusFFI` namespace, and verifies at least one maps back
-//! (via the mirror's `mirrored_classes` + each class's
-//! `core:short_name`) to the claim's class IRI. Failure surfaces
-//! as `PropositionMismatch` (D28 §9.1) with a diagnostic listing
-//! what the proposition *does* reference.
-//!
-//! The proposition is recommended-not-required (D28 §6.3). Absent
-//! → structural check is skipped; the covering check (class IRI ∈
-//! `mirrored_classes`) is the only correspondence gate. Once the
-//! orchestrator's commit pipeline guarantees `proposition`
-//! population for every committed proof, a future spec version may
-//! upgrade absent-proposition to a hard rejection.
+//! A `prov:VerificationTrace` naming the claim, emitted beside the Verdict and committed by the
+//! kernel into the `verdict_provenance` layer (eigenius#160). That trace is what makes
+//! `layer_admits_witness` answer `Verified` for the claim's proposition; the verdict resource
+//! itself grounds nothing. On `Fails`, no trace.
 
 use std::sync::Arc;
 
 use eigenius_kernel::context::ExecutionContext;
 use eigenius_kernel::institution::error::InstitutionError;
 use eigenius_kernel::institution::runtime::{Institution, QueryOutcome};
+use eigenius_kernel::nbe::term::Exp;
 use eigenius_kernel::nbe::val::Val;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
 use eigenius_kernel::ontology::well_known as wk;
+use eigenius_kernel::program::eigentt_type_mirror::decode_type;
+use eigenius_kernel::server::helpers::{millis_to_iso8601, now_millis};
 
-use crate::checker::{check_proof, Verdict};
+use crate::checker::{check_proof, ExpectedStatement, Verdict};
 
 /// Well-known IRIs the institution dispatches on. Keeping them in one
 /// place so a downstream caller building a `LeanProofTerm` resource
@@ -124,26 +112,11 @@ pub mod iris {
     /// Property: `LeanProofTerm.target_name` (string).
     pub const PROP_TARGET_NAME: &str = "urn:eigenius:lean:target_name";
 
-    /// Property: `LeanProofTerm.mirror_iri` — IRI of the
-    /// `runtime:RuntimePackageMirror` the proof's proposition is
-    /// anchored to.
-    /// Recommended on chain (20a.7+); absent means "verify under
-    /// nanoda alone, no chain-claim correspondence".
-    pub const PROP_MIRROR_IRI: &str = "urn:eigenius:lean:mirror_iri";
-
     /// Property: `LeanProofTerm.claim_iri` — IRI of the Eigon
     /// claim resource the proof discharges. v1 reads it for
     /// mirror-coverage matching: the claim's class must appear in
     /// the mirror's `mirrored_classes`.
     pub const PROP_CLAIM_IRI: &str = "urn:eigenius:lean:claim_iri";
-
-    /// Property: `LeanProofTerm.proposition` — chain-mirrored
-    /// `lean:LeanExpr` (D40 §3.4) value carrying the theorem's
-    /// *type*. v1 of the correspondence check walks this
-    /// value to confirm the proof actually reasons about the claim's
-    /// class via a mirror type (D28 §5.5 ¶2 final sentence). Absent
-    /// proposition → structural check is skipped.
-    pub const PROP_PROPOSITION: &str = "urn:eigenius:lean:proposition";
 
     /// Property attached to a `Verdict::Fails` carrying the
     /// human-readable refusal reason (D31 §6.3 / institution ontology).
@@ -161,25 +134,7 @@ pub mod iris {
     // ── Diagnostic kinds (D28 §9.1). Prefixed onto the diagnostic
     // string so consumers can match by leading token. Single-string
     // shape matches the existing `PROP_DIAGNOSTIC` flat surface.
-    pub(crate) const DIAG_FFI_VERSION_MISMATCH: &str = "FFIVersionMismatch";
-    pub(crate) const DIAG_ANCHOR_CONTENT_HASH_MISMATCH: &str = "AnchorContentHashMismatch";
-    pub(crate) const DIAG_PROPOSITION_MISMATCH: &str = "PropositionMismatch";
-
-    /// Lean namespace the mirror generator emits structures under
-    /// (D30 §2.4: `namespace EigeniusFFI`). A `Const` node in the
-    /// proposition with a name like `EigeniusFFI.Patient` is a
-    /// mirror-type reference; the structural correspondence check
-    /// finds these and maps the suffix back to a chain class IRI.
-    pub(crate) const MIRROR_NAMESPACE: &str = "EigeniusFFI";
 }
-
-/// IRI scheme prefix for wrapping a hex `LayerId` into a valid
-/// `urn:eigenius:core:formats:iri`-conforming string. Used by
-/// `RuntimePackageMirror.source_layer` and the institution's
-/// ancestry check (D28 §5.5). Two-way mapping: stripping this
-/// prefix from a stored `source_layer` value yields the hex form
-/// the layer chain stores directly on `Layer::id()`.
-const LAYER_IRI_PREFIX: &str = "urn:eigenius:layer:";
 
 /// In-process Lean 4 verification institution.
 ///
@@ -303,6 +258,57 @@ const DEFAULT_LEAN_AXIOMS: &[&str] = &[
     "Lean.trustCompiler",
 ];
 
+/// The claim this proof discharges: its IRI, and its `reflection:canonical_proposition`
+/// decoded to an `Exp` (D74 §2).
+///
+/// `None` only when the proof term names no claim at all. `lean:claim_iri` is `requires` on
+/// `LeanProofTerm` (D74 §6.3), so validation rejects that shape before dispatch and the arm is
+/// unreachable through the commit pipeline; it stays for a direct `query` call. An unresolvable
+/// `claim_iri`, a claim with no proposition, or a proposition that will not decode is an error
+/// rather than a skip: the author meant to bind a claim and the binding is broken.
+fn claim_proposition(
+    input: &Resource,
+    ctx: &ExecutionContext,
+) -> Result<Option<(Iri, Exp)>, InstitutionError> {
+    let Some(claim_iri) = input
+        .get(&Iri::parse(iris::PROP_CLAIM_IRI).expect("static IRI"))
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let claim_iri = Iri::parse(claim_iri).map_err(|e| {
+        InstitutionError::ComputationFailed(format!("`claim_iri` is not an IRI: {e}"))
+    })?;
+    let claim = ctx.resolve(&claim_iri).ok_or_else(|| {
+        InstitutionError::ComputationFailed(format!(
+            "`claim_iri` `{claim_iri}` does not resolve in the verification context"
+        ))
+    })?;
+    // REJECT, do not skip. The whole of #159 is that a `Holds` must mean "this proof proves THIS
+    // claim"; a claim carrying no proposition leaves nothing to compare against, and returning
+    // `None` here would fall back to the name-level check — "a theorem with this name
+    // type-checks" — which is the verdict the issue opened against.
+    //
+    // This cannot be expressed in the ontology: `reflection:canonical_proposition` is a
+    // `reflection:` property on an arbitrary claim class, and `lean:LeanProofTerm` cannot require
+    // a property of a resource it merely references. So the institution enforces it, and D74
+    // §6.3's `claim_iri: requires` is necessary but not sufficient on its own.
+    let Some(value) = claim.get(&Iri::parse(wk::CANONICAL_PROPOSITION).expect("well-known IRI"))
+    else {
+        return Err(InstitutionError::ComputationFailed(format!(
+            "claim `{claim_iri}` carries no `reflection:canonical_proposition`, so there is \
+             nothing to check the proof against; a Lean verdict must not rest on the target \
+             name alone (D74 / eigenius#159)"
+        )));
+    };
+    let exp = decode_type(value, ctx.head()).map_err(|e| {
+        InstitutionError::ComputationFailed(format!(
+            "`{claim_iri}`'s canonical_proposition does not decode: {e:?}"
+        ))
+    })?;
+    Ok(Some((claim_iri, exp)))
+}
+
 fn do_proof_check(
     input: &Resource,
     ctx: &ExecutionContext,
@@ -325,12 +331,33 @@ fn do_proof_check(
     // property and use it instead — that wiring lands when the
     // authoring runtime's env-resource flow into the kernel
     // commit pipeline (currently the env IRI isn't on the chain).
+    //
+    // This set is the trusted computing base of the verdict, and the `VerificationTrace` below
+    // does not record it: two proofs, one leaning on `Classical.choice` and one not, produce
+    // byte-identical traces. `prov:VerificationTrace` has no slot for it, so closing this needs
+    // an ontology edit, which drifts the bootstrap manifest — batched with D86's chain
+    // declarations rather than moved on its own.
     let permitted_axioms: Vec<String> = DEFAULT_LEAN_AXIOMS
         .iter()
         .map(|s| (*s).to_string())
         .collect();
-    let verdict = check_proof(bytes.as_bytes(), &target_name, &permitted_axioms)
-        .map_err(|e| InstitutionError::ComputationFailed(format!("nanoda check_proof: {e}")))?;
+    // D74 / #159 — the statement-level check beside the name-level one. The claim's own
+    // proposition becomes the Lean goal, so `Holds` means "this proof proves THIS claim" rather
+    // than "a theorem with this name type-checks".
+    let claim = claim_proposition(input, ctx)?;
+    let verdict = check_proof(
+        bytes.as_bytes(),
+        &target_name,
+        &permitted_axioms,
+        claim
+            .as_ref()
+            .map(|(_, prop)| ExpectedStatement {
+                proposition: prop,
+                layer: ctx.head(),
+            })
+            .as_ref(),
+    )
+    .map_err(|e| InstitutionError::ComputationFailed(format!("nanoda check_proof: {e}")))?;
 
     // Check 1 (proof validity) decided — short-circuit on nanoda
     // rejection. No correspondence check runs against a proof that
@@ -342,654 +369,70 @@ fn do_proof_check(
         )));
     }
 
-    // Checks 2 + 3 (D28 §5.5) — only run when the proof carries a
-    // mirror anchor. `LeanProofTerm` without `mirror_iri` is the
-    // 20a.4 shape ("verify under nanoda alone, no chain claim"); we
-    // preserve that path so unanchored proofs don't regress.
-    if let Some(failure) = do_correspondence_check(input, ctx)? {
-        return Ok(QueryOutcome::from_output(verdict_resource(
-            wk::VERDICT_FAILS,
-            Some(&failure),
-        )));
-    }
+    // Checks 2 and 3 (D28 §5.5) are gone with `mirror_iri` and `lean:proposition`
+    // (D74 §6.3.1). `def_eq` against the claim's own externalized proposition subsumes them:
+    // 2c asked whether the committed proposition MENTIONED the claim's class, a proxy for what
+    // the comparison answers directly, and 2a's version-skew check is implied — a moved mirror
+    // makes the externalized `Const` names disagree with the export's.
 
-    Ok(QueryOutcome::from_output(verdict_resource(
-        wk::VERDICT_HOLDS,
-        None,
-    )))
+    // eigenius#160 — a `Holds` that promotes nothing is the verdict this institution existed to
+    // avoid. The trace is what carries the check off this call and onto the chain: committed
+    // beside the Verdict, it makes `layer_admits_witness` answer `Verified` for the claim's own
+    // proposition (`witness_index::emit_from_trace`), which is the grade D28 §1 names as the
+    // reason a proof-checking institution exists.
+    let mut outcome = QueryOutcome::from_output(verdict_resource(wk::VERDICT_HOLDS, None));
+    if let Some((claim_iri, _)) = claim.as_ref() {
+        if let Some(trace) = verification_trace(input, &payload, claim_iri) {
+            outcome.derivations.push(trace);
+        }
+    }
+    Ok(outcome)
 }
 
-/// Run the D28 §5.5 correspondence checks against a successfully
-/// type-checked proof. Returns `Some(diagnostic)` on any failure;
-/// `None` when the proof has no mirror anchor (skip) or every
-/// check passes.
-fn do_correspondence_check(
-    proof_term: &Resource,
-    ctx: &ExecutionContext,
-) -> Result<Option<String>, InstitutionError> {
-    // The `mirror_iri` property carries the IRI of the
-    // `runtime:RuntimePackageMirror` resource the proof's proposition is
-    // anchored to. Absent → unanchored proof → skip (return None).
-    let mirror_iri_str = match proof_term
-        .get(&Iri::parse(iris::PROP_MIRROR_IRI).expect("static IRI"))
-        .and_then(Value::as_str)
-    {
-        Some(s) => s.to_string(),
-        None => return Ok(None),
-    };
-    let mirror_iri = Iri::parse(&mirror_iri_str).map_err(|e| {
-        InstitutionError::ComputationFailed(format!(
-            "LeanProofTerm `mirror_iri` is not a valid IRI: {e}"
-        ))
-    })?;
+/// `prov:proof_system` for a proof this institution checked. The property exists so a
+/// `VerificationTrace` from an external prover and one from the kernel's own certificate checker
+/// are the same class, told apart by value rather than by kind.
+const PROOF_SYSTEM_LEAN4: &str = "lean4";
 
-    // Resolve the mirror Resource. Missing → FFIVersionMismatch
-    // (the proof points at a mirror the chain doesn't carry).
-    let mirror = match ctx.resolve(&mirror_iri) {
-        Some(r) => r,
-        None => {
-            return Ok(Some(format_diag(
-                iris::DIAG_FFI_VERSION_MISMATCH,
-                &format!(
-                    "LeanPackageMirror `{mirror_iri_str}` does not resolve in the layer chain"
-                ),
-            )));
-        }
-    };
-
-    // ─── Check 3: anchor consistency ──────────────────────────────
-    //
-    // Recompute `library_content_hash` from the embedded archive
-    // and compare to the declared value. A mismatch means the
-    // mirror was tampered with between commit and verification —
-    // a hard reject regardless of any other check passing.
-    if let Some(diag) = check_anchor_consistency(&mirror)? {
-        return Ok(Some(diag));
-    }
-
-    // ─── Check 2: mirror correspondence ───────────────────────────
-    //
-    // Two sub-checks:
-    //   (a) The mirror's `source_layer` is reachable from the
-    //       verification context's head (proof anchored to an
-    //       ancestor-or-equal of the layer the check runs against).
-    //   (b) The claim's class is in the mirror's
-    //       `mirrored_classes` set.
-    //
-    // (a) failure → FFIVersionMismatch ("the mirror was generated
-    // against a layer outside this branch"). (b) failure →
-    // FFIVersionMismatch ("the mirror doesn't cover this class").
-    if let Some(diag) = check_mirror_anchor_reachable(&mirror, ctx) {
-        return Ok(Some(diag));
-    }
-    if let Some(diag) = check_mirror_covers_claim_class(proof_term, &mirror, ctx)? {
-        return Ok(Some(diag));
-    }
-
-    // ─── Check 2c: structural correspondence (D28 §5.5 ¶2 final) ──
-    //
-    // Walk the proposition's chain-mirrored `lean:LeanExpr` (D40)
-    // and confirm at least one of the mirror types it references
-    // maps back to the claim's class IRI. Skipped when the
-    // proposition is absent — `LeanProofTerm.proposition` is
-    // recommended, not required.
-    if let Some(diag) = check_proposition_structural_correspondence(proof_term, &mirror, ctx)? {
-        return Ok(Some(diag));
-    }
-
-    Ok(None)
-}
-
-/// Recompute SHA-256 over the mirror's embedded archive and verify
-/// it matches the declared `library_content_hash`. Uses the same
-/// length-prefixed framing as `eigenius_lean_runtime::mirror_gen::
-/// library_content_hash` so the two computations agree.
-fn check_anchor_consistency(mirror: &Resource) -> Result<Option<String>, InstitutionError> {
-    let declared = mirror
-        .get(&Iri::parse(iris::PROP_MIRROR_LIB_CONTENT_HASH).expect("static IRI"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            InstitutionError::ComputationFailed(
-                "LeanPackageMirror missing `library_content_hash` property".to_string(),
-            )
-        })?;
-
-    let lib_json = mirror
-        .get(&Iri::parse(iris::PROP_MIRROR_LIB_CONTENT).expect("static IRI"))
-        .ok_or_else(|| {
-            InstitutionError::ComputationFailed(
-                "LeanPackageMirror missing `library_content` property".to_string(),
-            )
-        })?;
-    let lib_json = match lib_json {
-        Value::Json(v) => v,
-        other => {
-            return Err(InstitutionError::ComputationFailed(format!(
-                "`library_content` must be JSON, got {other:?}"
-            )));
-        }
-    };
-
-    let actual = recompute_library_content_hash(lib_json)?;
-    if actual != declared {
-        return Ok(Some(format_diag(
-            iris::DIAG_ANCHOR_CONTENT_HASH_MISMATCH,
-            &format!("library_content_hash mismatch: declared `{declared}`, recomputed `{actual}`"),
-        )));
-    }
-    Ok(None)
-}
-
-/// Walk `head`'s parent chain looking for a layer whose `id()`
-/// matches the mirror's `source_layer`. Source layers are stored
-/// as a hex-encoded `LayerId` (`Display`-formatted) when committed
-/// by the substrate's image-build pipeline.
-fn check_mirror_anchor_reachable(mirror: &Resource, ctx: &ExecutionContext) -> Option<String> {
-    let source_layer = match mirror
-        .get(&Iri::parse(iris::PROP_MIRROR_SOURCE_LAYER).expect("static IRI"))
-        .and_then(Value::as_str)
-    {
-        Some(s) => s.to_string(),
-        None => {
-            // Missing source_layer is malformed — surface as a
-            // version mismatch with a descriptive message.
-            return Some(format_diag(
-                iris::DIAG_FFI_VERSION_MISMATCH,
-                "LeanPackageMirror missing `source_layer` property",
-            ));
-        }
-    };
-
-    // `source_layer` may be one of three shapes, accumulated by
-    // convention:
-    //   (a) Bare hex `LayerId` string (the historical pattern used by
-    //       capstone_test + correspondence_test).
-    //   (b) Layer name (set when the substrate names its working
-    //       layer something semantically meaningful).
-    //   (c) `urn:eigenius:layer:<hex>` IRI form (required by the
-    //       ontology's `format = urn:eigenius:core:formats:iri`
-    //       constraint on `RuntimePackageMirror.source_layer`;
-    //       Eigon-JSON loads going through `commit_with_validation`
-    //       reject (a) and (b) at format-check time).
-    //
-    // We accept all three so existing in-process tests and the
-    // documented IRI-form fixture both pass through the same check.
-    let stripped_hex = source_layer
-        .strip_prefix(LAYER_IRI_PREFIX)
-        .map(str::to_string);
-    let mut cur = Some(ctx.head().clone());
-    while let Some(layer) = cur {
-        let hex_id = layer.id().to_string();
-        if hex_id == source_layer
-            || layer.name() == source_layer
-            || stripped_hex.as_deref() == Some(hex_id.as_str())
-        {
-            return None;
-        }
-        cur = layer.parent().cloned();
-    }
-    Some(format_diag(
-        iris::DIAG_FFI_VERSION_MISMATCH,
-        &format!(
-            "mirror `source_layer = {source_layer}` is not in the verification context's ancestry"
-        ),
-    ))
-}
-
-/// Verify the claim's class IRI appears in the mirror's
-/// `mirrored_classes` set. Resolves `claim_iri` → claim Resource
-/// → `is_a` (first entry) → compares against the mirror's list.
+/// The `prov:VerificationTrace` recording that this proof was checked against this claim.
 ///
-/// v1 weaker check (D28 §5.5 ¶2): the *full* structural match
-/// between the proposition's mirror type and the claim's class
-/// requires walking the chain-mirrored `LeanExpr` (D40), which the
-/// current handler treats as opaque. Covering-set membership is
-/// strictly looser but catches the common case D28 §5.6 calls
-/// out: a mirror anchored to L₀ that doesn't include a class the
-/// claim references.
-fn check_mirror_covers_claim_class(
-    proof_term: &Resource,
-    mirror: &Resource,
-    ctx: &ExecutionContext,
-) -> Result<Option<String>, InstitutionError> {
-    let claim_iri_str = match proof_term
-        .get(&Iri::parse(iris::PROP_CLAIM_IRI).expect("static IRI"))
-        .and_then(Value::as_str)
-    {
-        Some(s) => s,
-        None => {
-            // mirror_iri without claim_iri is an authoring gap;
-            // skip the class-coverage check rather than refusing.
-            // The substrate's commit-time validator should reject
-            // such resources before they reach AutoOnLoad anyway.
-            return Ok(None);
-        }
-    };
-    let claim_iri = Iri::parse(claim_iri_str).map_err(|e| {
-        InstitutionError::ComputationFailed(format!(
-            "LeanProofTerm `claim_iri` is not a valid IRI: {e}"
-        ))
-    })?;
-    let claim = match ctx.resolve(&claim_iri) {
-        Some(r) => r,
-        None => {
-            return Ok(Some(format_diag(
-                iris::DIAG_FFI_VERSION_MISMATCH,
-                &format!("claim resource `{claim_iri_str}` does not resolve"),
-            )));
-        }
-    };
-
-    let claim_class = match claim
-        .get(&Iri::parse(wk::IS_A).expect("well-known IRI"))
-        .map(Value::as_iri_array)
-    {
-        Some(arr) if !arr.is_empty() => arr[0].clone(),
-        _ => {
-            return Ok(Some(format_diag(
-                iris::DIAG_FFI_VERSION_MISMATCH,
-                &format!("claim resource `{claim_iri_str}` has no `is_a` class"),
-            )));
-        }
-    };
-
-    let mirrored = mirror
-        .get(&Iri::parse(iris::PROP_MIRRORED_CLASSES).expect("static IRI"))
-        .map(Value::as_iri_array)
-        .unwrap_or_default();
-    if !mirrored.iter().any(|i| i == &claim_class) {
-        return Ok(Some(format_diag(
-            iris::DIAG_FFI_VERSION_MISMATCH,
-            &format!(
-                "claim class `{}` is not in the mirror's `mirrored_classes` set",
-                claim_class.as_str()
-            ),
-        )));
-    }
-    Ok(None)
-}
-
-/// Verify the proposition's mirror-typed references include the
-/// claim's class (D28 §5.5 ¶2 final sentence — "the mirror type
-/// referenced in the proposition must correspond structurally to
-/// that class").
+/// Four required properties (`prov.esl`): `prov:resource` — the claim, which is what makes the
+/// witness key land on the claim's `canonical_proposition` rather than on the proof term;
+/// `prov:proof_system`; `prov:proof_term`; `prov:timestamp`.
 ///
-/// Algorithm:
-///   1. Read `LeanProofTerm.proposition` — chain-mirrored
-///      `lean:LeanExpr` (D40) value as `serde_json::Value` tagged
-///      dict. Skip if absent.
-///   2. Walk the tree collecting every `Const` whose `Name` lives
-///      under the `EigeniusFFI` namespace — those are mirror-type
-///      references. The collected names are the Lean short names
-///      (e.g. `Patient` from `EigeniusFFI.Patient`).
-///   3. Build a `short_name → class_iri` map by resolving every
-///      IRI in `mirror.mirrored_classes` and reading
-///      `core:short_name`.
-///   4. Map collected short names through the table; verify the
-///      claim's class IRI appears in the resulting set.
+/// `prov:proof_term` names the resource holding the export bytes — the `LeanProofPayload`'s own
+/// IRI when it is a chain resource, and the `LeanProofTerm`'s when the payload is embedded in it,
+/// which is where the bytes live in that shape.
 ///
-/// Failure → `PropositionMismatch` (D28 §9.1) with a diagnostic
-/// naming the claim's class + the set of mirror types the
-/// proposition actually references.
-fn check_proposition_structural_correspondence(
-    proof_term: &Resource,
-    mirror: &Resource,
-    ctx: &ExecutionContext,
-) -> Result<Option<String>, InstitutionError> {
-    // The proposition is a `lean:LeanExpr` value resource (D85 §6.1). `ctor_view` is the one
-    // read of an inductive value; projecting through it lets `walk_lean_expr` below stay
-    // written against `{ctor, args}` — the shape of the constructor, not of a wire format.
-    let proposition = match proof_term.get(&Iri::parse(iris::PROP_PROPOSITION).expect("static IRI"))
-    {
-        Some(Value::Embedded(r)) => {
-            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, ctx.head()).map_err(
-                |e| {
-                    InstitutionError::ComputationFailed(format!(
-                        "LeanProofTerm `proposition` is not a well-formed value: {e}"
-                    ))
-                },
-            )?
-        }
-        // Proposition is recommended-not-required (D28 §6.3). Absent
-        // means the authoring side didn't run the chain-mirror
-        // translator yet — the covering check alone has to suffice.
-        // Future versions may upgrade this to a hard rejection once
-        // the orchestrator's commit pipeline guarantees the
-        // proposition's presence.
-        None => return Ok(None),
-        Some(other) => {
-            return Err(InstitutionError::ComputationFailed(format!(
-                "LeanProofTerm `proposition` must be a lean:LeanExpr value, got {other:?}"
-            )));
-        }
-    };
+/// `None` when the proof term has no `@id`: the trace's IRI is derived from it, and a dispatch
+/// over an embedded resource commits nothing to derive from. `finalize_emitted_resource` drops
+/// such an emission for the same reason.
+fn verification_trace(term: &Resource, payload: &Resource, claim_iri: &Iri) -> Option<Resource> {
+    let term_iri = term.id()?;
+    let proof_term_iri = payload.id().unwrap_or(term_iri);
 
-    let referenced_short_names = collect_mirror_short_names(&proposition);
-
-    // Resolve the claim's class IRI — same path as the covering
-    // check; duplicated here so the structural check is
-    // self-contained.
-    let claim_iri_str = match proof_term
-        .get(&Iri::parse(iris::PROP_CLAIM_IRI).expect("static IRI"))
-        .and_then(Value::as_str)
-    {
-        Some(s) => s,
-        None => return Ok(None), // No claim → nothing to correspond to; covering check already skipped.
-    };
-    let claim_iri = Iri::parse(claim_iri_str)
-        .map_err(|e| InstitutionError::ComputationFailed(format!("invalid claim_iri: {e}")))?;
-    let claim = match ctx.resolve(&claim_iri) {
-        Some(r) => r,
-        None => return Ok(None), // covering check already raised FFIVersionMismatch
-    };
-    let claim_class = match claim
-        .get(&Iri::parse(wk::IS_A).expect("well-known IRI"))
-        .map(Value::as_iri_array)
-    {
-        Some(arr) if !arr.is_empty() => arr[0].clone(),
-        _ => return Ok(None),
-    };
-
-    // Build the short_name → class_iri map from the mirror's
-    // `mirrored_classes`. Each entry resolves to the class
-    // Resource (in the same layer chain); we read its
-    // `core:short_name` to determine the Lean side name the
-    // generator would have stamped.
-    let mut short_to_iri: std::collections::BTreeMap<String, Iri> =
-        std::collections::BTreeMap::new();
-    let mirrored = mirror
-        .get(&Iri::parse(iris::PROP_MIRRORED_CLASSES).expect("static IRI"))
-        .map(Value::as_iri_array)
-        .unwrap_or_default();
-    for class_iri in mirrored {
-        let cls = match ctx.resolve(&class_iri) {
-            Some(c) => c,
-            None => continue, // unresolvable class — skip; covering check would have caught broader mirror issues
-        };
-        let short = cls
-            .get(&Iri::parse(wk::SHORT_NAME).expect("well-known IRI"))
-            .and_then(Value::as_str);
-        if let Some(s) = short {
-            short_to_iri.insert(s.to_string(), class_iri);
-        }
-    }
-
-    // For each mirror-type short name the proposition references,
-    // map back to the chain class IRI. Match against the claim's
-    // class.
-    let referenced_class_iris: std::collections::BTreeSet<&Iri> = referenced_short_names
-        .iter()
-        .filter_map(|s| short_to_iri.get(s))
-        .collect();
-    if referenced_class_iris.contains(&&claim_class) {
-        return Ok(None);
-    }
-
-    // Build a descriptive diagnostic listing what the proposition
-    // actually references so the user can see the version-skew or
-    // wrong-proposition shape at a glance.
-    let referenced_iri_strs: Vec<String> = referenced_class_iris
-        .iter()
-        .map(|i| i.as_str().to_string())
-        .collect();
-    let referenced_summary = if referenced_iri_strs.is_empty() {
-        format!(
-            "proposition references no mirror types (collected short names: [{}])",
-            referenced_short_names
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    } else {
-        format!(
-            "proposition references mirror classes [{}]",
-            referenced_iri_strs.join(", ")
-        )
-    };
-    Ok(Some(format_diag(
-        iris::DIAG_PROPOSITION_MISMATCH,
-        &format!(
-            "claim class `{}` not among the mirror types the proposition reasons about; {referenced_summary}",
-            claim_class.as_str()
-        ),
-    )))
-}
-
-/// Walk a chain-mirrored `lean:LeanExpr` tree (D40 §3.4, projected
-/// shape) collecting every `Const` whose decoded `Name` lives
-/// under the `EigeniusFFI` namespace. Returns the suffix short
-/// names — e.g. a `Const "EigeniusFFI.Patient"` yields
-/// `"Patient"`.
-///
-/// The walker handles every D40 ctor that nests sub-expressions
-/// (`App`, `Pi`, `Lambda`, `Let`, `Proj`) so a mirror-type
-/// reference buried in a deeply-nested binder is still found.
-/// Non-`EigeniusFFI` `Const` references (Lean stdlib types,
-/// project-local types) are silently ignored — they're not in the
-/// mirror's responsibility.
-fn collect_mirror_short_names(value: &serde_json::Value) -> std::collections::BTreeSet<String> {
-    let mut out = std::collections::BTreeSet::new();
-    walk_lean_expr(value, &mut out);
-    out
-}
-
-fn walk_lean_expr(value: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
-    let Some(ctor) = value.get("ctor").and_then(|v| v.as_str()) else {
-        return;
-    };
-    let args = value.get("args").and_then(|v| v.as_array());
-    match (ctor, args) {
-        ("Const", Some(args)) if !args.is_empty() => {
-            if let Some(short) = mirror_short_name_from_lean_name(&args[0]) {
-                out.insert(short);
-            }
-            // levels (args[1]) carries LeanLevel values; those don't
-            // reference mirror types so we don't recurse.
-        }
-        ("App", Some(args)) if args.len() == 2 => {
-            walk_lean_expr(&args[0], out); // fun
-            walk_lean_expr(&args[1], out); // arg
-        }
-        ("Pi" | "Lambda", Some(args)) if args.len() == 4 => {
-            // [binder_name, binder_style, binder_type, body]
-            walk_lean_expr(&args[2], out);
-            walk_lean_expr(&args[3], out);
-        }
-        ("Let", Some(args)) if args.len() == 5 => {
-            // [binder_name, binder_type, val, body, nondep]
-            walk_lean_expr(&args[1], out);
-            walk_lean_expr(&args[2], out);
-            walk_lean_expr(&args[3], out);
-        }
-        ("Proj", Some(args)) if args.len() == 3 => {
-            // [ty_name, idx, structure]
-            walk_lean_expr(&args[2], out);
-        }
-        // Var / Sort / StringLit / NatLit have no nested LeanExpr
-        // children; nothing to recurse into.
-        _ => {}
-    }
-}
-
-/// Decode a `lean:LeanName` constructor view (D40 §3.1) into the
-/// Lean-side short name **if** the name lives under the
-/// `EigeniusFFI` namespace. Returns `None` for any other shape.
-///
-/// `Str(Str(Anon, "EigeniusFFI"), "Patient")` → `Some("Patient")`.
-/// `Str(Anon, "Nat")` → `None` (not under EigeniusFFI).
-/// `Num(...)` → `None` (mirror class names are string-suffixed).
-fn mirror_short_name_from_lean_name(value: &serde_json::Value) -> Option<String> {
-    let ctor = value.get("ctor")?.as_str()?;
-    if ctor != "Str" {
-        return None;
-    }
-    let args = value.get("args")?.as_array()?;
-    if args.len() != 2 {
-        return None;
-    }
-    let suffix = args[1].as_str()?.to_string();
-    let prefix = &args[0];
-    let prefix_ctor = prefix.get("ctor")?.as_str()?;
-    match prefix_ctor {
-        // Top-level (single-segment) name — `EigeniusFFI` itself
-        // appears as `Str(Anon, "EigeniusFFI")` and isn't a class
-        // reference; we filter it out here.
-        "Anon" => None,
-        "Str" => {
-            // Two-segment names — confirm the leading segment is
-            // `EigeniusFFI` and return the suffix.
-            let prefix_args = prefix.get("args")?.as_array()?;
-            if prefix_args.len() != 2 {
-                return None;
-            }
-            let leading = prefix_args[1].as_str()?;
-            if leading != iris::MIRROR_NAMESPACE {
-                return None;
-            }
-            // The leading segment must itself be rooted at Anon
-            // (single-segment namespace). Deeper namespaces like
-            // `Project.EigeniusFFI.Patient` aren't generator output;
-            // reject them here so a malicious authoring path can't
-            // sneak past the check with a near-match name.
-            let nested = prefix_args[0].get("ctor")?.as_str()?;
-            if nested != "Anon" {
-                return None;
-            }
-            Some(suffix)
-        }
-        _ => None,
-    }
-}
-
-/// Compute the substrate-style `library_content_hash` over a
-/// `library_content` JSON value (the `{"kind": "embedded", "files":
-/// [{"path", "content_b64"}]}` shape). Mirrors
-/// `eigenius_lean_runtime::mirror_gen::library_content_hash` —
-/// path-sorted, length-prefixed framing, SHA-256. The two
-/// implementations are deliberately duplicated to keep the
-/// verification side dep-free; the test suite cross-checks them.
-fn recompute_library_content_hash(
-    lib_json: &serde_json::Value,
-) -> Result<String, InstitutionError> {
-    let kind = lib_json
-        .get("kind")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            InstitutionError::ComputationFailed(
-                "`library_content` missing string `kind` field".to_string(),
-            )
-        })?;
-    if kind != "embedded" {
-        // Recomputing an external-archive hash requires fetching
-        // the referenced bytes, which the verification path doesn't
-        // do. Treat as a configuration error rather than a
-        // correspondence failure — external libraries aren't a v1
-        // surface (D26 §7.2 future-work).
-        return Err(InstitutionError::ComputationFailed(format!(
-            "library_content `kind = \"{kind}\"` cannot be rehashed in v1 (only `embedded` supported)"
-        )));
-    }
-    let files = lib_json
-        .get("files")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| {
-            InstitutionError::ComputationFailed(
-                "`library_content.files` missing or not an array".to_string(),
-            )
-        })?;
-
-    let mut sorted_pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(files.len());
-    for (idx, f) in files.iter().enumerate() {
-        let path = f.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
-            InstitutionError::ComputationFailed(format!(
-                "`library_content.files[{idx}].path` missing or not a string"
-            ))
-        })?;
-        let b64 = f
-            .get("content_b64")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                InstitutionError::ComputationFailed(format!(
-                    "`library_content.files[{idx}].content_b64` missing or not a string"
-                ))
-            })?;
-        let bytes = base64_decode(b64).map_err(|e| {
-            InstitutionError::ComputationFailed(format!(
-                "library_content.files[{idx}].content_b64 (path `{path}`) is not valid base64: {e}"
-            ))
-        })?;
-        sorted_pairs.push((path.to_string(), bytes));
-    }
-    sorted_pairs.sort_by(|a, b| a.0.cmp(&b.0));
-
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    for (path, bytes) in &sorted_pairs {
-        hasher.update((path.len() as u64).to_be_bytes());
-        hasher.update(path.as_bytes());
-        hasher.update((bytes.len() as u64).to_be_bytes());
-        hasher.update(bytes);
-    }
-    Ok(format!("sha256:{:x}", hasher.finalize()))
-}
-
-/// Standard base64 decoder (RFC 4648 §4) — mirrors the encoder in
-/// `eigenius_lean_runtime::mirror_gen::base64_encode`.
-fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
-    fn val(c: u8) -> Option<u8> {
-        match c {
-            b'A'..=b'Z' => Some(c - b'A'),
-            b'a'..=b'z' => Some(c - b'a' + 26),
-            b'0'..=b'9' => Some(c - b'0' + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        }
-    }
-    let cleaned: Vec<u8> = s.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
-    if !cleaned.len().is_multiple_of(4) {
-        return Err(format!(
-            "input length {} not a multiple of 4",
-            cleaned.len()
-        ));
-    }
-    let mut out = Vec::with_capacity(cleaned.len() / 4 * 3);
-    let mut i = 0;
-    while i < cleaned.len() {
-        let chunk = &cleaned[i..i + 4];
-        let pad = chunk.iter().filter(|&&b| b == b'=').count();
-        let v0 = val(chunk[0]).ok_or_else(|| format!("invalid byte {:?}", chunk[0] as char))?;
-        let v1 = val(chunk[1]).ok_or_else(|| format!("invalid byte {:?}", chunk[1] as char))?;
-        let v2 = if chunk[2] == b'=' {
-            0
-        } else {
-            val(chunk[2]).ok_or_else(|| format!("invalid byte {:?}", chunk[2] as char))?
-        };
-        let v3 = if chunk[3] == b'=' {
-            0
-        } else {
-            val(chunk[3]).ok_or_else(|| format!("invalid byte {:?}", chunk[3] as char))?
-        };
-        let n = ((v0 as u32) << 18) | ((v1 as u32) << 12) | ((v2 as u32) << 6) | (v3 as u32);
-        out.push(((n >> 16) & 0xff) as u8);
-        if pad < 2 {
-            out.push(((n >> 8) & 0xff) as u8);
-        }
-        if pad < 1 {
-            out.push((n & 0xff) as u8);
-        }
-        i += 4;
-    }
-    Ok(out)
-}
-
-/// Format a diagnostic string: `<KIND>: <message>`. D28 §9.1 ships
-/// diagnostics as a single field; the leading token lets consumers
-/// pattern-match on the failure kind without growing the Verdict
-/// resource's property surface.
-fn format_diag(kind: &str, message: &str) -> String {
-    format!("{kind}: {message}")
+    let mut trace = Resource::new(Iri::parse(&format!("{term_iri}:verification")).ok()?);
+    trace.set(
+        Iri::parse(wk::IS_A).expect("well-known IRI"),
+        Value::Array(vec![Value::String(wk::VERIFICATION_TRACE.to_string())]),
+    );
+    trace.set(
+        Iri::parse(wk::REFLECTION_RESOURCE).expect("well-known IRI"),
+        Value::iri(claim_iri),
+    );
+    trace.set(
+        Iri::parse(wk::PROOF_SYSTEM).expect("well-known IRI"),
+        Value::String(PROOF_SYSTEM_LEAN4.to_string()),
+    );
+    trace.set(
+        Iri::parse(wk::PROOF_TERM).expect("well-known IRI"),
+        Value::String(proof_term_iri.as_str().to_string()),
+    );
+    trace.set(
+        Iri::parse(wk::TIMESTAMP).expect("well-known IRI"),
+        Value::String(millis_to_iso8601(now_millis())),
+    );
+    Some(trace)
 }
 
 /// Resolve a LeanProofTerm's `proof_payload` reference into the
