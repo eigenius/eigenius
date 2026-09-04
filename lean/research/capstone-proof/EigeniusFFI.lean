@@ -64,4 +64,9 @@ demonstrates nothing. The body is irrelevant to the statement being checked — 
 `Healthy p -> Healthy p` on both sides and never needs to unfold it. -/
 def eigenius.demo.lean.Healthy (_p : eigenius.demo.lean.Patient) : Prop := True
 
+/-- The capstone test's counterpart of the above, over its own namespace's `Patient`. Both exist
+because both consumers need a claim whose proposition is inside D74's §4 fragment, and each
+names its own chain class. -/
+def eigenius.test.capstone.Healthy (_p : eigenius.test.capstone.Patient) : Prop := True
+
 end EigeniusFFI

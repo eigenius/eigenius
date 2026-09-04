@@ -60,3 +60,12 @@ theorem healthy_refl :
     ∀ (p : EigeniusFFI.eigenius.demo.lean.Patient),
       EigeniusFFI.eigenius.demo.lean.Healthy p → EigeniusFFI.eigenius.demo.lean.Healthy p :=
   fun _ h => h
+
+/-- The capstone test's target, for the same reason `healthy_refl` is the demo's: the claim's
+`reflection:canonical_proposition` must be expressible in D74 §4, and `∀ p, 0.0 ≤ p.weight.val`
+is not. -/
+theorem capstone_healthy_refl :
+    ∀ (p : EigeniusFFI.eigenius.test.capstone.Patient),
+      EigeniusFFI.eigenius.test.capstone.Healthy p →
+        EigeniusFFI.eigenius.test.capstone.Healthy p :=
+  fun _ h => h

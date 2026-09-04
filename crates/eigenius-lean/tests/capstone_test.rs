@@ -100,7 +100,25 @@ use eigenius_lean::LeanInstitution;
 /// the `LeanProofPayload.payload_bytes` string.
 const CAPSTONE_PROOF_BYTES: &[u8] = include_bytes!("../test_resources/capstone_proof.json");
 
-const TARGET_THEOREM: &str = "patient_weight_nonneg";
+/// The bootstrap head — `CodecNames` reads ctor argument names off the chain (D85 §6.1).
+fn bootstrap_head() -> std::sync::Arc<eigenius_kernel::layer::Layer> {
+    use std::sync::OnceLock;
+    static H: OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> = OnceLock::new();
+    std::sync::Arc::clone(H.get_or_init(|| {
+        let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+        std::sync::Arc::clone(ctx.head())
+    }))
+}
+
+/// The theorem this test's proof discharges.
+///
+/// Not `patient_weight_nonneg`: D74's statement check manufactures the goal from the claim's
+/// `reflection:canonical_proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
+/// (a structure-field access, and Lean's `≤` at an instance nothing maps to — D86).
+const TARGET_THEOREM: &str = "capstone_healthy_refl";
+
+/// The chain axiom the claim's proposition applies.
+const HEALTHY_IRI: &str = "urn:eigenius:test:capstone:Healthy";
 
 // ─── Chain-side identifiers ───────────────────────────────────────
 
@@ -247,7 +265,59 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
             iri(PATIENT_CLASS_IRI).as_str().to_string(),
         )]),
     );
+    // The proposition the proof is checked against — required since eigenius#159: a claim
+    // carrying none makes the verdict rest on the target name alone, which is what that issue
+    // opened against. `∀ (p : Patient), Healthy(p) → Healthy(p)`, every node inside §4.1.
+    {
+        use eigenius_kernel::nbe::term::{Exp, Patt};
+        use eigenius_kernel::program::eigentt_type_mirror::{encode_type, CodecNames};
+        let healthy = || {
+            Exp::App(
+                Box::new(Exp::EigonAxiom(iri(HEALTHY_IRI))),
+                Box::new(Exp::Var("p".into())),
+            )
+        };
+        let prop = Exp::Pi(
+            Patt::Var("p".into()),
+            Box::new(Exp::EigonClass(iri(PATIENT_CLASS_IRI))),
+            Box::new(Exp::Arrow(Box::new(healthy()), Box::new(healthy()))),
+        );
+        let names = CodecNames::from_layer(&bootstrap_head());
+        patient.set(
+            iri(wk::CANONICAL_PROPOSITION),
+            encode_type(&prop, &names).expect("the capstone proposition encodes"),
+        );
+    }
     builder.add_resource(patient).expect("add patient instance");
+
+    // `test:capstone:Healthy : Patient -> Prop`, mirrored in Lean as a `def`.
+    {
+        use eigenius_kernel::nbe::level::Level;
+        use eigenius_kernel::nbe::term::Exp;
+        use eigenius_kernel::program::eigentt_type_mirror::{encode_type, CodecNames};
+        let mut healthy = Resource::new(iri(HEALTHY_IRI));
+        healthy.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:eigentt:Axiom".to_string(),
+            )]),
+        );
+        healthy.set(iri(wk::SHORT_NAME), Value::String("Healthy".to_string()));
+        healthy.set(
+            iri(wk::DESCRIPTION),
+            Value::String("A predicate over the capstone Patient class.".to_string()),
+        );
+        let statement = Exp::Arrow(
+            Box::new(Exp::EigonClass(iri(PATIENT_CLASS_IRI))),
+            Box::new(Exp::Sort(Level::Zero)),
+        );
+        let names = CodecNames::from_layer(&bootstrap_head());
+        healthy.set(
+            iri("urn:eigenius:eigentt:axiom_statement"),
+            encode_type(&statement, &names).expect("Patient -> Prop encodes"),
+        );
+        builder.add_resource(healthy).expect("add Healthy axiom");
+    }
 
     // ── LeanPackageMirror — the audit anchor for the proof ────────
     let archive = capstone_archive();
@@ -334,8 +404,11 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
 
 // ─── The capstone assertion ────────────────────────────────────────
 
+/// NOT `#[ignore]`d. It was, and the annotation hid a real failure: making D74's statement check
+/// mandatory (eigenius#159) broke this test, and the workspace battery stayed green because the
+/// test never ran. That is the same way `notebook_demo_fixture_lands_holds` hid a failure for
+/// eleven days (eigenius#207). It takes ~7.5 s, which is not "heavy" enough to buy that back.
 #[test]
-#[ignore = "heavy: parses ~9 kLoC of lean4export output via nanoda"]
 fn capstone_proof_lands_verified_through_full_audit_chain() {
     let (storage, layer) = build_capstone_layer();
     let ctx = ExecutionContext::new(
