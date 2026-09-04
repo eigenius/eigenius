@@ -124,6 +124,8 @@ agree until someone edits one. It is the same v1.1 gap that holds inductives
 
 ### 5.1 The ontology edit is one reseed, so it carries passengers
 
+Tracked as eigenius#235; the last row of §5 is eigenius#236.
+
 Any change to a bootstrap ontology's *content* moves the manifest hash — `description` values
 included; only ESL comments and JSON layout are exempt
 (`bootstrap::tests::the_manifest_hashes_content_not_presentation`). Persisted stores then refuse to
