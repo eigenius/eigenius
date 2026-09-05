@@ -108,6 +108,30 @@ Julia runs (BLAS pinning, FMA discipline). This batch takes the declaration at i
 what the paper's `Declared(f : I -> O)` means — an assertion by an accountable agent, not a
 measurement.
 
+### 2.0 Two corrections, `2026-09-04`
+
+**The paper's dichotomy has a third case, and it is the one this platform mostly runs.** Provenance
+when the plan is a declared function; evidence when the process is stochastic — and, third: a
+**stochastic proposer behind a deterministic acceptor**. The parsing pipeline is that shape. LLMs
+*rank*; the kernel accepts and type-checks deterministically. The stochasticity is in the search,
+not in the result, so the search record does not ground the output — the acceptance does, and
+formalized prose therefore arrives as **Declared** propositions even though its derivation from text
+went through a model. eigenius#201 already lands parsed claims Declared for this reason.
+
+The consequence for §2: a component's `deterministic: false` does **not** by itself make a run's
+record evidence. It does so only when nothing deterministic stands between the stochastic step and
+the committed output. Proof search has the same shape — nondeterministic search, deterministic
+check — and so does anything where a checker gates a proposer.
+
+**The blast radius is one demo, not the pipeline.** Measured: `kernel/src/dcg/` and
+`kernel/src/server/formalize.rs` reference none of `dispatch_component`, `RunProgram` or
+`ComponentRegistry` — the parsing pipeline does not use the program-execution machinery at all. The
+only consumer of `components:CompleteJson` / `CompleteText` outside the ontology and the registry
+wiring is `demo/summarize-program.json`.
+
+So the worry that §2 would turn most runs into `Observed` grounds was unfounded on both counts, and
+the choice below is affordable either way.
+
 ### 2.1 A separate gap found while measuring this
 
 The analysis plans are traced, but not declared. On the WRN chain:
