@@ -14,7 +14,7 @@
 |---|---|---|---|
 | §1 | Do the `witness:Is*As` types earn their place, or should the check key on the constructor? | **They earn it.** The type carries a resolution obligation, so kernel/ontology drift breaks the build instead of silently disabling the check | derived from the code |
 | §2 | Should `justification:Term` merge into `justification:Certificate`? | **A decision for the paper.** No load-bearing use of the separate term index exists in the implementation, but the paper's formalism is `JustifiedBy(j, P)` | measured `2026-09-05`, then referred out |
-| §3 | Should a term name a chain instance by reference rather than by string? | **The string is correct.** `eigentt:Term` is the type-level subset by design. What is missing is a stated rule about integrity | derived from the codec |
+| §3 | Should a term name a chain instance by reference rather than by string? | **The string is sediment.** The leaf already behaves as a reference — `core:mentions` indexes it — but by a prefix heuristic rather than a declared type. Give it one | derived from the index |
 | §4 | Can `app`'s `forall`-bound arguments be inferred? | **`app` yes, `spec_poly` no.** Four of the five pieces already exist | derived from `nbe/unify.rs` |
 
 ---
@@ -80,41 +80,51 @@ claim about the logic rather than about the implementation.
 Implementation cost is secondary — the demo notebook's certificate is the largest authored artifact
 and would be rewritten, and `justification:Term` is a versioned ADT.
 
-## 3. A term names an instance by string, and that is correct
+## 3. The string leaf is sediment; declare the type
 
-`Declared(core:string)` reads like surface syntax on the chain, and the provenance axis moved off
-strings for a stated reason: *"the string form could name an origin but not link to it."*
+`Declared(core:string)` names a resource with an untyped string. The IRI-ness is real, relied on in
+three places, and declared nowhere.
 
-**A reference is unavailable here.** The leaf is a subterm of an encoded value rather than a
-property, so the triple index cannot see it whatever its declared type — `core:resource` would
-advertise an edge that does not exist. A reference from inside a term is a `ConstRef`, and
-`resolve_const_ref` dispatches on the target's class: `core:Class`, `eigentt:Axiom`,
-`core:InductiveType`, five primitives. A `justification:Claim` instance is none of those.
+**The leaf already behaves as a reference.** `core:mentions` indexes it: `json_mentions_of_value`
+treats *"any string that parses as a `urn:` IRI"* as a mention, so a committed
+`Declared("urn:eigenius:demo:screen:bridge_lowic50")` produces a `(R, core:mentions, bridge)` edge
+and *which conclusions rest on this claim* is already a `scan_predicate_object` query
+(`well_known.rs:435`).
 
-**That boundary is deliberate.** `eigentt:Term` is *"the type-level subset of EigenTT's Exp"*.
-`Exp::EigonResource` exists in the kernel as a runtime value form and has no D47 encoding — the
-encoder covers `Sort`, `Var`, `ConstRef`, `App`, `Ann`, `Pi`, `Sig`, `Lam`, `One`, `Id`, `UnitVal`,
-the four literals, `CtorApp`, `Pair`, `Fst`, `Snd`, `Record`, `Refine` and `Checked`, and not
-`EigonResource`. No chain-mirrored form for an instance exists, so a string literal is what remains.
+**But it is recovered, not declared.** Three consumers each rediscover the same fact by a different
+route:
 
-**The gap is a stated rule, not a missing former.** Three formers name instances by string, each
-with a different integrity guarantee:
-
-| former | integrity comes from |
+| consumer | how it learns the string is an IRI |
 |---|---|
-| `Declared` / `Observed` / `Verified` leaves | the witness lookup — `synthesize_chain_witness` parses the IRI and errors on a bad one |
-| `Checked(payload_iri)` (D87 §4.2) | construction — only the institution builds one, because `check` refuses the form |
-| the D87 §6 fixture's subject | a class change — `patient_1` is declared an `eigentt:Axiom` so the term language can see it |
+| the `core:mentions` index | a **prefix heuristic** — `s.starts_with("urn:")`, which over-approximates: every urn-shaped string in any term becomes a mention whether or not it is a reference |
+| `synthesize_chain_witness` | `Iri::parse` at certificate-check time, erroring on a malformed leaf |
+| `wellfounded` | `Iri::parse` again on every traversal (`wellfounded.rs:191`), skipping what will not parse |
 
-The third case is the clearest: the fixture's proposition quantified over all Patients until the
-individual's class changed. **The rule: the term language names only type-level declarations, and
-every reference to an instance enters as a string whose integrity is the consuming rule's problem.**
-Three cases with three different consumers do not warrant a general instance-reference former;
-writing the rule down is the work.
+Nothing rejects `Declared("not an iri")` at commit on its own terms. It is caught only because a
+certificate check happens to parse the leaf.
 
-**One coupling.** `wellfounded` skips a leaf whose string does not parse as an IRI
-(`wellfounded.rs:191`), relying on the certificate check to have refused it. The graph walk is sound
-only because the witness lookup ran, which belongs in a comment there.
+**The type system has the concept and cannot reach it here.** IRI-valued *properties* declare
+themselves — `justification:subject_iri` and `justification:refutes` carry `format = formats:iri`.
+A constructor argument cannot: `InductiveArgType` has `arg_name` and `type_name` and no format slot,
+and no `core:iri` DataType exists. So a term's leaf has no way to say what every consumer assumes.
+
+**`Checked(payload_iri)` (D87 §4.2) is the same sediment, added `2026-09-05`.** It names a
+`lean:LeanProofPayload` and takes `core:string` for exactly the reason the older leaves do — because
+nothing better was available. Adding a fourth instance of a pattern is the point at which the
+pattern gets fixed rather than documented.
+
+**The fix.** Give a constructor argument a way to be declared IRI-valued — either a `core:iri`
+DataType or a format slot on `InductiveArgType` — and give it to `Declared`, `Observed`, `Verified`
+and `Checked`. Then the index rule becomes exact instead of a prefix match, the validator rejects a
+malformed leaf at commit instead of leaving it to whichever consumer parses first, and the three
+consumers stop each inferring the same fact.
+
+This is a versioned change to `justification:Term` plus a bootstrap edit, so it rides a reseed. That
+is the cost of the fix, not an argument against it.
+
+**Not a symptom:** `wellfounded` reads terms rather than the `core:mentions` index for a semantic
+reason, not a missing edge — `mentions` *"records both branches' edges undifferentiated"*, so a cycle
+walk over it would misread `Sum` (`wellfounded.rs:21`). That stays true whatever the leaf's type.
 
 ## 4. `app`'s arguments can be inferred; `spec_poly`'s cannot
 
@@ -180,10 +190,12 @@ also the only one of the four needing no amendment to the paper.
 2. **Implicit arguments (§4)** — scoped, not designed. Phase F's `MetaCtx` plus implicit-arg syntax,
    generalising the elision rule the `ChainWitness` hook implements. `app` is in reach; `spec_poly`
    needs a wider unification fragment and is a separate decision.
-3. **One indexed witness family.** §1 answers why the types exist, not whether the three should be
+3. **The typed leaf (§3)** — scoped, not designed. Whether it is a `core:iri` DataType or a format
+   slot on `InductiveArgType` is open; both are bootstrap edits.
+4. **One indexed witness family.** §1 answers why the types exist, not whether the three should be
    `ChainWitness(category, iri, P)`, which would make `trace_category`'s mapping a value rather than
    three constants.
-4. **`support` cost** — worth re-measuring if §2 proceeds. It currently walks a small tree of IRIs;
+5. **`support` cost** — worth re-measuring if §2 proceeds. It currently walks a small tree of IRIs;
    a derivation is larger.
 
 ## 6. Out of scope
