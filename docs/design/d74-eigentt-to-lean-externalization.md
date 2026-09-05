@@ -598,6 +598,12 @@ typed, and §3.3 is called out as a decision rather than an implementation detai
 
 D74 therefore joins nanoda_lib and D30 in the TCB.
 
+**And `layer_admits_witness` joins it too, for now.** The `VerificationTrace` #160 emits records
+that the check ran; it does not keep the checked result, so the `Verified` witness is postulated on
+the strength of a note. [D87](d87-the-verification-judgement.md) proposes keeping it as a
+`holds(logic_lean4, t, P)` judgement instead, which makes the admission re-decidable and is the
+prerequisite for removing `witness:IsVerifiedAs`.
+
 ### 5.1 Non-goals
 
 - **Proof *search*.** Lean supplies the proof; this supplies the goal.
