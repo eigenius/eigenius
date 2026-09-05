@@ -45,16 +45,20 @@ generate:
 up-mock:
     EIGENIUS_MOCK_LLM=true docker compose up --build -d
 
-# Start the stack with real LLM
+# Start the stack. The kernel is built with `use-llm`, so its untrusted
+# proposers can call a model and a D71 formalization run works on a doc branch
+# with no recorded draws. Needs ANTHROPIC_API_KEY in the env.
 up:
     docker compose up --build -d
 
-# Start the stack with a kernel whose untrusted proposers can call a model.
-# Needed for a D71 formalization run on a doc branch that carries no recorded
-# draws yet — the default image is built without `use-llm`, so such a run fails
-# closed rather than parsing unranked. Needs ANTHROPIC_API_KEY in the env.
-up-llm:
-    CARGO_FEATURES=use-llm docker compose up --build -d
+# Alias for `up`, kept because it is in muscle memory and in older notes.
+up-llm: up
+
+# Start the stack with a kernel that has NO live ranker. A formalization run on
+# a branch with no recorded draws fails closed here rather than parsing
+# unranked; replay from a recorded `ranks.json` works fine.
+up-no-llm:
+    CARGO_FEATURES= docker compose up --build -d
 
 # Copy a lexicon snapshot into the kernel's volume. `up` does NOT do this: it
 # starts the stack against whatever the volume already holds, which after any

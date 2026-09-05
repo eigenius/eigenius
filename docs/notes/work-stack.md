@@ -441,7 +441,9 @@ not in the shape this note predicts:
 - ✔ **Doc-layer home → committed branch.** `with_storage` doc branches.
 - ☐ **Proposer impls → orchestrator RPCs.** NOT done. `kernel/src/dcg/resolver_llm.rs` and
   `sense_ranker.rs` still call Anthropic directly from the kernel (`use-llm`), which is why the
-  kernel image needs `CARGO_FEATURES=use-llm` and an API key to formalize.
+  kernel image needs `use-llm` and an API key to formalize. That is now the compose default
+  (`2026-09-05`) — it was opt-in, which made every parsing run on a fresh doc branch a two-step:
+  fail closed, rebuild, rerun.
 
 Also remaining: **grading-phase gaps** (Citation grade-climb; graded-props over the full lexicon).
 
