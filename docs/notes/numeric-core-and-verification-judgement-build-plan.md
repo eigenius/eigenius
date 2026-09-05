@@ -33,6 +33,7 @@ All five, in `ontologies/`:
 | 1 | declare `≤` and `float_ieee_eq` over `core:float` | D86 §3.2, §3.3, §6 |
 | 2 | a permitted-axiom slot on `prov:VerificationTrace` | D87 §5 |
 | 3 | a checker-identity slot on `prov:VerificationTrace`, as **kind + value** | D87 §9.3 |
+| 3b | *(added during §3.3)* `prov:judgement` — the checker's result — plus `prov:checked_declaration`, found by §3.5's recomputation test | D87 §5, §7 |
 | 4 | delete `justification:VerifiedPropositionView` + `justification:source_verified_resource` | #235, confirmed `2026-09-05` |
 | 5 | delete `components:Combine` / `Extract` / `Transform` | kernel-run-records §3.5(b) |
 
@@ -161,11 +162,36 @@ Three steps, in order:
    the index is a cache for them. `Verified` was the one family where it was not — the
    `VerificationTrace` route admits on the strength of a committed note, because the kernel cannot
    re-run nanoda at lookup time — and §3.3 is what changes that.
-2. **Change the three `Certificate` constructors' premises**, from `witness:Is*As(iri, P)` to
-   whatever step 1 and §3.3 establish. Bootstrap edit, so it joins §1's pass **only if step 1 has
-   already been answered** — otherwise it waits for a second reseed, which is the one case this
-   batch should accept paying twice.
-3. **Delete `witness:Is*As`** and reduce the index to what it is: a cache over relations.
+2. ~~**Change the three `Certificate` constructors' premises.**~~ ~~3. **Delete
+   `witness:Is*As`.**~~ **Both withdrawn `2026-09-05`, and the reason is worth keeping.**
+
+   These came from D87 §7's row calling `witness:IsVerifiedAs` *removable* once
+   `Certificate.verified` consumes the judgement. It does not follow. The premise is what makes
+   `Certificate(Verified(iri), P)` inhabitable only where the chain verified `P` about `iri`;
+   delete it and the constructor is unconditional, so `Verified` becomes assertable by anyone
+   writing a certificate — the laundering the two-layer separation exists to forbid. Nothing else
+   can occupy the position either: a premise ranging over `eigentt:Judgement` would be a *data*
+   type, inhabited by any well-formed value, and the CHECK-mode rule that catches a bad one runs at
+   validation rather than inside the kernel's conversion.
+
+   **P7's question was never about the types.** It asks whether the three families are decision
+   procedures over relations, and says that if they are, *"the index is a cache over relations —
+   rebuildable, droppable, and not a soundness boundary."* That is the conclusion, and it now
+   holds. So step 3 became: say so where it was claimed otherwise, and prove the part that was
+   newly true.
+
+   - `witness_index.rs`'s header asserted *"this module is inside the TCB … the witness itself is
+     postulated, and a wrong admission cannot be caught downstream because an axiom has no proof to
+     re-check."* Rewritten: a wrong answer is now catchable by recomputation.
+   - **`a_verdict_is_recomputable_from_what_the_trace_pins`** is the gate. It takes the five inputs
+     off the committed trace, calls `check_proof` the way a third party would, and asserts the same
+     verdict. Writing it found the fifth input: `prov:proof_term` names the export BLOB, which
+     holds a whole Lean environment, so bytes plus a proposition does not say what was compared
+     against what. **`prov:checked_declaration`** is now required.
+   - The diagnostic P7 protects stated one remedy for all three families — commit a matching
+     `canonical_proposition` — which is the fix for two and no help for `Verified`, where no
+     property an author can write reaches the grade. It is now per-family, and names the trace that
+     admits each.
 
 **What must not be swept up**, per P7's own list: `hash_proposition_exp` and
 `alpha_canonicalize_proposition_json` (proposition identity, needed by anything comparing

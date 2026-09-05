@@ -385,6 +385,7 @@ fn do_proof_check(
             &payload,
             claim_iri,
             proposition,
+            &target_name,
             &permitted_axioms,
             ctx.head(),
         ) {
@@ -445,10 +446,13 @@ const LOGIC_LEAN4: &str = "urn:eigenius:eigentt:logic_lean4";
 /// result was computed and discarded, and the trace was a note that a check RAN, with `Verified`
 /// admitted on the strength of the note.
 ///
-/// `prov:permitted_axioms` and the checker-identity pair are the two inputs a verdict is a
-/// deterministic function of that nothing recorded (D87 §5). With them pinned any party can re-run
-/// `check_proof` and obtain the same verdict, which is stronger than a receipt: a receipt says "I
-/// checked", this says "check it yourself".
+/// `prov:permitted_axioms`, the checker-identity pair and `prov:checked_declaration` are the inputs a
+/// verdict is a deterministic function of that nothing recorded (D87 §5). The last was found by
+/// writing the recomputation down: `prov:proof_term` names the export BLOB, which holds a whole
+/// environment, so without the declaration name a party re-running the check would have to try
+/// every declaration in it. With all of them pinned any party can re-run `check_proof` and obtain
+/// the same verdict, which is stronger than a receipt: a receipt says "I checked", this says
+/// "check it yourself".
 ///
 /// `None` when the proof term has no `@id`: the trace's IRI is derived from it, and a dispatch over
 /// an embedded resource commits nothing to derive from. `finalize_emitted_resource` drops such an
@@ -460,6 +464,7 @@ fn verification_trace(
     payload: &Resource,
     claim_iri: &Iri,
     proposition: &Exp,
+    target_name: &str,
     permitted_axioms: &[String],
     layer: &Arc<eigenius_kernel::layer::Layer>,
 ) -> Result<Option<Resource>, InstitutionError> {
@@ -514,6 +519,10 @@ fn verification_trace(
     trace.set(
         Iri::parse(wk::PROOF_TERM).expect("well-known IRI"),
         Value::String(proof_term_iri.as_str().to_string()),
+    );
+    trace.set(
+        Iri::parse(wk::CHECKED_DECLARATION).expect("well-known IRI"),
+        Value::String(target_name.to_string()),
     );
     trace.set(
         Iri::parse(wk::PERMITTED_AXIOMS).expect("well-known IRI"),

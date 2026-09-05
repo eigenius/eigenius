@@ -253,8 +253,8 @@ class prov:ProgramTrace : prov:ProductionTrace {
 
 class prov:VerificationTrace : prov:Trace {
     description = "Records that a proof of a resource's proposition was CHECKED by a proof system. Two verifiers produce one, distinguished by prov:proof_system rather than by class: an external prover (lean4, coq, agda) whose exported blob is checked, and the kernel itself, whose type-checked justification:Certificate is the proof term. Kernel-checking is verification; treating the two as different kinds would make the ground depend on which checker ran. REQUIRES the permitted axiom set and the checker's identity (D87 §5): a verdict is a deterministic function of five inputs, and these two were the ones nothing recorded, so two proofs — one leaning on Classical.choice and one not — produced byte-identical traces. Requiring them rather than recommending them is what makes `Verified` re-decidable instead of attested; a trace that omitted them would record a check nobody could re-run, and the alternative to requiring them is a downstream guard asking whether a trace is re-checkable.";
-    requires prov:resource, prov:proof_system, prov:proof_term, prov:timestamp,
-             prov:judgement,
+    requires prov:resource, prov:proof_system, prov:proof_term, prov:checked_declaration,
+             prov:timestamp, prov:judgement,
              prov:permitted_axioms, prov:checker_identity_kind, prov:checker_identity;
     recommends prov:derivation_trace;
 }
@@ -298,6 +298,11 @@ property prov:proof_term : core:string {
 // proposition); these are the two that were not. Pinned, any party can re-run
 // the check and obtain the same verdict, which is stronger than a receipt: a
 // receipt says "I checked", this says "check it yourself".
+
+property prov:checked_declaration : core:string {
+    description = "Which declaration INSIDE the artifact prov:proof_term names was checked. Required, and the reason is that prov:proof_term under-determines the verdict on its own: an external prover's export is a whole environment holding hundreds of declarations, so `these bytes` plus `this proposition` does not say what was compared against what, and a party re-running the check would have to try every declaration to find the one that matches. It is the fifth of the five inputs a verdict is a deterministic function of (D87 §5) and the last one that was reachable only by string surgery on the trace's own IRI. For lean4 it is the `lean:target_name` the dispatch used.";
+    domain prov:VerificationTrace;
+}
 
 property prov:judgement : core:inductive {
     description = "The checker's RESULT, kept: `holds(logic, t, P)` — a checker for `logic` verified the term `t` against the proposition `P`. This is what the trace establishes, as opposed to what it records about the occasion, and it is what admits a Verified witness: the witness keys off this judgement's own `type` rather than off the target resource's stored `canonical_proposition`, so the grade rests on what was checked and not on what the target happens to say. Before it existed the trace was a note that a check RAN — the result was computed and discarded, and `Verified` was admitted on the strength of the note. For an external prover `t` is `eigentt:Checked(payload_iri)`, naming the artifact the checker examined; the kernel refuses that form at commit, so only the institution that ran the check can produce one of these.";

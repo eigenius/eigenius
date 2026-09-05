@@ -26,12 +26,38 @@
 //! carrying no reason. Direct lookup is O(1) in memory and holds the specific resource at the point
 //! of the decision (D66 slice 0).
 //!
-//! **What is being decided here is whether to assert an axiom.** The `witness:Is*As` types have zero
-//! constructors (`ontologies/justification/justification.esl:52`), so no term inhabits them and this
-//! function is the only way one comes into existence — see `Val::ChainWitness` in `nbe/val.rs` for
-//! the full anatomy. Consequently **this module is inside the TCB**: everything above a witness is
-//! type-checked, the witness itself is postulated, and a wrong admission cannot be caught
-//! downstream because an axiom has no proof to re-check.
+//! **A decision procedure, not an admission decision.** The `witness:Is*As` types have zero
+//! constructors, so no term inhabits them and this function is the only way one comes into
+//! existence — see `Val::ChainWitness` in `nbe/val.rs` for the full anatomy. This module used to
+//! call itself part of the TCB on that basis: *"the witness itself is postulated, and a wrong
+//! admission cannot be caught downstream because an axiom has no proof to re-check."*
+//!
+//! **That stopped being true, and it is what closes P7's open question** (`judgements-warrants-
+//! build-plan.md` §"Open after P7": *"a predicate the kernel inhabits by constant specification,
+//! computed from a relation it can read at any time, is a decision procedure rather than a
+//! witness … the index is a cache over relations — rebuildable, droppable, and not a soundness
+//! boundary"*). All three surviving families are now that:
+//!
+//! - `Declared` and `Observed` always were. Nothing about a witness is stored; the answer is
+//!   recomputed from the layer's Trace resources and the propositions they name, every time.
+//! - `Verified` was the exception. Its `VerificationTrace` route admitted on the strength of a
+//!   committed NOTE that a check had run, because the kernel cannot re-run nanoda at lookup time.
+//!   D87 put the checker's result on the trace as a `prov:judgement` and pinned the five inputs
+//!   the verdict is a function of, so what is read back is a recorded result any party can
+//!   recompute — see `a_verdict_is_recomputable_from_what_the_trace_pins`.
+//!
+//! **The types stay declared and the premises stay on the constructors.** Removing
+//! `witness:IsVerifiedAs` was proposed and does not work: `Certificate.verified` without its
+//! premise is unconditional, so `Verified(iri)` would be certifiable for any proposition and the
+//! grade assertable by anyone writing a certificate. What changed is not the shape but the
+//! standing — a wrong answer here is catchable by recomputation rather than being an axiom with
+//! no proof to re-check.
+//!
+//! **Two caches sit on top, and both fail conservatively.** `LayerHandle::has_witness_candidates`
+//! prunes a layer that stamped no candidate and deserializes as `true`, so an old handle is probed
+//! rather than skipped; [`any_trace_targeting`] treats a poisoned lock as in-flight and falls back
+//! to the full scan. Each turns a wrong guess into a refused certificate, never an admitted one,
+//! which is what "droppable" means concretely: delete either and the answers do not change.
 //!
 //! Lookup is the parent-chain walk: `lookup_chain_witness(&Layer, &key)` tries each Layer top-down,
 //! returning true on first hit. First-hit-wins is sound because Layer immutability means a
@@ -592,20 +618,39 @@ pub fn synthesize_chain_witness(
     if lookup_chain_witness(layer, &key) {
         Ok(crate::nbe::val::Val::ChainWitness(key))
     } else {
+        // P7 names this "the system's most-used error message", and what makes it usable is that
+        // it says what to COMMIT, not merely that a lookup missed. The remedy differs by family
+        // and used to be stated as one: every miss recommended a matching
+        // `reflection:canonical_proposition`, which is the fix for two of the three and no help
+        // at all for the third — nobody reaches `Verified` by editing a property.
+        let (ctor, remedy) = match category {
+            WitnessCategory::Declared => (
+                "declared",
+                format!(
+                    "commit a prov:DeclarationTrace (or a reflection:ExternalExecutionTrace) whose                      prov:resource is {iri}, and give {iri} a reflection:canonical_proposition                      matching the proposition above"
+                ),
+            ),
+            WitnessCategory::Observed => (
+                "observed",
+                format!(
+                    "commit a prov:ObservationTrace whose prov:resource is {iri}, and give {iri} a                      reflection:canonical_proposition matching the proposition above"
+                ),
+            ),
+            // No property an author can write reaches this one, which is the point of the grade.
+            WitnessCategory::Verified => (
+                "verified",
+                format!(
+                    "have a checker verify a proof of the proposition about {iri}: the witness is                      keyed off the prov:judgement on a prov:VerificationTrace, which the                      institution that ran the check emits. It cannot be reached by editing a                      property — a hand-authored holds(logic_lean4, ...) is refused at commit"
+                ),
+            ),
+        };
         Err(format!(
-            "no admitted {} witness for IRI {} with the supplied proposition; \
-             the resource at {} must be committed with reflection:canonical_proposition \
-             matching the proposition (or the proposition must be Asserts(<iri>) — the \
-             default; the Asserts default lands in Phase 5b once D39's core-ontology \
-             Asserts class is authored) before this justification:Certificate.{} constructor is well-typed",
+            "no admitted {} witness for IRI {} with the supplied proposition, so the              justification:Certificate.{} constructor citing it is not well-typed. To admit it:              {}. Where the resource carries no canonical_proposition the default proposition is              Asserts({}), so a certificate must cite that instead.",
             category.label(),
             iri,
+            ctor,
+            remedy,
             iri,
-            match category {
-                WitnessCategory::Declared => "declared",
-                WitnessCategory::Observed => "observed",
-                WitnessCategory::Verified => "verified",
-            },
         ))
     }
 }
@@ -1315,6 +1360,46 @@ mod tests {
         assert!(
             err.contains("justification:Certificate.declared"),
             "diagnostic should name the consuming constructor: {err}"
+        );
+        assert!(
+            err.contains("prov:DeclarationTrace"),
+            "and the trace that admits it — a canonical_proposition alone admits nothing: {err}"
+        );
+    }
+
+    /// The remedy a miss names is the one that works for THAT family.
+    ///
+    /// P7 calls this the system's most-used error message, and it stated one remedy for all
+    /// three: commit a matching `reflection:canonical_proposition`. That is the fix for two of
+    /// them and no help at all for `Verified`, where no property an author can write reaches the
+    /// grade — which is the point of the grade. A diagnostic that sends someone to edit a
+    /// property they can edit, for a result only a checker can produce, costs more than saying
+    /// nothing.
+    #[test]
+    fn a_verified_miss_does_not_send_the_author_to_edit_a_property() {
+        let layer = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        )
+        .build(LayerStorage::in_memory());
+        let target_iri = iri("urn:eigenius:example:unproved");
+        let err = synthesize_chain_witness(
+            &layer,
+            WitnessCategory::Verified,
+            &target_iri,
+            &Exp::sort(0),
+        )
+        .expect_err("witness must miss when nothing admits it");
+
+        assert!(err.contains("IsVerifiedAs"), "names the family: {err}");
+        assert!(err.contains(target_iri.as_str()), "names the IRI: {err}");
+        assert!(
+            err.contains("prov:VerificationTrace") && err.contains("prov:judgement"),
+            "and points at what actually admits it: {err}"
+        );
+        assert!(
+            err.contains("refused at commit"),
+            "and says why writing one by hand will not work: {err}"
         );
     }
 

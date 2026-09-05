@@ -557,6 +557,12 @@ pub const TIMESTAMP: &str = "urn:eigenius:prov:timestamp";
 /// rather than off the target's stored `canonical_proposition`.
 pub const PROV_JUDGEMENT: &str = "urn:eigenius:prov:judgement";
 
+/// `prov:checked_declaration` — which declaration inside the artifact [`PROOF_TERM`] names was
+/// checked. [`PROOF_TERM`] alone under-determines the verdict: an export is a whole environment,
+/// so a party re-running the check would have to try every declaration in it to find the one the
+/// proposition was compared against (D87 §5).
+pub const CHECKED_DECLARATION: &str = "urn:eigenius:prov:checked_declaration";
+
 /// `prov:permitted_axioms` — the axiom names the checker was permitted to admit, as the check
 /// actually ran (D87 §5). One of the two inputs a verdict is a function of that nothing recorded,
 /// so two proofs — one leaning on `Classical.choice` and one not — produced identical traces.

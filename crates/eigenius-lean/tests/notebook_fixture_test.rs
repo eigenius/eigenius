@@ -425,6 +425,120 @@ fn the_near_miss_is_refused_and_the_whole_commit_with_it() {
     );
 }
 
+/// A verdict is RECOMPUTABLE from what the trace pins — D87 §5, and the P7 closeout's real gate.
+///
+/// nanoda emits no cryptographic receipt and should not be made to: a signature produced by a key
+/// the checking process itself holds is not evidence *to* that process. The property to hold
+/// instead is that the verdict is a deterministic function of five inputs, all on the chain, so
+/// any party can re-run the check. A receipt says *"I checked"*; this says *"check it yourself"*.
+///
+/// This test IS that party. It reads nothing from the dispatch that produced the trace — it takes
+/// the five inputs off the committed trace and the resources it names, calls `check_proof` the
+/// way a third party would, and asserts the same verdict comes back. Everything the caller knows
+/// comes from the chain.
+///
+/// **Writing it down is what found the fifth input.** `prov:proof_term` names the export BLOB,
+/// which holds a whole Lean environment — hundreds of declarations. Bytes plus a proposition does
+/// not say what was compared against what, so a verifier would have had to try every declaration
+/// to find the one that matched, and the target name was reachable only by string surgery on the
+/// trace's own IRI. `prov:checked_declaration` is that input, now required.
+///
+/// This is also what makes the witness index a cache rather than a soundness boundary. `Verified`
+/// used to be admitted on the strength of a committed note that a check had run; it is now
+/// admitted from a recorded result, and the result is re-decidable — which is the condition
+/// `judgements-warrants-build-plan.md` §"Open after P7" set for exactly this conclusion.
+#[test]
+fn a_verdict_is_recomputable_from_what_the_trace_pins() {
+    use eigenius_kernel::program::eigentt_type_mirror::decode_judgement;
+    use eigenius_lean::checker::{check_proof, ExpectedStatement, Verdict};
+
+    let outcome = land(fixture_resources());
+    assert!(
+        outcome.error.is_none(),
+        "the demo lands: {:?}",
+        outcome.error
+    );
+    let provenance: Arc<Layer> = Arc::clone(&outcome.layers[1].layer);
+    let user_layer: Arc<Layer> = Arc::clone(&outcome.layers[0].layer);
+
+    let trace = provenance
+        .iter_resources()
+        .map(|(_, r)| r)
+        .find(|r| {
+            r.is_a()
+                .iter()
+                .any(|c| c.as_str() == wk::VERIFICATION_TRACE)
+        })
+        .expect("a Holds commits a VerificationTrace");
+    let slot = |name: &str| {
+        trace
+            .get(&Iri::parse(name).expect("well-known IRI"))
+            .unwrap_or_else(|| panic!("the trace must pin `{name}`"))
+            .clone()
+    };
+
+    // 1. The export bytes, through the artifact the trace names.
+    let payload_iri = slot(wk::PROOF_TERM);
+    let payload = user_layer
+        .resolve(&Iri::parse(payload_iri.as_str().expect("an IRI string")).expect("an IRI"))
+        .expect("prov:proof_term must resolve to the artifact that was checked");
+    let bytes = payload
+        .get(&Iri::parse("urn:eigenius:lean:payload_bytes").expect("static IRI"))
+        .and_then(Value::as_str)
+        .expect("the artifact carries the export bytes")
+        .to_string();
+
+    // 2. Which declaration inside it.
+    let target = slot(wk::CHECKED_DECLARATION);
+    let target = target.as_str().expect("a declaration name");
+
+    // 3. The proposition — off the judgement, which is what the grade is keyed on.
+    let judgement = decode_judgement(&slot(wk::PROV_JUDGEMENT), &provenance)
+        .expect("the trace's judgement decodes");
+
+    // 4. The permitted axiom set, verbatim as the check ran.
+    let axioms: Vec<String> = match slot(wk::PERMITTED_AXIOMS) {
+        Value::Array(a) => a
+            .iter()
+            .map(|v| v.as_str().expect("an axiom name").to_string())
+            .collect(),
+        other => panic!("prov:permitted_axioms must be an array; got {other:?}"),
+    };
+
+    // 5. The checker identity — which build to re-run. This process IS that build, so re-running
+    //    in-process is the honest recomputation here; a third party would resolve the identity to
+    //    a binary first.
+    let kind = slot(wk::CHECKER_IDENTITY_KIND);
+    assert!(
+        matches!(kind.as_str(), Some("image_digest") | Some("source_pin")),
+        "the identity must say which KIND it is, so a reader can tell one that binds the running \
+         binary from one that only names the source; got {kind:?}"
+    );
+    assert!(
+        slot(wk::CHECKER_IDENTITY)
+            .as_str()
+            .is_some_and(|v| !v.is_empty()),
+        "and carry a value"
+    );
+
+    let recomputed = check_proof(
+        bytes.as_bytes(),
+        target,
+        &axioms,
+        Some(&ExpectedStatement {
+            proposition: &judgement.typ,
+            layer: &provenance,
+        }),
+    )
+    .expect("re-running the check from the trace's own inputs");
+
+    assert!(
+        matches!(recomputed, Verdict::Holds),
+        "the same five inputs must yield the same verdict — that is the whole of D87 §5, and \
+         without it `Verified` is attested rather than re-decidable; got {recomputed:?}"
+    );
+}
+
 /// A `Verdict::Holds` reaches the **verified** grade — the whole of eigenius#160.
 ///
 /// Before this, `do_proof_check` returned a Verdict and nothing else, so a checked Lean proof
