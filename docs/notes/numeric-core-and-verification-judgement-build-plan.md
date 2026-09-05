@@ -54,7 +54,7 @@ export does not declare. Only `float_ieee_eq` is new. The four ordering axioms *
 them on the chain would dissolve the head the parser matches on. §3.2's derivation moves into §2's
 table instead, where it costs the TCB nothing.
 
-**#235's fifth edit — `witness:IsVerifiedAs`'s description, false since #160 — was dropped as
+**#235's third edit — `witness:IsVerifiedAs`'s description, false since #160 — was dropped as
 subsumed by §3.5 step 3 and is BACK IN, because step 3 was withdrawn.** Dropping it was right while
 the declaration was slated for deletion; §3.5 establishes that it stays, so the false sentence would
 have shipped. Caught before the reseed ran. All three witness descriptions also lose the postulate
