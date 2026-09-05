@@ -1,7 +1,7 @@
 # Build plan — kernel run records
 
-*Branch: `kernel-run-records`. Covers eigenius#206, #148, #135, #147, #150, #144 (in full — §3.6);
-decides on #145, #146 and #149 (§4).*
+*Branch: `kernel-run-records`. Covers eigenius#206, #148, #135, #147, #150, #144 (in full — §3.5),
+#149 (§4.4); decides on #145 and #146 (§4).*
 
 *Governing document:
 [Judgements, Warrants, and Logics](../design/judgements-and-warrants.tex) §"Taxonomy of Epistemic
@@ -263,16 +263,50 @@ either adding the argument to the key as insurance while §3.4 is in `trace.rs`,
 determinism gate in the `TraceStore` doc comment that currently calls the divergence a defect
 without noting what makes it unreachable.
 
-### 4.4 #149 — still a decision, not work
+### 4.4 #149 — decided `2026-09-04`: delete the field
 
-Nothing populates `Exp::InstitutionInvoke.target_iri`. `urn:eigenius:program:target_iri` appears at
-exactly one site, the decoder (`program/expr.rs:229`); the property is not declared in the program
-ontology, and the ESL lowering sets `function` and `source` and never a target. Its doc comment
-names EigenQL's `INTO` as the surface that would set it — and `INTO` goes through the fiber
-evaluator, which stamps its own IRI.
+`Exp::InstitutionInvoke.target_iri` is removed. Nothing sets it, and the surface its doc comment
+names as the one that would cannot reach it.
 
-**In as a decision, out as work.** §3.1 opens that evaluator; decide there whether to populate the
-field or delete it. Do not leave it undecided a third time.
+**Why `INTO` cannot be that surface.** `FIBER … INTO` is evaluated by the fiber evaluator, a
+query-plan path; `Exp::InstitutionInvoke` is a program term reduced by NbE. `INTO` never lowers to
+an `InstitutionInvoke`. The fiber evaluator picks the response IRI itself
+(`query/evaluate/fiber.rs:420`):
+
+```rust
+let (response_iri, persist_to_chain) = match &fc.into {
+    Some(target) => { /* reject a second arrival at the same IRI */ (target.clone(), true) }
+    None         => (fp.fiber_response_iri(clause_idx, binding_idx), false),
+};
+let mut stamped = Resource::new(response_iri.clone());
+for (k, v) in response.properties() { stamped.set(k.clone(), v.clone()); }
+```
+
+It takes the IRI straight off the parsed clause, builds a fresh `Resource` at it, copies the
+response's properties across, and pushes it to the `into_collector` for chain commit. Without
+`INTO` it synthesises a query-scoped transient. The chain-reinsertion behaviour D14 §9.3 describes
+is fully implemented — just not through this field.
+
+**What the field's absence changes: nothing.** `institution/eval_hooks.rs:253` is
+`match target_iri { Some(iri) => iri.clone(), None => deterministic_run_output_iri(…) }`, and the
+`Some` arm is unreachable, so the content-hash IRI is already what every comorphism output gets.
+
+**Surface — Rust-only, no reseed.** `urn:eigenius:program:target_iri` is **not declared** in
+`program-ontology.json` (0 hits), and the ESL lowering that builds `ComorphismInvokeApply` sets
+`function` and `source` and never a target. So no bootstrap ontology moves.
+
+| file | what goes |
+|---|---|
+| `nbe/term.rs:272, 289, 735, 739` | the field on the variant, its doc line, and its clone in the structural traversal |
+| `program/expr.rs:218-243` | the decoder reading `urn:eigenius:program:target_iri` |
+| `nbe/eval/hooks.rs:77` | the `institution_invoke` trait parameter |
+| `nbe/eval/mod.rs:538, 556`, `institution/eval_hooks.rs:122, 251-258, 588-590, 803` | call sites and the dead override branch |
+
+Rule 12 keeps an authored `urn:eigenius:program:target_iri` from erroring after the decoder goes;
+it becomes an unknown property and is ignored. Nothing in the tree authors one.
+
+**In the batch**, since §3.1 opens the same evaluator and this is the third time the field has been
+looked at without being resolved.
 
 ### 4.5 Unchanged
 
@@ -292,7 +326,8 @@ field or delete it. Do not leave it undecided a third time.
 5. **3.2 after 3.1** — the resume path should mint what `RunProgram` mints, so it copies a shape
    rather than inventing one.
 6. **3.4 last.** It changes the record's fields, so it lands once the set of minting sites is fixed.
-7. **§3.5(b)** whenever #235's reseed runs. It is the only item on this branch that touches a
+7. **§4.4 (#149)** alongside 3.1 — same evaluator, and the deletion is Rust-only.
+8. **§3.5(b)** whenever #235's reseed runs. It is the only item on this branch that touches a
    bootstrap ontology, and it does not gate anything else here.
 
 **One ontology edit, deferred.** §3.5(b) removes three resources from the program ontology and
