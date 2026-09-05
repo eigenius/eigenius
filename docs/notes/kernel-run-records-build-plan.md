@@ -1,7 +1,7 @@
 # Build plan — kernel run records
 
-*Branch: `kernel-run-records`. Covers eigenius#206, #148, #135, #147, #150; decides on #145 and
-#149.*
+*Branch: `kernel-run-records`. Covers eigenius#206, #148, #135, #147, #150, #144; decides on
+#145, #146 and #149 (§4).*
 
 *Governing document:
 [Judgements, Warrants, and Logics](../design/judgements-and-warrants.tex) §"Taxonomy of Epistemic
@@ -162,33 +162,98 @@ outcome may be to drop `trace_tree` and keep the trace flat.
 `fiber.rs:424` rejects a multi-row `FIBER` with `INTO`, since one IRI cannot name two resources.
 No test drives it. 3.1 modifies this evaluator, so pin the path before changing it.
 
-## 4. Decided out of the batch
+## 4. #144, #145, #146, #149 — reviewed `2026-09-04`
 
-- **#145 — `RunRuntimeScript` drops its `RuntimeInvocation`.** Same defect shape (record assembled,
-  then discarded) and it is the blocker named in `docs/spec/w3c-prov-mapping.md` §5.2 for a
-  chain-wide PROV export. **Out**, because it needs a `ComponentResponse` field — a protocol change
-  with generated TS on two paths — and that sets a different exit gate for the whole batch. It is
-  the natural follow-on.
-- **#149 — `Exp::InstitutionInvoke.target_iri` is never populated.** Its doc comment names `INTO` as
-  the surface that would set it; `INTO` goes through the fiber evaluator instead, which stamps its
-  own IRI. **Out as work, in as a decision**: while 3.1 is open, decide whether to populate it or
-  delete the field. Do not leave it undecided a third time.
-- **#144, #146** — component-registry and memo-key defects. Adjacent files, unrelated failures.
-- **The witness review** — `judgements-warrants-build-plan.md` §"Open after P7" asks whether the
-  witness index is now a cache over relations rather than a soundness boundary. It says *"Do not act
-  on this during P0–P7"*; P7 is done, so it is live. It is a question to answer once, not a build,
-  and it does not belong on this branch.
+### 4.1 #144 is **in** the batch, not adjacent
+
+`eval_hooks.rs:320` still returns the input unchanged for a component the registry does not hold,
+with no error and no `ComponentTrace`. What makes it this batch's problem rather than a neighbour's:
+
+| the four `deterministic: true` components | registered? |
+|---|---|
+| `Identity` | yes (builtin) |
+| `Combine` | **no** — identity fallback |
+| `Extract` | **no** — identity fallback |
+| `Transform` | **no** — identity fallback |
+
+The builtin registry holds `Identity` and `Checkpoint`; `REMOTE_COMPONENTS` holds `CompleteJson`,
+`CompleteText`, `HttpRequest`. §2 has the batch mint *provenance for a deterministic run* — and
+three of the four deterministic components never run. The batch would emit a record attesting a
+computation that returned its input untouched.
+
+Minimum fix for this batch: **dispatch on an unregistered component IRI is an error**, not an
+identity fallback. Implementing `Combine` / `Extract` / `Transform` is separate; removing the silent
+success is not.
+
+### 4.2 #145 — reconsidered, and the case is stronger than §2 first allowed
+
+`ComponentResponse` is `{success, output, error}` (`proto/eigenius.proto:767`). No field can carry a
+`RuntimeInvocation`, so this is a protocol change, as originally judged.
+
+Two facts change the weighting:
+
+- **`RunRuntimeScript` declares `deterministic: false`.** Under §2 its run record is *evidence*, not
+  provenance — an `Observed` leaf. The `RuntimeInvocation` is what makes that evidence mean
+  anything: image digest, `random_seed`, `numerical_metadata`. An `Observed` leaf for an external
+  run that does not say which image produced it is an observation of nothing in particular.
+- **The precedent exists and works.** `DispatchExternalResponse.runtime_invocation_partial_cbor`
+  (field 2) is populated by the orchestrator at `component_executor.ts:254` and parsed by the kernel
+  at `external_institution.rs:256`. The component path needs the same field on a different message,
+  not a new mechanism.
+
+**Decision needed**: include it and accept a proto change plus regenerated TS on two paths, or ship
+§2's stochastic branch with a known-thin `Observed` leaf for `RunRuntimeScript` and follow up. The
+second is defensible only if it is written down at the emit site.
+
+### 4.3 #146 — live, but latent, and less severe than the issue states
+
+`compute_trace_key(component, input)` omits the argument and both `ComponentTrace` sites set
+`argument_hash: None`. Confirmed.
+
+The issue's failure — *"a second call with the same input and a different argument gets the first
+call's output back and never runs"* — is **not reachable today**. The memo is determinism-gated
+(`eval_hooks.rs:431`: *"Deterministic component — content-address memo is sound"*), and no component
+is both `deterministic: true` and argument-taking:
+
+| takes an argument | `CompleteText`, `CompleteJson` (`argument_type: Arguments`) — both `deterministic: false` |
+|---|---|
+| **deterministic** | `Identity`, `Combine`, `Extract`, `Transform` — all `argument_type: None` |
+
+So the collision fires the first time someone declares a deterministic component that takes an
+argument, and nothing warns them. **Out of this batch**, since it is not a record defect. Worth
+either adding the argument to the key as insurance while §3.4 is in `trace.rs`, or recording the
+determinism gate in the `TraceStore` doc comment that currently calls the divergence a defect
+without noting what makes it unreachable.
+
+### 4.4 #149 — still a decision, not work
+
+Nothing populates `Exp::InstitutionInvoke.target_iri`. `urn:eigenius:program:target_iri` appears at
+exactly one site, the decoder (`program/expr.rs:229`); the property is not declared in the program
+ontology, and the ESL lowering sets `function` and `source` and never a target. Its doc comment
+names EigenQL's `INTO` as the surface that would set it — and `INTO` goes through the fiber
+evaluator, which stamps its own IRI.
+
+**In as a decision, out as work.** §3.1 opens that evaluator; decide there whether to populate the
+field or delete it. Do not leave it undecided a third time.
+
+### 4.5 Unchanged
+
+`#144`'s sibling defects in component registration, and any work implementing `Combine` / `Extract`
+/ `Transform`, stay out.
 
 ## 5. Sequencing
 
 1. **§2 first**, and it is now a small piece of work rather than only a decision: read
    `program:component:deterministic` at the minting site, defaulting absent to non-deterministic.
    Every other item writes against which record type it produces.
-2. **3.5, then 3.1.** Pin the `INTO` error path before editing the evaluator.
-3. **3.3 with 3.1**, since #206 constrains the failure path and both are the same error arm.
-4. **3.2 after 3.1** — the resume path should mint what `RunProgram` mints, so it copies a shape
+2. **§4.1 (#144) with §2**, and before any minting. An unregistered component must fail rather
+   than return its input, or the first records the batch mints attest three components that never
+   ran.
+3. **3.5, then 3.1.** Pin the `INTO` error path before editing the evaluator.
+4. **3.3 with 3.1**, since #206 constrains the failure path and both are the same error arm.
+5. **3.2 after 3.1** — the resume path should mint what `RunProgram` mints, so it copies a shape
    rather than inventing one.
-5. **3.4 last.** It changes the record's fields, so it lands once the set of minting sites is fixed.
+6. **3.4 last.** It changes the record's fields, so it lands once the set of minting sites is fixed.
 
 **No ontology edit is expected.** `prov:input` and `prov:trace_tree` are already declared. If 3.4's
 decision is to drop `trace_tree`, that *is* a bootstrap edit and joins #235's batched reseed rather
