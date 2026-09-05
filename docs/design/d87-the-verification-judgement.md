@@ -1,150 +1,193 @@
 # D87 — The verification judgement
 
-*Status: **proposed** `2026-09-04` · design note.*
+*Status: **proposed** `2026-09-04` · design note. §4 rewritten the same day; the first draft's
+proof-as-axiom proposal is withdrawn and the reason is recorded in §4.1.*
 
 *Replaces the artifact half of eigenius#160. Companions: the paper
 [Judgements, Warrants, and Logics](judgements-and-warrants.tex),
-[D74](d74-eigentt-to-lean-externalization.md) (what externalization can and cannot express), and
+[D74](d74-eigentt-to-lean-externalization.md) (what externalization can and cannot express),
+[D28](d28-lean-4-as-institution.md) §2.3 (nanoda runs in process), and
 `docs/notes/judgements-warrants-build-plan.md` §"Open after P7".*
 
 ---
 
 ## 1. The defect
 
-#160 made a checked Lean proof reach the *verified* grade by emitting a `prov:VerificationTrace`.
+eigenius#160 made a checked Lean proof reach the *verified* grade by emitting a `prov:VerificationTrace`.
 `witness_index::emit_from_trace` follows the trace's `prov:resource` to the claim, hashes the
 claim's `reflection:canonical_proposition`, and admits `IsVerifiedAs`. Nothing re-checks anything;
 the kernel takes the trace's word that nanoda ran.
 
-`eigentt:Judgement`'s own description names this failure mode exactly:
+`eigentt:Judgement`'s own description names the failure mode:
 
 > the reification of justification logic's proof-checker operator — LP's positive-introspection
 > axiom `t:F -> !t:(t:F)` names the evidence `!t` that `t` proves `F`, which is what a checker
 > returns and what this constructor persists. **An algebra carrying application and sum but no `!`
 > runs the checker at commit time and discards the result; a judgement keeps it.**
 
-The trace runs nanoda at commit and keeps a note that it ran. What survives is:
-
-| `prov:proof_system` | `"lean4"` — a string that binds to no checker |
-| `prov:proof_term` | an IRI naming the `LeanProofPayload` |
-| `prov:resource` | the claim |
-| `prov:timestamp` | when |
-
-The externalized proposition the institution compared by `def_eq` is discarded, and no later reader
-can re-run the comparison from what is committed.
-
-**Why this matters more than tidiness.** `witness:IsVerifiedAs` has **zero constructors**, so no
-term inhabits it and `layer_admits_witness` is the only way one comes into existence — which puts
-that function in the TCB, and a wrong admission cannot be caught downstream because an axiom has no
-proof to re-check. The witness is postulated on the strength of a note.
+`witness:IsVerifiedAs` has **zero constructors**, so no term inhabits it and `layer_admits_witness`
+is the only way one comes into existence. That puts the function in the TCB, and a wrong admission
+cannot be caught downstream because an axiom has no proof to re-check. The witness is postulated on
+the strength of a note.
 
 ## 2. The shape that keeps the result
 
 `eigentt:Judgement` has one constructor:
 
-```
+```text
 holds(logic : eigentt:Logic, term : eigentt:Term, type : eigentt:Term)
 ```
 
-*"A CHECKED triple: a checker for `logic` verified `term` against `type`."*
-
-Two `eigentt:Logic` values are declared, and the second is named for this:
-
-| `eigentt:logic_kernel` | the kernel's own type checker |
-| `eigentt:logic_lean4` | *"Lean 4, re-checked in process by the `nanoda_lib` kernel reimplementation"* |
+*"A CHECKED triple: a checker for `logic` verified `term` against `type`."* Two `eigentt:Logic`
+values are declared, and the second is named for this: `logic_kernel`, and `logic_lean4` — *"Lean 4,
+re-checked in process by the `nanoda_lib` kernel reimplementation."*
 
 The route is already implemented for one resource class. `emit_from_reasoning_sentence`
 (`witness_index.rs:291`) reads `justification:proof` off a `justification:Conclusion`, decodes the
 judgement, **refuses it when the type is a `Certificate`** — a certificate judgement establishes
-nothing about the proposition — and keys `Verified` off the proof's own type. That is a
-judgement-backed `Verified`, checked rather than postulated.
+nothing about the proposition — and keys `Verified` off the proof's own type.
 
 Nothing populates `justification:proof`. Both `Verified` routes exist; the trusted one is populated
 and the checked one is empty.
 
-## 3. The constraint that shapes the answer
+## 3. The constraint on `t`
 
-`holds`'s `term` argument is typed `eigentt:Term` — a structural term, not a reference. Two things
-follow, and the second was got wrong in discussion before it was checked:
+`holds`'s `term` argument is typed `eigentt:Term` — structural, not a reference. Two consequences:
 
-1. **A Lean proof term is not representable.** D74 externalizes propositions (types) in one
-   direction, EigenTT → Lean. There is no inverse, deliberately (#159), and `Lam` is refused
-   outright (D74 §4.4: Mini-TT lambdas carry no domain). `fun _ h => h` has no EigenTT form.
+1. **A Lean proof term is not representable.** D74 externalizes propositions in one direction,
+   EigenTT → Lean. There is no inverse, deliberately (#159), and `Lam` is refused outright
+   (D74 §4.4: Mini-TT lambdas carry no domain). `fun _ h => h` has no EigenTT form.
 2. **A `ConstRef` to the payload resource does not resolve.** `resolve_const_ref`
    (`eigentt_type_mirror.rs:1201`) dispatches on the target's class — `core:Class` → `EigonClass`,
-   `eigentt:Axiom` → `EigonAxiom`, `core:InductiveType` → `Const`, the five primitives
-   short-circuit — and an unresolved `ConstRef` is a `TermMalformed` rejection
-   (`eigentt_value.rs:619`). A `lean:LeanProofPayload` **instance** is none of those.
+   `eigentt:Axiom` → `EigonAxiom`, `core:InductiveType` → `Const`, five primitives short-circuit —
+   and an unresolved `ConstRef` is a `TermMalformed` rejection (`eigentt_value.rs:619`). A
+   `lean:LeanProofPayload` **instance** is none of those.
 
-So `holds(logic_lean4, t, P)` cannot name the proof blob directly, and cannot carry the proof
-structurally. `t` needs a decision.
+## 4. What `t` is
 
-## 4. Proposal: the checked proof is an axiom
+### 4.1 Not an axiom — withdrawn
 
-Declare the Lean-checked proof as an `eigentt:Axiom` whose `eigentt:axiom_statement` is the claim's
-proposition, and let
+The first draft proposed declaring the checked proof as an `eigentt:Axiom` whose `axiom_statement`
+is the claim's proposition, with `t = ConstRef(that axiom)`. It resolves, and it needs no change to
+the eigentt fragment. Both true, and both beside the point. `eigentt:Axiom` is:
 
-```
-t = ConstRef(<proof axiom IRI>)
-```
+> A named axiom: a closed term whose type the kernel admits **without checking the term itself**.
 
-**It resolves.** `eigentt:Axiom` is one of `resolve_const_ref`'s accepted classes, so the judgement
-decodes and type-checks with no change to the eigentt fragment.
+That is the opposite of what is being recorded. Using it would put "asserted without proof" and
+"checked by nanoda" in one class, with four consequences:
 
-**It is what the proof means here.** From EigenTT's side a Lean-checked proof *is* an axiom —
-asserted, not constructed in this type theory — and its statement is exactly the proposition the
-`def_eq` comparison established. The judgement then records **which checker licensed the
-assertion**, which is the fact the trace was trying and failing to carry.
+| | |
+|---|---|
+| a reader holding only the term | learns nothing about checked-ness; must find the judgement and trust it |
+| an author | can declare an axiom and write a judgement citing it; nothing refuses either |
+| `Declared(a)` and `Verified(a)` | can name the **same** resource, leaving the authored justification term as the only discriminator |
+| the chain | has no way to tell the two apart |
 
-**The pattern is already in use.** The demo fixture's `urn:eigenius:demo:lean:Healthy` is an
-`eigentt:Axiom` carrying an `eigentt:axiom_statement`, and D74 §4 translates `EigonAxiom` as a
-`Const`.
+**The codebase has diagnosed this exact shape twice.** #205: a hand-authored `ProgramTrace` and a
+kernel-minted one are the same class, so *"the kernel cannot tell them apart… The distinction has to
+be carried by the class"* — resolved by adding `reflection:ExternalExecutionTrace`. #23: deleted
+`epistemic_status`, because a resource must not declare its own grade. The withdrawn proposal walked
+back into what both eliminated, and its justification — *"needs no change to the eigentt fragment"* —
+is CLAUDE.md's named signal for wedging.
 
-**Re-checking is then defined.** `holds(logic_lean4, ConstRef(a), P)` is re-checkable by: resolve
-`a`, read the `LeanProofPayload` it is anchored to, externalize `P`, and run `check_proof` — which
-is precisely what `do_proof_check` already does. The judgement stops being a note and becomes a
-claim the kernel can re-decide at any time.
+### 4.2 The distinction is carried by the term's own form
 
-The axiom needs an anchor back to the payload so step two is mechanical. That is one property, and
-it is the one piece of new vocabulary this note proposes.
+`t` names something an institution checked, and the class says so. Three forms, in descending
+strength:
 
-## 5. What it changes
+| form | discriminates? | cost |
+|---|---|---|
+| a distinct `eigentt:Term` former (`Checked(iri)` beside `EigonAxiom`) | yes, structurally | a fragment change: D74's exhaustive 43-variant match, the D47 codec, conversion |
+| a subclass, `eigentt:CheckedProof : eigentt:Axiom` | by `is_a`, but it still *is* an axiom under subsumption, so anything reading the parent re-conflates | resolves through the existing `ConstRef` path |
+| same class + a kernel-only property | **no** — #205 records that no *"kernel-only, refused from input"* mechanism exists anywhere in the validator | unenforceable today |
+
+**Recommended: the distinct former.** D74 §5 is explicit that this is where a wrong call proves the
+wrong theorem soundly. A conflation carried forever is worse than one former added to a small
+fragment, and the fragment is small precisely so that additions are deliberate.
+
+The class settles **who may assert**. It does not make the assertion checkable — that is §5.
+
+## 5. Re-decidability, not attestation
+
+**nanoda_lib emits no cryptographic receipt, and should not be made to.** Verified `2026-09-04`: no
+`sha2`, `blake`, `ed25519` or `hmac` in its `Cargo.toml`; `unique_hasher.rs` is a 64-bit interning
+hasher for expression dedup inside the checker (`digest: u64`, `set_digest` asserted one-time), not
+a digest. `check_proof` returns `Verdict::Holds | Fails { diagnostic }` — a boolean and a string.
+
+**A self-signed receipt would be circular.** D28 §2.3 makes nanoda an in-process function call, no
+IPC. A signature produced by a key the same process holds is not evidence *to* that process: either
+the process is trusted or it is not. Such a receipt attests exactly what the `VerificationTrace`
+already attests, and adds key management. Receipts earn their keep when the checker ran somewhere
+outside the trust boundary and its result is to be admitted **without re-running** — which needs a
+key bound externally (TEE attestation, reproducible-build identity, a notary), a different
+architecture from this one.
+
+**The property to hold instead is that the verdict is recomputable.** It is a deterministic function
+of five inputs:
+
+| input | on the chain? |
+|---|---|
+| export bytes | **yes** — `LeanProofPayload.payload_bytes` |
+| target declaration name | **yes** — `lean:target_name` |
+| the claim's proposition | **yes** — `reflection:canonical_proposition` |
+| permitted axiom set | **no** — hardcoded `DEFAULT_LEAN_AXIOMS` in `institution.rs` |
+| checker identity (the `nanoda_lib` rev) | **no** — pinned in `Cargo.toml` only |
+
+Pin the last two and any party can re-run `check_proof` and obtain the same verdict. That is
+stronger than a receipt: a receipt says *"I checked"*; this says *"check it yourself."* It is also
+idiomatic — layers are content-addressed and `runtime:library_content_hash` already serves this role
+for mirrors.
+
+The two missing rows are exactly what a receipt would have bound. The axiom set is queued as a
+`prov:VerificationTrace` slot in [D86](d86-the-numeric-primitive-core.md) §5.1 / #235; the checker
+identity is not recorded anywhere and joins it.
+
+**This is the standard posture for proof-carrying data**, and it is what the Harvard collaboration
+wants: proofs arriving from outside are re-checked rather than trusted on a receipt, because
+checking is cheap relative to proving. Re-running nanoda over a small export is milliseconds.
+
+**It also relieves §4.** With the re-check defined and cheap, the term does not have to
+self-certify. The class settles who may assert; the pinned inputs settle whether anyone can verify
+the assertion. Both are needed, and neither substitutes for the other.
+
+## 6. What changes
 
 | | from | to |
 |---|---|---|
-| what the institution emits on `Holds` | `prov:VerificationTrace` | the trace **plus** a `holds(logic_lean4, ConstRef(a), P)` judgement, and the axiom `a` |
+| what the institution emits on `Holds` | `prov:VerificationTrace` | the trace **plus** `holds(logic_lean4, Checked(a), P)` |
+| the trace's role | the thing `Verified` is read from | provenance: when the check ran, against which payload, under which axiom set, by which checker build |
 | how `Verified` is admitted | `emit_from_trace` hashes the claim's proposition | the judgement's own `type` is the proposition — the `emit_from_reasoning_sentence` shape |
 | `Certificate.verified` | consumes `witness:IsVerifiedAs(iri, P)` | consumes the judgement |
-| `witness:IsVerifiedAs` | postulated by the kernel, zero constructors, in the TCB | removable |
+| `witness:IsVerifiedAs` | postulated, zero constructors, in the TCB | removable |
 
-The trace does not go away. It remains the provenance record — *when* the check ran, by what
-`proof_system`, against which payload — and the paper's separation holds: the trace is provenance,
-the judgement is warrant.
+The trace does not go away, and the paper's split is what keeps it: the trace is provenance, the
+judgement is warrant.
 
 **This is the prerequisite for removing `witness:Is*As`.** `Certificate.verified` cannot lose its
 argument until something else inhabits its premise. `Declared` and `Observed` are a separate
 question — both plausibly *are* constant specifications over relations the kernel can read at any
-time (`declared_by`, the observation relation), which is what
-`judgements-warrants-build-plan.md` §"Open after P7" asks. `Verified` is the family where the answer
-is no, and this note is why: no relation on the chain lets the kernel recompute "nanoda accepted
-this" without re-running nanoda. Making that re-run *possible* is the point.
+time — which is what `judgements-warrants-build-plan.md` §"Open after P7" asks. `Verified` is the
+family where the answer is no today, and §5 is what changes the answer: once the inputs are pinned,
+"nanoda accepted this" becomes recomputable rather than postulated.
 
-## 6. Cost
+## 7. Cost
 
-- **Ontology**: one property anchoring the proof axiom to its payload; possibly a slot for the
-  judgement on a non-`Conclusion` claim. Bootstrap-resident, so it rides #235's reseed.
-- **Institution**: `do_proof_check` already holds all three arguments at the moment it discards
-  them — the logic is fixed, `P` is the `Exp` it just compared, and the payload is resolved.
-- **Kernel**: reuse `emit_from_reasoning_sentence`'s decode-and-refuse-a-certificate logic; it is
-  not specific to `Conclusion` beyond where it reads the slot.
+- **Ontology**: two `prov:VerificationTrace` slots (permitted axioms, checker identity); an anchor
+  from the checked term to its payload. Bootstrap-resident, so it rides #235's reseed.
+- **eigentt fragment**: one term former (§4.2), landing in the D47 codec, conversion, and D74's
+  exhaustive match — which will refuse it for externalization, since a checked-proof reference has
+  no Lean counterpart to translate to.
+- **Institution**: `do_proof_check` already holds all three `holds` arguments at the moment it
+  discards them.
+- **Kernel**: reuse `emit_from_reasoning_sentence`'s decode-and-refuse-a-certificate logic.
 
-## 7. Open
+## 8. Open
 
 1. **Where the judgement lives** when the claim is not a `justification:Conclusion`. The demo's
    claim is a `demo:lean:Patient` instance. Either the slot generalises off `Conclusion`, or the
    institution emits a `Conclusion`, or the judgement rides the trace.
-2. **Who declares the axiom** — the institution at check time, or the author alongside the proof
-   term. Institution-minted keeps authors from asserting an axiom no checker licensed; author-minted
-   keeps the kernel from writing chain declarations.
-3. **Whether `Verified(iri)` in the justification term names the claim or the axiom.** It names a
-   chain resource by IRI, and after this change there are two candidates.
+2. **Whether `Verified(iri)` names the claim or the checked term.** It names a chain resource by
+   IRI, and after §4.2 there are two candidates.
+3. **What "checker identity" is.** A git rev is not a build identity — two builds of one rev can
+   differ. Whether this needs the reproducible-build machinery #43 asks for on the Julia side, or
+   whether a rev plus a toolchain pin is proportionate here.

@@ -135,7 +135,7 @@ should land in one pass:
 | edit | file | why |
 |---|---|---|
 | declare `≤` and `==` over `core:float` | `ontologies/…` (§6.1 decides where) | row 3 |
-| a permitted-axiom slot on `prov:VerificationTrace` | `ontologies/prov/prov.esl` | the axiom allowlist is the TCB of every Lean verdict and the trace does not record it — two proofs, one leaning on `Classical.choice` and one not, produce byte-identical traces (`institution.rs::do_proof_check`) |
+| a permitted-axiom slot **and a checker-identity slot** on `prov:VerificationTrace` ([D87](d87-the-verification-judgement.md) §5) | `ontologies/prov/prov.esl` | the axiom allowlist is the TCB of every Lean verdict and the trace does not record it — two proofs, one leaning on `Classical.choice` and one not, produce byte-identical traces (`institution.rs::do_proof_check`) |
 | `witness:IsVerifiedAs` description | `ontologies/core/core-ontology.json` | says *"Nothing in the tree currently emits one — the producer is the Lean institution under eigenius#160."* The Lean institution emits one as of `2026-09-03` |
 | `justification:VerifiedPropositionView` | `ontologies/justification/justification.esl` | its description says the witness emitter looks the view up by `source_verified_resource`; the emitter reads the claim's `canonical_proposition` and never touches the view. Nothing reads the class at all — declared, bootstrap-registered, referenced by two `esl::compile` tests, and otherwise dead. **Recommend deleting it** rather than rewording: the comorphism route it served was replaced by D74's forward externalization (D51 §3) |
 
