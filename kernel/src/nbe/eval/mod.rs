@@ -556,7 +556,6 @@ pub(crate) fn eval_impl<T: Tracer>(
         Exp::InstitutionInvoke {
             comorphism_iri,
             source,
-            target_iri,
         } => {
             let (source_val, source_node) = ev(source)?;
             // No effect hooks (Pure), or hooks with no institution
@@ -570,19 +569,13 @@ pub(crate) fn eval_impl<T: Tracer>(
             };
             match ctx.hooks() {
                 None => Ok((passthrough(), source_node)),
-                Some(hooks) => {
-                    match hooks.institution_invoke(
-                        comorphism_iri,
-                        &source_val,
-                        target_iri.as_ref(),
-                    )? {
-                        Some(translated) => {
-                            let node = T::comorphism(comorphism_iri, source_node, &translated);
-                            Ok((translated, node))
-                        }
-                        None => Ok((passthrough(), source_node)),
+                Some(hooks) => match hooks.institution_invoke(comorphism_iri, &source_val)? {
+                    Some(translated) => {
+                        let node = T::comorphism(comorphism_iri, source_node, &translated);
+                        Ok((translated, node))
                     }
-                }
+                    None => Ok((passthrough(), source_node)),
+                },
             }
         }
 

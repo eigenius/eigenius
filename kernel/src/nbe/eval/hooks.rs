@@ -74,7 +74,6 @@ pub trait EffectHooks: Send + Sync {
         &self,
         comorphism_iri: &Iri,
         source: &Val,
-        target_iri: Option<&Iri>,
     ) -> Result<Option<Val>, EvalError>;
 
     /// Decide an institution-bound constraint (D14 §9.2). Structural

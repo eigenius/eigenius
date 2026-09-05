@@ -261,6 +261,7 @@ impl EigeniusService {
             trace_iri: &trace_iri_str,
             output: &output,
             program: &program,
+            input: &input,
             root_trace: root_trace.as_ref(),
             started_at_ms,
             completed_at_ms,
@@ -831,6 +832,8 @@ pub(super) struct RunRecordInputs<'a> {
     pub trace_iri: &'a str,
     pub output: &'a Resource,
     pub program: &'a Resource,
+    /// What the run was applied to — `prov:input` (eigenius#147).
+    pub input: &'a Resource,
     pub root_trace: Option<&'a crate::program::trace::Trace>,
     pub started_at_ms: i64,
     pub completed_at_ms: i64,
@@ -844,6 +847,7 @@ pub(super) fn build_run_records(i: RunRecordInputs<'_>) -> RunRecords {
     let trace_iri_str = i.trace_iri;
     let output = i.output;
     let program = i.program;
+    let input = i.input;
     let root_trace = i.root_trace;
     let started_at_ms = i.started_at_ms;
     let completed_at_ms = i.completed_at_ms;
@@ -890,7 +894,32 @@ pub(super) fn build_run_records(i: RunRecordInputs<'_>) -> RunRecords {
             Value::iri(prog_id),
         );
     }
-    // Required: trace_tree — serialized tree-structured trace
+    // What the run was applied to (eigenius#147). Never populated before: the only thing
+    // written was `reflection:input_hash` (`program/trace.rs:313`), a different property,
+    // so a trace recorded that a run happened without naming its subject.
+    //
+    // Embedded, always — **not** referenced by IRI even when the input carries one. A run
+    // does not commit its input: `execute_program` adds the produced resources, the output,
+    // the program and these traces, and never the input. So an IRI reference dangles and
+    // Rule 22 rejects the trace with `UnresolvedClassReference`, which is what a first
+    // attempt at this did.
+    //
+    // Committing the input instead would make a reference resolvable and avoid duplicating
+    // a large input across traces, but it changes what a run puts on the chain — a separate
+    // decision, and one an author may not want for an input they passed by value.
+    trace_resource.set(
+        Iri::parse("urn:eigenius:prov:input").unwrap(),
+        Value::Embedded(Box::new(input.clone())),
+    );
+
+    // `prov:trace_tree` is `recommends`, not `requires` — `prov:ProgramTrace` requires only
+    // `prov:resource`, `prov:was_generated_by` and `prov:timestamp`. The comment here said
+    // "Required" and was wrong (eigenius#147).
+    //
+    // It IS read, contrary to that issue's first half: `notebooks/src/runtime/traceResource.ts`
+    // resolves it and flattens the right-leaning `Trace::Let` chain into siblings for the
+    // notebook's trace panel. The issue's scope enumerated "the kernel, the crates, the CLI
+    // or the orchestrator" — all four true, and `notebooks/` is none of them.
     if let Some(trace) = root_trace {
         let trace_tree = crate::program::trace::trace_to_resource(trace);
         trace_resource.set(
@@ -1099,6 +1128,60 @@ mod tests {
                  failure arm overwrote the record instead of updating it"
             ),
             other => panic!("expected a ProgramRun task record, got {other:?}"),
+        }
+    }
+
+    /// §3.4 / eigenius#147 — the trace names what the run was applied to.
+    ///
+    /// `prov:input` was never populated. The only thing written was
+    /// `reflection:input_hash` (`program/trace.rs:313`), a different property, so a
+    /// `ProgramTrace` recorded that a run happened without naming its subject — while
+    /// `prov:input`'s domain is `ProgramTrace` and the class recommends it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_runs_trace_names_its_input() {
+        let svc = service();
+        let mut input = Resource::new(Iri::parse("urn:eigenius:test:runprog:in").unwrap());
+        input.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String("urn:eigenius:prov:Agent".to_string()),
+            ]),
+        );
+        let resp = svc
+            .execute_program("main", working_program(), input)
+            .await
+            .expect("handler responds");
+        assert!(
+            resp.get_ref().success,
+            "errors: {:?}",
+            resp.get_ref().errors
+        );
+
+        let ctx = svc
+            .get_branch_context("main")
+            .await
+            .expect("branch context");
+        let head = Arc::clone(ctx.read().await.head());
+        let trace = head
+            .iter_resources()
+            .map(|(_, r)| r)
+            .find(|r| {
+                r.is_a()
+                    .iter()
+                    .any(|c| c.as_str() == "urn:eigenius:prov:ProgramTrace")
+            })
+            .expect("the run commits a ProgramTrace");
+
+        match trace.get(&Iri::parse("urn:eigenius:prov:input").unwrap()) {
+            Some(crate::ontology::resource::Value::Embedded(r)) => assert_eq!(
+                r.id().map(|i| i.as_str()),
+                Some("urn:eigenius:test:runprog:in"),
+                "the embedded input is the one the run was applied to"
+            ),
+            other => panic!(
+                "prov:input must be the embedded input resource — a run does not commit its \
+                 input, so an IRI reference dangles; got {other:?}"
+            ),
         }
     }
 

@@ -119,7 +119,6 @@ impl InstitutionEngine {
         &self,
         comorphism_iri: &Iri,
         source_val: &Val,
-        target_iri: Option<&Iri>,
     ) -> Result<Option<Val>, EvalError> {
         // No institution backing attached → `Ok(None)`, the evaluator
         // yields a passthrough neutral (a bare Pure/no-institution
@@ -247,15 +246,14 @@ impl InstitutionEngine {
                 ))
             })?;
 
-        // D14 §9.3 step 4: assign a chain-resident IRI. Caller-supplied
-        // `target_iri` overrides; otherwise mint a deterministic
-        // content-hash IRI so identical reify outputs dedupe on commit.
-        let assigned_iri = match target_iri {
-            Some(iri) => iri.clone(),
-            None => {
-                deterministic_run_output_iri("comorphism-output", comorphism_iri, &target_resource)
-            }
-        };
+        // D14 §9.3 step 4: assign the chain-resident IRI — a deterministic content-hash
+        // one, so identical reify outputs dedupe on commit.
+        //
+        // There was a caller-supplied `target_iri` override here, with this branch as its
+        // fallback. Nothing ever set it (eigenius#149), so the fallback was the only path
+        // and is now the whole of it.
+        let assigned_iri =
+            deterministic_run_output_iri("comorphism-output", comorphism_iri, &target_resource);
         target_resource.set_id(Some(assigned_iri));
 
         // Step 5 (D14 §9.3): post-translation validation invariant —
@@ -596,9 +594,8 @@ impl EffectHooks for InstitutionEngine {
         &self,
         comorphism_iri: &Iri,
         source: &Val,
-        target_iri: Option<&Iri>,
     ) -> Result<Option<Val>, EvalError> {
-        self.run_institution_invoke(comorphism_iri, source, target_iri)
+        self.run_institution_invoke(comorphism_iri, source)
     }
 
     fn decide_institution(
@@ -811,7 +808,6 @@ mod tests {
         let exp = Exp::InstitutionInvoke {
             comorphism_iri: Iri::parse("urn:eigenius:test:marker_cm").unwrap(),
             source: Box::new(source),
-            target_iri: None,
         };
         let v = eval(&exp, &Rho::Nil).expect("eval");
         match v {
@@ -1132,7 +1128,6 @@ mod tests {
         let exp = Exp::InstitutionInvoke {
             comorphism_iri: Iri::parse("urn:eigenius:test:pipe:cm").unwrap(),
             source: Box::new(source),
-            target_iri: None,
         };
         let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("institution pipeline eval");
         let result = match v {
@@ -1247,7 +1242,6 @@ mod tests {
                     Iri::parse("urn:eigenius:test:src").unwrap(),
                 ),
             ))),
-            target_iri: None,
         };
         let err = eval_ctx(&exp, &Rho::Nil, &ctx).unwrap_err();
         let msg = format!("{err}");

@@ -293,7 +293,7 @@ async fn resume_one_task(
             // The records come from `build_run_records`, shared with `execute_program`, so
             // a resumed run and a live one cannot drift apart.
             record.status = TaskStatus::Completed;
-            match commit_resumed_result(&record, exec, &backend, started_at_ms) {
+            match commit_resumed_result(&record, exec, &program, &input, &backend, started_at_ms) {
                 Ok(head) => record.result_layer_head = Some(head),
                 Err(e) => {
                     tracing::warn!(
@@ -652,9 +652,12 @@ impl TraceStore for BackendTraceStore {
 /// the commit hooks. A resumed run therefore commits its output and records but fires no
 /// institution gate. Recorded rather than silently accepted — closing it needs the branch
 /// question a `TaskRecord` cannot answer.
+#[allow(clippy::too_many_arguments)]
 fn commit_resumed_result(
     record: &crate::task::TaskRecord,
     exec: crate::program::eval_io::NbeExecutionResult,
+    program: &Resource,
+    input: &Resource,
     backend: &Arc<dyn crate::storage::PersistentBackend>,
     started_at_ms: i64,
 ) -> Result<crate::layer::LayerId, String> {
@@ -671,7 +674,8 @@ fn commit_resumed_result(
     } = build_run_records(RunRecordInputs {
         trace_iri: &trace_iri,
         output: &exec.output,
-        program: &crate::ontology::resource::Resource::new_embedded(),
+        program,
+        input,
         root_trace: exec.root_trace.as_ref(),
         started_at_ms,
         completed_at_ms,
