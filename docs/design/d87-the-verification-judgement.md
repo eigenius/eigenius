@@ -1,7 +1,8 @@
 # D87 — The verification judgement
 
 *Status: **proposed** `2026-09-04` · design note. §4 rewritten the same day; the first draft's
-proof-as-axiom proposal is withdrawn and the reason is recorded in §4.1.*
+proof-as-axiom proposal is withdrawn and the reason is recorded in §4.1. §9's three open questions
+are all closed — 1 in §6, 2 and 3 in §9 itself.*
 
 *Replaces the artifact half of eigenius#160. Companions: the paper
 [Judgements, Warrants, and Logics](judgements-and-warrants.tex),
@@ -268,6 +269,34 @@ family where the answer is no today, and §5 is what changes the answer: once th
    certificate over itself. The self-attestation D81 criticised — *"the reasoning institution
    vouching for its own output"* — is a separate defect about which route populates the witness, not
    about what the leaf names.
-3. **What "checker identity" is.** A git rev is not a build identity — two builds of one rev can
-   differ. Whether this needs the reproducible-build machinery #43 asks for on the Julia side, or
-   whether a rev plus a toolchain pin is proportionate here.
+3. ~~**What "checker identity" is.**~~ **Decided: start with rev plus toolchain**, and keep the
+   slot shaped so a stronger identity replaces the *value* rather than the schema.
+
+   v1 records two strings, both already compile-time constants:
+
+   | | |
+   |---|---|
+   | `nanoda_lib` rev | `1e44c4964b5ec916a1508c365af5f0e8a8c736fe`, pinned in `crates/eigenius-lean/Cargo.toml` |
+   | Lean toolchain | `leanprover/lean4:v4.29.1`, which `eigenius-lean-runtime/build.rs` already bakes into a const so the Dockerfile composer and every Rust caller read one version |
+
+   **What it covers**: which checker source was compiled, and which Lean produced the export format
+   the checker parses. Those are the two axes a verdict actually varies along today.
+
+   **What it does not**: that the running binary was built from that source. A different compiler
+   version, different feature flags, or a tampered build yields a different binary from the same rev.
+
+   **Why that is proportionate now.** §5's argument: the checker runs in process (D28 §2.3), so the
+   binary's identity *is* the deployment's identity, and a deployed kernel already carries an image
+   digest. A stronger checker identity would be re-deriving something the deployment record has.
+
+   **The trigger that upgrades it** is the same one that would justify a receipt: a verdict admitted
+   across a trust boundary — a checker running somewhere the verifier does not control, or an
+   archived verdict re-read after the deployment that produced it is gone. At that point the
+   identity has to bind the binary, and #43's reproducible-build machinery is the nearest existing
+   answer.
+
+   **The discipline that keeps this from becoming a permanent stopgap**: the slot holds an opaque
+   identity string, so replacing `rev + toolchain` with a build digest or an attestation changes
+   what is written, not the schema — no reseed, and no migration of traces already committed. If a
+   proposal for a stronger identity would require reshaping the slot, that is the signal this
+   decision was wrong.
