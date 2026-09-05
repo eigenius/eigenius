@@ -161,10 +161,31 @@ outcome may be to drop `trace_tree` and keep the trace flat.
 
 **Two halves, both in scope.**
 
-**(a) The dispatch is an error.** `eval_hooks.rs:320` returns the input unchanged for a component
-the registry does not hold — no error, no diagnostic, no `ComponentTrace`. Replace it with
-`EvalError::ComponentDispatchFailed { component_iri, message: "component not registered" }`, the
-variant the failure arm two branches down already uses.
+**(a) The dispatch is an error. Done `2026-09-04`.**
+
+**#144's stated mechanism is wrong — the third in this batch.** It points at
+`dispatch_component`'s identity fallback (`eval_hooks.rs:320`), which the evaluator never reaches:
+the `App` arm gates on `hooks.is_component(name)` (`nbe/eval/mod.rs:393`), so an unregistered IRI
+takes the ordinary-application branch instead. `Exp::Var` for a name unbound in `rho` then yields a
+neutral rather than an error, because in effectful mode *"unbound variables may be component IRIs
+that will be intercepted at the App level"* (`mod.rs:415`) — and the interception did not happen.
+
+Measured before fixing: an unregistered component **evaluates successfully** to
+`Nt(App(Gen(usize::MAX, iri), arg))`. A stuck neutral, which flows into downstream `Construct`
+fields and commits with a `ProgramTrace` over a step that never ran — the consequence #144
+describes, reached by a different route.
+
+The error therefore lands in the `App` arm, gated on the name being unbound so an ordinary
+lambda-bound head is untouched. `dispatch_component`'s fallback becomes an error too rather than
+being deleted: it is a public trait method, and a caller skipping the predicate should get a
+diagnostic instead of its input back.
+
+**It caught a test asserting the defect.** `institution_invoke_runs_four_step_pipeline_end_to_end`
+named a transformation that existed nowhere, with a comment saying so — *"No real Component —
+dispatch_component falls back to identity for unknown component IRIs, which is what we want for this
+structural test."* Fixed by registering a real identity component under that IRI
+(`program::component::identity_component()`); the test's subject, the comorphism pipeline, never
+needed the fallback.
 
 Why it gates the batch: three of the four `deterministic: true` components are unregistered.
 
