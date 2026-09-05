@@ -14,11 +14,15 @@
 reseed — which invalidates every staged snapshot and forces re-deriving the demo artifacts and both
 parse baselines. Paid once, the marginal cost of the second through fifth edit is zero.
 
-**And one argument.** D86 makes a measured quantity *relatable* — `0.0 ≤ x` meaning Lean's `≤`.
-D87 makes a checked proof *re-decidable* rather than attested. Both are the same move: shrink what
-the platform asserts and enlarge what it can recompute. They share the `prov:VerificationTrace`
-slots and the D30-emits-`def`s gap (eigenius#236), so splitting them would mean two reseeds and two
-passes over the same code.
+**And one argument. These specs were written to close out P7.**
+`judgements-warrants-build-plan.md` §"Open after P7" defers one question — whether the witness index
+is a soundness boundary or a cache over relations — and says to answer it once, at the end. D87 §7
+supplies the missing half: `Verified` was the family where the answer was *no*, and D87 §5 makes it
+recomputable. D86 is the same move on the numeric side: shrink what the platform asserts, enlarge
+what it can recompute.
+
+So §3.5 is not a follow-on to this batch. It is the batch's conclusion, and the reason the documents
+exist.
 
 ## 1. The ontology edit — one pass, then one reseed
 
@@ -102,6 +106,39 @@ identity slot records `image_digest` when present and falls back to `source_pin`
 
 Worth doing on its own merits, independent of D87.
 
+### 3.5 The P7 closeout — remove `witness:Is*As`
+
+**This is why D86 and D87 were written.** `judgements-warrants-build-plan.md` §"Open after P7" asks
+one question: *"A predicate the kernel inhabits by constant specification, computed from a relation
+it can read at any time, is a decision procedure rather than a witness. If all three surviving
+families are that, the index is a cache over relations — rebuildable, droppable, and not a soundness
+boundary."*
+
+D87 §7 gives the state of the answer: `Declared` and `Observed` are *plausibly* constant
+specifications already; **`Verified` is the family where the answer is no today**, and §5 is what
+changes it — once the inputs are pinned, *"nanoda accepted this"* becomes recomputable rather than
+postulated. So §3.3 does not merely enable the closeout; it is the last input the closeout was
+waiting on.
+
+Three steps, in order:
+
+1. **Verify the word "plausibly."** D87 asserts `Declared` and `Observed` are constant
+   specifications over relations the kernel can read at any time; nothing has checked it. Can the
+   kernel recompute `IsDeclaredAs(iri, P)` from `declared_by`, and `IsObservedAs` from the
+   observation relation, at any point — without consulting a committed witness? If either answer is
+   no, the closeout stops here and the index stays a soundness boundary for that family.
+2. **Change the three `Certificate` constructors' premises**, from `witness:Is*As(iri, P)` to
+   whatever step 1 and §3.3 establish. Bootstrap edit, so it joins §1's pass **only if step 1 has
+   already been answered** — otherwise it waits for a second reseed, which is the one case this
+   batch should accept paying twice.
+3. **Delete `witness:Is*As`** and reduce the index to what it is: a cache over relations.
+
+**What must not be swept up**, per P7's own list: `hash_proposition_exp` and
+`alpha_canonicalize_proposition_json` (proposition identity, needed by anything comparing
+propositions), the α/δ agreement between emit and check sides that
+`emit_and_check_sides_agree_on_the_hash` pins, and the diagnostic surface — *"a lookup miss naming
+the family, the IRI and the property is the system's most-used error message."*
+
 ## 4. Deliberately out
 
 - **eigenius#236** — D30 emitting chain definitions as Lean `def`s. It is the row of D86 §5 that
@@ -118,9 +155,6 @@ Worth doing on its own merits, independent of D87.
 
   That is the whole of the argument. If a future change could make an unmapped relation externalize
   to something the export *does* declare, this exclusion stops holding.
-- **Removing `witness:Is*As` entirely.** D87 §7 makes `IsVerifiedAs` removable; `Declared` and
-  `Observed` are a separate question, and `judgements-warrants-build-plan.md` §"Open after P7" asks
-  it once for all three. That review is live and is not this batch.
 - **An exporter for the PROV mapping** (`docs/spec/w3c-prov-mapping.md` §5) — needs the in-process
   Activity gap closed first (#145 territory).
 
@@ -137,6 +171,10 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase":
   baseline provenance on every axis — including `--umls-all`, whose absence is silent.
 - **The count that matters**: after §3.3, a Lean `Holds` produces a judgement *and* a trace, and the
   `Verified` witness keys off the judgement rather than the trace. Measure it.
+- **The P7 closeout's gate** (§3.5): a `Certificate` type-checks with no `witness:Is*As` in any
+  premise, and the diagnostic surface still names the family, the IRI and the property on a miss —
+  P7 lists that as the system's most-used error message and it must survive the index becoming a
+  cache.
 
 ## 6. Order
 
@@ -146,4 +184,7 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase":
 3. **§2 the correspondence table** + the two relation declarations become usable together.
 4. **§3.2 the term former**, the largest and riskiest piece.
 5. **§3.3 the emit**, which is small once §3.2 exists.
-6. **§3.4 deploy by digest**, independent — any time.
+6. **§3.5 the P7 closeout** — last, because §3.3 is the input it waits on. Step 1 (verifying
+   "plausibly" for `Declared` and `Observed`) can and should run *early*, in parallel with §1, since
+   its answer decides whether the constructor change makes §1's reseed or needs a second.
+7. **§3.4 deploy by digest**, independent — any time.
