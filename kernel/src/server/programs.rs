@@ -249,134 +249,24 @@ impl EigeniusService {
             );
         }
 
-        let mut trace_resource = Resource::new(Iri::parse(&trace_iri_str).unwrap());
-        trace_resource.set(
-            Iri::parse("urn:eigenius:core:is_a").unwrap(),
-            crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::String(
-                    "urn:eigenius:prov:ProgramTrace".to_string(),
-                ),
-            ]),
-        );
-        // ProgramTrace's three required fields, unified with
-        // DeclarationTrace and ObservationTrace around the D49 witness-
-        // emitter contract: `resource` is the target IRI the trace
-        // points at (the program's output here); `source` is a string
-        // naming the producer; `timestamp` is the wall-clock the trace
-        // was emitted (the completion timestamp). The rich execution-
-        // trace metadata (program / started_at / completed_at /
-        // trace_tree / metrics) lives in recommends; this handler
-        // fills every one.
-        if let Some(out_id) = output.id() {
-            trace_resource.set(
-                Iri::parse("urn:eigenius:prov:resource").unwrap(),
-                crate::ontology::resource::Value::iri(out_id),
-            );
-        }
-        // `prov:was_generated_by` is resource-typed, so the run needs an Activity
-        // to point at rather than the free-text `"kernel:run_program"` this used to
-        // write. The activity is the kernel's own program-running facility; it is
-        // committed alongside the trace so the reference resolves.
-        trace_resource.set(
-            Iri::parse("urn:eigenius:prov:was_generated_by").unwrap(),
-            crate::ontology::resource::Value::String(KERNEL_RUN_PROGRAM_ACTIVITY.to_string()),
-        );
-        trace_resource.set(
-            Iri::parse("urn:eigenius:prov:timestamp").unwrap(),
-            crate::ontology::resource::Value::String(millis_to_iso8601(completed_at_ms)),
-        );
-        if let Some(prog_id) = program.id() {
-            trace_resource.set(
-                Iri::parse("urn:eigenius:prov:program").unwrap(),
-                crate::ontology::resource::Value::iri(prog_id),
-            );
-        }
-        // Required: trace_tree — serialized tree-structured trace
-        if let Some(ref trace) = root_trace {
-            let trace_tree = crate::program::trace::trace_to_resource(trace);
-            trace_resource.set(
-                Iri::parse("urn:eigenius:prov:trace_tree").unwrap(),
-                crate::ontology::resource::Value::Embedded(Box::new(trace_tree)),
-            );
-        }
-        // Required: started_at, completed_at (ISO 8601)
-        trace_resource.set(
-            Iri::parse("urn:eigenius:prov:started_at").unwrap(),
-            crate::ontology::resource::Value::String(millis_to_iso8601(started_at_ms)),
-        );
-        trace_resource.set(
-            Iri::parse("urn:eigenius:prov:completed_at").unwrap(),
-            crate::ontology::resource::Value::String(millis_to_iso8601(completed_at_ms)),
-        );
-        trace_resource.set(
-            Iri::parse("urn:eigenius:prov:total_tokens").unwrap(),
-            crate::ontology::resource::Value::Integer(total_tokens),
-        );
-        trace_resource.set(
-            Iri::parse("urn:eigenius:prov:executed_steps").unwrap(),
-            crate::ontology::resource::Value::Integer(executed_steps),
-        );
-        // Recommended: universe_level = 0 (traces about domain resources)
-        trace_resource.set(
-            Iri::parse(crate::ontology::well_known::UNIVERSE_LEVEL).unwrap(),
-            crate::ontology::resource::Value::Integer(0),
-        );
-
-        // The run's outcome is SAMPLED, so the output carries an `ObservationTrace`
-        // beside the `ProgramTrace` (kernel-run-records §2).
-        //
-        // Two resources, two roles. The `ProgramTrace` above is provenance and grounds
-        // nothing — a computed claim rests on `App(Declared(plan), Observed(inputs))`,
-        // and the fact that a run happened is not a third ground. The paper puts the
-        // execution trace in the provenance graph explicitly: *"a sampled outcome
-        // reduces to a single Observed leaf. Details such as the specific instrument,
-        // the configuration parameters, and the execution trace belong in the provenance
-        // graph, not within the justification term."*
-        //
-        // **Why sampled rather than computed.** The paper's criterion is *"whether the
-        // plan formalizes a deterministic function, not the medium of execution"*.
-        // Nothing on any chain asserts that: 0 of 21 `stats:StatisticalAnalysisPlan`
-        // resources carry a `prov:DeclarationTrace`, and eigenius#43 records why the
-        // assertion is shaky even where it is made. So the outcome is a recording under a
-        // declared protocol, which is an `Observed` leaf.
-        //
-        // `program:component:deterministic` is deliberately NOT the predicate here. A
-        // component flag cannot see whether a deterministic acceptor stands between a
-        // stochastic step and the committed output — the shape the parser (LLMs rank, the
-        // kernel type-checks) and the Lean institution both have, where the acceptance
-        // grounds the result and the search record does not. It becomes the opt-out once
-        // a plan can formalize its function; it is not the test.
-        let observation_iri_str = format!("{trace_iri_str}:observed");
-        let mut observation_trace = Resource::new(Iri::parse(&observation_iri_str).unwrap());
-        observation_trace.set(
-            Iri::parse("urn:eigenius:core:is_a").unwrap(),
-            crate::ontology::resource::Value::Array(vec![
-                crate::ontology::resource::Value::String(
-                    "urn:eigenius:prov:ObservationTrace".to_string(),
-                ),
-            ]),
-        );
-        if let Some(out_id) = output.id() {
-            observation_trace.set(
-                Iri::parse("urn:eigenius:prov:resource").unwrap(),
-                crate::ontology::resource::Value::iri(out_id),
-            );
-        }
-        // `ObservationTrace` requires the Activity that produced the recording — the same
-        // one the ProgramTrace names, committed alongside so the reference resolves.
-        observation_trace.set(
-            Iri::parse("urn:eigenius:prov:was_generated_by").unwrap(),
-            crate::ontology::resource::Value::String(KERNEL_RUN_PROGRAM_ACTIVITY.to_string()),
-        );
-        observation_trace.set(
-            Iri::parse("urn:eigenius:prov:timestamp").unwrap(),
-            crate::ontology::resource::Value::String(millis_to_iso8601(completed_at_ms)),
-        );
-        // No link from here to the `ProgramTrace`. `prov:derivation` describes how a
-        // RESOURCE was produced and the output already carries it (set above), so an
-        // auditor reaching the output finds both traces. Putting it on this trace would
-        // read as "this observation was produced by that program run", which is not what
-        // the property means.
+        // Build the two records this run leaves behind. Extracted so the resume sweep
+        // emits the same pair rather than a second copy that drifts (eigenius#148) — the
+        // task-record arms in this same function had already drifted that way
+        // (eigenius#135).
+        let RunRecords {
+            program_trace: trace_resource,
+            observation_trace,
+            observation_iri: observation_iri_str,
+        } = build_run_records(RunRecordInputs {
+            trace_iri: &trace_iri_str,
+            output: &output,
+            program: &program,
+            root_trace: root_trace.as_ref(),
+            started_at_ms,
+            completed_at_ms,
+            total_tokens,
+            executed_steps,
+        });
 
         // Auto-commit program-run layer: produced domain resources
         // (comorphism reify outputs, program-final output) +
@@ -913,6 +803,182 @@ impl EigeniusService {
 
         let branch = resolve_branch_name(&req.branch).to_string();
         self.execute_program(&branch, program, input).await
+    }
+}
+
+/// The two records a completed program run leaves behind.
+///
+/// Extracted from `execute_program` so the resume sweep emits the same pair rather than a
+/// second copy that drifts (eigenius#148). The two task-record arms inside
+/// `execute_program` had already drifted exactly that way — the failure arm overwrote what
+/// the completion arm updated (eigenius#135) — which is the argument for one builder.
+///
+/// Pure: no `self`, no I/O, no clock. Timestamps arrive as arguments so a caller that wants
+/// a reproducible artifact fixes them, the same discipline `dcg::formalizer` uses.
+pub(super) struct RunRecords {
+    /// Provenance. Grounds nothing: a computed claim rests on
+    /// `App(Declared(plan), Observed(inputs))`, and that a run happened is not a third
+    /// ground.
+    pub program_trace: Resource,
+    /// The `Observed` leaf a sampled outcome is owed, on the run's output.
+    pub observation_trace: Resource,
+    /// The observation trace's IRI, for the caller's error reporting.
+    pub observation_iri: String,
+}
+
+/// Inputs to [`build_run_records`].
+pub(super) struct RunRecordInputs<'a> {
+    pub trace_iri: &'a str,
+    pub output: &'a Resource,
+    pub program: &'a Resource,
+    pub root_trace: Option<&'a crate::program::trace::Trace>,
+    pub started_at_ms: i64,
+    pub completed_at_ms: i64,
+    pub total_tokens: i64,
+    pub executed_steps: i64,
+}
+
+pub(super) fn build_run_records(i: RunRecordInputs<'_>) -> RunRecords {
+    use crate::ontology::resource::Value;
+
+    let trace_iri_str = i.trace_iri;
+    let output = i.output;
+    let program = i.program;
+    let root_trace = i.root_trace;
+    let started_at_ms = i.started_at_ms;
+    let completed_at_ms = i.completed_at_ms;
+    let total_tokens = i.total_tokens;
+    let executed_steps = i.executed_steps;
+
+    let mut trace_resource = Resource::new(Iri::parse(trace_iri_str).unwrap());
+    trace_resource.set(
+        Iri::parse("urn:eigenius:core:is_a").unwrap(),
+        Value::Array(vec![Value::String(
+            "urn:eigenius:prov:ProgramTrace".to_string(),
+        )]),
+    );
+    // ProgramTrace's three required fields, unified with
+    // DeclarationTrace and ObservationTrace around the D49 witness-
+    // emitter contract: `resource` is the target IRI the trace
+    // points at (the program's output here); `source` is a string
+    // naming the producer; `timestamp` is the wall-clock the trace
+    // was emitted (the completion timestamp). The rich execution-
+    // trace metadata (program / started_at / completed_at /
+    // trace_tree / metrics) lives in recommends; this handler
+    // fills every one.
+    if let Some(out_id) = output.id() {
+        trace_resource.set(
+            Iri::parse("urn:eigenius:prov:resource").unwrap(),
+            Value::iri(out_id),
+        );
+    }
+    // `prov:was_generated_by` is resource-typed, so the run needs an Activity
+    // to point at rather than the free-text `"kernel:run_program"` this used to
+    // write. The activity is the kernel's own program-running facility; it is
+    // committed alongside the trace so the reference resolves.
+    trace_resource.set(
+        Iri::parse("urn:eigenius:prov:was_generated_by").unwrap(),
+        Value::String(KERNEL_RUN_PROGRAM_ACTIVITY.to_string()),
+    );
+    trace_resource.set(
+        Iri::parse("urn:eigenius:prov:timestamp").unwrap(),
+        Value::String(millis_to_iso8601(completed_at_ms)),
+    );
+    if let Some(prog_id) = program.id() {
+        trace_resource.set(
+            Iri::parse("urn:eigenius:prov:program").unwrap(),
+            Value::iri(prog_id),
+        );
+    }
+    // Required: trace_tree — serialized tree-structured trace
+    if let Some(trace) = root_trace {
+        let trace_tree = crate::program::trace::trace_to_resource(trace);
+        trace_resource.set(
+            Iri::parse("urn:eigenius:prov:trace_tree").unwrap(),
+            Value::Embedded(Box::new(trace_tree)),
+        );
+    }
+    // Required: started_at, completed_at (ISO 8601)
+    trace_resource.set(
+        Iri::parse("urn:eigenius:prov:started_at").unwrap(),
+        Value::String(millis_to_iso8601(started_at_ms)),
+    );
+    trace_resource.set(
+        Iri::parse("urn:eigenius:prov:completed_at").unwrap(),
+        Value::String(millis_to_iso8601(completed_at_ms)),
+    );
+    trace_resource.set(
+        Iri::parse("urn:eigenius:prov:total_tokens").unwrap(),
+        Value::Integer(total_tokens),
+    );
+    trace_resource.set(
+        Iri::parse("urn:eigenius:prov:executed_steps").unwrap(),
+        Value::Integer(executed_steps),
+    );
+    // Recommended: universe_level = 0 (traces about domain resources)
+    trace_resource.set(
+        Iri::parse(crate::ontology::well_known::UNIVERSE_LEVEL).unwrap(),
+        Value::Integer(0),
+    );
+
+    // The run's outcome is SAMPLED, so the output carries an `ObservationTrace`
+    // beside the `ProgramTrace` (kernel-run-records §2).
+    //
+    // Two resources, two roles. The `ProgramTrace` above is provenance and grounds
+    // nothing — a computed claim rests on `App(Declared(plan), Observed(inputs))`,
+    // and the fact that a run happened is not a third ground. The paper puts the
+    // execution trace in the provenance graph explicitly: *"a sampled outcome
+    // reduces to a single Observed leaf. Details such as the specific instrument,
+    // the configuration parameters, and the execution trace belong in the provenance
+    // graph, not within the justification term."*
+    //
+    // **Why sampled rather than computed.** The paper's criterion is *"whether the
+    // plan formalizes a deterministic function, not the medium of execution"*.
+    // Nothing on any chain asserts that: 0 of 21 `stats:StatisticalAnalysisPlan`
+    // resources carry a `prov:DeclarationTrace`, and eigenius#43 records why the
+    // assertion is shaky even where it is made. So the outcome is a recording under a
+    // declared protocol, which is an `Observed` leaf.
+    //
+    // `program:component:deterministic` is deliberately NOT the predicate here. A
+    // component flag cannot see whether a deterministic acceptor stands between a
+    // stochastic step and the committed output — the shape the parser (LLMs rank, the
+    // kernel type-checks) and the Lean institution both have, where the acceptance
+    // grounds the result and the search record does not. It becomes the opt-out once
+    // a plan can formalize its function; it is not the test.
+    let observation_iri_str = format!("{trace_iri_str}:observed");
+    let mut observation_trace = Resource::new(Iri::parse(&observation_iri_str).unwrap());
+    observation_trace.set(
+        Iri::parse("urn:eigenius:core:is_a").unwrap(),
+        Value::Array(vec![Value::String(
+            "urn:eigenius:prov:ObservationTrace".to_string(),
+        )]),
+    );
+    if let Some(out_id) = output.id() {
+        observation_trace.set(
+            Iri::parse("urn:eigenius:prov:resource").unwrap(),
+            Value::iri(out_id),
+        );
+    }
+    // `ObservationTrace` requires the Activity that produced the recording — the same
+    // one the ProgramTrace names, committed alongside so the reference resolves.
+    observation_trace.set(
+        Iri::parse("urn:eigenius:prov:was_generated_by").unwrap(),
+        Value::String(KERNEL_RUN_PROGRAM_ACTIVITY.to_string()),
+    );
+    observation_trace.set(
+        Iri::parse("urn:eigenius:prov:timestamp").unwrap(),
+        Value::String(millis_to_iso8601(completed_at_ms)),
+    );
+    // No link from here to the `ProgramTrace`. `prov:derivation` describes how a
+    // RESOURCE was produced and the output already carries it (set above), so an
+    // auditor reaching the output finds both traces. Putting it on this trace would
+    // read as "this observation was produced by that program run", which is not what
+    // the property means.
+
+    RunRecords {
+        program_trace: trace_resource,
+        observation_trace,
+        observation_iri: observation_iri_str,
     }
 }
 

@@ -264,6 +264,7 @@ async fn resume_one_task(
         Arc::clone(&task_store),
     ));
 
+    let started_at_ms = super::helpers::now_millis();
     let result = crate::program::eval_io::execute_program_nbe_with_institutions(
         &program,
         &input,
@@ -276,8 +277,35 @@ async fn resume_one_task(
     );
 
     match result {
-        Ok(_) => {
+        Ok(exec) => {
+            // Commit what the run produced (eigenius#148). The success arm used to be
+            // `Ok(_) => status = Completed`, dropping the `NbeExecutionResult` whole: a
+            // task interrupted and resumed reported success and left no output resource
+            // and no trace, while the non-resumed path commits both.
+            //
+            // **Detached, by necessity.** A `TaskRecord` pins a `layer_head`, not a
+            // branch, so there is no ref to advance and no way to invent one without
+            // either a schema change or a policy for a branch that moved during the
+            // crash. The result lands as a layer off the pinned head and its id goes in
+            // `result_layer_head` — the field the live path already sets for exactly this,
+            // and what `GetTaskStatus` clients resolve.
+            //
+            // The records come from `build_run_records`, shared with `execute_program`, so
+            // a resumed run and a live one cannot drift apart.
             record.status = TaskStatus::Completed;
+            match commit_resumed_result(&record, exec, &backend, started_at_ms) {
+                Ok(head) => record.result_layer_head = Some(head),
+                Err(e) => {
+                    tracing::warn!(
+                        { field::OPERATION } = operation::TASK_RESUME,
+                        { field::ERROR_KIND } = "result_commit_failed",
+                        { field::TASK_ID } = ?task_id,
+                        { field::ERROR_MESSAGE } = %e,
+                        "resumed task ran but its result could not be committed"
+                    );
+                    record.status = TaskStatus::Failed;
+                }
+            }
         }
         Err(e) => {
             tracing::warn!(
@@ -605,5 +633,235 @@ impl TraceStore for BackendTraceStore {
         self.backend
             .as_trace_store()
             .put_component_trace(key, trace);
+    }
+}
+
+/// Commit a resumed run's output and records as a layer off the task's pinned head.
+///
+/// Detached: no branch advances. A `TaskRecord` pins a `layer_head` rather than a ref, so
+/// there is nothing to CAS against and nothing to conflict with a branch that moved while
+/// the process was down. The caller records the returned id in `result_layer_head`.
+///
+/// **Validated before it is stored.** `LayerBuilder::build` assembles; it does not run
+/// `Validator::validate` — that happens in `commit::phases`, which needs a branch to CAS
+/// against and so cannot serve a detached commit. A resumed run's output has never been
+/// validated (the original crashed before committing), so this runs the validator directly
+/// and refuses to store on any error rather than landing an unchecked layer.
+///
+/// What that still skips, relative to a live commit: the AutoOnLoad institution dispatch and
+/// the commit hooks. A resumed run therefore commits its output and records but fires no
+/// institution gate. Recorded rather than silently accepted — closing it needs the branch
+/// question a `TaskRecord` cannot answer.
+fn commit_resumed_result(
+    record: &crate::task::TaskRecord,
+    exec: crate::program::eval_io::NbeExecutionResult,
+    backend: &Arc<dyn crate::storage::PersistentBackend>,
+    started_at_ms: i64,
+) -> Result<crate::layer::LayerId, String> {
+    use crate::server::programs::{build_run_records, RunRecordInputs, RunRecords};
+
+    let completed_at_ms = super::helpers::now_millis();
+    let metrics = crate::program::trace::ProgramMetrics::from_trace(&exec.root_trace);
+    let trace_iri = format!("urn:eigenius:trace:resume-{}", uuid::Uuid::new_v4());
+
+    let RunRecords {
+        program_trace,
+        observation_trace,
+        ..
+    } = build_run_records(RunRecordInputs {
+        trace_iri: &trace_iri,
+        output: &exec.output,
+        program: &crate::ontology::resource::Resource::new_embedded(),
+        root_trace: exec.root_trace.as_ref(),
+        started_at_ms,
+        completed_at_ms,
+        total_tokens: metrics.total_tokens,
+        executed_steps: metrics.executed_steps,
+    });
+
+    let info = backend
+        .load_chain_from(&record.layer_head)
+        .map_err(|e| format!("load pinned chain: {e}"))?
+        .ok_or_else(|| "pinned layer vanished between resume and commit".to_string())?;
+    let head = crate::layer::build_chain(
+        info,
+        crate::layer::LayerStorage::with_persistent(Arc::clone(backend)),
+    );
+
+    let mut b = crate::layer::LayerBuilder::new("task-resume-result", Some(head));
+    for r in exec.produced_resources {
+        b.add_resource(r).map_err(|e| format!("produced: {e}"))?;
+    }
+    if exec.output.id().is_some() {
+        b.add_resource(exec.output)
+            .map_err(|e| format!("output: {e}"))?;
+    }
+    b.add_resource(program_trace)
+        .map_err(|e| format!("ProgramTrace: {e}"))?;
+    b.add_resource(observation_trace)
+        .map_err(|e| format!("ObservationTrace: {e}"))?;
+
+    let layer = Arc::new(
+        b.build(crate::layer::LayerStorage::with_persistent(Arc::clone(
+            backend,
+        ))),
+    );
+
+    let errors = crate::validation::Validator::new(Arc::clone(&layer)).validate();
+    if !errors.is_empty() {
+        return Err(format!(
+            "resumed result failed validation ({} error(s)); first: {}",
+            errors.len(),
+            errors
+                .first()
+                .map(|e| e.message.as_str())
+                .unwrap_or("<none>")
+        ));
+    }
+
+    backend
+        .store_layer(&layer)
+        .map_err(|e| format!("persist result layer: {e}"))
+}
+
+#[cfg(test)]
+mod resume_tests {
+    use super::*;
+    use crate::ontology::eigon_json;
+    use crate::ontology::resource::Resource;
+    use crate::storage::memory::MemoryPersistentBackend;
+    use crate::storage::PersistentBackend;
+
+    /// A layer holding a runnable program and its input, persisted so a task record can
+    /// pin it. Returns the backend, the pinned layer id, and the two IRIs.
+    fn pinned_run(backend: &Arc<dyn PersistentBackend>) -> (crate::layer::LayerId, String, String) {
+        let ctx = crate::bootstrap::bootstrap_persistent(Arc::clone(backend))
+            .expect("bootstrap over the memory backend");
+        let mut b = crate::layer::LayerBuilder::new("resume-fixture", Some(Arc::clone(ctx.head())));
+
+        let program = eigon_json::parse_document(
+            r#"{
+                "@id": "urn:eigenius:test:resume:prog",
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+                "urn:eigenius:program:input_type": "urn:eigenius:prov:Agent",
+                "urn:eigenius:program:output_type": "urn:eigenius:prov:Agent",
+                "urn:eigenius:program:body": {
+                    "urn:eigenius:core:is_a": ["urn:eigenius:program:Construct"],
+                    "urn:eigenius:program:class": "urn:eigenius:prov:Agent",
+                    "urn:eigenius:program:fields": {
+                        "urn:eigenius:core:short_name": {
+                            "urn:eigenius:core:is_a": ["urn:eigenius:program:Literal"],
+                            "urn:eigenius:program:value": "resumed"
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("program parses")
+        .remove(0);
+        let mut input = Resource::new(Iri::parse("urn:eigenius:test:resume:input").unwrap());
+        input.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String("urn:eigenius:prov:Agent".to_string()),
+            ]),
+        );
+        b.add_resource(program).expect("add program");
+        b.add_resource(input).expect("add input");
+
+        let layer = b.build(crate::layer::LayerStorage::with_persistent(Arc::clone(
+            backend,
+        )));
+        let id = backend
+            .store_layer(&layer)
+            .expect("persist the pinned layer");
+        (
+            id,
+            "urn:eigenius:test:resume:prog".to_string(),
+            "urn:eigenius:test:resume:input".to_string(),
+        )
+    }
+
+    /// §3.2 / eigenius#148 — a resumed task commits what it produced.
+    ///
+    /// The success arm was `Ok(_) => { record.status = TaskStatus::Completed; }`: the
+    /// `NbeExecutionResult` was dropped whole, so a task interrupted and resumed reported
+    /// success and left no output resource and no trace, while the non-resumed path
+    /// through `execute_program` commits all of them.
+    ///
+    /// The result lands **detached**: a layer off the record's pinned `layer_head`, with
+    /// its id in `result_layer_head`. No branch advances, because a `TaskRecord` carries
+    /// no branch — it pins a layer, not a ref — and inventing one would either need a
+    /// schema change or a policy for a branch that moved during the crash.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_resumed_task_commits_its_output_and_traces() {
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let (layer_head, program_iri, input_iri) = pinned_run(&backend);
+
+        let task_store: Arc<dyn crate::task::TaskStore> =
+            Arc::new(crate::task::BackendTaskStore::new(Arc::clone(&backend)));
+        let session_id = uuid::Uuid::new_v4();
+        let task_id = uuid::Uuid::new_v4();
+        let rec = crate::task::TaskRecord::new_running(
+            session_id,
+            task_id,
+            program_iri,
+            input_iri,
+            layer_head,
+            crate::server::helpers::now_millis(),
+        );
+        task_store.put_task(&rec).expect("seed the Running record");
+
+        let trace_store: Arc<dyn TraceStore> =
+            Arc::new(crate::server::BackendTraceStore::new(Arc::clone(&backend)));
+        resume_one_task(
+            rec,
+            Arc::clone(&task_store),
+            Arc::clone(&backend),
+            trace_store,
+            Arc::new(ComponentRegistry::default()),
+            1,
+        )
+        .await;
+
+        let after = task_store
+            .get_task(&session_id, &task_id)
+            .expect("read back")
+            .expect("the record survives resume");
+        assert_eq!(
+            after.status,
+            crate::task::TaskStatus::Completed,
+            "the re-execution succeeds"
+        );
+
+        let result_head = after.result_layer_head.expect(
+            "a resumed task records where its result landed — without this the run reports \
+             success and commits nothing (eigenius#148)",
+        );
+        let info = backend
+            .load_chain_from(&result_head)
+            .expect("load the result chain")
+            .expect("the result layer is persisted");
+        let layer = crate::layer::build_chain(
+            info,
+            crate::layer::LayerStorage::with_persistent(Arc::clone(&backend)),
+        );
+        let mut program_traces = 0;
+        let mut observation_traces = 0;
+        for (_iri, r) in layer.iter_resources() {
+            for c in r.is_a() {
+                match c.as_str() {
+                    "urn:eigenius:prov:ProgramTrace" => program_traces += 1,
+                    "urn:eigenius:prov:ObservationTrace" => observation_traces += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(
+            (program_traces, observation_traces),
+            (1, 1),
+            "the resumed run leaves the same pair as a live one — build_run_records is \
+             shared so the two cannot drift"
+        );
     }
 }

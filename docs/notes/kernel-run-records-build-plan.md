@@ -151,12 +151,27 @@ what the record held. The completion path forty lines down does it correctly —
 `get_task` and mutates. #206 names this as a constraint on itself: *"the failure path must not
 mint."* Both halves are in the same error arm.
 
-### 3.4 The record carries its input, and can be read — #147
+### 3.4 The record names what it ran on — #147
 
-Populate `prov:input`. Then either give `prov:trace_tree` a reader or stop writing it — a
-serialised tree with no inverse is not provenance anyone can traverse, and D6b §5 describes that
-traversal as *the* provenance mechanism. **This is a decision, not only work**: the cheaper honest
-outcome may be to drop `trace_tree` and keep the trace flat.
+**No fork. The trace-tree half of #147 is wrong** (corrected on the issue, `2026-09-05`).
+`prov:trace_tree` *is* read: `notebooks/src/runtime/traceResource.ts:56` maps `PROP.traceTree` to
+it and `:146` flattens the kernel's right-leaning `Trace::Let` chain into siblings for the
+notebook's trace panel. The inverse of `trace_to_resource` exists — in TypeScript, in the notebook
+runtime.
+
+The issue reads otherwise because its scope enumerates *"the kernel, the crates, the CLI or the
+orchestrator"*, all four true, and `notebooks/` is none of them. Working from it, this plan
+previously recommended dropping the field. That would have deleted a working feature, and the
+reader carries a comment about a previous bug where it read the wrong namespace and *"the panel
+rendered an empty tree beside a perfectly good trace"*.
+
+So 3.4 is two small things, no bootstrap edit and no #235 dependency:
+
+1. **Populate `prov:input`.** Genuinely never set — the only thing written is
+   `reflection:input_hash` (`program/trace.rs:313`), a different property — while `prov:input`'s
+   domain is `ProgramTrace` and the class recommends it.
+2. **Delete the `// Required: trace_tree` comment** in `build_run_records`. It is `recommends`;
+   `prov:ProgramTrace` requires only `prov:resource`, `prov:was_generated_by`, `prov:timestamp`.
 
 ### 3.5 An unregistered component fails, and the three phantom builtins go — #144
 
@@ -230,7 +245,8 @@ Deleting removes the affordance.
 
 **This half is a bootstrap edit.** `ontologies/program/program-ontology.json` is compiled into
 `BOOTSTRAP_CHAIN` (`bootstrap/mod.rs:273`), so removing three resources moves the manifest hash and
-forces a reseed. It therefore **rides #235's batched reseed** rather than paying for its own — and
+forces a reseed. It therefore **leaves this branch for the D86/D87/#235 follow-on batch**, where
+the reseed is paid once for all of them — and
 (a) does not wait for it, since (a) is Rust-only.
 
 ### 3.6 The `INTO` multi-binding rejection gets a test — #150
@@ -243,7 +259,7 @@ No test drives it. 3.1 modifies this evaluator, so pin the path before changing 
 ### 4.1 #144 — moved into the batch in full
 
 See §3.5. Both halves are in scope: the dispatch error (Rust-only, lands here) and deleting the
-three phantom declarations (a bootstrap edit, rides #235's reseed).
+three phantom declarations — a bootstrap edit, so it goes with the D86/D87/#235 batch, not here.
 
 ### 4.2 #145 — reconsidered, and the case is stronger than §2 first allowed
 
@@ -348,11 +364,14 @@ looked at without being resolved.
    rather than inventing one.
 6. **3.4 last.** It changes the record's fields, so it lands once the set of minting sites is fixed.
 7. **§4.4 (#149)** alongside 3.1 — same evaluator, and the deletion is Rust-only.
-8. **§3.5(b)** whenever #235's reseed runs. It is the only item on this branch that touches a
-   bootstrap ontology, and it does not gate anything else here.
+8. ~~**§3.5(b)**~~ — **not on this branch.** It is the only item here that touches a bootstrap
+   ontology, and it gates nothing else, so it moves to the D86/D87/#235 follow-on batch where one
+   reseed covers D86's `≤`/`==` declarations, D87 §5's two `prov:VerificationTrace` slots, the two
+   false descriptions, and this.
 
-**One ontology edit, deferred.** §3.5(b) removes three resources from the program ontology and
-rides #235's reseed. Otherwise `prov:input` and `prov:trace_tree` are already declared. If 3.4's
+**No ontology edit on this branch.** §3.5(b) removes three resources from the program ontology and
+travels with the D86/D87/#235 batch instead. `prov:input` and `prov:trace_tree` are already
+declared, so §3.4 needs none. If 3.4's
 decision is to drop `trace_tree`, that *is* a bootstrap edit and joins #235's batched reseed rather
 than paying for its own.
 

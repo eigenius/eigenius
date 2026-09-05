@@ -238,6 +238,14 @@ Liu, Jerry (2023). *LlamaIndex*.
 
 [Link](https://llamaindex.ai/)
 
+### `goldberg1991`
+
+Goldberg, David (1991). "What every computer scientist should know about floating-point arithmetic". *ACM Computing Surveys* 23(1), 5–48.
+
+[DOI: 10.1145/103162.103163](https://doi.org/10.1145/103162.103163)
+
+Cited by [D86](../../design/d86-the-numeric-primitive-core.md) §3.4 for the decision to admit IEEE NaN with its defined behaviour rather than refine it away.
+
 ### `ltn`
 
 Badreddine, Samy, Garcez, Artur d'Avila, Serafini, Luciano, and Spranger, Michael (2022). "Logic tensor networks". *Artificial Intelligence*, 303.

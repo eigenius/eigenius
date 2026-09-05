@@ -41,7 +41,7 @@ argued once**, with everything else *derived on the chain* and *generated into t
 the two agree by construction rather than by a table someone maintains. That is D74 §3.3's
 discipline (one mangling function called by both sides) applied one level up.
 
-## 3. The core: three primitives and one refinement
+## 3. The core: three primitives, and a refinement that stays optional
 
 ### 3.1 `core:float` ↔ `Float`
 
@@ -67,7 +67,7 @@ from `-0.0`. No measurement claim means that. A chain equality that translated t
 quietly be making claims about signed zero, which is D74 §5's failure mode arriving through the
 back door.
 
-### 3.4 Exclude NaN at the chain level, by refinement
+### 3.4 NaN is admitted, with its defined behaviour — decided `2026-09-05`
 
 ```
 NaN == NaN  → false
@@ -75,13 +75,35 @@ NaN ≤ NaN   → false
 1.0 ≤ 1.0   → true
 ```
 
-Both relations are non-reflexive on NaN, so the order is **partial** and ordinary reasoning
-breaks: `¬(x ≤ y)` stops implying `y < x`. Constrain measured quantities to non-NaN on the chain
-and the order is total and classical on that subset.
+Both relations are non-reflexive on NaN, so the order is **partial**: `¬(x ≤ y)` stops implying
+`y < x`.
 
-This costs no new machinery. D30 already emits a refinement as a Lean `Subtype`
-(`{ x : Float // … }`, visible in the golden `Mirror.lean`), and D74 §4.5 already translates `Sig`
-to exactly that.
+**That is not a defect to engineer around. It is the standard**
+([Goldberg 1991](https://doi.org/10.1145/103162.103163)). NaN's behaviour is *specified*, not
+undefined — comparisons are false, and it propagates through arithmetic — and IEEE 754 exists so
+that behaviour is principled and portable rather than per-implementation. The statistics tooling
+this chain records already behaves that way: R, NumPy and Julia all propagate NaN, so a statistical
+computation's output can legitimately be one. `core:float` is IEEE binary64, NaN included.
+
+**An earlier draft of this section excluded NaN by refinement.** That contradicted §3.3 one
+paragraph above it. §3.3 rejects Lean's structural `Eq` precisely *because* IEEE semantics are what
+a measurement means; excluding NaN declines to defer to IEEE immediately after insisting on it.
+Taking the standard seriously in one place and working around it in the next is the inconsistency,
+and admitting NaN is the consistent reading.
+
+**What it costs, stated plainly.** A proof about a possibly-NaN quantity has to handle NaN. That is
+correct rather than burdensome — the theorem is weaker because the fact is weaker, and a claim
+`0.0 ≤ x` is simply **false** for a NaN `x`, which is the right answer: a NaN measurement does not
+satisfy a bound.
+
+**§3.2's derivation survives unchanged.** `x < y` as `x ≤ y ∧ ¬(x == y)` gives, for NaN,
+`false ∧ ¬false = false` — NaN is less than nothing, which is IEEE's answer.
+
+**Refinement stays available, as an ordinary thing anyone can do.** An author who knows a quantity
+is non-NaN can say so per property and get the total order back, and it costs no new machinery: D30
+already emits a refinement as a Lean `Subtype` (`{ x : Float // … }`, visible in the golden
+`Mirror.lean`) and D74 §4.5 translates `Sig` to exactly that. What changed is that this is a
+property author's choice about a specific quantity, not a constraint on the primitive.
 
 ### 3.5 Arithmetic is deliberately *out*
 
@@ -113,8 +135,8 @@ modelling question about the chain, not about the comorphism.
 | | |
 |---|---|
 | `core:float` ↔ `Float` | **done** (D74 §4.8) |
-| non-NaN refinement → `Subtype` | **done** (D30 emission + D74 §4.5) |
-| declare `≤` and `==` on the chain | one ESL edit |
+| optional non-NaN refinement → `Subtype` | **done** (D30 emission + D74 §4.5), and optional per §3.4 |
+| declare `≤` and `float_ieee_eq` on the chain | one ESL edit; §6 settles the shape |
 | D30 emits chain definitions as Lean `def`s | the real work — it emits `structure`s only |
 
 The last row is the one that carries the design property. If D30 generates the Lean side from the
@@ -139,12 +161,35 @@ should land in one pass:
 | `witness:IsVerifiedAs` description | `ontologies/core/core-ontology.json` | says *"Nothing in the tree currently emits one — the producer is the Lean institution under eigenius#160."* The Lean institution emits one as of `2026-09-03` |
 | `justification:VerifiedPropositionView` | `ontologies/justification/justification.esl` | its description says the witness emitter looks the view up by `source_verified_resource`; the emitter reads the claim's `canonical_proposition` and never touches the view. Nothing reads the class at all — declared, bootstrap-registered, referenced by two `esl::compile` tests, and otherwise dead. **Recommend deleting it** rather than rewording: the comorphism route it served was replaced by D74's forward externalization (D51 §3) |
 
-## 6. Open
+## 6. Settled `2026-09-05`
 
-1. **Where the primitive correspondence is stated.** A property on the chain axiom, an entry in
-   the generator, or a fixed table in D30. Whichever it is, there should be one of it, and it
-   should be short enough to read in full.
-2. **Whether `==` should be `BEq` or a `Decidable` equality**, and what the chain-side name is.
-3. **Whether the non-NaN refinement is mandatory on `core:float`** or opt-in per property. Making
-   it mandatory makes every float total-ordered and removes a class of mistake; making it opt-in
-   keeps `core:float` faithful to IEEE, which includes NaN.
+1. **Where the primitive correspondence is stated: a table in the generator**, beside the
+   externalizer that consumes it.
+
+   The alternative — a property on the chain axiom — would let whoever authors an axiom write its
+   Lean meaning, and `docs/guides/esl/09-institutions.md` §9.11.2 puts **each formal comorphism in
+   the TCB**. That makes a TCB entry authorable by committing a resource, which is the
+   self-nomination shape eigenius#23 deleted `epistemic_status` for. A table in D30 alone documents
+   and enforces nothing. In Rust the correspondence is reviewed like the rest of the TCB (D74, D30,
+   `nanoda_lib`) and cannot be extended from the chain. §5's "generate the Lean side from the
+   chain" argument does not apply: that guards against two hand-written sides drifting, and this is
+   a fixed set of two relations.
+
+2. **`==` is `BEq` / `instBEqFloat`**, and the chain-side proposition is `(x == y) = true`.
+
+   Not a `Decidable` equality: that decides `Eq`, and §3.3's measurement is that `Eq` on `Float` is
+   structural — `0.0 == -0.0` is `true` while `0.0.toBits == -0.0.toBits` is `false`. A `Decidable`
+   equality therefore delivers exactly the relation §3.3 rejects. **The name must carry the
+   IEEE-ness on its face** — `float_ieee_eq` rather than `float_eq` — so it cannot be read as
+   propositional equality by someone who has not read §3.3.
+
+3. **NaN is admitted; there is no mandatory refinement.** See §3.4. The question as originally posed
+   — mandatory on `core:float` or opt-in per property — assumed the refinement was the expected
+   case. It is not: `core:float` is IEEE binary64, and refinement is an ordinary per-property choice
+   for an author who knows a quantity is non-NaN.
+
+   Two facts that would have made "mandatory" expensive, recorded for the avoidance of a rerun:
+   nothing in the tree checks NaN today (no `is_nan` anywhere in validation or the ontology), so
+   mandatory means a new validator rule *plus* a decision about floats already committed; and
+   making it mandatory changes what a core primitive means, which is the most load-bearing edit
+   available.
