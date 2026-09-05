@@ -1000,12 +1000,60 @@ fn eigenql_fiber_into_collects_response_for_chain_commit() {
 
     let outcome =
         query::execute_with_into(&source, &data, runtime).expect("query executes with INTO");
+    // Three chain-bound resources: the response, plus the record of what produced it —
+    // a `ProgramTrace` and the Activity it names (eigenius#206, kernel-run-records §3.1).
+    // Before that, the response landed on the chain with no chain-resident account of its
+    // origin; the EigenQL trace the dispatch comment relies on does not persist.
     assert_eq!(
         outcome.into_resources.len(),
-        1,
-        "FIBER ... INTO should produce exactly one chain-bound resource"
+        3,
+        "FIBER ... INTO commits the response plus its ProgramTrace and Activity; got {:?}",
+        outcome
+            .into_resources
+            .iter()
+            .map(|r| r.id().map(|i| i.as_str().to_string()))
+            .collect::<Vec<_>>()
     );
-    let committed = &outcome.into_resources[0];
+    let committed = outcome
+        .into_resources
+        .iter()
+        .find(|r| r.id().map(|i| i.as_str()) == Some(target))
+        .expect("the response is committed at the user-named INTO IRI");
+
+    let trace = outcome
+        .into_resources
+        .iter()
+        .find(|r| {
+            r.is_a()
+                .iter()
+                .any(|c| c.as_str() == "urn:eigenius:prov:ProgramTrace")
+        })
+        .expect("the write-back carries a ProgramTrace");
+    assert_eq!(
+        trace.get(&iri("urn:eigenius:prov:resource")),
+        Some(&Value::iri(&iri(target))),
+        "the trace points at the resource that was written back"
+    );
+    assert!(
+        trace.get(&iri("urn:eigenius:prov:input")).is_some(),
+        "and records the query it was asked — `prov:input` carries the dispatched resource"
+    );
+    let activity_iri = trace
+        .get(&iri("urn:eigenius:prov:was_generated_by"))
+        .and_then(|v| match v {
+            Value::String(s) => Some(s.clone()),
+            _ => None,
+        })
+        .expect("ProgramTrace requires was_generated_by");
+    assert!(
+        outcome
+            .into_resources
+            .iter()
+            .any(|r| r.id().map(|i| i.as_str()) == Some(activity_iri.as_str())),
+        "the Activity is committed alongside so the reference resolves — it is minted \
+         locally rather than declared in prov.esl, since one query invocation is not a \
+         permanent facility"
+    );
     assert_eq!(
         committed.id().map(|i| i.as_str()),
         Some(target),
