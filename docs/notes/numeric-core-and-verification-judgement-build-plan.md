@@ -33,16 +33,34 @@ All five, in `ontologies/`:
 | 1 | declare `≤` and `float_ieee_eq` over `core:float` | D86 §3.2, §3.3, §6 |
 | 2 | a permitted-axiom slot on `prov:VerificationTrace` | D87 §5 |
 | 3 | a checker-identity slot on `prov:VerificationTrace`, as **kind + value** | D87 §9.3 |
-| 4 | `witness:IsVerifiedAs`'s description — false since #160 | #235 |
-| 5 | delete `justification:VerifiedPropositionView` + `justification:source_verified_resource` | #235, confirmed `2026-09-05` |
-| 6 | delete `components:Combine` / `Extract` / `Transform` | kernel-run-records §3.5(b) |
+| 4 | delete `justification:VerifiedPropositionView` + `justification:source_verified_resource` | #235, confirmed `2026-09-05` |
+| 5 | delete `components:Combine` / `Extract` / `Transform` | kernel-run-records §3.5(b) |
 
-**Nothing here is undecided.** D86 §6 settled the three that were open (`2026-09-05`); #235's edit 4
-was confirmed; §3.5(b) was argued in the previous batch. Edit 5 also needs the two `esl::compile`
-test references repointed and the `bootstrap/mod.rs:1375` registration removed.
+**Nothing here is undecided.** D86 §6 settled the three that were open (`2026-09-05`); §3.5(b) was
+argued in the previous batch. Edit 4 also needs the two `esl::compile` test references repointed and
+the `bootstrap/mod.rs:1375` registration removed.
 
-**Sequencing:** land all six, then reseed **once**, then the verification gate (§5). Do not reseed
-between edits.
+**Edit 1 is one relation, not two.** `stats:le` already exists
+(`ontologies/statistics/statistics.esl`, namespace `urn:eigenius:measurements`), alongside `lt`,
+`gt` and `ge` — D86 §1 uses it as its own example of a relation that externalizes to a `Const` the
+export does not declare. Only `float_ieee_eq` is new. The four ordering axioms **stay axioms**: a
+`def` is transparent, and the DCG recognises `measurements:gt` / `lt` by IRI on the decoded term
+(`dcg/category.rs`, `dcg/rules/combinators.rs` — the form the WordNet importer emits), so deriving
+them on the chain would dissolve the head the parser matches on. §3.2's derivation moves into §2's
+table instead, where it costs the TCB nothing.
+
+**#235's fifth edit — rewording `witness:IsVerifiedAs`'s description — is dropped, subsumed by §3.5
+step 3, which deletes the declaration.** It was listed before §3.5 joined the batch. Rewording a
+declaration this same batch removes buys nothing and costs a reseed; if step 3 turns out blocked,
+the reword lands in the second pass instead, so the description is not left false either way.
+
+**Sequencing: land all five, then keep going — the reseed waits for §3.5.** §3.5 step 2 changes the
+`Certificate` constructors and cannot join this pass, because the premise replacing `witness:Is*As`
+does not exist until §3.3 emits the judgement, so the plan first read as two reseeds. It is one:
+nothing between here and §3.5 needs a reseeded store to *develop* against — the unit tests build the
+bootstrap in memory, and `gen_verification_demo` (§3.1) writes a JSON file. The reseed is a
+verification step, not a prerequisite, so running it once after §3.5's edit costs one pass instead
+of two and validates the shape the batch actually ends with.
 
 ## 2. D86 — the correspondence lives in Rust
 
@@ -122,11 +140,27 @@ waiting on.
 
 Three steps, in order:
 
-1. **Verify the word "plausibly."** D87 asserts `Declared` and `Observed` are constant
-   specifications over relations the kernel can read at any time; nothing has checked it. Can the
-   kernel recompute `IsDeclaredAs(iri, P)` from `declared_by`, and `IsObservedAs` from the
-   observation relation, at any point — without consulting a committed witness? If either answer is
-   no, the closeout stops here and the index stays a soundness boundary for that family.
+1. ~~**Verify the word "plausibly."**~~ **Answered `2026-09-05`: yes for both, and the kernel
+   already does it.** `layer_admits_witness` (`kernel/src/layer/witness_index.rs`) consults no
+   committed witness. It is a pure function of the layer's Trace-class resources — reached through
+   the triple index on `prov:resource`, or by iterating the layer when it is still in-flight — plus
+   the target's `reflection:canonical_proposition`, or D39 §4.1's `Asserts(target_iri)` default when
+   it carries none. Nothing about a witness is stored: the `Val::ChainWitness` is synthesised on
+   demand at the certificate's type-check site. The module's own header says so — *"a pure
+   deterministic function of that Layer's Trace-class resources … nothing here is persisted"* — and
+   `lookup_chain_witness`'s first-hit-wins walk is sound for the reason a decision procedure needs,
+   Layer immutability making a once-admitted witness stay admitted in every descendant.
+
+   Two caches sit on top and neither is a soundness boundary, because both fail conservatively.
+   `LayerHandle::has_witness_candidates` prunes a layer that stamped no candidate; it defaults to
+   `true` on deserialization, so an old handle is probed rather than skipped. `any_trace_targeting`
+   treats a poisoned `pending` lock as in-flight (`unwrap_or(true)`) and falls back to the full
+   scan. Both turn a wrong guess into a refused certificate, never an admitted one.
+
+   So `Declared` and `Observed` are decision procedures over relations, exactly as P7 supposed, and
+   the index is a cache for them. `Verified` was the one family where it was not — the
+   `VerificationTrace` route admits on the strength of a committed note, because the kernel cannot
+   re-run nanoda at lookup time — and §3.3 is what changes that.
 2. **Change the three `Certificate` constructors' premises**, from `witness:Is*As(iri, P)` to
    whatever step 1 and §3.3 establish. Bootstrap edit, so it joins §1's pass **only if step 1 has
    already been answered** — otherwise it waits for a second reseed, which is the one case this
@@ -178,13 +212,13 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase":
 
 ## 6. Order
 
-1. **§1's six ontology edits**, then the reseed, then §5's baselines. Everything else builds on the
-   reseeded chain.
+1. **§1's five ontology edits.** No reseed here — see §1; the single reseed follows §3.5.
 2. **§3.1 the fixture** — nothing downstream is testable before it.
 3. **§2 the correspondence table** + the two relation declarations become usable together.
 4. **§3.2 the term former**, the largest and riskiest piece.
 5. **§3.3 the emit**, which is small once §3.2 exists.
 6. **§3.5 the P7 closeout** — last, because §3.3 is the input it waits on. Step 1 (verifying
-   "plausibly" for `Declared` and `Observed`) can and should run *early*, in parallel with §1, since
-   its answer decides whether the constructor change makes §1's reseed or needs a second.
-7. **§3.4 deploy by digest**, independent — any time.
+   "plausibly" for `Declared` and `Observed`) runs early, in parallel with §1 — **answered
+   `2026-09-05`, see §3.5.**
+7. **The reseed, then §5's baselines.** One pass, over §1's edits and §3.5's together.
+8. **§3.4 deploy by digest**, independent — any time.

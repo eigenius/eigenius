@@ -60,7 +60,7 @@ mod gc;
 pub mod helpers;
 mod hooks;
 mod inspect;
-mod lifecycle;
+pub(crate) mod lifecycle;
 mod load;
 mod parse;
 pub use parse::ParseConfig;

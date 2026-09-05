@@ -172,11 +172,13 @@ pub fn is_witness_candidate(resource: &Resource) -> bool {
 ///
 /// All four grounding families are here (eigenius#200). `VerificationTrace` was absent until
 /// `2026-08-21` on the reasoning that it would arrive with D49 §7's comorphism-reified
-/// `VerifiedPropositionView`. That deferred the wrong half: the view is how a LEAN proof's
-/// proposition reaches the trace, not what makes a `VerificationTrace` admit a witness. The trace
-/// already names its target through `prov:resource`, so `emit_from_trace` reads the target's
-/// `canonical_proposition` for it exactly as it does for the other three — nothing about the
-/// Verified category needs special handling here.
+/// `VerifiedPropositionView` — a chain artifact holding a Lean proof's proposition in EigenTT form.
+/// That deferred the wrong half, and the view is now deleted: it is how a Lean proof's proposition
+/// would have reached the trace, not what makes a `VerificationTrace` admit a witness, and D74's
+/// forward externalization replaced the route it served (D51 §3). The trace already names its
+/// target through `prov:resource`, so `emit_from_trace` reads the target's `canonical_proposition`
+/// for it exactly as it does for the other three — nothing about the Verified category needs
+/// special handling here.
 ///
 /// The consequence of the omission was a witness with no artifact: `emit_from_reasoning_sentence`
 /// synthesised a Verified key straight from the sentence, so every Verified witness on every chain

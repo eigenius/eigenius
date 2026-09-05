@@ -326,30 +326,6 @@ property justification:refutes : core:string {
     domain justification:Conclusion;
 }
 
-// ── VerifiedPropositionView (D49 §7) ─────────────────────────────────
-//
-// The chain artifact reified by the Lean → Reasoning comorphism. Carries
-// the EigenTT-form proposition that a Lean VerifiedResource inhabits, so
-// the witness emitter for VerificationTrace reads canonical_proposition
-// from a chain resource uniformly with the other three witness families.
-// The user-authored Lean resource stays intact; this view is derived.
-//
-// Created automatically by the lean_to_justification comorphism (D49 §7);
-// not user-authored. Phase 8 wires the comorphism; this declaration
-// fixes the contract.
-
-class justification:VerifiedPropositionView {
-    description = "Comorphism-reified view of a Lean (or future Coq/Agda/Idris) VerifiedResource's proposition, expressed as an EigenTT Prop term. The witness emitter for prov:VerificationTrace looks up the view by source_verified_resource and reads canonical_proposition to build the IsVerifiedAs witness (D49 §7). Required, not optional: a view without a canonical_proposition is malformed.";
-    requires justification:source_verified_resource,
-             reflection:canonical_proposition;
-}
-
-property justification:source_verified_resource : core:string {
-    description = "IRI of the user-authored VerifiedResource (typically a lean:LeanProofTerm) whose proposition this view exposes in EigenTT form. The IsVerifiedAs witness key's iri slot uses this value (not the view's own IRI) so that justification:Certificate.verified constructors over the user-authored VerifiedResource resolve successfully.";
-    format = formats:iri;
-    domain justification:VerifiedPropositionView;
-}
-
 // ── What P7 deleted here ─────────────────────────────────────────────
 //
 // The Reasoning institution and its surface used to sit between the classes above and the

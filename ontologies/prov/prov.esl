@@ -251,8 +251,9 @@ class prov:ProgramTrace : prov:ProductionTrace {
 }
 
 class prov:VerificationTrace : prov:Trace {
-    description = "Records that a proof of a resource's proposition was CHECKED by a proof system. Two verifiers produce one, distinguished by prov:proof_system rather than by class: an external prover (lean4, coq, agda) whose exported blob is checked, and the kernel itself, whose type-checked justification:Certificate is the proof term. Kernel-checking is verification; treating the two as different kinds would make the ground depend on which checker ran.";
-    requires prov:resource, prov:proof_system, prov:proof_term, prov:timestamp;
+    description = "Records that a proof of a resource's proposition was CHECKED by a proof system. Two verifiers produce one, distinguished by prov:proof_system rather than by class: an external prover (lean4, coq, agda) whose exported blob is checked, and the kernel itself, whose type-checked justification:Certificate is the proof term. Kernel-checking is verification; treating the two as different kinds would make the ground depend on which checker ran. REQUIRES the permitted axiom set and the checker's identity (D87 §5): a verdict is a deterministic function of five inputs, and these two were the ones nothing recorded, so two proofs — one leaning on Classical.choice and one not — produced byte-identical traces. Requiring them rather than recommending them is what makes `Verified` re-decidable instead of attested; a trace that omitted them would record a check nobody could re-run, and the alternative to requiring them is a downstream guard asking whether a trace is re-checkable.";
+    requires prov:resource, prov:proof_system, prov:proof_term, prov:timestamp,
+             prov:permitted_axioms, prov:checker_identity_kind, prov:checker_identity;
     recommends prov:derivation_trace;
 }
 
@@ -282,6 +283,33 @@ property prov:proof_system : core:string {
 property prov:proof_term : core:string {
     description = "IRI of the proof term. For an external prover, the exported proof blob in blob storage; for the kernel, the chain-resident IRI of the justification:Conclusion carrying a justification:proof — the judgement holds(logic, t, P), a checker having verified t against P itself. NOT the conclusion whose CERTIFICATE type-checked: justification:judgement is holds(kernel, c, Certificate(j, P)), which says a checker verified the certificate c and does not say P. A certificate records grounds and is not factive, and minting Verified from one laundered a conclusion resting on nothing but Declared(...) into a proof exactly one citation downstream. Both are IRIs; only the former is a blob.";
     format = formats:iri;
+    domain prov:VerificationTrace;
+}
+
+// ── The two inputs that make a verdict re-decidable (D87 §5) ─────────
+//
+// nanoda_lib emits no cryptographic receipt and should not be made to: a
+// signature produced by a key the checking process itself holds is not evidence
+// TO that process. The property to hold instead is that the verdict is
+// RECOMPUTABLE — a deterministic function of five inputs. Three were already on
+// the chain (the export bytes, the target declaration name, the claim's
+// proposition); these are the two that were not. Pinned, any party can re-run
+// the check and obtain the same verdict, which is stronger than a receipt: a
+// receipt says "I checked", this says "check it yourself".
+
+property prov:permitted_axioms : core:value_array {
+    element_type = core:string;
+    description = "The axiom names the checker was permitted to admit, verbatim, as the check actually ran. Was hard-coded (`DEFAULT_LEAN_AXIOMS` in the Lean institution) and recorded nowhere, so a proof leaning on `Classical.choice` and a constructive one produced byte-identical traces — the allowlist is the TCB of every verdict and it was invisible. Recorded here as the set USED rather than a reference to a policy resource, because the policy can be edited afterwards and the trace has to stay a record of what happened. Empty array means no axiom was permitted, which is different from absent.";
+    domain prov:VerificationTrace;
+}
+
+property prov:checker_identity_kind : core:string {
+    description = "Which KIND of checker identity prov:checker_identity carries, so a reader can tell an identity that binds the running binary from one that only names the source. `image_digest` — the registry digest of the kernel image, injected at deploy time, binding the running binary. `source_pin` — the checker's source revision plus the toolchain that produced the export format it parses, binding neither the compiler nor the build. Kind plus value rather than a single string: a stronger identity then adds a kind instead of reshaping the schema, so no reseed and no migration of traces already committed, and a `source_pin` trace stays readable and stays honestly labelled as the weaker thing it is.";
+    domain prov:VerificationTrace;
+}
+
+property prov:checker_identity : core:string {
+    description = "The checker's identity, in the form prov:checker_identity_kind names. Self-reported either way — the kernel repeats what it was told, so a compromised or misconfigured deployment writes what it likes. It is provenance, not warrant, and becomes load-bearing only when something outside the process vouches for the binding (a signed deployment, the orchestrator's own record, a TEE attestation).";
     domain prov:VerificationTrace;
 }
 

@@ -6545,7 +6545,7 @@ mod tests {
         let class_iri = iri(crate::ontology::well_known::CLASS);
         for expected in &[
             "urn:eigenius:justification:Conclusion",
-            "urn:eigenius:justification:VerifiedPropositionView",
+            "urn:eigenius:justification:Claim",
         ] {
             assert!(
                 resources
@@ -6651,10 +6651,10 @@ mod tests {
         }
         let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        // Phase 4 — the resource classes (justification:Conclusion, TaskOutput,
-        // VerifiedPropositionView) declare `subclass_of
-        // reflection:DerivedResource`, so reflection-ontology has to be
-        // in the layer chain before reasoning.esl loads.
+        // Phase 4 — the resource classes (justification:Conclusion, TaskOutput)
+        // declare `subclass_of reflection:DerivedResource`, so
+        // reflection-ontology has to be in the layer chain before
+        // justification.esl loads.
         let reflection_json =
             include_str!("../../../ontologies/reflection/reflection-ontology.json");
         let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
@@ -6694,7 +6694,7 @@ mod tests {
                 .unwrap_or_else(|e| panic!("failed to resolve {iri_str}: {e}"));
         }
 
-        // The three resource classes — Phase 4. `resolve_class_type` on
+        // The two resource classes — Phase 4. `resolve_class_type` on
         // a regular Class returns the Σ-chain of its required +
         // recommended properties; we just check that resolution
         // succeeds (the structural contract is "all referenced
@@ -6703,7 +6703,7 @@ mod tests {
         // an unresolved class.
         for iri_str in &[
             "urn:eigenius:justification:Conclusion",
-            "urn:eigenius:justification:VerifiedPropositionView",
+            "urn:eigenius:justification:Claim",
         ] {
             let class_iri = Iri::parse(iri_str).unwrap();
             resolve_class_type(&class_iri, &layer)

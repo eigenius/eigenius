@@ -1248,24 +1248,56 @@ class p:Cat { description = "a dog"; }"#;
         }
     }
 
+    /// Every `program:Component` the bootstrap declares is implemented somewhere.
+    ///
+    /// Replaces a hand-maintained list of names to resolve, which could only ever confirm that a
+    /// declaration exists — the property that was already true of `components:Combine`, `Extract`
+    /// and `Transform`, declared `implementation: "builtin"` and `deterministic: true` while
+    /// being implemented nowhere. Three of the four components declaring determinism were
+    /// phantoms, and an unregistered IRI evaluated to a stuck neutral that committed with a
+    /// `ProgramTrace` over a step that never ran (eigenius#144). Deleting the three declarations
+    /// fixes the instances; checking the declarations against the implementations is what stops
+    /// a fourth.
+    ///
+    /// The two implementation sites are [`ComponentRegistry::default`] (in-process) and
+    /// `server::lifecycle::REMOTE_COMPONENTS` (dispatched to the orchestrator).
     #[test]
-    fn can_resolve_builtin_components() {
-        let ctx = bootstrap().unwrap();
-        for comp in [
-            "Identity",
-            "CompleteText",
-            "CompleteJson",
-            "Combine",
-            "Extract",
-            "Transform",
-            "HttpRequest",
-        ] {
-            let iri = Iri::parse(&format!("urn:eigenius:program:components:{comp}")).unwrap();
-            assert!(
-                ctx.resolve(&iri).is_some(),
-                "should resolve component {comp}"
-            );
-        }
+    fn every_declared_component_is_implemented() {
+        let component_class = Iri::parse("urn:eigenius:program:Component").unwrap();
+
+        let registry = crate::program::component::ComponentRegistry::default();
+        let implemented: std::collections::BTreeSet<String> = registry
+            .list()
+            .into_iter()
+            .chain(
+                crate::server::lifecycle::REMOTE_COMPONENTS
+                    .iter()
+                    .map(|s| (*s).to_string()),
+            )
+            .collect();
+
+        let program_json = include_str!("../../../ontologies/program/program-ontology.json");
+        let declared: Vec<String> = eigon_json::parse_document(program_json)
+            .expect("the program ontology parses")
+            .into_iter()
+            .filter(|r| r.is_a().iter().any(|c| c == &component_class))
+            .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
+            .collect();
+
+        assert!(
+            !declared.is_empty(),
+            "the bootstrap declares no `program:Component` at all, so this test checks nothing"
+        );
+
+        let phantom: Vec<&String> = declared
+            .iter()
+            .filter(|iri| !implemented.contains(*iri))
+            .collect();
+        assert!(
+            phantom.is_empty(),
+            "these components are declared and implemented nowhere — a program applying one \
+             fails `ComponentDispatchFailed` at run time rather than at commit: {phantom:?}"
+        );
     }
 
     #[test]
@@ -1372,7 +1404,7 @@ class p:Cat { description = "a dog"; }"#;
             "urn:eigenius:justification:Term",
             "urn:eigenius:justification:Certificate",
             "urn:eigenius:justification:Conclusion",
-            "urn:eigenius:justification:VerifiedPropositionView",
+            "urn:eigenius:justification:Claim",
         ] {
             let parsed = Iri::parse(iri).unwrap();
             assert!(

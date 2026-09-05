@@ -523,9 +523,9 @@ pub const OBSERVATION_TRACE: &str = "urn:eigenius:prov:ObservationTrace";
 pub const PROGRAM_TRACE: &str = "urn:eigenius:prov:ProgramTrace";
 /// Resource recording that a proof of a resource's proposition was checked. Two verifiers produce
 /// one, distinguished by [`PROOF_SYSTEM`] rather than by class (eigenius#200): an external prover,
-/// whose exported blob D49 §7's `Lean → Reasoning` comorphism reifies into a
-/// `justification:VerifiedPropositionView`, and the kernel, whose type-checked `justification:Certificate`
-/// certificate is itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
+/// whose exported blob is externalized forward and compared by `def_eq` against the claim's own
+/// proposition (D74), and the kernel, whose type-checked `justification:Certificate` certificate is
+/// itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
 pub const VERIFICATION_TRACE: &str = "urn:eigenius:prov:VerificationTrace";
 
 /// Trace recording that an author ASSERTS a computation ran somewhere the kernel did not initiate
