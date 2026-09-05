@@ -13,7 +13,7 @@
 | | question | answer | basis |
 |---|---|---|---|
 | §1 | Do the `witness:Is*As` types earn their place, or should the check key on the constructor? | **They earn it.** The type carries a resolution obligation, so kernel/ontology drift breaks the build instead of silently disabling the check | derived from the code |
-| §2 | Should `justification:Term` merge into `justification:Certificate`? | **A decision for the paper.** No load-bearing use of the separate term index exists in the implementation, but the paper's formalism is `JustifiedBy(j, P)` | measured `2026-09-05`, then referred out |
+| §2 | Should `justification:Term` merge into `justification:Certificate`? | **Not on the code's authority.** Nothing in the implementation uses the separate term index — five candidate reasons, none holds. The paper defines `JustifiedBy(j, P)`, so both indices stay until the paper says otherwise | measured `2026-09-05` |
 | §3 | Should a term name a chain instance by reference rather than by string? | **The string is sediment.** The leaf already behaves as a reference — `core:mentions` indexes it — but by a prefix heuristic rather than a declared type. Give it one | derived from the index |
 | §4 | Can `app`'s `forall`-bound arguments be inferred? | **`app` yes, `spec_poly` no.** Four of the five pieces already exist | derived from `nbe/unify.rs` |
 
@@ -51,7 +51,7 @@ not protect against `justification.esl` dropping it. Both files are bootstrap, s
 a reseed and neither is a user action. The claim is only that one mechanism fails loudly under drift
 and the other fails silently.
 
-## 2. Merging the term into the certificate is a decision for the paper
+## 2. Nothing in the code uses the term index; the paper is why it stays
 
 `justification:Term` and `justification:Certificate` encode one thing twice. `app`'s term arguments
 are fixed by its certificate arguments — `Certificate(j1, A -> B)` determines `j1` — so the term
@@ -69,16 +69,21 @@ reasons, none of which holds:
 | `spec_poly` leaves the term untouched, so specialising costs nothing in the audit trail | `spec_poly` is not a leaf, so `support` yields the same set either way |
 | something compares terms for equality | nothing does; `wellfounded` and `refutes` use leaf IRIs |
 
-**The formalism decides it, not the code.** `judgements-and-warrants.tex` uses `JustifiedBy(j, P)`
-with both indices, and states that *"the Verified state corresponds to the configuration lacking the
-middle layer: the system holds `Judgement(L, t, P)` directly."* The justification layer applies to
-`Declared` and `Observed` grounds and their compositions; at the strongest ground there is no
-justification term at all. A merged `Justification(P)` has to say what it means there, which is a
-claim about the logic rather than about the implementation.
+**So the implementation supplies no argument either way, and the paper supplies the only one there
+is:** `judgements-and-warrants.tex` defines the justification layer as `JustifiedBy(j, P)`, with both
+indices. Under the rule that the implementation follows the paper, both indices stay. That is the
+answer for now.
 
-**Recommendation:** treat it as an amendment to the paper, to be made or declined by its author.
-Implementation cost is secondary — the demo notebook's certificate is the largest authored artifact
-and would be rewritten, and `justification:Term` is a versioned ADT.
+**What an amendment would have to settle** — one question, and the code cannot answer it. The paper
+states that *"the Verified state corresponds to the configuration lacking the middle layer: the
+system holds `Judgement(L, t, P)` directly."* So the justification layer applies to `Declared` and
+`Observed` grounds and their compositions, and at the strongest ground there is no justification term
+at all. A merged `Justification(P)` has to say what it means at that end: whether `Verified` is
+outside the family, or whether the family absorbs the case the paper deliberately puts outside it.
+That is a claim about the logic.
+
+Implementation cost is secondary and small enough not to weigh: `justification:Term` is a versioned
+ADT, and the demo notebook's certificate is the largest authored artifact that would be rewritten.
 
 ## 3. The string leaf is sediment; declare the type
 
@@ -186,7 +191,9 @@ also the only one of the four needing no amendment to the paper.
 
 ## 5. Still open
 
-1. **The merge (§2)** — referred to the paper's author, with the implementation evidence above.
+1. **The merge (§2)** — blocked on one question about the logic: what a merged `Justification(P)`
+   means for `Verified`, which the paper places outside the justification layer entirely. The
+   implementation evidence is in §2; the decision is an amendment to the paper.
 2. **Implicit arguments (§4)** — scoped, not designed. Phase F's `MetaCtx` plus implicit-arg syntax,
    generalising the elision rule the `ChainWitness` hook implements. `app` is in reach; `spec_poly`
    needs a wider unification fragment and is a separate decision.
