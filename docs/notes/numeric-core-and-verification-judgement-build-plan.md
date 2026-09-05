@@ -269,11 +269,18 @@ run stands on its own. If it misses, the draw has to be **re-recorded live**, an
 choosing novel readings leaves `reading_unadjudicated > 0` until those ledger rows are adjudicated —
 which is judgement work, not a script. Budget for that branch rather than discovering it.
 
-**Nothing in this batch should move either number.** Every edit is to the provenance and
-verification axes: the numeric relations are declared and unused by the parser, and the five
-`prov:VerificationTrace` slots and the `Checked` former are on a path the DCG never takes. A moved
-number therefore means something unintended happened, and the run is worth reading rather than
-re-baselining. Do not update either baseline to make a red run green.
+**Nothing in this batch should move either number, and it is worth being exact about why**, since
+the parser *does* use two of the relations §1 touches. `measurements:lt` and `gt` are what the
+WordNet importer emits for gradable adjectives and what `dcg::category` matches by IRI — and both
+are **unchanged**. What §1 adds is `float_ieee_eq`, which nothing in the lexicon path mentions;
+what §2 adds is a table read only by the Lean externalizer, which the DCG never invokes. The
+remaining edits are the `prov:VerificationTrace` slots, the `Checked` former and two deletions of
+declarations with no readers.
+
+The one thing that *does* reach the parser is the reseed itself — a moved manifest means a fresh
+store, and a fresh store can change the candidate sense lists, which is the replay fork above. So a
+moved number means either that fork or something unintended, and both are worth reading. Do not
+update either baseline to make a red run green.
 
 **The P7 closeout's gate changed shape**, because its premise did. It read *"a `Certificate`
 type-checks with no `witness:Is*As` in any premise"* — which §3.5 withdrew, since a certificate
