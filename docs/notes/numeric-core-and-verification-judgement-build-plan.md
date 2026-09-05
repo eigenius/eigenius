@@ -241,6 +241,40 @@ is the WRN-relevant TUI subset, every tracked snapshot is `--umls-all`, and the 
 Build the image with `CARGO_FEATURES=use-llm` for the same reason the compose default does — a
 binary with no live ranker makes every parse a cap-only run, which is a different experiment.
 
+```sh
+CARGO_FEATURES=use-llm scripts/reseed-lexicon-db.sh --umls-all
+```
+
+### What the baselines then need, and the fork in the middle of it
+
+Two baselines, four gates:
+
+| baseline | gate | |
+|---|---|---|
+| `experiments/parsing/baseline.json` | `grammar_gap == 0 && missing_lexeme == 0` | **non-negotiable** |
+| | `encoded >= 10` | the drift-free floor, not a peak draw |
+| `experiments/parsing/selection-baseline.json` | `reading_correct >= expected`, `invalid_selected == 0` | |
+| | `reading_unadjudicated == 0` | an unadjudicated decision makes the number a partial count |
+
+Run `scripts/measure-parse-rate.sh` (it autodetects the newest snapshot and builds release —
+load-bearing: a debug build overflows the stack in NbE readback and the harness reports it as a
+grammar gap indistinguishable from a real one), then `scripts/eval-parse-rate.sh <run.log>
+--baseline`.
+
+**The fork is the replay.** The tracked rank draws were recorded against an earlier snapshot, and a
+reseed can change the candidate sense lists — new `name` entries, recovered mass entries — so a
+replay may MISS. `experiments/parsing/README.md` §3: *"a replay with `misses > 0` is a different
+experiment, not a reproduction."* If the draw replays clean, the comparison is drift-free and the
+run stands on its own. If it misses, the draw has to be **re-recorded live**, and a new draw
+choosing novel readings leaves `reading_unadjudicated > 0` until those ledger rows are adjudicated —
+which is judgement work, not a script. Budget for that branch rather than discovering it.
+
+**Nothing in this batch should move either number.** Every edit is to the provenance and
+verification axes: the numeric relations are declared and unused by the parser, and the five
+`prov:VerificationTrace` slots and the `Checked` former are on a path the DCG never takes. A moved
+number therefore means something unintended happened, and the run is worth reading rather than
+re-baselining. Do not update either baseline to make a red run green.
+
 **The P7 closeout's gate changed shape**, because its premise did. It read *"a `Certificate`
 type-checks with no `witness:Is*As` in any premise"* — which §3.5 withdrew, since a certificate
 that type-checks without one is exactly the unsoundness. The gate is now the recomputation test:
