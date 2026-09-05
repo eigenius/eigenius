@@ -1,7 +1,7 @@
 # Build plan — kernel run records
 
-*Branch: `kernel-run-records`. Covers eigenius#206, #148, #135, #147, #150, #144; decides on
-#145, #146 and #149 (§4).*
+*Branch: `kernel-run-records`. Covers eigenius#206, #148, #135, #147, #150, #144 (in full — §3.6);
+decides on #145, #146 and #149 (§4).*
 
 *Governing document:
 [Judgements, Warrants, and Logics](../design/judgements-and-warrants.tex) §"Taxonomy of Epistemic
@@ -157,33 +157,71 @@ serialised tree with no inverse is not provenance anyone can traverse, and D6b �
 traversal as *the* provenance mechanism. **This is a decision, not only work**: the cheaper honest
 outcome may be to drop `trace_tree` and keep the trace flat.
 
-### 3.5 The `INTO` multi-binding rejection gets a test — #150
+### 3.5 An unregistered component fails, and the three phantom builtins go — #144
+
+**Two halves, both in scope.**
+
+**(a) The dispatch is an error.** `eval_hooks.rs:320` returns the input unchanged for a component
+the registry does not hold — no error, no diagnostic, no `ComponentTrace`. Replace it with
+`EvalError::ComponentDispatchFailed { component_iri, message: "component not registered" }`, the
+variant the failure arm two branches down already uses.
+
+Why it gates the batch: three of the four `deterministic: true` components are unregistered.
+
+| `deterministic: true` | registered? |
+|---|---|
+| `Identity` | yes (builtin) |
+| `Combine` | **no** |
+| `Extract` | **no** |
+| `Transform` | **no** |
+
+The builtin registry holds `Identity` and `Checkpoint`; `REMOTE_COMPONENTS` holds `CompleteJson`,
+`CompleteText`, `HttpRequest`. §2 mints provenance for a deterministic run, so without (a) the first
+records this batch emits attest three components that returned their input untouched — and #144
+records the consequence: a downstream certificate discharging `derived(output_iri, P)` against that
+trace succeeds, so the grade is earned by a no-op.
+
+**(b) The three declarations are deleted.** #144 offers a fork — *"either implement the three
+declared builtins or mark them in the ontology as reserved"*. A third reading is the right one,
+because **they are not implementable as declared**:
+
+| | declared | needed to implement |
+|---|---|---|
+| `Combine` | *"Merge properties from multiple inputs into one resource"* | multiple inputs; `input_type` is a single `Class` |
+| `Extract` | *"Extract specific properties from a resource"* | *which* properties; `argument_type: None` |
+| `Transform` | *"Apply property mappings and renames"* | *which* mappings; `argument_type: None` |
+
+Each names a parameterised operation and declares no parameter slot. Implementing them is not
+finishing an unfinished builtin — it is designing three argument types first, which is a separate
+piece of design and not this batch.
+
+Nothing uses them. `grep` across `*.rs`, `*.ts`, `*.esl`, `*.json`, `*.md` returns one hit outside
+the ontology: `docs/design/d6b-reasoning-trace-schema.md:207`, where `components:Extract` is a value
+inside an illustrative `PureTrace` JSON example. That example needs a different component IRI, and
+`Identity` serves.
+
+Marking them reserved keeps a declaration that reads as a capability, which is the condition #144
+names as what makes the defect reachable: *"an author reading the program ontology finds three
+deterministic builtins with descriptions, no marker that they are unimplemented, and a runtime that
+accepts them without complaint."* A reserved marker fixes the runtime half only if someone reads it.
+Deleting removes the affordance.
+
+**This half is a bootstrap edit.** `ontologies/program/program-ontology.json` is compiled into
+`BOOTSTRAP_CHAIN` (`bootstrap/mod.rs:273`), so removing three resources moves the manifest hash and
+forces a reseed. It therefore **rides #235's batched reseed** rather than paying for its own — and
+(a) does not wait for it, since (a) is Rust-only.
+
+### 3.6 The `INTO` multi-binding rejection gets a test — #150
 
 `fiber.rs:424` rejects a multi-row `FIBER` with `INTO`, since one IRI cannot name two resources.
 No test drives it. 3.1 modifies this evaluator, so pin the path before changing it.
 
 ## 4. #144, #145, #146, #149 — reviewed `2026-09-04`
 
-### 4.1 #144 is **in** the batch, not adjacent
+### 4.1 #144 — moved into the batch in full
 
-`eval_hooks.rs:320` still returns the input unchanged for a component the registry does not hold,
-with no error and no `ComponentTrace`. What makes it this batch's problem rather than a neighbour's:
-
-| the four `deterministic: true` components | registered? |
-|---|---|
-| `Identity` | yes (builtin) |
-| `Combine` | **no** — identity fallback |
-| `Extract` | **no** — identity fallback |
-| `Transform` | **no** — identity fallback |
-
-The builtin registry holds `Identity` and `Checkpoint`; `REMOTE_COMPONENTS` holds `CompleteJson`,
-`CompleteText`, `HttpRequest`. §2 has the batch mint *provenance for a deterministic run* — and
-three of the four deterministic components never run. The batch would emit a record attesting a
-computation that returned its input untouched.
-
-Minimum fix for this batch: **dispatch on an unregistered component IRI is an error**, not an
-identity fallback. Implementing `Combine` / `Extract` / `Transform` is separate; removing the silent
-success is not.
+See §3.5. Both halves are in scope: the dispatch error (Rust-only, lands here) and deleting the
+three phantom declarations (a bootstrap edit, rides #235's reseed).
 
 ### 4.2 #145 — reconsidered, and the case is stronger than §2 first allowed
 
@@ -246,16 +284,19 @@ field or delete it. Do not leave it undecided a third time.
 1. **§2 first**, and it is now a small piece of work rather than only a decision: read
    `program:component:deterministic` at the minting site, defaulting absent to non-deterministic.
    Every other item writes against which record type it produces.
-2. **§4.1 (#144) with §2**, and before any minting. An unregistered component must fail rather
+2. **§3.5(a) (#144) with §2**, and before any minting. An unregistered component must fail rather
    than return its input, or the first records the batch mints attest three components that never
    ran.
-3. **3.5, then 3.1.** Pin the `INTO` error path before editing the evaluator.
+3. **3.6, then 3.1.** Pin the `INTO` error path before editing the evaluator.
 4. **3.3 with 3.1**, since #206 constrains the failure path and both are the same error arm.
 5. **3.2 after 3.1** — the resume path should mint what `RunProgram` mints, so it copies a shape
    rather than inventing one.
 6. **3.4 last.** It changes the record's fields, so it lands once the set of minting sites is fixed.
+7. **§3.5(b)** whenever #235's reseed runs. It is the only item on this branch that touches a
+   bootstrap ontology, and it does not gate anything else here.
 
-**No ontology edit is expected.** `prov:input` and `prov:trace_tree` are already declared. If 3.4's
+**One ontology edit, deferred.** §3.5(b) removes three resources from the program ontology and
+rides #235's reseed. Otherwise `prov:input` and `prov:trace_tree` are already declared. If 3.4's
 decision is to drop `trace_tree`, that *is* a bootstrap edit and joins #235's batched reseed rather
 than paying for its own.
 
@@ -267,10 +308,12 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase":
   --workspace --all-targets`.
 - **Written as failing tests first**: a resumed task commits an output resource and a trace (3.2); a
   failed `RunProgram` leaves its original record intact and mints nothing (3.3); a multi-row `FIBER
-  … INTO` is rejected (3.5).
+  … INTO` is rejected (3.6); applying an unregistered component IRI is a `ComponentDispatchFailed`,
+  not an identity step (3.5a).
 - **The count that matters**: after 3.1 and 3.2, every kernel-initiated run on a test chain has
   exactly one record. Measure it, do not assert it.
-- If 3.4 drops `trace_tree`: reseed, and check the resource count against the plan's §0 method.
+- After §3.5(b), and after 3.4 if it drops `trace_tree`: reseed, and check the resource count
+  against `judgements-warrants-build-plan.md` §0's method.
 
 ## 7. What this batch does not claim
 
