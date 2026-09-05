@@ -196,7 +196,9 @@ pub fn is_witness_candidate(resource: &Resource) -> bool {
 
 /// The witness category a Trace class attests, or `None` if the class is not a Trace.
 ///
-/// All four grounding families are here (eigenius#200). `VerificationTrace` was absent until
+/// All THREE grounding families are here (eigenius#200), across five Trace classes: `ProgramTrace`
+/// grounds nothing and `ExternalExecutionTrace` grounds `Declared`. It said "four" until P4's
+/// three-grounds change removed `Derived`. `VerificationTrace` was absent until
 /// `2026-08-21` on the reasoning that it would arrive with D49 §7's comorphism-reified
 /// `VerifiedPropositionView` — a chain artifact holding a Lean proof's proposition in EigenTT form.
 /// That deferred the wrong half, and the view is now deleted: it is how a Lean proof's proposition

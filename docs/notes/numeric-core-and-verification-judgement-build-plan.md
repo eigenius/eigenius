@@ -36,6 +36,7 @@ All five, in `ontologies/`:
 | 3b | *(added during §3.3)* `prov:judgement` — the checker's result — plus `prov:checked_declaration`, found by §3.5's recomputation test | D87 §5, §7 |
 | 4 | delete `justification:VerifiedPropositionView` + `justification:source_verified_resource` | #235, confirmed `2026-09-05` |
 | 5 | delete `components:Combine` / `Extract` / `Transform` | kernel-run-records §3.5(b) |
+| 6 | `witness:Is*As` descriptions — `IsVerifiedAs`'s is false since #160, and all three call the synthesis a postulate | #235; §3.5 |
 
 **Nothing here is undecided.** D86 §6 settled the three that were open (`2026-09-05`); §3.5(b) was
 argued in the previous batch. Edit 4 also needs the two `esl::compile` test references repointed and
@@ -50,10 +51,12 @@ export does not declare. Only `float_ieee_eq` is new. The four ordering axioms *
 them on the chain would dissolve the head the parser matches on. §3.2's derivation moves into §2's
 table instead, where it costs the TCB nothing.
 
-**#235's fifth edit — rewording `witness:IsVerifiedAs`'s description — is dropped, subsumed by §3.5
-step 3, which deletes the declaration.** It was listed before §3.5 joined the batch. Rewording a
-declaration this same batch removes buys nothing and costs a reseed; if step 3 turns out blocked,
-the reword lands in the second pass instead, so the description is not left false either way.
+**#235's fifth edit — `witness:IsVerifiedAs`'s description, false since #160 — was dropped as
+subsumed by §3.5 step 3 and is BACK IN, because step 3 was withdrawn.** Dropping it was right while
+the declaration was slated for deletion; §3.5 establishes that it stays, so the false sentence would
+have shipped. Caught before the reseed ran. All three witness descriptions also lose the postulate
+framing P7 asked about — the synthesis is a decision procedure over relations, so the index is a
+cache and not a soundness boundary.
 
 **Sequencing: land all five, then keep going — the reseed waits for §3.5.** §3.5 step 2 changes the
 `Certificate` constructors and cannot join this pass, because the premise replacing `witness:Is*As`
