@@ -69,12 +69,48 @@ So a run record is provenance when the plan is `Declared(f : I -> O)`, and evide
 leaf — when the process is stochastic. The minting code cannot tell which it is producing without
 being told.
 
-**Measured `2026-09-04`, and it settles the question: the plan declaration is not readable.**
+**The declaration exists, is populated, and nothing reads it.**
 
-`judgements-warrants-build-plan.md` §"Prerequisite found `2026-08-29`" recorded that 0 of 21
-`stats:StatisticalAnalysisPlan` resources carried a `DeclarationTrace`, and set P4's shape
-accordingly — *"author 21 `DeclarationTrace`s (with agents and rationales)"*. That did not land. On
-the WRN chain today:
+`program:component:deterministic` — *"Whether the component produces the same output for the same
+input"* — is a `core:boolean` with `domain: program:Component`, `recommends` on the class. That is
+the paper's `f : I -> O` assertion, sited on the component rather than on the analysis plan. Measured
+`2026-09-04`:
+
+| | |
+|---|---|
+| `program:Component` resources | 12 |
+| declaring `deterministic` | 9 — **4 true, 5 false** |
+| not declaring it | 3 |
+| Rust code reading the property | **0** |
+
+The split is meaningful, not incidental:
+
+| | components |
+|---|---|
+| `true` | `Combine`, `Extract`, `Identity`, `Transform` — pure data transforms |
+| `false` | `CompleteJson`, `CompleteText`, `HttpRequest`, `RunRuntimeScript`, `Checkpoint` |
+
+The `false` set is exactly the paper's stochastic case. An LLM completion's output is not determined
+by its input, so the execution record *is* the evidence — there is nothing to re-derive it from.
+
+**So the minting site reads `deterministic` and the asymmetry is mechanical.** No new authoring
+burden and no new vocabulary: a `true` component's run yields provenance, a `false` component's run
+yields an `Observed` leaf.
+
+**One decision this forces.** The property is `recommends`, so 3 of 12 components do not carry it.
+Absent must default to **non-deterministic** — the record is evidence. Defaulting the other way
+asserts a determinism nobody declared, which is the direction that silently manufactures a
+`Declared(f : I -> O)` premise. Whether to promote the property to `requires` is a separate
+question; it is a bootstrap edit and belongs with #235's batched reseed, not here.
+
+*Related but not blocking:* #43 asks whether a component **declared** deterministic actually is, for
+Julia runs (BLAS pinning, FMA discipline). This batch takes the declaration at its word, which is
+what the paper's `Declared(f : I -> O)` means — an assertion by an accountable agent, not a
+measurement.
+
+### 2.1 A separate gap found while measuring this
+
+The analysis plans are traced, but not declared. On the WRN chain:
 
 | | |
 |---|---|
@@ -82,18 +118,16 @@ the WRN chain today:
 | traced by `prov:ProgramTrace` | **21** |
 | traced by `prov:DeclarationTrace` | **0** |
 
-The chain carries 75 `DeclarationTrace` resources; none of them targets a plan. Since
-`trace_category(wk::PROGRAM_TRACE)` is `None`, no plan emits any witness, so `Declared(plan)` — the
-left half of `App(Declared(plan), Observed(inputs))` — cannot resolve for any of the 21.
+The chain carries 75 `DeclarationTrace` resources; none targets a plan. Since
+`trace_category(wk::PROGRAM_TRACE)` is `None`, no plan emits a witness, so `Declared(plan)` cannot
+resolve for any of the 21. `judgements-warrants-build-plan.md` §"Prerequisite found `2026-08-29`"
+recorded this and set P4's shape to *"author 21 `DeclarationTrace`s (with agents and rationales)"*;
+that did not land.
 
-**Nothing is broken by this yet**: no plan is cited as `DeclaredEvidence` anywhere on the chain
-(`grep DeclaredEvidence …/chain/*.esl` matching `plan`: 0 hits), so no composite currently asks for
-the missing half. The gap is latent.
-
-**So this batch mints provenance only.** The stochastic case — where the paper says the execution
-record *is* the evidence — stays out, stated as a limitation rather than left implicit, because the
-minting site has nothing to read that would tell it which case it is in. Closing the plan-declaration
-prerequisite is what unblocks it, and that is not this batch.
+Nothing is broken by it today — no plan is cited as `DeclaredEvidence` anywhere on the chain — so
+the gap is latent, waiting for the first consumer that cites one. **It is not this batch**, and it is
+not what gates §2: component determinism and plan declaration are different assertions at different
+sites. It needs its own issue.
 
 ## 3. Items
 
@@ -147,8 +181,9 @@ No test drives it. 3.1 modifies this evaluator, so pin the path before changing 
 
 ## 5. Sequencing
 
-1. **§2's decision first.** It determines whether one record type or two come out of the minting
-   sites, and every other item writes against that answer.
+1. **§2 first**, and it is now a small piece of work rather than only a decision: read
+   `program:component:deterministic` at the minting site, defaulting absent to non-deterministic.
+   Every other item writes against which record type it produces.
 2. **3.5, then 3.1.** Pin the `INTO` error path before editing the evaluator.
 3. **3.3 with 3.1**, since #206 constrains the failure path and both are the same error arm.
 4. **3.2 after 3.1** — the resume path should mint what `RunProgram` mints, so it copies a shape
@@ -174,11 +209,16 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase":
 
 ## 7. What this batch does not claim
 
-It does not make anything more attested than it was, and it does not close the plan-declaration
-prerequisite in §2. `ProgramTrace` grounds nothing before and
-after — a computed claim rests on `App(Declared(plan), Observed(inputs))`, and the run record is not
-a third ground. What changes is that the record of a kernel-initiated run exists, names its input,
-and can be read back.
+It does not make a computed conclusion more attested than it was — `ProgramTrace` grounds nothing
+before and after. It does give the stochastic case its `Observed` leaf, which is a ground the chain
+could not previously emit for a run.
+
+A computed claim still rests on `App(Declared(plan), Observed(inputs))`, and the run record is not
+a third ground. What changes for the deterministic case is only that the record exists, names its
+input, and can be read back.
+
+It does not close §2.1's plan-declaration gap, and it does not verify that a component declared
+deterministic is one (#43).
 
 #206 should be retitled and rewritten against §0 and §1 before the first commit, so the issue does
 not keep asserting a premise the tree removed.
