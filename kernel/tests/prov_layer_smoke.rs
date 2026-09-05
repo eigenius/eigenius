@@ -70,3 +70,71 @@ fn every_prov_declaration_resolves() {
         );
     }
 }
+
+/// A run's output carries an `ObservationTrace`, and the chain admits `Observed` for it.
+///
+/// This pins the contract between what `server::programs::execute_program` emits and what
+/// `witness_index::emit_from_trace` reads — the part of kernel-run-records §2 that can
+/// silently break. `execute_program` is `pub(super)` behind the gRPC service, so the trace
+/// is built here exactly as that code builds it: `is_a: [prov:ObservationTrace]`,
+/// `prov:resource` at the output, `prov:was_generated_by` at the run activity, and
+/// `prov:timestamp` — the three the class requires.
+///
+/// The output carries no `reflection:canonical_proposition`, so the witness keys on D39
+/// §4.1's default `Asserts(iri)`, which is what an unannotated program output asserts.
+///
+/// **Why `Observed` and not nothing.** A run's outcome is *sampled*: the paper's criterion
+/// is whether the plan formalizes a deterministic function, and nothing asserts that —
+/// 0 of 21 `stats:StatisticalAnalysisPlan` resources carry a `DeclarationTrace`. The
+/// `ProgramTrace` beside this one stays provenance and grounds nothing.
+#[test]
+fn a_run_output_with_an_observation_trace_admits_observed() {
+    use eigenius_kernel::layer::{lookup_chain_witness, LayerBuilder, LayerStorage};
+    use eigenius_kernel::ontology::resource::{Resource, Value};
+    use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
+    use std::sync::Arc;
+
+    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap seeds");
+    let mut b = LayerBuilder::new("run-output", Some(Arc::clone(ctx.head())));
+
+    let out_iri = Iri::parse("urn:eigenius:test:run:output").unwrap();
+    b.add_resource(Resource::new(out_iri.clone()))
+        .expect("add the run output");
+
+    let mut obs = Resource::new(Iri::parse("urn:eigenius:trace:exec-t:observed").unwrap());
+    obs.set(
+        Iri::parse("urn:eigenius:core:is_a").unwrap(),
+        Value::Array(vec![Value::String(
+            "urn:eigenius:prov:ObservationTrace".to_string(),
+        )]),
+    );
+    obs.set(
+        Iri::parse("urn:eigenius:prov:resource").unwrap(),
+        Value::iri(&out_iri),
+    );
+    obs.set(
+        Iri::parse("urn:eigenius:prov:was_generated_by").unwrap(),
+        Value::String("urn:eigenius:prov:activity:kernel_run_program".to_string()),
+    );
+    obs.set(
+        Iri::parse("urn:eigenius:prov:timestamp").unwrap(),
+        Value::String("2026-09-04T00:00:00.000Z".to_string()),
+    );
+    b.add_resource(obs).expect("add the observation trace");
+
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let prop_hash = eigenius_kernel::layer::default_asserts_proposition_hash(&layer, &out_iri)
+        .expect("the default Asserts(iri) proposition hashes");
+    let key = WitnessKey {
+        category: WitnessCategory::Observed,
+        iri: out_iri,
+        prop_hash,
+    };
+
+    assert!(
+        lookup_chain_witness(&layer, &key),
+        "an ObservationTrace on a run's output must admit `Observed` — this is the leaf a \
+         sampled outcome is owed (kernel-run-records §2)"
+    );
+}

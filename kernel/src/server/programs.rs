@@ -291,6 +291,62 @@ impl EigeniusService {
             crate::ontology::resource::Value::Integer(0),
         );
 
+        // The run's outcome is SAMPLED, so the output carries an `ObservationTrace`
+        // beside the `ProgramTrace` (kernel-run-records §2).
+        //
+        // Two resources, two roles. The `ProgramTrace` above is provenance and grounds
+        // nothing — a computed claim rests on `App(Declared(plan), Observed(inputs))`,
+        // and the fact that a run happened is not a third ground. The paper puts the
+        // execution trace in the provenance graph explicitly: *"a sampled outcome
+        // reduces to a single Observed leaf. Details such as the specific instrument,
+        // the configuration parameters, and the execution trace belong in the provenance
+        // graph, not within the justification term."*
+        //
+        // **Why sampled rather than computed.** The paper's criterion is *"whether the
+        // plan formalizes a deterministic function, not the medium of execution"*.
+        // Nothing on any chain asserts that: 0 of 21 `stats:StatisticalAnalysisPlan`
+        // resources carry a `prov:DeclarationTrace`, and eigenius#43 records why the
+        // assertion is shaky even where it is made. So the outcome is a recording under a
+        // declared protocol, which is an `Observed` leaf.
+        //
+        // `program:component:deterministic` is deliberately NOT the predicate here. A
+        // component flag cannot see whether a deterministic acceptor stands between a
+        // stochastic step and the committed output — the shape the parser (LLMs rank, the
+        // kernel type-checks) and the Lean institution both have, where the acceptance
+        // grounds the result and the search record does not. It becomes the opt-out once
+        // a plan can formalize its function; it is not the test.
+        let observation_iri_str = format!("{trace_iri_str}:observed");
+        let mut observation_trace = Resource::new(Iri::parse(&observation_iri_str).unwrap());
+        observation_trace.set(
+            Iri::parse("urn:eigenius:core:is_a").unwrap(),
+            crate::ontology::resource::Value::Array(vec![
+                crate::ontology::resource::Value::String(
+                    "urn:eigenius:prov:ObservationTrace".to_string(),
+                ),
+            ]),
+        );
+        if let Some(out_id) = output.id() {
+            observation_trace.set(
+                Iri::parse("urn:eigenius:prov:resource").unwrap(),
+                crate::ontology::resource::Value::iri(out_id),
+            );
+        }
+        // `ObservationTrace` requires the Activity that produced the recording — the same
+        // one the ProgramTrace names, committed alongside so the reference resolves.
+        observation_trace.set(
+            Iri::parse("urn:eigenius:prov:was_generated_by").unwrap(),
+            crate::ontology::resource::Value::String(KERNEL_RUN_PROGRAM_ACTIVITY.to_string()),
+        );
+        observation_trace.set(
+            Iri::parse("urn:eigenius:prov:timestamp").unwrap(),
+            crate::ontology::resource::Value::String(millis_to_iso8601(completed_at_ms)),
+        );
+        // No link from here to the `ProgramTrace`. `prov:derivation` describes how a
+        // RESOURCE was produced and the output already carries it (set above), so an
+        // auditor reaching the output finds both traces. Putting it on this trace would
+        // read as "this observation was produced by that program run", which is not what
+        // the property means.
+
         // Auto-commit program-run layer: produced domain resources
         // (comorphism reify outputs, program-final output) +
         // ProgramTrace + all IO ComponentTraces.
@@ -407,6 +463,15 @@ impl EigeniusService {
                     property_iri: String::new(),
                     rule: "internal".to_string(),
                     message: format!("failed to add ProgramTrace: {e}"),
+                    severity: "error".to_string(),
+                });
+            }
+            if let Err(e) = ctx.add_resource(observation_trace) {
+                errors.push(ValidationError {
+                    resource_iri: observation_iri_str.clone(),
+                    property_iri: String::new(),
+                    rule: "internal".to_string(),
+                    message: format!("failed to add ObservationTrace: {e}"),
                     severity: "error".to_string(),
                 });
             }

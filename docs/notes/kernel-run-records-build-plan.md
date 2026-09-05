@@ -368,6 +368,13 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase":
   not an identity step (3.5a).
 - **The count that matters**: after 3.1 and 3.2, every kernel-initiated run on a test chain has
   exactly one record. Measure it, do not assert it.
+- **A gap this batch inherits and now depends on**: nothing in the tree drives
+  `server::programs::execute_program`. It is `pub(super)` behind the gRPC service, and no test
+  under `kernel/tests/` or any crate exercises `RunProgram`. §2's emission is therefore pinned
+  indirectly — `prov_layer_smoke::a_run_output_with_an_observation_trace_admits_observed` builds
+  the trace exactly as that function builds it and asserts the witness follows, with a negative
+  control (the same resource as a `ProgramTrace` must not admit). That pins the emit/read contract,
+  not the emission. A harness driving the handler would close it and is worth its own item.
 - After §3.5(b), and after 3.4 if it drops `trace_tree`: reseed, and check the resource count
   against `judgements-warrants-build-plan.md` §0's method.
 
