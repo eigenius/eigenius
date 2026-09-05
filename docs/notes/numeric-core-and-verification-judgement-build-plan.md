@@ -220,21 +220,29 @@ the family, the IRI and the property is the system's most-used error message."*
 
 ## 5. Verification
 
-Per `judgements-warrants-build-plan.md` §"Verification, every phase":
+Per `judgements-warrants-build-plan.md` §"Verification, every phase". Status `2026-09-05`:
 
-- `cargo test --workspace`, `cargo fmt --all -- --check`, `RUSTFLAGS="-D warnings" cargo clippy
-  --workspace --all-targets`.
-- **Written as failing tests first**: a claim whose proposition is about its subject verifies, and
-  its near-miss fails (§3.1); a `Checked(t)` term round-trips the D47 codec and is refused by the
-  externalizer (§3.2); a `Holds` emits a judgement whose type is the claim's proposition (§3.3).
-- **After the reseed**: the demo artifacts re-derive, and both parse baselines are re-run. Match
-  baseline provenance on every axis — including `--umls-all`, whose absence is silent.
-- **The count that matters**: after §3.3, a Lean `Holds` produces a judgement *and* a trace, and the
-  `Verified` witness keys off the judgement rather than the trace. Measure it.
-- **The P7 closeout's gate** (§3.5): a `Certificate` type-checks with no `witness:Is*As` in any
-  premise, and the diagnostic surface still names the family, the IRI and the property on a miss —
-  P7 lists that as the system's most-used error message and it must survive the index becoming a
-  cache.
+| gate | where | state |
+|---|---|---|
+| `cargo test --workspace`, `fmt`, `clippy -D warnings` | — | green after each of §1–§3.5 |
+| a claim about its subject verifies, its near-miss fails | `notebook_fixture_test` | **done**, and the near-miss fails on `def_eq` with both propositions true and both subjects in scope |
+| a `Checked(t)` round-trips the D47 codec, and is refused by the externalizer | `eigentt_type_mirror`, `externalize_test` | **done**, plus the arm that matters more — a hand-authored `holds(logic_lean4, …)` is refused at commit |
+| a `Holds` emits a judgement whose type is the claim's proposition | `notebook_fixture_test` | **done** |
+| the verdict is recomputable from the trace alone | `a_verdict_is_recomputable_from_what_the_trace_pins` | **done**; it found `prov:checked_declaration` |
+| the diagnostic still names the family, the IRI and the property | `witness_index` | **done**, and now names the right remedy per family |
+| the demo artifacts re-derive | `gen_verification_demo` | **done** — two documents now, the demo and the near-miss |
+| the reseed, then both parse baselines | `scripts/reseed-lexicon-db.sh --umls-all` | **outstanding** — the one item left |
+
+**The reseed's provenance has to match on every axis**, `--umls-all` included: the script's default
+is the WRN-relevant TUI subset, every tracked snapshot is `--umls-all`, and the mismatch is silent.
+Build the image with `CARGO_FEATURES=use-llm` for the same reason the compose default does — a
+binary with no live ranker makes every parse a cap-only run, which is a different experiment.
+
+**The P7 closeout's gate changed shape**, because its premise did. It read *"a `Certificate`
+type-checks with no `witness:Is*As` in any premise"* — which §3.5 withdrew, since a certificate
+that type-checks without one is exactly the unsoundness. The gate is now the recomputation test:
+what P7 asked is whether the index is a cache, and a verdict that any party can re-derive from the
+chain is what makes it one.
 
 ## 6. Order
 
