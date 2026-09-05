@@ -244,8 +244,30 @@ family where the answer is no today, and §5 is what changes the answer: once th
 
 1. ~~**Where the judgement lives** when the claim is not a `justification:Conclusion`.~~
    **Resolved in §6**: the claim is a `Conclusion`, and the demo fixture is what is wrong.
-2. **Whether `Verified(iri)` names the claim or the checked term.** It names a chain resource by
-   IRI, and after §4.2 there are two candidates.
+2. ~~**Whether `Verified(iri)` names the claim or the checked term.**~~ **Resolved — it names the
+   claim**, by §6's own lever. `witness:IsVerifiedAs`'s signature is `core:string -> Prop -> Prop`:
+   *"the IRI of the underlying resource and **the proposition it carries**."* A proof term does not
+   *carry* a proposition on the chain — it *proves* one; the `Conclusion` carries it. And the
+   parallel holds across the algebra: `Declared(plan)` names the plan, which carries the assertion
+   that it denotes `f : I -> O`; `Observed(inputs)` names the dataset, which carries the assertion
+   that it was recorded. All three leaves name proposition-carrying chain resources, so `Verified`
+   does too.
+
+   The checked term is named in a different slot — `holds(logic_lean4, Checked(t), P)`'s second
+   argument. That yields three slots for three distinct things, which is the same separation §6
+   restored between logic and aboutness:
+
+   | slot | names |
+   |---|---|
+   | `holds(_, t, _)` | the evidence — what the checker examined |
+   | `Verified(iri)` | the claim whose standing that judgement establishes |
+   | `justification:subject_iri` | what the claim is *about* |
+
+   **No circularity.** `Certificate(Verified(c), P)` is what a *downstream* claim cites, with `c` as
+   its evidence. `c`'s own standing comes from its `justification:proof` judgement, not from a
+   certificate over itself. The self-attestation D81 criticised — *"the reasoning institution
+   vouching for its own output"* — is a separate defect about which route populates the witness, not
+   about what the leaf names.
 3. **What "checker identity" is.** A git rev is not a build identity — two builds of one rev can
    differ. Whether this needs the reproducible-build machinery #43 asks for on the Julia side, or
    whether a rev plus a toolchain pin is proportionate here.
