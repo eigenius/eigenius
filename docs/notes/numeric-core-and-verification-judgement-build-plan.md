@@ -105,8 +105,19 @@ Worth doing on its own merits, independent of D87.
 ## 4. Deliberately out
 
 - **eigenius#236** — D30 emitting chain definitions as Lean `def`s. It is the row of D86 §5 that
-  carries the design property, and it is a generator rewrite. This batch declares the relations and
-  wires the correspondence; #236 is what would make the two sides agree *by construction*.
+  carries the design property: generate the Lean side from the chain and the two agree because one
+  produced the other, *"if a human writes both, they agree until someone edits one"*.
+
+  §2's Rust table is the second hand-written side, so that warning applies to it. **What makes it
+  safe to defer is that the drift cannot be silent.** If the chain relation and the table disagree,
+  the externalizer falls through to D74 §3.3's mangling and emits a `Const` the export does not
+  declare — and `checker.rs:132` sets `unknown_pp_declar_hard_error: true`, so nanoda refuses,
+  while `ExternalizeError::UnknownConstant` names both the IRI and the Lean name it resolved to.
+  Agreement-by-construction is stronger than agreement-enforced-by-a-hard-failure, but the weaker
+  one does not admit a wrong answer, only a refused one.
+
+  That is the whole of the argument. If a future change could make an unmapped relation externalize
+  to something the export *does* declare, this exclusion stops holding.
 - **Removing `witness:Is*As` entirely.** D87 §7 makes `IsVerifiedAs` removable; `Declared` and
   `Observed` are a separate question, and `judgements-warrants-build-plan.md` §"Open after P7" asks
   it once for all three. That review is live and is not this batch.
