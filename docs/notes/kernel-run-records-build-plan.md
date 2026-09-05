@@ -57,101 +57,78 @@ And the records that *are* written are incomplete:
   `trace_to_resource` exists, and nothing in the kernel, crates, CLI or orchestrator resolves a
   committed value.
 
-## 2. The decision that shapes the work
+## 2. Run records are provenance; sampled outcomes are Observed
 
-The paper draws an asymmetry that this batch's single code path runs straight through:
+The paper's criterion, from §"Epistemic Scope of Observations":
 
-> Conversely, for a stochastic process, the output is not strictly determined by the input. In this
-> case, **the execution record is the evidence**, yielding an observation rather than an
-> application. This structural asymmetry prevents the two from sharing a unified ground.
+> a sampled outcome reduces to a single `Observed` leaf. Details such as the specific instrument,
+> the configuration parameters, and **the execution trace belong in the provenance graph, not within
+> the justification term**. Furthermore, the underlying substrate is irrelevant: both a model
+> invocation and a laboratory assay function as recordings under a declared protocol. The criterion
+> separating them from computed conclusions is **whether the plan formalizes a deterministic
+> function, not the medium of execution**.
 
-So a run record is provenance when the plan is `Declared(f : I -> O)`, and evidence — an `Observed`
-leaf — when the process is stochastic. The minting code cannot tell which it is producing without
-being told.
+### 2.1 What that settles
 
-**The declaration exists, is populated, and nothing reads it.**
-
-`program:component:deterministic` — *"Whether the component produces the same output for the same
-input"* — is a `core:boolean` with `domain: program:Component`, `recommends` on the class. That is
-the paper's `f : I -> O` assertion, sited on the component rather than on the analysis plan. Measured
-`2026-09-04`:
-
-| | |
-|---|---|
-| `program:Component` resources | 12 |
-| declaring `deterministic` | 9 — **4 true, 5 false** |
-| not declaring it | 3 |
-| Rust code reading the property | **0** |
-
-The split is meaningful, not incidental:
-
-| | components |
-|---|---|
-| `true` | `Combine`, `Extract`, `Identity`, `Transform` — pure data transforms |
-| `false` | `CompleteJson`, `CompleteText`, `HttpRequest`, `RunRuntimeScript`, `Checkpoint` |
-
-The `false` set is exactly the paper's stochastic case. An LLM completion's output is not determined
-by its input, so the execution record *is* the evidence — there is nothing to re-derive it from.
-
-**So the minting site reads `deterministic` and the asymmetry is mechanical.** No new authoring
-burden and no new vocabulary: a `true` component's run yields provenance, a `false` component's run
-yields an `Observed` leaf.
-
-**One decision this forces.** The property is `recommends`, so 3 of 12 components do not carry it.
-Absent must default to **non-deterministic** — the record is evidence. Defaulting the other way
-asserts a determinism nobody declared, which is the direction that silently manufactures a
-`Declared(f : I -> O)` premise. Whether to promote the property to `requires` is a separate
-question; it is a bootstrap edit and belongs with #235's batched reseed, not here.
-
-*Related but not blocking:* #43 asks whether a component **declared** deterministic actually is, for
-Julia runs (BLAS pinning, FMA discipline). This batch takes the declaration at its word, which is
-what the paper's `Declared(f : I -> O)` means — an assertion by an accountable agent, not a
-measurement.
-
-### 2.0 Two corrections, `2026-09-04`
-
-**The paper's dichotomy has a third case, and it is the one this platform mostly runs.** Provenance
-when the plan is a declared function; evidence when the process is stochastic — and, third: a
-**stochastic proposer behind a deterministic acceptor**. The parsing pipeline is that shape. LLMs
-*rank*; the kernel accepts and type-checks deterministically. The stochasticity is in the search,
-not in the result, so the search record does not ground the output — the acceptance does, and
-formalized prose therefore arrives as **Declared** propositions even though its derivation from text
-went through a model. eigenius#201 already lands parsed claims Declared for this reason.
-
-The consequence for §2: a component's `deterministic: false` does **not** by itself make a run's
-record evidence. It does so only when nothing deterministic stands between the stochastic step and
-the committed output. Proof search has the same shape — nondeterministic search, deterministic
-check — and so does anything where a checker gates a proposer.
-
-**The blast radius is one demo, not the pipeline.** Measured: `kernel/src/dcg/` and
-`kernel/src/server/formalize.rs` reference none of `dispatch_component`, `RunProgram` or
-`ComponentRegistry` — the parsing pipeline does not use the program-execution machinery at all. The
-only consumer of `components:CompleteJson` / `CompleteText` outside the ontology and the registry
-wiring is `demo/summarize-program.json`.
-
-So the worry that §2 would turn most runs into `Observed` grounds was unfounded on both counts, and
-the choice below is affordable either way.
-
-### 2.1 A separate gap found while measuring this
-
-The analysis plans are traced, but not declared. On the WRN chain:
+**The run record never changes class.** A `ProgramTrace` is provenance, always, and grounds nothing.
+An earlier draft of this section proposed flipping it to an `ObservationTrace` for a stochastic run;
+the paper puts the execution trace in the provenance graph, so that would have moved the wrong
+object. Two resources, two roles:
 
 | | |
 |---|---|
-| `stats:StatisticalAnalysisPlan` resources | 21 |
-| traced by `prov:ProgramTrace` | **21** |
-| traced by `prov:DeclarationTrace` | **0** |
+| `ProgramTrace` on the run | provenance — unchanged by this batch except for §3.4's completeness fixes |
+| `ObservationTrace` on the **output** | the `Observed` leaf, when the outcome is sampled |
 
-The chain carries 75 `DeclarationTrace` resources; none targets a plan. Since
-`trace_category(wk::PROGRAM_TRACE)` is `None`, no plan emits a witness, so `Declared(plan)` cannot
-resolve for any of the 21. `judgements-warrants-build-plan.md` §"Prerequisite found `2026-08-29`"
-recorded this and set P4's shape to *"author 21 `DeclarationTrace`s (with agents and rationales)"*;
-that did not land.
+This makes §2 **additive**. Nothing existing changes meaning, and the pieces are in place:
+`programs.rs` already commits an activity for `prov:was_generated_by`, which is what
+`prov:ObservationTrace` requires alongside `prov:resource`.
 
-Nothing is broken by it today — no plan is cited as `DeclaredEvidence` anywhere on the chain — so
-the gap is latent, waiting for the first consumer that cites one. **It is not this batch**, and it is
-not what gates §2: component determinism and plan declaration are different assertions at different
-sites. It needs its own issue.
+**Sampled is the realistic default, not the fallback.** The paper's criterion is whether the plan
+formalizes a deterministic function. For a real scientific pipeline that formalization is rarely
+available — and where someone would assert it, #43 records why it is shaky for Julia runs (BLAS
+pinning, FMA discipline). Measured from the other end: 21 `stats:StatisticalAnalysisPlan` resources
+on the WRN chain, **0** carrying a `prov:DeclarationTrace`, so nothing asserts the function
+declaration `App(Declared(plan), Observed(inputs))` needs.
+
+So: **mint the `ObservationTrace` on the output unless the plan formalizes a deterministic
+function.** Nothing asserts that today, so in practice it is minted always, and
+`program:component:deterministic` becomes the future *opt-out* rather than the predicate.
+
+### 2.2 Why the determinism flag is not the predicate
+
+Three shapes, not two. The third is the one this platform mostly runs, and a per-component flag
+cannot see it:
+
+| shape | ground | example |
+|---|---|---|
+| declared function over observed inputs | `App(Declared(plan), Observed(inputs))` | requires an assertion nobody has made |
+| sampled outcome | a bare `Observed` leaf | a scientific pipeline, an assay, a model invocation |
+| stochastic proposer behind a deterministic acceptor | whatever the **acceptor** licenses | the parser (LLMs rank, the kernel type-checks → **Declared**, eigenius#201); nanoda behind a Lean proof |
+
+In the third, the stochasticity is in the search and not in the result, so the search record does
+not ground the output — the acceptance does. A component's `deterministic: false` therefore does not
+by itself make a run's record evidence; it does so only when nothing deterministic stands between
+the stochastic step and the committed output. Reading the flag and *recording* it is sound;
+inferring a ground from it is not.
+
+### 2.3 What this dissolves
+
+`judgements-warrants-build-plan.md` §"Prerequisite found `2026-08-29`" reads as work owed: *"author
+21 `DeclarationTrace`s (with agents and rationales)"*, so that `Declared(plan)` resolves. Under §2.1
+that is **not owed** — if those results are Sampled, the composite is the wrong model for them and no
+plan witness is required. The plan stays a declared document; it simply is not carrying the function
+declaration the composite would need.
+
+Nothing on the chain currently cites a plan as `DeclaredEvidence`, which is consistent with the
+composite never having been the operative shape for them.
+
+### 2.4 Blast radius
+
+Small, and not where it was assumed. `kernel/src/dcg/` and `kernel/src/server/formalize.rs`
+reference none of `dispatch_component`, `RunProgram` or `ComponentRegistry` — the parsing pipeline
+does not use the program-execution machinery at all. The only consumer of `components:CompleteJson`
+/ `CompleteText` outside the ontology and the registry wiring is `demo/summarize-program.json`.
 
 ## 3. Items
 
@@ -360,9 +337,8 @@ looked at without being resolved.
 
 ## 5. Sequencing
 
-1. **§2 first**, and it is now a small piece of work rather than only a decision: read
-   `program:component:deterministic` at the minting site, defaulting absent to non-deterministic.
-   Every other item writes against which record type it produces.
+1. **§2 first.** Mint a `prov:ObservationTrace` on a run's output alongside the existing
+   `ProgramTrace`, which is unchanged. Additive, so every other item writes against a settled shape.
 2. **§3.5(a) (#144) with §2**, and before any minting. An unregistered component must fail rather
    than return its input, or the first records the batch mints attest three components that never
    ran.
@@ -397,9 +373,9 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase":
 
 ## 7. What this batch does not claim
 
-It does not make a computed conclusion more attested than it was — `ProgramTrace` grounds nothing
-before and after. It does give the stochastic case its `Observed` leaf, which is a ground the chain
-could not previously emit for a run.
+It does not change what a `ProgramTrace` grounds — nothing, before and after. It adds the
+`Observed` leaf a sampled outcome is owed, on the run's **output**, which is a ground the chain
+could not previously emit for a run (§2.1).
 
 A computed claim still rests on `App(Declared(plan), Observed(inputs))`, and the run record is not
 a third ground. What changes for the deterministic case is only that the record exists, names its
