@@ -539,6 +539,117 @@ fn a_verdict_is_recomputable_from_what_the_trace_pins() {
     );
 }
 
+/// **The far end of the bridge**: a `Certificate.verified` citing the demo's claim type-checks.
+///
+/// Everything else tests the two halves separately and they never meet.
+/// `a_holds_verdict_admits_a_verified_witness` calls `lookup_chain_witness` DIRECTLY with a
+/// hand-built key — trace to witness, bypassing the constructor.
+/// `kernel/tests/justification_wellfounded.rs` writes `verified(...)` inside certificates, but it
+/// is about cycle detection: its layers come from `LayerBuilder::build`, which does not validate,
+/// so no certificate in it is ever type-checked, and its cases are refusals besides.
+///
+/// So until this test, nothing anywhere ran `check` over a real `Certificate.verified` against a
+/// chain carrying a real `prov:VerificationTrace`. The two ends could disagree and every test
+/// would stay green — and they could: `synthesize_chain_witness` hashes the proposition **the
+/// author wrote in the certificate**, while `emit_from_trace` hashes **the type of the judgement
+/// the institution emitted**. Those are different expressions reaching the same hash only if the
+/// institution built the judgement from the claim's own proposition. It does. Nothing checked it.
+///
+/// The path this exercises, in order: the `eigentt:Judgement` validation rule → CHECK mode →
+/// `check` on the certificate → `CheckHooks::synthesize_chain_witness` at the `verified`
+/// constructor's elided witness slot → `lookup_chain_witness` → `layer_admits_witness` →
+/// `emit_from_trace` → the trace's `prov:judgement`.
+#[test]
+fn a_certificate_citing_the_verified_claim_type_checks() {
+    use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
+    use eigenius_kernel::validation::{ValidationRule, Validator};
+
+    let outcome = land(fixture_resources());
+    assert!(
+        outcome.error.is_none(),
+        "the demo lands: {:?}",
+        outcome.error
+    );
+    // Layer 1 is the `verdict_provenance` Sibling — where the VerificationTrace lives.
+    let provenance: Arc<Layer> = Arc::clone(&outcome.layers[1].layer);
+
+    // A conclusion whose ground is the Lean-verified claim. `verified(iri, P)` is written with two
+    // arguments; the third — `witness:IsVerifiedAs(iri, P)` — is elided and filled by the kernel.
+    let source = r#"
+namespace core          = "urn:eigenius:core";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace demo          = "urn:eigenius:demo:lean";
+namespace probe         = "urn:eigenius:probe";
+
+resource probe:concl_patient_1_healthy : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:demo:lean:patient_1";
+    justification:judgement = type_expr(
+        alias
+            CLAIM = "urn:eigenius:demo:lean:claim_patient_1_healthy",
+            P     = demo:Healthy(demo:patient_1)
+        in
+        holds( eigentt:logic_kernel,
+               verified(CLAIM, P),
+               justification:Certificate(Verified(CLAIM), P) )
+    );
+}
+"#;
+    let resources = eigenius_kernel::esl::compile(source, &provenance)
+        .unwrap_or_else(|e| panic!("the citing conclusion must compile: {e:?}"));
+    let mut b = LayerBuilder::new("citing-conclusion", Some(Arc::clone(&provenance)));
+    for r in resources {
+        b.add_resource(r).expect("add the conclusion");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let errs: Vec<_> = Validator::new(layer)
+        .validate()
+        .into_iter()
+        .filter(|e| {
+            matches!(
+                e.rule,
+                ValidationRule::TermIllTyped | ValidationRule::TermMalformed
+            )
+        })
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "a certificate citing the Lean-verified claim must type-check — the witness the trace \
+         admits is exactly what `Certificate.verified` consumes, and if the two ends hash the \
+         proposition differently this is where it shows. Got: {errs:?}"
+    );
+
+    // And the same certificate about the OTHER patient is refused. Without this the test above
+    // would pass just as well if the witness lookup admitted anything, which is the failure mode
+    // that matters: `Verified` is the grade no author is supposed to be able to assert.
+    let wrong = source.replace(
+        "P     = demo:Healthy(demo:patient_1)",
+        "P     = demo:Healthy(demo:patient_2)",
+    );
+    let resources = eigenius_kernel::esl::compile(&wrong, &provenance)
+        .unwrap_or_else(|e| panic!("the near-miss conclusion must still COMPILE: {e:?}"));
+    let mut b = LayerBuilder::new("citing-conclusion-wrong", Some(provenance));
+    for r in resources {
+        b.add_resource(r).expect("add the conclusion");
+    }
+    let errs: Vec<_> = Validator::new(Arc::new(b.build(LayerStorage::in_memory())))
+        .validate()
+        .into_iter()
+        .filter(|e| matches!(e.rule, ValidationRule::TermIllTyped))
+        .collect();
+    assert!(
+        !errs.is_empty(),
+        "a certificate claiming the chain verified `Healthy(patient_2)` about a claim it verified \
+         `Healthy(patient_1)` about must NOT type-check — nothing on the chain grounds it"
+    );
+    let msg = format!("{:?}", errs[0]);
+    assert!(
+        msg.contains("IsVerifiedAs"),
+        "and the refusal must name the family that missed, not fail somewhere incidental: {msg}"
+    );
+}
+
 /// A `Verdict::Holds` reaches the **verified** grade — the whole of eigenius#160.
 ///
 /// Before this, `do_proof_check` returned a Verdict and nothing else, so a checked Lean proof

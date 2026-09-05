@@ -350,6 +350,23 @@ no proof to re-check. `witness_index.rs`'s header claim — *"this module is ins
 witness itself is postulated, and a wrong admission cannot be caught downstream"* — is what stops
 being true, for the reason P7 predicted.
 
+**Still open: whether the `witness:Is*As` TYPES earn their place.** The argument above rules out
+deleting `Certificate.verified`'s premise and leaving the constructor unconditional. It does not
+rule out a third option, which was not evaluated: **keep the condition, drop the type** — check
+`verified(iri, P)` against the chain by a rule keyed on the *constructor* rather than by filling an
+argument. The witness is already a check-time side condition in all but name: it is elided in the
+surface (`declared(RULE, RULE_P)`, two arguments for a three-argument constructor), synthesised by
+`CheckHooks::synthesize_chain_witness`, never persisted, and carries no information the trace does
+not.
+
+The trade-off is where the special case lives. Today it keys on the *type* — the hook fires when
+the expected type is a witness-category inductive — so any constructor in any layer can demand a
+witness by naming the type, and the kernel needs no knowledge of `justification:Certificate`.
+Without the type it would key on the constructor, pulling the reasoning vocabulary into the
+checker, which is the direction the layer-ordering argument in those declarations' own descriptions
+warns against. That argument is already partly compromised: `witness_index.rs` hard-codes
+`justification:Conclusion` as `REASONING_SENTENCE`.
+
 ## 8. Cost
 
 - **Ontology**: `prov:VerificationTrace` slots for the permitted axiom set and for the checker

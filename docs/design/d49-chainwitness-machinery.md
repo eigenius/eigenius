@@ -1,10 +1,70 @@
 # D49 — `ChainWitness` Machinery
 
-*Status: design memo · June 2026*
+*Status: **largely superseded** `2026-09-05` · design memo · June 2026. Read §4, §5 and §6 as
+live; read §1's four families, §2's coercion, §3's table and §7 entirely as history. See
+**"What is still true"** below before relying on anything here.*
 
 *Companion documents: [D39 justification logic (v2 draft)](d39-justification-logic.md), [D46 Prop universe + axiom framework](d46-prop-universe-and-proof-irrelevance.md), [D47 chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md), [D48 indexed inductive families](d48-indexed-inductive-families.md), [D41 commit pipeline](d41-commit-pipeline.md).*
 
 *This memo settles the implementation shape of the `ChainWitness` predicate family that D39 v2 §5 introduces. It is the soundness boundary for the Reasoning institution — every grounding fact entering the type system passes through these witnesses — so getting the table location, the synthesis algorithm, the trace hook points, and the Lean checker integration right matters more than getting them done quickly. D39 implementation depends on this design landing first.*
+
+---
+
+## What is still true — `2026-09-05`
+
+**Not the sentence directly above.** *"It is the soundness boundary for the Reasoning institution"*
+was withdrawn by the P7 closeout: the Reasoning institution is gone, and what this machinery does
+is recompute a decision from relations the chain already holds, so a wrong answer is catchable by
+running it again rather than being an axiom with no proof to re-check. The index is a cache —
+rebuildable, droppable — which is what `judgements-warrants-build-plan.md` §"Open after P7" asked.
+
+### Eliminated
+
+| here | what happened |
+|---|---|
+| §1, §2 — **four** `IsXxAs` families | **three.** P4's three-grounds change removed `IsDerivedAs`; *"removing the constant is forced by the algebra"* |
+| §2, §4 — the `IsVerifiedAs → IsDerivedAs` coercion | **gone.** `witness_categories_do_not_coerce_into_one_another` calls it *"the spend half of the laundering P3 closed the mint half of"* |
+| §1, §6 — a `ProgramTrace` commit admits a witness | **gone.** `trace_category(PROGRAM_TRACE)` is `None`: a computed claim rests on `App(Declared(plan), Observed(inputs))`, not on the fact that a run happened |
+| §3 — the materialised `BTreeMap<WitnessKey, ()>` on `Layer` | **gone** (D66 slice 0). Direct lookup on the key's IRI. This was the memo's central engineering decision |
+| §5 — `prop_hash = sha256(canonical_cbor(encode_type(P)))` | **changed** (D66 §4). The hash is over the *decoded* `Exp`, because a definition is written folded and seen unfolded |
+| §7 — the Lean → Reasoning comorphism and `VerifiedPropositionView` | **gone entirely.** D74's forward externalization replaced the route (D51 §3); the class is deleted, and [D87](d87-the-verification-judgement.md) puts the checker's result on the trace as `prov:judgement`, which is what `Verified` is now keyed off |
+| §9 — EntailmentQuery cost, the `OnceLock` | moot. P7 deleted the QueryClass; the index it costed does not exist |
+| the closing note — *"the witness machinery is the soundness boundary, so build it first"* | withdrawn, as above |
+
+### Live
+
+- **§4's key**, `(category, iri, prop_hash)`. This memo calls `prop_hash` *"effectively redundant"*;
+  it is the opposite. It is what makes the proposition an author wrote and the proposition the
+  chain records comparable across folding, α-renaming and encoding — D66 §4 and D82 §3.5 are both
+  bugs in exactly that comparison.
+- **§5's shape**: encode → hash → key → parent-chain walk → first-hit-wins → typed diagnostic.
+  First-hit-wins is sound because layers are immutable.
+- **§6's no-new-hooks property.** Witnesses fall out of trace commits; the commit pipeline needs no
+  witness phase. The most durable idea here, and untouched.
+- **§3's *reasoning*** for per-layer scope, even though the table it justified is gone: layers are
+  the unit of immutable commitment, lookup composes through the existing walk, content-addressing
+  stays honest, persistence is free.
+- **§8's opaque value.** `Val::ChainWitness` — no eliminator, no readback, proof-irrelevant.
+
+### What the machinery is for, stated without the inflation
+
+There is no epistemic status on the chain to bridge *from*: eigenius#23 deleted
+`epistemic_status`, and no grade is stored anywhere. What the chain holds is traces and the
+propositions their targets carry. So a witness is **the name of a query result** over trace
+relations, in a position where a derivation can consume it.
+
+Something has to occupy that position because the composition constructors (`app`, `sum_l`/`sum_r`,
+`spec_poly`) are pure logic and will compose ungrounded leaves happily, while `support` and
+`is_fully_verified` read the justification TERM at query time — so with nothing checking the
+leaves, `Verified("anything")` would read as verified. **The certificate checks the composition;
+the witness grounds the leaves.**
+
+Three things are load-bearing: the query (`layer_admits_witness`), proposition identity
+(`hash_proposition_exp`, α-canonicalization, and the emit/check agreement
+`emit_and_check_sides_agree_on_the_hash` pins), and the seam in `check` where a type-theoretic
+derivation depends on a database fact. Only the third needs a *type*, and only because a
+constructor argument must have one — so whether the `witness:Is*As` types earn their place against
+a constructor-keyed side condition is open (D87 §7).
 
 ---
 
