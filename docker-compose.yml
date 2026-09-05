@@ -30,10 +30,17 @@ services:
       context: .
       dockerfile: deploy/Dockerfile.kernel
       args:
-        # Empty by default. Set CARGO_FEATURES=use-llm to build a kernel whose
-        # untrusted proposers can actually call a model — required for a D71
-        # formalization run on a doc branch with no recorded draws yet.
-        CARGO_FEATURES: ${CARGO_FEATURES:-}
+        # `use-llm` by DEFAULT. The kernel's untrusted proposers can call a model,
+        # which is what a D71 formalization run on a doc branch with no recorded
+        # draws needs. Built without it, such a run fails closed — "a cap-only run
+        # is a DIFFERENT experiment" — which is correct behaviour and was the wrong
+        # default: the common case is wanting the ranker, and the old default made
+        # every parsing run a two-step (fail, rebuild with `up-llm`, rerun).
+        #
+        # Override with `CARGO_FEATURES= docker compose up --build` for a kernel
+        # with no live ranker. Replay from a recorded `ranks.json` needs no LLM and
+        # works either way.
+        CARGO_FEATURES: ${CARGO_FEATURES-use-llm}
     ports:
       - "50051:50051"
     environment:

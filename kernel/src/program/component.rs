@@ -141,6 +141,16 @@ impl Default for ComponentRegistry {
 
 // --- Built-in components ---
 
+/// A fresh `Identity` builtin, for registering under a caller-chosen IRI.
+///
+/// The registry's own `Identity` is keyed on `components:Identity`; a test or a
+/// comorphism that needs a pass-through component under a different name registers one
+/// of these rather than relying on an unregistered IRI dispatching to nothing
+/// (eigenius#144).
+pub fn identity_component() -> Box<dyn BuiltinComponent> {
+    Box::new(IdentityComponent)
+}
+
 struct IdentityComponent;
 
 impl BuiltinComponent for IdentityComponent {

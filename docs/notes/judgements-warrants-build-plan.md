@@ -514,6 +514,21 @@ in `project.rs`. Both answered wrongly before, in the reassuring direction.
 
 ### Prerequisite found `2026-08-29` — the analysis plans are not declared
 
+> **Dissolved `2026-09-05`, not owed** (`kernel-run-records-build-plan.md` §2.3). This section set
+> P4's shape to *"author 21 `DeclarationTrace`s (with agents and rationales)"* so that
+> `Declared(plan)` resolves. That did not land, and it should not: it presumes the composite
+> `App(Declared(plan), Observed(inputs))` is the operative shape for those plans.
+>
+> The paper's criterion is *"whether the plan formalizes a deterministic function, not the medium
+> of execution"*, and for a real scientific pipeline that formalization is rarely available —
+> eigenius#43 records why it is shaky even where asserted. Those results are **Sampled**: a bare
+> `Observed` leaf. Consistent with the measurement, nothing on the chain cites a plan as
+> `DeclaredEvidence`, so no consumer has ever wanted the witness this section proposed to mint.
+>
+> The plans remain declared documents. They simply do not carry the function declaration the
+> composite would need, and minting 21 traces to satisfy a composite nobody uses would have been
+> work in service of the wrong model.
+
 **`App(Declared(plan), Observed(inputs))` needs BOTH witnesses to resolve, and the plan half does
 not exist.** Measured against the WRN chain:
 
@@ -1242,6 +1257,17 @@ family, the IRI and the property is the system's most-used error message.
 
 **Do not act on this during P0–P7.** It is a question about the shape that P7 leaves, and answering
 it early would fix the answer against a tree that is still changing.
+
+**Partly answered `2026-09-04`, and the answer is not uniform across the three families.**
+eigenius#160 landed after this section was written and gave `Verified` a second establishment
+route — a `prov:VerificationTrace` read through `emit_from_trace` — so P3's row above
+("the witness index stops being how `Verified` is established") is no longer true as stated.
+That route does not recompute anything: the kernel cannot re-run nanoda at lookup time, so it admits
+on the strength of a committed note. `Declared` and `Observed` remain plausible constant
+specifications over relations the kernel can read at any time. So the index is not simply a cache —
+it is a soundness boundary for exactly one family. [D87](../design/d87-the-verification-judgement.md)
+proposes closing that by keeping the checker's result as a `holds(logic_lean4, t, P)` judgement,
+which would make `Verified` re-decidable and let the review reach the uniform answer it expected.
 
 ---
 

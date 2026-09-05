@@ -590,7 +590,7 @@ WordNet Morphy dictionary, neither of which is in the default image:
 
 ```bash
 scripts/provision-wordnet.sh download   # compose bind-mounts references/WordNet-3.0/dict
-ANTHROPIC_API_KEY=sk-... just up-llm    # builds the kernel with --features use-llm
+ANTHROPIC_API_KEY=sk-... just up         # the kernel is built with --features use-llm by default
 ```
 
 Without the dict the served parser falls back to a no-op lemmatizer and *every*

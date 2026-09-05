@@ -269,12 +269,16 @@ pub enum Exp {
     /// the chain (D14 §9.3 step 4) before being wrapped as
     /// `Val::ResourceVal` for downstream evaluation.
     ///
-    /// `target_iri` carries an optional explicit IRI override for the
-    /// produced resource. `None` (the ESL default) instructs the kernel
-    /// to assign a deterministic content-hash IRI of the form
-    /// `urn:eigenius:comorphism-output:<comorphism-tail>:<hex>`. `Some`
-    /// (set by EigenQL's `INTO` clause) commits the produced resource
-    /// at the caller-named IRI.
+    /// The produced resource always gets a deterministic content-hash IRI of the form
+    /// `urn:eigenius:comorphism-output:<comorphism-tail>:<hex>`, so identical reify
+    /// outputs dedupe on commit.
+    ///
+    /// There was a `target_iri` override here, removed by eigenius#149. Nothing ever set
+    /// it: the property `urn:eigenius:program:target_iri` was undeclared, the ESL lowering
+    /// set `function` and `source` and never a target, and the surface its doc named as the
+    /// one that would — EigenQL's `INTO` — cannot reach it. `FIBER … INTO` is evaluated by
+    /// the fiber evaluator, a query-plan path, and picks the response IRI itself
+    /// (`query/evaluate/fiber.rs`); `INTO` never lowers to an `InstitutionInvoke`.
     ///
     /// Without a institution index/runtime attached (bare
     /// `EvalCtx::pure()` used at type-check time), the expression
@@ -286,7 +290,6 @@ pub enum Exp {
     InstitutionInvoke {
         comorphism_iri: Iri,
         source: Box<Exp>,
-        target_iri: Option<Iri>,
     },
 }
 
@@ -732,11 +735,9 @@ impl Exp {
             Exp::InstitutionInvoke {
                 comorphism_iri,
                 source,
-                target_iri,
             } => Exp::InstitutionInvoke {
                 comorphism_iri: comorphism_iri.clone(),
                 source: bx(source),
-                target_iri: target_iri.clone(),
             },
 
             // Level-free leaves.

@@ -436,6 +436,83 @@ fn apply_fiber_clause(
             stamped.set(k.clone(), v.clone());
         }
         if persist_to_chain {
+            // A chain-resident resource needs a chain-resident record of what produced it
+            // (eigenius#206, kernel-run-records §3.1).
+            //
+            // The comment above the dispatch states the general position — a FIBER's audit
+            // trail rides on the EigenQL trace rather than the chain, because an OnDemand
+            // query is an explicit invocation and nothing of it persists. `INTO` is the
+            // one exception: it puts the response ON the chain, where a resource with no
+            // record of its origin is what the trace machinery exists to prevent. So this
+            // sits inside `persist_to_chain`, and a FIBER without `INTO` still leaves
+            // nothing behind.
+            //
+            // A `ProgramTrace`: provenance, grounding nothing. **Not** an
+            // `ObservationTrace`, though a program run's output gets one in
+            // `server::programs::execute_program`. The difference is what the output is: a
+            // program's output is a computed or sampled value, while a FIBER's is an
+            // institution's *answer*, and for a proof-checking institution that answer is
+            // a Verdict — an acceptance, not a recording. Minting an `Observed` leaf for
+            // it would be the inference the build plan's §2.2 warns against, so that
+            // question is left open rather than answered by default.
+            //
+            // The Activity is minted here rather than declared in `prov.esl`, following
+            // `eigenius-encoding`'s emitter: `prov:activity:kernel_run_program` is a
+            // permanent facility, while this is ONE query invocation. Minting it locally
+            // keeps the write-back self-contained and moves no manifest.
+            let activity_iri = Iri::parse(&format!("{response_iri}:fiber-activity"))
+                .map_err(|e| QueryError::evaluation(format!("FIBER activity IRI: {e}")))?;
+            let mut activity = Resource::new(activity_iri.clone());
+            activity.set(
+                Iri::parse(wk::IS_A).expect("well-known IRI"),
+                Value::Array(vec![Value::String(
+                    "urn:eigenius:prov:Activity".to_string(),
+                )]),
+            );
+            activity.set(
+                Iri::parse(wk::SHORT_NAME).expect("well-known IRI"),
+                Value::String("fiber_into".to_string()),
+            );
+            activity.set(
+                Iri::parse(wk::DESCRIPTION).expect("well-known IRI"),
+                Value::String(format!(
+                    "EigenQL `FIBER … INTO` chain-reinsertion: OnDemand dispatch of \
+                     `{}` on institution `{}` (D14 §9.3)",
+                    qc_entry.query_handler, qc_entry.institution_ref
+                )),
+            );
+
+            let trace_iri = Iri::parse(&format!("{response_iri}:fiber-trace"))
+                .map_err(|e| QueryError::evaluation(format!("FIBER trace IRI: {e}")))?;
+            let mut trace = Resource::new(trace_iri);
+            trace.set(
+                Iri::parse(wk::IS_A).expect("well-known IRI"),
+                Value::Array(vec![Value::String(wk::PROGRAM_TRACE.to_string())]),
+            );
+            trace.set(
+                Iri::parse(wk::REFLECTION_RESOURCE).expect("well-known IRI"),
+                Value::iri(&response_iri),
+            );
+            trace.set(
+                Iri::parse("urn:eigenius:prov:was_generated_by").expect("static IRI"),
+                Value::iri(&activity_iri),
+            );
+            trace.set(
+                Iri::parse(wk::TIMESTAMP).expect("well-known IRI"),
+                Value::String(crate::server::helpers::millis_to_iso8601(
+                    crate::server::helpers::now_millis(),
+                )),
+            );
+            // What was asked, embedded, so an auditor reads the inputs without resolving
+            // anything. `prov:input` is `core:resource`-typed and recommended on the class.
+            trace.set(
+                Iri::parse("urn:eigenius:prov:input").expect("static IRI"),
+                Value::Embedded(Box::new(query_res.clone())),
+            );
+
+            into_collector.push(activity);
+            into_collector.push(trace);
+
             into_collector.push(stamped.clone());
         }
         overlay.push(response_iri.clone(), stamped);

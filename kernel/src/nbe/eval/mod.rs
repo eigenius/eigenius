@@ -396,6 +396,27 @@ pub(crate) fn eval_impl<T: Tracer>(
                     let node = T::combine(vec![arg_node, T::component(comp_trace)]);
                     return Ok((val, node));
                 }
+                // Not registered. The `Exp::Var` arm below yields a neutral rather than
+                // an error for an unbound name in effectful mode, and its reason is this
+                // interception — "unbound variables may be component IRIs that will be
+                // intercepted at the App level". The interception did not happen, so the
+                // name is a component IRI naming no component, and letting it through
+                // produces `Nt(App(Gen(_, iri), arg))`: a stuck neutral that flows into
+                // downstream `Construct` fields and commits with a `ProgramTrace` over a
+                // step that never ran. A certificate discharging `derived(output, P)`
+                // against that trace earns its grade from nothing (eigenius#144).
+                //
+                // Gated on the name being unbound, so an ordinary lambda-bound function
+                // in head position is untouched.
+                if rho.get(name).is_err() {
+                    return Err(EvalError::ComponentDispatchFailed {
+                        component_iri: name.clone(),
+                        message: "component is not registered — it is in neither the \
+                                  builtin registry nor the remote set, and the name is \
+                                  not bound in the environment"
+                            .to_string(),
+                    });
+                }
             }
             let (f_val, f_node) = ev(e1)?;
             let (arg_val, arg_node) = ev(e2)?;
@@ -535,7 +556,6 @@ pub(crate) fn eval_impl<T: Tracer>(
         Exp::InstitutionInvoke {
             comorphism_iri,
             source,
-            target_iri,
         } => {
             let (source_val, source_node) = ev(source)?;
             // No effect hooks (Pure), or hooks with no institution
@@ -549,19 +569,13 @@ pub(crate) fn eval_impl<T: Tracer>(
             };
             match ctx.hooks() {
                 None => Ok((passthrough(), source_node)),
-                Some(hooks) => {
-                    match hooks.institution_invoke(
-                        comorphism_iri,
-                        &source_val,
-                        target_iri.as_ref(),
-                    )? {
-                        Some(translated) => {
-                            let node = T::comorphism(comorphism_iri, source_node, &translated);
-                            Ok((translated, node))
-                        }
-                        None => Ok((passthrough(), source_node)),
+                Some(hooks) => match hooks.institution_invoke(comorphism_iri, &source_val)? {
+                    Some(translated) => {
+                        let node = T::comorphism(comorphism_iri, source_node, &translated);
+                        Ok((translated, node))
                     }
-                }
+                    None => Ok((passthrough(), source_node)),
+                },
             }
         }
 

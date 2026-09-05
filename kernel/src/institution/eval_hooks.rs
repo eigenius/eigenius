@@ -119,7 +119,6 @@ impl InstitutionEngine {
         &self,
         comorphism_iri: &Iri,
         source_val: &Val,
-        target_iri: Option<&Iri>,
     ) -> Result<Option<Val>, EvalError> {
         // No institution backing attached → `Ok(None)`, the evaluator
         // yields a passthrough neutral (a bare Pure/no-institution
@@ -247,15 +246,14 @@ impl InstitutionEngine {
                 ))
             })?;
 
-        // D14 §9.3 step 4: assign a chain-resident IRI. Caller-supplied
-        // `target_iri` overrides; otherwise mint a deterministic
-        // content-hash IRI so identical reify outputs dedupe on commit.
-        let assigned_iri = match target_iri {
-            Some(iri) => iri.clone(),
-            None => {
-                deterministic_run_output_iri("comorphism-output", comorphism_iri, &target_resource)
-            }
-        };
+        // D14 §9.3 step 4: assign the chain-resident IRI — a deterministic content-hash
+        // one, so identical reify outputs dedupe on commit.
+        //
+        // There was a caller-supplied `target_iri` override here, with this branch as its
+        // fallback. Nothing ever set it (eigenius#149), so the fallback was the only path
+        // and is now the whole of it.
+        let assigned_iri =
+            deterministic_run_output_iri("comorphism-output", comorphism_iri, &target_resource);
         target_resource.set_id(Some(assigned_iri));
 
         // Step 5 (D14 §9.3): post-translation validation invariant —
@@ -317,8 +315,19 @@ impl InstitutionEngine {
 
         let component = match registry.get(component_iri) {
             Some(c) => c,
-            // Unknown component — return input unchanged (identity fallback).
-            None => return Ok((input_val.clone(), None)),
+            // Unreachable through the evaluator, which gates this call on
+            // `is_component` (`nbe/eval/mod.rs:393`) and now errors when that is false.
+            // Kept as an error rather than deleted because `dispatch_component` is a
+            // public trait method: a caller that skips the predicate gets a diagnostic
+            // instead of its input back. The identity fallback that stood here returned
+            // `Ok((input_val.clone(), None))` — no error, no trace, a step
+            // indistinguishable from a real one (eigenius#144).
+            None => {
+                return Err(EvalError::ComponentDispatchFailed {
+                    component_iri: component_iri.to_string(),
+                    message: "component is not registered".to_string(),
+                })
+            }
         };
 
         let input_resource = val_to_resource(input_val);
@@ -585,9 +594,8 @@ impl EffectHooks for InstitutionEngine {
         &self,
         comorphism_iri: &Iri,
         source: &Val,
-        target_iri: Option<&Iri>,
     ) -> Result<Option<Val>, EvalError> {
-        self.run_institution_invoke(comorphism_iri, source, target_iri)
+        self.run_institution_invoke(comorphism_iri, source)
     }
 
     fn decide_institution(
@@ -800,7 +808,6 @@ mod tests {
         let exp = Exp::InstitutionInvoke {
             comorphism_iri: Iri::parse("urn:eigenius:test:marker_cm").unwrap(),
             source: Box::new(source),
-            target_iri: None,
         };
         let v = eval(&exp, &Rho::Nil).expect("eval");
         match v {
@@ -879,6 +886,67 @@ mod tests {
                 crate::ontology::resource::Value::String(procedure_iri.as_str().into()),
             );
             Ok(tagged)
+        }
+    }
+
+    // --- #144: an unregistered component IRI in head position ---
+
+    /// Applying a component the registry does not hold must not silently succeed.
+    ///
+    /// **The mechanism is not the one eigenius#144 describes.** That issue points at
+    /// `dispatch_component`'s identity fallback — *"return input unchanged"* — but the
+    /// evaluator never reaches it: `eval_impl`'s `App` arm gates on
+    /// `hooks.is_component(name)` (`nbe/eval/mod.rs:393`), so an unregistered IRI takes
+    /// the ordinary-application branch instead. `Exp::Var` for a name unbound in `rho`
+    /// then yields `Val::Nt(Neut::Gen(usize::MAX, name))` rather than an error, because
+    /// in effectful mode *"unbound variables may be component IRIs that will be
+    /// intercepted at the App level"* (`mod.rs:415`) — and here the interception did not
+    /// happen. Applying that neutral produces a stuck neutral.
+    ///
+    /// So the silent failure is real and the fallback is dead code on this path. This
+    /// test pins the behaviour at the site that actually decides it.
+    #[test]
+    fn an_unregistered_component_does_not_silently_pass_through() {
+        let engine = Arc::new(InstitutionEngine {
+            layer: Some(build_pipeline_chain()),
+            institution_index: None,
+            institution_runtime: None,
+            registry: Some(Arc::new(ComponentRegistry::new())),
+            trace_store: None,
+            dispatched_traces: Arc::new(Mutex::new(Vec::new())),
+            produced_resources: Arc::new(Mutex::new(Vec::new())),
+            task_context: None,
+        });
+        let ctx = EvalCtx::effectful(None, engine as Arc<dyn crate::nbe::eval::EffectHooks>);
+
+        // `Transform(input)` — Transform is declared `implementation: "builtin"` and
+        // `deterministic: true` in the program ontology, and implemented nowhere.
+        let input = Exp::EigonResource(Box::new(crate::ontology::resource::Resource::new(
+            Iri::parse("urn:eigenius:test:144:input").unwrap(),
+        )));
+        let app = Exp::App(
+            Box::new(Exp::Var(
+                "urn:eigenius:program:components:Transform".to_string(),
+            )),
+            Box::new(input),
+        );
+
+        let result = eval_ctx(&app, &Rho::Nil, &ctx);
+
+        match result {
+            Err(EvalError::ComponentDispatchFailed { component_iri, .. }) => assert_eq!(
+                component_iri, "urn:eigenius:program:components:Transform",
+                "the diagnostic must name the component that could not be dispatched"
+            ),
+            Err(other) => panic!(
+                "an unregistered component may fail, but the diagnostic must name it; got {other:?}"
+            ),
+            Ok(v) => panic!(
+                "an unregistered component must not evaluate successfully; got {v:?}. \
+                 This is eigenius#144: the step is indistinguishable from a real one, and a \
+                 downstream certificate discharging `derived(output_iri, P)` against the \
+                 resulting ProgramTrace earns its grade from a computation that never ran."
+            ),
         }
     }
 
@@ -979,9 +1047,10 @@ mod tests {
         );
         comorphism.set(
             Iri::parse(wk::TRANSFORMATION).unwrap(),
-            // No real Component — dispatch_component falls back to
-            // identity for unknown component IRIs, which is what we
-            // want for this structural test.
+            // A real identity component, registered by `pipeline_registry()`.
+            // This test used to name a component that existed nowhere and rely on
+            // `dispatch_component`'s identity fallback — it was asserting the defect
+            // eigenius#144 reports.
             crate::ontology::resource::Value::String(
                 "urn:eigenius:test:pipe:identity_transform".into(),
             ),
@@ -1019,7 +1088,7 @@ mod tests {
                 Some(Arc::clone(&__engine_layer)),
                 Arc::new(crate::institution::eval_hooks::InstitutionEngine::for_io(
                     Arc::clone(&__engine_layer),
-                    Arc::new(ComponentRegistry::default()),
+                    Arc::new(pipeline_registry()),
                     None,
                     Arc::new(Mutex::new(Vec::new())),
                     Arc::new(Mutex::new(Vec::new())),
@@ -1030,6 +1099,22 @@ mod tests {
             )
         };
         (ctx, idx)
+    }
+
+    /// Registry for the pipeline test: `Identity` under the comorphism's
+    /// `transformation` IRI, so the structural test has a real component to dispatch to.
+    ///
+    /// It previously passed `ComponentRegistry::default()` and named a transformation
+    /// that existed nowhere, relying on `dispatch_component` returning its input for an
+    /// unregistered IRI. That fallback is now an error (eigenius#144), and the test's
+    /// subject — the four-step comorphism pipeline — never depended on it.
+    fn pipeline_registry() -> ComponentRegistry {
+        let mut r = ComponentRegistry::default();
+        r.register(
+            "urn:eigenius:test:pipe:identity_transform".to_string(),
+            crate::program::component::identity_component(),
+        );
+        r
     }
 
     #[test]
@@ -1043,7 +1128,6 @@ mod tests {
         let exp = Exp::InstitutionInvoke {
             comorphism_iri: Iri::parse("urn:eigenius:test:pipe:cm").unwrap(),
             source: Box::new(source),
-            target_iri: None,
         };
         let v = eval_ctx(&exp, &Rho::Nil, &ctx).expect("institution pipeline eval");
         let result = match v {
@@ -1140,7 +1224,7 @@ mod tests {
                 Some(Arc::clone(&__engine_layer)),
                 Arc::new(crate::institution::eval_hooks::InstitutionEngine::for_io(
                     Arc::clone(&__engine_layer),
-                    Arc::new(ComponentRegistry::default()),
+                    Arc::new(pipeline_registry()),
                     None,
                     Arc::new(Mutex::new(Vec::new())),
                     Arc::new(Mutex::new(Vec::new())),
@@ -1158,7 +1242,6 @@ mod tests {
                     Iri::parse("urn:eigenius:test:src").unwrap(),
                 ),
             ))),
-            target_iri: None,
         };
         let err = eval_ctx(&exp, &Rho::Nil, &ctx).unwrap_err();
         let msg = format!("{err}");
@@ -1321,7 +1404,7 @@ mod tests {
                 Some(Arc::clone(&__engine_layer)),
                 Arc::new(crate::institution::eval_hooks::InstitutionEngine::for_io(
                     Arc::clone(&__engine_layer),
-                    Arc::new(ComponentRegistry::default()),
+                    Arc::new(pipeline_registry()),
                     None,
                     Arc::new(Mutex::new(Vec::new())),
                     Arc::new(Mutex::new(Vec::new())),
@@ -1394,7 +1477,7 @@ mod tests {
                 Some(Arc::clone(&__engine_layer)),
                 Arc::new(crate::institution::eval_hooks::InstitutionEngine::for_io(
                     Arc::clone(&__engine_layer),
-                    Arc::new(ComponentRegistry::default()),
+                    Arc::new(pipeline_registry()),
                     None,
                     Arc::new(Mutex::new(Vec::new())),
                     Arc::new(Mutex::new(Vec::new())),
