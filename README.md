@@ -938,6 +938,9 @@ system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)
 | [D79: The representation of inductive types](docs/design/d79-the-representation-of-inductive-types.md) | Completing D76 — term-valued properties onto `core:inductive`, term references projected into the index as `core:mentions`, and inductive declarations sealed against redefinition |
 | [D77: Merge as a pushout of environments](docs/design/d77-merge-as-a-pushout-of-environments.md) | **Designed, not implemented.** Merge must check that a rebinding did not invalidate what was checked against the old binding |
 | [D80: Witness and institution machinery](docs/design/d80-witness-and-institution-machinery.md) | **Designed, not implemented.** Witness credit and institution verdicts both survive a rebinding that widens; neither is repaired by revalidation |
+| [D86: The numeric primitive core](docs/design/d86-the-numeric-primitive-core.md) | `≤` and IEEE `==` over `core:float`, so a measurement claim can state a relation a Lean proof can discharge. Two asserted correspondences, three derived from them; NaN admitted with its defined behaviour |
+| [D87: The verification judgement](docs/design/d87-the-verification-judgement.md) | The checker's result kept, not discarded — `holds(logic_lean4, Checked(t), P)` on the `VerificationTrace`, with the five inputs the verdict is a function of pinned, so `Verified` is re-decidable rather than attested |
+| [D88: Four questions the justification layer leaves open](docs/design/d88-four-questions-the-justification-layer-leaves-open.md) | Why the `witness:Is*As` types earn their place (drift fails loudly with them, silently without); whether the justification term should merge into the certificate (no load-bearing use found — referred to the paper); how a chain instance is named from inside a term; and why making `app`'s arguments inferable is a kernel feature, not an ergonomic fix |
 
 **Evaluation methodology**
 

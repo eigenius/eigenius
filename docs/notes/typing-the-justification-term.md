@@ -1,5 +1,14 @@
 # Typing the justification term
 
+> **Superseded in part by [D88](../design/d88-four-questions-the-justification-layer-leaves-open.md)
+> §3** (`2026-09-05`). D88 checks each candidate reason for keeping the separate term index and finds
+> none load-bearing in the implementation, so the decision is referred to the paper's author as a
+> formalism question. **§2a.2 below is wrong** and D88 corrects it: the withdrawal scenario does not
+> distinguish the two shapes — after a withdrawal, `holds(kernel, c, Certificate(j,P))` and
+> `holds(kernel, c, Justification(P))` both stop validating. §4's instance-reference finding is
+> answered in D88 §4, and §5.4's "separable ergonomic half" is answered in D88 §5, where it turns
+> out to be the largest of the four items rather than the smallest.
+
 *Open design question, raised `2026-09-05` while closing out
 [D87](../design/d87-the-verification-judgement.md) §3.5. Concerns
 [D39](../design/d39-justification-logic.md) §3 and §5 —

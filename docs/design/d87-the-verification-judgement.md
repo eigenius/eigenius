@@ -365,7 +365,13 @@ no proof to re-check. `witness_index.rs`'s header claim — *"this module is ins
 witness itself is postulated, and a wrong admission cannot be caught downstream"* — is what stops
 being true, for the reason P7 predicted.
 
-**Still open: whether the `witness:Is*As` TYPES earn their place.** The argument above rules out
+**Answered in [D88](d88-four-questions-the-justification-layer-leaves-open.md) §2: they do.** The
+question and the evidence are below; D88 derives the answer from how drift fails — with the type,
+the constructor's premise names something that must resolve, so a kernel/ontology divergence breaks
+the build; keyed on the constructor instead, the kernel silently stops matching and the side
+condition never fires.
+
+**The question as it stood.** The argument above rules out
 deleting `Certificate.verified`'s premise and leaving the constructor unconditional. It does not
 rule out a third option, which was not evaluated: **keep the condition, drop the type** — check
 `verified(iri, P)` against the chain by a rule keyed on the *constructor* rather than by filling an
