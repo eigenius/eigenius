@@ -32,26 +32,35 @@
 //! call itself part of the TCB on that basis: *"the witness itself is postulated, and a wrong
 //! admission cannot be caught downstream because an axiom has no proof to re-check."*
 //!
-//! **That stopped being true, and it is what closes P7's open question** (`judgements-warrants-
-//! build-plan.md` §"Open after P7": *"a predicate the kernel inhabits by constant specification,
-//! computed from a relation it can read at any time, is a decision procedure rather than a
-//! witness … the index is a cache over relations — rebuildable, droppable, and not a soundness
-//! boundary"*). All three surviving families are now that:
+//! **The INDEX is a cache, and that is what closes P7's open question** (`judgements-warrants-
+//! build-plan.md` §"Open after P7": *"the index is a cache over relations — rebuildable,
+//! droppable"*). Nothing about a witness is stored; every answer is recomputed from the layer's
+//! Trace resources and the propositions they name. Delete this module's caches and the answers do
+//! not change.
 //!
-//! - `Declared` and `Observed` always were. Nothing about a witness is stored; the answer is
-//!   recomputed from the layer's Trace resources and the propositions they name, every time.
-//! - `Verified` was the exception. Its `VerificationTrace` route admitted on the strength of a
-//!   committed NOTE that a check had run, because the kernel cannot re-run nanoda at lookup time.
-//!   D87 put the checker's result on the trace as a `prov:judgement` and pinned the five inputs
-//!   the verdict is a function of, so what is read back is a recorded result any party can
-//!   recompute — see `a_verdict_is_recomputable_from_what_the_trace_pins`.
+//! **The CONSTANT SPECIFICATION is not, and must not be.** An earlier version of this comment said
+//! the TCB claim "stops being true" for all three families. That over-generalised.
+//! `judgements-and-warrants.tex` §"Witnesses and the Trusted Computing Base" is explicit: *"The
+//! Verified state is provable, whereas Declared and Observed states are postulated … Postulation is
+//! the correct semantic operation for attributions: verification is impossible because an
+//! attribution merely asserts that an agent made a claim or that a physical recording occurred."*
+//! And it names the TCB as the kernel's checker, each hosted external checker, each comorphism,
+//! **and the constant specification governing attributions**.
+//!
+//! Recomputing the *lookup* does not help there: it recomputes the same trusted assertion. The
+//! chain says an agent declared `P`; nothing can check that they did. So:
+//!
+//! - `Declared` and `Observed` — the lookup is a decision procedure, the FACT is postulated. In the
+//!   TCB permanently, and correctly.
+//! - `Verified` — the paper classifies it as *provable*, and D87 is what made the proof actually
+//!   re-runnable: the trace now carries the checker's `prov:judgement` plus the five inputs the
+//!   verdict is a deterministic function of, so any party can re-run `check_proof` and get the same
+//!   answer — see `a_verdict_is_recomputable_from_what_the_trace_pins`.
 //!
 //! **The types stay declared and the premises stay on the constructors.** Removing
 //! `witness:IsVerifiedAs` was proposed and does not work: `Certificate.verified` without its
 //! premise is unconditional, so `Verified(iri)` would be certifiable for any proposition and the
-//! grade assertable by anyone writing a certificate. What changed is not the shape but the
-//! standing — a wrong answer here is catchable by recomputation rather than being an axiom with
-//! no proof to re-check.
+//! grade assertable by anyone writing a certificate.
 //!
 //! **Two caches sit on top, and both fail conservatively.** `LayerHandle::has_witness_candidates`
 //! prunes a layer that stamped no candidate and deserializes as `true`, so an old handle is probed

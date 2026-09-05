@@ -331,8 +331,23 @@ no committed witness, only the layer's Trace resources and the propositions they
 two caches (`has_witness_candidates`, the in-flight fallback) both fail conservatively — a wrong
 guess refuses a certificate, never admits one. `Verified` was the exception, because the trace it
 read was a note that a check had run. With the judgement on the trace and its inputs pinned, that
-route reads a recorded result whose verdict anyone can recompute. All three are decision
-procedures; the index is a cache.
+route reads a recorded result whose verdict anyone can recompute. All three lookups are decision
+procedures; **the index is a cache.**
+
+**The constant specification is a different thing, and it stays in the TCB.** An earlier draft of
+this section said the TCB framing "stops being true" without qualifying which part. That
+over-generalised, and `judgements-and-warrants.tex` §"Witnesses and the Trusted Computing Base" is
+explicit against it: *"The Verified state is provable, whereas Declared and Observed states are
+postulated … Postulation is the correct semantic operation for attributions: verification is
+impossible because an attribution merely asserts that an agent made a claim or that a physical
+recording occurred."* The paper names the TCB as the kernel's checker, each hosted external checker,
+each comorphism, **and the constant specification governing attributions**.
+
+Recomputing a *lookup* does not touch that: it recomputes the same trusted assertion. The chain says
+an agent declared `P`, and nothing can check whether they did — which is why postulation is correct
+rather than a gap. So what this batch moved is exactly one family: `Verified`, which the paper
+already classified as *provable*, and which D87 §5 makes re-runnable in practice by pinning the
+inputs. `Declared` and `Observed` are in the TCB permanently, by design.
 
 **An earlier draft of this table said `witness:IsVerifiedAs` was *removable*, and that does not
 follow.** `Certificate.verified`'s premise is what makes `Certificate(Verified(iri), P)`
