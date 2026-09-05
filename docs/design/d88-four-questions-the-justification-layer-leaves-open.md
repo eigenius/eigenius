@@ -18,6 +18,7 @@ derivation:
 | D87 §7: `witness:IsVerifiedAs` is *removable* once `Certificate.verified` consumes the judgement | withdrawn — the premise is what makes the constructor conditional |
 | the P7 closeout: the witness machinery is *no longer a soundness boundary* | over-generalised — the paper says postulation is **correct** for attributions and names the constant specification as part of the TCB |
 | `typing-the-justification-term.md` §3: *no blocking objection found* | the paper produced three within the hour |
+| this document's own §5, first version: *EigenTT has no implicit-argument mechanism at all* | wrong — `nbe/unify.rs` is 739 lines of pattern unification, already wired into every constructor check. The grep looked for `implicit` and `BinderStyle`; the module is called `unify` |
 
 Each was plausible, stated as settled, and wrong in a way no test would catch. So every answer
 below names the evidence that produced it, and says which of three kinds it is:
@@ -130,32 +131,86 @@ consumers.
 (`wellfounded.rs:191`), relying on the certificate check having refused it first. The graph walk is
 only sound because the witness lookup ran. That is fine and should be a comment, not a discovery.
 
-## 5. Making `app`'s arguments inferable — **measured: not an ergonomic change**
+## 5. Making `app`'s arguments inferable — **derived: mostly already built; `app` yes, `spec_poly` no**
 
-**The question.** All four of `app`'s `forall`-bound arguments are determined by its two explicit
-ones, and the demo notebook spells every one out — six arguments per node, propositions and terms
-both, at every level of a deep composition.
+**Correction.** The first version of this section said *"EigenTT has no implicit-argument mechanism
+at all — no binder styles, no elaboration, no unifier"*, and concluded this was the largest of the
+four. That measurement was wrong. It came from grepping `kernel/src/nbe/` and `kernel/src/esl/` for
+`implicit` and `BinderStyle` and reading two hits as absence — but the unifier is named `unify` and
+lives in `kernel/src/nbe/unify.rs`, which neither term finds. Concluding "no mechanism" from the
+absence of two guessed names is not a measurement.
 
-**Measured `2026-09-05`: EigenTT has no implicit-argument mechanism at all.** No binder styles, no
-elaboration, no unification-driven argument synthesis anywhere in `kernel/src/nbe/` or
-`kernel/src/esl/`. (`default_binder_style` in the externalizer is nanoda's, on the Lean side.)
+### What already exists
 
-So this is not "make four binders implicit". It is **introducing implicit arguments and a unifier to
-the kernel** — a core type-theory feature with its own design surface: which binders are implicit,
-how they are solved, what happens when solving fails, how the diagnostics read, and what it does to
-the D47 codec's round-trip. Previously filed as the small, separable half of §3; it is the largest
-of the four.
+| | |
+|---|---|
+| **A unifier with metavariables** | `nbe/unify.rs`, 739 lines — *"D48 Phase C — first-order pattern unification for EigenTT"*, with `MetaCtx`, occurs-checking and the Miller pattern condition |
+| **Index unification against the expected type** | already runs on **every** constructor check — D48 Phase D, `check_inductive_ctor_args` |
+| **Parameters solved from the expected type** | already: *"Parameters come from the expected type"* |
+| **Argument elision keyed on declared type** | already: trailing `ChainWitness`-typed slots are omitted by the author and filled by the kernel. This **is** an implicit argument, restricted to one type family |
 
-**It is also the one with the clearest independent value.** The authoring burden it removes is
-visible without any of the other three changing, and unlike §3 it needs no amendment to the paper.
-If §3 is ever taken up, this is a prerequisite either way: a merged `Justification(P)` still binds
-`A` and `B` in `app`, and they are still inferable.
+So four of the five pieces are in place, and the fifth is named in the code:
+
+> Phase D uses a fresh per-call `MetaCtx` — EigenTT doesn't yet have implicit-arg syntax that would
+> create metas surviving outside ctor checking. **Phase F** (motive inference) will thread a
+> longer-lived `MetaCtx` through.
+
+The work is therefore *implicit-argument syntax plus a `MetaCtx` outliving one constructor check* —
+which is Phase F's stated scope — and generalising the elision rule from "trailing
+`ChainWitness`-typed" to "solvable by unification".
+
+### Which binders, exactly
+
+**`app` — reachable with what exists.**
+
+```
+app : forall (A : Prop, B : Prop, j1 : Term, j2 : Term) =>
+      Certificate(j1, A -> B) -> Certificate(j2, A) -> Certificate(App(j1, j2), B)
+```
+
+Checking against an expected `Certificate(J, P)`:
+
+- `j1`, `j2` — unify `App(j1, j2)` against `J`. First-order and structural: `J` is written by the
+  author in the judgement's type and is literally an `App` node.
+- `B` — unify against `P`. Immediate.
+- `A` — **does not appear in the result type.** It occurs only in the argument types, so it cannot
+  come from the expected type. It comes from *inferring* `c2 : Certificate(j2, A)` and reading the
+  second index.
+
+That last point is the one real change to the checking loop. `check_inductive_ctor_args` walks
+arguments left to right in **check** mode against `arg_typ_val`, which presumes every earlier binder
+is already solved. Solving `A` needs one argument elaborated in **inference** mode, with the result
+unified back. Ordinary bidirectional elaboration, and no new theory.
+
+**`spec_poly` — not reachable, and the reason is structural.**
+
+```
+spec_poly : forall (T : Type 1, P : T -> Prop, j : Term, x : T) =>
+            Certificate(j, forall (y : T) => P(y)) -> Certificate(j, P(x))
+```
+
+`j` is first-order. But solving `P` means satisfying `P(x) ≡ Q` for a *concrete* `Q` with both `P`
+and `x` unknown — **higher-order**, and outside Phase C's fragment by explicit design: D48 §3.1
+restricts to first-order patterns, and `unify.rs` records that higher-order patterns are left to
+*"the institution where Lean's elaborator handles higher-order"*.
+
+So `spec_poly`'s `P` and `x` stay explicit unless the fragment is widened, which is a much larger
+decision than this question.
+
+### What this changes about the answer
+
+Not the largest of the four — the smallest that yields anything, and partial. `app` is also the node
+that repeats most in a deep composition (`stats-and-reasoning.json` nests four of them), so the
+ergonomic win is concentrated exactly where the burden is. And it remains the only one of the four
+needing no amendment to the paper.
 
 ## 6. What remains open after this
 
 1. **§3 — the merge.** Referred to the paper's author, with the implementation evidence supplied
    and the withdrawal argument withdrawn.
-2. **§5 — implicit arguments.** Scoped, not designed. Needs its own note.
+2. **§5 — implicit arguments.** Scoped against what exists: Phase F's longer-lived `MetaCtx` plus
+   implicit-arg syntax, generalising the elision rule the `ChainWitness` hook already implements.
+   `app` is in reach; `spec_poly` needs a wider unification fragment and is a separate decision.
 3. **The D87 §7 residue.** §2 answers *why the types exist*; it does not answer whether the three
    families should be one indexed family (`ChainWitness(category, iri, P)`), which would make
    `trace_category`'s mapping a value rather than three constants. Not examined here.
