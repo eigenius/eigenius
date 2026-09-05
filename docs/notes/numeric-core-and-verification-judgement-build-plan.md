@@ -12,7 +12,9 @@
 
 **One reseed.** Every ontology edit below is bootstrap-resident, so each one alone would cost a
 reseed — which invalidates every staged snapshot and forces re-deriving the demo artifacts and both
-parse baselines. Paid once, the marginal cost of the second through fifth edit is zero.
+parse baselines. Paid once, the marginal cost of every further edit is zero. That turned out to
+matter more than the count suggested: the list grew from five to seven while the batch was built,
+and each addition was free because the reseed had not run yet.
 
 **And one argument. These specs were written to close out P7.**
 `judgements-warrants-build-plan.md` §"Open after P7" defers one question — whether the witness index
@@ -26,7 +28,8 @@ exist.
 
 ## 1. The ontology edit — one pass, then one reseed
 
-All five, in `ontologies/`:
+Seven, in `ontologies/` — the plan opened with five; **3b** arrived while building §3.3 and §3.5,
+and **6** came back after §3.5 withdrew what had subsumed it:
 
 | # | edit | source |
 |---|---|---|
@@ -288,15 +291,27 @@ that type-checks without one is exactly the unsoundness. The gate is now the rec
 what P7 asked is whether the index is a cache, and a verdict that any party can re-derive from the
 chain is what makes it one.
 
-## 6. Order
+## 6. Order, and what it cost
 
-1. **§1's five ontology edits.** No reseed here — see §1; the single reseed follows §3.5.
-2. **§3.1 the fixture** — nothing downstream is testable before it.
-3. **§2 the correspondence table** + the two relation declarations become usable together.
-4. **§3.2 the term former**, the largest and riskiest piece.
-5. **§3.3 the emit**, which is small once §3.2 exists.
-6. **§3.5 the P7 closeout** — last, because §3.3 is the input it waits on. Step 1 (verifying
-   "plausibly" for `Declared` and `Observed`) runs early, in parallel with §1 — **answered
-   `2026-09-05`, see §3.5.**
-7. **The reseed, then §5's baselines.** One pass, over §1's edits and §3.5's together.
-8. **§3.4 deploy by digest**, independent — any time.
+| | | |
+|---|---|---|
+| 1 | §1's ontology edits. No reseed here; the single reseed follows §3.5 | **done** |
+| 2 | §2 the correspondence table | **done** |
+| 3 | §3.2 the term former — "the largest and riskiest piece" | **done**; three exhaustive matches, and §4.3 was the real work |
+| 4 | §3.3 the emit, "small once §3.2 exists" | **done**; it needed a fourth `prov` slot |
+| 5 | §3.1 the fixture | **done**; it needed a Lean rebuild and turned up three defects |
+| 6 | §3.5 the P7 closeout | **done**, with D87 §7's conclusion withdrawn |
+| 7 | §3.4 deploy by digest, independent | **done** |
+| 8 | the reseed, then §5's baselines | **outstanding** |
+
+**The order changed once, and the reason is worth keeping.** §3.1 was scheduled second, on the
+grounds that *"nothing downstream is testable before it."* That was true of the *end-to-end* tests
+and false of everything else: §3.2's codec round-trip, its externalizer refusal and — the one that
+matters — the refusal of a hand-authored lean4 judgement are all unit-level and need no fixture at
+all. Running §3.1 after §3.3 meant the fixture could be tested against the judgement the institution
+actually emits, which is what caught the constant predicate: with `Healthy = fun _ => True` the
+near-miss verdict came back `Holds`, and a fixture built before the emit existed would have looked
+correct.
+
+**Step 1 of §3.5** — verifying "plausibly" for `Declared` and `Observed` — ran early in parallel
+with §1 as planned, and was answered by reading `layer_admits_witness` rather than by changing it.
