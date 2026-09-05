@@ -237,7 +237,7 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase". Status `2
 | the verdict is recomputable from the trace alone | `a_verdict_is_recomputable_from_what_the_trace_pins` | **done**; it found `prov:checked_declaration` |
 | the diagnostic still names the family, the IRI and the property | `witness_index` | **done**, and now names the right remedy per family |
 | the demo artifacts re-derive | `gen_verification_demo` | **done** — two documents now, the demo and the near-miss |
-| the reseed, then both parse baselines | `scripts/reseed-lexicon-db.sh --umls-all` | **outstanding** — the one item left |
+| the reseed, then both parse baselines | `scripts/reseed-lexicon-db.sh --umls-all` | **done** `2026-09-05` — see below |
 
 **The reseed's provenance has to match on every axis**, `--umls-all` included: the script's default
 is the WRN-relevant TUI subset, every tracked snapshot is `--umls-all`, and the mismatch is silent.
@@ -271,6 +271,34 @@ experiment, not a reproduction."* If the draw replays clean, the comparison is d
 run stands on its own. If it misses, the draw has to be **re-recorded live**, and a new draw
 choosing novel readings leaves `reading_unadjudicated > 0` until those ledger rows are adjudicated —
 which is judgement work, not a script. Budget for that branch rather than discovering it.
+
+### What the reseed measured — `2026-09-05`
+
+Snapshots: base `wordnet-umls-2026-09-05` (3.65 GiB), aligned
+`wordnet-umls-aligned-2026-09-05`, from an image built at `7c24fa1`. Tracked draw
+`ranks/2026-08-22-productiontrace.json` + `selections/2026-08-22-productiontrace-live.json`.
+
+**The fork did not arise. `replay: 62 hits, 0 misses`** — the tracked draw reproduces exactly against
+the new store, so the reseed did not move the sense space and no re-record was needed.
+
+| | baseline | this run | |
+|---|---|---|---|
+| grammar-gap / missing-lexeme | 0 / 0 | 0 / 0 | **PASS**, non-negotiable |
+| expected-hits | 62/62 | 62/62 | **PASS**, miss-set unchanged |
+| reading-correct | 30/40 | 30/41 | **PASS** |
+| reading-unadjudicated | 0 | 0 | **PASS** |
+| invalid-selected | 0 | 0 | **PASS** |
+| total-readings | 674 | 674 | identical |
+| total-skeletons | 170 | 171 | +1, ungated, ceiling 250 |
+
+**The live draw was not the measurement, and reading it as one would have produced a false
+regression.** A single live run reported `expected-hits 60/62`, losing «Depletion of WRN induced
+double-stranded DNA breaks.» and «Synthetic lethality is an interaction between two genetic
+events.» Two checks placed it before anything was concluded: `grep -c 'malformed reply'` returned
+0, so it was not eigenius#212, and the replay on the identical store and binary held all 62. The
+baseline's own protocol note describes this shape — *"a single live run is a DRAW, not a
+measurement … four earlier draws that day reported 61 hits twice on DIFFERENT sentences"* — so the
+live number is a draw and there is nothing to re-baseline. **Neither baseline file is edited.**
 
 **Nothing in this batch should move either number, and it is worth being exact about why**, since
 the parser *does* use two of the relations §1 touches. `measurements:lt` and `gt` are what the
