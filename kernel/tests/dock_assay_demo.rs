@@ -1120,9 +1120,89 @@ fn fiber_param_comorphism_coercion_unknown_comorphism_errors() {
         &exec_ctx,
     )
     .unwrap_err();
-    let msg = format!("{err}");
+    let msg = format!("{err:?}");
     assert!(
         msg.contains("not registered"),
         "expected `not registered` error; got: {msg}"
+    );
+}
+
+/// A multi-row `FIBER … INTO` is rejected, and the diagnostic says why.
+///
+/// `INTO "<iri>"` names one chain resource, and each input binding produces its own
+/// response, so a FIBER matching more than one row would commit two distinct resources at
+/// one IRI. `fiber.rs` rejects the second arrival rather than letting the later one win
+/// silently.
+///
+/// **This was the one error path in the `INTO` surface with no coverage** (eigenius#150).
+/// The happy path is exercised above, and the clause's parse by `query::parser`'s own test
+/// module, but nothing drove a multi-row FIBER with `INTO` attached — so the rejection
+/// could have been deleted or inverted without a test noticing. It is pinned here before
+/// the run-record work opens this evaluator (kernel-run-records §3.1).
+#[test]
+fn eigenql_fiber_into_rejects_more_than_one_binding() {
+    use eigenius_kernel::query;
+
+    // Two DockingResults, so the MATCH binds twice against a single INTO IRI.
+    let (demo, _) = build_demo_layer();
+    let mut builder = LayerBuilder::new("dock-assay-demo-data-two", Some(demo));
+    for (id, dg) in [
+        ("urn:eigenius:demo:institutions:dock-result-1", -8.5),
+        ("urn:eigenius:demo:institutions:dock-result-2", -9.25),
+    ] {
+        let mut docking = Resource::new(iri(id));
+        docking.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(DOCKING_RESULT_CLASS.to_string())]),
+        );
+        docking.set(iri(DELTA_G_PROP), Value::Float(dg));
+        builder.add_resource(docking).expect("add docking resource");
+    }
+    let storage = LayerStorage::in_memory();
+    let data = Arc::new(builder.build(storage.clone()));
+
+    let index = build_demo_index(&data);
+    let runtime_inst = build_demo_runtime();
+    let components = build_demo_components();
+    let exec_ctx = build_exec_ctx(Arc::clone(&data), storage);
+
+    let runtime = query::evaluate::FiberRuntime {
+        index: Some(&index),
+        runtime: Some(&runtime_inst),
+        components: Some(&components),
+        overlay: None,
+        ctx: Some(&exec_ctx),
+        similarity: None,
+        embedders: None,
+        embedding_cache: None,
+        vector_segment_cache: None,
+    };
+
+    let target = "urn:eigenius:demo:institutions:my_validation_verdict";
+    let source = format!(
+        r#"
+        USING INSTITUTION "urn:eigenius:demo:institutions:assay" AS assay
+        USING NAMESPACE "urn:eigenius:demo:institutions:"
+
+        MATCH "urn:eigenius:demo:institutions:DockingResult"(?d) {{
+            "urn:eigenius:demo:institutions:delta_g": ?dg
+        }}
+        FIBER assay:validate_prediction {{
+            candidate: "urn:eigenius:demo:institutions:dock_to_assay"(?d)
+        }} AS ?v INTO "{target}"
+        RETURN [] {{ d: ?d, v: ?v }}
+        "#
+    );
+
+    let err = query::execute_with_into(&source, &data, runtime)
+        .expect_err("two bindings cannot commit to one INTO IRI");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("more than one input binding"),
+        "the diagnostic must say the FIBER matched more than once; got: {msg}"
+    );
+    assert!(
+        msg.contains(target),
+        "and must name the IRI that cannot hold two resources; got: {msg}"
     );
 }
