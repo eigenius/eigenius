@@ -368,7 +368,20 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase":
   not an identity step (3.5a).
 - **The count that matters**: after 3.1 and 3.2, every kernel-initiated run on a test chain has
   exactly one record. Measure it, do not assert it.
-- **UNMET GATE — the handler is undrivable.** §6 asks for "a failed `RunProgram` leaves its
+- **GATE CLOSED `2026-09-05`.** `kernel/src/server/programs.rs` has a `mod tests`.
+  `execute_program` is `pub(super)`, so an in-module test reaches it, and
+  `EigeniusService::with_persistent_backend(ComponentRegistry::default(), MemoryPersistentBackend)`
+  supplies the task store `new()` leaves `None` — no server, port or proto marshalling. Two
+  fixture notes worth keeping: the output class must resolve in the bootstrap chain or the run
+  succeeds and the *commit* fails `UnresolvedClassReference` (`prov:Agent` requires nothing and
+  recommends `core:short_name`, so a `Construct` over it validates with no seeded layer), and the
+  tests need `#[tokio::test(flavor = "multi_thread")]` because the commit hook calls
+  `block_in_place`.
+
+  What follows was the state before that, kept because it is why three items landed verified
+  only indirectly:
+
+- ~~**UNMET GATE — the handler is undrivable.**~~ §6 asks for "a failed `RunProgram` leaves its
   original record intact and mints nothing" (3.3) as a failing test first. It cannot be written
   today. `execute_program` is `pub(super)`, so only a unit test inside `kernel/src/server/` reaches
   it — and `EigeniusService::new()` sets `task_store: None`, which is exactly what 3.3's path is

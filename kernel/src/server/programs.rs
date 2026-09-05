@@ -915,3 +915,165 @@ impl EigeniusService {
         self.execute_program(&branch, program, input).await
     }
 }
+
+/// Tests for the `RunProgram` handler.
+///
+/// **Why these exist here rather than under `kernel/tests/`.** `execute_program` is
+/// `pub(super)`, so only a module inside `crate::server` reaches it — and the paths worth
+/// pinning are gated on `self.task_store`, which `EigeniusService::new()` leaves `None`.
+/// `with_persistent_backend` over a `MemoryPersistentBackend` supplies both a task store
+/// and a bootstrapped context in three lines, with no server, port or proto marshalling.
+///
+/// Before this module the handler had no test of any kind, and three items of the
+/// kernel-run-records batch depended on it (§2, §3.2, §3.3).
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ontology::eigon_json;
+    use crate::program::component::ComponentRegistry;
+    use crate::storage::memory::MemoryPersistentBackend;
+
+    /// A service with a task store, over an in-memory backend.
+    fn service() -> EigeniusService {
+        let backend = Arc::new(MemoryPersistentBackend::new());
+        EigeniusService::with_persistent_backend(ComponentRegistry::default(), backend)
+            .expect("service over memory backend")
+    }
+
+    /// A program that evaluates *and whose output commits*.
+    ///
+    /// The output class must resolve in the bootstrap chain and its properties must be
+    /// declared, or the run succeeds and the commit fails `UnresolvedClassReference`.
+    /// `prov:Agent` requires nothing and recommends `core:short_name`, so a `Construct`
+    /// over it validates without seeding a layer first.
+    fn working_program() -> Resource {
+        eigon_json::parse_document(
+            r#"{
+                "@id": "urn:eigenius:test:runprog:ok",
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+                "urn:eigenius:program:input_type": "urn:eigenius:prov:Agent",
+                "urn:eigenius:program:output_type": "urn:eigenius:prov:Agent",
+                "urn:eigenius:program:body": {
+                    "urn:eigenius:core:is_a": ["urn:eigenius:program:Construct"],
+                    "urn:eigenius:program:class": "urn:eigenius:prov:Agent",
+                    "urn:eigenius:program:fields": {
+                        "urn:eigenius:core:short_name": {
+                            "urn:eigenius:core:is_a": ["urn:eigenius:program:Literal"],
+                            "urn:eigenius:program:value": "run-record-fixture"
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("program parses")
+        .remove(0)
+    }
+
+    /// A program that does not evaluate: the body applies a component IRI the registry
+    /// does not hold, which is `ComponentDispatchFailed` since eigenius#144.
+    fn failing_program() -> Resource {
+        eigon_json::parse_document(
+            r#"{
+                "@id": "urn:eigenius:test:runprog:bad",
+                "urn:eigenius:core:is_a": ["urn:eigenius:program:Program"],
+                "urn:eigenius:program:input_type": "urn:eigenius:prov:Agent",
+                "urn:eigenius:program:output_type": "urn:eigenius:prov:Agent",
+                "urn:eigenius:program:body": {
+                    "urn:eigenius:core:is_a": ["urn:eigenius:program:Apply"],
+                    "urn:eigenius:program:component": "urn:eigenius:program:components:Transform",
+                    "urn:eigenius:program:argument": {
+                        "urn:eigenius:core:is_a": ["urn:eigenius:program:Literal"],
+                        "urn:eigenius:program:value": 1
+                    }
+                }
+            }"#,
+        )
+        .expect("program parses")
+        .remove(0)
+    }
+
+    /// §3.3 / eigenius#135 — a failed run's task record keeps what it was.
+    ///
+    /// The failure arm used to overwrite the record with a fresh `new_running` carrying
+    /// `String::new()` for `program_iri` and `input_iri`. Those two are the
+    /// `TaskKind::ProgramRun` payload, so a failed run named neither its program nor its
+    /// input and a client polling `GetTaskStatus` saw a failure it could not attribute.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_failed_run_keeps_its_task_records_identity() {
+        let svc = service();
+        let resp = svc
+            .execute_program("main", failing_program(), Resource::new_embedded())
+            .await
+            .expect("the handler returns a response even when the run fails");
+        assert!(
+            !resp.get_ref().success,
+            "the program applies an unregistered component, so the run must fail"
+        );
+
+        let store = svc
+            .task_store
+            .as_ref()
+            .expect("memory backend supplies one");
+        let session_id = svc.session.read().await.session_id;
+        let tasks = store.list_tasks(&session_id).expect("list tasks");
+        let rec = tasks.last().expect("the run allocated a task record");
+
+        assert_eq!(
+            rec.status,
+            crate::task::TaskStatus::Failed,
+            "the failure is recorded"
+        );
+        match &rec.kind {
+            crate::task::TaskKind::ProgramRun {
+                program_iri,
+                input_iri,
+            } => assert!(
+                !program_iri.is_empty() || !input_iri.is_empty(),
+                "the record must still name what ran; both blank is eigenius#135, where the \
+                 failure arm overwrote the record instead of updating it"
+            ),
+            other => panic!("expected a ProgramRun task record, got {other:?}"),
+        }
+    }
+
+    /// §2 — a successful run's output carries both records.
+    ///
+    /// The `ProgramTrace` is provenance and grounds nothing; the `ObservationTrace` is the
+    /// `Observed` leaf a sampled outcome is owed. Two resources, two roles.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_successful_run_commits_a_program_trace_and_an_observation_trace() {
+        let svc = service();
+        let resp = svc
+            .execute_program("main", working_program(), Resource::new_embedded())
+            .await
+            .expect("handler responds");
+        assert!(
+            resp.get_ref().success,
+            "the literal program evaluates; errors: {:?}",
+            resp.get_ref().errors
+        );
+
+        let ctx = svc
+            .get_branch_context("main")
+            .await
+            .expect("branch context");
+        let head = Arc::clone(ctx.read().await.head());
+        let mut program_traces = 0;
+        let mut observation_traces = 0;
+        for (_iri, r) in head.iter_resources() {
+            for c in r.is_a() {
+                match c.as_str() {
+                    "urn:eigenius:prov:ProgramTrace" => program_traces += 1,
+                    "urn:eigenius:prov:ObservationTrace" => observation_traces += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(
+            (program_traces, observation_traces),
+            (1, 1),
+            "a run commits exactly one ProgramTrace (provenance) and one ObservationTrace \
+             (the Observed leaf on its output)"
+        );
+    }
+}
