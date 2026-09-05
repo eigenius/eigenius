@@ -66,7 +66,10 @@ impl EigeniusService {
         // sweep. The evaluator routes IO dispatches through a
         // TaskContext so repeated calls with the same input each
         // occupy their own step_seq slot (D21 §3.2).
-        let (task_context, task_id_str, layer_head, session_id) = match &self.task_store {
+        // `layer_head` and `session_id` were destructured here only to build the blank
+        // failure record eigenius#135 removed; the `TaskContext` carries the session id and
+        // the existing record carries its own layer head, so neither is needed now.
+        let (task_context, task_id_str) = match &self.task_store {
             Some(store) => {
                 let session_id = self.session.read().await.session_id;
                 let task_id = uuid::Uuid::new_v4();
@@ -98,9 +101,9 @@ impl EigeniusService {
                     task_id,
                     Arc::clone(store),
                 ));
-                (Some(tc), task_id.to_string(), Some(layer_head), session_id)
+                (Some(tc), task_id.to_string())
             }
-            None => (None, String::new(), None, uuid::Uuid::nil()),
+            None => (None, String::new()),
         };
 
         // Execute via NbE in IO mode
@@ -122,20 +125,48 @@ impl EigeniusService {
             ) {
                 Ok(result) => result,
                 Err(e) => {
-                    // Record the failure if we have a task store.
-                    if let (Some(store), Some(head)) = (&self.task_store, layer_head.as_ref()) {
-                        if let Some(tid) = task_context.as_ref().map(|tc| tc.task_id) {
-                            let mut rec = crate::task::TaskRecord::new_running(
-                                session_id,
-                                tid,
-                                String::new(),
-                                String::new(),
-                                head.clone(),
-                                now_millis(),
-                            );
-                            rec.status = crate::task::TaskStatus::Failed;
-                            rec.updated_at = now_millis();
-                            let _ = store.put_task(&rec);
+                    // Record the failure by UPDATING the task's record, the way the
+                    // completion path below does — `get_task`, mutate, `put_task`.
+                    //
+                    // This used to construct a fresh `TaskRecord::new_running` with
+                    // `String::new()` for `program_iri` and `input_iri` and overwrite the
+                    // record with it (eigenius#135). Those two fields are the
+                    // `TaskKind::ProgramRun` payload — precisely what says *which* run
+                    // failed — so a failed run's record named neither its program nor its
+                    // input, and everything else `new_of_kind` defaults (creation time,
+                    // retention, checkpoint state) was reset with them. A client polling
+                    // `GetTaskStatus` saw a failure it could not attribute.
+                    if let (Some(store), Some(tc)) = (&self.task_store, task_context.as_ref()) {
+                        match store.get_task(&tc.session_id, &tc.task_id) {
+                            Ok(Some(mut rec)) => {
+                                rec.status = crate::task::TaskStatus::Failed;
+                                rec.updated_at = now_millis();
+                                if let Err(e) = store.put_task(&rec) {
+                                    tracing::warn!(
+                                        { field::OPERATION } = operation::TASK_CHECKPOINT,
+                                        { field::ERROR_KIND } = "task_record_update_failed",
+                                        { field::TASK_ID } = ?tc.task_id,
+                                        { field::ERROR_MESSAGE } = %e,
+                                        "failed to record run failure on the task record"
+                                    );
+                                }
+                            }
+                            // No record to update. Writing a fresh one here is what the
+                            // defect did; a blank record is worse than none, because it
+                            // reports a failure against a run it cannot name.
+                            Ok(None) => tracing::warn!(
+                                { field::OPERATION } = operation::TASK_CHECKPOINT,
+                                { field::ERROR_KIND } = "task_record_absent",
+                                { field::TASK_ID } = ?tc.task_id,
+                                "run failed but no task record exists to mark Failed"
+                            ),
+                            Err(e) => tracing::warn!(
+                                { field::OPERATION } = operation::TASK_CHECKPOINT,
+                                { field::ERROR_KIND } = "task_record_read_failed",
+                                { field::TASK_ID } = ?tc.task_id,
+                                { field::ERROR_MESSAGE } = %e,
+                                "run failed and its task record could not be read"
+                            ),
                         }
                     }
                     // Eval errored before the commit attempt — no CAS

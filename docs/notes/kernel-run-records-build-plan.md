@@ -368,6 +368,18 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase":
   not an identity step (3.5a).
 - **The count that matters**: after 3.1 and 3.2, every kernel-initiated run on a test chain has
   exactly one record. Measure it, do not assert it.
+- **UNMET GATE — the handler is undrivable.** §6 asks for "a failed `RunProgram` leaves its
+  original record intact and mints nothing" (3.3) as a failing test first. It cannot be written
+  today. `execute_program` is `pub(super)`, so only a unit test inside `kernel/src/server/` reaches
+  it — and `EigeniusService::new()` sets `task_store: None`, which is exactly what 3.3's path is
+  gated on, so a bare service skips it. The one existing harness, `kernel/tests/server_integration.rs`,
+  stands up a tonic server on an ephemeral port and drives it over the wire.
+
+  Closing it needs either a service constructed with a backend + task store for in-module unit
+  tests, or an over-the-wire `RunProgram` test. **It would close the gate for three items** — §2's
+  emission, §3.2 and §3.3 — and until it lands those three are verified only indirectly. Three
+  items depending on an untested handler is the shape eigenius#207 had.
+
 - **A gap this batch inherits and now depends on**: nothing in the tree drives
   `server::programs::execute_program`. It is `pub(super)` behind the gRPC service, and no test
   under `kernel/tests/` or any crate exercises `RunProgram`. §2's emission is therefore pinned
