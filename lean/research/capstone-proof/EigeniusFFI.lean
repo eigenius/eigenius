@@ -51,18 +51,57 @@ structure eigenius.test.capstone.Patient where
   deriving Repr
 
 /-- Mirror of `urn:eigenius:demo:lean:Patient` — the notebook demo's own class, distinct from the
-capstone test's above. Both live here because both consumers share this one Lake project. -/
+capstone test's above. Both live here because both consumers share this one Lake project.
+
+**Two `Nat` fields, and none of the three choices is incidental.**
+
+*Fields at all*, unlike the capstone's refinement-typed `weight`: the demo needs NAMED INDIVIDUALS
+so a claim's proposition can be *about* its subject (D87 §6), and constructing one means
+discharging every field's obligation. `0.0 ≤ (x : Float)` cannot be discharged in the kernel —
+`Float.ble` is `@[extern]`, so `Float.le` does not reduce and `rfl` proves nothing about it — so a
+refinement here would leave the individuals unconstructible. The refinement's own story, D30 §9.1
+lifting a chain-side `min_value` into Lean's type system, is told by
+`eigenius.test.capstone.Patient` above, whose `patient_weight_nonneg` proves exactly that.
+
+*`Nat` and not `Float`*: `Nat` comparison reduces in the kernel, so a proposition about these
+fields is provable by `decide`. Every `Float` operation is `@[extern]` and reduces to nothing.
+
+*More than zero fields*: a nullary structure makes `patient_1` and `patient_2` DEFINITIONALLY
+EQUAL — structure eta gives `{} = {}` — so no claim about one could be told from a claim about the
+other, which is the property the demo exists to show. -/
 structure eigenius.demo.lean.Patient where
-  weight : { x : Float // 0.0 ≤ x }
+  /-- Chart identifier. Distinct values are what make two individuals distinguishable. -/
+  chartId : Nat
+  /-- Resting heart rate, beats per minute. -/
+  restingHr : Nat
   deriving Repr
 
-/-- Mirror of the chain axiom `urn:eigenius:demo:lean:Healthy : demo:Patient -> Prop`.
+/-- Mirror of the chain axiom `urn:eigenius:demo:lean:Healthy : demo:Patient -> Prop`, and it says
+something ABOUT its argument.
 
-A `def`, not a Lean `axiom`, deliberately: an axiom would have to be named in the institution's
-permitted-axiom allowlist, and more to the point a proof that ASSUMES its own predicate
-demonstrates nothing. The body is irrelevant to the statement being checked — `def_eq` compares
-`Healthy p -> Healthy p` on both sides and never needs to unfold it. -/
-def eigenius.demo.lean.Healthy (_p : eigenius.demo.lean.Patient) : Prop := True
+It was `fun _ => True` — constant, ignoring the patient — which is a deeper version of the defect
+D87 §6 names. With a constant predicate `Healthy patient_1` and `Healthy patient_2` are both
+definitionally `True`, so `def_eq` accepts either claim against either proof and NO arrangement of
+subjects can make the demo discriminate. Measured before the change: the near-miss verdict came
+back `Holds`.
+
+A `def` and not a Lean `axiom`, as before: an axiom would have to be named in the institution's
+permitted-axiom allowlist, and a proof that assumes its own predicate demonstrates nothing. -/
+def eigenius.demo.lean.Healthy (p : eigenius.demo.lean.Patient) : Prop :=
+  50 ≤ p.restingHr ∧ p.restingHr ≤ 100
+
+/-- A named individual. The demo's claim is *about* this one, which is what `patient_1` failed to
+be while it was a chain resource with a ∀-quantified proposition hanging off it: that proposition
+never mentioned it, so any resource IRI would have served equally (D87 §6). -/
+def eigenius.demo.lean.patient_1 : eigenius.demo.lean.Patient :=
+  { chartId := 1, restingHr := 62 }
+
+/-- The second individual, and the near-miss's subject. Equally real and equally healthy: the demo
+proves `Healthy patient_1` and `Healthy patient_2` both, then binds the proof of the first to the
+claim about the second. Both propositions being true is what leaves the statement comparison as
+the only thing that can refuse it. -/
+def eigenius.demo.lean.patient_2 : eigenius.demo.lean.Patient :=
+  { chartId := 2, restingHr := 71 }
 
 /-- The capstone test's counterpart of the above, over its own namespace's `Patient`. Both exist
 because both consumers need a claim whose proposition is inside D74's §4 fragment, and each
