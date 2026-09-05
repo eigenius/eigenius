@@ -150,7 +150,63 @@ checking is cheap relative to proving. Re-running nanoda over a small export is 
 self-certify. The class settles who may assert; the pinned inputs settle whether anyone can verify
 the assertion. Both are needed, and neither substitutes for the other.
 
-## 6. What changes
+## 6. The demo's claim is not a claim
+
+The fixture the whole Lean path is demonstrated on is mis-modelled, and it matters here because
+§9's first open question was framed around accommodating it.
+
+`urn:eigenius:demo:lean:patient_1` carries `is_a: [demo:lean:Patient]` and a
+`reflection:canonical_proposition`, and nothing else. Decoded, that proposition is:
+
+```text
+Π (p : Patient). Π (_ : Healthy(p)). Healthy(p)
+```
+
+— closed, universally quantified over *all* Patients, and it never mentions `patient_1`. So the
+witness the chain admits is
+
+```text
+IsVerifiedAs("urn:eigenius:demo:lean:patient_1", ∀p:Patient. Healthy(p) → Healthy(p))
+```
+
+in which the IRI contributes nothing to the pairing: any resource IRI would serve equally.
+`witness/mod.rs` states the intent — the `(category, iri)` pair *"determines exactly one canonical
+proposition per resource"* — and here the resource is a hook the proposition hangs from.
+
+**Two counts, and the second is the substantive one.**
+
+1. A `Patient` instance is an entity, not an assertion. Patients do not carry propositions.
+2. The proposition is not about it. This is *not* a validation violation —
+   `reflection:canonical_proposition` declares `class_types eigentt:Term` and no domain, so it is
+   permitted anywhere, and a claim legitimately may carry a universally quantified proposition. The
+   defect is that `patient_1` is not a claim-bearing resource in the first place, and D39 §4.1's
+   default (`Asserts(iri)`, which does mention its subject) shows what the pairing is meant to be.
+
+**The shape already exists.** `justification:Conclusion` `requires justification:judgement`,
+`recommends justification:proof` — the `holds(logic, t, P)` slot §2 wants — and carries
+`justification:subject_iri`, described as *"The principal Resource this conclusion is about.
+**Aboutness, not logic**: no judgement carries it."* That is exactly the distinction the fixture
+collapses. The claim should be a `Conclusion` whose proposition is the ∀-statement and whose
+`subject_iri` is `patient_1`.
+
+**This resolves §9's open question 1.** It was framed as *"where does the judgement live when the
+claim is not a `justification:Conclusion`"* — presupposing a `Patient` instance is a legitimate
+claim-bearer. It is not, so the machinery does not generalise off `Conclusion` to accommodate a
+mis-modelled fixture; the fixture emits a `Conclusion`. `emit_from_reasoning_sentence` already reads
+`justification:proof` off one, so the checked route works today for a correctly-shaped claim.
+
+**What it qualifies about eigenius#159.** That issue was *"nothing binds a Lean proof to the claim it
+is supposed to prove."* The binding is now checked — `def_eq` against the claim's own proposition,
+refused when absent. But in the demo what is bound is a resource IRI to a proposition that says
+nothing about that resource, and the proof is a tautology (`fun _ h => h`). The demo therefore
+verifies that the plumbing runs, not that it discriminates. A fixture whose proposition is *about*
+its subject, and a near-miss variant that must fail, are what would show the mechanism working.
+
+**Cost is small.** `cargo run -p eigenius-lean --example gen_verification_demo` generates
+`lean-verification-demo.eigon.json`, so the change is in that generator plus the notebook prose in
+`notebooks/examples/lean-verification.json`, which describes `patient_1` as "the Eigon claim".
+
+## 7. What changes
 
 | | from | to |
 |---|---|---|
@@ -170,7 +226,7 @@ time — which is what `judgements-warrants-build-plan.md` §"Open after P7" ask
 family where the answer is no today, and §5 is what changes the answer: once the inputs are pinned,
 "nanoda accepted this" becomes recomputable rather than postulated.
 
-## 7. Cost
+## 8. Cost
 
 - **Ontology**: two `prov:VerificationTrace` slots (permitted axioms, checker identity); an anchor
   from the checked term to its payload. Bootstrap-resident, so it rides #235's reseed.
@@ -180,12 +236,14 @@ family where the answer is no today, and §5 is what changes the answer: once th
 - **Institution**: `do_proof_check` already holds all three `holds` arguments at the moment it
   discards them.
 - **Kernel**: reuse `emit_from_reasoning_sentence`'s decode-and-refuse-a-certificate logic.
+- **Fixture**: regenerate the demo through `gen_verification_demo` so the claim is a `Conclusion`
+  with `subject_iri` (§6), and add a proposition that is *about* its subject plus a near-miss that
+  must fail — without those the demo cannot show the check discriminating.
 
-## 8. Open
+## 9. Open
 
-1. **Where the judgement lives** when the claim is not a `justification:Conclusion`. The demo's
-   claim is a `demo:lean:Patient` instance. Either the slot generalises off `Conclusion`, or the
-   institution emits a `Conclusion`, or the judgement rides the trace.
+1. ~~**Where the judgement lives** when the claim is not a `justification:Conclusion`.~~
+   **Resolved in §6**: the claim is a `Conclusion`, and the demo fixture is what is wrong.
 2. **Whether `Verified(iri)` names the claim or the checked term.** It names a chain resource by
    IRI, and after §4.2 there are two candidates.
 3. **What "checker identity" is.** A git rev is not a build identity — two builds of one rev can
