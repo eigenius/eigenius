@@ -108,6 +108,42 @@ fragment, and the fragment is small precisely so that additions are deliberate.
 
 The class settles **who may assert**. It does not make the assertion checkable — that is §5.
 
+### 4.3 What `Checked(a)` does at the kernel's own check, and why input cannot forge one
+
+`eigentt:Judgement`'s contract is that *"a slot ranging over this type is checked in CHECK mode —
+decode both fields, check `type` is a type, check `term` against it"*, and
+`validation/rules/eigentt_value.rs` does exactly that for **every** judgement, whatever its `logic`.
+So `holds(logic_lean4, Checked(a), P)` raises a question §4.2 leaves implicit: does the kernel check
+`Checked(a)` against `P` in its own type theory?
+
+**It must not, and it must not succeed vacuously either.** Checking it would mean re-proving `P`
+without the export — impossible. Admitting it for any `P` would make `Verified` assertable by
+anybody who writes the judgement, which is the laundering the two-layer separation exists to
+forbid.
+
+**`Checked` therefore fails the kernel's check, deliberately, and that is the whole enforcement.**
+The kernel has no proof of `P` and will not manufacture one, so a *hand-authored* lean4 judgement is
+refused at commit.
+
+**An institution-emitted one is never asked.** `structural_validate` runs **before**
+`autoonload_dispatch` in `commit::pipeline`, and the followup slice is `[build, persist]` with no
+validation at all — *"kernel-emitted content … re-validation is redundant and forces the ontology to
+be permissive enough for every shape the kernel emits."* So the judgement the institution mints
+after `check_proof` returned `Holds` is not re-checked in a theory that could not check it, while
+the one an author writes is.
+
+**This is the mechanism #205 said did not exist.** §4.2's third row records that no *"kernel-only,
+refused from input"* mechanism exists anywhere in the validator, and takes that as the reason to
+reject the same-class-plus-a-property option. It exists here without being built: the emission path
+and the input path already differ in whether they validate, so the property falls out of the
+pipeline's shape rather than from a guard added to it. What `Checked` contributes on top is what
+§4.2 argued for — the distinction is structural, so `Declared(a)` and `Verified(a)` cannot name the
+same thing and a reader holding only the term knows what it is.
+
+**It does not make the judgement true, and §5 is still what does.** A judgement the kernel minted is
+a record that nanoda accepted the export. Anyone can re-run that check; §5 is what pins the two
+inputs that make the re-run reach the same verdict.
+
 ## 5. Re-decidability, not attestation
 
 **nanoda_lib emits no cryptographic receipt, and should not be made to.** Verified `2026-09-04`: no
@@ -213,12 +249,23 @@ its subject, and a near-miss variant that must fail, are what would show the mec
 |---|---|---|
 | what the institution emits on `Holds` | `prov:VerificationTrace` | the trace **plus** `holds(logic_lean4, Checked(a), P)` |
 | the trace's role | the thing `Verified` is read from | provenance: when the check ran, against which payload, under which axiom set, by which checker build |
-| how `Verified` is admitted | `emit_from_trace` hashes the claim's proposition | the judgement's own `type` is the proposition — the `emit_from_reasoning_sentence` shape |
+| how `Verified` is admitted | `emit_from_trace` hashes the claim's proposition | the judgement's own `type` is the proposition — the `emit_from_reasoning_sentence` shape, on the trace |
 | `Certificate.verified` | consumes `witness:IsVerifiedAs(iri, P)` | consumes the judgement |
 | `witness:IsVerifiedAs` | postulated, zero constructors, in the TCB | removable |
 
 The trace does not go away, and the paper's split is what keeps it: the trace is provenance, the
 judgement is warrant.
+
+**The judgement rides on the trace**, in a `prov:VerificationTrace` slot of its own, and the three
+alternatives are worse. Writing it onto the author's claim as `justification:proof` means an
+institution redefining a user's resource. Emitting a fresh `justification:Conclusion` at
+`{claim_iri}:verified` means `Verified(iri)` names that emission rather than the claim, against §9.2,
+and `finalize_emitted_resource` would stamp it `reflection:InstitutionEmittedDerivation` — *"grounds
+nothing"* on the one resource whose purpose is to be a ground, which is the conflict the trace
+exemption already had to resolve once. Leaving it off the chain is what §1 is about. On the trace it
+needs no new resource, no exemption and no redefinition: `trace_category` already reads
+`VerificationTrace` as `Verified`, and `emit_from_trace` reads the judgement's `type` in place of
+the target's stored `canonical_proposition`.
 
 **This is the prerequisite for removing `witness:Is*As`.** `Certificate.verified` cannot lose its
 argument until something else inhabits its premise. `Declared` and `Observed` are a separate

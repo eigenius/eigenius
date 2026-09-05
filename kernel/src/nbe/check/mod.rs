@@ -1317,6 +1317,29 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                 ))
             })
         }
+        // D87 §4.3 — a reference to a proof an EXTERNAL checker verified. Refused here, and the
+        // refusal is the enforcement.
+        //
+        // The alternatives are both wrong. Checking it would mean re-proving the proposition
+        // without the export, which the kernel cannot do. Admitting it at whatever type the
+        // judgement names would make `Verified` assertable by anybody who writes the judgement —
+        // the laundering the two-layer separation exists to forbid, and worse than the
+        // proof-as-axiom shape D87 §4.1 withdrew, since an axiom at least has to be declared.
+        //
+        // So a HAND-AUTHORED `holds(logic_lean4, Checked(a), P)` is rejected at commit, by the
+        // `eigentt:Judgement` check-mode rule that runs this. An INSTITUTION-EMITTED one is never
+        // asked: `structural_validate` runs before `autoonload_dispatch` in `commit::pipeline`,
+        // and the followup slice is `[build, persist]` with no validation phase. The two paths
+        // already differ in whether they validate, so "kernel-only, refused from input" — which
+        // eigenius#205 recorded as existing nowhere in the validator — falls out of the pipeline's
+        // shape rather than from a guard placed here.
+        //
+        // What makes the emitted judgement worth anything is not this check but D87 §5: the
+        // export bytes, the target name, the proposition, the permitted axiom set and the checker
+        // identity are all on the chain, so anyone can re-run nanoda and get the same verdict.
+        Exp::Checked(iri) => Err(CheckError::IllFormed(format!(
+            "`Checked({iri})` names a proof an external checker verified; the kernel has no proof              of the proposition it is offered against and will not admit one. A              `holds(logic_lean4, Checked(_), _)` judgement is produced by the institution that ran              the check, not written by an author"
+        ))),
         // eigenius#71 / D49 — literal values infer to their primitive
         // type (`Val::EigonPrimitive(PrimitiveType::*)`). Round-trips
         // through D47 as the `LitString` / `LitInt` / `LitFloat` /

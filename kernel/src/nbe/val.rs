@@ -243,6 +243,13 @@ pub enum Neut {
     /// `NotAFunction` — axioms have no reduction rules and there's
     /// no `Val::Lam` to apply.
     EigonAxiom(Iri),
+    /// A reference to an externally checked proof (D87 §4.2) — `Exp::Checked`'s value form.
+    ///
+    /// A `Neut` for the same reason `EigonAxiom` is one: it has no reduction rule, so it is a
+    /// normal form that compares by IRI. It is a SEPARATE variant so the distinction survives a
+    /// round-trip — reading a `Checked` back as an `EigonAxiom` would put "asserted without
+    /// proof" and "checked by nanoda" in one form, which is exactly what D87 §4.1 withdrew.
+    Checked(Iri),
     /// Property access on a neutral resource
     PropAccess(Box<Neut>, Iri),
 

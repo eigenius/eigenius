@@ -155,6 +155,29 @@ pub enum Exp {
     /// `EigonClass`. Parallels D46 §10 + the encoding-probe in
     /// `crates/eigenius-statistics/tests/axiom_encoding_probe.rs`.
     EigonAxiom(Iri),
+    /// Reference to a proof an EXTERNAL checker verified (D87 §4.2). The IRI names the artifact
+    /// the checker examined — a `lean:LeanProofPayload` — so the term anchors to the bytes rather
+    /// than standing for them.
+    ///
+    /// This is the `term` argument of `holds(logic_lean4, Checked(a), P)`: what nanoda checked
+    /// against `P`. It is **not** an [`Self::EigonAxiom`], and D87 §4.1 withdrew making it one.
+    /// `eigentt:Axiom` is *"a closed term whose type the kernel admits without checking the term
+    /// itself"*, which is the opposite of what is being recorded; putting both in one class would
+    /// let `Declared(a)` and `Verified(a)` name the same resource with the authored justification
+    /// term as the only discriminator, which is the conflation eigenius#205 and #23 each removed
+    /// once already.
+    ///
+    /// **It does not type-check, and that is the enforcement** (D87 §4.3). `check` refuses it: the
+    /// kernel has no proof of `P` and will not manufacture one, so a hand-authored
+    /// `holds(logic_lean4, …)` is rejected at commit by the `eigentt:Judgement` check-mode rule.
+    /// An institution-emitted one is never asked, because `structural_validate` runs BEFORE
+    /// `autoonload_dispatch` and the followup pipeline slice has no validation phase at all. The
+    /// emission path and the input path already differ in whether they validate, so "kernel-only,
+    /// refused from input" falls out of the pipeline's shape rather than from a guard.
+    ///
+    /// `eval` and `readback` are identity — there is nothing to reduce — and D74 REFUSES it for
+    /// externalization: a checked-proof reference has no Lean counterpart to translate to.
+    Checked(Iri),
     /// Eigon primitive type
     EigonPrimitive(PrimitiveType),
     /// A concrete Eigon resource value
@@ -746,6 +769,7 @@ impl Exp {
             | Exp::Var(_)
             | Exp::EigonClass(_)
             | Exp::EigonAxiom(_)
+            | Exp::Checked(_)
             | Exp::EigonPrimitive(_)
             | Exp::EigonResource(_)
             | Exp::LitString(_)

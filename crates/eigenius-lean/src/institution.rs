@@ -332,11 +332,9 @@ fn do_proof_check(
     // authoring runtime's env-resource flow into the kernel
     // commit pipeline (currently the env IRI isn't on the chain).
     //
-    // This set is the trusted computing base of the verdict, and the `VerificationTrace` below
-    // does not record it: two proofs, one leaning on `Classical.choice` and one not, produce
-    // byte-identical traces. `prov:VerificationTrace` has no slot for it, so closing this needs
-    // an ontology edit, which drifts the bootstrap manifest — batched with D86's chain
-    // declarations rather than moved on its own.
+    // This set is the trusted computing base of the verdict, and the trace records it
+    // (`prov:permitted_axioms`, D87 §5). Until it did, two proofs — one leaning on
+    // `Classical.choice` and one not — produced byte-identical traces.
     let permitted_axioms: Vec<String> = DEFAULT_LEAN_AXIOMS
         .iter()
         .map(|s| (*s).to_string())
@@ -381,12 +379,49 @@ fn do_proof_check(
     // proposition (`witness_index::emit_from_trace`), which is the grade D28 §1 names as the
     // reason a proof-checking institution exists.
     let mut outcome = QueryOutcome::from_output(verdict_resource(wk::VERDICT_HOLDS, None));
-    if let Some((claim_iri, _)) = claim.as_ref() {
-        if let Some(trace) = verification_trace(input, &payload, claim_iri) {
-            outcome.derivations.push(trace);
+    if let Some((claim_iri, proposition)) = claim.as_ref() {
+        match verification_trace(
+            input,
+            &payload,
+            claim_iri,
+            proposition,
+            &permitted_axioms,
+            ctx.head(),
+        ) {
+            Ok(Some(trace)) => outcome.derivations.push(trace),
+            Ok(None) => {}
+            // The check held; the trace could not be built. Refusing the whole dispatch is right
+            // and a silent `Holds` would not be: the trace is what carries the result onto the
+            // chain, so a `Holds` without one is the verdict-that-promotes-nothing eigenius#160
+            // existed to eliminate, arriving by a different route.
+            Err(e) => return Err(e),
         }
     }
     Ok(outcome)
+}
+
+/// The checker's identity, as a *kind* and a value (D87 §9.3).
+///
+/// `image_digest` when the deployment injected `EIGENIUS_IMAGE_DIGEST` — the registry digest of
+/// the running image, which is the only value binding the BINARY. `source_pin` otherwise: the
+/// `nanoda_lib` revision this crate links plus the Lean toolchain whose export format it parses,
+/// which binds the checker's source and not the build. Absence of the variable is itself
+/// informative — "not deployed by digest" — so there is nothing to fall back past.
+///
+/// Self-reported either way: the kernel repeats what it was told. It is provenance, not warrant,
+/// and becomes load-bearing only when something outside the process vouches for the binding.
+fn checker_identity() -> (&'static str, String) {
+    match std::env::var("EIGENIUS_IMAGE_DIGEST") {
+        Ok(d) if !d.trim().is_empty() => ("image_digest", d),
+        _ => (
+            "source_pin",
+            format!(
+                "nanoda_lib@{} lean@{}",
+                env!("EIGENIUS_NANODA_REV"),
+                eigenius_lean_runtime::conventions::LEAN_TOOLCHAIN_VERSION
+            ),
+        ),
+    }
 }
 
 /// `prov:proof_system` for a proof this institution checked. The property exists so a
@@ -394,24 +429,72 @@ fn do_proof_check(
 /// are the same class, told apart by value rather than by kind.
 const PROOF_SYSTEM_LEAN4: &str = "lean4";
 
+/// The `eigentt:Logic` individual naming this checker — "Lean 4, re-checked in process by the
+/// `nanoda_lib` kernel reimplementation". The `logic` argument of every judgement this
+/// institution emits.
+const LOGIC_LEAN4: &str = "urn:eigenius:eigentt:logic_lean4";
+
 /// The `prov:VerificationTrace` recording that this proof was checked against this claim.
 ///
-/// Four required properties (`prov.esl`): `prov:resource` — the claim, which is what makes the
-/// witness key land on the claim's `canonical_proposition` rather than on the proof term;
-/// `prov:proof_system`; `prov:proof_term`; `prov:timestamp`.
+/// Two halves, and the split is the paper's: the **judgement** is what the check ESTABLISHED, and
+/// everything else is provenance about the occasion.
 ///
-/// `prov:proof_term` names the resource holding the export bytes — the `LeanProofPayload`'s own
-/// IRI when it is a chain resource, and the `LeanProofTerm`'s when the payload is embedded in it,
-/// which is where the bytes live in that shape.
+/// `prov:judgement` holds `holds(logic_lean4, Checked(payload), P)` — nanoda verified the artifact
+/// at `payload` against `P` (D87 §2). It is what `witness_index::emit_from_trace` reads to admit a
+/// `Verified` witness, keyed off this judgement's own `type`. Before it existed the checker's
+/// result was computed and discarded, and the trace was a note that a check RAN, with `Verified`
+/// admitted on the strength of the note.
 ///
-/// `None` when the proof term has no `@id`: the trace's IRI is derived from it, and a dispatch
-/// over an embedded resource commits nothing to derive from. `finalize_emitted_resource` drops
-/// such an emission for the same reason.
-fn verification_trace(term: &Resource, payload: &Resource, claim_iri: &Iri) -> Option<Resource> {
-    let term_iri = term.id()?;
-    let proof_term_iri = payload.id().unwrap_or(term_iri);
+/// `prov:permitted_axioms` and the checker-identity pair are the two inputs a verdict is a
+/// deterministic function of that nothing recorded (D87 §5). With them pinned any party can re-run
+/// `check_proof` and obtain the same verdict, which is stronger than a receipt: a receipt says "I
+/// checked", this says "check it yourself".
+///
+/// `None` when the proof term has no `@id`: the trace's IRI is derived from it, and a dispatch over
+/// an embedded resource commits nothing to derive from. `finalize_emitted_resource` drops such an
+/// emission for the same reason. `Err` when the judgement will not encode — a `Holds` whose result
+/// cannot be written down must not commit as a bare note that a check happened.
+#[allow(clippy::result_large_err)]
+fn verification_trace(
+    term: &Resource,
+    payload: &Resource,
+    claim_iri: &Iri,
+    proposition: &Exp,
+    permitted_axioms: &[String],
+    layer: &Arc<eigenius_kernel::layer::Layer>,
+) -> Result<Option<Resource>, InstitutionError> {
+    use eigenius_kernel::program::eigentt_type_mirror::{
+        encode_judgement, encode_type, CodecNames,
+    };
 
-    let mut trace = Resource::new(Iri::parse(&format!("{term_iri}:verification")).ok()?);
+    let Some(term_iri) = term.id() else {
+        return Ok(None);
+    };
+    let proof_term_iri = payload.id().unwrap_or(term_iri);
+    let Ok(trace_iri) = Iri::parse(&format!("{term_iri}:verification")) else {
+        return Ok(None);
+    };
+
+    // `Checked` names the ARTIFACT nanoda examined, so the term anchors to the bytes. It is not an
+    // `eigentt:Axiom`: that is "a closed term whose type the kernel admits without checking the
+    // term itself", the opposite of what is being recorded (D87 §4.1).
+    let names = CodecNames::from_layer(layer);
+    let encode_err = |what: &str, e: String| {
+        InstitutionError::ComputationFailed(format!(
+            "the proof checked out, but its {what} would not encode, so the result could not be \
+             written to the chain: {e}"
+        ))
+    };
+    let checked = encode_type(&Exp::Checked(proof_term_iri.clone()), &names)
+        .map_err(|e| encode_err("checked-term reference", format!("{e:?}")))?;
+    let prop = encode_type(proposition, &names)
+        .map_err(|e| encode_err("proposition", format!("{e:?}")))?;
+    let judgement = encode_judgement(LOGIC_LEAN4, &checked, &prop, &names)
+        .map_err(|e| encode_err("judgement", format!("{e:?}")))?;
+
+    let (identity_kind, identity) = checker_identity();
+
+    let mut trace = Resource::new(trace_iri);
     trace.set(
         Iri::parse(wk::IS_A).expect("well-known IRI"),
         Value::Array(vec![Value::String(wk::VERIFICATION_TRACE.to_string())]),
@@ -419,6 +502,10 @@ fn verification_trace(term: &Resource, payload: &Resource, claim_iri: &Iri) -> O
     trace.set(
         Iri::parse(wk::REFLECTION_RESOURCE).expect("well-known IRI"),
         Value::iri(claim_iri),
+    );
+    trace.set(
+        Iri::parse(wk::PROV_JUDGEMENT).expect("well-known IRI"),
+        judgement,
     );
     trace.set(
         Iri::parse(wk::PROOF_SYSTEM).expect("well-known IRI"),
@@ -429,10 +516,27 @@ fn verification_trace(term: &Resource, payload: &Resource, claim_iri: &Iri) -> O
         Value::String(proof_term_iri.as_str().to_string()),
     );
     trace.set(
+        Iri::parse(wk::PERMITTED_AXIOMS).expect("well-known IRI"),
+        Value::Array(
+            permitted_axioms
+                .iter()
+                .map(|a| Value::String(a.clone()))
+                .collect(),
+        ),
+    );
+    trace.set(
+        Iri::parse(wk::CHECKER_IDENTITY_KIND).expect("well-known IRI"),
+        Value::String(identity_kind.to_string()),
+    );
+    trace.set(
+        Iri::parse(wk::CHECKER_IDENTITY).expect("well-known IRI"),
+        Value::String(identity),
+    );
+    trace.set(
         Iri::parse(wk::TIMESTAMP).expect("well-known IRI"),
         Value::String(millis_to_iso8601(now_millis())),
     );
-    Some(trace)
+    Ok(Some(trace))
 }
 
 /// Resolve a LeanProofTerm's `proof_payload` reference into the

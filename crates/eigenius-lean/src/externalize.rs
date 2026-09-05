@@ -501,6 +501,17 @@ fn go<'x, 't: 'x, 'p: 't>(
         // so a `Lam` under an application gets its domain from the function. Measured before
         // refusing: of the 102 committed `canonical_proposition` values in the tree, zero contain
         // a `Lam`, so v1 gives up nothing that exists.
+        // D87 §4.2 — a reference to a proof an external checker verified. It is refused here for
+        // the reason the former exists: it names the artifact nanoda examined, and an artifact has
+        // no Lean counterpart to translate INTO. Externalization manufactures a Lean GOAL from a
+        // chain proposition; a `Checked` is evidence, not a proposition, so it can only appear as
+        // `holds`'s `term` argument, never inside the `type` this walks.
+        Exp::Checked(_) => outside(
+            "Checked",
+            "a reference to an externally checked proof is evidence, not a proposition — it names \
+             the artifact the checker examined and has no Lean form",
+        ),
+
         Exp::Lam(_, _) => outside(
             "Lam",
             "Mini-TT's lambda carries no domain and Lean's requires one that `def_eq` compares; \

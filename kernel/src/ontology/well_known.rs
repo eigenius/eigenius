@@ -551,6 +551,25 @@ pub const PROOF_TERM: &str = "urn:eigenius:prov:proof_term";
 /// `prov:timestamp` — when a Trace's event occurred. Required by every Trace class.
 pub const TIMESTAMP: &str = "urn:eigenius:prov:timestamp";
 
+/// `prov:judgement` — the checker's RESULT on a [`VERIFICATION_TRACE`]: `holds(logic, t, P)`
+/// (D87 §2). What the trace ESTABLISHED, as against what it records about the occasion, and what
+/// `witness_index::emit_from_trace` reads to key `Verified` — off this judgement's own `type`
+/// rather than off the target's stored `canonical_proposition`.
+pub const PROV_JUDGEMENT: &str = "urn:eigenius:prov:judgement";
+
+/// `prov:permitted_axioms` — the axiom names the checker was permitted to admit, as the check
+/// actually ran (D87 §5). One of the two inputs a verdict is a function of that nothing recorded,
+/// so two proofs — one leaning on `Classical.choice` and one not — produced identical traces.
+pub const PERMITTED_AXIOMS: &str = "urn:eigenius:prov:permitted_axioms";
+
+/// `prov:checker_identity_kind` — which kind of identity [`CHECKER_IDENTITY`] carries:
+/// `image_digest` (binds the running binary) or `source_pin` (binds only the source). Kind plus
+/// value, so a stronger identity adds a kind rather than reshaping the schema (D87 §9.3).
+pub const CHECKER_IDENTITY_KIND: &str = "urn:eigenius:prov:checker_identity_kind";
+
+/// `prov:checker_identity` — the checker's identity in the form [`CHECKER_IDENTITY_KIND`] names.
+pub const CHECKER_IDENTITY: &str = "urn:eigenius:prov:checker_identity";
+
 /// `reflection:canonical_proposition` — the optional `Prop`-typed
 /// proposition a resource asserts (per D49 §6). Carries a D47-encoded
 /// `eigentt:Term` payload. Absent value defaults to `Asserts(iri)`

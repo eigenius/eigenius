@@ -657,7 +657,7 @@
     "@id": "urn:eigenius:eigentt:Term",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "Term",
-    "urn:eigenius:core:description": "Chain-mirrored EigenTT type fragment. Encodes closed EigenTT type expressions (axiom statements, theorem statements, propositional institutional artifacts) as queryable chain values. Covers the type-level subset of EigenTT's Exp — universes, dependent binders, propositional equality, references to chain-declared type formers, and the size sort. Declared in CORE rather than beside eigentt:Axiom because core:param_kind and core:type_name carry eigentt:Term values and a lower layer cannot reference a higher one; the IRI keeps its eigentt: prefix because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4). The value shape follows D32 §3.7's `{\"ctor\": <name>, \"args\": [...]}` form; the validator checks each value tree against the ctor schema declared here. See D47.",
+    "urn:eigenius:core:description": "Chain-mirrored EigenTT type fragment. Encodes closed EigenTT type expressions (axiom statements, theorem statements, propositional institutional artifacts) as queryable chain values. Covers the type-level subset of EigenTT's Exp — universes, dependent binders, propositional equality, references to chain-declared type formers, and the size sort. One ctor is not type-level: `Checked(payload_iri)` (D87 \u00a74.2), a reference to a proof an external checker verified, which appears only as `eigentt:Judgement.holds`'s `term` argument. It is its own ctor rather than a `ConstRef` because `ConstRef` resolves by the target's class and yields EigonClass / EigonAxiom / Const, none of which a `lean:LeanProofPayload` instance is \u2014 and because putting 'asserted without proof' and 'checked by nanoda' in one form is the conflation D87 \u00a74.1 withdrew. The kernel's `check` REFUSES it: it has no proof of the proposition and will not manufacture one, so a hand-authored `holds(logic_lean4, Checked(_), _)` is rejected at commit, while an institution-emitted one \u2014 minted after the checker returned \u2014 never reaches validation, because `structural_validate` runs before `autoonload_dispatch` and the followup pipeline slice has no validation phase. Declared in CORE rather than beside eigentt:Axiom because core:param_kind and core:type_name carry eigentt:Term values and a lower layer cannot reference a higher one; the IRI keeps its eigentt: prefix because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4). The value shape follows D32 §3.7's `{\"ctor\": <name>, \"args\": [...]}` form; the validator checks each value tree against the ctor schema declared here. See D47.",
     "urn:eigenius:core:ctors": [
       {
         "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
@@ -913,6 +913,21 @@
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
               "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:integer",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Checked",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "payload_iri",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
               "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           }

@@ -392,6 +392,15 @@ pub(crate) fn encode_term(exp: &Exp, names: &CodecNames) -> Result<Value, Encode
             }
             Ok(acc)
         }
+        // D87 §4.2 — the checked-proof reference. Its own ctor, not `ConstRef`: `ConstRef`
+        // resolves by the target's class and yields `EigonClass` / `EigonAxiom` / `Const`, none
+        // of which a `lean:LeanProofPayload` instance is, and reusing it would put "asserted
+        // without proof" and "checked by nanoda" in one wire form.
+        Exp::Checked(iri) => term(
+            names,
+            "Checked",
+            vec![Value::String(iri.as_str().to_string())],
+        ),
         Exp::LitString(s) => term(names, "LitString", vec![Value::String(s.clone())]),
         Exp::LitInt(n) => term(names, "LitInt", vec![Value::Integer(*n)]),
         Exp::LitFloat(f) => term(names, "LitFloat", vec![Value::Float(*f)]),
@@ -1072,6 +1081,16 @@ fn decode_value(r: &Resource, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
         // (the validator at canonical_proposition emission time should
         // already have caught this — D49 Phase 5 — but the codec is
         // the last line of defence).
+        // D87 §4.2. Decoding is total, as it must be — the ctor is on the chain, so a value
+        // carrying it has to read back. What refuses a hand-authored one is `check`, which has no
+        // proof of the proposition and will not manufacture one.
+        "Checked" => {
+            expect_arg_count("Checked", 1, args)?;
+            let iri_str = arg_string("Checked", 0, args[0])?;
+            let iri = Iri::parse(&iri_str)
+                .map_err(|e| wrong_shape("Checked", 0, &format!("invalid IRI `{iri_str}`: {e}")))?;
+            Ok(Exp::Checked(iri))
+        }
         "LitString" => {
             expect_arg_count("LitString", 1, args)?;
             let s = args[0]
@@ -1823,6 +1842,27 @@ mod tests {
         let v = encode_type(&exp, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&v, &empty_layer()).unwrap();
         assert_eq!(decoded, exp);
+    }
+
+    /// D87 §4.2 — the checked-proof reference survives the codec as itself.
+    ///
+    /// The property that matters is that it does not come back as an `EigonAxiom`. Both would
+    /// round-trip through a `ConstRef`, and a chain that could not tell them apart is the
+    /// conflation the former was added to prevent: `Declared(a)` and `Verified(a)` would name the
+    /// same resource with the authored justification term as the only discriminator.
+    #[test]
+    fn a_checked_proof_reference_round_trips_as_itself() {
+        let payload = Iri::parse("urn:eigenius:demo:lean:proof_payload").unwrap();
+        let exp = Exp::Checked(payload.clone());
+        let v = encode_type(&exp, crate::testing::codec_names()).unwrap();
+        let decoded = decode_type(&v, &empty_layer()).unwrap();
+        assert_eq!(decoded, exp);
+        assert_ne!(
+            decoded,
+            Exp::EigonAxiom(payload),
+            "a checked-proof reference must not decode as an axiom — the whole point of the \
+             former is that the chain can tell `asserted without proof` from `checked by nanoda`"
+        );
     }
 
     #[test]

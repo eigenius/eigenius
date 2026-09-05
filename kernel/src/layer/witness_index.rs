@@ -332,6 +332,33 @@ fn emit_from_trace(
     category: WitnessCategory,
 ) -> Option<WitnessKey> {
     let target_iri = resolve_target_iri(trace)?;
+    // D87 §7 — a `VerificationTrace` carries the checker's RESULT, and the result is what admits
+    // the witness. `prov:judgement` is `holds(logic, t, P)`; `P` is what a checker verified `t`
+    // against, so the key is built from the judgement's own type rather than from what the target
+    // resource happens to say about itself.
+    //
+    // This is why `Verified` stopped being the family the index was a soundness boundary for. The
+    // trace used to be a note that a check RAN, and the grade rested on the note; now it carries
+    // the judgement, whose inputs the trace also pins (`prov:permitted_axioms`,
+    // `prov:checker_identity`), so the verdict is recomputable rather than postulated.
+    //
+    // The refuse-a-certificate check is [`emit_from_reasoning_sentence`]'s, for the same reason: a
+    // judgement whose type is a `Certificate(...)` says a checker verified the CERTIFICATE, which
+    // establishes nothing about the proposition, and minting `Verified` from one launders a
+    // conclusion resting on nothing but `Declared(...)` into a proof one citation downstream.
+    if category == WitnessCategory::Verified {
+        if let Some(stored) = Iri::parse(wk::PROV_JUDGEMENT)
+            .ok()
+            .and_then(|i| trace.get(&i))
+        {
+            let prop_hash = judgement_proposition_hash(layer, trace, stored)?;
+            return Some(WitnessKey {
+                category,
+                iri: target_iri,
+                prop_hash,
+            });
+        }
+    }
     let target_resource = layer.resolve(&target_iri)?;
     let prop_hash = target_proposition_hash(layer, &target_iri, &target_resource)?;
     Some(WitnessKey {
@@ -339,6 +366,35 @@ fn emit_from_trace(
         iri: target_iri,
         prop_hash,
     })
+}
+
+/// The proposition a `prov:judgement` establishes, hashed — or `None`, with a reason logged.
+fn judgement_proposition_hash(layer: &Layer, trace: &Resource, stored: &Value) -> Option<[u8; 32]> {
+    let trace_iri = trace.id().cloned()?;
+    let j = match crate::program::eigentt_type_mirror::decode_judgement(stored, layer) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::warn!(
+                { field::OPERATION } = operation::WITNESS_DECODE,
+                { field::ERROR_KIND } = "trace_judgement_decode_failed",
+                { field::ERROR_MESSAGE } = %format!("{e:?}"),
+                resource_iri = %trace_iri,
+                "a VerificationTrace's judgement did not decode; no Verified witness admitted"
+            );
+            return None;
+        }
+    };
+    if crate::program::eigentt_type_mirror::certificate_indices(&j.typ).is_some() {
+        tracing::warn!(
+            { field::OPERATION } = operation::WITNESS_DECODE,
+            { field::ERROR_KIND } = "trace_judgement_is_a_certificate",
+            resource_iri = %trace_iri,
+            "a VerificationTrace's judgement holds a certificate judgement, not a proof of the \
+             proposition; no Verified witness admitted"
+        );
+        return None;
+    }
+    hash_proposition_exp(&j.typ, &CodecNames::from_layer(layer)).ok()
 }
 
 /// The proposition a trace's target canonically asserts, hashed.
