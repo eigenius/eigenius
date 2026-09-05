@@ -229,8 +229,12 @@ family where the answer is no today, and §5 is what changes the answer: once th
 
 ## 8. Cost
 
-- **Ontology**: two `prov:VerificationTrace` slots (permitted axioms, checker identity); an anchor
-  from the checked term to its payload. Bootstrap-resident, so it rides #235's reseed.
+- **Ontology**: `prov:VerificationTrace` slots for the permitted axiom set and for the checker
+  identity as a *kind + value* pair (§9.3); an anchor from the checked term to its payload.
+  Bootstrap-resident, so it rides #235's reseed.
+- **Deploy**: pin `deploy/bicep/modules/kernel.bicep` and `docker-compose.yml` by digest rather
+  than tag, and pass `EIGENIUS_IMAGE_DIGEST`. Independently worth doing — a tag is mutable, so
+  neither deployment is reproducible today.
 - **eigentt fragment**: one term former (§4.2), landing in the D47 codec, conversion, and D74's
   exhaustive match — which will refuse it for externalization, since a checked-proof reference has
   no Lean counterpart to translate to.
@@ -269,34 +273,76 @@ family where the answer is no today, and §5 is what changes the answer: once th
    certificate over itself. The self-attestation D81 criticised — *"the reasoning institution
    vouching for its own output"* — is a separate defect about which route populates the witness, not
    about what the leaf names.
-3. ~~**What "checker identity" is.**~~ **Decided: start with rev plus toolchain**, and keep the
-   slot shaped so a stronger identity replaces the *value* rather than the schema.
+3. ~~**What "checker identity" is.**~~ **Decided.** The slot records the strongest available
+   binding **and says which kind it is**, so a reader can tell an identity that binds the running
+   binary from one that only names the source.
 
-   v1 records two strings, both already compile-time constants:
+   | kind | value | binds |
+   |---|---|---|
+   | `image_digest` | the registry digest of the kernel image, injected at deploy time | the running binary |
+   | `source_pin` | `nanoda_lib` rev + Lean toolchain | the checker's source and the export format |
 
-   | | |
-   |---|---|
-   | `nanoda_lib` rev | `1e44c4964b5ec916a1508c365af5f0e8a8c736fe`, pinned in `crates/eigenius-lean/Cargo.toml` |
-   | Lean toolchain | `leanprover/lean4:v4.29.1`, which `eigenius-lean-runtime/build.rs` already bakes into a const so the Dockerfile composer and every Rust caller read one version |
+   Both are compile-time or deploy-time constants. The `source_pin` values exist today: the rev is
+   pinned in `crates/eigenius-lean/Cargo.toml` (`1e44c496…`), and `leanprover/lean4:v4.29.1` is
+   already baked into a const by `eigenius-lean-runtime/build.rs` so the Dockerfile composer and
+   every Rust caller read one version.
 
-   **What it covers**: which checker source was compiled, and which Lean produced the export format
-   the checker parses. Those are the two axes a verdict actually varies along today.
+   **Start with `source_pin`; `image_digest` is the upgrade and it is small.** It covers what a
+   verdict actually varies along today — which checker source was compiled, which Lean produced the
+   export format it parses. What it does not cover is that the running binary was built from that
+   source: a different compiler version, different feature flags, or a tampered build yields a
+   different binary from the same rev.
 
-   **What it does not**: that the running binary was built from that source. A different compiler
-   version, different feature flags, or a tampered build yields a different binary from the same rev.
+   ### The digest comes from the deployment, not from the container
 
-   **Why that is proportionate now.** §5's argument: the checker runs in process (D28 §2.3), so the
-   binary's identity *is* the deployment's identity, and a deployed kernel already carries an image
-   digest. A stronger checker identity would be re-deriving something the deployment record has.
+   The deployer already knows which digest it deployed. That is where the fact is authoritative, it
+   needs no privilege, and it works on every runtime:
 
-   **The trigger that upgrades it** is the same one that would justify a receipt: a verdict admitted
-   across a trust boundary — a checker running somewhere the verifier does not control, or an
-   archived verdict re-read after the deployment that produced it is gone. At that point the
-   identity has to bind the binary, and #43's reproducible-build machinery is the nearest existing
+   ```bicep
+   image: '${acrLoginServer}/eigenius-kernel@${imageDigest}'
+   env: [
+     { name: 'EIGENIUS_IMAGE_DIGEST', value: imageDigest }
+   ]
+   ```
+
+   Same shape in `docker-compose.yml`. **This also fixes something independently broken**: both
+   deployments pin by *tag* today — `deploy/bicep/modules/kernel.bicep:31` is
+   `eigenius-kernel:${imageTag}`, `docker-compose.yml:28` is `eigenius-kernel:local` — and a tag is
+   mutable, so neither deployment is reproducible even in principle. Deploying by digest is the
+   prerequisite for the identity meaning anything, and is worth doing on its own.
+
+   Absence of the variable is itself informative — "not deployed by digest" — so no fallback logic
+   is needed beyond emitting `source_pin`.
+
+   **Asking the container runtime was considered and rejected.** Reading `/etc/hostname` and
+   inspecting `/containers/{id}/json` over `/var/run/docker.sock` (directly, or via `bollard`, which
+   the workspace already carries behind `runtime-substrate`'s optional `docker-spawner` feature)
+   fails on four counts:
+
+   - **It does not work in production.** `deploy/bicep/modules/kernel.bicep:9` is
+     `Microsoft.App/containerApps@2024-03-01` — a managed platform with no Docker socket.
+   - **It requires mounting the socket**, which is root-equivalent on the host. The substrate holds
+     that capability because its job is spawning containers; extending it to the checker for a read
+     inverts the trust relationship the identity exists to establish.
+   - **`.Image` is the image ID**, the sha256 of the local image config — not the registry
+     `RepoDigests`, which is the only value corresponding to what a registry served or signed.
+   - **`/etc/hostname` is the container ID only by Docker's default**; compose `hostname:`,
+     Kubernetes (pod name) and ACA all override it.
+
+   Since it cannot work on ACA, in the CLI, or in tests, the `source_pin` path is needed regardless,
+   and the digest branch would be dead exactly where verdicts are produced for real.
+
+   ### What it is, and is not
+
+   An injected digest is still **self-reported**: the kernel repeats what it was told, so a
+   compromised or misconfigured one writes what it likes. It is provenance, not warrant — the same
+   circularity §5 identifies in a self-signed receipt — and it becomes load-bearing only when
+   something outside the process vouches for the binding (the orchestrator's own record, a signed
+   deployment, a TEE attestation). That is the same trust-boundary trigger §5 gives for receipts,
+   and it is the point at which `#43`'s reproducible-build machinery becomes the nearest existing
    answer.
 
-   **The discipline that keeps this from becoming a permanent stopgap**: the slot holds an opaque
-   identity string, so replacing `rev + toolchain` with a build digest or an attestation changes
-   what is written, not the schema — no reseed, and no migration of traces already committed. If a
-   proposal for a stronger identity would require reshaping the slot, that is the signal this
-   decision was wrong.
+   **What keeps this from becoming a permanent stopgap**: the slot is a *kind* plus a value, so a
+   stronger identity adds a kind rather than reshaping the schema — no reseed, and no migration of
+   traces already committed. A `source_pin` trace stays readable and stays honestly labelled as the
+   weaker thing it is.
