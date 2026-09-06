@@ -74,6 +74,13 @@
 //! moved NOTHING, because those edits were all `//` comments — the compiler strips them, while a
 //! `description = "…"` is a resource property and hashes.
 //!
+//! IT FIRED AGAIN ON B1 (`2026-09-05`): `core` and `justification`. `core` gained the
+//! `core:implicit_args` property and a `recommends` on `core:InductiveCtor`; `justification`
+//! declares `app`'s `A`/`B` and `sum_l`/`sum_r`'s `P` implicit, which changes those
+//! constructors' chain-resident declarations. Both are content, so both hash. The reseed this
+//! obliges is B4 in `docs/notes/next-steps-after-d88.md`, which also carries B2's merge and the
+//! three stale description strings from `#235`.
+//!
 //! IT FIRED FOR eigenius#188 A SECOND TIME (`2026-08-23`), on **`core` and
 //! `eigentt-type-fragment`**. The level algebra moved DOWN to `core:Level` and `core:result_sort`
 //! was retyped from a string (`"Prop"` / `"Set"` / `"Type:N"`) to a `core:Level` value. It had to
@@ -120,7 +127,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "core:c11728d41e595ca16147d40d5cab9eb770ab906d1965ad95c0645f3ea74ab3ab
+const EXPECTED: &str = "core:f3b333d50e196210eb04b5b496e36b535e062bc6dc0e54a1a88fba667697c4c4
 eigentt-type-fragment:52bcfe935009fb7f32400dcb344ab884f29937692370aa4e3cc5a24d87250028
 program:429718a323b6bfcc3ff858277f73b2c15de724f9d1c1c2c2c220748295b3c726
 reflection:2455ee11766bc20134ed820e69c006951de44aa9e486abb36938d1a5361c0569
@@ -131,7 +138,7 @@ runtime:ada851931aeff9eed036621b306ca3eb25c0044d600c84dcad77c67973c1a22e
 formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:d6faf931474f38e64da8c4cafb1180eaf1dbf9800112466eb4cedc0279bbae28
-justification:3bccf2243113682ab775cd84ebebcdbf92bfe532fb8eb156c32c9c726fbf56c9
+justification:ad1cabcd7bd0f8cc7cd0ace75f70f752d3bfad1a0e280303b36bcca800166348
 statistics:c0fa9ce038ad7b3a61a884c32432686eaa0a50fbc6c437cff8fbdbf6ce2dda6d
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447

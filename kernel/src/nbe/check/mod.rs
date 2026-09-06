@@ -3987,9 +3987,9 @@ mod tests {
 
     #[test]
     fn d48_ctor_with_meta_index_in_expected_solves() {
-        // EigenTT doesn't yet have implicit-arg syntax to *create*
-        // metas at user-facing sites, but we can construct one
-        // directly to exercise the unification path. The expected
+        // A constructor's declared-implicit binders create metas (`solve_implicit_binders`);
+        // here one is constructed directly to exercise the unification path from the other
+        // side — a meta sitting in the EXPECTED index. The expected
         // type `SimpleVec A ?m` — when checked against `nil A` which
         // produces `SimpleVec A ()` — should unify ?m := Unit.
         //
@@ -3998,7 +3998,7 @@ mod tests {
         // checker resolves them via the unifier.
         let decl = simple_vec_decl();
         let mut mctx = crate::nbe::unify::MetaCtx::new();
-        let m_id = mctx.fresh();
+        let m_id = mctx.fresh(0);
         let m = Val::Nt(crate::nbe::val::Neut::Meta(m_id, Vec::new()));
         let mut c = ctx().declaring(decl.clone());
         // `nil` takes 0 non-param args; the `A` param flows in from

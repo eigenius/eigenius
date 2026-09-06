@@ -21,6 +21,29 @@ in the interim cannot be misread as a pass.
 it needed no reseed; it does — see below. Doing it after B2 also shrinks it, since the merge removes
 `j1` and `j2` from `app` outright.
 
+### B1 — declare the implicit binders (D88 §4) — **DONE `2026-09-05`**
+
+Built as declared `core:implicit_args` (binder names) with an `implicit(A, B)` ESL clause, not as
+the `eigentt:Implicit(Prop)` marker type recommended below. **The marker was the wrong shape.** It
+annotates the binder's TYPE, so every reader of `core:ctor_type` that does not know about it sees a
+type that does not exist — the mirror generators, `esl::print`, the Lean translation each would
+have to remember to strip it. A separate property is read only by the code that cares; everything
+else sees the true telescope. It also needs no universe-polymorphic marker constant whose own type
+must be right for a thing that is stripped before checking.
+
+Two kernel changes the plan did not have: a `MetaCtx` spanning the whole constructor check (Phase
+F, as predicted), and componentwise comparison of two anonymous arrows (not predicted — `app`'s
+binders sit inside `Certificate(A -> B)`, and every `Val::Pi` fell through to readback equality).
+Anonymous is the whole soundness argument: nothing is bound, so no variable is introduced and
+nothing can be captured. `solve_meta`'s scope check was strengthened alongside it — metas record
+their creation level and refuse a solution proposed from inside a binder they do not scope over.
+See D88 §4.
+
+Content: 309 `app` calls lost two arguments each across 14 ESL files, plus 2 `sum_l`, 1 `sum_r`,
+and the notebook's 4. `spec_poly` stayed fully explicit, `T` included.
+
+The original plan, kept for the record:
+
 ### B1 — declare the implicit binders (D88 §4)
 
 **Which binders.** Not "the solvable ones" — the ones that carry no authorial content. The grounding
@@ -56,7 +79,12 @@ grammar, and would duplicate a mechanism the kernel already has. The marker-type
 
 Still a bootstrap edit — the constructors' encoded types change — so it rides B4's reseed.
 
-### B2 — collapse `justification:Term` into `justification:Certificate` (D88 §2)
+### B2 — collapse `justification:Term` into `justification:Certificate` (D88 §2) — **DONE `2026-09-05`**
+
+Landed as `ba1abb6`. Cost 663 argument deletions across 24 files plus 176 dead alias bindings —
+~60× the estimate, which counted the notebook and missed the WRN publication chain. See D88 §2.
+Residue: 32 `x = Declared(IRI)` aliases in 7 files, to be removed by hand.
+
 
 `Justification : Prop -> Type 2`, seven constructors, each losing its term arguments.
 

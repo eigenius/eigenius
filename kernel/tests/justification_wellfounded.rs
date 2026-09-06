@@ -200,8 +200,7 @@ resource probe:concl_sum : justification:Conclusion {{
     justification:subject_iri = "urn:eigenius:probe:subject";
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
-               sum_r( probe:P,
-                      verified("urn:eigenius:probe:concl_cyclic", probe:P),
+               sum_r( verified("urn:eigenius:probe:concl_cyclic", probe:P),
                       declared("urn:eigenius:probe:solid", probe:P) ),
                justification:Certificate(probe:P) )
     );

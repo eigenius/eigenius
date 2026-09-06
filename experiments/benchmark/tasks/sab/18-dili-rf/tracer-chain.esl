@@ -193,8 +193,6 @@ resource s18:concl_solution_implements : justification:Conclusion {
                 s18:ConformsOutputFormat(p) ->
                 s18:ImplementsDILIPredictor(p),
 
-            j0 = Declared(RULE),
-
             rule_cert = spec_poly(
                 // T : the domain
                 core:string,
@@ -208,12 +206,12 @@ resource s18:concl_solution_implements : justification:Conclusion {
                 P,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, rule_cert, declared(D1, C1)),
-            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, cert1, declared(D2, C2)),
-            cert3 = app(C3, C4 -> C5 -> IMPL, cert2, declared(D3, C3)),
-            cert4 = app(C4, C5 -> IMPL, cert3, declared(D4, C4))
+            cert1 = app(rule_cert, declared(D1, C1)),
+            cert2 = app(cert1, declared(D2, C2)),
+            cert3 = app(cert2, declared(D3, C3)),
+            cert4 = app(cert3, declared(D4, C4))
         in
-        app(C5, IMPL, cert4, declared(D5, C5))),
+        app(cert4, declared(D5, C5))),
                type_expr(alias
             P    = "urn:eigenius:bench:sab18:solution",
             RULE = "urn:eigenius:bench:sab18:impl_rule",
@@ -238,8 +236,6 @@ resource s18:concl_solution_implements : justification:Conclusion {
                 s18:ConformsOutputFormat(p) ->
                 s18:ImplementsDILIPredictor(p),
 
-            j0 = Declared(RULE),
-
             rule_cert = spec_poly(
                 // T : the domain
                 core:string,
@@ -253,10 +249,10 @@ resource s18:concl_solution_implements : justification:Conclusion {
                 P,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, rule_cert, declared(D1, C1)),
-            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, cert1, declared(D2, C2)),
-            cert3 = app(C3, C4 -> C5 -> IMPL, cert2, declared(D3, C3)),
-            cert4 = app(C4, C5 -> IMPL, cert3, declared(D4, C4))
+            cert1 = app(rule_cert, declared(D1, C1)),
+            cert2 = app(cert1, declared(D2, C2)),
+            cert3 = app(cert2, declared(D3, C3)),
+            cert4 = app(cert3, declared(D4, C4))
         in
         justification:Certificate(
                    s18:ImplementsDILIPredictor("urn:eigenius:bench:sab18:solution") )) );

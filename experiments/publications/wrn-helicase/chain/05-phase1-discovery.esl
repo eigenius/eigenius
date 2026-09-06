@@ -177,10 +177,9 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                 onco:TopDifferentialDependency(g, DCTX) ->
                 onco:SelectivelyEssential(g, MSI),
 
-            // Specialization leaves the TERM unchanged — `spec_poly` narrows the
-            // proposition from the universal to WRN, and narrowing introduces no
-            // ground. The rule is Declared before and after.
-            j0 = Declared(RULE),
+            // `spec_poly` narrows the proposition from the universal to WRN.
+            // Narrowing introduces no ground: the rule is declared before and
+            // after, and the certificate's leaf set is unchanged.
             rule_cert = spec_poly(
                 // T : the domain
                 core:string,
@@ -191,9 +190,9 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                 G,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(TA, TD -> SE, rule_cert, declared(DDA, TA))
+            cert1 = app(rule_cert, declared(DDA, TA))
         in
-        app(TD, SE, cert1, declared(DDD, TD))),
+        app(cert1, declared(DDD, TD))),
                type_expr(alias
             G    = "WRN",
             ACTX = "Achilles_MSI",
@@ -212,10 +211,9 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                 onco:TopDifferentialDependency(g, DCTX) ->
                 onco:SelectivelyEssential(g, MSI),
 
-            // Specialization leaves the TERM unchanged — `spec_poly` narrows the
-            // proposition from the universal to WRN, and narrowing introduces no
-            // ground. The rule is Declared before and after.
-            j0 = Declared(RULE),
+            // `spec_poly` narrows the proposition from the universal to WRN.
+            // Narrowing introduces no ground: the rule is declared before and
+            // after, and the certificate's leaf set is unchanged.
             rule_cert = spec_poly(
                 // T : the domain
                 core:string,
@@ -226,7 +224,7 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                 G,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(TA, TD -> SE, rule_cert, declared(DDA, TA))
+            cert1 = app(rule_cert, declared(DDA, TA))
         in
         justification:Certificate(
                    onco:SelectivelyEssential("WRN", "MSI") )) );

@@ -1902,8 +1902,8 @@ impl Compiler {
                 // another inductive's index/result-type position.
                 //
                 // `resolve_ctor_iri` walks `ctors_by_short_name` and
-                // filters by namespace prefix, so `justification:App(...)`
-                // unambiguously picks the `reasoning` namespace's
+                // filters by namespace prefix, so `formulas:App(...)`
+                // unambiguously picks the `formulas` namespace's
                 // `App` ctor even when `eigentt:Term:App` shares
                 // the short name.
                 if let Some(ctor_iri_str) = self.resolve_ctor_iri(name)? {
@@ -2465,7 +2465,9 @@ impl Compiler {
                         }
                         cr.set(iri(wk::ARG_TYPES), Value::Array(arg_values));
                     }
-                    ast::CtorDecl::Typed { typ, pos, .. } => {
+                    ast::CtorDecl::Typed {
+                        typ, implicit, pos, ..
+                    } => {
                         // eigenius#72 Layer 2 — the typed form supplies
                         // the full Π-telescope (including conclusion
                         // indices) as a single Term. Lower it to
@@ -2488,6 +2490,38 @@ impl Compiler {
                             )
                         })?;
                         cr.set(iri(wk::CTOR_TYPE), encoded);
+                        if !implicit.is_empty() {
+                            // Check the names against the telescope here as well as at decode.
+                            // Both paths need it — a JSON-authored ontology never passes through
+                            // the compiler — but only this one can point at a line.
+                            let bound = telescope_binder_names(&ctor_exp, decl.params.len());
+                            for name in implicit {
+                                if bound.iter().filter(|b| *b == name).count() != 1 {
+                                    return Err(EslError::compiler(
+                                        Some(pos.clone()),
+                                        format!(
+                                            "constructor `{}` declares `{name}` implicit, but its \
+                                             telescope binds that name {} time(s) past the {} \
+                                             parameter(s). Bound there: {}",
+                                            c.name(),
+                                            bound.iter().filter(|b| *b == name).count(),
+                                            decl.params.len(),
+                                            if bound.is_empty() {
+                                                "nothing".to_string()
+                                            } else {
+                                                bound.join(", ")
+                                            },
+                                        ),
+                                    ));
+                                }
+                            }
+                            cr.set(
+                                iri(wk::IMPLICIT_ARGS),
+                                Value::Array(
+                                    implicit.iter().map(|n| Value::String(n.clone())).collect(),
+                                ),
+                            );
+                        }
                     }
                 }
                 Ok(Value::Embedded(Box::new(cr)))
@@ -2849,11 +2883,10 @@ impl Compiler {
             // the qualified-ctor lookup first (which surfaces the
             // ambiguity-aware diagnostic when needed), then fall
             // through to D52 §12 macro expansion only if it's not a
-            // ctor. This is what makes
-            // `justification:App(...)` resolve to the
-            // a justification constructor inside a value
-            // slot — the disambiguator authors need when bare `App`
-            // collides with another inductive's ctor short name.
+            // ctor. This is what makes `formulas:App(...)` resolve to
+            // `formulas:FormulaTerm`'s constructor inside a value slot —
+            // the disambiguator authors need when bare `App` collides
+            // with another inductive's ctor short name.
             ast::Value::MacroCall { name, args, pos } => {
                 if self.resolve_ctor_iri(name)?.is_some() {
                     return self.ctor_application(&name.name, args, pos);
@@ -3017,7 +3050,7 @@ impl Compiler {
                 self.encode_type_expr_to_value(typ, &scope)
             }
             // Same disambiguation as `compile_value`: try ctor resolution first (qualified ctor
-            // refs reach this site when an outer ctor's arg is `justification:App(...)`), fall
+            // refs reach this site when an outer ctor's arg is `formulas:App(...)`), fall
             // back to macro expansion otherwise.
             ast::Value::MacroCall { name, args, pos } => {
                 if self.resolve_ctor_iri(name)?.is_some() {
@@ -3854,6 +3887,25 @@ const SESSION_AGENT_ENV: &str = "EIGENIUS_DECLARED_BY";
 /// An explicitly configured agent wins; otherwise the unattributed marker. A malformed
 /// value is NOT silently ignored — it falls back and the caller sees the marker rather
 /// than a fabricated attribution, which is the whole point of D72.
+/// Named binders of a constructor's Π-telescope past its `n_params` parameter prefix, in order.
+///
+/// Anonymous binders (`A -> B`) contribute nothing: they cannot be named implicit, having no name.
+fn telescope_binder_names(ctor_typ: &crate::nbe::term::Exp, n_params: usize) -> Vec<String> {
+    use crate::nbe::term::{Exp, Patt};
+    let mut names = Vec::new();
+    let mut remaining = n_params;
+    let mut current = ctor_typ;
+    while let Exp::Pi(patt, _, body) = current {
+        if remaining > 0 {
+            remaining -= 1;
+        } else if let Patt::Var(n) = patt {
+            names.push(n.clone());
+        }
+        current = body;
+    }
+    names
+}
+
 fn session_declarer() -> String {
     declarer_from(std::env::var(SESSION_AGENT_ENV).ok().as_deref())
 }
@@ -5483,6 +5535,93 @@ mod tests {
         );
     }
 
+    /// `implicit(n)` reaches the chain as `core:implicit_args`, carrying the binder NAME.
+    #[test]
+    fn an_implicit_clause_compiles_to_implicit_args() {
+        use crate::ontology::well_known as wk_local;
+
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Vec(A : Set) : core:Nat -> Set {
+                nil : forall (A : Set) => ex:Vec(A, ex:zero),
+                cons implicit(n) : forall (A : Set, n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+            "#,
+        );
+        let ctors = match resources[0].get(&Iri::parse(wk_local::CTORS).unwrap()) {
+            Some(Value::Array(a)) => a.clone(),
+            other => panic!("expected a ctors array, got {other:?}"),
+        };
+        let implicit_iri = Iri::parse(wk_local::IMPLICIT_ARGS).unwrap();
+        let ctor = |i: usize| match &ctors[i] {
+            Value::Embedded(r) => r.clone(),
+            other => panic!("ctor {i} is not embedded: {other:?}"),
+        };
+        assert!(
+            ctor(0).get(&implicit_iri).is_none(),
+            "`nil` declares nothing implicit, so it carries no `implicit_args`"
+        );
+        match ctor(1).get(&implicit_iri) {
+            Some(Value::Array(a)) => assert_eq!(
+                a.as_slice(),
+                [Value::String("n".to_string())],
+                "`cons` should carry the binder name"
+            ),
+            other => panic!("`cons` should carry `implicit_args`, got {other:?}"),
+        }
+    }
+
+    /// A name that binds nothing is rejected where it is written.
+    ///
+    /// The decoder rejects it too — a JSON-authored ontology never passes through the compiler —
+    /// but only this path can name the line.
+    #[test]
+    fn implicit_naming_an_unbound_binder_is_rejected() {
+        let err = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Vec(A : Set) : core:Nat -> Set {
+                cons implicit(m) : forall (A : Set, n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+            "#,
+            term_chain(),
+        )
+        .expect_err("`m` binds nothing in the telescope");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains('m') && msg.contains("implicit"),
+            "the error should name the binder it could not find: {msg}"
+        );
+    }
+
+    /// The inductive's own parameters are not the author's to elide — they come from the expected
+    /// type already — so naming one is the same error as naming nothing.
+    #[test]
+    fn implicit_cannot_name_the_inductives_parameter() {
+        let err = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Vec(A : Set) : core:Nat -> Set {
+                cons implicit(A) : forall (A : Set, n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+            "#,
+            term_chain(),
+        )
+        .expect_err("`A` is the inductive's parameter, not a binder past the prefix");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("implicit"),
+            "the error should say what it rejected: {msg}"
+        );
+    }
+
     #[test]
     fn compile_data_indexed_emits_indices_and_result_sort_and_ctor_type() {
         use crate::ontology::well_known as wk_local;
@@ -5847,10 +5986,9 @@ mod tests {
         // because at parse time it can't distinguish ctor from macro.
         // The compiler disambiguates by trying `resolve_ctor_iri`
         // first; only when no ctor matches does it fall through to
-        // macro expansion. Without that order, `justification:App(...)`
-        // in a `justification:term = ...` slot errors with
-        // "macro not declared" instead of resolving to the
-        // a justification constructor.
+        // macro expansion. Without that order, `formulas:App(...)`
+        // in a value slot errors with "macro not declared" instead of
+        // resolving to `formulas:FormulaTerm`'s constructor.
         let resources = esl::compile(
             r#"
             namespace core = "urn:eigenius:core";

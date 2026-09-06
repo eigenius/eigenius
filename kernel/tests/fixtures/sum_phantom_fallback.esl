@@ -56,8 +56,7 @@ resource screen:concl_phantom_fallback : justification:Conclusion {
             B = "urn:eigenius:demo:screen:review_absent",
             P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
         in
-        sum_l(P,
-                     declared(A, P),
+        sum_l(declared(A, P),
                      declared(B, P))),
                type_expr(alias
             A = "urn:eigenius:demo:screen:review_a",

@@ -116,7 +116,12 @@ WHY THERE IS NO SEPARATE TERM TYPE. This was `Certificate : justification:Term -
         justification:Certificate(P),
 
     // Artemov Application: a justification of `A -> B` applied to one of `A` justifies `B`.
-    app :
+    //
+    // Both propositions are implicit (D88 §4). `B` is the certificate's own index, so the type
+    // the application is checked against fixes it. `A` occurs in no index at all — it is
+    // determined by inferring the first argument and reading the domain of its `A -> B`. Writing
+    // either would restate what the arguments already say.
+    app implicit(A, B) :
         forall (A : Prop, B : Prop) =>
         justification:Certificate(A -> B) ->
         justification:Certificate(A) ->
@@ -125,13 +130,13 @@ WHY THERE IS NO SEPARATE TERM TYPE. This was `Certificate : justification:Term -
     // Artemov Sum, both branches justified — see the description. `sum_l` and `sum_r` have the
     // same type; the choice of constructor is what records which branch was preferred, and that
     // is unchanged by the merge because it never lived in the index.
-    sum_l :
+    sum_l implicit(P) :
         forall (P : Prop) =>
         justification:Certificate(P) ->
         justification:Certificate(P) ->
         justification:Certificate(P),
 
-    sum_r :
+    sum_r implicit(P) :
         forall (P : Prop) =>
         justification:Certificate(P) ->
         justification:Certificate(P) ->
@@ -140,6 +145,13 @@ WHY THERE IS NO SEPARATE TERM TYPE. This was `Certificate : justification:Term -
     // Narrow a universal to an instance. It lost its `j` binder with the merge: `j` was carried
     // from premise to conclusion unchanged, which is exactly what "specialisation adds no ground"
     // means, and with the term gone there is nothing left to carry.
+    //
+    // Nothing here is implicit, `T` included. `T` reaches the index only inside `P(x)`, and `P`
+    // applied to a bound variable is a higher-order pattern — outside the first-order fragment
+    // `unify` implements (D48 §3.1). Solving it from the premise argument fails for the same
+    // reason: the domain of `forall (y : T) => P(y)` would fix `T`, but the codomain is `P(y)`
+    // and unification of the whole argument type has to succeed for any of it to count.
+    // Widening that fragment is D88 §6, a decision about EigenTT.
     spec_poly :
         forall (T : Type 1, P : T -> Prop, x : T) =>
         justification:Certificate(forall (y : T) => P(y)) ->

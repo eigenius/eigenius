@@ -210,19 +210,9 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        forall (c : core:string) =>
                           screen:sample_for(s, c)
                           -> stats:lt(stats:mean_of(s), 100.0)
-                          -> screen:HasLowIC50(c),
-
-            // Justification spine pieces — reused inside the cert
-            rule_j      = Declared(RULE),
-            bridge_s    = Declared(BRIDGE),
-            bridge_full = bridge_s,
-            sf_j        = Declared(SFW)
-            // The COMPUTED ground: the plan applied to the input. Was
-            // `DerivedEvidence(SAR)`, one leaf for both halves of what happened.
+                          -> screen:HasLowIC50(c)
         in
         app(
-                   // outer A, B
-                   HAS_LOW, STRONG,
                    // outer c1 : specialise the literature rule at EIG_0291.
                    spec_poly(
                        // T : the domain
@@ -235,11 +225,9 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                    // outer c2 : middle app composes the partially-applied bridge
                    // (after sample_for) with the per-effect verdict.
                    app(
-                       STAT, HAS_LOW,
                        // middle c1' : inner app composes the fully-specialised
                        // bridge with the sample_for witness.
                        app(
-                           S_FOR, STAT -> HAS_LOW,
                            // inner c1'' : nested spec_poly — specialise the
                            // bridge at s, then at c.
                            spec_poly(
@@ -267,9 +255,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        ),
                        // middle c2' : the computed statistic — the declared plan
                        // applied to the observed input.
-                       app(
-                           core:Asserts(SS), STAT,
-                           declared(PLAN, core:Asserts(SS) -> STAT),
+                       app(declared(PLAN, core:Asserts(SS) -> STAT),
                            observed(SS, core:Asserts(SS))
                        )
                    )
@@ -295,15 +281,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        forall (c : core:string) =>
                           screen:sample_for(s, c)
                           -> stats:lt(stats:mean_of(s), 100.0)
-                          -> screen:HasLowIC50(c),
-
-            // Justification spine pieces — reused inside the cert
-            rule_j      = Declared(RULE),
-            bridge_s    = Declared(BRIDGE),
-            bridge_full = bridge_s,
-            sf_j        = Declared(SFW)
-            // The COMPUTED ground: the plan applied to the input. Was
-            // `DerivedEvidence(SAR)`, one leaf for both halves of what happened.
+                          -> screen:HasLowIC50(c)
         in
         justification:Certificate(
                    screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") )) );

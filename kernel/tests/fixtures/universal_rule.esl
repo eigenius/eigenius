@@ -96,13 +96,12 @@ resource screen:m_eig0291_trace : prov:ObservationTrace {
 
 // ─── Step 4: justification:Conclusion with universal-rule specialisation ──
 //
-// The justification chain value uses the new `SpecStr` JT ctor to
-// specialise the universal rule at "urn:EIG_0291":
+// The certificate specialises the universal rule at "urn:EIG_0291",
+// then applies it to the observation:
 //
-//   justification:App(Declared(rule_iri),
-//       Observed(obs_iri))
+//   app(spec_poly(declared(rule_iri)), observed(obs_iri))
 //
-// The certificate's `spec_poly` rule witnesses that the rule (with
+// `spec_poly` witnesses that the rule (with
 // its universal proposition) applied at "urn:EIG_0291" yields the
 // specialised `HasLowIC50("urn:EIG_0291") -> StrongInhibitor(...)`
 // proposition — which `app` then composes with the observation to
@@ -118,10 +117,6 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
     justification:judgement =
         holds( eigentt:logic_kernel,
                type_expr(app(
-                   // A : Prop = HasLowIC50("urn:EIG_0291")
-                   screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
-                   // B : Prop = StrongInhibitor("urn:EIG_0291")
-                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
                    // c1 : justification:Certificate(A -> B)
                    //    = spec_poly(core:string, P, Declared(rule),
                    //                "urn:EIG_0291", rule_cert)

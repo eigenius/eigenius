@@ -347,72 +347,109 @@ fn peel_ctor_telescope<'a>(
     (args, current)
 }
 
-/// Solve a constructor's **implicit** binders from the type it is checked against.
+/// The unification state of one constructor check: a metavariable per telescope binder, and the
+/// context they are solved in.
 ///
-/// Returns one slot per `arg_specs` entry: `Some(v)` where unifying the ctor's declared result type
-/// against `expected_indices` determined that binder, `None` otherwise.
+/// One `MetaCtx` lives for the whole of [`check_inductive_ctor_args`] rather than for a single
+/// unification. That is the "longer-lived `MetaCtx`" D48 named as Phase F's job, and it is what
+/// makes a binder solvable from *two* directions: the constructor's result type up front, and an
+/// argument's inferred type as the loop reaches it.
+struct Implicits {
+    mctx: crate::nbe::unify::MetaCtx,
+    /// One metavariable per `arg_specs` entry, in order.
+    ids: Vec<crate::nbe::val::MetaId>,
+    /// The level the metas stand at — the outer scope, since a constructor's binders are written
+    /// where the constructor is applied.
+    level: usize,
+}
+
+impl Implicits {
+    /// The binder value to put in the argument environment for slot `i`: its solution if it has
+    /// one, otherwise the metavariable itself so a later unification can still fix it.
+    fn binder_value(&self, i: usize) -> Val {
+        let id = self.ids[i];
+        match self.mctx.solution(id) {
+            Some(v) => self.mctx.zonk(v),
+            None => Val::Nt(crate::nbe::val::Neut::Meta(id, Vec::new())),
+        }
+    }
+
+    fn solution(&self, i: usize) -> Option<Val> {
+        self.mctx.solution(self.ids[i]).map(|v| self.mctx.zonk(v))
+    }
+
+    fn zonk(&self, v: &Val) -> Val {
+        self.mctx.zonk(v)
+    }
+
+    /// Unify an argument's inferred type against its declared type, solving whatever metas the
+    /// declared type still carries.
+    fn absorb(
+        &mut self,
+        declared: &Val,
+        inferred: &Val,
+    ) -> Result<(), crate::nbe::unify::UnifyError> {
+        crate::nbe::unify::unify(self.level, declared, inferred, &mut self.mctx)
+    }
+}
+
+/// Open a constructor's binders as metavariables and solve what the **expected type** fixes.
 ///
-/// **This adds no inference power.** [`check_inductive_ctor_args`] already unifies the constructed
-/// result against the expected indices at the end of its work (D48 Phase D); this runs the same
-/// unification up front with every binder bound to a fresh metavariable, and reports which metas
-/// came back solved. A binder occurring in no result index is not solved — `app`'s `A` — and
-/// neither is one occurring only under a higher-order pattern, since `unify` is the first-order
-/// fragment (D48 §3.1): `spec_poly`'s `P` in `Certificate(j, P(x))` stays unsolved.
+/// Every binder past the parameter prefix gets a meta, whether or not it is declared implicit:
+/// unifying the ctor's declared result against `expected_indices` is one unification and it
+/// determines all of them at once. Only the implicit ones are read back out.
 ///
-/// All-`None` in inference mode or when unification fails, so the caller behaves as it did before
-/// and a genuine mismatch is reported by the end-of-function check with its own diagnostic.
-fn solve_implicit_binders(
+/// A binder occurring in no result index is *not* solved here — `app`'s `A`, which occurs only in
+/// an argument type. Neither is one occurring only under a higher-order pattern, since `unify` is
+/// the first-order fragment (D48 §3.1): `spec_poly`'s `P` in `Certificate(P(x))` stays unsolved.
+/// The argument loop finishes the first kind; the second is an error naming the binder.
+///
+/// In inference mode there is nothing to unify against, so every meta comes back unsolved.
+fn open_implicit_binders(
     ctx: &mut CheckCtx,
     arg_specs: &[CtorArg],
     result_typ: &Exp,
     param_env: &Rho,
     expected_indices: Option<&[Val]>,
-) -> Vec<Option<Val>> {
-    let none = || vec![None; arg_specs.len()];
-    let Some(expected_indices) = expected_indices else {
-        return none();
-    };
-    if !arg_specs
-        .iter()
-        .any(|CtorArg::Value { implicit, .. }| *implicit)
-    {
-        return none();
-    }
-
+) -> Implicits {
+    let level = ctx.rho.len();
     let mut mctx = crate::nbe::unify::MetaCtx::new();
     let mut env = param_env.clone();
     let mut ids = Vec::with_capacity(arg_specs.len());
     for CtorArg::Value { patt, .. } in arg_specs {
-        let id = mctx.fresh();
+        let id = mctx.fresh(level);
         env = env.extend(
             patt.clone(),
             Val::Nt(crate::nbe::val::Neut::Meta(id, Vec::new())),
         );
         ids.push(id);
     }
+    let mut state = Implicits { mctx, ids, level };
 
-    let Ok(actual) = ctx.eval(result_typ, &env) else {
-        return none();
+    // No expected type, or a result that is not an inductive application, leaves every meta
+    // unsolved — the argument loop then has the whole job, and reports what it cannot do.
+    let Some(expected_indices) = expected_indices else {
+        return state;
     };
-    let Val::InductiveType {
+    let Ok(Val::InductiveType {
         indices: actual_indices,
         ..
-    } = &actual
+    }) = ctx.eval(result_typ, &env)
     else {
-        return none();
+        return state;
     };
     if actual_indices.len() != expected_indices.len() {
-        return none();
+        return state;
     }
     for (a, e) in actual_indices.iter().zip(expected_indices.iter()) {
-        if crate::nbe::unify::unify(ctx.rho.len(), a, e, &mut mctx).is_err() {
-            return none();
+        // A failure here is not reported: the same comparison runs again at the end of
+        // `check_inductive_ctor_args` against fully-evaluated arguments, with a diagnostic that
+        // names the index. Reporting it twice would name the meta instead of the mismatch.
+        if crate::nbe::unify::unify(state.level, a, e, &mut state.mctx).is_err() {
+            break;
         }
     }
-
-    ids.iter()
-        .map(|id| mctx.solution(*id).map(|v| mctx.zonk(v)))
-        .collect()
+    state
 }
 
 /// Type-check a constructor application's arguments and **return the type it constructs** — the
@@ -507,10 +544,13 @@ pub(super) fn check_inductive_ctor_args(
         arg_env = arg_env.extend(patt.clone(), val.clone());
     }
 
-    // Fill what the constructor declares implicit. Which slots those are is fixed by the
-    // declaration, so the author's arguments line up with the explicit slots whatever the solver
-    // manages to solve.
-    let solved = solve_implicit_binders(ctx, &arg_specs, current, &arg_env, expected_indices);
+    // Open the constructor's binders as metavariables and solve what the expected type fixes.
+    // Which slots are implicit is fixed by the declaration, so the author's arguments line up
+    // with the explicit slots whatever the solver manages to solve.
+    let mut implicits = open_implicit_binders(ctx, &arg_specs, current, &arg_env, expected_indices);
+    // Slots still standing as an unsolved meta in `arg_env`, in declaration order. Each is either
+    // solved by an argument below or reported at the end.
+    let mut pending: Vec<usize> = Vec::new();
     let mut cursor = 0usize;
     for (i, spec) in arg_specs.iter().enumerate() {
         match spec {
@@ -519,19 +559,23 @@ pub(super) fn check_inductive_ctor_args(
                 typ,
                 implicit,
             } => {
-                let arg_typ_val = ctx.eval(typ, &arg_env)?;
+                // The declared type under the bindings made so far, with every meta solved to
+                // date substituted in. An implicit binder that is still unknown survives this as
+                // a meta, which is what marks the argument below as needing inference.
+                let arg_typ_val = implicits.zonk(&ctx.eval(typ, &arg_env)?);
 
                 if *implicit {
-                    let solved_val = solved.get(i).and_then(|s| s.clone()).ok_or_else(|| {
-                        format!(
-                            "InductiveCtor `{}.{ctor_name}`: implicit argument {i} was not \
-                             determined by the expected type. It appears in no result index, or \
-                             only under a higher-order pattern, so nothing here can solve it — \
-                             declare it explicit, or supply the expected type that fixes it.",
-                            decl.name
-                        )
-                    })?;
-                    arg_env = arg_env.extend(patt.clone(), solved_val);
+                    match implicits.solution(i) {
+                        Some(v) => arg_env = arg_env.extend(patt.clone(), v),
+                        None => {
+                            // Not determined by the expected type. Bind the meta itself and carry
+                            // on: it may occur in a later argument's declared type, and inferring
+                            // that argument will solve it (`app`'s `A`, which occurs only in
+                            // `Certificate(A -> B)`).
+                            pending.push(i);
+                            arg_env = arg_env.extend(patt.clone(), implicits.binder_value(i));
+                        }
+                    }
                     continue;
                 }
                 let user_arg = args.get(cursor);
@@ -558,7 +602,28 @@ pub(super) fn check_inductive_ctor_args(
                             )
                         })?;
                         cursor += 1;
-                        check(ctx, arg_exp, &arg_typ_val)?;
+                        if pending.is_empty() {
+                            check(ctx, arg_exp, &arg_typ_val)?;
+                        } else {
+                            // A binder in this argument's declared type is still unknown, so
+                            // there is nothing complete to check against. Infer the argument's
+                            // own type and unify the two — ordinary bidirectional elaboration,
+                            // and the only place `app`'s `A` can be determined.
+                            //
+                            // `unify` subsumes the check it replaces: with no metas left it is
+                            // `eq_nf`, and with metas it either solves them or reports the
+                            // mismatch. Solutions land in the shared `MetaCtx`, so every later
+                            // argument type and the result type see them.
+                            let inferred = check_infer(ctx, arg_exp)?;
+                            implicits.absorb(&arg_typ_val, &inferred).map_err(|e| {
+                                CheckError::TypeMismatch(format!(
+                                    "InductiveCtor `{}.{ctor_name}`: arg {i} does not fix the \
+                                     constructor's implicit binder(s): {e}",
+                                    decl.name
+                                ))
+                            })?;
+                            pending.retain(|slot| implicits.solution(*slot).is_none());
+                        }
                         ctx.eval(arg_exp, &ctx.rho)?
                     }
                 };
@@ -583,7 +648,20 @@ pub(super) fn check_inductive_ctor_args(
     // used at `SizedNat i` would pass silently.
     // The constructed type: the ctor's declared result under the bound arguments. This is the
     // answer in inference mode, and the left-hand side of the comparison in checking mode.
-    let actual_result = ctx.eval(current, &arg_env)?;
+    // Every implicit binder must be determined by now: by the expected type, or by an argument
+    // inferred above. One still open cannot be recovered — nothing further is elaborated.
+    if let Some(&slot) = pending.first() {
+        let CtorArg::Value { patt, .. } = &arg_specs[slot];
+        return Err(CheckError::TypeMismatch(format!(
+            "InductiveCtor `{}.{ctor_name}`: implicit binder `{patt:?}` (slot {slot}) was not \
+             determined. It occurs in no result index and in no argument whose type fixes it, or \
+             only under a higher-order pattern — declare it explicit, or supply the expected type \
+             that fixes it.",
+            decl.name
+        )));
+    }
+    // Substituting the solved metas is what turns the binders bound above into real values.
+    let actual_result = implicits.zonk(&ctx.eval(current, &arg_env)?);
     let Some(expected_indices) = expected_indices else {
         // INFERENCE — nothing to compare against, so neither the result-type subtype check nor the
         // index unification below applies (Lean does neither when inferring). Answer with the type
@@ -1402,6 +1480,187 @@ mod tests {
             vec![Exp::One, Exp::Unit],
         );
         check(&mut ctx, &term, &expected).expect("`wrap(One, unit)` checks against `Box(One)`");
+    }
+
+    /// `C : Set -> Set` with `justification:Certificate.app`'s exact shape:
+    ///
+    /// ```text
+    /// lit : forall (X : Set) => C(X)
+    /// app : forall (A : Set, B : Set) => C(A -> B) -> C(A) -> C(B)
+    /// ```
+    ///
+    /// `B` is the result index; `A` occurs in no index at all, only in the first argument's type.
+    /// That is the case the expected type cannot reach.
+    fn app_decl(implicit: bool) -> std::sync::Arc<InductiveDecl> {
+        let iri = crate::ontology::iri::Iri::parse("urn:test:C").unwrap();
+        let c_of = |idx: Exp| Exp::const_applied(iri.clone(), Vec::new(), vec![idx]);
+        let var = |n: &str| Exp::Var(n.to_string());
+        std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
+            iri: iri.clone(),
+            name: "C".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Var("X".to_string()), Exp::sort(1))],
+            sort: Exp::sort(1),
+            ctors: vec![
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "lit".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("X".to_string()),
+                        Box::new(Exp::sort(1)),
+                        Box::new(c_of(var("X"))),
+                    ),
+                    implicit: Vec::new(),
+                },
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "app".to_string(),
+                    // forall (A : Set, B : Set) => C(A -> B) -> C(A) -> C(B)
+                    typ: Exp::Pi(
+                        Patt::Var("A".to_string()),
+                        Box::new(Exp::sort(1)),
+                        Box::new(Exp::Pi(
+                            Patt::Var("B".to_string()),
+                            Box::new(Exp::sort(1)),
+                            Box::new(Exp::Pi(
+                                Patt::Unit,
+                                Box::new(c_of(Exp::Pi(
+                                    Patt::Unit,
+                                    Box::new(var("A")),
+                                    Box::new(var("B")),
+                                ))),
+                                Box::new(Exp::Pi(
+                                    Patt::Unit,
+                                    Box::new(c_of(var("A"))),
+                                    Box::new(c_of(var("B"))),
+                                )),
+                            )),
+                        )),
+                    ),
+                    implicit: if implicit {
+                        vec![true, true, false, false]
+                    } else {
+                        Vec::new()
+                    },
+                },
+            ],
+        })
+    }
+
+    /// A binder that occurs in no result index is solved from an argument's inferred type.
+    ///
+    /// `app(lit(Prop -> One), lit(Prop)) : C(One)`. `B := One` comes from the expected index. `A`
+    /// cannot: `C(B)` does not mention it. It is determined by inferring the first argument as
+    /// `C(Prop -> One)` and unifying that against the declared `C(?A -> One)` — which means
+    /// unification descending into a `Val::Pi`'s domain, and a `MetaCtx` that outlives the
+    /// up-front pass.
+    #[test]
+    fn a_binder_absent_from_every_index_is_solved_from_an_argument() {
+        let decl = app_decl(true);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let expected = ctx
+            .eval(
+                &Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One]),
+                &Rho::Nil,
+            )
+            .expect("C(One) evaluates");
+        let lit = |arg: Exp| Exp::InductiveCtor(decl.iri.clone(), "lit".to_string(), vec![arg]);
+        let arrow = Exp::Pi(Patt::Unit, Box::new(Exp::sort(0)), Box::new(Exp::One));
+        let term = Exp::InductiveCtor(
+            decl.iri.clone(),
+            "app".to_string(),
+            vec![lit(arrow), lit(Exp::sort(0))],
+        );
+        check(&mut ctx, &term, &expected)
+            .expect("`app(lit(Prop -> One), lit(Prop))` checks against `C(One)`");
+    }
+
+    /// Both binders are solved with **no expected type at all**, from the first argument alone.
+    ///
+    /// This is the nested case, and it is not hypothetical: when an `app` is itself the argument
+    /// whose inference fixes an enclosing `app`'s binder, it is elaborated without an expected
+    /// type, so `B` cannot come from the result index either. `Certificate(A -> B)` carries both,
+    /// and comparing it against the argument's inferred type determines both at once.
+    #[test]
+    fn both_binders_are_solved_from_one_argument_when_nothing_is_expected() {
+        let decl = app_decl(true);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let lit = |arg: Exp| Exp::InductiveCtor(decl.iri.clone(), "lit".to_string(), vec![arg]);
+        let arrow = Exp::Pi(Patt::Unit, Box::new(Exp::sort(0)), Box::new(Exp::One));
+        let term = Exp::InductiveCtor(
+            decl.iri.clone(),
+            "app".to_string(),
+            vec![lit(arrow), lit(Exp::sort(0))],
+        );
+        let inferred =
+            check_infer(&mut ctx, &term).expect("`app(...)` infers with no expected type");
+        match inferred {
+            Val::InductiveType { indices, .. } => assert_eq!(
+                indices.len(),
+                1,
+                "the inferred type should be `C` at one index"
+            ),
+            other => panic!("expected an inductive type, got {other:?}"),
+        }
+    }
+
+    /// The two arguments must agree about the binder they share.
+    ///
+    /// Same shape, but the second argument is `lit(One)` where the first fixed `A := Prop`. The
+    /// solved meta is substituted into the second argument's declared type, so this is an ordinary
+    /// mismatch — not a second, weaker check.
+    #[test]
+    fn arguments_disagreeing_about_a_solved_binder_are_rejected() {
+        let decl = app_decl(true);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let expected = ctx
+            .eval(
+                &Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One]),
+                &Rho::Nil,
+            )
+            .expect("C(One) evaluates");
+        let lit = |arg: Exp| Exp::InductiveCtor(decl.iri.clone(), "lit".to_string(), vec![arg]);
+        let arrow = Exp::Pi(Patt::Unit, Box::new(Exp::sort(0)), Box::new(Exp::One));
+        let term = Exp::InductiveCtor(
+            decl.iri.clone(),
+            "app".to_string(),
+            vec![lit(arrow), lit(Exp::One)],
+        );
+        check(&mut ctx, &term, &expected)
+            .expect_err("`A` was fixed to Prop by the first argument; `lit(One)` contradicts it");
+    }
+
+    /// Without the declaration the same constructor takes all four arguments.
+    #[test]
+    fn the_app_shape_without_the_declaration_takes_four_arguments() {
+        let decl = app_decl(false);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let expected = ctx
+            .eval(
+                &Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One]),
+                &Rho::Nil,
+            )
+            .expect("C(One) evaluates");
+        let lit = |arg: Exp| Exp::InductiveCtor(decl.iri.clone(), "lit".to_string(), vec![arg]);
+        let arrow = Exp::Pi(Patt::Unit, Box::new(Exp::sort(0)), Box::new(Exp::One));
+        let term = Exp::InductiveCtor(
+            decl.iri.clone(),
+            "app".to_string(),
+            vec![
+                Exp::sort(0),
+                Exp::One,
+                lit(arrow.clone()),
+                lit(Exp::sort(0)),
+            ],
+        );
+        check(&mut ctx, &term, &expected).expect("all four written checks against `C(One)`");
+
+        let two = Exp::InductiveCtor(
+            decl.iri.clone(),
+            "app".to_string(),
+            vec![lit(arrow), lit(Exp::sort(0))],
+        );
+        check(&mut ctx, &two, &expected)
+            .expect_err("two arguments for four explicit binders must not check");
     }
 
     // ---------- eigenius#138 — the recursor motive is index-aware ----------

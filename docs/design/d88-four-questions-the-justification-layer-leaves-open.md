@@ -13,9 +13,9 @@
 | | question | answer | basis |
 |---|---|---|---|
 | §1 | Do the `witness:Is*As` types earn their place, or should the check key on the constructor? | **They earn it — on layering, not soundness.** The type declares the trigger and carries the lookup's parameters as its indices, so the kernel needs no knowledge of the justification vocabulary | derived from the code |
-| §2 | Should `justification:Term` merge into `justification:Certificate`? | **Yes — nothing requires the split.** The paper specifies term *shapes* and the typing relation `t : F`, not an encoding; the code has no use for the separate term index. Bootstrap edit, versioned ADT, one reseed | measured `2026-09-05` |
+| §2 | Should `justification:Term` merge into `justification:Certificate`? | **Yes, and merged `2026-09-05`.** The paper specifies term *shapes* and the typing relation `t : F`, not an encoding; the code had no use for the separate term index | measured, then built |
 | §3 | Should a term name a chain instance by reference rather than by string? | **The string is sediment.** The leaf already behaves as a reference — `core:mentions` indexes it — but by a prefix heuristic rather than a declared type. Give it one | derived from the index |
-| §4 | Can `app`'s `forall`-bound arguments be inferred? | **`app` yes, `spec_poly` no.** Four of the five pieces already exist | derived from `nbe/unify.rs` |
+| §4 | Can `app`'s `forall`-bound arguments be inferred? | **`app` yes, and built `2026-09-05`; `spec_poly` no.** | derived from `nbe/unify.rs`, then built |
 
 ---
 
@@ -151,8 +151,38 @@ a downstream claim cites … `c`'s own standing comes from its `justification:pr
 from a certificate over itself"*). State and constructor are different things, and the merge changes
 neither.
 
-Implementation cost does not weigh much: `justification:Term` is a versioned ADT, and the demo
-notebook's certificate is the largest authored artifact that would be rewritten.
+### What the merge cost, measured after the fact
+
+The sentence that stood here — *"the demo notebook's certificate is the largest authored artifact
+that would be rewritten"* — **was wrong by about sixty**. The notebook held 12 of 663 argument sites.
+
+| | sites | compiled by the suite |
+|---|---|---|
+| WRN publication chain (6 files) | 610 | yes |
+| benchmark tracer chains, kernel fixtures, `prose-to-formulas-v2` | 41 | yes |
+| the notebook | 12 | no |
+
+Plus 176 dead `justification:App` / `Sum` alias bindings, which compiled only because an unused
+alias is never elaborated. Nothing could be deferred: `wrn_phase3` and `wrn_phase5` load the
+publication chain.
+
+The scale is also what made the change safe. An arity survey ran first: 306 `app` calls all at
+arity 6, `spec_poly` uniformly at 5, every off-pattern count inside a `//` comment. That made the
+transformation five positional rules rather than a judgement per site, applied by a paren-aware
+transformer deleting argument spans right-to-left, leaving formatting and comments untouched. The
+check was the existing tests — `wrn_phase3` asserts that `app(declared(plan), observed(input))`
+reaches *verified* with both witnesses chain-resident — so a semantically wrong rewrite fails an
+assertion instead of compiling quietly. Exactly one non-mechanical assertion broke: the
+`core:mentions` test, which is the claim of this section.
+
+What the estimate should have counted is every file the suite compiles, found with one
+extension-agnostic grep. Scoping to `kernel/tests/fixtures/*.esl` and the notebook missed the
+publication chain, a fixture under `crates/`, and — three separate times — ESL embedded in Rust
+string literals, which no `.esl` glob reaches.
+
+**Residue:** 32 alias bindings of the form `x = Declared(IRI)` in 7 files still name deleted
+constructors. They are inert. Remove them by hand, one file at a time with a compile check, not by
+a pattern sweep.
 
 ## 3. The string leaf is sediment; declare the type
 
@@ -258,6 +288,69 @@ larger decision than this question.
 burden is: `app` is the node that repeats, nested four deep in `stats-and-reasoning.json`. It is
 also the only one of the four needing no amendment to the paper.
 
+### What was built, `2026-09-05`
+
+The §2 merge landed first and removed `j1` / `j2`, so the constructor reaching this work was
+`app : forall (A : Prop, B : Prop) => Certificate(A -> B) -> Certificate(A) -> Certificate(B)`.
+`B` is still the result index; `A` still occurs nowhere in it.
+
+**Declared, not derived.** `core:implicit_args` lists the binder NAMES a constructor's author does
+not write, and `implicit(A, B)` is the ESL clause that sets it. A binder is elided because the
+declaration says so — never because the checker turns out to be able to solve it. An earlier
+attempt derived implicitness from solvability and shifted the author's arguments onto the slots it
+elided: `verified(CLAIM, P)` put a string where a `Prop` belonged, because which slot an argument
+lands on then depends on what the solver managed.
+
+Names rather than positions because a positional list cannot be checked — every index is in range
+for *some* telescope — while a name that binds nothing, or binds twice, is an error at both the
+compiler and the decoder. The clause sits on the constructor rather than marking `{A : Prop}`
+inside the `forall`, because per-constructor is the only scope in which EigenTT represents
+implicitness: `InductiveCtorDecl::implicit` is per-constructor and `Exp::Pi` has no binder style.
+Brace syntax inside a general `forall` would have to be rejected everywhere else — surface syntax
+promising something the type theory does not have.
+
+**Two kernel changes were needed. The fifth piece named above was one of them; the other is not on that list.**
+
+| | |
+|---|---|
+| a `MetaCtx` outliving one unification | Phase F's stated scope, as predicted. One context now spans the whole constructor check, so a binder can be solved from the result type up front *and* from an argument as the loop reaches it |
+| unification comparing two anonymous arrows componentwise | **not predicted.** `Certificate(A -> B)` puts the metas inside a `Val::Pi`, and every `Val::Pi` fell through to readback equality, which cannot solve one |
+
+**Restricted to anonymous arrows, and that restriction is the soundness argument.** A `Patt::Unit`
+binder cannot be referenced, so neither codomain mentions it, so no variable is introduced and both
+sides are compared at the same level — there is nothing a solution could capture. A named binder
+still falls through to `eq_nf`. The restriction is also why this is not a behaviour change for
+meta-free types: readback preserves `Patt::Unit` for D49's witness-key byte stability, so for two
+anonymous arrows readback equality already *is* componentwise equality, and the one pair the two
+would judge differently — an anonymous arrow against a named-but-unused binder — is what the guard
+excludes.
+
+The metavariable scope rule was strengthened alongside it. `solve_meta`'s check was *"approximated
+for v1 by accepting any reference"*; metas now record the level they were created at, and a solution
+proposed from inside a binder the meta does not scope over is refused. Refused rather than
+inspected: a `Val` hides variables inside closure environments, so "does this mention a variable
+above level N" is not decidable by a structural walk, and a walk treating closures as opaque would
+answer no for exactly the unsound cases. Nothing reaches it today — the arrow rule never raises the
+level — which is the point: it is the invariant that a later descent into a dependent binder has to
+satisfy, and it fires instead of capturing.
+
+**A first attempt did descend under the binder, and `sab16_tracer` caught it.** Comparing codomains
+one level in refuses to solve any meta from outside, which is correct but too strong: an `app`
+nested as the argument whose inference fixes an enclosing `app`'s binder is elaborated with **no
+expected type**, so `B` is not fixed up front either. `Certificate(A -> B)` carries both binders,
+and one comparison against the argument's inferred type determines both — but only if the codomain
+can be solved, which under a binder it cannot.
+
+**`spec_poly` stayed fully explicit, `T` included.** `T` reaches the index only inside `P(x)`.
+Solving it from the premise argument fails for the same reason it fails from the result: the domain
+of `forall (y : T) => P(y)` would fix `T`, but the codomain is `P(y)` — a meta applied to a bound
+variable — and the whole argument type has to unify for any of it to count.
+
+**Cost.** 309 `app` calls lost two arguments each across 14 ESL files, plus 2 `sum_l`, 1 `sum_r`,
+and the notebook's 4. Same transformer as §2, with a comment-aware splitter this time: an argument
+list containing `// outer A, B` splits on the comma inside the comment, which made the first arity
+survey report three different arities for one uniform call shape.
+
 ## 5. Work this decides
 
 Three of the four questions are answered *yes, change it*. What remains for each is implementation,
@@ -287,7 +380,7 @@ Neither of these was asked here, and neither is answered.
    `ChainWitness(category, iri, P)`, which would make `trace_category`'s mapping a value rather than
    three constants.
 
-## 6. Out of scope
+## 7. Out of scope
 
 `justification:Certificate`'s seven constructors, `Sum`'s departure from LP's axiom, the
 well-foundedness condition, and the three-level stratification are settled in the paper and

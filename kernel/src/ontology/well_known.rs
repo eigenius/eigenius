@@ -251,6 +251,14 @@ pub const UNIVERSE_PARAMS: &str = "urn:eigenius:core:universe_params";
 /// positional form cannot express conclusion indices).
 pub const CTOR_TYPE: &str = "urn:eigenius:core:ctor_type";
 
+/// Names of a constructor's telescope binders the author does not write (D88 §4).
+///
+/// Each name must bind exactly once in `CTOR_TYPE`'s telescope past the inductive's parameter
+/// prefix. Names rather than positions so the list and the telescope cannot silently disagree —
+/// a name matching no binder is an error at decode, where a stale index would just move which
+/// slot an argument lands on.
+pub const IMPLICIT_ARGS: &str = "urn:eigenius:core:implicit_args";
+
 // --- Institution-realisation vocabulary (D14) ---
 
 /// is_a marker for a cross-institution comorphism resource. The Comorphism class is declared in `institution-ontology.json` and

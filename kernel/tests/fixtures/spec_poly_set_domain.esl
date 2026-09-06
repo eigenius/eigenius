@@ -72,10 +72,7 @@ resource poly:concl : justification:Conclusion {
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
     justification:judgement =
         holds( eigentt:logic_kernel,
-               type_expr(app(
-                   poly:HasActivity(poly:Model),
-                   poly:RequiresActivity(poly:Model),
-                   spec_poly(
+               type_expr(app(spec_poly(
                        Set,
                        (fun (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m)),
                        poly:Model,
