@@ -290,10 +290,48 @@ axiom stats:spearman_rho : core:string -> core:float
 axiom stats:ppv         : core:string -> core:float
 axiom stats:sensitivity : core:string -> core:float
 
+// ── The numeric primitive core (D86) ─────────────────────────────────
+//
+// `le` and `float_ieee_eq` are the two relations the Lean comorphism maps
+// directly, and the whole of what it asserts about floats: `le` is
+// `@LE.le.{0} Float instLEFloat`, `float_ieee_eq` is `instBEqFloat` read as the
+// proposition `(x == y) = true`. Each such correspondence enters the TCB
+// (`docs/guides/esl/09-institutions.md` §9.11.2), so the asserted set is kept to
+// two and everything else is built from them — `ge(x, y)` is `le(y, x)`,
+// `gt(x, y)` is `lt(y, x)`, and `lt(x, y)` is `le(x, y) ∧ ¬float_ieee_eq(x, y)`,
+// which is what makes `<` come out FALSE at signed zero, where `≤` and IEEE `==`
+// both hold.
+//
+// **`float_ieee_eq`, not `float_eq`.** Lean's propositional `Eq` on `Float` is
+// STRUCTURAL — same bits — so it separates `0.0` from `-0.0`, and no measurement
+// claim means that. The name carries the IEEE-ness on its face so it cannot be
+// read as propositional equality by someone who has not read D86 §3.3.
+//
+// **NaN is admitted** with its defined behaviour (D86 §3.4, Goldberg 1991).
+// `NaN == NaN` and `NaN ≤ NaN` are both false, so the order is PARTIAL and
+// `¬(x ≤ y)` stops implying `y < x`. That is the standard, not a defect to
+// engineer around: R, NumPy and Julia all propagate NaN, so a statistical
+// computation's output can legitimately be one, and `0.0 ≤ x` is simply FALSE
+// for a NaN `x` — which is the right answer, since a NaN measurement does not
+// satisfy a bound. An author who knows a quantity is non-NaN refines it per
+// property and gets the total order back; that is a property author's choice
+// about a specific quantity, not a constraint on the primitive.
+//
+// **`lt`, `gt` and `ge` stay axioms rather than becoming `def`s**, even though
+// D86 §3.2 derives them. A `def` is transparent — decode substitutes the body at
+// the use site — and the DCG's gradable-adjective machinery recognises
+// `measurements:gt` / `lt` by IRI on the decoded term (`dcg/category.rs`,
+// `dcg/rules/combinators.rs`), which is the form the WordNet importer emits. The
+// derivation therefore lives in the comorphism's table, where it costs the TCB
+// nothing, rather than on the chain, where it would dissolve the head the parser
+// matches on.
+
 axiom stats:lt : core:float -> core:float -> Prop
 axiom stats:le : core:float -> core:float -> Prop
 axiom stats:gt : core:float -> core:float -> Prop
 axiom stats:ge : core:float -> core:float -> Prop
+axiom stats:float_ieee_eq : core:float -> core:float -> Prop
+  desc: "IEEE 754 equality on binary64, the relation `instBEqFloat` decides — NOT propositional equality. Lean's `Eq` on `Float` is structural, so it separates `0.0` from `-0.0` while this relation holds between them; a chain equality that meant `Eq` would quietly be making claims about signed zero. Non-reflexive on NaN, deliberately: `NaN == NaN` is false, which is IEEE's answer and the one the statistics tooling this chain records already gives."
 
 // ── ANOVA effect predicates ──────────────────────────────────────────
 //

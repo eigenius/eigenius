@@ -364,13 +364,23 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_class_item(&mut self) -> Result<ClassItem, EslError> {
+        // A qualified name is a property assignment on the class itself. The three bare-word
+        // items below are sugar for the properties that come up constantly.
+        if matches!(self.peek(), TokenKind::QualName(_, _)) {
+            let prop = self.parse_qualified_name()?;
+            self.expect(&TokenKind::Eq)?;
+            let value = self.parse_qualified_name()?;
+            self.expect_semicolon()?;
+            return Ok(ClassItem::Property(prop, value));
+        }
         let name = match self.peek().clone() {
             TokenKind::Ident(n) => n,
             _ => {
                 return Err(EslError::parser(
                     Some(self.current_pos()),
                     format!(
-                        "expected class item (description, requires, recommends), found {:?}",
+                        "expected a class item — `description`, `requires`, `recommends`, or a \
+                         qualified property name — found {:?}",
                         self.peek()
                     ),
                 ))
@@ -1543,6 +1553,33 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
+    /// The optional `implicit(A, B)` clause after a constructor's name. Empty when absent.
+    fn parse_implicit_clause(&mut self) -> Result<Vec<String>, EslError> {
+        if !matches!(self.peek(), TokenKind::Ident(w) if w == "implicit") {
+            return Ok(Vec::new());
+        }
+        let pos = self.current_pos();
+        self.advance();
+        self.expect(&TokenKind::LParen)?;
+        let mut names = Vec::new();
+        while !self.at(&TokenKind::RParen) && !self.at_eof() {
+            names.push(self.expect_ident()?);
+            if self.at(&TokenKind::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        self.expect(&TokenKind::RParen)?;
+        if names.is_empty() {
+            return Err(EslError::parser(
+                Some(pos),
+                "`implicit()` names no binder — omit the clause instead".to_string(),
+            ));
+        }
+        Ok(names)
+    }
+
     /// D37 §3.3 — `merge_comorphism <iri> for <class> { <body> }`.
     ///
     /// Body is either:
@@ -1980,7 +2017,7 @@ impl<'a> Parser<'a> {
     ///   [`IndexKind::Named`].
     /// - A sort literal (`Prop` / `Set` / `Type N`) — needed for
     ///   indexed inductives that range over types as values, e.g.
-    ///   D39 §5's `justification:Certificate : justification:Term → Prop → Type`
+    ///   `justification:Certificate : Prop → Type 2`
     ///   and `ChainWitness.IsDeclaredAs : core:string → Prop → Prop`;
     ///   carries through as [`IndexKind::Sort`].
     ///
@@ -2045,13 +2082,38 @@ impl<'a> Parser<'a> {
     /// - `name : <type-expr>` — typed form carrying the full Π-telescope
     ///   (required for indexed inductives; optional but allowed for
     ///   non-indexed too).
+    ///
+    /// The typed form may carry an `implicit(A, B)` clause between the name and the `:`, naming
+    /// telescope binders the author does not write (D88 §4):
+    ///
+    /// ```text
+    /// app implicit(A, B) : forall (A : Prop, B : Prop) =>
+    ///     just:Certificate(A -> B) -> just:Certificate(A) -> just:Certificate(B),
+    /// ```
+    ///
+    /// `implicit` is contextual, not a keyword: the positional form puts `(` directly after the
+    /// name, so an identifier in between can only be this clause, and a constructor may still be
+    /// called `implicit`.
     fn parse_ctor_decl(&mut self) -> Result<CtorDecl, EslError> {
         let pos = self.current_pos();
         let name = self.expect_ident()?;
+        let implicit = self.parse_implicit_clause()?;
         if self.at(&TokenKind::Colon) {
             self.advance();
             let typ = self.parse_type_expr()?;
-            return Ok(CtorDecl::Typed { name, typ, pos });
+            return Ok(CtorDecl::Typed {
+                name,
+                typ,
+                implicit,
+                pos,
+            });
+        }
+        if !implicit.is_empty() {
+            return Err(EslError::parser(
+                Some(pos),
+                "`implicit(...)` names binders of a constructor's Π-telescope, so it belongs on                  the typed form `name implicit(...) : forall (...) => ...`. The positional form                  `name(arg, ...)` has no binders to name."
+                    .to_string(),
+            ));
         }
         let args = if self.at(&TokenKind::LParen) {
             self.advance();
@@ -2705,8 +2767,8 @@ impl<'a> Parser<'a> {
 ///
 /// It emitted bare `App` / `OpRef` / `LitFloat` until D85 §5 step 4, which worked only while
 /// one inductive in scope declared those names. A value states its constructor's CLASS, so the
-/// compiler resolves the name — and against a real chain `App` is `eigentt:Term`'s,
-/// `justification:Term`'s AND `formulas:FormulaTerm`'s. The `Type:ctor` form (eigenius#24) is
+/// compiler resolves the name — and against a real chain `App` is `eigentt:Term`'s
+/// AND `formulas:FormulaTerm`'s. The `Type:ctor` form (eigenius#24) is
 /// what the sugar has always meant.
 const FORMULA_APP: &str = "FormulaTerm:App";
 const FORMULA_OP_REF: &str = "FormulaTerm:OpRef";

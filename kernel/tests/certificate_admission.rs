@@ -178,52 +178,17 @@ fn synthetic_sentence(
     }
     r
 }
-/// Assemble the one judgement a conclusion now carries from the three parts
-/// that used to be separate slots: `holds(kernel, cert, Certificate(j, P))`.
-fn judgement(proposition: Value, justification: serde_json::Value, cert: Value) -> Value {
+/// Assemble the one judgement a conclusion carries: `holds(kernel, cert, Certificate(P))`.
+///
+/// It took a separate justification term until the D88 §2 merge. The certificate IS the term now,
+/// so `cert` is the only derivation here and the type carries the proposition alone. The
+/// `justification` argument is retained so the callers below keep reading as the shapes they are
+/// about; it is no longer part of what gets encoded.
+fn judgement(proposition: Value, _justification: serde_json::Value, cert: Value) -> Value {
     use eigenius_kernel::program::eigentt_type_mirror::{certificate_type, encode_judgement};
-    let typ = certificate_type(&d47(&justification), &proposition, codec())
-        .expect("certificate type encodes");
+    let typ = certificate_type(&proposition, codec()).expect("certificate type encodes");
     encode_judgement("urn:eigenius:eigentt:logic_kernel", &cert, &typ, codec())
         .expect("judgement encodes")
-}
-
-/// Re-encode a plain `{ctor, args}` `justification:Term` literal into the value a term
-/// embedded in a judgement must carry.
-///
-/// This conversion is the encoding boundary the collapse moved. A justification
-/// term used to sit in a slot of its own as a plain `{"ctor", "args"}` dict; it
-/// now rides inside the judgement, which is an `eigentt:Term`-ranged value, so
-/// the D47 codec reads it and a foreign inductive's constructor is named by
-/// `CtorApp` with arguments folded through `App`. Callers below still write the
-/// plain literal because it is what an author reads.
-fn d47(j: &serde_json::Value) -> Value {
-    term_value(&d47_tagged(j))
-}
-
-/// The `App`/`CtorApp` spine, still as a literal, so the recursion composes before
-/// [`term_value`] builds the whole tree in one pass.
-fn d47_tagged(j: &serde_json::Value) -> serde_json::Value {
-    const JT: &str = "urn:eigenius:justification:Term";
-    let (Some(name), args) = (
-        j.get("ctor").and_then(serde_json::Value::as_str),
-        j.get("args")
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-            .unwrap_or_default(),
-    ) else {
-        return j.clone();
-    };
-    let mut acc = json!({"ctor": "CtorApp", "args": [JT, name]});
-    for a in args {
-        let arg = match &a {
-            serde_json::Value::String(s) => json!({"ctor": "LitString", "args": [s]}),
-            serde_json::Value::Object(_) => d47_tagged(&a),
-            other => other.clone(),
-        };
-        acc = json!({"ctor": "App", "args": [acc, arg]});
-    }
-    acc
 }
 
 // ── Phase 10 — end-to-end Holds path ────────────────────────────────
@@ -276,7 +241,7 @@ fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     );
 
     // The DeclarationTrace pointing at the target. Its presence is
-    // what makes `build_witness_index` emit the Declared witness key.
+    // what makes `emit_from_trace` emit the Declared witness key.
     let trace_iri_str = format!("{target_iri_str}-decl-trace");
     let mut trace = Resource::new(Iri::parse(&trace_iri_str).unwrap());
     trace.set(
@@ -665,7 +630,9 @@ fn arity_mismatch_in_certificate_is_rejected() {
         "args": ["urn:foo"],
     });
     // Certificate with only ONE App-arg — `justification:Certificate.declared`
-    // expects three (iri, P, witness).
+    // expects three (iri, P, witness). The one supplied is a `Sort`, so it lands on the `iri`
+    // binder and mismatches there; since B3 that binder is `core:iri`, which is what the
+    // diagnostic names.
     let certificate = term_value(&json!({
         "ctor": "App",
         "args": [
@@ -682,25 +649,27 @@ fn arity_mismatch_in_certificate_is_rejected() {
     assert!(
         errors
             .iter()
-            .any(|e| e.contains("type mismatch: Sort(Succ(Zero)) \u{2260} EigonPrimitive(String)")),
+            .any(|e| e.contains("type mismatch: Sort(Succ(Zero)) \u{2260} EigonPrimitive(Iri)")),
         "an arity mismatch must be reported as the type mismatch it is, got:\n{}",
         errors.join("\n")
     );
 }
 
-// ── eigenius#205: a declared-external execution admits Declared, never Derived ──
+// ── eigenius#205: a transcribed external run is attested as Declared, and no more ──
 
 #[test]
-fn an_external_execution_trace_admits_declared_not_derived() {
-    // `Derived` holds a trace tied to a KERNEL-INITIATED activity — running a program, invoking an
-    // institution, a query that writes back. An author writing down that a program ran elsewhere is
-    // making a different claim: there is no `f : I -> O`, so no specification, so nothing entailed
-    // (D73 §3.3). `ExternalExecutionTrace` carries that claim and `trace_category` maps it to
-    // Declared.
+fn a_transcribed_external_run_admits_declared_not_observed() {
+    // An author writing down that a program ran elsewhere has no `f : I -> O`, so no
+    // specification, so nothing entailed (D73 §3.3). What attests it is an ordinary
+    // `prov:DeclarationTrace` carrying `prov:was_generated_by` — the shape every site in the WRN
+    // publication chain uses.
     //
-    // The kernel cannot tell a hand-authored `ProgramTrace` from one it minted — no "kernel-only,
-    // refused from input" mechanism exists anywhere in the validator — so the distinction has to be
-    // carried by the CLASS. This test is that distinction.
+    // This test named `reflection:ExternalExecutionTrace` until `2026-09-05`. eigenius#205 minted
+    // that class so a required `prov:derivation` slot could be filled; `prov:was_generated_by`
+    // replaced the requirement, the class was removed, and the `trace_category` arm outlived it.
+    // The test kept passing because `LayerBuilder::build` does not validate, so an `is_a` naming
+    // an undeclared class raised nothing. The claim being tested survives the class: a
+    // transcription grounds `Declared` and not `Observed`.
     use eigenius_kernel::layer::layer_admits_witness;
     use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
 
@@ -737,7 +706,7 @@ fn an_external_execution_trace_admits_declared_not_derived() {
     trace.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::String(
-            Iri::parse(wk::EXTERNAL_EXECUTION_TRACE)
+            Iri::parse(wk::DECLARATION_TRACE)
                 .unwrap()
                 .as_str()
                 .to_string(),
@@ -768,7 +737,7 @@ fn an_external_execution_trace_admits_declared_not_derived() {
 
     assert!(
         layer_admits_witness(&layer, &key(WitnessCategory::Declared)),
-        "an ExternalExecutionTrace must admit IsDeclaredAs — someone asserts the run happened"
+        "a transcribed run must admit IsDeclaredAs — someone asserts the run happened"
     );
     assert!(
         !layer_admits_witness(&layer, &key(WitnessCategory::Observed)),

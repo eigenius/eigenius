@@ -852,7 +852,7 @@ system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)
 | [D46: Prop Universe and Proof Irrelevance](docs/design/d46-prop-universe-and-proof-irrelevance.md) | Impredicative `Prop` (`Sort(0)`), unified sort ladder, proof irrelevance, singleton elimination, `eigentt:Axiom` chain class with built-in `propext` / `Quot.sound` |
 | [D47: Chain-Mirrored EigenTT Type Fragment](docs/design/d47-chain-mirrored-eigentt-type-fragment.md) | `eigentt:TypeExpr` inductive + bidirectional `Exp` ↔ `Value::Json` codec (`encode_type` / `decode_type`); term-level extension via eigenius#71; substrate for D46 axiom statements and D39 propositions |
 | [D48: Indexed Inductive Families](docs/design/d48-indexed-inductive-families.md) | Indexed families (`Vec(A) : Nat → Set`, `Eq(A) : A → A → Prop`), first-order pattern unifier, dependent ctor checking, per-arm index-coherence in match, singleton elimination for propositional indices; K-axiom implicit via D46 proof irrelevance |
-| [D49: `ChainWitness` Machinery](docs/design/d49-chainwitness-machinery.md) | Implementation memo for D39's `ChainWitness` predicate family — per-`Layer` witness index derived from Trace resources, kernel-internal witness synthesis at type-check time, `Lean → Reasoning` comorphism producing `VerifiedPropositionView` for `IsVerifiedAs`; no new D14 trait surface |
+| [D49: `ChainWitness` Machinery](docs/design/d49-chainwitness-machinery.md) | Implementation memo for D39's `ChainWitness` predicate family — per-`Layer` witness index derived from Trace resources, kernel-internal witness synthesis at type-check time, `IsVerifiedAs` admitted from a `prov:VerificationTrace`; no new D14 trait surface. D49 §7's `Lean → Reasoning` comorphism and its `VerifiedPropositionView` were superseded by D74's forward externalization (D51 §3) and the class is deleted |
 
 **Storage, lifecycle, commit**
 
@@ -938,13 +938,16 @@ system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)
 | [D79: The representation of inductive types](docs/design/d79-the-representation-of-inductive-types.md) | Completing D76 — term-valued properties onto `core:inductive`, term references projected into the index as `core:mentions`, and inductive declarations sealed against redefinition |
 | [D77: Merge as a pushout of environments](docs/design/d77-merge-as-a-pushout-of-environments.md) | **Designed, not implemented.** Merge must check that a rebinding did not invalidate what was checked against the old binding |
 | [D80: Witness and institution machinery](docs/design/d80-witness-and-institution-machinery.md) | **Designed, not implemented.** Witness credit and institution verdicts both survive a rebinding that widens; neither is repaired by revalidation |
+| [D86: The numeric primitive core](docs/design/d86-the-numeric-primitive-core.md) | `≤` and IEEE `==` over `core:float`, so a measurement claim can state a relation a Lean proof can discharge. Two asserted correspondences, three derived from them; NaN admitted with its defined behaviour |
+| [D87: The verification judgement](docs/design/d87-the-verification-judgement.md) | The checker's result kept, not discarded — `holds(logic_lean4, Checked(t), P)` on the `VerificationTrace`, with the five inputs the verdict is a function of pinned, so `Verified` is re-decidable rather than attested |
+| [D88: Four questions the justification layer leaves open](docs/design/d88-four-questions-the-justification-layer-leaves-open.md) | Why the `witness:Is*As` types earn their place (drift fails loudly with them, silently without); whether the justification term should merge into the certificate (no load-bearing use found — referred to the paper); how a chain instance is named from inside a term; and why making `app`'s arguments inferable is a kernel feature, not an ergonomic fix |
 
 **Evaluation methodology**
 
 | Document | Description |
 |----------|-------------|
-| [D50: Benchmark Evaluation Approach](docs/design/d50-benchmark-evaluation-approach.md) | Experimental design testing whether forcing the agent to capture reasoning as typed justified propositions improves performance — three conditions (baseline / chain-of-thought / Eigenius-structured), 15 ScienceAgentBench + 11 EngiBench Level 3 tasks, six per-family base ontologies, scoring and pilot phasing |
-| [D51: Benchmark Implementation Gaps](docs/design/d51-benchmark-implementation-gaps.md) | Companion to D50 — the eight implementation gaps ordered along the critical path (D49 machinery, Lean → Reasoning comorphism, D39 v2 artifacts, MCP surface, base ontologies, agent skill, three-condition harness, per-task wiring), per-gap effort sizing and sequencing |
+| [D50: Benchmark Evaluation Approach](docs/design/d50-benchmark-evaluation-approach.md) | **Dormant `2026-09-05`.** Experimental design testing whether forcing the agent to capture reasoning as typed justified propositions improves performance — three conditions (baseline / chain-of-thought / Eigenius-structured), 15 ScienceAgentBench + 11 EngiBench Level 3 tasks, six per-family base ontologies, scoring and pilot phasing |
+| [D51: Benchmark Implementation Gaps](docs/design/d51-benchmark-implementation-gaps.md) | **Dormant `2026-09-05`.** Companion to D50 — the eight implementation gaps ordered along the critical path (D49 machinery, Lean → Reasoning comorphism, D39 v2 artifacts, MCP surface, base ontologies, agent skill, three-condition harness, per-task wiring), per-gap effort sizing and sequencing |
 
 ## Contributing
 

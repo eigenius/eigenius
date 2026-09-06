@@ -251,6 +251,14 @@ pub const UNIVERSE_PARAMS: &str = "urn:eigenius:core:universe_params";
 /// positional form cannot express conclusion indices).
 pub const CTOR_TYPE: &str = "urn:eigenius:core:ctor_type";
 
+/// Names of a constructor's telescope binders the author does not write (D88 §4).
+///
+/// Each name must bind exactly once in `CTOR_TYPE`'s telescope past the inductive's parameter
+/// prefix. Names rather than positions so the list and the telescope cannot silently disagree —
+/// a name matching no binder is an error at decode, where a stale index would just move which
+/// slot an argument lands on.
+pub const IMPLICIT_ARGS: &str = "urn:eigenius:core:implicit_args";
+
 // --- Institution-realisation vocabulary (D14) ---
 
 /// is_a marker for a cross-institution comorphism resource. The Comorphism class is declared in `institution-ontology.json` and
@@ -422,6 +430,8 @@ pub const SOURCE_IRL: &str = "urn:eigenius:core:source_irl";
 // --- DataType IRIs ---
 
 pub const STRING: &str = "urn:eigenius:core:string";
+/// An absolute IRI — a refinement of [`STRING`], not a separate carrier (D88 §3).
+pub const IRI_TYPE: &str = "urn:eigenius:core:iri";
 pub const INTEGER: &str = "urn:eigenius:core:integer";
 pub const FLOAT: &str = "urn:eigenius:core:float";
 pub const BOOLEAN: &str = "urn:eigenius:core:boolean";
@@ -523,17 +533,10 @@ pub const OBSERVATION_TRACE: &str = "urn:eigenius:prov:ObservationTrace";
 pub const PROGRAM_TRACE: &str = "urn:eigenius:prov:ProgramTrace";
 /// Resource recording that a proof of a resource's proposition was checked. Two verifiers produce
 /// one, distinguished by [`PROOF_SYSTEM`] rather than by class (eigenius#200): an external prover,
-/// whose exported blob D49 §7's `Lean → Reasoning` comorphism reifies into a
-/// `justification:VerifiedPropositionView`, and the kernel, whose type-checked `justification:Certificate`
-/// certificate is itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
+/// whose exported blob is externalized forward and compared by `def_eq` against the claim's own
+/// proposition (D74), and the kernel, whose type-checked `justification:Certificate` certificate is
+/// itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
 pub const VERIFICATION_TRACE: &str = "urn:eigenius:prov:VerificationTrace";
-
-/// Trace recording that an author ASSERTS a computation ran somewhere the kernel did not initiate
-/// (eigenius#205). Admits `IsDeclaredAs`: a transcription has no `f : I -> O`, so no
-/// specification, so nothing entailed (D73 §3.3). Not a weaker [`PROGRAM_TRACE`] — a different
-/// claim, and the one trace kind that already refused to treat a run record as a ground of its own
-/// kind before the three-grounds change made that uniform.
-pub const EXTERNAL_EXECUTION_TRACE: &str = "urn:eigenius:reflection:ExternalExecutionTrace";
 
 /// `prov:resource` — the target IRI a Trace points at. Common to
 /// all four Trace classes (semantically; for `ProgramTrace` the role is
@@ -550,6 +553,31 @@ pub const PROOF_TERM: &str = "urn:eigenius:prov:proof_term";
 
 /// `prov:timestamp` — when a Trace's event occurred. Required by every Trace class.
 pub const TIMESTAMP: &str = "urn:eigenius:prov:timestamp";
+
+/// `prov:judgement` — the checker's RESULT on a [`VERIFICATION_TRACE`]: `holds(logic, t, P)`
+/// (D87 §2). What the trace ESTABLISHED, as against what it records about the occasion, and what
+/// `witness_admission::emit_from_trace` reads to key `Verified` — off this judgement's own `type`
+/// rather than off the target's stored `canonical_proposition`.
+pub const PROV_JUDGEMENT: &str = "urn:eigenius:prov:judgement";
+
+/// `prov:checked_declaration` — which declaration inside the artifact [`PROOF_TERM`] names was
+/// checked. [`PROOF_TERM`] alone under-determines the verdict: an export is a whole environment,
+/// so a party re-running the check would have to try every declaration in it to find the one the
+/// proposition was compared against (D87 §5).
+pub const CHECKED_DECLARATION: &str = "urn:eigenius:prov:checked_declaration";
+
+/// `prov:permitted_axioms` — the axiom names the checker was permitted to admit, as the check
+/// actually ran (D87 §5). One of the two inputs a verdict is a function of that nothing recorded,
+/// so two proofs — one leaning on `Classical.choice` and one not — produced identical traces.
+pub const PERMITTED_AXIOMS: &str = "urn:eigenius:prov:permitted_axioms";
+
+/// `prov:checker_identity_kind` — which kind of identity [`CHECKER_IDENTITY`] carries:
+/// `image_digest` (binds the running binary) or `source_pin` (binds only the source). Kind plus
+/// value, so a stronger identity adds a kind rather than reshaping the schema (D87 §9.3).
+pub const CHECKER_IDENTITY_KIND: &str = "urn:eigenius:prov:checker_identity_kind";
+
+/// `prov:checker_identity` — the checker's identity in the form [`CHECKER_IDENTITY_KIND`] names.
+pub const CHECKER_IDENTITY: &str = "urn:eigenius:prov:checker_identity";
 
 /// `reflection:canonical_proposition` — the optional `Prop`-typed
 /// proposition a resource asserts (per D49 §6). Carries a D47-encoded

@@ -25,7 +25,7 @@
 //! Layer builds from its Trace resources.
 //!
 //! This module hosts the keying / hashing / category primitives. The
-//! per-Layer index lives in [`crate::layer`] (see `witness_index.rs`); the
+//! per-Layer index lives in [`crate::layer`] (see `witness_admission.rs`); the
 //! type-checker synthesis hook lives in [`crate::nbe::check`].
 //!
 //! Specification: `docs/design/d49-chainwitness-machinery.md` §3-§6.
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn key_is_ord_for_btreemap_use() {
         // Sanity: the BTreeMap-as-witness-index pattern in
-        // kernel/src/layer/witness_index.rs needs WitnessKey: Ord.
+        // kernel/src/layer/witness_admission.rs needs WitnessKey: Ord.
         // Just confirm the impl exists by exercising it.
         let mut keys: std::collections::BTreeMap<WitnessKey, ()> = Default::default();
         let p = Exp::sort(0);

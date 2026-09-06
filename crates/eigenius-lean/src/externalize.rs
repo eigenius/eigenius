@@ -345,7 +345,18 @@ fn go<'x, 't: 'x, 'p: 't>(
             None => Err(ExternalizeError::UnboundVar(name.clone())),
         },
 
+        // D86 — the numeric primitive core. A fully applied chain relation over `core:float`
+        // becomes the Lean relation it denotes, rather than a `Const` under D74 §3.3's mangling
+        // that the export does not declare. Partial application falls through to the generic
+        // path and fails with `UnknownConstant`, which names both the IRI and the Lean name.
         Exp::App(f, x) => {
+            if let Exp::App(head, a) = &**f {
+                if let Exp::EigonAxiom(iri) = &**head {
+                    if let Some(rel) = NumericRel::for_iri(iri.as_str()) {
+                        return numeric_core(rel, a, x, tc, cx, binders);
+                    }
+                }
+            }
             let f = go(f, tc, cx, binders)?;
             let x = go(x, tc, cx, binders)?;
             Ok(tc.ctx.mk_app(f, x))
@@ -451,21 +462,49 @@ fn go<'x, 't: 'x, 'p: 't>(
 
         Exp::EigonPrimitive(p) => {
             use eigenius_kernel::nbe::term::PrimitiveType;
-            let n = match p {
-                PrimitiveType::String => "String",
-                PrimitiveType::Integer => "Int",
-                PrimitiveType::Boolean => "Bool",
-                PrimitiveType::Float => "Float",
-                // `Float` has the same problem `LitFloat` has, and `Json` is a chain-side
-                // carrier with no Lean image at all.
-                PrimitiveType::Json => {
-                    return outside(
-                        "EigonPrimitive(Json)",
-                        "a chain-side carrier type with no \
+            let n =
+                match p {
+                    PrimitiveType::String => "String",
+                    PrimitiveType::Integer => "Int",
+                    PrimitiveType::Boolean => "Bool",
+                    PrimitiveType::Float => "Float",
+                    // `Float` has the same problem `LitFloat` has, and `Json` is a chain-side
+                    // carrier with no Lean image at all.
+                    PrimitiveType::Json => {
+                        return outside(
+                            "EigonPrimitive(Json)",
+                            "a chain-side carrier type with no \
                          Lean image",
-                    )
-                }
-            };
+                        )
+                    }
+                    // `Iri` is a REFINEMENT of `String` (D88 §3), and refusing it is a decision about
+                    // the TCB, not about expressibility.
+                    //
+                    // The shape exists on both sides. Lean has URI types — `Std.Http.URI` with
+                    // `URI.parse?` and `URI.Query` in the networking stack, and the simpler
+                    // `System.Uri` (`pathToUri`, `fileUriToPath?`) that LSP uses — and this file
+                    // already builds refinements through [`subtype_of`], so `Subtype String isIri` is
+                    // writable here.
+                    //
+                    // What blocks it is what that mapping WOULD BE. Each formal comorphism is in the
+                    // TCB (see the D86 note below), so emitting `Subtype String p` asserts that our
+                    // `Iri::parse` and Lean's `p` accept the same strings. Neither available `p`
+                    // supports that assertion: `Std.Http.URI` is HTTP-oriented while our IRIs are
+                    // `urn:` URNs, `System.Uri` is `file://`-oriented, and RFC 3987 IRIs admit
+                    // non-ASCII that an RFC 3986 URI parser does not. Lean's own URI logic is still
+                    // split between `Init.System.Uri` and `Std.Http`, with consolidation into one
+                    // RFC 3986-compliant `Std.URI` an open RFC (#13922).
+                    //
+                    // So: refuse, and name what lifts the refusal — a general `Std.URI` whose accepted
+                    // set we can state agrees with `Iri::parse`, at which point this becomes a
+                    // `subtype_of` call and a TCB entry that can be reviewed on its merits.
+                    PrimitiveType::Iri => return outside(
+                        "EigonPrimitive(Iri)",
+                        "a refinement of String; Lean's URI types (Std.Http.URI, System.Uri) are \
+                         each narrower than an RFC 3987 IRI, so asserting they agree with \
+                         Iri::parse would be an unsupportable TCB entry. Pending a general Std.URI",
+                    ),
+                };
             lean_const(tc.ctx, cx, n)
         }
 
@@ -490,6 +529,17 @@ fn go<'x, 't: 'x, 'p: 't>(
         // so a `Lam` under an application gets its domain from the function. Measured before
         // refusing: of the 102 committed `canonical_proposition` values in the tree, zero contain
         // a `Lam`, so v1 gives up nothing that exists.
+        // D87 §4.2 — a reference to a proof an external checker verified. It is refused here for
+        // the reason the former exists: it names the artifact nanoda examined, and an artifact has
+        // no Lean counterpart to translate INTO. Externalization manufactures a Lean GOAL from a
+        // chain proposition; a `Checked` is evidence, not a proposition, so it can only appear as
+        // `holds`'s `term` argument, never inside the `type` this walks.
+        Exp::Checked(_) => outside(
+            "Checked",
+            "a reference to an externally checked proof is evidence, not a proposition — it names \
+             the artifact the checker examined and has no Lean form",
+        ),
+
         Exp::Lam(_, _) => outside(
             "Lam",
             "Mini-TT's lambda carries no domain and Lean's requires one that `def_eq` compares; \
@@ -825,6 +875,156 @@ fn subtype_of<'t, 'p: 't>(
     let head = ctx.mk_const(name, levels);
     let applied = ctx.mk_app(head, domain);
     Ok(ctx.mk_app(applied, predicate))
+}
+
+/// D86 §2 — the numeric primitive core: chain relations over `core:float` and the Lean
+/// relations they denote.
+///
+/// **Why the correspondence lives here and not on the chain.** Each formal comorphism is in the
+/// TCB (`docs/guides/esl/09-institutions.md` §9.11.2), so stating it as a property on the chain
+/// axiom would make a TCB entry authorable by committing a resource — the self-nomination shape
+/// eigenius#23 deleted `epistemic_status` for. In Rust it is reviewed like the rest of the TCB
+/// (D74, D30, `nanoda_lib`) and cannot be extended from the chain. D86 §5's "generate the Lean
+/// side from the chain" argument does not apply: that guards two hand-written sides against
+/// drift, and this is a fixed set of two asserted relations.
+///
+/// **Two are asserted; three are built from them.** `Le` and `Eq` are the correspondence — each
+/// entering the TCB — and `Ge`, `Gt` and `Lt` are derived, so widening the surface from one
+/// ordering relation to four costs the TCB nothing (D86 §3.2).
+///
+/// **`Eq` is IEEE equality, not Lean's `Eq`.** Lean's propositional `Eq` on `Float` is
+/// structural — same bits — so it separates `0.0` from `-0.0`, and no measurement claim means
+/// that (D86 §3.3). The chain name carries the IEEE-ness on its face for the same reason.
+///
+/// **The drift this cannot hide.** If a chain relation is added and this table is not, the
+/// externalizer falls through to D74 §3.3's mangling and emits a `Const` the export does not
+/// declare; `checker.rs` sets `unknown_pp_declar_hard_error: true`, so nanoda refuses. Agreement
+/// by construction would be stronger, but the weaker property still admits no wrong answer, only
+/// a refused one (eigenius#236).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum NumericRel {
+    /// `@LE.le.{0} Float instLEFloat x y` — asserted.
+    Le,
+    /// `(x == y) = true`, over `instBEqFloat` — asserted.
+    Eq,
+    /// `le(y, x)`.
+    Ge,
+    /// `lt(y, x)`.
+    Gt,
+    /// `le(x, y) ∧ ¬eq(x, y)`. The conjunct is what makes `<` come out FALSE at signed zero,
+    /// where `≤` and IEEE `==` both hold (D86 §3.2).
+    Lt,
+}
+
+impl NumericRel {
+    /// The whole table, short enough to read in full (D86 §6.1).
+    fn for_iri(iri: &str) -> Option<Self> {
+        match iri {
+            "urn:eigenius:measurements:le" => Some(Self::Le),
+            "urn:eigenius:measurements:float_ieee_eq" => Some(Self::Eq),
+            "urn:eigenius:measurements:ge" => Some(Self::Ge),
+            "urn:eigenius:measurements:gt" => Some(Self::Gt),
+            "urn:eigenius:measurements:lt" => Some(Self::Lt),
+            _ => None,
+        }
+    }
+}
+
+/// Build the Lean proposition a numeric-core relation denotes.
+///
+/// NaN needs no handling and gets none (D86 §3.4): both relations are non-reflexive on NaN in
+/// Lean exactly as they are in IEEE 754, so `0.0 ≤ x` is simply false for a NaN `x` — the right
+/// answer, since a NaN measurement does not satisfy a bound — and `Lt`'s derivation gives
+/// `false ∧ ¬false = false`, which is IEEE's answer too.
+fn numeric_core<'x, 't: 'x, 'p: 't>(
+    rel: NumericRel,
+    a: &Exp,
+    b: &Exp,
+    tc: &mut TypeChecker<'x, 't, 'p>,
+    cx: &mut Cx<'_, 't>,
+    binders: &mut Binders<'t>,
+) -> Result<ExprPtr<'t>, ExternalizeError> {
+    match rel {
+        NumericRel::Le => float_le(a, b, tc, cx, binders),
+        NumericRel::Ge => float_le(b, a, tc, cx, binders),
+        NumericRel::Eq => float_ieee_eq(a, b, tc, cx, binders),
+        NumericRel::Lt => float_lt(a, b, tc, cx, binders),
+        NumericRel::Gt => float_lt(b, a, tc, cx, binders),
+    }
+}
+
+/// `@LE.le.{0} Float instLEFloat a b`. The level is fixed at 0 by `Float : Type 0`, whatever the
+/// target declaration's own parameters are — the same reason [`lean_const_at`] exists.
+fn float_le<'x, 't: 'x, 'p: 't>(
+    a: &Exp,
+    b: &Exp,
+    tc: &mut TypeChecker<'x, 't, 'p>,
+    cx: &mut Cx<'_, 't>,
+    binders: &mut Binders<'t>,
+) -> Result<ExprPtr<'t>, ExternalizeError> {
+    let head = lean_const_at(tc.ctx, cx, "LE.le", 0)?;
+    let float_ty = lean_const(tc.ctx, cx, "Float")?;
+    let inst = lean_const(tc.ctx, cx, "instLEFloat")?;
+    let a = go(a, tc, cx, binders)?;
+    let b = go(b, tc, cx, binders)?;
+    let e = tc.ctx.mk_app(head, float_ty);
+    let e = tc.ctx.mk_app(e, inst);
+    let e = tc.ctx.mk_app(e, a);
+    Ok(tc.ctx.mk_app(e, b))
+}
+
+/// `@Eq.{1} Bool (@BEq.beq.{0} Float instBEqFloat a b) Bool.true` — D86 §6.2's chain-side
+/// proposition `(a == b) = true`.
+///
+/// `Eq` sits at level 1 because it quantifies over `Sort u` and its argument is `Bool : Type 0`,
+/// which is `Sort 1`. `BEq.beq` sits at 0 because it quantifies over `Type u` and its argument is
+/// `Float : Type 0`.
+///
+/// **Not `Decidable` equality.** That decides `Eq`, and `Eq` on `Float` is structural, so a
+/// `Decidable` equality delivers exactly the relation D86 §3.3 rejects.
+fn float_ieee_eq<'x, 't: 'x, 'p: 't>(
+    a: &Exp,
+    b: &Exp,
+    tc: &mut TypeChecker<'x, 't, 'p>,
+    cx: &mut Cx<'_, 't>,
+    binders: &mut Binders<'t>,
+) -> Result<ExprPtr<'t>, ExternalizeError> {
+    let beq = lean_const_at(tc.ctx, cx, "BEq.beq", 0)?;
+    let float_ty = lean_const(tc.ctx, cx, "Float")?;
+    let inst = lean_const(tc.ctx, cx, "instBEqFloat")?;
+    let a = go(a, tc, cx, binders)?;
+    let b = go(b, tc, cx, binders)?;
+    let applied = tc.ctx.mk_app(beq, float_ty);
+    let applied = tc.ctx.mk_app(applied, inst);
+    let applied = tc.ctx.mk_app(applied, a);
+    let applied = tc.ctx.mk_app(applied, b);
+
+    let eq = lean_const_at(tc.ctx, cx, "Eq", 1)?;
+    let bool_ty = lean_const(tc.ctx, cx, "Bool")?;
+    let tt = lean_const(tc.ctx, cx, "Bool.true")?;
+    let e = tc.ctx.mk_app(eq, bool_ty);
+    let e = tc.ctx.mk_app(e, applied);
+    Ok(tc.ctx.mk_app(e, tt))
+}
+
+/// `And (a ≤ b) (Not ((a == b) = true))` — D86 §3.2's derivation.
+///
+/// `And` and `Not` are `Prop -> Prop -> Prop` and `Prop -> Prop`, so neither takes a universe
+/// argument.
+fn float_lt<'x, 't: 'x, 'p: 't>(
+    a: &Exp,
+    b: &Exp,
+    tc: &mut TypeChecker<'x, 't, 'p>,
+    cx: &mut Cx<'_, 't>,
+    binders: &mut Binders<'t>,
+) -> Result<ExprPtr<'t>, ExternalizeError> {
+    let le = float_le(a, b, tc, cx, binders)?;
+    let eq = float_ieee_eq(a, b, tc, cx, binders)?;
+    let not = lean_const(tc.ctx, cx, "Not")?;
+    let neq = tc.ctx.mk_app(not, eq);
+    let and = lean_const(tc.ctx, cx, "And")?;
+    let e = tc.ctx.mk_app(and, le);
+    Ok(tc.ctx.mk_app(e, neq))
 }
 
 /// One of Lean's own constants at an EXPLICIT universe level.

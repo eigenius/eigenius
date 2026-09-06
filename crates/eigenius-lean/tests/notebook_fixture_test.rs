@@ -70,6 +70,14 @@ use eigenius_kernel::storage::PersistentBackend;
 use eigenius_lean::LeanInstitution;
 
 const DEMO_PROOF_TERM_IRI: &str = "urn:eigenius:demo:lean:proof_term";
+/// The near-miss: the same proof and the same target declaration, bound to the claim about the
+/// OTHER individual. D87 §6 — without a fixture that fails, the demo shows the plumbing running
+/// and not the check discriminating.
+const NEAR_MISS_TERM_IRI: &str = "urn:eigenius:demo:lean:proof_term_near_miss";
+/// The claim the proof proves: `Healthy(patient_1)`, a proposition ABOUT its subject.
+const CLAIM_1_IRI: &str = "urn:eigenius:demo:lean:claim_patient_1_healthy";
+/// The claim the proof does not prove — equally true, equally proved in the same export.
+const CLAIM_2_IRI: &str = "urn:eigenius:demo:lean:claim_patient_2_healthy";
 const VERDICT_SUBJECT_PROP: &str = "urn:eigenius:institution:verdict_subject";
 const VERDICT_CLASS_IRI: &str = "urn:eigenius:institution:Verdict";
 
@@ -103,12 +111,35 @@ fn fixture_resources() -> Vec<eigenius_kernel::ontology::resource::Resource> {
     });
     assert_eq!(
         resources.len(),
-        6,
-        "demo fixture must carry exactly six resources (Patient class, the `Healthy` axiom its \
-         proposition applies, the claim instance, mirror, payload, term); got {}",
+        9,
+        "demo fixture must carry exactly nine resources — the Patient class, the `Healthy` axiom \
+         its propositions apply, TWO named individuals, a claim about each, the mirror, the \
+         payload, and the proof term that Holds. The near-miss is a SEPARATE document; see \
+         `near_miss_resources`; got {}",
         resources.len()
     );
     resources
+}
+
+/// The near-miss document's single resource.
+///
+/// It ships apart from the fixture above because an AutoOnLoad gate returning `Fails` refuses the
+/// WHOLE commit — so a near-miss in the main document would take the demo down with it. That is
+/// what `the_near_miss_is_refused_and_the_whole_commit_with_it` asserts, and it is why the
+/// notebook loads the two files in two cells.
+fn near_miss_resources() -> Vec<eigenius_kernel::ontology::resource::Resource> {
+    let path = fixture_path()
+        .parent()
+        .expect("the fixture has a parent directory")
+        .join("lean-verification-near-miss.eigon.json");
+    let bytes = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "read near-miss fixture `{}`: {e}\n\
+             Regenerate via: cargo run -p eigenius-lean --example gen_verification_demo",
+            path.display()
+        )
+    });
+    eigon_json::parse_document(&bytes).expect("the near-miss fixture parses")
 }
 
 /// Drive the commit orchestrator over `resources`, exactly as the Load handler does.
@@ -294,8 +325,13 @@ fn notebook_demo_fixture_lands_holds() {
 /// the hole: its claim carried only `is_a`, so it landed `Holds` with the statement check never
 /// running.
 ///
-/// The claim now carries `∀ (p : Patient), Healthy(p) → Healthy(p)`, and stripping it must fail
-/// the commit rather than quietly weaken what `Holds` attests.
+/// **Since D87 §6 the refusal comes one step earlier, from the ONTOLOGY.** The claim is now a
+/// `justification:Claim`, which `requires reflection:canonical_proposition` — *"carrying a
+/// proposition is what makes a resource citable, and what makes warrant a question that applies
+/// to it at all"* — so stripping it fails validation before AutoOnLoad ever dispatches. That is
+/// strictly better than an institution-side refusal: it is enforced for every claim on every
+/// chain rather than for the ones a Lean proof happens to name. The institution's own refusal is
+/// still there and still tested, by `capstone_test`.
 #[test]
 fn a_claim_without_a_proposition_is_refused() {
     use eigenius_kernel::ontology::iri::Iri;
@@ -304,7 +340,7 @@ fn a_claim_without_a_proposition_is_refused() {
     let stripped: Vec<_> = fixture_resources()
         .into_iter()
         .map(|mut r| {
-            if r.id().is_some_and(|i| i.as_str().ends_with(":patient_1")) {
+            if r.id().is_some_and(|i| i.as_str() == CLAIM_1_IRI) {
                 r.remove(&Iri::parse(wk::CANONICAL_PROPOSITION).expect("well-known IRI"));
             }
             r
@@ -321,8 +357,296 @@ fn a_claim_without_a_proposition_is_refused() {
         "the refusal must name what is missing; got {msg}"
     );
     assert!(
-        msg.contains("target name alone") || msg.contains("nothing to check"),
-        "and must say why a name-level verdict is not enough; got {msg}"
+        msg.contains("MissingRequired"),
+        "and must be the class's own requirement rather than a downstream institution's guess at \
+         what the author meant; got {msg}"
+    );
+}
+
+/// The near-miss is refused, and the refusal takes the commit with it — D87 §6.
+///
+/// The old fixture could not show this. `patient_1` carried `∀ (p : Patient), Healthy(p) →
+/// Healthy(p)` — closed, universally quantified, never mentioning `patient_1` — so the witness
+/// paired a resource IRI with a proposition that said nothing about that resource and any IRI
+/// would have served equally. The proof was a tautology about no one in particular. What the demo
+/// demonstrated was that the plumbing ran.
+///
+/// Two things had to change before a fixture could fail for the right reason, and each was found
+/// by measuring rather than by reading:
+///
+/// 1. **The predicate has to depend on its argument.** `Healthy` was `fun _ => True`, so
+///    `Healthy patient_1` and `Healthy patient_2` were both definitionally `True` and `def_eq`
+///    accepted either claim against either proof. Measured: the near-miss came back `Holds`. It
+///    is now a statement about the patient's resting heart rate.
+/// 2. **The subject has to be in the target's environment.** `check_statement` runs under
+///    `EnvLimit::ByName(target)`, so a constant declared later in the export is unreachable —
+///    and the name table was being built from ALL declarations, so externalization resolved one
+///    `def_eq` would then fail to find, which nanoda answers with a PANIC. That is now an
+///    `UnknownConstant` naming both the IRI and the Lean name; the export additionally declares
+///    both individuals ahead of the theorem, which is where the Lean source declares them.
+///
+/// So both propositions are true, both are proved in the same export, both subjects are in
+/// scope — and the near-miss still fails, on the statement comparison and nothing else. That is
+/// `Holds` meaning *"this proof proves THIS claim"*.
+#[test]
+fn the_near_miss_is_refused_and_the_whole_commit_with_it() {
+    // Both documents in one commit, which is what the demo would be if the near-miss shipped
+    // inside it. The refusal below is why it does not: one failed gate refuses everything staged
+    // with it, so the demo's own claim would never land either.
+    let near_miss = near_miss_resources();
+    assert_eq!(
+        near_miss.len(),
+        1,
+        "the near-miss document adds one resource"
+    );
+    assert_eq!(
+        near_miss[0]
+            .get(&Iri::parse("urn:eigenius:lean:claim_iri").expect("static IRI"))
+            .and_then(Value::as_str),
+        Some(CLAIM_2_IRI),
+        "the near-miss differs from the proof term that Holds in ONE slot — which claim it names"
+    );
+
+    let mut both = fixture_resources();
+    both.extend(near_miss);
+
+    let outcome = land(both);
+    let err = outcome
+        .error
+        .expect("a proof bound to a claim it does not prove must not land");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains(NEAR_MISS_TERM_IRI),
+        "the refusal must name the proof term that failed; got {msg}"
+    );
+    assert!(
+        msg.contains("Fails"),
+        "and must be the AutoOnLoad gate's verdict; got {msg}"
+    );
+}
+
+/// A verdict is RECOMPUTABLE from what the trace pins — D87 §5, and the P7 closeout's real gate.
+///
+/// nanoda emits no cryptographic receipt and should not be made to: a signature produced by a key
+/// the checking process itself holds is not evidence *to* that process. The property to hold
+/// instead is that the verdict is a deterministic function of five inputs, all on the chain, so
+/// any party can re-run the check. A receipt says *"I checked"*; this says *"check it yourself"*.
+///
+/// This test IS that party. It reads nothing from the dispatch that produced the trace — it takes
+/// the five inputs off the committed trace and the resources it names, calls `check_proof` the
+/// way a third party would, and asserts the same verdict comes back. Everything the caller knows
+/// comes from the chain.
+///
+/// **Writing it down is what found the fifth input.** `prov:proof_term` names the export BLOB,
+/// which holds a whole Lean environment — hundreds of declarations. Bytes plus a proposition does
+/// not say what was compared against what, so a verifier would have had to try every declaration
+/// to find the one that matched, and the target name was reachable only by string surgery on the
+/// trace's own IRI. `prov:checked_declaration` is that input, now required.
+///
+/// This is also what makes the witness index a cache rather than a soundness boundary. `Verified`
+/// used to be admitted on the strength of a committed note that a check had run; it is now
+/// admitted from a recorded result, and the result is re-decidable — which is the condition
+/// `judgements-warrants-build-plan.md` §"Open after P7" set for exactly this conclusion.
+#[test]
+fn a_verdict_is_recomputable_from_what_the_trace_pins() {
+    use eigenius_kernel::program::eigentt_type_mirror::decode_judgement;
+    use eigenius_lean::checker::{check_proof, ExpectedStatement, Verdict};
+
+    let outcome = land(fixture_resources());
+    assert!(
+        outcome.error.is_none(),
+        "the demo lands: {:?}",
+        outcome.error
+    );
+    let provenance: Arc<Layer> = Arc::clone(&outcome.layers[1].layer);
+    let user_layer: Arc<Layer> = Arc::clone(&outcome.layers[0].layer);
+
+    let trace = provenance
+        .iter_resources()
+        .map(|(_, r)| r)
+        .find(|r| {
+            r.is_a()
+                .iter()
+                .any(|c| c.as_str() == wk::VERIFICATION_TRACE)
+        })
+        .expect("a Holds commits a VerificationTrace");
+    let slot = |name: &str| {
+        trace
+            .get(&Iri::parse(name).expect("well-known IRI"))
+            .unwrap_or_else(|| panic!("the trace must pin `{name}`"))
+            .clone()
+    };
+
+    // 1. The export bytes, through the artifact the trace names.
+    let payload_iri = slot(wk::PROOF_TERM);
+    let payload = user_layer
+        .resolve(&Iri::parse(payload_iri.as_str().expect("an IRI string")).expect("an IRI"))
+        .expect("prov:proof_term must resolve to the artifact that was checked");
+    let bytes = payload
+        .get(&Iri::parse("urn:eigenius:lean:payload_bytes").expect("static IRI"))
+        .and_then(Value::as_str)
+        .expect("the artifact carries the export bytes")
+        .to_string();
+
+    // 2. Which declaration inside it.
+    let target = slot(wk::CHECKED_DECLARATION);
+    let target = target.as_str().expect("a declaration name");
+
+    // 3. The proposition — off the judgement, which is what the grade is keyed on.
+    let judgement = decode_judgement(&slot(wk::PROV_JUDGEMENT), &provenance)
+        .expect("the trace's judgement decodes");
+
+    // 4. The permitted axiom set, verbatim as the check ran.
+    let axioms: Vec<String> = match slot(wk::PERMITTED_AXIOMS) {
+        Value::Array(a) => a
+            .iter()
+            .map(|v| v.as_str().expect("an axiom name").to_string())
+            .collect(),
+        other => panic!("prov:permitted_axioms must be an array; got {other:?}"),
+    };
+
+    // 5. The checker identity — which build to re-run. This process IS that build, so re-running
+    //    in-process is the honest recomputation here; a third party would resolve the identity to
+    //    a binary first.
+    let kind = slot(wk::CHECKER_IDENTITY_KIND);
+    assert!(
+        matches!(kind.as_str(), Some("image_digest") | Some("source_pin")),
+        "the identity must say which KIND it is, so a reader can tell one that binds the running \
+         binary from one that only names the source; got {kind:?}"
+    );
+    assert!(
+        slot(wk::CHECKER_IDENTITY)
+            .as_str()
+            .is_some_and(|v| !v.is_empty()),
+        "and carry a value"
+    );
+
+    let recomputed = check_proof(
+        bytes.as_bytes(),
+        target,
+        &axioms,
+        Some(&ExpectedStatement {
+            proposition: &judgement.typ,
+            layer: &provenance,
+        }),
+    )
+    .expect("re-running the check from the trace's own inputs");
+
+    assert!(
+        matches!(recomputed, Verdict::Holds),
+        "the same five inputs must yield the same verdict — that is the whole of D87 §5, and \
+         without it `Verified` is attested rather than re-decidable; got {recomputed:?}"
+    );
+}
+
+/// **The far end of the bridge**: a `Certificate.verified` citing the demo's claim type-checks.
+///
+/// Everything else tests the two halves separately and they never meet.
+/// `a_holds_verdict_admits_a_verified_witness` calls `lookup_chain_witness` DIRECTLY with a
+/// hand-built key — trace to witness, bypassing the constructor.
+/// `kernel/tests/justification_wellfounded.rs` writes `verified(...)` inside certificates, but it
+/// is about cycle detection: its layers come from `LayerBuilder::build`, which does not validate,
+/// so no certificate in it is ever type-checked, and its cases are refusals besides.
+///
+/// So until this test, nothing anywhere ran `check` over a real `Certificate.verified` against a
+/// chain carrying a real `prov:VerificationTrace`. The two ends could disagree and every test
+/// would stay green — and they could: `synthesize_chain_witness` hashes the proposition **the
+/// author wrote in the certificate**, while `emit_from_trace` hashes **the type of the judgement
+/// the institution emitted**. Those are different expressions reaching the same hash only if the
+/// institution built the judgement from the claim's own proposition. It does. Nothing checked it.
+///
+/// The path this exercises, in order: the `eigentt:Judgement` validation rule → CHECK mode →
+/// `check` on the certificate → `CheckHooks::synthesize_chain_witness` at the `verified`
+/// constructor's elided witness slot → `lookup_chain_witness` → `layer_admits_witness` →
+/// `emit_from_trace` → the trace's `prov:judgement`.
+#[test]
+fn a_certificate_citing_the_verified_claim_type_checks() {
+    use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
+    use eigenius_kernel::validation::{ValidationRule, Validator};
+
+    let outcome = land(fixture_resources());
+    assert!(
+        outcome.error.is_none(),
+        "the demo lands: {:?}",
+        outcome.error
+    );
+    // Layer 1 is the `verdict_provenance` Sibling — where the VerificationTrace lives.
+    let provenance: Arc<Layer> = Arc::clone(&outcome.layers[1].layer);
+
+    // A conclusion whose ground is the Lean-verified claim. `verified(iri, P)` is written with two
+    // arguments; the third — `witness:IsVerifiedAs(iri, P)` — is elided and filled by the kernel.
+    let source = r#"
+namespace core          = "urn:eigenius:core";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace demo          = "urn:eigenius:demo:lean";
+namespace probe         = "urn:eigenius:probe";
+
+resource probe:concl_patient_1_healthy : justification:Conclusion {
+    justification:subject_iri = "urn:eigenius:demo:lean:patient_1";
+    justification:judgement = type_expr(
+        alias
+            CLAIM = "urn:eigenius:demo:lean:claim_patient_1_healthy",
+            P     = demo:Healthy(demo:patient_1)
+        in
+        holds( eigentt:logic_kernel,
+               verified(CLAIM, P),
+               justification:Certificate(P) )
+    );
+}
+"#;
+    let resources = eigenius_kernel::esl::compile(source, &provenance)
+        .unwrap_or_else(|e| panic!("the citing conclusion must compile: {e:?}"));
+    let mut b = LayerBuilder::new("citing-conclusion", Some(Arc::clone(&provenance)));
+    for r in resources {
+        b.add_resource(r).expect("add the conclusion");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let errs: Vec<_> = Validator::new(layer)
+        .validate()
+        .into_iter()
+        .filter(|e| {
+            matches!(
+                e.rule,
+                ValidationRule::TermIllTyped | ValidationRule::TermMalformed
+            )
+        })
+        .collect();
+    assert!(
+        errs.is_empty(),
+        "a certificate citing the Lean-verified claim must type-check — the witness the trace \
+         admits is exactly what `Certificate.verified` consumes, and if the two ends hash the \
+         proposition differently this is where it shows. Got: {errs:?}"
+    );
+
+    // And the same certificate about the OTHER patient is refused. Without this the test above
+    // would pass just as well if the witness lookup admitted anything, which is the failure mode
+    // that matters: `Verified` is the grade no author is supposed to be able to assert.
+    let wrong = source.replace(
+        "P     = demo:Healthy(demo:patient_1)",
+        "P     = demo:Healthy(demo:patient_2)",
+    );
+    let resources = eigenius_kernel::esl::compile(&wrong, &provenance)
+        .unwrap_or_else(|e| panic!("the near-miss conclusion must still COMPILE: {e:?}"));
+    let mut b = LayerBuilder::new("citing-conclusion-wrong", Some(provenance));
+    for r in resources {
+        b.add_resource(r).expect("add the conclusion");
+    }
+    let errs: Vec<_> = Validator::new(Arc::new(b.build(LayerStorage::in_memory())))
+        .validate()
+        .into_iter()
+        .filter(|e| matches!(e.rule, ValidationRule::TermIllTyped))
+        .collect();
+    assert!(
+        !errs.is_empty(),
+        "a certificate claiming the chain verified `Healthy(patient_2)` about a claim it verified \
+         `Healthy(patient_1)` about must NOT type-check — nothing on the chain grounds it"
+    );
+    let msg = format!("{:?}", errs[0]);
+    assert!(
+        msg.contains("IsVerifiedAs"),
+        "and the refusal must name the family that missed, not fail somewhere incidental: {msg}"
     );
 }
 
@@ -346,7 +670,7 @@ fn a_holds_verdict_admits_a_verified_witness() {
     use eigenius_kernel::layer::lookup_chain_witness;
     use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
 
-    const CLAIM_IRI: &str = "urn:eigenius:demo:lean:patient_1";
+    const CLAIM_IRI: &str = CLAIM_1_IRI;
     const PAYLOAD_IRI: &str = "urn:eigenius:demo:lean:proof_payload";
 
     let resources = fixture_resources();
@@ -368,15 +692,23 @@ fn a_holds_verdict_admits_a_verified_witness() {
     // 1. The trace is there, and it names the claim rather than the proof term. `prov:resource`
     //    is what `emit_from_trace` follows to find the proposition the witness keys on, so a
     //    trace pointing at the `LeanProofTerm` would commit cleanly and attest nothing.
-    let trace = provenance
+    let traces: Vec<_> = provenance
         .iter_resources()
         .map(|(_, r)| r)
-        .find(|r| {
+        .filter(|r| {
             r.is_a()
                 .iter()
                 .any(|c| c.as_str() == wk::VERIFICATION_TRACE)
         })
-        .expect("a Holds verdict must commit a prov:VerificationTrace beside it");
+        .collect();
+    assert_eq!(
+        traces.len(),
+        1,
+        "exactly one trace: the fixture carries two proof terms and only one of them Holds. \
+         `finalize_emitted_resource` drops a trace from a dispatch that did not decide, because a \
+         trace grounds a witness and a refused check establishes nothing to attest"
+    );
+    let trace = &traces[0];
     assert_eq!(
         trace.get(&Iri::parse(wk::REFLECTION_RESOURCE).expect("well-known IRI")),
         Some(&Value::iri(&Iri::parse(CLAIM_IRI).expect("static IRI"))),

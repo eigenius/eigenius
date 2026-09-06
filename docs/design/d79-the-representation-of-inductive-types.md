@@ -298,7 +298,7 @@ mentions come from the *unsealed* IRIs in `cat` and `sem_type`, which is the ent
 little else — order one per entry against the ~7.6M `lexicon:sem` triples the index already holds.
 
 **What the seal does not do.** It does not address the witness defect
-(`layer/witness_index.rs:1184`), where credit survives redefinition of a class a proposition
+(`layer/witness_admission.rs:1184`), where credit survives redefinition of a class a proposition
 quantifies over. The rebound name there is `Dog`, a **class**, and classes stay redefinable by design
 (§5). That is [D80](d80-witness-and-institution-machinery.md) §2, and it is a separate defect on a
 separate trigger — related to the seal only in sharing `conjunction_entails` as its direction test.

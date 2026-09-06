@@ -49,7 +49,7 @@ Reasoning leaves a typed audit trail. These shapes are pre-existing chain artifa
 | `justification:Claim` + `prov:ObservationTrace` | Bench measurement, instrument log entry. The trace names the `prov:Activity` that produced it and admits `IsObservedAs(iri, canonical_proposition)`. |
 | `prov:ProgramTrace` | A record that a program run happened. **It admits no witness and grounds nothing.** |
 
-**Three witness families, not four.** `trace_category` (`kernel/src/layer/witness_index.rs`) maps `DeclarationTrace → Declared`, `ObservationTrace → Observed`, `VerificationTrace → Verified`, and `ProgramTrace → None`.
+**Three witness families, not four.** `trace_category` (`kernel/src/layer/witness_admission.rs`) maps `DeclarationTrace → Declared`, `ObservationTrace → Observed`, `VerificationTrace → Verified`, and `ProgramTrace → None`.
 
 There is no `IsDerivedAs`, because a computed claim does not rest on the fact that a computation ran. It rests on two things a run cannot supply: the assertion that the plan denotes a function `I -> O` — which an accountable agent makes, and which no execution establishes, since determinism is a fact about the environment rather than something recoverable from a run record — and the inputs it was applied to. So a computed ground is the APPLICATION `App(Declared(plan), Observed(inputs))`, built from the two grounds that remain. `Sampled` is likewise a bare `Observed` leaf. Neither is a fourth kind of thing.
 
@@ -87,13 +87,13 @@ pub struct WitnessKey {
 }
 ```
 
-`layer_admits_witness(&Layer, &WitnessKey) -> bool` ([`kernel/src/layer/witness_index.rs`](../../../../kernel/src/layer/witness_index.rs)) answers in three steps and builds nothing:
+`layer_admits_witness(&Layer, &WitnessKey) -> bool` ([`kernel/src/layer/witness_admission.rs`](../../../../kernel/src/layer/witness_admission.rs)) answers in three steps and builds nothing:
 
 1. **Skip.** `LayerHandle::has_witness_candidates` is stamped at write time over the layer's resources. A layer holding no Trace, no `InstitutionEmittedDerivation` and no `justification:Conclusion` answers `false` with no probe at all — a lexicon layer stops here.
 2. **Self-attesting.** `Layer::get_resource` on the key's IRI, which is layer-local. If that resource is a `justification:Conclusion` and the key's category is `Verified`, or an `InstitutionEmittedDerivation` and the category is `Derived`, build the key it would emit and compare it to the key asked for.
 3. **Trace-attested.** Find a Trace resource *defined in this layer* whose `prov:resource` points at the key's IRI — through the triple index when the layer is already stored, by iterating the layer when it is still in flight, which is the case during `autoonload_dispatch`. Resolve the target (a chain walk, since a trace here may attest a resource in an ancestor), read its `reflection:canonical_proposition` — or fall back to the D39 §4.1 default `Asserts(target_iri)` when it carries none — hash it, and compare.
 
-An earlier implementation did materialize an index: `build_witness_index` walked the layer at construction and cached a `BTreeMap<WitnessKey, ()>` in a `OnceLock` on the `Layer`, and lookup was a membership test. **D66 slice 0 removed all of it.** The map cost memory proportional to the layer's trace count for the layer's whole lifetime and reduced every miss to a bare `false` carrying no reason; direct lookup is O(1) in memory and holds the specific resource at the point of the decision. There is no `Layer::chain_witness_index` method and nothing is cached.
+An earlier implementation did materialize an index: `build_witness_index` walked the layer at construction and cached a `BTreeMap<WitnessKey, ()>` in a `OnceLock` on the `Layer`, and lookup was a membership test. **D66 slice 0 removed all of it.** The map cost memory proportional to the layer's trace count for the layer's whole lifetime and reduced every miss to a bare `false` carrying no reason; direct lookup is O(1) in memory and holds the specific resource at the point of the decision. There is no `Layer::chain_witness_admission` method and nothing is cached.
 
 Both ends of the key hash the proposition the same way. The emitter *decodes* the stored `Value::Json` against the layer before hashing (`hash_stored_proposition`), so a folded definition name and its unfolded body land on the same hash as the checker's readback of the term the author wrote (D66 §4). A stored proposition that fails to decode emits no witness, and logs why, rather than failing silently.
 

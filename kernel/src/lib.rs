@@ -31,7 +31,7 @@ pub mod dcg;
 pub mod esl;
 pub mod gc;
 pub mod institution;
-/// Reading a retained `justification:Term`: what a conclusion rests on.
+/// Reading a retained `justification:Certificate`: what a conclusion rests on.
 pub mod justification;
 pub mod lattice;
 pub mod layer;

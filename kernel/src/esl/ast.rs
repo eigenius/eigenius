@@ -207,6 +207,22 @@ pub enum ClassItem {
     Description(String),
     Requires(Vec<QualifiedName>),
     Recommends(Vec<QualifiedName>),
+    /// Any other property, set on the class resource itself: `ex:colour = ex:Blue;`.
+    ///
+    /// A class IS a resource, so its declaration can set its properties. `description`, `requires`
+    /// and `recommends` are sugar for the three that come up constantly, and until `2026-09-06`
+    /// they were the only three the grammar accepted — a class could carry no other property, so a
+    /// class-level annotation had to be authored in JSON instead of ESL. Of 882 class resources in
+    /// the shipped JSON ontologies, exactly one hand-authored class carried a property outside that
+    /// set (`core:Property`'s `conditional_requires`); the other 734 occurrences are
+    /// `source_irl` / `was_attributed_to` written by the schema-org importer, which never goes
+    /// through this parser. That is why the gap survived: demand for it was almost zero, and
+    /// `prov:was_attributed_to` — the one property every compiled class carries — is stamped by
+    /// the compiler rather than written as a class item.
+    ///
+    /// The discriminator is the token: a bare `Ident` opens one of the three keywords, a
+    /// `QualName` opens this.
+    Property(QualifiedName, QualifiedName),
 }
 
 /// `property ex:name : core:string { ... }`
@@ -371,10 +387,9 @@ pub struct DataDecl {
     /// matching the pre-D48 / pre-eigenius#72-Layer-2 surface).
     ///
     /// Indices use [`DataIndex`] rather than [`DataParam`] because
-    /// index kinds can be Sort literals (e.g., D39 §5's
-    /// `justification:Certificate : justification:Term → Prop → Type` has `Prop` as
-    /// its second index kind). Type params have no such use case in
-    /// v1 — they're always Set-kinded today.
+    /// index kinds can be Sort literals (e.g., `justification:Certificate :
+    /// Prop → Type 2` has `Prop` as its index kind). Type params have no
+    /// such use case in v1 — they're always Set-kinded today.
     pub indices: Vec<DataIndex>,
     /// Result sort declared after the index telescope's arrow chain.
     /// `None` defaults to `Set` (`Sort(1)`).
@@ -410,10 +425,9 @@ pub struct DataParam {
 /// One entry in an indexed-data declaration's index telescope
 /// (eigenius#72 Layer 2). Differs from [`DataParam`] in that the kind
 /// can be a Sort literal (`Prop` / `Set` / `Type N`) as well as a
-/// qualified-name reference — D39 §5's
-/// `justification:Certificate : justification:Term → Prop → Type` has `Prop` as its
-/// second index kind, which `DataParam`'s `QualifiedName`-only kind
-/// field can't express.
+/// qualified-name reference — `justification:Certificate : Prop → Type 2`
+/// has `Prop` as its index kind, which `DataParam`'s `QualifiedName`-only
+/// kind field can't express.
 #[derive(Debug)]
 pub struct DataIndex {
     pub name: String,
@@ -465,6 +479,15 @@ pub enum CtorDecl {
         /// Full Π-telescope of the constructor type, ending in an
         /// application of the parent inductive to its params and indices.
         typ: Term,
+        /// Binder names from `typ`'s telescope the author does not write, from the
+        /// `implicit(...)` clause (D88 §4). Compiles to `core:implicit_args`.
+        ///
+        /// The clause sits on the CONSTRUCTOR rather than marking binders inside the `forall`,
+        /// because that is the only scope in which EigenTT represents implicitness:
+        /// `InductiveCtorDecl::implicit` is per-constructor and `Exp::Pi` has no binder style.
+        /// A `{A : Prop}` inside a general `forall` would have to be rejected everywhere else —
+        /// surface syntax promising something the type theory does not have.
+        implicit: Vec<String>,
         pos: Position,
     },
 }

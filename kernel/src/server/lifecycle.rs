@@ -331,7 +331,10 @@ async fn resume_one_task(
 }
 
 /// Known remote component IRIs that should be dispatched to the orchestrator.
-const REMOTE_COMPONENTS: &[&str] = &[
+///
+/// `pub(crate)` so `bootstrap::tests::every_declared_component_is_implemented` can check the
+/// declarations against the two places a component is actually implemented.
+pub(crate) const REMOTE_COMPONENTS: &[&str] = &[
     "urn:eigenius:program:components:CompleteText",
     "urn:eigenius:program:components:CompleteJson",
     "urn:eigenius:program:components:HttpRequest",

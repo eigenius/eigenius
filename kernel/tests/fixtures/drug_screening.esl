@@ -59,27 +59,25 @@
 //      bridge across many compounds; lands as a follow-on. A matching
 //      `DeclarationTrace` admits the IsDeclaredAs witness.
 //
-// 6. A `justification:Conclusion` claiming `StrongInhibitor(EIG_0291)`. The
-//    justification composes FOUR evidences via nested `App`:
-//      justification:App(rule,
-//          justification:App(bridge,
-//              justification:App(Declared(plan), Observed(sampleset))))
-//    - `App(Declared(plan), Observed(sampleset))` is the COMPUTED ground and
+// 6. A `justification:Conclusion` claiming `StrongInhibitor(EIG_0291)`. Its
+//    certificate composes FOUR grounds through three nested `app(c1, c2)` calls:
+//      app(rule,
+//          app(bridge,
+//              app(declared(plan), observed(sampleset))))
+//    - `app(declared(plan), observed(sampleset))` is the COMPUTED ground and
 //      exposes `stats:lt(mean_of(s), 100.0)` (the statistical claim). It was one
 //      `DerivedEvidence(verdict_iri)` leaf: the fact that a computation ran,
 //      standing in for both the method and the data it was run on.
-//    - The inner `justification:App(bridge, verdict)` yields `HasLowIC50(EIG_0291)`
+//    - The inner `app(bridge, verdict)` yields `HasLowIC50(EIG_0291)`
 //      (the domain claim)
-//    - The outer `justification:App(rule, ...)` yields `StrongInhibitor(EIG_0291)`
+//    - The outer `app(rule, ...)` yields `StrongInhibitor(EIG_0291)`
 //      (the conclusion).
-//    The certificate is three nested `app(A, B, j1, j2, c1, c2)` calls
-//    composing justification:Certificate.declared (rule) + .declared
-//    (bridge) + .declared (plan) + .observed (sample set), all via
-//    justification:Certificate.app.
+//    The leaves are justification:Certificate.declared (rule, bridge, plan)
+//    and .observed (sample set), composed by justification:Certificate.app.
 //
 // On commit, ValidateJustification fires AutoOnLoad on the sentence
 // and the kernel type-checks the certificate against
-// `justification:Certificate(justification, proposition)`. The chain-witness index
+// `justification:Certificate(proposition)`. The chain-witness index
 // supplies the three witnesses the grounding constructors consume
 // (`IsDerivedAs` on the verdict, `IsDeclaredAs` on the bridge, and
 // `IsDeclaredAs` on the literature rule).
@@ -306,21 +304,23 @@ resource screen:bridge_eig0291_lowic50_trace : prov:DeclarationTrace {
 // literature rule applied to the domain claim yields the conclusion
 // (StrongInhibitor).
 //
-//   justification:App(
-//     Declared(rule_iri),         -- literature rule
-//     justification:App(
-//       Declared(bridge_iri),     -- statistical → domain
-//       justification:App(
-//         Declared(plan_iri),     -- the plan denotes a function of its input
-//         Observed(sampleset_iri) -- and this is the input
+//   app(
+//     declared(rule_iri),         -- literature rule
+//     app(
+//       declared(bridge_iri),     -- statistical → domain
+//       app(
+//         declared(plan_iri),     -- the plan denotes a function of its input
+//         observed(sampleset_iri) -- and this is the input
 //       )
 //     )
 //   )
 //
-// Certificate: nested `app(A, B, j1, j2, c1, c2)`. The outer `app`
-// composes the literature rule with the result of the inner `app`,
-// which itself composes the bridge with the computed statistic — itself
-// an `app` of the declared plan to the observed sample set.
+// `app` takes only its two certificates: its `A` and `B` are declared implicit
+// (D88 §4), so `B` comes from the proposition the whole term is checked against
+// and `A` from the first argument's own type. The outer `app` composes the
+// literature rule with the result of the inner `app`, which itself composes the
+// bridge with the computed statistic — itself an `app` of the declared plan to
+// the observed sample set.
 
 resource screen:concl_eig0291_strong : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
@@ -330,19 +330,6 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
     justification:judgement =
         holds( eigentt:logic_kernel,
                type_expr(app(
-                   // outer A
-                   screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
-                   // outer B
-                   screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
-                   // outer j1
-                   Declared("urn:eigenius:demo:screen:rule_strong"),
-                   // outer j2 — qualified `justification:App` because the bare
-                   // `App` ctor name collides with `eigentt:Term.App`
-                   // and the type_expr parser resolves to Term otherwise.
-                   justification:App(
-                       Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
-                       justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"))
-                   ),
                    // outer c1: literature rule — witness slot elided
                    declared(
                        "urn:eigenius:demo:screen:rule_strong",
@@ -351,17 +338,6 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                    ),
                    // outer c2: inner app — bridge applied to verdict
                    app(
-                       // inner A'
-                       stats:lt(
-                           stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"),
-                           100.0
-                       ),
-                       // inner B'
-                       screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
-                       // inner j1'
-                       Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
-                       // inner j2' — the computed ground: the plan applied to the input
-                       justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset")),
                        // inner c1': bridge — witness slot elided
                        declared(
                            "urn:eigenius:demo:screen:bridge_eig0291_lowic50",
@@ -375,13 +351,6 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        // leaf standing for both halves of what happened; now the
                        // application of the declared plan to the observed input.
                        app(
-                           // A' : the input is on record
-                           core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset"),
-                           // B' : what applying the plan to it yields
-                           stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"), 100.0),
-                           // j1', j2'
-                           Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"),
-                           Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"),
                            // c1' : the plan denotes this function of this input
                            declared(
                                "urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect",
@@ -393,13 +362,6 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                    )
                )),
                type_expr(justification:Certificate(
-                   justification:App(
-                       Declared("urn:eigenius:demo:screen:rule_strong"),
-                       justification:App(
-                           Declared("urn:eigenius:demo:screen:bridge_eig0291_lowic50"),
-                           justification:App(Declared("urn:eigenius:demo:screen:claim_eig0291_lowic50_yields_main_effect"), Observed("urn:eigenius:demo:screen:m_eig0291_sampleset"))
-                       )
-                   ),
                    screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") )) );
 
 
@@ -407,18 +369,14 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
     // inner app (which produces HasLowIC50(EIG_0291)).
     //   A  = HasLowIC50(EIG_0291)
     //   B  = StrongInhibitor(EIG_0291)
-    //   j1 = Declared(rule_iri)
-    //   j2 = justification:App(bridge, computed) — produced by the inner app
     //   c1 = declared(rule_iri, A -> B)
     //   c2 = inner app(...) — bridge applied to the computed statistic
     //
     // Inner app: applies the bridge to the computed statistic.
     //   A'  = stats:lt(mean_of(s), 100.0)
     //   B'  = HasLowIC50(EIG_0291)
-    //   j1' = Declared(bridge_iri)
-    //   j2' = justification:App(Declared(plan_iri), Observed(sampleset_iri))
     //   c1' = declared(bridge_iri, A' -> B')
-    //   c2' = app(Asserts(s), A', Declared(plan), Observed(s),
+    //   c2' = app(Asserts(s), A',
     //             declared(plan, Asserts(s) -> A'), observed(s, Asserts(s)))
     //
     // The grounding ctors `declared`/`observed` each take a trailing

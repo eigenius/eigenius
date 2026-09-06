@@ -299,7 +299,7 @@ pub fn compile_file_with_context(
     // The codec's table is rebuilt from the MERGED constructor table — the chain's plus this
     // file's. A file declares an inductive and writes values of it in the same compile, and
     // encoding a value names its constructor's class (D85 §6.1), so a table from the parent
-    // chain alone cannot encode `justification:Term`'s constructors while compiling
+    // chain alone cannot encode a higher layer's constructors while compiling
     // `justification.esl`.
     compiler.codec_names =
         crate::program::eigentt_type_mirror::CodecNames::from_class_table(&compiler.ctor_arg_names);
@@ -336,9 +336,8 @@ pub fn compile_file_with_context(
 ///
 /// Both indices accumulate across the entire chain — no first-wins
 /// shadowing. When two chain-resident inductives in different
-/// namespaces declare a ctor with the same short name (e.g.
-/// `eigentt:Term.App` and `justification:Term.App`),
-/// both land in `by_short_name[name]`. The ESL surface's bare-name
+/// namespaces declare a ctor with the same short name, both land in
+/// `by_short_name[name]`. The ESL surface's bare-name
 /// lookup turns that into an "ambiguous — qualify as one of [...]"
 /// error rather than picking one silently.
 #[derive(Debug, Default, Clone)]
@@ -538,7 +537,7 @@ struct Compiler {
     /// `ctors_by_short_name`: short name → list of qualifying ctor
     ///   IRIs, for bare-name lookup with ambiguity detection. Two
     ///   inductives that share a ctor short name (e.g.
-    ///   `eigentt:Term.App` and `justification:Term.App`)
+    ///   two inductives declaring the same ctor short name)
     ///   are both recorded; a bare `App(...)` reference becomes a hard
     ///   "ambiguous — qualify as one of [...]" error instead of
     ///   silently picking the chain-order-first one.
@@ -960,7 +959,7 @@ impl Compiler {
     ///   `<ns_uri>:<CtorName>` via the standard namespace table.
     /// - Canonical chain IRI (what the ctor buckets store):
     ///   `<parent_inductive_iri>:<CtorName>`, e.g.
-    ///   `urn:eigenius:justification:Term:Declared`.
+    ///   `urn:eigenius:justification:Certificate:declared`.
     ///
     /// The two never match by string equality, so the resolution
     /// strategy is short-name-based with namespace filtering:
@@ -968,9 +967,14 @@ impl Compiler {
     /// - **Qualified** `ns:Name` → look up `Name` in `ctors_by_short_name`,
     ///   filter the candidate ctor IRIs to those whose parent IRI
     ///   starts with `ns_uri:`. If exactly one match, use it. The
-    ///   namespace prefix is what disambiguates between
-    ///   `eigentt:App` (= `eigentt:Term:App`) and `justification:App`
-    ///   (= `justification:Term:App`).
+    ///   namespace prefix is what disambiguates two inductives in
+    ///   different namespaces that declare the same ctor short name.
+    ///   The collision this used to name — `eigentt:Term.App` against
+    ///   `justification:Term.App` — is gone: the D88 §2 merge deleted
+    ///   `justification:Term`, and the certificate's own constructors
+    ///   are lower-case (`app`), so they no longer collide with
+    ///   `eigentt:Term`'s. The machinery stays because the collision is
+    ///   a property of the chain, not of these two declarations.
     /// - **Bare** `Name` → look up the short name in
     ///   `ctors_by_short_name`. If exactly one ctor IRI matches, use
     ///   it. If two or more, error with an "ambiguous" message that
@@ -1898,8 +1902,8 @@ impl Compiler {
                 // another inductive's index/result-type position.
                 //
                 // `resolve_ctor_iri` walks `ctors_by_short_name` and
-                // filters by namespace prefix, so `justification:App(...)`
-                // unambiguously picks the `reasoning` namespace's
+                // filters by namespace prefix, so `formulas:App(...)`
+                // unambiguously picks the `formulas` namespace's
                 // `App` ctor even when `eigentt:Term:App` shares
                 // the short name.
                 if let Some(ctor_iri_str) = self.resolve_ctor_iri(name)? {
@@ -2461,7 +2465,9 @@ impl Compiler {
                         }
                         cr.set(iri(wk::ARG_TYPES), Value::Array(arg_values));
                     }
-                    ast::CtorDecl::Typed { typ, pos, .. } => {
+                    ast::CtorDecl::Typed {
+                        typ, implicit, pos, ..
+                    } => {
                         // eigenius#72 Layer 2 — the typed form supplies
                         // the full Π-telescope (including conclusion
                         // indices) as a single Term. Lower it to
@@ -2484,6 +2490,38 @@ impl Compiler {
                             )
                         })?;
                         cr.set(iri(wk::CTOR_TYPE), encoded);
+                        if !implicit.is_empty() {
+                            // Check the names against the telescope here as well as at decode.
+                            // Both paths need it — a JSON-authored ontology never passes through
+                            // the compiler — but only this one can point at a line.
+                            let bound = telescope_binder_names(&ctor_exp, decl.params.len());
+                            for name in implicit {
+                                if bound.iter().filter(|b| *b == name).count() != 1 {
+                                    return Err(EslError::compiler(
+                                        Some(pos.clone()),
+                                        format!(
+                                            "constructor `{}` declares `{name}` implicit, but its \
+                                             telescope binds that name {} time(s) past the {} \
+                                             parameter(s). Bound there: {}",
+                                            c.name(),
+                                            bound.iter().filter(|b| *b == name).count(),
+                                            decl.params.len(),
+                                            if bound.is_empty() {
+                                                "nothing".to_string()
+                                            } else {
+                                                bound.join(", ")
+                                            },
+                                        ),
+                                    ));
+                                }
+                            }
+                            cr.set(
+                                iri(wk::IMPLICIT_ARGS),
+                                Value::Array(
+                                    implicit.iter().map(|n| Value::String(n.clone())).collect(),
+                                ),
+                            );
+                        }
                     }
                 }
                 Ok(Value::Embedded(Box::new(cr)))
@@ -2625,6 +2663,11 @@ impl Compiler {
                         .map(|n| self.resolve(n).map(Value::String))
                         .collect();
                     r.set(iri("urn:eigenius:core:recommends"), Value::Array(iris?));
+                }
+                ast::ClassItem::Property(prop, value) => {
+                    let prop_iri = self.resolve(prop)?;
+                    let value_iri = self.resolve(value)?;
+                    r.set(iri(&prop_iri), Value::String(value_iri));
                 }
             }
         }
@@ -2845,11 +2888,10 @@ impl Compiler {
             // the qualified-ctor lookup first (which surfaces the
             // ambiguity-aware diagnostic when needed), then fall
             // through to D52 §12 macro expansion only if it's not a
-            // ctor. This is what makes
-            // `justification:App(...)` resolve to the
-            // `justification:Term.App` ctor inside a value
-            // slot — the disambiguator authors need when bare `App`
-            // collides with another inductive's ctor short name.
+            // ctor. This is what makes `formulas:App(...)` resolve to
+            // `formulas:FormulaTerm`'s constructor inside a value slot —
+            // the disambiguator authors need when bare `App` collides
+            // with another inductive's ctor short name.
             ast::Value::MacroCall { name, args, pos } => {
                 if self.resolve_ctor_iri(name)?.is_some() {
                     return self.ctor_application(&name.name, args, pos);
@@ -3013,7 +3055,7 @@ impl Compiler {
                 self.encode_type_expr_to_value(typ, &scope)
             }
             // Same disambiguation as `compile_value`: try ctor resolution first (qualified ctor
-            // refs reach this site when an outer ctor's arg is `justification:App(...)`), fall
+            // refs reach this site when an outer ctor's arg is `formulas:App(...)`), fall
             // back to macro expansion otherwise.
             ast::Value::MacroCall { name, args, pos } => {
                 if self.resolve_ctor_iri(name)?.is_some() {
@@ -3850,6 +3892,25 @@ const SESSION_AGENT_ENV: &str = "EIGENIUS_DECLARED_BY";
 /// An explicitly configured agent wins; otherwise the unattributed marker. A malformed
 /// value is NOT silently ignored — it falls back and the caller sees the marker rather
 /// than a fabricated attribution, which is the whole point of D72.
+/// Named binders of a constructor's Π-telescope past its `n_params` parameter prefix, in order.
+///
+/// Anonymous binders (`A -> B`) contribute nothing: they cannot be named implicit, having no name.
+fn telescope_binder_names(ctor_typ: &crate::nbe::term::Exp, n_params: usize) -> Vec<String> {
+    use crate::nbe::term::{Exp, Patt};
+    let mut names = Vec::new();
+    let mut remaining = n_params;
+    let mut current = ctor_typ;
+    while let Exp::Pi(patt, _, body) = current {
+        if remaining > 0 {
+            remaining -= 1;
+        } else if let Patt::Var(n) = patt {
+            names.push(n.clone());
+        }
+        current = body;
+    }
+    names
+}
+
 fn session_declarer() -> String {
     declarer_from(std::env::var(SESSION_AGENT_ENV).ok().as_deref())
 }
@@ -4134,6 +4195,66 @@ mod tests {
 
     fn compile_esl(input: &str) -> Vec<Resource> {
         esl::compile(input, term_chain()).unwrap()
+    }
+
+    /// A class can carry a property that is not one of the three keywords.
+    ///
+    /// The grammar accepted only `description`, `requires` and `recommends` until `2026-09-06`, so
+    /// a class-level annotation had to be authored in JSON. Nothing in the tree needs this yet —
+    /// the change closes a surface gap rather than serving a caller — which is why it is pinned
+    /// here.
+    #[test]
+    fn a_class_can_carry_an_arbitrary_property() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            class ex:Marker { }
+
+            class ex:Document {
+                description = "A text document";
+                ex:marked_by = ex:Marker;
+            }
+            "#,
+        );
+        let doc = resources
+            .iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:Document"))
+            .expect("ex:Document compiles");
+        assert_eq!(
+            doc.get(&Iri::parse("urn:eigenius:example:marked_by").unwrap())
+                .and_then(|v| v.as_str()),
+            Some("urn:eigenius:example:Marker"),
+            "the property must land on the class resource itself"
+        );
+    }
+
+    /// The three keywords still parse as keywords, not as properties.
+    #[test]
+    fn the_class_keywords_are_not_read_as_properties() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            property ex:title : core:string { }
+
+            class ex:Doc {
+                description = "d";
+                requires ex:title;
+            }
+            "#,
+        );
+        let doc = resources
+            .iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:Doc"))
+            .expect("ex:Doc compiles");
+        assert!(
+            doc.get(&Iri::parse("urn:eigenius:core:requires").unwrap())
+                .is_some(),
+            "`requires` must still compile to core:requires"
+        );
     }
 
     #[test]
@@ -5479,6 +5600,93 @@ mod tests {
         );
     }
 
+    /// `implicit(n)` reaches the chain as `core:implicit_args`, carrying the binder NAME.
+    #[test]
+    fn an_implicit_clause_compiles_to_implicit_args() {
+        use crate::ontology::well_known as wk_local;
+
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Vec(A : Set) : core:Nat -> Set {
+                nil : forall (A : Set) => ex:Vec(A, ex:zero),
+                cons implicit(n) : forall (A : Set, n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+            "#,
+        );
+        let ctors = match resources[0].get(&Iri::parse(wk_local::CTORS).unwrap()) {
+            Some(Value::Array(a)) => a.clone(),
+            other => panic!("expected a ctors array, got {other:?}"),
+        };
+        let implicit_iri = Iri::parse(wk_local::IMPLICIT_ARGS).unwrap();
+        let ctor = |i: usize| match &ctors[i] {
+            Value::Embedded(r) => r.clone(),
+            other => panic!("ctor {i} is not embedded: {other:?}"),
+        };
+        assert!(
+            ctor(0).get(&implicit_iri).is_none(),
+            "`nil` declares nothing implicit, so it carries no `implicit_args`"
+        );
+        match ctor(1).get(&implicit_iri) {
+            Some(Value::Array(a)) => assert_eq!(
+                a.as_slice(),
+                [Value::String("n".to_string())],
+                "`cons` should carry the binder name"
+            ),
+            other => panic!("`cons` should carry `implicit_args`, got {other:?}"),
+        }
+    }
+
+    /// A name that binds nothing is rejected where it is written.
+    ///
+    /// The decoder rejects it too — a JSON-authored ontology never passes through the compiler —
+    /// but only this path can name the line.
+    #[test]
+    fn implicit_naming_an_unbound_binder_is_rejected() {
+        let err = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Vec(A : Set) : core:Nat -> Set {
+                cons implicit(m) : forall (A : Set, n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+            "#,
+            term_chain(),
+        )
+        .expect_err("`m` binds nothing in the telescope");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains('m') && msg.contains("implicit"),
+            "the error should name the binder it could not find: {msg}"
+        );
+    }
+
+    /// The inductive's own parameters are not the author's to elide — they come from the expected
+    /// type already — so naming one is the same error as naming nothing.
+    #[test]
+    fn implicit_cannot_name_the_inductives_parameter() {
+        let err = esl::compile(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            data ex:Vec(A : Set) : core:Nat -> Set {
+                cons implicit(A) : forall (A : Set, n : core:Nat) => A -> ex:Vec(A, n) -> ex:Vec(A, ex:succ(n)),
+            }
+            "#,
+            term_chain(),
+        )
+        .expect_err("`A` is the inductive's parameter, not a binder past the prefix");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("implicit"),
+            "the error should say what it rejected: {msg}"
+        );
+    }
+
     #[test]
     fn compile_data_indexed_emits_indices_and_result_sort_and_ctor_type() {
         use crate::ontology::well_known as wk_local;
@@ -5843,10 +6051,9 @@ mod tests {
         // because at parse time it can't distinguish ctor from macro.
         // The compiler disambiguates by trying `resolve_ctor_iri`
         // first; only when no ctor matches does it fall through to
-        // macro expansion. Without that order, `justification:App(...)`
-        // in a `justification:term = ...` slot errors with
-        // "macro not declared" instead of resolving to the
-        // `justification:Term.App` ctor.
+        // macro expansion. Without that order, `formulas:App(...)`
+        // in a value slot errors with "macro not declared" instead of
+        // resolving to `formulas:FormulaTerm`'s constructor.
         let resources = esl::compile(
             r#"
             namespace core = "urn:eigenius:core";
@@ -6499,14 +6706,14 @@ mod tests {
     fn reasoning_ontology_esl_compiles() {
         // D39 Phase 3 — the authored justification.esl source must compile
         // cleanly. Locks the structural contract: namespace declarations,
-        // the `justification:Term` five-ctor inductive, and the
+        // the `justification:Certificate` inductive, and the
         // `justification:Certificate` seven-ctor indexed inductive predicate.
         // Any future edit to the file or to the ESL surface that breaks this
         // round-trip needs to be deliberate.
         let source = include_str!("../../../ontologies/justification/justification.esl");
         let resources = esl::compile(source, term_chain()).expect("justification.esl must compile");
 
-        // Expect: 1 justification:Term + 1 justification:Certificate.
+        // Expect: justification:Certificate alone.
         // The three `witness:Is*As` predicates were here until P7 and are NOT
         // any more — see below.
         let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
@@ -6515,10 +6722,13 @@ mod tests {
             .filter(|r| r.is_a().iter().any(|c| c == &inductive_iri))
             .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
             .collect();
-        assert!(
-            inductives.len() >= 2,
-            "expected at least 2 inductive Resources in justification.esl, found {}: {inductives:?}",
-            inductives.len()
+        // ONE, since the D88 §2 merge: `justification:Certificate` alone. `justification:Term`
+        // was the second, and the certificate now IS the term — its constructor tree is the
+        // algebra, indexed by the proposition.
+        assert_eq!(
+            inductives,
+            vec!["urn:eigenius:justification:Certificate".to_string()],
+            "justification.esl declares exactly one inductive"
         );
 
         // **The witness types are declared in CORE, not here.** The kernel
@@ -6545,7 +6755,7 @@ mod tests {
         let class_iri = iri(crate::ontology::well_known::CLASS);
         for expected in &[
             "urn:eigenius:justification:Conclusion",
-            "urn:eigenius:justification:VerifiedPropositionView",
+            "urn:eigenius:justification:Claim",
         ] {
             assert!(
                 resources
@@ -6636,7 +6846,7 @@ mod tests {
         // `Prop` index), (b) the codec self-reference short-circuit
         // (justification:Certificate's ctors reference justification:Certificate itself), and
         // (c) cross-inductive references (justification:Certificate → ChainWitness +
-        // justification:Term). If any of these regress, the full Phase 6
+        // justification:Certificate). If any of these regress, the full Phase 6
         // synthesis path breaks.
         use crate::layer::LayerBuilder;
         use crate::ontology::eigon_json;
@@ -6651,10 +6861,10 @@ mod tests {
         }
         let core = Arc::new(core_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        // Phase 4 — the resource classes (justification:Conclusion, TaskOutput,
-        // VerifiedPropositionView) declare `subclass_of
-        // reflection:DerivedResource`, so reflection-ontology has to be
-        // in the layer chain before reasoning.esl loads.
+        // Phase 4 — the resource classes (justification:Conclusion, TaskOutput)
+        // declare `subclass_of reflection:DerivedResource`, so
+        // reflection-ontology has to be in the layer chain before
+        // justification.esl loads.
         let reflection_json =
             include_str!("../../../ontologies/reflection/reflection-ontology.json");
         let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
@@ -6681,12 +6891,12 @@ mod tests {
         }
         let layer = Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        // The five inductive types — Phase 3.
+        // The four inductive types — three witness predicates from core plus the certificate.
+        // `justification:Term` was a fifth until the D88 §2 merge folded it into the certificate.
         for iri_str in &[
             "urn:eigenius:witness:IsDeclaredAs",
             "urn:eigenius:witness:IsObservedAs",
             "urn:eigenius:witness:IsVerifiedAs",
-            "urn:eigenius:justification:Term",
             "urn:eigenius:justification:Certificate",
         ] {
             let class_iri = Iri::parse(iri_str).unwrap();
@@ -6694,7 +6904,7 @@ mod tests {
                 .unwrap_or_else(|e| panic!("failed to resolve {iri_str}: {e}"));
         }
 
-        // The three resource classes — Phase 4. `resolve_class_type` on
+        // The two resource classes — Phase 4. `resolve_class_type` on
         // a regular Class returns the Σ-chain of its required +
         // recommended properties; we just check that resolution
         // succeeds (the structural contract is "all referenced
@@ -6703,7 +6913,7 @@ mod tests {
         // an unresolved class.
         for iri_str in &[
             "urn:eigenius:justification:Conclusion",
-            "urn:eigenius:justification:VerifiedPropositionView",
+            "urn:eigenius:justification:Claim",
         ] {
             let class_iri = Iri::parse(iri_str).unwrap();
             resolve_class_type(&class_iri, &layer)

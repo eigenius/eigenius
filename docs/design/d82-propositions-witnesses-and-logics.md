@@ -122,7 +122,7 @@ argument the checker filled — which is bounded by the number of certificates, 
 Different objects, different cost.
 
 **The determinism argument against it is sound, and bounds what P7 may claim.**
-`witness_index.rs:17-20` states the case: admission is *"a pure deterministic function of that
+`witness_admission.rs:17-20` states the case: admission is *"a pure deterministic function of that
 Layer's Trace-class resources — content-addressed transitively via the Layer's own content hash, so
 nothing here is persisted."* That is correct. For a fixed chain, recomputation cannot disagree with
 what was asserted, so **P7 buys no soundness** — and in particular it does **not** detect D80 §2's
@@ -433,7 +433,7 @@ Both findings examined so far have the same shape, and it is not the shape D82 �
 | finding | the rule, already declared | what the code does |
 |---|---|---|
 | §5.2 — *"three semantic relations are kernel-only"* | `reflection:epistemic_status`, `allows_only` over exactly the four grades, attached to `ProgramTrace`'s `recommends` | `trace_category`'s hard-coded match; `grep epistemic_status` over `*.rs` returns **zero hits** |
-| §5.2 — *"`Verified` rests on a conjunction nothing records"* | `VerificationTrace requires proof_term + proof_system` | `emit_from_reasoning_sentence` (`witness_index.rs:262`) mints `Verified` from `is_a == ReasoningSentence` plus a hashable proposition — **no proof term, no trace, no `proof_system`** |
+| §5.2 — *"`Verified` rests on a conjunction nothing records"* | `VerificationTrace requires proof_term + proof_system` | `emit_from_reasoning_sentence` (`witness_admission.rs:262`) mints `Verified` from `is_a == ReasoningSentence` plus a hashable proposition — **no proof term, no trace, no `proof_system`** |
 
 So the bridge from findings to design is not *"invent the right shape"*. For each finding, ask:
 **is the correct rule already declared in the chain vocabulary, and is Rust routing around it?**
@@ -496,7 +496,7 @@ proof"*. A proof term is **checked, not produced** — a hand-written Lean proof
 program. The subclass forces `VerifiedResource requires derivation`, i.e. a `ProgramTrace` pointer
 for something no program ran.
 
-The relation exists to make `IsVerifiedAs` coerce to `IsDerivedAs` at lookup (`witness_index.rs:1024`,
+The relation exists to make `IsVerifiedAs` coerce to `IsDerivedAs` at lookup (`witness_admission.rs:1024`,
 D49 §4) — a **citation convenience encoded as a subsumption**. Under §5b the two answer different
 questions: `Derived` = what computed it; `Verified` = does the kernel hold a term that checks.
 Neither entails the other. Breaking the subclass costs the coercion, and the question that decides
@@ -597,7 +597,7 @@ The pieces above compose into a **live wrong answer**, reachable on the designed
 1. `DeclaredClaimGrader` writes a `reasoning:ReasoningSentence` whose own justification is
    `DeclaredEvidence(declaring)` — someone asserted it (`grade.rs:260-270`).
 2. `emit_from_reasoning_sentence` mints `IsVerifiedAs(sentence_iri, P)` for **any** `ReasoningSentence`
-   with a hashable proposition (`witness_index.rs:262`). It never inspects that sentence's own
+   with a hashable proposition (`witness_admission.rs:262`). It never inspects that sentence's own
    justification.
 3. A later sentence cites it with `JustifiedBy.verified` — `ChainRuleApplication`'s documented
    lemma-citation path, *"the prior sentence is cited with `verified`"* (`grade.rs:542`).
@@ -834,7 +834,7 @@ is the part backed by measurement.
   property lets a trace nominate its own grade and should be **deleted**. `trace_category`'s match
   goes, replaced by the shape of the evidence, not by a lookup.
 - **S4a — key `Verified` to the checked certificate.** Replace
-  `emit_from_reasoning_sentence`'s `is_a` test (`witness_index.rs:262`) with the `VerificationTrace`
+  `emit_from_reasoning_sentence`'s `is_a` test (`witness_admission.rs:262`) with the `VerificationTrace`
   the ontology already requires. Closes D81 §5.2's standing finding and the §3.5 subject problem in
   the one lane where a subject mismatch is detectable.
 - **S5 — the selection-record protocol** (§3.4). Independent; can run any time after S1.

@@ -3,7 +3,7 @@
 //
 // Identical to that fixture's conclusion except that the second summand names
 // `screen:review_absent`, which the chain does not carry. Under the old
-// `sum_l : Certificate(j1, P) -> Certificate(Sum(j1, j2), P)` this committed:
+// `sum_l : Certificate(P) -> Certificate(P) -> Certificate(P)` this committed:
 // `j2` was bound and entirely unconstrained. It must now be refused, because
 // `sum_l` demands a certificate for the second branch too and there is no
 // `IsDeclaredAs` witness to build one from.
@@ -56,8 +56,7 @@ resource screen:concl_phantom_fallback : justification:Conclusion {
             B = "urn:eigenius:demo:screen:review_absent",
             P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
         in
-        sum_l(P, Declared(A), Declared(B),
-                     declared(A, P),
+        sum_l(declared(A, P),
                      declared(B, P))),
                type_expr(alias
             A = "urn:eigenius:demo:screen:review_a",
@@ -65,6 +64,5 @@ resource screen:concl_phantom_fallback : justification:Conclusion {
             P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
         in
         justification:Certificate(
-                   justification:Sum(Declared(A), Declared(B)),
                    P )) );
 }

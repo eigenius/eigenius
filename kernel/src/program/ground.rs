@@ -38,6 +38,7 @@ pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String>
     // Check for primitive types first
     match class_iri.as_str() {
         wk::STRING => return Ok(Val::EigonPrimitive(PrimitiveType::String)),
+        wk::IRI_TYPE => return Ok(Val::EigonPrimitive(PrimitiveType::Iri)),
         wk::INTEGER => return Ok(Val::EigonPrimitive(PrimitiveType::Integer)),
         wk::FLOAT => return Ok(Val::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => return Ok(Val::EigonPrimitive(PrimitiveType::Boolean)),
@@ -273,6 +274,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
 
     match data_type_str.as_str() {
         wk::STRING => Ok(Val::EigonPrimitive(PrimitiveType::String)),
+        wk::IRI_TYPE => Ok(Val::EigonPrimitive(PrimitiveType::Iri)),
         wk::INTEGER => Ok(Val::EigonPrimitive(PrimitiveType::Integer)),
         wk::FLOAT => Ok(Val::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => Ok(Val::EigonPrimitive(PrimitiveType::Boolean)),
@@ -317,6 +319,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
             {
                 match et_iri_val.as_str() {
                     wk::STRING => Val::EigonPrimitive(PrimitiveType::String),
+                    wk::IRI_TYPE => Val::EigonPrimitive(PrimitiveType::Iri),
                     wk::INTEGER => Val::EigonPrimitive(PrimitiveType::Integer),
                     wk::FLOAT => Val::EigonPrimitive(PrimitiveType::Float),
                     wk::BOOLEAN => Val::EigonPrimitive(PrimitiveType::Boolean),
@@ -709,12 +712,112 @@ fn decode_ctors(
             };
             build_ctor_type(class_iri, params, arg_types_arr, layer)?
         };
+        let implicit = decode_implicit_args(class_iri, &name, cr, params.len(), &ctor_typ)?;
         out.push(InductiveCtorDecl {
+            implicit,
             name,
             typ: ctor_typ,
         });
     }
     Ok(out)
+}
+
+/// Resolve `core:implicit_args` — binder NAMES — against the constructor's telescope, yielding one
+/// flag per binder past the parameter prefix (D88 §4).
+///
+/// The chain carries names and the kernel wants positions, and this is the only place that
+/// translation happens. It is also where the two are checked against each other: a name binding no
+/// telescope binder, or binding more than one, is an error. A positional list could not be checked
+/// at all — every index is in range for *some* telescope — and a stale one would silently move
+/// which slot each authored argument lands on.
+///
+/// The parameter prefix is excluded because parameters are not the author's to write: they come
+/// from the expected type already.
+fn decode_implicit_args(
+    class_iri: &Iri,
+    ctor_name: &str,
+    cr: &crate::ontology::resource::Resource,
+    n_params: usize,
+    ctor_typ: &Exp,
+) -> Result<Vec<bool>, String> {
+    let listed: Vec<String> = match cr.get(&Iri::parse(wk::IMPLICIT_ARGS).unwrap()) {
+        None => return Ok(Vec::new()),
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|v| match v {
+                Value::String(s) => Ok(s.clone()),
+                other => Err(format!(
+                    "inductive type '{class_iri}.{ctor_name}' has a non-string entry in \
+                     `implicit_args`: {other:?}"
+                )),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(other) => {
+            return Err(format!(
+                "inductive type '{class_iri}.{ctor_name}' has a non-array `implicit_args`: \
+                 {other:?}"
+            ))
+        }
+    };
+    if listed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // The telescope past the parameter prefix, in order.
+    let mut binders: Vec<Option<&str>> = Vec::new();
+    let mut remaining = n_params;
+    let mut current = ctor_typ;
+    while let Exp::Pi(patt, _, body) = current {
+        if remaining > 0 {
+            remaining -= 1;
+        } else {
+            binders.push(match patt {
+                Patt::Var(n) => Some(n.as_str()),
+                _ => None,
+            });
+        }
+        current = body;
+    }
+
+    let mut flags = vec![false; binders.len()];
+    for name in &listed {
+        let hits: Vec<usize> = binders
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| (*b == Some(name.as_str())).then_some(i))
+            .collect();
+        match hits.as_slice() {
+            [i] => flags[*i] = true,
+            [] => {
+                return Err(format!(
+                    "inductive type '{class_iri}.{ctor_name}' declares `{name}` implicit, but its \
+                     telescope binds no such name past the {n_params} parameter(s). Bound there: \
+                     {}",
+                    describe_binders(&binders)
+                ))
+            }
+            more => {
+                return Err(format!(
+                    "inductive type '{class_iri}.{ctor_name}' declares `{name}` implicit, but its \
+                     telescope binds that name {} times (positions {more:?}) — which one is \
+                     elided would be a guess",
+                    more.len()
+                ))
+            }
+        }
+    }
+    Ok(flags)
+}
+
+fn describe_binders(binders: &[Option<&str>]) -> String {
+    if binders.is_empty() {
+        return "nothing".to_string();
+    }
+    binders
+        .iter()
+        .map(|b| b.unwrap_or("_"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Assemble a constructor's full type expression:
@@ -930,6 +1033,7 @@ fn decode_arg_type(class_iri: &Iri, value: &Value, layer: &Layer) -> Result<Exp,
     // Primitive type IRIs get folded to the corresponding Exp form.
     match arg_iri.as_str() {
         wk::STRING => return Ok(Exp::EigonPrimitive(PrimitiveType::String)),
+        wk::IRI_TYPE => return Ok(Exp::EigonPrimitive(PrimitiveType::Iri)),
         wk::INTEGER => return Ok(Exp::EigonPrimitive(PrimitiveType::Integer)),
         wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),

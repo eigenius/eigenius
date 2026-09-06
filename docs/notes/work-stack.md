@@ -38,7 +38,7 @@ any detour.
 >    demo passes. See D79 §7 for what each phase actually did versus what was planned — three of
 >    seven differed.
 > 2. **D80 — witness and institution machinery.** Two facts earned under a binding that survive it
->    changing: witness credit (D75 §3.4, standing test at `witness_index.rs:1184`) and institution
+>    changing: witness credit (D75 §3.4, standing test at `witness_admission.rs:1184`) and institution
 >    verdicts whose bound data was rebound. Both fire on a *linear* commit. W0 (what revocation
 >    means) → W1 binding-aware lookup → W2 AutoOnLoad baseline → W3 provenance closure.
 > 3. **D77 — merge as a pushout.** #225. Last because it needs recheckers to call, and for witnesses

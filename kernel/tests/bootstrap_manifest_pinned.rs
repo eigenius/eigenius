@@ -74,6 +74,13 @@
 //! moved NOTHING, because those edits were all `//` comments — the compiler strips them, while a
 //! `description = "…"` is a resource property and hashes.
 //!
+//! IT FIRED AGAIN ON B1 (`2026-09-05`): `core` and `justification`. `core` gained the
+//! `core:implicit_args` property and a `recommends` on `core:InductiveCtor`; `justification`
+//! declares `app`'s `A`/`B` and `sum_l`/`sum_r`'s `P` implicit, which changes those
+//! constructors' chain-resident declarations. Both are content, so both hash. The reseed this
+//! obliges is B4 in `docs/notes/next-steps-after-d88.md`, which also carries B2's merge and the
+//! three stale description strings from `#235`.
+//!
 //! IT FIRED FOR eigenius#188 A SECOND TIME (`2026-08-23`), on **`core` and
 //! `eigentt-type-fragment`**. The level algebra moved DOWN to `core:Level` and `core:result_sort`
 //! was retyped from a string (`"Prop"` / `"Set"` / `"Type:N"`) to a `core:Level` value. It had to
@@ -120,19 +127,19 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "core:f8c7f18a36095456322d47bc5a6d26264d03e8141cf3b0320f4a7077dbcde333
+const EXPECTED: &str = "core:0649ee06317973fedaf2e05f81999144a04a781d8318819a0e000f2f43eb7244
 eigentt-type-fragment:52bcfe935009fb7f32400dcb344ab884f29937692370aa4e3cc5a24d87250028
-program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
+program:429718a323b6bfcc3ff858277f73b2c15de724f9d1c1c2c2c220748295b3c726
 reflection:2455ee11766bc20134ed820e69c006951de44aa9e486abb36938d1a5361c0569
-prov:742e0152373443a999e8f6562932277fe8b37da64a2ae0ce35f03ab598f9a4d9
+prov:d8da4523a2e60ea524113b6ac3225392cd28222a3b3663c93d4c0ad466fb22e5
 obo:b515192765257daf466b28bb4154d6155461c8c2d1302f945ec785f8a00bb959
 institution:94d7ba70bdb49cde8febceb2cef67d1421076b8c336e05cfe15f6e4c6aae263b
 runtime:ada851931aeff9eed036621b306ca3eb25c0044d600c84dcad77c67973c1a22e
 formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:d6faf931474f38e64da8c4cafb1180eaf1dbf9800112466eb4cedc0279bbae28
-justification:ee21375589e59a9cfe15e2279e8d75a9c2e706eb442d63e789525ba2f2d482b6
-statistics:3ba48d9b24245a117defab3ff706945907652ce40be0a1b4a6956deb0d0070b8
+justification:7399baf8d4310557a1ebbf6df9a080fb8d44c4e6c9327b3ab57f27df4d317d38
+statistics:c0fa9ce038ad7b3a61a884c32432686eaa0a50fbc6c437cff8fbdbf6ce2dda6d
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:33277845534074177e7c9015b0669c2fad20e35a8adc592f7df362914ecb152b

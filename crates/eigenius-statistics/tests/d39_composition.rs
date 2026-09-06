@@ -69,8 +69,29 @@ fn build_composition_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    // Reasoning layer — provides justification:Certificate + justification:Term
-    // inductives the certificate type-checks against.
+    // Prov layer. This chain commits resources typed `prov:DeclarationTrace` and expects them to
+    // admit a Declared witness, and until `2026-09-06` it did that without loading `prov` at all:
+    // `trace_category` matches the class IRI as a string, so a trace class the chain never
+    // declares still grounds a witness. The test passed on a chain that could not resolve the
+    // class it was using.
+    //
+    // Loading `prov` is not required for the test to pass — the string match does not consult the
+    // chain — but a fixture should declare what it uses. The same gap, in the other direction,
+    // is how `reflection:ExternalExecutionTrace` survived in `trace_category` for months while
+    // being declared in no ontology at all.
+    let prov_resources = esl::compile(
+        include_str!("../../../ontologies/prov/prov.esl"),
+        &reflection,
+    )
+    .expect("prov.esl compiles");
+    let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
+    for r in prov_resources {
+        prov_builder.add_resource(r).unwrap();
+    }
+    let reflection = Arc::new(prov_builder.build(LayerStorage::in_memory()));
+
+    // Reasoning layer — provides the justification:Certificate inductive the
+    // certificate type-checks against.
     let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
     // Compiled against `reflection`, the layer it sits on: D85 §6.1 values name their
     // constructors' arguments, and `eigentt:Term` declares those names down the chain.

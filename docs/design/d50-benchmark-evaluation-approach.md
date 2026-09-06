@@ -1,6 +1,18 @@
 # D50 — Benchmark Evaluation Approach
 
-*Status: experimental-design memo · June 2026 · **scope narrowed 2026-06-11***
+*Status: experimental-design memo · June 2026 · scope narrowed 2026-06-11 · **DORMANT `2026-09-05`***
+
+> **Dormant, not withdrawn.** The pilot never proceeded past two tracer tasks. Those two
+> (`experiments/benchmark/tasks/sab/{16-compound-filter,18-dili-rf}`), the `mol` module and their
+> tests were deleted `2026-09-05`: they had carried no unique regression coverage since the WRN
+> publication chain took over that role, and their READMEs had gone stale twice over (naming a
+> deleted crate and the deleted `SpecStr` constructor). What survives is `bench-core.esl` and
+> `harness-ontology.esl`, which the WRN chain loads for `bench:Measurement`, `bench:Dataset` and
+> `bench:TaskOutput` — those are live and unrelated to the pilot.
+>
+> The experimental design below stands on its own. Reviving it means re-authoring the task chains
+> against the current justification surface, not restoring the deleted ones: D88 §2 and §4 changed
+> what a certificate is written as.
 
 *Companion documents: [D14 institution realisation](d14-institution-realisation.md), [D28 Lean 4 as institution](d28-lean-4-as-institution.md), [D39 justification logic (v2 draft)](d39-justification-logic.md), [D46 Prop universe + axiom framework](d46-prop-universe-and-proof-irrelevance.md), [D47 chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md), [D48 indexed inductive families](d48-indexed-inductive-families.md), [D49 ChainWitness machinery](d49-chainwitness-machinery.md), [D51 benchmark implementation gaps](d51-benchmark-implementation-gaps.md).*
 

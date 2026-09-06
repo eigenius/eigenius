@@ -17,18 +17,42 @@
 //! Reads the existing capstone proof bytes
 //! (`crates/eigenius-lean/test_resources/capstone_proof.json`) plus
 //! the capstone Lake project sources (`lean/research/capstone-proof/`)
-//! and emits a self-contained Eigon-JSON document with the five
-//! resources the audit chain walks through:
+//! and emits a self-contained Eigon-JSON document with the resources the audit chain walks
+//! through:
 //!
 //! 1. `urn:eigenius:demo:lean:Patient` — class declaration.
-//! 2. `urn:eigenius:demo:lean:patient_1` — instance (the Eigon claim
-//!    the proof discharges).
-//! 3. `urn:eigenius:demo:lean:mirror` — `LeanPackageMirror` carrying
-//!    the embedded Lake project archive.
-//! 4. `urn:eigenius:demo:lean:proof_payload` — `LeanProofPayload`
-//!    holding the verbatim `lean4export` bytes.
-//! 5. `urn:eigenius:demo:lean:proof_term` — `LeanProofTerm` wiring
-//!    everything together, including the chain-mirrored proposition.
+//! 2. `urn:eigenius:demo:lean:Healthy` — the predicate the propositions apply.
+//! 3. `urn:eigenius:demo:lean:patient_1` / `patient_2` — NAMED INDIVIDUALS. Chain axioms of type
+//!    `Patient`, so a proposition can mention one; entities, so neither carries a proposition.
+//! 4. `urn:eigenius:demo:lean:claim_patient_1_healthy` / `claim_patient_2_healthy` —
+//!    `justification:Claim`s, each carrying `Healthy(<its subject>)`.
+//! 5. `urn:eigenius:demo:lean:mirror` — `LeanPackageMirror` carrying the embedded Lake archive.
+//! 6. `urn:eigenius:demo:lean:proof_payload` — `LeanProofPayload` with the verbatim
+//!    `lean4export` bytes.
+//! 7. `urn:eigenius:demo:lean:proof_term` — the `LeanProofTerm` that HOLDS: `healthy_patient_1`
+//!    against the claim about `patient_1`.
+//!
+//! Plus a second document, `lean-verification-near-miss.eigon.json`, carrying one resource:
+//! `urn:eigenius:demo:lean:proof_term_near_miss` — the same proof and the same target
+//! declaration, bound to the claim about `patient_2`. It ships separately because an AutoOnLoad
+//! gate returning `Fails` refuses the whole commit, so a near-miss inside the main document would
+//! take the demo down with it. Separate, the refusal is the demonstration.
+//!
+//! ## What D87 §6 changed here, and why
+//!
+//! `patient_1` used to be a `Patient` INSTANCE carrying a `reflection:canonical_proposition`, and
+//! that proposition was `∀ (p : Patient), Healthy(p) → Healthy(p)` — closed, universally
+//! quantified, and never mentioning `patient_1`. So the witness the chain admitted paired a
+//! resource IRI with a proposition that said nothing about that resource: *any* IRI would have
+//! served equally. Two counts, and the second is the substantive one — a `Patient` instance is an
+//! entity rather than an assertion, and the proposition was not about it.
+//!
+//! The demo therefore showed the plumbing running, not the check discriminating: the proof was a
+//! tautology (`fun _ h => h`) about no one in particular. It now shows both. Each individual has
+//! a claim ABOUT it, one proof exists, and the near-miss binds that proof to the other claim — a
+//! proposition that is equally true and equally proved, so the refusal comes from `def_eq` and
+//! nothing else. That is `Holds` meaning *"this proof proves THIS claim"* rather than *"a theorem
+//! with this name type-checks"* (eigenius#159).
 //!
 //! The output file is loaded by `lean-verification-setup.sh` before
 //! the user opens the notebook in the browser. Regenerate any time
@@ -54,13 +78,16 @@ use eigenius_lean::institution::iris as lean_iris;
 use eigenius_lean_runtime::mirror_gen::LeanMirrorGenerator;
 use eigenius_runtime_substrate::mirror_generator::MirrorGenerator;
 
-/// The theorem the demo's proof discharges.
+/// The theorem the demo's proof discharges: `Healthy patient_1`.
 ///
 /// Not `patient_weight_nonneg`: D74's statement check manufactures the goal from the claim's
 /// `reflection:canonical_proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
-/// (a structure-field access, and `Float`). `healthy_refl` is `Prop`-valued, expressible, and
-/// provable without assuming anything. See `lean/research/capstone-proof/Capstone.lean`.
-const TARGET_THEOREM: &str = "healthy_refl";
+/// (a structure-field access, and `Float`).
+///
+/// Not `healthy_refl` either, since D87 §6. That one is `∀ p, Healthy p → Healthy p` — true of
+/// every Patient and about none of them, so the claim it was checked against could name any
+/// resource at all. This one names its subject.
+const TARGET_THEOREM: &str = "healthy_patient_1";
 
 /// The chain axiom the proposition applies — `demo:Healthy : demo:Patient -> Prop`.
 const HEALTHY_IRI: &str = "urn:eigenius:demo:lean:Healthy";
@@ -69,12 +96,26 @@ const HEALTHY_IRI: &str = "urn:eigenius:demo:lean:Healthy";
 // capstone integration-test scope) so a chain that has both committed
 // concurrently doesn't collide.
 const PATIENT_CLASS_IRI: &str = "urn:eigenius:demo:lean:Patient";
-const PATIENT_INSTANCE_IRI: &str = "urn:eigenius:demo:lean:patient_1";
+/// The subject the demo's claim is about, and the subject its proof names.
+const PATIENT_1_IRI: &str = "urn:eigenius:demo:lean:patient_1";
+/// The near-miss's subject. Equally real, equally healthy, and not what the proof proves.
+const PATIENT_2_IRI: &str = "urn:eigenius:demo:lean:patient_2";
+const CLAIM_1_IRI: &str = "urn:eigenius:demo:lean:claim_patient_1_healthy";
+const CLAIM_2_IRI: &str = "urn:eigenius:demo:lean:claim_patient_2_healthy";
 const MIRROR_IRI: &str = "urn:eigenius:demo:lean:mirror";
 const PAYLOAD_IRI: &str = "urn:eigenius:demo:lean:proof_payload";
 const TERM_IRI: &str = "urn:eigenius:demo:lean:proof_term";
+const NEAR_MISS_TERM_IRI: &str = "urn:eigenius:demo:lean:proof_term_near_miss";
 
 const OUTPUT_REL: &str = "notebooks/examples/lean-verification-demo.eigon.json";
+
+/// The near-miss ships as its OWN document, and it has to.
+///
+/// An AutoOnLoad gate returning `Fails` refuses the whole commit — measured: the orchestrator
+/// answers `InstitutionValidation … returned Fails` and lands no layer. So a near-miss inside the
+/// main document would take the demo down with it. Loaded separately, the refusal is the point:
+/// the notebook commits the verified claim, then commits this and watches the chain say no.
+const NEAR_MISS_OUTPUT_REL: &str = "notebooks/examples/lean-verification-near-miss.eigon.json";
 
 fn main() {
     let workspace = workspace_root();
@@ -116,10 +157,13 @@ fn main() {
     let resources = vec![
         patient_class_resource(),
         healthy_axiom_resource(chain()),
-        patient_instance_resource(chain()),
+        named_individual_resource(PATIENT_1_IRI, "patient_1", chain()),
+        named_individual_resource(PATIENT_2_IRI, "patient_2", chain()),
+        claim_resource(CLAIM_1_IRI, PATIENT_1_IRI, chain()),
+        claim_resource(CLAIM_2_IRI, PATIENT_2_IRI, chain()),
         mirror_resource(lib_hash, lib_json, bootstrap_head_id),
         proof_payload_resource(&proof_bytes),
-        proof_term_resource(),
+        proof_term_resource(TERM_IRI, CLAIM_1_IRI),
     ];
 
     let doc = eigon_json::serialize_document(&resources);
@@ -135,6 +179,21 @@ fn main() {
         output_path.display(),
         pretty.len(),
         resources.len()
+    );
+
+    // The near-miss, alone in its own document. `claim_patient_2_healthy` is already committed by
+    // the file above, so this adds only the proof term that binds the wrong claim to the proof.
+    let near_miss = vec![proof_term_resource(NEAR_MISS_TERM_IRI, CLAIM_2_IRI)];
+    let near_miss_path = workspace.join(NEAR_MISS_OUTPUT_REL);
+    let near_miss_doc = eigon_json::serialize_document(&near_miss);
+    let near_miss_pretty =
+        serde_json::to_string_pretty(&near_miss_doc).expect("pretty-print Eigon-JSON");
+    std::fs::write(&near_miss_path, &near_miss_pretty).expect("write near-miss fixture");
+    eprintln!(
+        "Wrote {} ({} bytes, {} resource)",
+        near_miss_path.display(),
+        near_miss_pretty.len(),
+        near_miss.len()
     );
 }
 
@@ -163,40 +222,96 @@ fn patient_class_resource() -> Resource {
     r
 }
 
-fn patient_instance_resource(chain: &Arc<eigenius_kernel::layer::Layer>) -> Resource {
-    use eigenius_kernel::nbe::term::{Exp, Patt};
+/// A NAMED INDIVIDUAL: `axiom demo:lean:<name> : demo:lean:Patient`.
+///
+/// An `eigentt:Axiom` and not a `Patient` instance, and the difference is what D87 §6 is about.
+/// The D47 decoder yields `EigonAxiom` only for that class, and an `EigonClass` cannot head an
+/// application — so only an axiom-shaped individual can appear as an argument in `Healthy(x)`.
+/// A resource that is merely `is_a: [Patient]` is an entity the term language cannot mention,
+/// which is why the old fixture's proposition quantified over all Patients instead of naming one.
+///
+/// It carries no proposition. Patients do not assert things; the `justification:Claim` beside it
+/// does, and this is what that claim is about.
+fn named_individual_resource(
+    individual_iri: &str,
+    short_name: &str,
+    chain: &Arc<eigenius_kernel::layer::Layer>,
+) -> Resource {
+    use eigenius_kernel::nbe::term::Exp;
     use eigenius_kernel::program::eigentt_type_mirror::{encode_type, CodecNames};
 
-    // The Eigon claim the proof discharges.
-    let mut r = Resource::new(iri(PATIENT_INSTANCE_IRI));
+    let mut r = Resource::new(iri(individual_iri));
     r.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(
-            iri(PATIENT_CLASS_IRI).as_str().to_string(),
+            "urn:eigenius:eigentt:Axiom".to_string(),
         )]),
     );
+    r.set(iri(wk::SHORT_NAME), Value::String(short_name.to_string()));
+    r.set(
+        iri(wk::DESCRIPTION),
+        Value::String(format!(
+            "A named individual of demo:lean:Patient. Mirrored in Lean as `def \
+             EigeniusFFI.eigenius.demo.lean.{short_name}`, so a proposition naming it \
+             externalizes to a Const the export declares."
+        )),
+    );
+    // The individual's TYPE is the class itself — this is an inhabitant, not a predicate.
+    let names = CodecNames::from_layer(chain);
+    r.set(
+        iri("urn:eigenius:eigentt:axiom_statement"),
+        encode_type(&Exp::EigonClass(iri(PATIENT_CLASS_IRI)), &names).expect("Patient encodes"),
+    );
+    r
+}
 
-    // `∀ (p : Patient), Healthy(p) -> Healthy(p)` — what the Lean proof proves, as an EigenTT
-    // term. D74 turns THIS into the Lean goal and compares it to `healthy_refl`'s type with
-    // `def_eq`, which is what binds the proof to this claim (eigenius#159).
-    //
-    // Required, not optional: the institution rejects a claim carrying no
-    // `canonical_proposition` rather than falling back to the name-level check, because "a
-    // theorem with this name type-checks" is the verdict #159 opened against.
-    let healthy = || {
-        Exp::App(
-            Box::new(Exp::EigonAxiom(iri(HEALTHY_IRI))),
-            Box::new(Exp::Var("p".into())),
-        )
-    };
-    let prop = Exp::Pi(
-        Patt::Var("p".into()),
-        Box::new(Exp::EigonClass(iri(PATIENT_CLASS_IRI))),
-        Box::new(Exp::Arrow(Box::new(healthy()), Box::new(healthy()))),
+/// A `justification:Claim` carrying `Healthy(<subject>)` — a proposition ABOUT its subject.
+///
+/// `justification:Claim` and not `justification:Conclusion`: a Conclusion `requires
+/// justification:judgement`, the kernel's own `holds(kernel, c, Certificate(j, P))`, and this
+/// claim's warrant is a Lean proof rather than a certificate over chain grounds. D87 §6 reached
+/// for `Conclusion` because `subject_iri` was the only way to say what a ∀-quantified proposition
+/// was about; with the proposition naming its subject directly, `Claim` is the class the ontology
+/// already describes — *"a chain-resident resource carrying a proposition … cited as a ground"*.
+fn claim_resource(
+    claim_iri: &str,
+    subject_iri: &str,
+    chain: &Arc<eigenius_kernel::layer::Layer>,
+) -> Resource {
+    use eigenius_kernel::nbe::term::Exp;
+    use eigenius_kernel::program::eigentt_type_mirror::{encode_type, CodecNames};
+
+    let mut r = Resource::new(iri(claim_iri));
+    r.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::String(
+            "urn:eigenius:justification:Claim".to_string(),
+        )]),
+    );
+    r.set(
+        iri("urn:eigenius:prov:was_attributed_to"),
+        Value::String("urn:eigenius:prov:agent:eigenius_core_team".to_string()),
+    );
+    r.set(
+        iri(wk::DESCRIPTION),
+        Value::String(format!(
+            "The claim that {subject_iri} is Healthy. Its proposition mentions its subject, which \
+             is what makes the (resource, proposition) pairing mean something: swap the subject \
+             and the proposition changes with it."
+        )),
+    );
+
+    // `Healthy(subject)` — `App(EigonAxiom(Healthy), EigonAxiom(subject))`. Every node is inside
+    // D74 §4.1, and it externalizes to `EigeniusFFI.…Healthy EigeniusFFI.…<subject>`.
+    let prop = Exp::App(
+        Box::new(Exp::EigonAxiom(iri(HEALTHY_IRI))),
+        Box::new(Exp::EigonAxiom(iri(subject_iri))),
     );
     let names = CodecNames::from_layer(chain);
-    let encoded = encode_type(&prop, &names).expect("the demo proposition is inside the D47 codec");
-    r.set(iri(wk::CANONICAL_PROPOSITION), encoded);
+    r.set(
+        iri(wk::CANONICAL_PROPOSITION),
+        encode_type(&prop, &names).expect("the demo proposition is inside the D47 codec"),
+    );
     r
 }
 
@@ -345,8 +460,14 @@ fn proof_payload_resource(bytes: &[u8]) -> Resource {
     r
 }
 
-fn proof_term_resource() -> Resource {
-    let mut r = Resource::new(iri(TERM_IRI));
+/// A `LeanProofTerm` binding the one payload and the one target declaration to `claim_iri`.
+///
+/// Two are emitted, differing only in that last slot. `TARGET_THEOREM` proves `Healthy patient_1`,
+/// so the term naming the `patient_1` claim Holds and the one naming the `patient_2` claim Fails —
+/// on `def_eq` against the target's type, with both propositions true and both proved in the same
+/// export. Nothing about name availability is what separates them.
+fn proof_term_resource(term_iri: &str, claim_iri: &str) -> Resource {
+    let mut r = Resource::new(iri(term_iri));
     r.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(
@@ -363,7 +484,7 @@ fn proof_term_resource() -> Resource {
     );
     r.set(
         iri(lean_iris::PROP_CLAIM_IRI),
-        Value::String(PATIENT_INSTANCE_IRI.to_string()),
+        Value::String(claim_iri.to_string()),
     );
     r
 }

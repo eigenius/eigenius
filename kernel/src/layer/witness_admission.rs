@@ -26,12 +26,47 @@
 //! carrying no reason. Direct lookup is O(1) in memory and holds the specific resource at the point
 //! of the decision (D66 slice 0).
 //!
-//! **What is being decided here is whether to assert an axiom.** The `witness:Is*As` types have zero
-//! constructors (`ontologies/justification/justification.esl:52`), so no term inhabits them and this
-//! function is the only way one comes into existence — see `Val::ChainWitness` in `nbe/val.rs` for
-//! the full anatomy. Consequently **this module is inside the TCB**: everything above a witness is
-//! type-checked, the witness itself is postulated, and a wrong admission cannot be caught
-//! downstream because an axiom has no proof to re-check.
+//! **A decision procedure, not an admission decision.** The `witness:Is*As` types have zero
+//! constructors, so no term inhabits them and this function is the only way one comes into
+//! existence — see `Val::ChainWitness` in `nbe/val.rs` for the full anatomy. This module used to
+//! call itself part of the TCB on that basis: *"the witness itself is postulated, and a wrong
+//! admission cannot be caught downstream because an axiom has no proof to re-check."*
+//!
+//! **The index — when there was one — was a cache, and that is what closes P7's open question** (`judgements-warrants-
+//! build-plan.md` §"Open after P7": *"the index is a cache over relations — rebuildable,
+//! droppable"*). Nothing about a witness is stored; every answer is recomputed from the layer's
+//! Trace resources and the propositions they name. Delete this module's caches and the answers do
+//! not change.
+//!
+//! **The CONSTANT SPECIFICATION is not, and must not be.** An earlier version of this comment said
+//! the TCB claim "stops being true" for all three families. That over-generalised.
+//! `judgements-and-warrants.tex` §"Witnesses and the Trusted Computing Base" is explicit: *"The
+//! Verified state is provable, whereas Declared and Observed states are postulated … Postulation is
+//! the correct semantic operation for attributions: verification is impossible because an
+//! attribution merely asserts that an agent made a claim or that a physical recording occurred."*
+//! And it names the TCB as the kernel's checker, each hosted external checker, each comorphism,
+//! **and the constant specification governing attributions**.
+//!
+//! Recomputing the *lookup* does not help there: it recomputes the same trusted assertion. The
+//! chain says an agent declared `P`; nothing can check that they did. So:
+//!
+//! - `Declared` and `Observed` — the lookup is a decision procedure, the FACT is postulated. In the
+//!   TCB permanently, and correctly.
+//! - `Verified` — the paper classifies it as *provable*, and D87 is what made the proof actually
+//!   re-runnable: the trace now carries the checker's `prov:judgement` plus the five inputs the
+//!   verdict is a deterministic function of, so any party can re-run `check_proof` and get the same
+//!   answer — see `a_verdict_is_recomputable_from_what_the_trace_pins`.
+//!
+//! **The types stay declared and the premises stay on the constructors.** Removing
+//! `witness:IsVerifiedAs` was proposed and does not work: `Certificate.verified` without its
+//! premise is unconditional, so `Verified(iri)` would be certifiable for any proposition and the
+//! grade assertable by anyone writing a certificate.
+//!
+//! **Two caches sit on top, and both fail conservatively.** `LayerHandle::has_witness_candidates`
+//! prunes a layer that stamped no candidate and deserializes as `true`, so an old handle is probed
+//! rather than skipped; [`any_trace_targeting`] treats a poisoned lock as in-flight and falls back
+//! to the full scan. Each turns a wrong guess into a refused certificate, never an admitted one,
+//! which is what "droppable" means concretely: delete either and the answers do not change.
 //!
 //! Lookup is the parent-chain walk: `lookup_chain_witness(&Layer, &key)` tries each Layer top-down,
 //! returning true on first hit. First-hit-wins is sound because Layer immutability means a
@@ -170,13 +205,28 @@ pub fn is_witness_candidate(resource: &Resource) -> bool {
 
 /// The witness category a Trace class attests, or `None` if the class is not a Trace.
 ///
-/// All four grounding families are here (eigenius#200). `VerificationTrace` was absent until
+/// All THREE grounding families are here (eigenius#200), across four Trace classes: `ProgramTrace`
+/// grounds nothing. It said "four" grounding families until P4's three-grounds change removed
+/// `Derived`, and "five" Trace classes until `2026-09-05` removed the arm for
+/// `reflection:ExternalExecutionTrace`.
+///
+/// **That fifth arm named a class no ontology declared.** eigenius#205 minted the class so a
+/// required `prov:derivation` slot — typed at `prov:ProductionTrace`, so unable to name the
+/// `DeclarationTrace` a transcription carries — could be filled. The requirement was then replaced
+/// by `prov:was_generated_by`, which is uniform across a kernel run and a transcribed one, and the
+/// class went with it. The constant, this arm and the remedy string below outlived it. Nothing in
+/// the tree was ever an instance: the WRN chain names it only in comments explaining what it
+/// stopped doing, and the one test that built one used `LayerBuilder::build`, which does not
+/// validate. The two namespaces it was spelled in — `reflection:` in the constant, `prov:` in
+/// `witness:IsDeclaredAs`'s description — never agreed either. `VerificationTrace` was absent until
 /// `2026-08-21` on the reasoning that it would arrive with D49 §7's comorphism-reified
-/// `VerifiedPropositionView`. That deferred the wrong half: the view is how a LEAN proof's
-/// proposition reaches the trace, not what makes a `VerificationTrace` admit a witness. The trace
-/// already names its target through `prov:resource`, so `emit_from_trace` reads the target's
-/// `canonical_proposition` for it exactly as it does for the other three — nothing about the
-/// Verified category needs special handling here.
+/// `VerifiedPropositionView` — a chain artifact holding a Lean proof's proposition in EigenTT form.
+/// That deferred the wrong half, and the view is now deleted: it is how a Lean proof's proposition
+/// would have reached the trace, not what makes a `VerificationTrace` admit a witness, and D74's
+/// forward externalization replaced the route it served (D51 §3). The trace already names its
+/// target through `prov:resource`, so `emit_from_trace` reads the target's `canonical_proposition`
+/// for it exactly as it does for the other three — nothing about the Verified category needs
+/// special handling here.
 ///
 /// The consequence of the omission was a witness with no artifact: `emit_from_reasoning_sentence`
 /// synthesised a Verified key straight from the sentence, so every Verified witness on every chain
@@ -201,7 +251,6 @@ fn trace_category(class_iri: &str) -> Option<WitnessCategory> {
         // it. This arm was the one place the old four-category split had the right instinct:
         // it already refused to call a run record a ground of its own kind. Now that
         // `ProgramTrace` grounds nothing either, the two agree.
-        wk::EXTERNAL_EXECUTION_TRACE => Some(WitnessCategory::Declared),
         _ => None,
     }
 }
@@ -330,6 +379,33 @@ fn emit_from_trace(
     category: WitnessCategory,
 ) -> Option<WitnessKey> {
     let target_iri = resolve_target_iri(trace)?;
+    // D87 §7 — a `VerificationTrace` carries the checker's RESULT, and the result is what admits
+    // the witness. `prov:judgement` is `holds(logic, t, P)`; `P` is what a checker verified `t`
+    // against, so the key is built from the judgement's own type rather than from what the target
+    // resource happens to say about itself.
+    //
+    // This is why `Verified` stopped being the family the index was a soundness boundary for. The
+    // trace used to be a note that a check RAN, and the grade rested on the note; now it carries
+    // the judgement, whose inputs the trace also pins (`prov:permitted_axioms`,
+    // `prov:checker_identity`), so the verdict is recomputable rather than postulated.
+    //
+    // The refuse-a-certificate check is [`emit_from_reasoning_sentence`]'s, for the same reason: a
+    // judgement whose type is a `Certificate(...)` says a checker verified the CERTIFICATE, which
+    // establishes nothing about the proposition, and minting `Verified` from one launders a
+    // conclusion resting on nothing but `Declared(...)` into a proof one citation downstream.
+    if category == WitnessCategory::Verified {
+        if let Some(stored) = Iri::parse(wk::PROV_JUDGEMENT)
+            .ok()
+            .and_then(|i| trace.get(&i))
+        {
+            let prop_hash = judgement_proposition_hash(layer, trace, stored)?;
+            return Some(WitnessKey {
+                category,
+                iri: target_iri,
+                prop_hash,
+            });
+        }
+    }
     let target_resource = layer.resolve(&target_iri)?;
     let prop_hash = target_proposition_hash(layer, &target_iri, &target_resource)?;
     Some(WitnessKey {
@@ -337,6 +413,35 @@ fn emit_from_trace(
         iri: target_iri,
         prop_hash,
     })
+}
+
+/// The proposition a `prov:judgement` establishes, hashed — or `None`, with a reason logged.
+fn judgement_proposition_hash(layer: &Layer, trace: &Resource, stored: &Value) -> Option<[u8; 32]> {
+    let trace_iri = trace.id().cloned()?;
+    let j = match crate::program::eigentt_type_mirror::decode_judgement(stored, layer) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::warn!(
+                { field::OPERATION } = operation::WITNESS_DECODE,
+                { field::ERROR_KIND } = "trace_judgement_decode_failed",
+                { field::ERROR_MESSAGE } = %format!("{e:?}"),
+                resource_iri = %trace_iri,
+                "a VerificationTrace's judgement did not decode; no Verified witness admitted"
+            );
+            return None;
+        }
+    };
+    if crate::program::eigentt_type_mirror::certificate_indices(&j.typ).is_some() {
+        tracing::warn!(
+            { field::OPERATION } = operation::WITNESS_DECODE,
+            { field::ERROR_KIND } = "trace_judgement_is_a_certificate",
+            resource_iri = %trace_iri,
+            "a VerificationTrace's judgement holds a certificate judgement, not a proof of the \
+             proposition; no Verified witness admitted"
+        );
+        return None;
+    }
+    hash_proposition_exp(&j.typ, &CodecNames::from_layer(layer)).ok()
 }
 
 /// The proposition a trace's target canonically asserts, hashed.
@@ -373,8 +478,7 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
             .and_then(|i| target.get(&i))
         {
             if let Ok(j) = crate::program::eigentt_type_mirror::decode_judgement(stored, layer) {
-                if let Some((_, prop)) =
-                    crate::program::eigentt_type_mirror::certificate_indices(&j.typ)
+                if let Some(prop) = crate::program::eigentt_type_mirror::certificate_indices(&j.typ)
                 {
                     return hash_proposition_exp(prop, &CodecNames::from_layer(layer)).ok();
                 }
@@ -534,20 +638,39 @@ pub fn synthesize_chain_witness(
     if lookup_chain_witness(layer, &key) {
         Ok(crate::nbe::val::Val::ChainWitness(key))
     } else {
+        // P7 names this "the system's most-used error message", and what makes it usable is that
+        // it says what to COMMIT, not merely that a lookup missed. The remedy differs by family
+        // and used to be stated as one: every miss recommended a matching
+        // `reflection:canonical_proposition`, which is the fix for two of the three and no help
+        // at all for the third — nobody reaches `Verified` by editing a property.
+        let (ctor, remedy) = match category {
+            WitnessCategory::Declared => (
+                "declared",
+                format!(
+                    "commit a prov:DeclarationTrace whose prov:resource is {iri}, and give {iri}                      a reflection:canonical_proposition matching the proposition above"
+                ),
+            ),
+            WitnessCategory::Observed => (
+                "observed",
+                format!(
+                    "commit a prov:ObservationTrace whose prov:resource is {iri}, and give {iri} a                      reflection:canonical_proposition matching the proposition above"
+                ),
+            ),
+            // No property an author can write reaches this one, which is the point of the grade.
+            WitnessCategory::Verified => (
+                "verified",
+                format!(
+                    "have a checker verify a proof of the proposition about {iri}: the witness is                      keyed off the prov:judgement on a prov:VerificationTrace, which the                      institution that ran the check emits. It cannot be reached by editing a                      property — a hand-authored holds(logic_lean4, ...) is refused at commit"
+                ),
+            ),
+        };
         Err(format!(
-            "no admitted {} witness for IRI {} with the supplied proposition; \
-             the resource at {} must be committed with reflection:canonical_proposition \
-             matching the proposition (or the proposition must be Asserts(<iri>) — the \
-             default; the Asserts default lands in Phase 5b once D39's core-ontology \
-             Asserts class is authored) before this justification:Certificate.{} constructor is well-typed",
+            "no admitted {} witness for IRI {} with the supplied proposition, so the              justification:Certificate.{} constructor citing it is not well-typed. To admit it:              {}. Where the resource carries no canonical_proposition the default proposition is              Asserts({}), so a certificate must cite that instead.",
             category.label(),
             iri,
+            ctor,
+            remedy,
             iri,
-            match category {
-                WitnessCategory::Declared => "declared",
-                WitnessCategory::Observed => "observed",
-                WitnessCategory::Verified => "verified",
-            },
         ))
     }
 }
@@ -621,7 +744,7 @@ mod tests {
     }
 
     #[test]
-    fn build_witness_index_emits_declared_for_declaration_trace() {
+    fn emit_from_trace_emits_declared_for_declaration_trace() {
         let mut b = LayerBuilder::new(
             "test",
             Some(std::sync::Arc::clone(crate::testing::term_chain())),
@@ -650,7 +773,7 @@ mod tests {
     }
 
     #[test]
-    fn build_witness_index_no_emission_when_canonical_prop_missing() {
+    fn emit_from_trace_no_emission_when_canonical_prop_missing() {
         // Phase-4 behaviour: no Asserts(iri) default yet (deferred to
         // Phase 5). When the target lacks `canonical_proposition`, the
         // witness emitter skips emission.
@@ -767,7 +890,7 @@ mod tests {
     }
 
     #[test]
-    fn build_witness_index_emits_asserts_default_when_canonical_prop_missing() {
+    fn emit_from_trace_emits_asserts_default_when_canonical_prop_missing() {
         // With core ontology loaded, a DeclarationTrace pointing at a
         // target that lacks canonical_proposition still emits a witness
         // — the witness key uses Asserts(target_iri) as the proposition.
@@ -921,15 +1044,18 @@ mod tests {
         // premise. Nothing here is proved.
         let j = encode_type(
             &Exp::InductiveCtor(
-                iri("urn:eigenius:justification:Term"),
-                "Declared".into(),
-                vec![Exp::LitString("urn:eigenius:test:p3:premise".into())],
+                iri("urn:eigenius:justification:Certificate"),
+                "declared".into(),
+                vec![
+                    Exp::LitString("urn:eigenius:test:p3:premise".into()),
+                    prop.clone(),
+                ],
             ),
             crate::testing::codec_names(),
         )
         .unwrap();
         let p = encode_type(&prop, crate::testing::codec_names()).unwrap();
-        let typ = certificate_type(&j, &p, crate::testing::codec_names()).unwrap();
+        let typ = certificate_type(&p, crate::testing::codec_names()).unwrap();
         let judgement = encode_judgement(
             "urn:eigenius:eigentt:logic_kernel",
             &j,
@@ -1059,14 +1185,17 @@ mod tests {
             let p = encode_type(&prop, crate::testing::codec_names()).unwrap();
             let j = encode_type(
                 &Exp::InductiveCtor(
-                    iri("urn:eigenius:justification:Term"),
-                    "Declared".into(),
-                    vec![Exp::LitString("urn:eigenius:test:premise".into())],
+                    iri("urn:eigenius:justification:Certificate"),
+                    "declared".into(),
+                    vec![
+                        Exp::LitString("urn:eigenius:test:premise".into()),
+                        prop.clone(),
+                    ],
                 ),
                 crate::testing::codec_names(),
             )
             .unwrap();
-            let typ = certificate_type(&j, &p, crate::testing::codec_names())
+            let typ = certificate_type(&p, crate::testing::codec_names())
                 .expect("certificate type encodes");
             let stored = encode_judgement(
                 "urn:eigenius:eigentt:logic_kernel",
@@ -1078,7 +1207,7 @@ mod tests {
 
             let judgement = decode_judgement(&stored, &layer)
                 .unwrap_or_else(|e| panic!("{label}: judgement must decode: {e}"));
-            let (_, projected) = certificate_indices(&judgement.typ)
+            let projected = certificate_indices(&judgement.typ)
                 .unwrap_or_else(|| panic!("{label}: judgement type must be a Certificate"));
             let via_judgement = hash_proposition_exp(projected, crate::testing::codec_names())
                 .expect("projected proposition hashes");
@@ -1257,6 +1386,46 @@ mod tests {
         assert!(
             err.contains("justification:Certificate.declared"),
             "diagnostic should name the consuming constructor: {err}"
+        );
+        assert!(
+            err.contains("prov:DeclarationTrace"),
+            "and the trace that admits it — a canonical_proposition alone admits nothing: {err}"
+        );
+    }
+
+    /// The remedy a miss names is the one that works for THAT family.
+    ///
+    /// P7 calls this the system's most-used error message, and it stated one remedy for all
+    /// three: commit a matching `reflection:canonical_proposition`. That is the fix for two of
+    /// them and no help at all for `Verified`, where no property an author can write reaches the
+    /// grade — which is the point of the grade. A diagnostic that sends someone to edit a
+    /// property they can edit, for a result only a checker can produce, costs more than saying
+    /// nothing.
+    #[test]
+    fn a_verified_miss_does_not_send_the_author_to_edit_a_property() {
+        let layer = LayerBuilder::new(
+            "test",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        )
+        .build(LayerStorage::in_memory());
+        let target_iri = iri("urn:eigenius:example:unproved");
+        let err = synthesize_chain_witness(
+            &layer,
+            WitnessCategory::Verified,
+            &target_iri,
+            &Exp::sort(0),
+        )
+        .expect_err("witness must miss when nothing admits it");
+
+        assert!(err.contains("IsVerifiedAs"), "names the family: {err}");
+        assert!(err.contains(target_iri.as_str()), "names the IRI: {err}");
+        assert!(
+            err.contains("prov:VerificationTrace") && err.contains("prov:judgement"),
+            "and points at what actually admits it: {err}"
+        );
+        assert!(
+            err.contains("refused at commit"),
+            "and says why writing one by hand will not work: {err}"
         );
     }
 

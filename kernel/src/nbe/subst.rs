@@ -194,6 +194,7 @@ fn subst_inner(
         | Exp::Unit
         | Exp::EigonClass(_)
         | Exp::EigonAxiom(_)
+        | Exp::Checked(_)
         | Exp::EigonPrimitive(_)
         | Exp::EigonResource(_)
         | Exp::LitString(_)

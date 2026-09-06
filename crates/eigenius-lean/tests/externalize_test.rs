@@ -116,6 +116,36 @@ fn a_proposition_outside_the_fragment_is_refused_by_name() {
     }
 }
 
+/// D87 §4.2 — a checked-proof reference is refused, and the refusal names it.
+///
+/// It is evidence, not a proposition: it names the artifact nanoda examined, so there is nothing
+/// on the Lean side to translate it INTO. Externalization manufactures a goal from a chain
+/// proposition, and `Checked` can only ever appear as `holds`'s `term` argument, never inside the
+/// `type` this walks — so meeting one here means a caller put evidence where a proposition goes.
+#[test]
+fn a_checked_proof_reference_is_refused_by_name() {
+    let v = check(
+        "PUnit.unit",
+        &Exp::Checked(
+            eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:demo:lean:proof_payload")
+                .unwrap(),
+        ),
+    );
+    match v {
+        Verdict::Fails { diagnostic } => {
+            assert!(
+                diagnostic.contains("Checked"),
+                "the refusal must name the variant; got {diagnostic}"
+            );
+            assert!(
+                diagnostic.contains("evidence"),
+                "and say why it is out — it is evidence, not a proposition; got {diagnostic}"
+            );
+        }
+        other => panic!("a checked-proof reference must not Hold as a proposition; got {other:?}"),
+    }
+}
+
 /// D74 §6.5 — a `Level::Param` naming something the target does not declare is refused here
 /// rather than left to `def_eq`, which would compare one parameter against a different one and
 /// fail with nothing to say that universes were the cause.

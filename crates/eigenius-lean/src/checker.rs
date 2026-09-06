@@ -229,8 +229,27 @@ fn check_statement(
             })
             .collect();
 
-        let declared: Vec<_> = export.declars.keys().copied().collect();
-        let names = externalize::NameTable::build(tc.ctx, &declared);
+        // **Only the declarations the target's own environment holds.** `with_tc_and_declar` runs
+        // under `EnvLimit::ByName(target)`, which cuts the environment off AT the target's index,
+        // so `def_eq` can reach nothing declared later. Building the name table from ALL of them
+        // instead let externalization resolve a constant `def_eq` would then fail to find, and
+        // nanoda's `infer_const` answers that with a PANIC — caught upstream and reported as "the
+        // statement check panicked", which says nothing a reader can act on.
+        //
+        // Resolving against the same set is what turns that into `UnknownConstant`, naming both
+        // the chain IRI and the Lean name it resolved to. That is the module's own discipline (see
+        // `externalize`'s header: *"a constant the export does not declare cannot be `def_eq` to
+        // anything in it"*, resolved up front for exactly this reason); it just was not applied to
+        // the environment limit.
+        //
+        // Measured on the notebook demo's near-miss: a claim about `patient_2` checked against
+        // `healthy_patient_1`, where `patient_2` is declared LATER in the same export.
+        let limit = export
+            .declars
+            .get_index_of(&info.name)
+            .unwrap_or(export.declars.len());
+        let in_scope: Vec<_> = export.declars.keys().copied().take(limit).collect();
+        let names = externalize::NameTable::build(tc.ctx, &in_scope);
 
         // Universe arity per declaration. A `Const` whose level list does not match makes
         // nanoda's `subst_expr_levels` assert — a panic inside `def_eq`, not a `false` — so
@@ -238,6 +257,7 @@ fn check_statement(
         let arities: std::collections::HashMap<_, _> = export
             .declars
             .iter()
+            .take(limit)
             .map(|(n, d)| (*n, tc.ctx.read_levels(d.info().uparams).len()))
             .collect();
 

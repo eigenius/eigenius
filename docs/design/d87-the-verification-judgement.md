@@ -15,7 +15,7 @@ are all closed — 1 in §6, 2 and 3 in §9 itself.*
 ## 1. The defect
 
 eigenius#160 made a checked Lean proof reach the *verified* grade by emitting a `prov:VerificationTrace`.
-`witness_index::emit_from_trace` follows the trace's `prov:resource` to the claim, hashes the
+`witness_admission::emit_from_trace` follows the trace's `prov:resource` to the claim, hashes the
 claim's `reflection:canonical_proposition`, and admits `IsVerifiedAs`. Nothing re-checks anything;
 the kernel takes the trace's word that nanoda ran.
 
@@ -44,7 +44,7 @@ values are declared, and the second is named for this: `logic_kernel`, and `logi
 re-checked in process by the `nanoda_lib` kernel reimplementation."*
 
 The route is already implemented for one resource class. `emit_from_reasoning_sentence`
-(`witness_index.rs:291`) reads `justification:proof` off a `justification:Conclusion`, decodes the
+(`witness_admission.rs:291`) reads `justification:proof` off a `justification:Conclusion`, decodes the
 judgement, **refuses it when the type is a `Certificate`** — a certificate judgement establishes
 nothing about the proposition — and keys `Verified` off the proof's own type.
 
@@ -107,6 +107,42 @@ wrong theorem soundly. A conflation carried forever is worse than one former add
 fragment, and the fragment is small precisely so that additions are deliberate.
 
 The class settles **who may assert**. It does not make the assertion checkable — that is §5.
+
+### 4.3 What `Checked(a)` does at the kernel's own check, and why input cannot forge one
+
+`eigentt:Judgement`'s contract is that *"a slot ranging over this type is checked in CHECK mode —
+decode both fields, check `type` is a type, check `term` against it"*, and
+`validation/rules/eigentt_value.rs` does exactly that for **every** judgement, whatever its `logic`.
+So `holds(logic_lean4, Checked(a), P)` raises a question §4.2 leaves implicit: does the kernel check
+`Checked(a)` against `P` in its own type theory?
+
+**It must not, and it must not succeed vacuously either.** Checking it would mean re-proving `P`
+without the export — impossible. Admitting it for any `P` would make `Verified` assertable by
+anybody who writes the judgement, which is the laundering the two-layer separation exists to
+forbid.
+
+**`Checked` therefore fails the kernel's check, deliberately, and that is the whole enforcement.**
+The kernel has no proof of `P` and will not manufacture one, so a *hand-authored* lean4 judgement is
+refused at commit.
+
+**An institution-emitted one is never asked.** `structural_validate` runs **before**
+`autoonload_dispatch` in `commit::pipeline`, and the followup slice is `[build, persist]` with no
+validation at all — *"kernel-emitted content … re-validation is redundant and forces the ontology to
+be permissive enough for every shape the kernel emits."* So the judgement the institution mints
+after `check_proof` returned `Holds` is not re-checked in a theory that could not check it, while
+the one an author writes is.
+
+**This is the mechanism #205 said did not exist.** §4.2's third row records that no *"kernel-only,
+refused from input"* mechanism exists anywhere in the validator, and takes that as the reason to
+reject the same-class-plus-a-property option. It exists here without being built: the emission path
+and the input path already differ in whether they validate, so the property falls out of the
+pipeline's shape rather than from a guard added to it. What `Checked` contributes on top is what
+§4.2 argued for — the distinction is structural, so `Declared(a)` and `Verified(a)` cannot name the
+same thing and a reader holding only the term knows what it is.
+
+**It does not make the judgement true, and §5 is still what does.** A judgement the kernel minted is
+a record that nanoda accepted the export. Anyone can re-run that check; §5 is what pins the two
+inputs that make the re-run reach the same verdict.
 
 ## 5. Re-decidability, not attestation
 
@@ -187,8 +223,62 @@ proposition per resource"* — and here the resource is a hook the proposition h
 `recommends justification:proof` — the `holds(logic, t, P)` slot §2 wants — and carries
 `justification:subject_iri`, described as *"The principal Resource this conclusion is about.
 **Aboutness, not logic**: no judgement carries it."* That is exactly the distinction the fixture
-collapses. The claim should be a `Conclusion` whose proposition is the ∀-statement and whose
-`subject_iri` is `patient_1`.
+collapses.
+
+**Built `2026-09-05`, and it came out as `justification:Claim` rather than `Conclusion`.** This
+section reached for `Conclusion` because `subject_iri` was the only way to say what a
+∀-quantified proposition was about. Make the proposition name its subject instead and that need
+disappears, while `Conclusion`'s *required* `justification:judgement` — the kernel's own
+`holds(kernel, c, Certificate(j, P))` — has nothing honest to hold for a claim whose warrant is a
+Lean proof rather than a certificate over chain grounds. `justification:Claim` is the class the
+ontology already describes for this: *"a chain-resident resource carrying a proposition … cited as
+a ground"*, requiring exactly `reflection:canonical_proposition`. It also moves the eigenius#159
+refusal one step earlier — a claim with no proposition now fails VALIDATION, for every claim on
+every chain, rather than being refused by an institution when a Lean proof happens to name it.
+
+Three resources, three jobs:
+
+| resource | class | what it is |
+|---|---|---|
+| `demo:lean:Patient` | `core:Class` | the type |
+| `demo:lean:patient_1` | `eigentt:Axiom` | a named individual — an entity, carrying no proposition |
+| `demo:lean:claim_patient_1_healthy` | `justification:Claim` | the assertion, carrying `Healthy(patient_1)` |
+
+The individual is an `eigentt:Axiom` and not an instance of `Patient` because only an axiom-shaped
+resource can appear as an argument in a term: `resolve_const_ref` yields an applicable head for
+that class and not for a bare instance. A resource that is merely `is_a: [Patient]` is something
+the term language **cannot mention** — which is why the old fixture had to quantify over all
+Patients instead of naming one. That is the mechanical reason behind this section's two counts.
+
+### What building it found
+
+Three things, none of them visible from reading:
+
+1. **The predicate was constant, and that is worse than the quantification.** `Healthy` was
+   `def Healthy (_p) : Prop := True`. With it, `Healthy patient_1` and `Healthy patient_2` are
+   both definitionally `True`, so `def_eq` accepts either claim against either proof and **no
+   arrangement of subjects can make the demo discriminate**. Measured: the first near-miss came
+   back `Holds`. `Healthy p` is now `50 ≤ p.restingHr ∧ p.restingHr ≤ 100`, over a `Patient` with
+   `Nat` fields — `Nat` because `Float` operations are `@[extern]` and reduce to nothing in the
+   kernel, so no proposition about a `Float` field is provable by `decide`.
+
+   The mirror's own comment had asserted the opposite — *"the body is irrelevant to the statement
+   being checked"* — which was true of `healthy_refl`, an implication compared syntactically, and
+   false the moment the claim became an application.
+
+2. **`check_statement` resolved names against declarations `def_eq` could not reach.** It runs
+   under `EnvLimit::ByName(target)`, which cuts the environment off at the target's index, while
+   the `NameTable` was built from *every* declaration in the export. So externalization resolved a
+   constant `def_eq` then failed to find, and nanoda answers that with a **panic** — caught
+   upstream and reported as "the statement check panicked", which says nothing a reader can act
+   on. Resolving against the same set turns it into `UnknownConstant`, naming both the chain IRI
+   and the Lean name. That is the module's own discipline (*"a constant the export does not
+   declare cannot be `def_eq` to anything in it"*, resolved up front for exactly this reason); it
+   had not been applied to the environment limit.
+
+3. **A `Fails` verdict refuses the whole commit**, so the near-miss cannot ship inside the demo's
+   document — it would take the demo down with it. It is a second one-resource file, and the
+   refusal is the demonstration: load the claim that verifies, then load the one that does not.
 
 **This resolves §9's open question 1.** It was framed as *"where does the judgement live when the
 claim is not a `justification:Conclusion`"* — presupposing a `Patient` instance is a legitimate
@@ -213,19 +303,90 @@ its subject, and a near-miss variant that must fail, are what would show the mec
 |---|---|---|
 | what the institution emits on `Holds` | `prov:VerificationTrace` | the trace **plus** `holds(logic_lean4, Checked(a), P)` |
 | the trace's role | the thing `Verified` is read from | provenance: when the check ran, against which payload, under which axiom set, by which checker build |
-| how `Verified` is admitted | `emit_from_trace` hashes the claim's proposition | the judgement's own `type` is the proposition — the `emit_from_reasoning_sentence` shape |
+| how `Verified` is admitted | `emit_from_trace` hashes the claim's proposition | the judgement's own `type` is the proposition — the `emit_from_reasoning_sentence` shape, on the trace |
 | `Certificate.verified` | consumes `witness:IsVerifiedAs(iri, P)` | consumes the judgement |
-| `witness:IsVerifiedAs` | postulated, zero constructors, in the TCB | removable |
+| `witness:IsVerifiedAs` | postulated, zero constructors, in the TCB | still declared, no longer postulated — see below |
 
 The trace does not go away, and the paper's split is what keeps it: the trace is provenance, the
 judgement is warrant.
 
-**This is the prerequisite for removing `witness:Is*As`.** `Certificate.verified` cannot lose its
-argument until something else inhabits its premise. `Declared` and `Observed` are a separate
-question — both plausibly *are* constant specifications over relations the kernel can read at any
-time — which is what `judgements-warrants-build-plan.md` §"Open after P7" asks. `Verified` is the
-family where the answer is no today, and §5 is what changes the answer: once the inputs are pinned,
-"nanoda accepted this" becomes recomputable rather than postulated.
+**The judgement rides on the trace**, in a `prov:VerificationTrace` slot of its own, and the three
+alternatives are worse. Writing it onto the author's claim as `justification:proof` means an
+institution redefining a user's resource. Emitting a fresh `justification:Conclusion` at
+`{claim_iri}:verified` means `Verified(iri)` names that emission rather than the claim, against §9.2,
+and `finalize_emitted_resource` would stamp it `reflection:InstitutionEmittedDerivation` — *"grounds
+nothing"* on the one resource whose purpose is to be a ground, which is the conflict the trace
+exemption already had to resolve once. Leaving it off the chain is what §1 is about. On the trace it
+needs no new resource, no exemption and no redefinition: `trace_category` already reads
+`VerificationTrace` as `Verified`, and `emit_from_trace` reads the judgement's `type` in place of
+the target's stored `canonical_proposition`.
+
+**This is what closes `judgements-warrants-build-plan.md` §"Open after P7", and the answer is about
+the INDEX, not the types.** That section asks whether the three surviving witness families are
+decision procedures over relations the kernel can read at any time; if so, *"the index is a cache
+over relations — rebuildable, droppable, and not a soundness boundary."*
+
+`Declared` and `Observed` were already that, verified `2026-09-05`: `layer_admits_witness` consults
+no committed witness, only the layer's Trace resources and the propositions they point at, and its
+two caches (`has_witness_candidates`, the in-flight fallback) both fail conservatively — a wrong
+guess refuses a certificate, never admits one. `Verified` was the exception, because the trace it
+read was a note that a check had run. With the judgement on the trace and its inputs pinned, that
+route reads a recorded result whose verdict anyone can recompute. All three lookups are decision
+procedures; **the index is a cache.**
+
+**The constant specification is a different thing, and it stays in the TCB.** An earlier draft of
+this section said the TCB framing "stops being true" without qualifying which part. That
+over-generalised, and `judgements-and-warrants.tex` §"Witnesses and the Trusted Computing Base" is
+explicit against it: *"The Verified state is provable, whereas Declared and Observed states are
+postulated … Postulation is the correct semantic operation for attributions: verification is
+impossible because an attribution merely asserts that an agent made a claim or that a physical
+recording occurred."* The paper names the TCB as the kernel's checker, each hosted external checker,
+each comorphism, **and the constant specification governing attributions**.
+
+Recomputing a *lookup* does not touch that: it recomputes the same trusted assertion. The chain says
+an agent declared `P`, and nothing can check whether they did — which is why postulation is correct
+rather than a gap. So what this batch moved is exactly one family: `Verified`, which the paper
+already classified as *provable*, and which D87 §5 makes re-runnable in practice by pinning the
+inputs. `Declared` and `Observed` are in the TCB permanently, by design.
+
+**An earlier draft of this table said `witness:IsVerifiedAs` was *removable*, and that does not
+follow.** `Certificate.verified`'s premise is what makes `Certificate(Verified(iri), P)`
+inhabitable only where the chain verified `P` about `iri`. Delete the premise and the constructor
+is unconditional — `verified(iri, P)` for any `P`, so `Verified` becomes assertable by anyone who
+writes a certificate, which is the laundering this whole design exists to forbid. Nothing else can
+occupy that position: a premise ranging over `eigentt:Judgement` would be a *data* type, inhabited
+by any well-formed value, and the CHECK-mode rule that would catch a bad one runs at validation
+rather than inside the kernel's own conversion.
+
+So the three predicates stay declared and the kernel still synthesises their inhabitants. What
+changes is what that synthesis IS: a decision procedure over chain relations rather than an
+admission decision, so a wrong answer is catchable by recomputation instead of being an axiom with
+no proof to re-check. `witness_admission.rs`'s header claim — *"this module is inside the TCB … the
+witness itself is postulated, and a wrong admission cannot be caught downstream"* — is what stops
+being true, for the reason P7 predicted.
+
+**Answered in [D88](d88-four-questions-the-justification-layer-leaves-open.md) §2: they do.** The
+question and the evidence are below; D88 derives the answer from how drift fails — with the type,
+the constructor's premise names something that must resolve, so a kernel/ontology divergence breaks
+the build; keyed on the constructor instead, the kernel silently stops matching and the side
+condition never fires.
+
+**The question as it stood.** The argument above rules out
+deleting `Certificate.verified`'s premise and leaving the constructor unconditional. It does not
+rule out a third option, which was not evaluated: **keep the condition, drop the type** — check
+`verified(iri, P)` against the chain by a rule keyed on the *constructor* rather than by filling an
+argument. The witness is already a check-time side condition in all but name: it is elided in the
+surface (`declared(RULE, RULE_P)`, two arguments for a three-argument constructor), synthesised by
+`CheckHooks::synthesize_chain_witness`, never persisted, and carries no information the trace does
+not.
+
+The trade-off is where the special case lives. Today it keys on the *type* — the hook fires when
+the expected type is a witness-category inductive — so any constructor in any layer can demand a
+witness by naming the type, and the kernel needs no knowledge of `justification:Certificate`.
+Without the type it would key on the constructor, pulling the reasoning vocabulary into the
+checker, which is the direction the layer-ordering argument in those declarations' own descriptions
+warns against. That argument is already partly compromised: `witness_admission.rs` hard-codes
+`justification:Conclusion` as `REASONING_SENTENCE`.
 
 ## 8. Cost
 

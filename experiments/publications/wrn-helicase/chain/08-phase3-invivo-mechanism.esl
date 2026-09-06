@@ -112,11 +112,9 @@ resource wrn:concl_vivo : justification:Conclusion {
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
     justification:judgement =
         holds( eigentt:logic_kernel,
-               type_expr(app(core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table"), onco:InVivoDependence("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table"),
-                       declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table") -> onco:InVivoDependence("WRN", "MSI")),
+               type_expr(app(declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table") -> onco:InVivoDependence("WRN", "MSI")),
                        observed("urn:eigenius:pub:wrn:vivo_xenograft_table", core:Asserts("urn:eigenius:pub:wrn:vivo_xenograft_table")))),
                type_expr(justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:vivo_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:vivo_xenograft_table")),
                    onco:InVivoDependence("WRN", "MSI") )) );
 }
 
@@ -134,13 +132,9 @@ resource wrn:concl_vivo_ontarget : justification:Conclusion {
             SC   = onco:SeedControlInert("WRN", "xenograft_growth"),
             OT   = onco:OnTarget("WRN", "xenograft_growth"),
             RULE_P = C911 -> SC -> OT,
-            jC911 = Declared(LIT),
-            jSC   = Declared(ART),
-            cert1 = app(C911, SC -> OT, Declared(RULE), jC911,
-                        declared(RULE, RULE_P), declared(LIT, C911))
+            cert1 = app(declared(RULE, RULE_P), declared(LIT, C911))
         in
-        app(SC, OT, justification:App(Declared(RULE), jC911), jSC,
-               cert1, declared(ART, SC))),
+        app(cert1, declared(ART, SC))),
                type_expr(alias
             RULE = "urn:eigenius:pub:wrn:seed_control_rule",
             LIT  = "urn:eigenius:pub:wrn:lit:lit_c911_design",
@@ -149,19 +143,9 @@ resource wrn:concl_vivo_ontarget : justification:Conclusion {
             SC   = onco:SeedControlInert("WRN", "xenograft_growth"),
             OT   = onco:OnTarget("WRN", "xenograft_growth"),
             RULE_P = C911 -> SC -> OT,
-            jC911 = Declared(LIT),
-            jSC   = Declared(ART),
-            cert1 = app(C911, SC -> OT, Declared(RULE), jC911,
-                        declared(RULE, RULE_P), declared(LIT, C911))
+            cert1 = app(declared(RULE, RULE_P), declared(LIT, C911))
         in
         justification:Certificate(
-                   justification:App(
-                       justification:App(
-                           Declared("urn:eigenius:pub:wrn:seed_control_rule"),
-                           Declared("urn:eigenius:pub:wrn:lit:lit_c911_design")
-                       ),
-                       Declared("urn:eigenius:pub:wrn:vivo_seed_control")
-                   ),
                    onco:OnTarget("WRN", "xenograft_growth") )) );
 }
 
@@ -209,14 +193,9 @@ resource wrn:concl_p53_activation : justification:Conclusion {
             RM   = onco:RaisesP53DamageMarkers("WRN", "MSI"),
             AP   = onco:ActivatesP53Response("WRN", "MSI"),
             RULE_P = PS15 -> RM -> AP,
-            jPS15 = Declared(LIT),
-            jRM   = justification:App(Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519")),
-            cert1 = app(PS15, RM -> AP, Declared(RULE), jPS15,
-                        declared(RULE, RULE_P), declared(LIT, PS15))
+            cert1 = app(declared(RULE, RULE_P), declared(LIT, PS15))
         in
-        app(RM, AP, justification:App(Declared(RULE), jPS15), jRM,
-               cert1, app(core:Asserts("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519"), onco:RaisesP53DamageMarkers("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519"),
-                       declared("urn:eigenius:pub:wrn:if_ed5_yields_result", core:Asserts("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519") -> onco:RaisesP53DamageMarkers("WRN", "MSI")),
+        app(cert1, app(declared("urn:eigenius:pub:wrn:if_ed5_yields_result", core:Asserts("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519") -> onco:RaisesP53DamageMarkers("WRN", "MSI")),
                        observed("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519", core:Asserts("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519"))))),
                type_expr(alias
             RULE = "urn:eigenius:pub:wrn:p53_activation_rule",
@@ -226,19 +205,9 @@ resource wrn:concl_p53_activation : justification:Conclusion {
             RM   = onco:RaisesP53DamageMarkers("WRN", "MSI"),
             AP   = onco:ActivatesP53Response("WRN", "MSI"),
             RULE_P = PS15 -> RM -> AP,
-            jPS15 = Declared(LIT),
-            jRM   = justification:App(Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519")),
-            cert1 = app(PS15, RM -> AP, Declared(RULE), jPS15,
-                        declared(RULE, RULE_P), declared(LIT, PS15))
+            cert1 = app(declared(RULE, RULE_P), declared(LIT, PS15))
         in
         justification:Certificate(
-                   justification:App(
-                       justification:App(
-                           Declared("urn:eigenius:pub:wrn:p53_activation_rule"),
-                           Declared("urn:eigenius:pub:wrn:lit:lit_ps15_readout")
-                       ),
-                       justification:App(Declared("urn:eigenius:pub:wrn:if_ed5_yields_result"), Observed("urn:eigenius:ingest:file:8d26fbb8aafb610a4952c6281b4088b41bb1ffc6d3318b16c7f7ca164c86c519"))
-                   ),
                    onco:ActivatesP53Response("WRN", "MSI") )) );
 }
 
@@ -259,11 +228,9 @@ resource wrn:concl_paralog : justification:Conclusion {
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
     justification:judgement =
         holds( eigentt:logic_kernel,
-               type_expr(app(core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"), onco:NotExplainedByParalogLoss("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed"),
-                       declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed") -> onco:NotExplainedByParalogLoss("WRN", "MSI")),
+               type_expr(app(declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed") -> onco:NotExplainedByParalogLoss("WRN", "MSI")),
                        observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed", core:Asserts("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed")))),
                type_expr(justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:paralog_ctrl_yields_result"), Observed("urn:eigenius:ingest:file:14e82c398188b9f61ad2255301726551884354e90d1fd4ea612bfe6c709c85ed")),
                    onco:NotExplainedByParalogLoss("WRN", "MSI") )) );
 }
 
@@ -336,7 +303,6 @@ resource wrn:concl_dsb : justification:Conclusion {
                type_expr(declared("urn:eigenius:pub:wrn:mech_dsb",
                onco:CausesDSBs("WRN", "MSI"))),
                type_expr(justification:Certificate(
-                   Declared("urn:eigenius:pub:wrn:mech_dsb"),
                    onco:CausesDSBs("WRN", "MSI") )) );
 }
 
@@ -360,11 +326,9 @@ resource wrn:concl_dsb_foci : justification:Conclusion {
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
     justification:judgement =
         holds( eigentt:logic_kernel,
-               type_expr(app(core:Asserts("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:foci_dsb_yields_result"), Observed("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83"),
-                       declared("urn:eigenius:pub:wrn:foci_dsb_yields_result", core:Asserts("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83") -> onco:CausesDSBs("WRN", "MSI")),
+               type_expr(app(declared("urn:eigenius:pub:wrn:foci_dsb_yields_result", core:Asserts("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83") -> onco:CausesDSBs("WRN", "MSI")),
                        observed("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83", core:Asserts("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83")))),
                type_expr(justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:foci_dsb_yields_result"), Observed("urn:eigenius:ingest:file:1ba6dc6f78b10cee9ebc25287cc35170fffc11c357e6f371469395bfc14e9b83")),
                    onco:CausesDSBs("WRN", "MSI") )) );
 }
 
@@ -384,11 +348,9 @@ resource wrn:concl_dsb_gh2ax : justification:Conclusion {
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
     justification:judgement =
         holds( eigentt:logic_kernel,
-               type_expr(app(core:Asserts("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:gh2ax_yields_result"), Observed("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95"),
-                       declared("urn:eigenius:pub:wrn:gh2ax_yields_result", core:Asserts("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95") -> onco:CausesDSBs("WRN", "MSI")),
+               type_expr(app(declared("urn:eigenius:pub:wrn:gh2ax_yields_result", core:Asserts("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95") -> onco:CausesDSBs("WRN", "MSI")),
                        observed("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95", core:Asserts("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95")))),
                type_expr(justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:gh2ax_yields_result"), Observed("urn:eigenius:ingest:file:d8da9e9535f0f863e8ca541c63982804fa1e0fb9e9a9d3d721650c08ef625f95")),
                    onco:CausesDSBs("WRN", "MSI") )) );
 }
 resource wrn:concl_dsb_gh2ax_foci : justification:Conclusion {
@@ -397,11 +359,9 @@ resource wrn:concl_dsb_gh2ax_foci : justification:Conclusion {
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
     justification:judgement =
         holds( eigentt:logic_kernel,
-               type_expr(app(core:Asserts("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c"), onco:CausesDSBs("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result"), Observed("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c"),
-                       declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result", core:Asserts("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c") -> onco:CausesDSBs("WRN", "MSI")),
+               type_expr(app(declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result", core:Asserts("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c") -> onco:CausesDSBs("WRN", "MSI")),
                        observed("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c", core:Asserts("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c")))),
                type_expr(justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:gh2ax_foci_yields_result"), Observed("urn:eigenius:ingest:file:70abbad2f5319ae18ed840cd36bb3b75805ecd5c75f2adf940858e719e4b198c")),
                    onco:CausesDSBs("WRN", "MSI") )) );
 }
 
@@ -420,11 +380,9 @@ resource wrn:concl_ddr_signaling : justification:Conclusion {
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
     justification:judgement =
         holds( eigentt:logic_kernel,
-               type_expr(app(core:Asserts("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de"), onco:ActivatesDSBResponse("WRN", "MSI"), Declared("urn:eigenius:pub:wrn:patm_yields_result"), Observed("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de"),
-                       declared("urn:eigenius:pub:wrn:patm_yields_result", core:Asserts("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de") -> onco:ActivatesDSBResponse("WRN", "MSI")),
+               type_expr(app(declared("urn:eigenius:pub:wrn:patm_yields_result", core:Asserts("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de") -> onco:ActivatesDSBResponse("WRN", "MSI")),
                        observed("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de", core:Asserts("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de")))),
                type_expr(justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:patm_yields_result"), Observed("urn:eigenius:ingest:file:9a718df80087dece5ca9c36af2cb647f06913e1a4a54b7dd038a60ba2cc325de")),
                    onco:ActivatesDSBResponse("WRN", "MSI") )) );
 }
 
@@ -451,19 +409,13 @@ resource wrn:concl_mech : justification:Conclusion {
                type_expr(alias
             c_cellcycle_re_0_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
             c_cellcycle_re_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
-            c_cellcycle_re_0_js_0 = justification:App(Declared(c_cellcycle_re_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset")),
-            c_cellcycle_re_0_cs_0 = app(c_cellcycle_re_0_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0), Declared(c_cellcycle_re_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
-                        declared(c_cellcycle_re_0_CLAIM_0, c_cellcycle_re_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_0_OBSP_0)),
+            c_cellcycle_re_0_cs_0 = app(declared(c_cellcycle_re_0_CLAIM_0, c_cellcycle_re_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_0_OBSP_0)),
             c_cellcycle_re_0_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
             c_cellcycle_re_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
-            c_cellcycle_re_0_js_1 = justification:App(Declared(c_cellcycle_re_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset")),
-            c_cellcycle_re_0_cs_1 = app(c_cellcycle_re_0_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0), Declared(c_cellcycle_re_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
-                        declared(c_cellcycle_re_0_CLAIM_1, c_cellcycle_re_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_0_OBSP_1)),
+            c_cellcycle_re_0_cs_1 = app(declared(c_cellcycle_re_0_CLAIM_1, c_cellcycle_re_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_0_OBSP_1)),
             c_cellcycle_re_0_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
             c_cellcycle_re_0_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
-            c_cellcycle_re_0_js_2 = justification:App(Declared(c_cellcycle_re_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset")),
-            c_cellcycle_re_0_cs_2 = app(c_cellcycle_re_0_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0), Declared(c_cellcycle_re_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
-                        declared(c_cellcycle_re_0_CLAIM_2, c_cellcycle_re_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_0_OBSP_2)),
+            c_cellcycle_re_0_cs_2 = app(declared(c_cellcycle_re_0_CLAIM_2, c_cellcycle_re_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_0_OBSP_2)),
             c_cellcycle_re_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
             c_cellcycle_re_0_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
             c_cellcycle_re_0_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
@@ -473,25 +425,17 @@ resource wrn:concl_mech : justification:Conclusion {
             c_cellcycle_re_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
             c_cellcycle_re_0_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
             c_cellcycle_re_0_RULE_P = c_cellcycle_re_0_K -> c_cellcycle_re_0_S -> c_cellcycle_re_0_O -> c_cellcycle_re_0_CA,
-            c_cellcycle_re_0_cert1 = app(c_cellcycle_re_0_K, c_cellcycle_re_0_S -> c_cellcycle_re_0_O -> c_cellcycle_re_0_CA, Declared(c_cellcycle_re_0_BRIDGE), c_cellcycle_re_0_js_0,
-                        declared(c_cellcycle_re_0_BRIDGE, c_cellcycle_re_0_RULE_P), c_cellcycle_re_0_cs_0),
-            c_cellcycle_re_0_cert2 = app(c_cellcycle_re_0_S, c_cellcycle_re_0_O -> c_cellcycle_re_0_CA, justification:App(Declared(c_cellcycle_re_0_BRIDGE), c_cellcycle_re_0_js_0),
-                        c_cellcycle_re_0_js_1, c_cellcycle_re_0_cert1, c_cellcycle_re_0_cs_1),
+            c_cellcycle_re_0_cert1 = app(declared(c_cellcycle_re_0_BRIDGE, c_cellcycle_re_0_RULE_P), c_cellcycle_re_0_cs_0),
+            c_cellcycle_re_0_cert2 = app(c_cellcycle_re_0_cert1, c_cellcycle_re_0_cs_1),
             c_apoptosis_re_1_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
             c_apoptosis_re_1_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
-            c_apoptosis_re_1_js_0 = justification:App(Declared(c_apoptosis_re_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset")),
-            c_apoptosis_re_1_cs_0 = app(c_apoptosis_re_1_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0), Declared(c_apoptosis_re_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
-                        declared(c_apoptosis_re_1_CLAIM_0, c_apoptosis_re_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_1_OBSP_0)),
+            c_apoptosis_re_1_cs_0 = app(declared(c_apoptosis_re_1_CLAIM_0, c_apoptosis_re_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_1_OBSP_0)),
             c_apoptosis_re_1_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
             c_apoptosis_re_1_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
-            c_apoptosis_re_1_js_1 = justification:App(Declared(c_apoptosis_re_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset")),
-            c_apoptosis_re_1_cs_1 = app(c_apoptosis_re_1_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0), Declared(c_apoptosis_re_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
-                        declared(c_apoptosis_re_1_CLAIM_1, c_apoptosis_re_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_1_OBSP_1)),
+            c_apoptosis_re_1_cs_1 = app(declared(c_apoptosis_re_1_CLAIM_1, c_apoptosis_re_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_1_OBSP_1)),
             c_apoptosis_re_1_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
             c_apoptosis_re_1_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
-            c_apoptosis_re_1_js_2 = justification:App(Declared(c_apoptosis_re_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset")),
-            c_apoptosis_re_1_cs_2 = app(c_apoptosis_re_1_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0), Declared(c_apoptosis_re_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
-                        declared(c_apoptosis_re_1_CLAIM_2, c_apoptosis_re_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_1_OBSP_2)),
+            c_apoptosis_re_1_cs_2 = app(declared(c_apoptosis_re_1_CLAIM_2, c_apoptosis_re_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_1_OBSP_2)),
             c_apoptosis_re_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
             c_apoptosis_re_1_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
             c_apoptosis_re_1_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
@@ -501,25 +445,17 @@ resource wrn:concl_mech : justification:Conclusion {
             c_apoptosis_re_1_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
             c_apoptosis_re_1_CA = onco:CausesApoptosis("WRN", "MSI"),
             c_apoptosis_re_1_RULE_P = c_apoptosis_re_1_K -> c_apoptosis_re_1_S -> c_apoptosis_re_1_O -> c_apoptosis_re_1_CA,
-            c_apoptosis_re_1_cert1 = app(c_apoptosis_re_1_K, c_apoptosis_re_1_S -> c_apoptosis_re_1_O -> c_apoptosis_re_1_CA, Declared(c_apoptosis_re_1_BRIDGE), c_apoptosis_re_1_js_0,
-                        declared(c_apoptosis_re_1_BRIDGE, c_apoptosis_re_1_RULE_P), c_apoptosis_re_1_cs_0),
-            c_apoptosis_re_1_cert2 = app(c_apoptosis_re_1_S, c_apoptosis_re_1_O -> c_apoptosis_re_1_CA, justification:App(Declared(c_apoptosis_re_1_BRIDGE), c_apoptosis_re_1_js_0),
-                        c_apoptosis_re_1_js_1, c_apoptosis_re_1_cert1, c_apoptosis_re_1_cs_1),
+            c_apoptosis_re_1_cert1 = app(declared(c_apoptosis_re_1_BRIDGE, c_apoptosis_re_1_RULE_P), c_apoptosis_re_1_cs_0),
+            c_apoptosis_re_1_cert2 = app(c_apoptosis_re_1_cert1, c_apoptosis_re_1_cs_1),
             c_cellcycle_re_2_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
             c_cellcycle_re_2_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
-            c_cellcycle_re_2_js_0 = justification:App(Declared(c_cellcycle_re_2_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset")),
-            c_cellcycle_re_2_cs_0 = app(c_cellcycle_re_2_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0), Declared(c_cellcycle_re_2_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
-                        declared(c_cellcycle_re_2_CLAIM_0, c_cellcycle_re_2_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_2_OBSP_0)),
+            c_cellcycle_re_2_cs_0 = app(declared(c_cellcycle_re_2_CLAIM_0, c_cellcycle_re_2_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_2_OBSP_0)),
             c_cellcycle_re_2_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
             c_cellcycle_re_2_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
-            c_cellcycle_re_2_js_1 = justification:App(Declared(c_cellcycle_re_2_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset")),
-            c_cellcycle_re_2_cs_1 = app(c_cellcycle_re_2_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0), Declared(c_cellcycle_re_2_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
-                        declared(c_cellcycle_re_2_CLAIM_1, c_cellcycle_re_2_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_2_OBSP_1)),
+            c_cellcycle_re_2_cs_1 = app(declared(c_cellcycle_re_2_CLAIM_1, c_cellcycle_re_2_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_2_OBSP_1)),
             c_cellcycle_re_2_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
             c_cellcycle_re_2_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
-            c_cellcycle_re_2_js_2 = justification:App(Declared(c_cellcycle_re_2_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset")),
-            c_cellcycle_re_2_cs_2 = app(c_cellcycle_re_2_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0), Declared(c_cellcycle_re_2_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
-                        declared(c_cellcycle_re_2_CLAIM_2, c_cellcycle_re_2_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_2_OBSP_2)),
+            c_cellcycle_re_2_cs_2 = app(declared(c_cellcycle_re_2_CLAIM_2, c_cellcycle_re_2_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_2_OBSP_2)),
             c_cellcycle_re_2_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
             c_cellcycle_re_2_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
             c_cellcycle_re_2_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
@@ -529,25 +465,17 @@ resource wrn:concl_mech : justification:Conclusion {
             c_cellcycle_re_2_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
             c_cellcycle_re_2_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
             c_cellcycle_re_2_RULE_P = c_cellcycle_re_2_K -> c_cellcycle_re_2_S -> c_cellcycle_re_2_O -> c_cellcycle_re_2_CA,
-            c_cellcycle_re_2_cert1 = app(c_cellcycle_re_2_K, c_cellcycle_re_2_S -> c_cellcycle_re_2_O -> c_cellcycle_re_2_CA, Declared(c_cellcycle_re_2_BRIDGE), c_cellcycle_re_2_js_0,
-                        declared(c_cellcycle_re_2_BRIDGE, c_cellcycle_re_2_RULE_P), c_cellcycle_re_2_cs_0),
-            c_cellcycle_re_2_cert2 = app(c_cellcycle_re_2_S, c_cellcycle_re_2_O -> c_cellcycle_re_2_CA, justification:App(Declared(c_cellcycle_re_2_BRIDGE), c_cellcycle_re_2_js_0),
-                        c_cellcycle_re_2_js_1, c_cellcycle_re_2_cert1, c_cellcycle_re_2_cs_1),
+            c_cellcycle_re_2_cert1 = app(declared(c_cellcycle_re_2_BRIDGE, c_cellcycle_re_2_RULE_P), c_cellcycle_re_2_cs_0),
+            c_cellcycle_re_2_cert2 = app(c_cellcycle_re_2_cert1, c_cellcycle_re_2_cs_1),
             c_apoptosis_re_3_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
             c_apoptosis_re_3_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
-            c_apoptosis_re_3_js_0 = justification:App(Declared(c_apoptosis_re_3_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset")),
-            c_apoptosis_re_3_cs_0 = app(c_apoptosis_re_3_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0), Declared(c_apoptosis_re_3_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
-                        declared(c_apoptosis_re_3_CLAIM_0, c_apoptosis_re_3_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_3_OBSP_0)),
+            c_apoptosis_re_3_cs_0 = app(declared(c_apoptosis_re_3_CLAIM_0, c_apoptosis_re_3_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_3_OBSP_0)),
             c_apoptosis_re_3_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
             c_apoptosis_re_3_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
-            c_apoptosis_re_3_js_1 = justification:App(Declared(c_apoptosis_re_3_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset")),
-            c_apoptosis_re_3_cs_1 = app(c_apoptosis_re_3_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0), Declared(c_apoptosis_re_3_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
-                        declared(c_apoptosis_re_3_CLAIM_1, c_apoptosis_re_3_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_3_OBSP_1)),
+            c_apoptosis_re_3_cs_1 = app(declared(c_apoptosis_re_3_CLAIM_1, c_apoptosis_re_3_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_3_OBSP_1)),
             c_apoptosis_re_3_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
             c_apoptosis_re_3_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
-            c_apoptosis_re_3_js_2 = justification:App(Declared(c_apoptosis_re_3_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset")),
-            c_apoptosis_re_3_cs_2 = app(c_apoptosis_re_3_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0), Declared(c_apoptosis_re_3_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
-                        declared(c_apoptosis_re_3_CLAIM_2, c_apoptosis_re_3_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_3_OBSP_2)),
+            c_apoptosis_re_3_cs_2 = app(declared(c_apoptosis_re_3_CLAIM_2, c_apoptosis_re_3_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_3_OBSP_2)),
             c_apoptosis_re_3_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
             c_apoptosis_re_3_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
             c_apoptosis_re_3_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
@@ -557,10 +485,8 @@ resource wrn:concl_mech : justification:Conclusion {
             c_apoptosis_re_3_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
             c_apoptosis_re_3_CA = onco:CausesApoptosis("WRN", "MSI"),
             c_apoptosis_re_3_RULE_P = c_apoptosis_re_3_K -> c_apoptosis_re_3_S -> c_apoptosis_re_3_O -> c_apoptosis_re_3_CA,
-            c_apoptosis_re_3_cert1 = app(c_apoptosis_re_3_K, c_apoptosis_re_3_S -> c_apoptosis_re_3_O -> c_apoptosis_re_3_CA, Declared(c_apoptosis_re_3_BRIDGE), c_apoptosis_re_3_js_0,
-                        declared(c_apoptosis_re_3_BRIDGE, c_apoptosis_re_3_RULE_P), c_apoptosis_re_3_cs_0),
-            c_apoptosis_re_3_cert2 = app(c_apoptosis_re_3_S, c_apoptosis_re_3_O -> c_apoptosis_re_3_CA, justification:App(Declared(c_apoptosis_re_3_BRIDGE), c_apoptosis_re_3_js_0),
-                        c_apoptosis_re_3_js_1, c_apoptosis_re_3_cert1, c_apoptosis_re_3_cs_1),
+            c_apoptosis_re_3_cert1 = app(declared(c_apoptosis_re_3_BRIDGE, c_apoptosis_re_3_RULE_P), c_apoptosis_re_3_cs_0),
+            c_apoptosis_re_3_cert2 = app(c_apoptosis_re_3_cert1, c_apoptosis_re_3_cs_1),
             RULE = "urn:eigenius:pub:wrn:mech_rule",
             ART  = "urn:eigenius:pub:wrn:mech_dsb",
             CC   = "urn:eigenius:pub:wrn:concl_cellcycle_recomputed",
@@ -570,52 +496,20 @@ resource wrn:concl_mech : justification:Conclusion {
             AA   = onco:CausesApoptosis("WRN", "MSI"),
             DL   = onco:DSBDrivenLethality("WRN", "MSI"),
             RULE_P = DSB -> CA -> AA -> DL,
-            jDSB = Declared(ART),
-            jCA  = justification:App(
-                       justification:App(
-                           justification:App(
-                               Declared("urn:eigenius:pub:wrn:bridge_cellcycle"),
-                               c_cellcycle_re_0_js_0
-                           ),
-                           c_cellcycle_re_0_js_1
-                       ),
-                       c_cellcycle_re_0_js_2
-                   ),
-            jAA  = justification:App(
-                       justification:App(
-                           justification:App(
-                               Declared("urn:eigenius:pub:wrn:bridge_apoptosis"),
-                               c_apoptosis_re_1_js_0
-                           ),
-                           c_apoptosis_re_1_js_1
-                       ),
-                       c_apoptosis_re_1_js_2
-                   ),
-            cert1 = app(DSB, CA -> AA -> DL, Declared(RULE), jDSB,
-                        declared(RULE, RULE_P), declared(ART, DSB)),
-            cert2 = app(CA, AA -> DL, justification:App(Declared(RULE), jDSB),
-                        jCA, cert1, app(c_cellcycle_re_0_O, c_cellcycle_re_0_CA, justification:App(justification:App(Declared(c_cellcycle_re_0_BRIDGE), c_cellcycle_re_0_js_0), c_cellcycle_re_0_js_1),
-               c_cellcycle_re_0_js_2, c_cellcycle_re_0_cert2, c_cellcycle_re_0_cs_2))
+            cert1 = app(declared(RULE, RULE_P), declared(ART, DSB)),
+            cert2 = app(cert1, app(c_cellcycle_re_0_cert2, c_cellcycle_re_0_cs_2))
         in
-        app(AA, DL, justification:App(justification:App(Declared(RULE), jDSB), jCA),
-               jAA, cert2, app(c_apoptosis_re_1_O, c_apoptosis_re_1_CA, justification:App(justification:App(Declared(c_apoptosis_re_1_BRIDGE), c_apoptosis_re_1_js_0), c_apoptosis_re_1_js_1),
-               c_apoptosis_re_1_js_2, c_apoptosis_re_1_cert2, c_apoptosis_re_1_cs_2))),
+        app(cert2, app(c_apoptosis_re_1_cert2, c_apoptosis_re_1_cs_2))),
                type_expr(alias
             c_cellcycle_re_0_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
             c_cellcycle_re_0_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
-            c_cellcycle_re_0_js_0 = justification:App(Declared(c_cellcycle_re_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset")),
-            c_cellcycle_re_0_cs_0 = app(c_cellcycle_re_0_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0), Declared(c_cellcycle_re_0_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
-                        declared(c_cellcycle_re_0_CLAIM_0, c_cellcycle_re_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_0_OBSP_0)),
+            c_cellcycle_re_0_cs_0 = app(declared(c_cellcycle_re_0_CLAIM_0, c_cellcycle_re_0_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_0_OBSP_0)),
             c_cellcycle_re_0_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
             c_cellcycle_re_0_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
-            c_cellcycle_re_0_js_1 = justification:App(Declared(c_cellcycle_re_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset")),
-            c_cellcycle_re_0_cs_1 = app(c_cellcycle_re_0_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0), Declared(c_cellcycle_re_0_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
-                        declared(c_cellcycle_re_0_CLAIM_1, c_cellcycle_re_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_0_OBSP_1)),
+            c_cellcycle_re_0_cs_1 = app(declared(c_cellcycle_re_0_CLAIM_1, c_cellcycle_re_0_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_0_OBSP_1)),
             c_cellcycle_re_0_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
             c_cellcycle_re_0_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
-            c_cellcycle_re_0_js_2 = justification:App(Declared(c_cellcycle_re_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset")),
-            c_cellcycle_re_0_cs_2 = app(c_cellcycle_re_0_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0), Declared(c_cellcycle_re_0_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
-                        declared(c_cellcycle_re_0_CLAIM_2, c_cellcycle_re_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_0_OBSP_2)),
+            c_cellcycle_re_0_cs_2 = app(declared(c_cellcycle_re_0_CLAIM_2, c_cellcycle_re_0_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_0_OBSP_2)),
             c_cellcycle_re_0_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
             c_cellcycle_re_0_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
             c_cellcycle_re_0_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
@@ -625,25 +519,17 @@ resource wrn:concl_mech : justification:Conclusion {
             c_cellcycle_re_0_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
             c_cellcycle_re_0_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
             c_cellcycle_re_0_RULE_P = c_cellcycle_re_0_K -> c_cellcycle_re_0_S -> c_cellcycle_re_0_O -> c_cellcycle_re_0_CA,
-            c_cellcycle_re_0_cert1 = app(c_cellcycle_re_0_K, c_cellcycle_re_0_S -> c_cellcycle_re_0_O -> c_cellcycle_re_0_CA, Declared(c_cellcycle_re_0_BRIDGE), c_cellcycle_re_0_js_0,
-                        declared(c_cellcycle_re_0_BRIDGE, c_cellcycle_re_0_RULE_P), c_cellcycle_re_0_cs_0),
-            c_cellcycle_re_0_cert2 = app(c_cellcycle_re_0_S, c_cellcycle_re_0_O -> c_cellcycle_re_0_CA, justification:App(Declared(c_cellcycle_re_0_BRIDGE), c_cellcycle_re_0_js_0),
-                        c_cellcycle_re_0_js_1, c_cellcycle_re_0_cert1, c_cellcycle_re_0_cs_1),
+            c_cellcycle_re_0_cert1 = app(declared(c_cellcycle_re_0_BRIDGE, c_cellcycle_re_0_RULE_P), c_cellcycle_re_0_cs_0),
+            c_cellcycle_re_0_cert2 = app(c_cellcycle_re_0_cert1, c_cellcycle_re_0_cs_1),
             c_apoptosis_re_1_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
             c_apoptosis_re_1_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
-            c_apoptosis_re_1_js_0 = justification:App(Declared(c_apoptosis_re_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset")),
-            c_apoptosis_re_1_cs_0 = app(c_apoptosis_re_1_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0), Declared(c_apoptosis_re_1_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
-                        declared(c_apoptosis_re_1_CLAIM_0, c_apoptosis_re_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_1_OBSP_0)),
+            c_apoptosis_re_1_cs_0 = app(declared(c_apoptosis_re_1_CLAIM_0, c_apoptosis_re_1_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_1_OBSP_0)),
             c_apoptosis_re_1_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
             c_apoptosis_re_1_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
-            c_apoptosis_re_1_js_1 = justification:App(Declared(c_apoptosis_re_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset")),
-            c_apoptosis_re_1_cs_1 = app(c_apoptosis_re_1_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0), Declared(c_apoptosis_re_1_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
-                        declared(c_apoptosis_re_1_CLAIM_1, c_apoptosis_re_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_1_OBSP_1)),
+            c_apoptosis_re_1_cs_1 = app(declared(c_apoptosis_re_1_CLAIM_1, c_apoptosis_re_1_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_1_OBSP_1)),
             c_apoptosis_re_1_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
             c_apoptosis_re_1_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
-            c_apoptosis_re_1_js_2 = justification:App(Declared(c_apoptosis_re_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset")),
-            c_apoptosis_re_1_cs_2 = app(c_apoptosis_re_1_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0), Declared(c_apoptosis_re_1_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
-                        declared(c_apoptosis_re_1_CLAIM_2, c_apoptosis_re_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_1_OBSP_2)),
+            c_apoptosis_re_1_cs_2 = app(declared(c_apoptosis_re_1_CLAIM_2, c_apoptosis_re_1_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_1_OBSP_2)),
             c_apoptosis_re_1_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
             c_apoptosis_re_1_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
             c_apoptosis_re_1_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
@@ -653,25 +539,17 @@ resource wrn:concl_mech : justification:Conclusion {
             c_apoptosis_re_1_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
             c_apoptosis_re_1_CA = onco:CausesApoptosis("WRN", "MSI"),
             c_apoptosis_re_1_RULE_P = c_apoptosis_re_1_K -> c_apoptosis_re_1_S -> c_apoptosis_re_1_O -> c_apoptosis_re_1_CA,
-            c_apoptosis_re_1_cert1 = app(c_apoptosis_re_1_K, c_apoptosis_re_1_S -> c_apoptosis_re_1_O -> c_apoptosis_re_1_CA, Declared(c_apoptosis_re_1_BRIDGE), c_apoptosis_re_1_js_0,
-                        declared(c_apoptosis_re_1_BRIDGE, c_apoptosis_re_1_RULE_P), c_apoptosis_re_1_cs_0),
-            c_apoptosis_re_1_cert2 = app(c_apoptosis_re_1_S, c_apoptosis_re_1_O -> c_apoptosis_re_1_CA, justification:App(Declared(c_apoptosis_re_1_BRIDGE), c_apoptosis_re_1_js_0),
-                        c_apoptosis_re_1_js_1, c_apoptosis_re_1_cert1, c_apoptosis_re_1_cs_1),
+            c_apoptosis_re_1_cert1 = app(declared(c_apoptosis_re_1_BRIDGE, c_apoptosis_re_1_RULE_P), c_apoptosis_re_1_cs_0),
+            c_apoptosis_re_1_cert2 = app(c_apoptosis_re_1_cert1, c_apoptosis_re_1_cs_1),
             c_cellcycle_re_2_CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
             c_cellcycle_re_2_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
-            c_cellcycle_re_2_js_0 = justification:App(Declared(c_cellcycle_re_2_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset")),
-            c_cellcycle_re_2_cs_0 = app(c_cellcycle_re_2_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0), Declared(c_cellcycle_re_2_CLAIM_0), Observed("urn:eigenius:pub:wrn:cc_KM12_sampleset"),
-                        declared(c_cellcycle_re_2_CLAIM_0, c_cellcycle_re_2_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_2_OBSP_0)),
+            c_cellcycle_re_2_cs_0 = app(declared(c_cellcycle_re_2_CLAIM_0, c_cellcycle_re_2_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_KM12_sampleset", c_cellcycle_re_2_OBSP_0)),
             c_cellcycle_re_2_CLAIM_1 = "urn:eigenius:pub:wrn:cc_SW48_plan_yields_main_effect",
             c_cellcycle_re_2_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
-            c_cellcycle_re_2_js_1 = justification:App(Declared(c_cellcycle_re_2_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset")),
-            c_cellcycle_re_2_cs_1 = app(c_cellcycle_re_2_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0), Declared(c_cellcycle_re_2_CLAIM_1), Observed("urn:eigenius:pub:wrn:cc_SW48_sampleset"),
-                        declared(c_cellcycle_re_2_CLAIM_1, c_cellcycle_re_2_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_2_OBSP_1)),
+            c_cellcycle_re_2_cs_1 = app(declared(c_cellcycle_re_2_CLAIM_1, c_cellcycle_re_2_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_SW48_sampleset", c_cellcycle_re_2_OBSP_1)),
             c_cellcycle_re_2_CLAIM_2 = "urn:eigenius:pub:wrn:cc_OVK18_plan_yields_main_effect",
             c_cellcycle_re_2_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
-            c_cellcycle_re_2_js_2 = justification:App(Declared(c_cellcycle_re_2_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset")),
-            c_cellcycle_re_2_cs_2 = app(c_cellcycle_re_2_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0), Declared(c_cellcycle_re_2_CLAIM_2), Observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset"),
-                        declared(c_cellcycle_re_2_CLAIM_2, c_cellcycle_re_2_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_2_OBSP_2)),
+            c_cellcycle_re_2_cs_2 = app(declared(c_cellcycle_re_2_CLAIM_2, c_cellcycle_re_2_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:cc_OVK18_sampleset", c_cellcycle_re_2_OBSP_2)),
             c_cellcycle_re_2_BRIDGE = "urn:eigenius:pub:wrn:bridge_cellcycle",
             c_cellcycle_re_2_R_K = "urn:eigenius:pub:wrn:cc_KM12_plan:result:main_effect",
             c_cellcycle_re_2_R_S = "urn:eigenius:pub:wrn:cc_SW48_plan:result:main_effect",
@@ -681,25 +559,17 @@ resource wrn:concl_mech : justification:Conclusion {
             c_cellcycle_re_2_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0),
             c_cellcycle_re_2_CA = onco:CausesCellCycleArrest("WRN", "MSI"),
             c_cellcycle_re_2_RULE_P = c_cellcycle_re_2_K -> c_cellcycle_re_2_S -> c_cellcycle_re_2_O -> c_cellcycle_re_2_CA,
-            c_cellcycle_re_2_cert1 = app(c_cellcycle_re_2_K, c_cellcycle_re_2_S -> c_cellcycle_re_2_O -> c_cellcycle_re_2_CA, Declared(c_cellcycle_re_2_BRIDGE), c_cellcycle_re_2_js_0,
-                        declared(c_cellcycle_re_2_BRIDGE, c_cellcycle_re_2_RULE_P), c_cellcycle_re_2_cs_0),
-            c_cellcycle_re_2_cert2 = app(c_cellcycle_re_2_S, c_cellcycle_re_2_O -> c_cellcycle_re_2_CA, justification:App(Declared(c_cellcycle_re_2_BRIDGE), c_cellcycle_re_2_js_0),
-                        c_cellcycle_re_2_js_1, c_cellcycle_re_2_cert1, c_cellcycle_re_2_cs_1),
+            c_cellcycle_re_2_cert1 = app(declared(c_cellcycle_re_2_BRIDGE, c_cellcycle_re_2_RULE_P), c_cellcycle_re_2_cs_0),
+            c_cellcycle_re_2_cert2 = app(c_cellcycle_re_2_cert1, c_cellcycle_re_2_cs_1),
             c_apoptosis_re_3_CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
             c_apoptosis_re_3_OBSP_0 = core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
-            c_apoptosis_re_3_js_0 = justification:App(Declared(c_apoptosis_re_3_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset")),
-            c_apoptosis_re_3_cs_0 = app(c_apoptosis_re_3_OBSP_0, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0), Declared(c_apoptosis_re_3_CLAIM_0), Observed("urn:eigenius:pub:wrn:apop_KM12_sampleset"),
-                        declared(c_apoptosis_re_3_CLAIM_0, c_apoptosis_re_3_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_3_OBSP_0)),
+            c_apoptosis_re_3_cs_0 = app(declared(c_apoptosis_re_3_CLAIM_0, c_apoptosis_re_3_OBSP_0 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_KM12_sampleset", c_apoptosis_re_3_OBSP_0)),
             c_apoptosis_re_3_CLAIM_1 = "urn:eigenius:pub:wrn:apop_SW48_plan_yields_main_effect",
             c_apoptosis_re_3_OBSP_1 = core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
-            c_apoptosis_re_3_js_1 = justification:App(Declared(c_apoptosis_re_3_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset")),
-            c_apoptosis_re_3_cs_1 = app(c_apoptosis_re_3_OBSP_1, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0), Declared(c_apoptosis_re_3_CLAIM_1), Observed("urn:eigenius:pub:wrn:apop_SW48_sampleset"),
-                        declared(c_apoptosis_re_3_CLAIM_1, c_apoptosis_re_3_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_3_OBSP_1)),
+            c_apoptosis_re_3_cs_1 = app(declared(c_apoptosis_re_3_CLAIM_1, c_apoptosis_re_3_OBSP_1 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_SW48_sampleset", c_apoptosis_re_3_OBSP_1)),
             c_apoptosis_re_3_CLAIM_2 = "urn:eigenius:pub:wrn:apop_OVK18_plan_yields_main_effect",
             c_apoptosis_re_3_OBSP_2 = core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
-            c_apoptosis_re_3_js_2 = justification:App(Declared(c_apoptosis_re_3_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset")),
-            c_apoptosis_re_3_cs_2 = app(c_apoptosis_re_3_OBSP_2, stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0), Declared(c_apoptosis_re_3_CLAIM_2), Observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset"),
-                        declared(c_apoptosis_re_3_CLAIM_2, c_apoptosis_re_3_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_3_OBSP_2)),
+            c_apoptosis_re_3_cs_2 = app(declared(c_apoptosis_re_3_CLAIM_2, c_apoptosis_re_3_OBSP_2 -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)), observed("urn:eigenius:pub:wrn:apop_OVK18_sampleset", c_apoptosis_re_3_OBSP_2)),
             c_apoptosis_re_3_BRIDGE = "urn:eigenius:pub:wrn:bridge_apoptosis",
             c_apoptosis_re_3_R_K = "urn:eigenius:pub:wrn:apop_KM12_plan:result:main_effect",
             c_apoptosis_re_3_R_S = "urn:eigenius:pub:wrn:apop_SW48_plan:result:main_effect",
@@ -709,10 +579,8 @@ resource wrn:concl_mech : justification:Conclusion {
             c_apoptosis_re_3_O = stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0),
             c_apoptosis_re_3_CA = onco:CausesApoptosis("WRN", "MSI"),
             c_apoptosis_re_3_RULE_P = c_apoptosis_re_3_K -> c_apoptosis_re_3_S -> c_apoptosis_re_3_O -> c_apoptosis_re_3_CA,
-            c_apoptosis_re_3_cert1 = app(c_apoptosis_re_3_K, c_apoptosis_re_3_S -> c_apoptosis_re_3_O -> c_apoptosis_re_3_CA, Declared(c_apoptosis_re_3_BRIDGE), c_apoptosis_re_3_js_0,
-                        declared(c_apoptosis_re_3_BRIDGE, c_apoptosis_re_3_RULE_P), c_apoptosis_re_3_cs_0),
-            c_apoptosis_re_3_cert2 = app(c_apoptosis_re_3_S, c_apoptosis_re_3_O -> c_apoptosis_re_3_CA, justification:App(Declared(c_apoptosis_re_3_BRIDGE), c_apoptosis_re_3_js_0),
-                        c_apoptosis_re_3_js_1, c_apoptosis_re_3_cert1, c_apoptosis_re_3_cs_1),
+            c_apoptosis_re_3_cert1 = app(declared(c_apoptosis_re_3_BRIDGE, c_apoptosis_re_3_RULE_P), c_apoptosis_re_3_cs_0),
+            c_apoptosis_re_3_cert2 = app(c_apoptosis_re_3_cert1, c_apoptosis_re_3_cs_1),
             RULE = "urn:eigenius:pub:wrn:mech_rule",
             ART  = "urn:eigenius:pub:wrn:mech_dsb",
             CC   = "urn:eigenius:pub:wrn:concl_cellcycle_recomputed",
@@ -722,62 +590,10 @@ resource wrn:concl_mech : justification:Conclusion {
             AA   = onco:CausesApoptosis("WRN", "MSI"),
             DL   = onco:DSBDrivenLethality("WRN", "MSI"),
             RULE_P = DSB -> CA -> AA -> DL,
-            jDSB = Declared(ART),
-            jCA  = justification:App(
-                       justification:App(
-                           justification:App(
-                               Declared("urn:eigenius:pub:wrn:bridge_cellcycle"),
-                               c_cellcycle_re_0_js_0
-                           ),
-                           c_cellcycle_re_0_js_1
-                       ),
-                       c_cellcycle_re_0_js_2
-                   ),
-            jAA  = justification:App(
-                       justification:App(
-                           justification:App(
-                               Declared("urn:eigenius:pub:wrn:bridge_apoptosis"),
-                               c_apoptosis_re_1_js_0
-                           ),
-                           c_apoptosis_re_1_js_1
-                       ),
-                       c_apoptosis_re_1_js_2
-                   ),
-            cert1 = app(DSB, CA -> AA -> DL, Declared(RULE), jDSB,
-                        declared(RULE, RULE_P), declared(ART, DSB)),
-            cert2 = app(CA, AA -> DL, justification:App(Declared(RULE), jDSB),
-                        jCA, cert1, app(c_cellcycle_re_0_O, c_cellcycle_re_0_CA, justification:App(justification:App(Declared(c_cellcycle_re_0_BRIDGE), c_cellcycle_re_0_js_0), c_cellcycle_re_0_js_1),
-               c_cellcycle_re_0_js_2, c_cellcycle_re_0_cert2, c_cellcycle_re_0_cs_2))
+            cert1 = app(declared(RULE, RULE_P), declared(ART, DSB)),
+            cert2 = app(cert1, app(c_cellcycle_re_0_cert2, c_cellcycle_re_0_cs_2))
         in
         justification:Certificate(
-                   justification:App(
-                       justification:App(
-                           justification:App(
-                               Declared("urn:eigenius:pub:wrn:mech_rule"),
-                               Declared("urn:eigenius:pub:wrn:mech_dsb")
-                           ),
-                           justification:App(
-                       justification:App(
-                           justification:App(
-                               Declared("urn:eigenius:pub:wrn:bridge_cellcycle"),
-                               c_cellcycle_re_2_js_0
-                           ),
-                           c_cellcycle_re_2_js_1
-                       ),
-                       c_cellcycle_re_2_js_2
-                   )
-                       ),
-                       justification:App(
-                       justification:App(
-                           justification:App(
-                               Declared("urn:eigenius:pub:wrn:bridge_apoptosis"),
-                               c_apoptosis_re_3_js_0
-                           ),
-                           c_apoptosis_re_3_js_1
-                       ),
-                       c_apoptosis_re_3_js_2
-                   )
-                   ),
                    onco:DSBDrivenLethality("WRN", "MSI") )) );
 }
 
@@ -818,7 +634,6 @@ resource wrn:concl_not_telomere : justification:Conclusion {
                type_expr(declared("urn:eigenius:pub:wrn:fish_readout",
                onco:NotViaTelomereDefect("WRN", "MSI"))),
                type_expr(justification:Certificate(
-                   Declared("urn:eigenius:pub:wrn:fish_readout"),
                    onco:NotViaTelomereDefect("WRN", "MSI") )) );
 }
 

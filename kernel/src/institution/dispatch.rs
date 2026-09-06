@@ -514,7 +514,7 @@ pub fn allocate_invocation_iri() -> Iri {
 /// channel. A derivation records WHAT A RUN PRODUCED and grounds nothing, which
 /// is what the marker class asserts. A trace records what the check
 /// ESTABLISHED, and grounds a witness: a `prov:VerificationTrace` from the Lean
-/// institution is what `witness_index::trace_category` reads to admit `Verified`
+/// institution is what `witness_admission::trace_category` reads to admit `Verified`
 /// (eigenius#160). Stamping the marker on one would put "grounds nothing" on the
 /// single resource whose purpose is to be a ground. Decided by
 /// [`Layer::is_subclass_of`], not a list of trace IRIs, so a new `prov:Trace`

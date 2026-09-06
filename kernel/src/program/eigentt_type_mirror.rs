@@ -224,9 +224,9 @@ impl CodecNames {
 
     /// Find the one inductive declaring `ctor`, for a caller that has only the name.
     ///
-    /// Ambiguity is an error, not a guess: `App` belongs to `eigentt:Term`,
-    /// `justification:Term` AND `formulas:FormulaTerm`, and picking one silently is how a
-    /// value ends up stating a class its slot does not admit.
+    /// Ambiguity is an error, not a guess: `App` belongs to `eigentt:Term` AND
+    /// `formulas:FormulaTerm`, and picking one silently is how a value ends up
+    /// stating a class its slot does not admit.
     /// Does `inductive` declare `ctor`?
     pub fn lookup_declares(&self, inductive: &str, ctor: &str) -> bool {
         self.by_class
@@ -356,6 +356,7 @@ pub(crate) fn encode_term(exp: &Exp, names: &CodecNames) -> Result<Value, Encode
             use crate::nbe::term::PrimitiveType;
             let iri_str = match prim {
                 PrimitiveType::String => wk::STRING,
+                PrimitiveType::Iri => wk::IRI_TYPE,
                 PrimitiveType::Integer => wk::INTEGER,
                 PrimitiveType::Float => wk::FLOAT,
                 PrimitiveType::Boolean => wk::BOOLEAN,
@@ -392,6 +393,15 @@ pub(crate) fn encode_term(exp: &Exp, names: &CodecNames) -> Result<Value, Encode
             }
             Ok(acc)
         }
+        // D87 §4.2 — the checked-proof reference. Its own ctor, not `ConstRef`: `ConstRef`
+        // resolves by the target's class and yields `EigonClass` / `EigonAxiom` / `Const`, none
+        // of which a `lean:LeanProofPayload` instance is, and reusing it would put "asserted
+        // without proof" and "checked by nanoda" in one wire form.
+        Exp::Checked(iri) => term(
+            names,
+            "Checked",
+            vec![Value::String(iri.as_str().to_string())],
+        ),
         Exp::LitString(s) => term(names, "LitString", vec![Value::String(s.clone())]),
         Exp::LitInt(n) => term(names, "LitInt", vec![Value::Integer(*n)]),
         Exp::LitFloat(f) => term(names, "LitFloat", vec![Value::Float(*f)]),
@@ -1072,6 +1082,16 @@ fn decode_value(r: &Resource, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
         // (the validator at canonical_proposition emission time should
         // already have caught this — D49 Phase 5 — but the codec is
         // the last line of defence).
+        // D87 §4.2. Decoding is total, as it must be — the ctor is on the chain, so a value
+        // carrying it has to read back. What refuses a hand-authored one is `check`, which has no
+        // proof of the proposition and will not manufacture one.
+        "Checked" => {
+            expect_arg_count("Checked", 1, args)?;
+            let iri_str = arg_string("Checked", 0, args[0])?;
+            let iri = Iri::parse(&iri_str)
+                .map_err(|e| wrong_shape("Checked", 0, &format!("invalid IRI `{iri_str}`: {e}")))?;
+            Ok(Exp::Checked(iri))
+        }
         "LitString" => {
             expect_arg_count("LitString", 1, args)?;
             let s = args[0]
@@ -1214,6 +1234,7 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
     use crate::ontology::well_known as wk;
     match iri.as_str() {
         wk::STRING => return Ok(Exp::EigonPrimitive(PrimitiveType::String)),
+        wk::IRI_TYPE => return Ok(Exp::EigonPrimitive(PrimitiveType::Iri)),
         wk::INTEGER => return Ok(Exp::EigonPrimitive(PrimitiveType::Integer)),
         wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
@@ -1313,10 +1334,9 @@ fn wrong_shape(ctor: &'static str, slot: usize, details: &str) -> DecodeError {
 ///
 /// The inverse of [`certificate_indices`]. An indexed inductive applied to its
 /// indices encodes as nested `App`s over a `ConstRef` head.
-pub fn certificate_type(j: &Value, p: &Value, names: &CodecNames) -> Result<Value, EncodeError> {
+pub fn certificate_type(p: &Value, names: &CodecNames) -> Result<Value, EncodeError> {
     let head = const_ref(names, "urn:eigenius:justification:Certificate", &[])?;
-    let one = term(names, "App", vec![head, j.clone()])?;
-    term(names, "App", vec![one, p.clone()])
+    term(names, "App", vec![head, p.clone()])
 }
 
 /// Build an `eigentt:Judgement` value — `holds(logic, term, type)` — from an
@@ -1439,23 +1459,22 @@ pub fn decode_judgement(value: &Value, layer: &Layer) -> Result<Judgement, Decod
     }
 }
 
-/// Project the two indices out of a `justification:Certificate(j, P)` type.
+/// Project the proposition out of a `justification:Certificate(P)` type.
 ///
-/// A certificate type is the indexed inductive applied to its two indices, so
-/// it reaches here as `App(App(Const(Certificate), j), P)` — the shape D76
-/// Phase B leaves for a type former applied to arguments.
+/// A certificate type is the indexed inductive applied to its one index, so it reaches here as
+/// `App(Const(Certificate), P)` — the shape D76 Phase B leaves for a type former applied to
+/// arguments.
 ///
-/// This is what lets a conclusion's proposition be recovered from its
-/// judgement rather than stored in a second slot. The emit and check sides
-/// must agree on the result: the witness index hashes `P` projected out here,
-/// while a citing certificate's `verified(iri, P)` supplies `P` directly, and
-/// a mismatch does not error — it silently fails to admit the witness.
-pub fn certificate_indices(typ: &Exp) -> Option<(&Exp, &Exp)> {
-    let (inner, p) = match typ {
-        Exp::App(f, a) => (f.as_ref(), a.as_ref()),
-        _ => return None,
-    };
-    let (head, j) = match inner {
+/// It had two indices until the D88 §2 merge, `(j, P)`, and callers took the term from the first.
+/// The term is now the certificate VALUE, so a caller that wants it reads `judgement.term` and a
+/// caller that wants the proposition reads this.
+///
+/// This is what lets a conclusion's proposition be recovered from its judgement rather than stored
+/// in a second slot. The emit and check sides must agree on the result: the witness index hashes
+/// `P` projected out here, while a citing certificate's `verified(iri, P)` supplies `P` directly,
+/// and a mismatch does not error — it silently fails to admit the witness.
+pub fn certificate_indices(typ: &Exp) -> Option<&Exp> {
+    let (head, p) = match typ {
         Exp::App(f, a) => (f.as_ref(), a.as_ref()),
         _ => return None,
     };
@@ -1464,7 +1483,7 @@ pub fn certificate_indices(typ: &Exp) -> Option<(&Exp, &Exp)> {
         Exp::Const(iri, _) | Exp::EigonClass(iri) | Exp::EigonAxiom(iri)
             if iri.as_str() == "urn:eigenius:justification:Certificate"
     );
-    names_certificate.then_some((j, p))
+    names_certificate.then_some(p)
 }
 
 #[cfg(test)]
@@ -1825,6 +1844,27 @@ mod tests {
         assert_eq!(decoded, exp);
     }
 
+    /// D87 §4.2 — the checked-proof reference survives the codec as itself.
+    ///
+    /// The property that matters is that it does not come back as an `EigonAxiom`. Both would
+    /// round-trip through a `ConstRef`, and a chain that could not tell them apart is the
+    /// conflation the former was added to prevent: `Declared(a)` and `Verified(a)` would name the
+    /// same resource with the authored justification term as the only discriminator.
+    #[test]
+    fn a_checked_proof_reference_round_trips_as_itself() {
+        let payload = Iri::parse("urn:eigenius:demo:lean:proof_payload").unwrap();
+        let exp = Exp::Checked(payload.clone());
+        let v = encode_type(&exp, crate::testing::codec_names()).unwrap();
+        let decoded = decode_type(&v, &empty_layer()).unwrap();
+        assert_eq!(decoded, exp);
+        assert_ne!(
+            decoded,
+            Exp::EigonAxiom(payload),
+            "a checked-proof reference must not decode as an axiom — the whole point of the \
+             former is that the chain can tell `asserted without proof` from `checked by nanoda`"
+        );
+    }
+
     #[test]
     fn decodes_propext_round_trip() {
         // Re-build propext, encode it, decode it, compare structurally
@@ -1987,6 +2027,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "nil".to_string(),
                 typ: Exp::const_applied(
                     Arc::new(InductiveDecl {
@@ -2044,6 +2085,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "zero".to_string(),
                 typ: Exp::sort(1),
             }],
@@ -2067,6 +2109,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "succ".to_string(),
                 typ: Exp::sort(1),
             }],
@@ -2139,10 +2182,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "zero".to_string(),
                     typ: Exp::sort(1),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "succ".to_string(),
                     typ: Exp::sort(1),
                 },

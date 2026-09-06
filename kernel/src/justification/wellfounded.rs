@@ -136,10 +136,14 @@ fn term_of(layer: &Layer, iri: &Iri) -> Option<Result<crate::nbe::term::Exp, Str
         Ok(j) => j,
         Err(e) => return Some(Err(format!("judgement does not decode: {e}"))),
     };
+    // The certificate itself, not an index of its type. It used to come from
+    // `certificate_indices(&judgement.typ).0` — the term the type carried alongside the
+    // proposition — and with that index merged into the certificate (D88 §2) the derivation is
+    // the judgement's own `term`: `holds(kernel, c, Certificate(P))`.
     match crate::program::eigentt_type_mirror::certificate_indices(&judgement.typ) {
-        Some((j_exp, _p)) => Some(Ok(j_exp.clone())),
+        Some(_) => Some(Ok(judgement.term.clone())),
         None => Some(Err(
-            "judgement's type is not a `justification:Certificate(j, P)`".to_string(),
+            "judgement's type is not a `justification:Certificate(P)`".to_string(),
         )),
     }
 }

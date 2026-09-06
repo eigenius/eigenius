@@ -132,11 +132,10 @@ pub enum Val {
     },
 
     // --- D49 ChainWitness (kernel-internal opaque value) ---
-    /// An admitted `ChainWitness` inhabitant — **an axiom the kernel
-    /// asserts**, not a term anyone wrote.
+    /// An admitted `ChainWitness` inhabitant — **decided by the kernel**, not a term anyone wrote.
     ///
-    /// The types it inhabits (`witness:IsDeclaredAs` and its three
-    /// siblings, `ontologies/justification/justification.esl`) are `Prop`-valued
+    /// The types it inhabits (`witness:IsDeclaredAs` and its two
+    /// siblings, declared in `ontologies/core/core-ontology.json`) are `Prop`-valued
     /// inductives with **zero constructors**, so nothing in the term
     /// language can inhabit them. That emptiness is the enforcement
     /// mechanism, not an omission: it is what makes the kernel the only
@@ -155,18 +154,28 @@ pub enum Val {
     ///
     /// The kernel synthesises one during `justification:Certificate.*` constructor
     /// type-checking, via `CheckHooks::synthesize_chain_witness` →
-    /// `layer::witness_index::layer_admits_witness`, which reads
+    /// `layer::witness_admission::layer_admits_witness`, which reads
     /// `DeclarationTrace` / `ObservationTrace` / `VerificationTrace`
     /// resources by **direct lookup on the key's IRI**.
     /// There is no materialised index — the `OnceLock<BTreeMap<..>>`
     /// this comment used to describe was removed in D66 slice 0; see
-    /// `witness_index.rs`'s module docs.
+    /// `witness_admission.rs`'s module docs.
     ///
-    /// **This is the trust boundary.** Everything above the witness is
-    /// checked; the witness itself is postulated, so
-    /// `layer_admits_witness` is inside the TCB and an incorrect
-    /// admission is undetectable downstream — an axiom has no proof to
-    /// re-check. `WitnessKey` records the category, the IRI and a hash of
+    /// **It used to be a trust boundary and no longer is** (the P7 closeout, `2026-09-05`). This
+    /// comment read: *"the witness itself is postulated, so `layer_admits_witness` is inside the
+    /// TCB and an incorrect admission is undetectable downstream — an axiom has no proof to
+    /// re-check."* What `layer_admits_witness` does is recompute a deterministic function of the
+    /// layer's Trace resources and the propositions they name, storing nothing, so an incorrect
+    /// admission IS detectable: run it again. The last family for which that was not true was
+    /// `Verified`, whose trace recorded only that a check had happened; it now carries the
+    /// checker's judgement and the inputs the verdict is a function of, so the verdict is
+    /// re-derivable by any party from the chain (D87 §5).
+    ///
+    /// The type is still zero-constructor and the kernel is still the only source, because that is
+    /// what keeps the grade off an author's pen. What changed is that being the only source no
+    /// longer means being unaccountable.
+    ///
+    /// `WitnessKey` records the category, the IRI and a hash of
     /// the proposition, but not *which relation* it establishes, which is
     /// how a well-formed witness for a wrongly-encoded subject passed
     /// (D81 §5; D82 §3.5).
@@ -243,6 +252,13 @@ pub enum Neut {
     /// `NotAFunction` — axioms have no reduction rules and there's
     /// no `Val::Lam` to apply.
     EigonAxiom(Iri),
+    /// A reference to an externally checked proof (D87 §4.2) — `Exp::Checked`'s value form.
+    ///
+    /// A `Neut` for the same reason `EigonAxiom` is one: it has no reduction rule, so it is a
+    /// normal form that compares by IRI. It is a SEPARATE variant so the distinction survives a
+    /// round-trip — reading a `Checked` back as an `EigonAxiom` would put "asserted without
+    /// proof" and "checked by nanoda" in one form, which is exactly what D87 §4.1 withdrew.
+    Checked(Iri),
     /// Property access on a neutral resource
     PropAccess(Box<Neut>, Iri),
 

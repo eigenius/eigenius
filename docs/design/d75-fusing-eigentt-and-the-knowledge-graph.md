@@ -170,10 +170,10 @@ reference encodes as a bare `ConstRef(iri)` (`eigentt_type_mirror.rs:139`). `Wit
 grounded resource's IRI. **No layer id is an input anywhere in that chain**, so the hash cannot
 distinguish "C as defined in L1" from "C as defined in L2".
 
-`hash_stored_proposition` (`witness_index.rs:120`) decodes against the layer first, so *definition*
+`hash_stored_proposition` (`witness_admission.rs:120`) decodes against the layer first, so *definition*
 bodies do enter the hash (D66 §4). Classes and axioms do not unfold, so they do not.
 
-Two tests in `kernel/src/layer/witness_index.rs`, both passing against current behaviour:
+Two tests in `kernel/src/layer/witness_admission.rs`, both passing against current behaviour:
 
 - `redefining_a_class_does_not_change_the_hash_of_a_proposition_over_it` — `Π(x : Dog). Prop` hashes
   identically against a layer defining `Dog` and a child redefining it, with an `assert_ne!` on the
@@ -186,7 +186,7 @@ Two tests in `kernel/src/layer/witness_index.rs`, both passing against current b
 The direction is load-bearing. Narrowing the class shrinks the domain and leaves stale credit sound
 by accident; only widening exhibits the unsoundness.
 
-**The failing soundness argument is written down in the kernel** (`witness_index.rs:30-31`):
+**The failing soundness argument is written down in the kernel** (`witness_admission.rs:30-31`):
 
 > "First-hit-wins is sound because Layer immutability means a once-admitted witness stays admitted in
 > all descendants."

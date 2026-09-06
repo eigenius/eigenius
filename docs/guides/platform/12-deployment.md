@@ -136,15 +136,36 @@ az acr login --name <acr>
 docker push <acr>.azurecr.io/eigenius-kernel:<tag>
 docker push <acr>.azurecr.io/eigenius-orchestration:<tag>
 
+# Resolve the digest the registry assigned the kernel image
+DIGEST=$(docker buildx imagetools inspect <acr>.azurecr.io/eigenius-kernel:<tag> \
+    --format '{{.Manifest.Digest}}')
+
 # Deploy
 az deployment group create \
     --resource-group <rg> \
     --template-file deploy/bicep/main.bicep \
     --parameters @deploy/bicep/parameters/staging.bicepparam \
-    --parameters imageTag=<tag>
+    --parameters imageTag=<tag> kernelImageDigest="$DIGEST"
 ```
 
-The `staging.bicepparam` and `production.bicepparam` files in `parameters/` carry three parameters each — `environment`, `imageTag` and `acrLoginServer`. No region, no tier sizing: location comes from the resource group and CPU/memory are hardcoded in the modules. Set `acrLoginServer` to your own registry before the first deploy.
+**The kernel is pinned by digest, not by tag.** A tag is mutable, so a tag-pinned deployment is
+not reproducible even in principle — the same template deploys different code on different days.
+The digest also becomes the kernel's *checker identity*: it is injected as
+`EIGENIUS_IMAGE_DIGEST` and written onto every `prov:VerificationTrace` the Lean institution
+emits, which is what lets a reader tell an identity binding the running binary from one that only
+names the source ([D87](../../design/d87-the-verification-judgement.md) §9.3). Without it the
+kernel records `source_pin` — the `nanoda_lib` revision and the Lean toolchain — and says so.
+
+The digest is taken from the deployment rather than read out of the container at run time: the
+deployer already knows what it deployed, it needs no privilege, and it works on every runtime.
+ACA has no Docker socket, so the alternative could not work here at all.
+
+The `staging.bicepparam` and `production.bicepparam` files in `parameters/` carry four parameters
+each — `environment`, `imageTag`, `kernelImageDigest` and `acrLoginServer`. `kernelImageDigest` is
+empty in both and has an `@minLength(71)` constraint (`sha256:` plus 64 hex), so a deploy that
+forgets it is refused by the template with the parameter named rather than by a failed image pull.
+No region, no tier sizing: location comes from the resource group and CPU/memory are hardcoded in
+the modules. Set `acrLoginServer` to your own registry before the first deploy.
 
 ### Updating
 
@@ -155,12 +176,14 @@ For container image updates:
 docker build -t <acr>.azurecr.io/eigenius-kernel:<new-tag> -f deploy/Dockerfile.kernel .
 docker push <acr>.azurecr.io/eigenius-kernel:<new-tag>
 
-# Re-run deployment with new tag
+# Re-run deployment with the new tag AND its digest
+DIGEST=$(docker buildx imagetools inspect <acr>.azurecr.io/eigenius-kernel:<new-tag> \
+    --format '{{.Manifest.Digest}}')
 az deployment group create \
     --resource-group <rg> \
     --template-file deploy/bicep/main.bicep \
     --parameters @deploy/bicep/parameters/staging.bicepparam \
-    --parameters imageTag=<new-tag>
+    --parameters imageTag=<new-tag> kernelImageDigest="$DIGEST"
 ```
 
 ContainerApps performs a rolling update — old replicas drain while new ones come up.

@@ -155,6 +155,29 @@ pub enum Exp {
     /// `EigonClass`. Parallels D46 §10 + the encoding-probe in
     /// `crates/eigenius-statistics/tests/axiom_encoding_probe.rs`.
     EigonAxiom(Iri),
+    /// Reference to a proof an EXTERNAL checker verified (D87 §4.2). The IRI names the artifact
+    /// the checker examined — a `lean:LeanProofPayload` — so the term anchors to the bytes rather
+    /// than standing for them.
+    ///
+    /// This is the `term` argument of `holds(logic_lean4, Checked(a), P)`: what nanoda checked
+    /// against `P`. It is **not** an [`Self::EigonAxiom`], and D87 §4.1 withdrew making it one.
+    /// `eigentt:Axiom` is *"a closed term whose type the kernel admits without checking the term
+    /// itself"*, which is the opposite of what is being recorded; putting both in one class would
+    /// let `Declared(a)` and `Verified(a)` name the same resource with the authored justification
+    /// term as the only discriminator, which is the conflation eigenius#205 and #23 each removed
+    /// once already.
+    ///
+    /// **It does not type-check, and that is the enforcement** (D87 §4.3). `check` refuses it: the
+    /// kernel has no proof of `P` and will not manufacture one, so a hand-authored
+    /// `holds(logic_lean4, …)` is rejected at commit by the `eigentt:Judgement` check-mode rule.
+    /// An institution-emitted one is never asked, because `structural_validate` runs BEFORE
+    /// `autoonload_dispatch` and the followup pipeline slice has no validation phase at all. The
+    /// emission path and the input path already differ in whether they validate, so "kernel-only,
+    /// refused from input" falls out of the pipeline's shape rather than from a guard.
+    ///
+    /// `eval` and `readback` are identity — there is nothing to reduce — and D74 REFUSES it for
+    /// externalization: a checked-proof reference has no Lean counterpart to translate to.
+    Checked(Iri),
     /// Eigon primitive type
     EigonPrimitive(PrimitiveType),
     /// A concrete Eigon resource value
@@ -378,10 +401,33 @@ pub enum Constraint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrimitiveType {
     String,
+    /// An absolute IRI. A REFINEMENT of [`PrimitiveType::String`], not a separate carrier: its
+    /// values are `Exp::LitString`, and the difference is that checking one parses it (D88 §3).
+    ///
+    /// It exists so a slot that holds a reference to a chain resource SAYS SO. The grounding
+    /// constructors' leaf, the `witness:Is*As` iri index and `eigentt:Term.Checked`'s payload all
+    /// named `core:string` and were read back as references by a prefix heuristic —
+    /// `s.starts_with("urn:")` in three places — which is a guess about a string rather than a
+    /// declaration about a slot.
+    ///
+    /// `LitString` INFERS to `String`, never to this: a bare literal cannot know which it is
+    /// meant to be. `Iri` is reachable only in CHECK mode, where a declared type asks for it. That
+    /// asymmetry is deliberate and is what keeps every existing authored literal valid.
+    Iri,
     Integer,
     Float,
     Boolean,
     Json,
+}
+
+impl PrimitiveType {
+    /// Whether a value of `self` is admissible where `other` is expected.
+    ///
+    /// Only `Iri <: String` holds — every IRI is a string. The converse does not: that is the
+    /// whole point of declaring the slot.
+    pub fn subtype_of(self, other: PrimitiveType) -> bool {
+        self == other || (self == PrimitiveType::Iri && other == PrimitiveType::String)
+    }
 }
 
 /// Declaration of an inductive type (Phase 11b, D19).
@@ -484,6 +530,7 @@ impl InductiveDecl {
                 .ctors
                 .iter()
                 .map(|c| InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: c.name.clone(),
                     typ: c.typ.subst_levels(ks, levels),
                 })
@@ -512,6 +559,24 @@ pub struct InductiveCtorDecl {
     /// Full constructor type: a Π-telescope ending in an application
     /// of the parent inductive to its parameters.
     pub typ: Exp,
+    /// Which telescope binders (past the inductive's parameter prefix) the author does not write.
+    ///
+    /// One entry per `CtorArg` the telescope peels to; an empty vector means every argument is
+    /// explicit, which is what every constructor outside `justification:Certificate` declares.
+    ///
+    /// **Beside the type rather than inside it.** A marker in the binder's type — `A :
+    /// Implicit(Prop)` — would have to survive the constructor's own well-formedness check, where
+    /// `A -> B` demands `A : Sort _` and `Implicit(Prop)` is not one. Keeping the flag out of `typ`
+    /// leaves the universe check, positivity and the D48 Phase B terminal check reading exactly
+    /// what they read before.
+    ///
+    /// **Declared, not derived.** Solving a binder from the expected type does not license eliding
+    /// it: "the author omitted a solvable binder" and "the author supplied a value for one" are the
+    /// same argument list, so deriving implicitness misaligns everything after the first elided
+    /// slot. Measured `2026-09-05` on `verified(CLAIM, P)` — auto-filling `iri` moved `CLAIM` onto
+    /// the `P : Prop` slot. Alignment has to be fixed by the declaration, before any solving, which
+    /// is how the `ChainWitness` slots have always worked.
+    pub implicit: Vec<bool>,
 }
 
 impl Patt {
@@ -746,6 +811,7 @@ impl Exp {
             | Exp::Var(_)
             | Exp::EigonClass(_)
             | Exp::EigonAxiom(_)
+            | Exp::Checked(_)
             | Exp::EigonPrimitive(_)
             | Exp::EigonResource(_)
             | Exp::LitString(_)
@@ -898,6 +964,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
         ctors: vec![
             // nil : Π A:Set. List A
             InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -907,6 +974,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
             },
             // cons : Π A:Set. A → List A → List A
             InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "cons".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -955,6 +1023,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
         ctors: vec![
             // none : Π A:Set. Option A
             InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "none".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -964,6 +1033,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
             },
             // some : Π A:Set. A → Option A
             InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "some".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),

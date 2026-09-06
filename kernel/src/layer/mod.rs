@@ -43,9 +43,9 @@ pub mod term_mentions;
 mod text_index;
 mod value_index;
 mod vector_index;
-mod witness_index;
+mod witness_admission;
 
-pub use witness_index::{
+pub use witness_admission::{
     default_asserts_proposition, default_asserts_proposition_hash, is_witness_candidate,
     layer_admits_witness, lookup_chain_witness, synthesize_chain_witness,
 };

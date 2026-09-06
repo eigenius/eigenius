@@ -1,13 +1,13 @@
-// TEMPORARY smoke test for the benchmark base ontologies (D51 gap 5).
+// `bench-core.esl` and `harness-ontology.esl` compile against the bootstrap chain and build into
+// layers without validator failures.
 //
-// Confirms `experiments/benchmark/base-ontologies/{bench-core,mol}.esl`
-// compile against the bootstrap chain and build into layers without
-// validator failures — the D51 gap-5 "rounds-trips through the commit
-// pipeline cleanly" quality check.
+// These two are not benchmark scaffolding despite where they live: the WRN publication chain loads
+// both (`wrn_phase2`, `wrn_phase3`, `wrn_phase5`, `wrn_phase1_recompute`, `demo/wrn-helicase/run.sh`)
+// for `bench:Measurement`, `bench:Dataset` and `bench:TaskOutput`. Those tests would also fail if
+// either stopped compiling, but only after building a seven-layer chain; this says which file broke.
 //
-// This lives in the production reasoning crate's test dir only for
-// bring-up. When the benchmark harness gets its own crate (D51 gap 7),
-// move it there and drop the include_str! dependency on experiments/.
+// The `mol.esl` module it also covered was deleted `2026-09-05` with the SAB tracer tasks — nothing
+// outside them used the `mol:` namespace.
 
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ fn fail(stage: &str, errs: Vec<impl std::fmt::Debug>) -> ! {
 }
 
 #[test]
-fn bench_core_and_mol_round_trip() {
+fn bench_core_and_harness_round_trip() {
     // core
     let core_json = include_str!("../../ontologies/core/core-ontology.json");
     let core_resources = eigon_json::parse_document(core_json).unwrap();
@@ -78,16 +78,5 @@ fn bench_core_and_mol_round_trip() {
     for r in harness_resources {
         harness_builder.add_resource(r).unwrap();
     }
-    let harness = Arc::new(harness_builder.build(LayerStorage::in_memory()));
-
-    // mol, compiled against harness (linear chain: bench-core → harness → mol)
-    let mol_src = include_str!("../../experiments/benchmark/base-ontologies/mol.esl");
-    let mol_resources =
-        esl::compile(mol_src, &harness).unwrap_or_else(|errs| fail("mol.esl compile", errs));
-    assert!(!mol_resources.is_empty(), "mol produced no resources");
-    let mut mol_builder = LayerBuilder::new("mol", Some(harness));
-    for r in mol_resources {
-        mol_builder.add_resource(r).unwrap();
-    }
-    let _mol = Arc::new(mol_builder.build(LayerStorage::in_memory()));
+    let _harness = Arc::new(harness_builder.build(LayerStorage::in_memory()));
 }

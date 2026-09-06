@@ -491,7 +491,7 @@ impl Printer<'_> {
             //
             // Qualified rather than bare on purpose: bare resolution is by short name across every
             // chain-resident inductive, and `App` alone is already ambiguous between
-            // `eigentt:Term:App` and `justification:Term:App`.
+            // `eigentt:Term:App` and `formulas:FormulaTerm:App`.
             "CtorApp" => {
                 let decl = str_arg(0)?;
                 let name = str_arg(1)?;
@@ -695,10 +695,10 @@ fn escape(s: &str) -> String {
 /// leaves. It also **omits the decl IRI**, so the namespace to qualify with cannot be recovered
 /// from the term — the caller supplies it. The decompiler uses the holding property's own
 /// namespace, since a property and the inductive its values inhabit are declared in the same
-/// ontology (`justification:term` holds a `justification:Term`).
+/// ontology (`formulas:formula` holds a `formulas:FormulaTerm`).
 ///
 /// Qualification is not optional: bare `App` is ambiguous between `eigentt:Term:App` and
-/// `justification:Term:App`, and the compiler rightly refuses it.
+/// `formulas:FormulaTerm:App`, and the compiler rightly refuses it.
 pub fn print_value_term(
     term: &Value,
     ns: &mut Namespaces,
@@ -1193,9 +1193,28 @@ fn print_data(
             .and_then(Value::as_str)
             .ok_or_else(|| bad(format!("`ctors[{i}]` has no `ctor_name`")))?;
         if let Some(ct) = co.get(wk::CTOR_TYPE) {
-            // Typed form: the whole Π chain is one D47 term.
+            // Typed form: the whole Π chain is one D47 term, optionally preceded by the
+            // `implicit(...)` clause naming binders the author does not write (D88 §4).
+            let implicit = match co.get(wk::IMPLICIT_ARGS).and_then(Value::as_array) {
+                None => String::new(),
+                Some(names) => {
+                    let listed: Vec<&str> = names
+                        .iter()
+                        .map(|n| {
+                            n.as_str().ok_or_else(|| {
+                                bad(format!("`ctors[{i}].implicit_args` entry is not a string"))
+                            })
+                        })
+                        .collect::<Result<_, _>>()?;
+                    if listed.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" implicit({})", listed.join(", "))
+                    }
+                }
+            };
             lines.push(format!(
-                "    {name} : {},",
+                "    {name}{implicit} : {},",
                 print_type_expr_with(ct, ns, layout, 4)?
             ));
         } else {

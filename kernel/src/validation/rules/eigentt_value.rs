@@ -416,6 +416,106 @@ mod tests {
         Arc::new(top.build(LayerStorage::in_memory()))
     }
 
+    /// The same chain plus `test:jx`, a slot ranging over `eigentt:Judgement` — the shape whose
+    /// obligation is the CHECK-mode rule: decode both fields, check `type` is a type, check
+    /// `term` against it.
+    fn chain_with_judgement_slot() -> Arc<Layer> {
+        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let mut top = LayerBuilder::new("judgement_slot_test", Some(head));
+        let mut prop = Resource::new(iri("urn:eigenius:test:jx"));
+        prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
+        );
+        prop.set(iri(wk::SHORT_NAME), Value::String("jx".into()));
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::RESOURCE)));
+        prop.set(
+            iri(wk::CLASS_TYPES),
+            Value::Array(vec![Value::String(
+                iri("urn:eigenius:eigentt:Judgement").as_str().to_string(),
+            )]),
+        );
+        top.add_resource(prop).unwrap();
+        Arc::new(top.build(LayerStorage::in_memory()))
+    }
+
+    fn errors_for_judgement(value: Value) -> Vec<crate::validation::ValidationError> {
+        let chain = chain_with_judgement_slot();
+        let mut top = LayerBuilder::new("holder", Some(chain));
+        let mut r = Resource::new(iri("urn:eigenius:test:judgement_holder"));
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(wk::CLASS.to_string())]),
+        );
+        r.set(iri("urn:eigenius:test:jx"), value);
+        top.add_resource(r).unwrap();
+        eigentt_errors(Arc::new(top.build(LayerStorage::in_memory())))
+    }
+
+    /// D87 §4.3 — an author cannot write a Lean verification judgement.
+    ///
+    /// This is the enforcement the whole `Checked` former rests on. Without it, anybody who can
+    /// commit a resource can mint `holds(logic_lean4, Checked(anything), P)` for any `P` they
+    /// like, and `Verified` — the one grade no author is supposed to be able to assert into
+    /// existence — becomes assertable in one commit.
+    ///
+    /// The kernel has no proof of `P` and will not manufacture one, so the CHECK-mode rule
+    /// `eigentt:Judgement` declares refuses the term against its type. The institution's own
+    /// emission is never asked: `structural_validate` runs before `autoonload_dispatch`, and the
+    /// followup pipeline slice has no validation phase at all.
+    #[test]
+    fn a_hand_authored_lean_verification_judgement_is_refused() {
+        use crate::program::eigentt_type_mirror::encode_judgement;
+        let names = crate::testing::codec_names();
+        let payload = Iri::parse("urn:eigenius:demo:lean:proof_payload").unwrap();
+        let term = encode_type(&Exp::Checked(payload), names).expect("the term encodes");
+        // A real, well-formed proposition — the point is that no proposition works, so the
+        // refusal has to come from the TERM and not from the type being malformed.
+        let typ = encode_type(
+            &Exp::App(
+                Box::new(Exp::EigonAxiom(
+                    Iri::parse("urn:eigenius:measurements:methods_agree").unwrap(),
+                )),
+                Box::new(Exp::LitString("urn:eigenius:test:sampleset".into())),
+            ),
+            names,
+        )
+        .expect("the proposition encodes");
+        let judgement = encode_judgement("urn:eigenius:eigentt:logic_lean4", &term, &typ, names)
+            .expect("the judgement encodes");
+
+        let errs = errors_for_judgement(judgement);
+        assert_eq!(
+            errs.len(),
+            1,
+            "exactly one refusal, on the term against its type; got {errs:?}"
+        );
+        assert_eq!(errs[0].rule, ValidationRule::TermIllTyped);
+        assert!(
+            errs[0].message.contains("Checked"),
+            "the diagnostic must name the form the author reached for; got {}",
+            errs[0].message
+        );
+    }
+
+    /// The counterpart: the kernel's own logic still works, so the refusal above is about
+    /// `Checked` and not about judgements in general.
+    #[test]
+    fn a_kernel_judgement_over_a_real_term_still_passes() {
+        use crate::program::eigentt_type_mirror::encode_judgement;
+        let names = crate::testing::codec_names();
+        // `Sort(0) : Sort(1)` — the smallest judgement the kernel can actually check.
+        let term = encode_type(&Exp::sort(0), names).expect("encodes");
+        let typ = encode_type(&Exp::sort(1), names).expect("encodes");
+        let judgement = encode_judgement("urn:eigenius:eigentt:logic_kernel", &term, &typ, names)
+            .expect("the judgement encodes");
+        let errs = errors_for_judgement(judgement);
+        assert!(
+            errs.is_empty(),
+            "a judgement the kernel CAN check must commit; got {errs:?}"
+        );
+    }
+
     fn holder_with_tx(id: &str, value: Value) -> Resource {
         let mut r = Resource::new(iri(id));
         r.set(

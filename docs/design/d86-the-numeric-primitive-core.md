@@ -136,8 +136,9 @@ modelling question about the chain, not about the comorphism.
 |---|---|
 | `core:float` ↔ `Float` | **done** (D74 §4.8) |
 | optional non-NaN refinement → `Subtype` | **done** (D30 emission + D74 §4.5), and optional per §3.4 |
-| declare `≤` and `float_ieee_eq` on the chain | one ESL edit; §6 settles the shape |
-| D30 emits chain definitions as Lean `def`s | the real work — it emits `structure`s only |
+| declare `≤` and `float_ieee_eq` on the chain | **done** `2026-09-05`; `≤` was already there, so one relation. §5.1 |
+| the correspondence itself, as §6.1's table | **done** — `NumericRel` in `crates/eigenius-lean/src/externalize.rs`, read at the `App` arm |
+| D30 emits chain definitions as Lean `def`s | the real work — it emits `structure`s only. Still open (eigenius#236) |
 
 The last row is the one that carries the design property. If D30 generates the Lean side from the
 chain declaration, the two agree because one produced the other; if a human writes both, they
@@ -147,6 +148,22 @@ agree until someone edits one. It is the same v1.1 gap that holds inductives
 ### 5.1 The ontology edit is one reseed, so it carries passengers
 
 Tracked as eigenius#235; the last row of §5 is eigenius#236.
+
+**Landed `2026-09-05`** on `numeric-core-and-verification-judgement`, and the passenger list grew
+from four to seven while the batch was built — each addition free, because the reseed had not run
+yet. Two corrections to the table below, both found by measuring:
+
+- **Row 1 is one relation, not two.** `stats:le : core:float -> core:float -> Prop` already existed
+  in `ontologies/statistics/statistics.esl` (namespace `urn:eigenius:measurements`), alongside `lt`,
+  `gt` and `ge` — §1 above uses it as its own example of a relation that externalizes to a `Const`
+  the export does not declare. Only `float_ieee_eq` is new.
+- **The four ordering axioms stay axioms**, against §3.2's "`<`, `>` and `≥` all derive". A `def` is
+  transparent — decode substitutes the body at the use site — and the DCG recognises
+  `measurements:gt` / `lt` **by IRI on the decoded term** (`dcg/category.rs`,
+  `dcg/rules/combinators.rs`), which is the form the WordNet importer emits. Deriving them on the
+  chain would dissolve the head the parser matches on. The derivation lives in §6.1's table
+  instead, where `Ge` is `le(y, x)`, `Gt` is `lt(y, x)` and `Lt` is `le(x, y) ∧ ¬eq(x, y)` — so the
+  asserted set stays at two whatever the surface offers, which is what §4 claims for it.
 
 Any change to a bootstrap ontology's *content* moves the manifest hash — `description` values
 included; only ESL comments and JSON layout are exempt
@@ -159,7 +176,14 @@ should land in one pass:
 | declare `≤` and `==` over `core:float` | `ontologies/…` (§6.1 decides where) | row 3 |
 | a permitted-axiom slot **and a checker-identity slot** on `prov:VerificationTrace` ([D87](d87-the-verification-judgement.md) §5) | `ontologies/prov/prov.esl` | the axiom allowlist is the TCB of every Lean verdict and the trace does not record it — two proofs, one leaning on `Classical.choice` and one not, produce byte-identical traces (`institution.rs::do_proof_check`) |
 | `witness:IsVerifiedAs` description | `ontologies/core/core-ontology.json` | says *"Nothing in the tree currently emits one — the producer is the Lean institution under eigenius#160."* The Lean institution emits one as of `2026-09-03` |
-| `justification:VerifiedPropositionView` | `ontologies/justification/justification.esl` | its description says the witness emitter looks the view up by `source_verified_resource`; the emitter reads the claim's `canonical_proposition` and never touches the view. Nothing reads the class at all — declared, bootstrap-registered, referenced by two `esl::compile` tests, and otherwise dead. **Recommend deleting it** rather than rewording: the comorphism route it served was replaced by D74's forward externalization (D51 §3) |
+| `justification:VerifiedPropositionView` | `ontologies/justification/justification.esl` | its description says the witness emitter looks the view up by `source_verified_resource`; the emitter reads the claim's `canonical_proposition` and never touches the view. Nothing reads the class at all — declared, bootstrap-registered, referenced by two `esl::compile` tests, and otherwise dead. **Recommend deleting it** rather than rewording: the comorphism route it served was replaced by D74's forward externalization (D51 §3). **Deleted** |
+
+Three more joined it: `prov:judgement` and `prov:checked_declaration` on `prov:VerificationTrace`
+(D87 §5 and §7 — the second found by writing the recomputation test, since `prov:proof_term` names
+the whole export and does not say which declaration was checked), the three phantom
+`program:Component` declarations from the previous batch, and the `witness:Is*As` descriptions,
+whose `IsVerifiedAs` sentence had been false since #160 and whose shared paragraph called the
+kernel's synthesis a postulate — which the P7 closeout settled it is not.
 
 ## 6. Settled `2026-09-05`
 

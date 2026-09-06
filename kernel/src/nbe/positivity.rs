@@ -552,6 +552,7 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         | Exp::Unit
         | Exp::EigonClass(_)
         | Exp::EigonAxiom(_)
+        | Exp::Checked(_)
         | Exp::EigonPrimitive(_)
         | Exp::EigonResource(_)
         | Exp::LitString(_)
@@ -592,10 +593,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "zero".to_string(),
                     typ: nat_ty.clone(),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "succ".to_string(),
                     typ: Exp::Pi(Patt::Unit, Box::new(nat_ty.clone()), Box::new(nat_ty)),
                 },
@@ -618,6 +621,7 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -626,6 +630,7 @@ mod tests {
                     ),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -659,10 +664,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "True".to_string(),
                     typ: bool_ty.clone(),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "False".to_string(),
                     typ: bool_ty,
                 },
@@ -685,6 +692,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Unit,
@@ -732,6 +740,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Unit,
@@ -780,6 +789,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Unit,
@@ -814,6 +824,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "node".to_string(),
                 typ: Exp::Pi(Patt::Unit, Box::new(nested), Box::new(tree_ty)),
             }],
@@ -833,6 +844,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Unit,
@@ -867,6 +879,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -907,6 +920,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: Exp::Pi(Patt::Unit, Box::new(disguised_negative), Box::new(neg_ty)),
             }],
@@ -936,6 +950,7 @@ mod const_self_reference {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: ctor_typ,
             }],
@@ -1113,6 +1128,7 @@ mod mutual_positivity_gap {
         let bad = decl(
             "SelfBad",
             vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 // mk : (SelfBad → SelfBad) → SelfBad
                 typ: Exp::Pi(
@@ -1150,6 +1166,7 @@ mod mutual_positivity_gap {
         let a = decl(
             "MutA",
             vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mkA".to_string(),
                 // mkA : B → A   (B strictly positive; A fine)
                 typ: Exp::Pi(Patt::Unit, Box::new(ty("MutB")), Box::new(ty("MutA"))),
@@ -1158,6 +1175,7 @@ mod mutual_positivity_gap {
         let b = decl(
             "MutB",
             vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mkB".to_string(),
                 // mkB : (A → A) → B   ← A to the LEFT of an arrow
                 typ: Exp::Pi(
