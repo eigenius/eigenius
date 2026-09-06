@@ -468,8 +468,7 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
             .and_then(|i| target.get(&i))
         {
             if let Ok(j) = crate::program::eigentt_type_mirror::decode_judgement(stored, layer) {
-                if let Some((_, prop)) =
-                    crate::program::eigentt_type_mirror::certificate_indices(&j.typ)
+                if let Some(prop) = crate::program::eigentt_type_mirror::certificate_indices(&j.typ)
                 {
                     return hash_proposition_exp(prop, &CodecNames::from_layer(layer)).ok();
                 }
@@ -1035,15 +1034,18 @@ mod tests {
         // premise. Nothing here is proved.
         let j = encode_type(
             &Exp::InductiveCtor(
-                iri("urn:eigenius:justification:Term"),
-                "Declared".into(),
-                vec![Exp::LitString("urn:eigenius:test:p3:premise".into())],
+                iri("urn:eigenius:justification:Certificate"),
+                "declared".into(),
+                vec![
+                    Exp::LitString("urn:eigenius:test:p3:premise".into()),
+                    prop.clone(),
+                ],
             ),
             crate::testing::codec_names(),
         )
         .unwrap();
         let p = encode_type(&prop, crate::testing::codec_names()).unwrap();
-        let typ = certificate_type(&j, &p, crate::testing::codec_names()).unwrap();
+        let typ = certificate_type(&p, crate::testing::codec_names()).unwrap();
         let judgement = encode_judgement(
             "urn:eigenius:eigentt:logic_kernel",
             &j,
@@ -1173,14 +1175,17 @@ mod tests {
             let p = encode_type(&prop, crate::testing::codec_names()).unwrap();
             let j = encode_type(
                 &Exp::InductiveCtor(
-                    iri("urn:eigenius:justification:Term"),
-                    "Declared".into(),
-                    vec![Exp::LitString("urn:eigenius:test:premise".into())],
+                    iri("urn:eigenius:justification:Certificate"),
+                    "declared".into(),
+                    vec![
+                        Exp::LitString("urn:eigenius:test:premise".into()),
+                        prop.clone(),
+                    ],
                 ),
                 crate::testing::codec_names(),
             )
             .unwrap();
-            let typ = certificate_type(&j, &p, crate::testing::codec_names())
+            let typ = certificate_type(&p, crate::testing::codec_names())
                 .expect("certificate type encodes");
             let stored = encode_judgement(
                 "urn:eigenius:eigentt:logic_kernel",
@@ -1192,7 +1197,7 @@ mod tests {
 
             let judgement = decode_judgement(&stored, &layer)
                 .unwrap_or_else(|e| panic!("{label}: judgement must decode: {e}"));
-            let (_, projected) = certificate_indices(&judgement.typ)
+            let projected = certificate_indices(&judgement.typ)
                 .unwrap_or_else(|| panic!("{label}: judgement type must be a Certificate"));
             let via_judgement = hash_proposition_exp(projected, crate::testing::codec_names())
                 .expect("projected proposition hashes");

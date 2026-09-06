@@ -19,7 +19,7 @@
 //    `screen:HasLowIC50(c)` inside the body where `c` is a Pi
 //    binder lowers cleanly to `Exp::InductiveType(stub, [Var(c)])`.
 //    The body proposition references its binder.
-// 3. The new `justification:Term.j` ctor in the
+// 3. The certificate's own constructor tree in the
 //    `justification` chain inductive value.
 // 4. The `justification:Certificate.spec_poly` rule in the certificate,
 //    producing the specialised type via kernel NbE beta-reduction
@@ -122,11 +122,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                    screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
                    // B : Prop = StrongInhibitor("urn:EIG_0291")
                    screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291"),
-                   // j1 : JT — the specialised rule justification
-                   Declared("urn:eigenius:demo:screen:rule_strong"),
-                   // j2 : JT — the observation
-                   Observed("urn:eigenius:demo:screen:m_eig0291"),
-                   // c1 : justification:Certificate(j1, A -> B)
+                   // c1 : justification:Certificate(A -> B)
                    //    = spec_poly(core:string, P, Declared(rule),
                    //                "urn:EIG_0291", rule_cert)
                    //   where rule_cert : justification:Certificate(Declared(rule),
@@ -143,11 +139,9 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        // the same key.
                        fun (x : core:string) =>
                            screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
-                       // j : JT
-                       Declared("urn:eigenius:demo:screen:rule_strong"),
                        // t : core:string
                        "urn:eigenius:demo:screen:EIG_0291",
-                       // rule_cert : justification:Certificate(j, forall x, P(x))
+                       // rule_cert : justification:Certificate(forall x, P(x))
                        declared(
                            "urn:eigenius:demo:screen:rule_strong",
                            forall (c : core:string) =>
@@ -155,7 +149,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                            Prop
                        )
                    ),
-                   // c2 : justification:Certificate(j2, A)
+                   // c2 : justification:Certificate(A)
                    observed(
                        "urn:eigenius:demo:screen:m_eig0291",
                        screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291"),
@@ -163,13 +157,9 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                    )
                )),
                type_expr(justification:Certificate(
-                   justification:App(
-                       Declared("urn:eigenius:demo:screen:rule_strong"),
-                       Observed("urn:eigenius:demo:screen:m_eig0291")
-                   ),
                    screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") ) ) );
 
-    // Chain-shape justification:Term value.
+    // Chain-shape certificate value.
 
     // The certificate. The witness placeholders in the rule/obs
     // `declared` / `observed` ctors are kernel-synthesised (D49

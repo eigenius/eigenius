@@ -69,10 +69,10 @@ resource inferred:sentence : justification:Conclusion {
     // `justification:Certificate.app` is Artemov application — from a warrant for an implication and a warrant
     // for its antecedent, a warrant for its consequent:
     //
-    //   app : forall (A : Prop, B : Prop, j1 : justification:Term, j2 : justification:Term) =>
-    //         justification:Certificate(j1, A -> B) ->        // j1 warrants the implication
-    //         justification:Certificate(j2, A) ->             // j2 warrants its antecedent
-    //         justification:Certificate(justification:App(j1, j2), B)       // ... so justification:App(j1, j2) warrants the consequent
+    //   app : forall (A : Prop, B : Prop) =>
+    //         justification:Certificate(A -> B) ->            // warrants the implication
+    //         justification:Certificate(A) ->                 // warrants its antecedent
+    //         justification:Certificate(B)                    // ... so the application warrants the consequent
     //
     // `alias` names the model term once instead of four times. It is compile-time substitution —
     // the stored proposition is identical to writing the term out at each site.
@@ -160,12 +160,6 @@ resource inferred:sentence : justification:Conclusion {
                         ontology:compound_kind(x0, umlscui:C0920269))
         in
                justification:Certificate(
-                   justification:App(
-                       justification:Declared(
-                           "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
-                       ),
-                       justification:Declared("urn:eigenius:demo:v2:claim_1")
-                   ),
                    onco_typed:RequiresActivity(
                    (exists x0 : umlscui:C1516211 =>
                        ontology:compound_kind(x0, umlscui:C0920269)),

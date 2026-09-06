@@ -15,7 +15,7 @@
 //! D73 §1.2's projections, asked of the flagship chain's own conclusion (eigenius#204).
 //!
 //! `wrn:concl_wrn_selective` — *WRN is selectively essential in MSI* — is the WRN encoding's
-//! headline claim. Its `justification:Term`
+//! headline claim. Its certificate
 //! (`experiments/publications/wrn-helicase/chain/05-phase1-discovery.esl:144`):
 //!
 //! ```text
@@ -49,8 +49,8 @@ const DRIVE: &str = "urn:eigenius:pub:wrn:dd_drive";
 fn decl() -> Arc<InductiveDecl> {
     Arc::new(InductiveDecl {
         uparams: Vec::new(),
-        iri: Iri::parse("urn:eigenius:justification:Term").unwrap(),
-        name: "justification:Term".to_string(),
+        iri: Iri::parse("urn:eigenius:justification:Certificate").unwrap(),
+        name: "justification:Certificate".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
         sort: Exp::sort(1),
@@ -60,20 +60,22 @@ fn decl() -> Arc<InductiveDecl> {
 fn ctor(name: &str, args: Vec<Exp>) -> Exp {
     Exp::InductiveCtor(decl().iri.clone(), name.to_string(), args)
 }
+/// A grounding leaf as it is stored: `declared(iri, P)`, with the witness slot elided.
+/// `support` reads the first argument; the proposition contributes no leaf.
 fn leaf(name: &str, iri: &str) -> Exp {
-    ctor(name, vec![Exp::LitString(iri.to_string())])
+    ctor(name, vec![Exp::LitString(iri.to_string()), Exp::sort(0)])
 }
 
 /// The WRN conclusion's term, transcribed from the chain.
 fn wrn_conclusion() -> Exp {
     ctor(
-        "App",
+        "app",
         vec![
             ctor(
-                "App",
-                vec![leaf("Declared", RULE), leaf("Declared", ACHILLES)],
+                "app",
+                vec![leaf("declared", RULE), leaf("declared", ACHILLES)],
             ),
-            leaf("Declared", DRIVE),
+            leaf("declared", DRIVE),
         ],
     )
 }
@@ -142,12 +144,12 @@ fn a_second_source_would_make_a_recompute_droppable() {
     // are two alternatives that were actually grounded. See
     // `kernel/tests/sum_requires_both_branches.rs`.
     let t = ctor(
-        "App",
+        "app",
         vec![
-            leaf("Declared", RULE),
+            leaf("declared", RULE),
             ctor(
-                "Sum",
-                vec![leaf("Declared", ACHILLES), leaf("Declared", DRIVE)],
+                "sum_l",
+                vec![leaf("declared", ACHILLES), leaf("declared", DRIVE)],
             ),
         ],
     );

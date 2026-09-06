@@ -84,7 +84,7 @@ resource screen:concl_two_real_sources : justification:Conclusion {
             B = "urn:eigenius:demo:screen:review_b",
             P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
         in
-        sum_l(P, Declared(A), Declared(B),
+        sum_l(P,
                      declared(A, P),
                      declared(B, P))),
                type_expr(alias
@@ -93,6 +93,5 @@ resource screen:concl_two_real_sources : justification:Conclusion {
             P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
         in
         justification:Certificate(
-                   justification:Sum(Declared(A), Declared(B)),
                    P )) );
 }

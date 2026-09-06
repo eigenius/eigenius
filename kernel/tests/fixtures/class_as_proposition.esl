@@ -47,7 +47,8 @@ resource screen:concl_class : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:CellLine";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
-    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms. The type is
+    // `Certificate(P)` — one index since the D88 §2 merge, the certificate being the term.
     justification:judgement =
         holds( eigentt:logic_kernel,
                type_expr(declared(
@@ -55,9 +56,7 @@ resource screen:concl_class : justification:Conclusion {
                    screen:CellLine,
                    Prop
                )),
-               type_expr(justification:Certificate(
-                   Declared("urn:eigenius:demo:screen:rule_class"),
-                   screen:CellLine )) );
+               type_expr(justification:Certificate( screen:CellLine )) );
 
 
 }
@@ -85,7 +84,8 @@ resource screen:concl_prop : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:IsInhibitory";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
-    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
+    // `term` and `type` arguments are declared `eigentt:Term`, so those are terms. The type is
+    // `Certificate(P)` — one index since the D88 §2 merge, the certificate being the term.
     justification:judgement =
         holds( eigentt:logic_kernel,
                type_expr(declared(
@@ -93,9 +93,7 @@ resource screen:concl_prop : justification:Conclusion {
                    screen:IsInhibitory,
                    Prop
                )),
-               type_expr(justification:Certificate(
-                   Declared("urn:eigenius:demo:screen:rule_prop"),
-                   screen:IsInhibitory )) );
+               type_expr(justification:Certificate( screen:IsInhibitory )) );
 
 
 }

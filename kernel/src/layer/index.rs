@@ -1586,19 +1586,40 @@ mod mentions_tests {
             .collect()
     }
 
-    /// **A justification term's premise citations are indexed.** The grounding
-    /// leaves take the premise IRI as a `core:string` argument rather than a
-    /// `ConstRef`, so whether they reach the index is not obvious; the walker matches any
-    /// `urn:`-prefixed string at any depth, so they do. This is what
-    /// lets a commit-time check reach a justification term's premises through the
-    /// triple index rather than by decoding the term.
+    /// **A certificate's premise citations are indexed.** The grounding constructors take the
+    /// premise IRI as a `core:string` argument rather than a `ConstRef`, so whether they reach the
+    /// index is not obvious; the walker matches any `urn:`-prefixed string at any depth, so they
+    /// do. This is what lets a commit-time check reach a certificate's premises through the triple
+    /// index rather than by decoding it.
+    ///
+    /// The heuristic is the subject of D88 §3: the leaf behaves as a reference and is recovered by
+    /// a prefix match rather than declared as one, which over-approximates — every urn-shaped
+    /// string in any term becomes a mention whether or not it is a reference.
     #[test]
     fn a_grounding_leafs_string_iri_becomes_a_mentions_triple() {
+        // `declared("urn:…:Topic", One)` — an indexed inductive's constructor encodes as a
+        // `CtorApp` base with its arguments folded on as `App`s, which is the D47 shape for any
+        // chain-declared inductive.
+        let leaf = |ctor: &str| {
+            serde_json::json!({
+                "ctor": "App",
+                "args": [
+                    {"ctor": "App", "args": [
+                        {"ctor": "CtorApp", "args": ["urn:eigenius:justification:Certificate", ctor]},
+                        {"ctor": "LitString", "args": ["urn:eigenius:test:Topic"]},
+                    ]},
+                    {"ctor": "One", "args": []},
+                ],
+            })
+        };
         let m = mentions_of(serde_json::json!({
             "ctor": "App",
             "args": [
-                {"ctor": "Declared", "args": ["urn:eigenius:test:Topic"]},
-                {"ctor": "Observed", "args": ["urn:eigenius:test:Topic"]}
+                {"ctor": "App", "args": [
+                    {"ctor": "CtorApp", "args": ["urn:eigenius:justification:Certificate", "app"]},
+                    leaf("declared"),
+                ]},
+                leaf("observed"),
             ],
         }));
         assert_eq!(m, vec!["urn:eigenius:test:Topic".to_string()], "{m:?}");

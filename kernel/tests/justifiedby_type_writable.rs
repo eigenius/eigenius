@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! PROBE (eigenius#199): can `justification:Certificate(j, P)` be written as a type in ESL?
+//! PROBE (eigenius#199): can `justification:Certificate(P)` be written as a type in ESL?
 
 use std::sync::Arc;
 
@@ -64,7 +64,7 @@ fn chain() -> Arc<eigenius_kernel::layer::Layer> {
 fn justifiedby_can_be_written_as_a_type() {
     let base = chain();
     // The literal definition of done for eigenius#199: write
-    // `justification:Certificate(j, P)` as a TYPE at the ESL surface. An `axiom`
+    // `justification:Certificate(P)` as a TYPE at the ESL surface. An `axiom`
     // statement is the right slot — it holds a type, not a proposition,
     // so this exercises the index telescope without the `Prop`
     // obligation Rule 21 puts on `canonical_proposition`.
@@ -81,10 +81,7 @@ fn justifiedby_can_be_written_as_a_type() {
 
         data probe:P : Prop { }
 
-        axiom probe:cert : justification:Certificate(
-            justification:Declared("urn:eigenius:probe:src"),
-            probe:P
-        )
+        axiom probe:cert : justification:Certificate(probe:P)
     "#;
     let mut b = LayerBuilder::new("probe", Some(Arc::clone(&base)));
     for r in esl::compile(src, &base).expect("probe ESL compiles") {
@@ -99,11 +96,11 @@ fn justifiedby_can_be_written_as_a_type() {
 }
 
 #[test]
-fn justifiedby_index_zero_rejects_a_non_justification_term() {
-    // The other half of eigenius#199: making index #0 decode to
-    // `InductiveType` must ENFORCE the index kind, not merely swap one
-    // permissive form for another. A `core:string` where a
-    // `justification:Term` belongs has to be refused.
+fn justifiedby_index_rejects_a_non_proposition() {
+    // The other half of eigenius#199: the index must be ENFORCED, not merely swapped for a
+    // permissive form. It was index #0, which had to be a `justification:Term` and refused a
+    // `core:string`; the D88 §2 merge left one index, the proposition, and a string is refused
+    // there for the same reason — the kind is checked rather than assumed.
     let base = chain();
     let src = r#"
         namespace core      = "urn:eigenius:core";
@@ -112,7 +109,7 @@ fn justifiedby_index_zero_rejects_a_non_justification_term() {
 
         data probe:P : Prop { }
 
-        axiom probe:bad : justification:Certificate("not-a-justification-term", probe:P)
+        axiom probe:bad : justification:Certificate("not-a-proposition")
     "#;
     let mut b = LayerBuilder::new("probe", Some(Arc::clone(&base)));
     for r in esl::compile(src, &base).expect("probe ESL compiles") {

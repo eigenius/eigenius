@@ -591,7 +591,7 @@ resource probe:concl_patient_1_healthy : justification:Conclusion {
         in
         holds( eigentt:logic_kernel,
                verified(CLAIM, P),
-               justification:Certificate(Verified(CLAIM), P) )
+               justification:Certificate(P) )
     );
 }
 "#;

@@ -99,9 +99,9 @@ pub enum Ground {
 impl Ground {
     fn from_ctor(name: &str) -> Option<Self> {
         match name {
-            "Declared" => Some(Ground::Declared),
-            "Observed" => Some(Ground::Observed),
-            "Verified" => Some(Ground::Verified),
+            "declared" => Some(Ground::Declared),
+            "observed" => Some(Ground::Observed),
+            "verified" => Some(Ground::Verified),
             _ => None,
         }
     }
@@ -109,9 +109,9 @@ impl Ground {
     /// The constructor name, for diagnostics and for rendering a projection back to the chain.
     pub fn ctor_name(self) -> &'static str {
         match self {
-            Ground::Declared => "Declared",
-            Ground::Observed => "Observed",
-            Ground::Verified => "Verified",
+            Ground::Declared => "declared",
+            Ground::Observed => "observed",
+            Ground::Verified => "verified",
         }
     }
 }
@@ -126,7 +126,7 @@ pub struct Leaf {
 /// Why a term could not be projected.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProjectError {
-    /// A constructor outside the five `justification:Term` forms.
+    /// A constructor outside `justification:Certificate`'s seven forms.
     UnknownCtor(String),
     /// A grounding constructor whose argument is not a string literal IRI.
     MalformedLeaf(String),
@@ -141,7 +141,9 @@ pub enum ProjectError {
 impl std::fmt::Display for ProjectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnknownCtor(c) => write!(f, "`{c}` is not a justification:Term constructor"),
+            Self::UnknownCtor(c) => {
+                write!(f, "`{c}` is not a justification:Certificate constructor")
+            }
             Self::MalformedLeaf(c) => {
                 write!(f, "`{c}`'s argument is not a string literal IRI")
             }
@@ -162,20 +164,23 @@ impl std::error::Error for ProjectError {}
 ///
 /// See the module docs for the algebra. Order is deterministic (`BTreeSet` inside, and alternatives
 /// in left-to-right term order) so a projection is stable across runs and diffable.
-pub fn support(term: &Exp) -> Result<Vec<BTreeSet<Leaf>>, ProjectError> {
-    let (ctor, args) = match term {
+pub fn support(certificate: &Exp) -> Result<Vec<BTreeSet<Leaf>>, ProjectError> {
+    let (ctor, args) = match certificate {
         Exp::InductiveCtor(_, name, args) => (name.as_str(), args.as_slice()),
         _ => return Err(ProjectError::NotATerm),
     };
 
     if let Some(ground) = Ground::from_ctor(ctor) {
-        let iri = match args {
-            [Exp::LitString(s)] => s.clone(),
-            [_] => return Err(ProjectError::MalformedLeaf(ctor.to_string())),
-            other => {
+        // `declared(iri, P)` — and a third, elided `witness:Is*As` slot the kernel fills. The IRI
+        // is the first argument; the rest are the proposition and the witness, neither of which
+        // contributes a leaf.
+        let iri = match args.first() {
+            Some(Exp::LitString(s)) => s.clone(),
+            Some(_) => return Err(ProjectError::MalformedLeaf(ctor.to_string())),
+            None => {
                 return Err(ProjectError::Arity {
                     ctor: ctor.to_string(),
-                    got: other.len(),
+                    got: 0,
                 })
             }
         };
@@ -187,8 +192,8 @@ pub fn support(term: &Exp) -> Result<Vec<BTreeSet<Leaf>>, ProjectError> {
     match ctor {
         // CONJUNCTIVE: applying `A -> B` to `A` needs both grounds, so every alternative on the
         // left pairs with every alternative on the right.
-        "App" => {
-            let (a, b) = two(ctor, args)?;
+        "app" => {
+            let (a, b) = last_two(ctor, args)?;
             let (sa, sb) = (support(a)?, support(b)?);
             let total = sa.len().saturating_mul(sb.len());
             if total > MAX_SUPPORT_SETS {
@@ -202,10 +207,12 @@ pub fn support(term: &Exp) -> Result<Vec<BTreeSet<Leaf>>, ProjectError> {
             }
             Ok(out)
         }
-        // DISJUNCTIVE: `Sum` packages two independent grounds for the SAME proposition, so either
-        // alternative carries it alone. Reading this conjunctively is D39 §8's error.
-        "Sum" => {
-            let (a, b) = two(ctor, args)?;
+        // DISJUNCTIVE: `sum_l` / `sum_r` package two independent justifications of the SAME
+        // proposition, so either alternative carries it alone. Reading this conjunctively is
+        // D39 §8's error. The two constructors have the same type and the same support; which one
+        // was chosen is the record of the preferred branch, and nothing here reads it.
+        "sum_l" | "sum_r" => {
+            let (a, b) = last_two(ctor, args)?;
             let (mut sa, sb) = (support(a)?, support(b)?);
             if sa.len() + sb.len() > MAX_SUPPORT_SETS {
                 return Err(ProjectError::TooManyAlternatives(sa.len() + sb.len()));
@@ -213,13 +220,29 @@ pub fn support(term: &Exp) -> Result<Vec<BTreeSet<Leaf>>, ProjectError> {
             sa.extend(sb);
             Ok(sa)
         }
+        // Narrowing a universal to an instance adds no ground, so the support is the premise's.
+        // This is the row the module docs used to say did not exist: `spec_poly` left the term
+        // index alone, so there was nothing to project. With the term merged into the certificate
+        // the node is present in the value and has to be walked through.
+        "spec_poly" => {
+            let inner = args.last().ok_or(ProjectError::Arity {
+                ctor: ctor.to_string(),
+                got: 0,
+            })?;
+            support(inner)
+        }
         other => Err(ProjectError::UnknownCtor(other.to_string())),
     }
 }
 
-fn two<'a>(ctor: &str, args: &'a [Exp]) -> Result<(&'a Exp, &'a Exp), ProjectError> {
+/// The last two arguments — the certificate operands of `app` / `sum_l` / `sum_r`.
+///
+/// Taken from the END because a constructor's telescope is its `forall`-bound binders followed by
+/// its value arguments, and how many binders appear in a stored term depends on which the
+/// declaration marks implicit. The operands are always the trailing pair.
+fn last_two<'a>(ctor: &str, args: &'a [Exp]) -> Result<(&'a Exp, &'a Exp), ProjectError> {
     match args {
-        [a, b] => Ok((a, b)),
+        [.., a, b] => Ok((a, b)),
         other => Err(ProjectError::Arity {
             ctor: ctor.to_string(),
             got: other.len(),
@@ -280,8 +303,8 @@ mod tests {
     fn decl() -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
             uparams: Vec::new(),
-            iri: Iri::parse("urn:eigenius:justification:Term").unwrap(),
-            name: "justification:Term".to_string(),
+            iri: Iri::parse("urn:eigenius:justification:Certificate").unwrap(),
+            name: "justification:Certificate".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
             sort: Exp::sort(1),
@@ -289,23 +312,25 @@ mod tests {
         })
     }
 
+    /// A grounding leaf as it is stored: `declared(iri, P)`, with the witness slot elided.
+    /// `support` reads the first argument and ignores the rest.
     fn leaf(ctor: &str, iri: &str) -> Exp {
         Exp::InductiveCtor(
             decl().iri.clone(),
             ctor.to_string(),
-            vec![Exp::LitString(iri.to_string())],
+            vec![Exp::LitString(iri.to_string()), Exp::sort(0)],
         )
     }
     fn app(a: Exp, b: Exp) -> Exp {
-        Exp::InductiveCtor(decl().iri.clone(), "App".to_string(), vec![a, b])
+        Exp::InductiveCtor(decl().iri.clone(), "app".to_string(), vec![a, b])
     }
     fn sum(a: Exp, b: Exp) -> Exp {
-        Exp::InductiveCtor(decl().iri.clone(), "Sum".to_string(), vec![a, b])
+        Exp::InductiveCtor(decl().iri.clone(), "sum_l".to_string(), vec![a, b])
     }
 
     #[test]
     fn a_grounding_leaf_is_its_own_support() {
-        let s = support(&leaf("Observed", "urn:m1")).expect("projects");
+        let s = support(&leaf("observed", "urn:m1")).expect("projects");
         assert_eq!(s.len(), 1);
         assert_eq!(
             s[0].iter().next().unwrap(),
@@ -319,7 +344,7 @@ mod tests {
     #[test]
     fn app_is_conjunctive_one_alternative_carrying_both_grounds() {
         // Applying `A -> B` to `A` needs both. One alternative, two leaves.
-        let t = app(leaf("Declared", "urn:rule"), leaf("Observed", "urn:m1"));
+        let t = app(leaf("declared", "urn:rule"), leaf("observed", "urn:m1"));
         let s = support(&t).expect("projects");
         assert_eq!(s.len(), 1, "App yields one alternative");
         assert_eq!(s[0].len(), 2, "and it needs both grounds");
@@ -330,8 +355,8 @@ mod tests {
         // THE case D39 §8's propagation rule got wrong. `Sum` packages two independent grounds for
         // the SAME proposition; either carries it.
         let t = sum(
-            leaf("Verified", "urn:proof"),
-            leaf("Declared", "urn:assumed"),
+            leaf("verified", "urn:proof"),
+            leaf("declared", "urn:assumed"),
         );
         let s = support(&t).expect("projects");
         assert_eq!(s.len(), 2, "Sum yields two alternatives");
@@ -349,8 +374,8 @@ mod tests {
     fn a_declared_ground_under_app_blocks_full_verification() {
         // Contrast with the Sum case: under App there is no alternative to fall back to.
         let t = app(
-            leaf("Verified", "urn:proof"),
-            leaf("Declared", "urn:assumed"),
+            leaf("verified", "urn:proof"),
+            leaf("declared", "urn:assumed"),
         );
         assert!(!is_fully_verified(&t).expect("projects"));
     }
@@ -365,7 +390,7 @@ mod tests {
             support(&Exp::InductiveCtor(
                 decl().iri.clone(),
                 "SpecStr".to_string(),
-                vec![leaf("Declared", "urn:rule"), Exp::LitString("urn:x".into())],
+                vec![leaf("declared", "urn:rule"), Exp::LitString("urn:x".into())],
             )),
             Err(ProjectError::UnknownCtor("SpecStr".to_string()))
         );
@@ -380,10 +405,10 @@ mod tests {
         // term. Both answers were wrong in the reassuring direction.
         let t = app(
             leaf(
-                "Declared",
+                "declared",
                 "urn:eigenius:pub:wrn:wrn_dep_plan_yields_effect",
             ),
-            leaf("Observed", "urn:eigenius:pub:wrn:wrn_dep_sampleset"),
+            leaf("observed", "urn:eigenius:pub:wrn:wrn_dep_sampleset"),
         );
         assert_eq!(
             leaves_of(&t, Ground::Observed)
@@ -408,17 +433,17 @@ mod tests {
     #[test]
     fn the_counterfactual_distinguishes_a_fallback_from_a_dependency() {
         // The argument for retaining the polynomial. A stored scalar cannot answer either of these.
-        let m1 = || leaf("Observed", "urn:instrument_x");
+        let m1 = || leaf("observed", "urn:instrument_x");
 
         // Under Sum, instrument X has an alternative: losing it costs nothing.
-        let with_fallback = sum(m1(), leaf("Observed", "urn:instrument_y"));
+        let with_fallback = sum(m1(), leaf("observed", "urn:instrument_y"));
         assert!(
             survives_without(&with_fallback, "urn:instrument_x").expect("projects"),
             "the y branch carries the conclusion without x"
         );
 
         // Under App it does not: every alternative cites x.
-        let load_bearing = app(leaf("Declared", "urn:rule"), m1());
+        let load_bearing = app(leaf("declared", "urn:rule"), m1());
         assert!(
             !survives_without(&load_bearing, "urn:instrument_x").expect("projects"),
             "no alternative avoids x"
@@ -429,8 +454,8 @@ mod tests {
     fn app_over_sum_distributes_into_both_alternatives() {
         // The multiplying case: `App(rule, Sum(a, b))` gives {rule,a} and {rule,b}.
         let t = app(
-            leaf("Declared", "urn:rule"),
-            sum(leaf("Observed", "urn:a"), leaf("Observed", "urn:b")),
+            leaf("declared", "urn:rule"),
+            sum(leaf("observed", "urn:a"), leaf("observed", "urn:b")),
         );
         let s = support(&t).expect("projects");
         assert_eq!(s.len(), 2);
@@ -445,8 +470,8 @@ mod tests {
     #[test]
     fn the_audit_projections_read_across_every_alternative() {
         let t = app(
-            leaf("Declared", "urn:agent_rule"),
-            sum(leaf("Observed", "urn:m1"), leaf("Declared", "urn:assumed")),
+            leaf("declared", "urn:agent_rule"),
+            sum(leaf("observed", "urn:m1"), leaf("declared", "urn:assumed")),
         );
         let declared = leaves_of(&t, Ground::Declared).expect("projects");
         assert_eq!(
@@ -482,11 +507,11 @@ mod tests {
         assert_eq!(
             support(&Exp::InductiveCtor(
                 decl().iri.clone(),
-                "App".into(),
+                "app".into(),
                 vec![]
             )),
             Err(ProjectError::Arity {
-                ctor: "App".into(),
+                ctor: "app".into(),
                 got: 0
             })
         );
@@ -496,13 +521,13 @@ mod tests {
     fn support_refuses_rather_than_truncating() {
         // Nested Sums under Apps multiply. Every projection here reads as exhaustive, so a
         // truncated support set would make each of them lie in the safe-looking direction.
-        let mut t = sum(leaf("Observed", "urn:a0"), leaf("Observed", "urn:b0"));
+        let mut t = sum(leaf("observed", "urn:a0"), leaf("observed", "urn:b0"));
         for i in 1..14 {
             t = app(
                 t,
                 sum(
-                    leaf("Observed", &format!("urn:a{i}")),
-                    leaf("Observed", &format!("urn:b{i}")),
+                    leaf("observed", &format!("urn:a{i}")),
+                    leaf("observed", &format!("urn:b{i}")),
                 ),
             );
         }

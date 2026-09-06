@@ -8,14 +8,12 @@
 //   values at `justification:Certificate.*` type-check sites via the per-Layer witness
 //   index (D49 §5, kernel/src/layer/witness_index.rs).
 //
-// - `justification:Term` (D39 §3) — five-constructor closed inductive:
-//   three categorical groundings (one per epistemic category) and the
-//   paper's two composition operators (Artemov `App`/`Sum`). No further
-//   evolution without a versioned change to the ADT.
+// - `justification:Certificate : Prop -> Type 2` (D39 §3, §5) — the justification itself. An
+//   inhabitant IS the justification term: a constructor tree over three categorical groundings
+//   and the paper's two composition operators, indexed by the proposition it justifies. No
+//   further evolution without a versioned change to the ADT.
 //
-// - `justification:Certificate : justification:Term -> Prop -> Type 0` (D39 §5) — the
-//   indexed inductive predicate whose inhabitants are the certificates
-//   `justification:Conclusion` carries. Seven constructors: three grounding
+//   Seven constructors: three grounding
 //   constructors consume the matching `ChainWitness` witness; `app`
 //   realises Artemov's Application; `sum_l` / `sum_r` jointly realise
 //   Artemov's Sum (no eliminator — `Sum` is a packaging operator, not
@@ -53,52 +51,37 @@ namespace prov       = "urn:eigenius:prov";
 // guard. The certificate ctors below reference them across the layer boundary, which is the
 // ordinary direction.
 
-// ── justification:Term ────────────────────────────────────────────────
+// ── Where justification:Term went ────────────────────────────────────
 //
-// The interlingua. Five ctors: THREE categorical groundings and the paper's
-// two composition operators — *"an algebra of justification terms that supports
-// application and sum."* Adding a constructor is a versioned change.
+// It was a five-constructor data type — three categorical groundings and the paper's two
+// composition operators — indexed into `justification:Certificate` alongside the proposition.
+// It is gone, and the certificate IS the term: an inhabitant of `Certificate(P)` is a
+// constructor tree over exactly that algebra, with the proposition as its index. `support`
+// walks the value where it used to walk the index, and reports the same alternatives.
 //
-// **Three grounds, not four.** `DerivedEvidence(iri)` was the fourth, naming a
-// program's output as a ground in its own right. It is gone because a computed
-// claim does not rest on the fact that a computation ran. It rests on two
-// things a run cannot supply: the assertion that the plan denotes a function
-// `I -> O`, which an accountable agent makes and no execution establishes —
-// determinism is an empirical fact about the environment, not a property
-// recoverable from a run record — and the inputs it was applied to. So a
-// computed ground is `App(Declared(plan), Observed(inputs))`, an application
-// of the two grounds that remain, and `Sampled` is a bare `Observed` leaf.
-// The measurement that forced this: 0 of 21 `stats:StatisticalAnalysisPlan`
-// resources carried a `DeclarationTrace`; every one was traced only by the
-// `ProgramTrace` of its run.
+// Two facts the old type carried are worth keeping written down, because they are decisions
+// rather than encoding:
 //
-// **`SpecStr` is gone too, and it was the third operation the paper's algebra
-// does not have.** Its second field was the ONLY unchecked argument anywhere
-// in the algebra: `spec_poly` bound the instance `x : T` and the tag
-// independently with nothing relating them, so the tag was a free string the
-// author picked and no rule validated. Every other constructor argument is
-// checked — a leaf's IRI is consumed by the matching `Is*As`, `App` and `Sum`
-// are structural. Nothing is lost: `support` already discarded the tag
-// (`SpecStr(j, tag) -> support(j)`), and the instance survives in two places
-// that ARE checked — `spec_poly`'s `x : T` binding and the proposition `P(x)`.
-// The RULE stays (see `justification:Certificate.spec_poly`); only the term
-// record goes, and specialization now leaves the term unchanged, which is
-// right: eliminating a quantifier narrows the proposition, it adds no ground.
-
-data justification:Term {
-    description = "The interlingua of justification logic: what a claim RESTS ON, as an algebra rather than a grade. Five constructors — three categorical groundings (Declared, Observed, Verified, each naming a chain resource by IRI) and the paper's two composition operators, Application and Sum. It is retained whole rather than collapsed to a scalar at commit, because a scalar records what the grounds came to and not what they were, so nothing is left to recompute over; every epistemic question is a query over the retained term (D73 §1.2). There is no Derived ground: a computed claim rests on App(Declared(plan), Observed(inputs)), not on the fact that a run happened. Adding a constructor is a versioned change.";
-    Declared(core:string),
-    Observed(core:string),
-    Verified(core:string),
-    App(justification:Term, justification:Term),
-    Sum(justification:Term, justification:Term),
-}
+// **Three grounds, not four.** `DerivedEvidence(iri)` was a fourth, naming a program's output as
+// a ground in its own right. A computed claim does not rest on the fact that a computation ran.
+// It rests on two things a run cannot supply: the assertion that the plan denotes a function
+// `I -> O`, which an accountable agent makes and no execution establishes — determinism is an
+// empirical fact about the environment, not a property recoverable from a run record — and the
+// inputs it was applied to. So a computed ground is `app(declared(plan), observed(inputs))`, and
+// `Sampled` is a bare `observed` leaf. The measurement that forced it: 0 of 21
+// `stats:StatisticalAnalysisPlan` resources carried a `DeclarationTrace`; every one was traced
+// only by the `ProgramTrace` of its run.
+//
+// **`SpecStr` is gone too**, and it was the third operation the paper's algebra does not have.
+// Its second field was the ONLY unchecked argument anywhere in the algebra: `spec_poly` bound the
+// instance `x : T` and the tag independently with nothing relating them, so the tag was a free
+// string the author picked and no rule validated. Nothing is lost — `support` already discarded
+// it, and the instance survives in `spec_poly`'s `x : T` binding and in the proposition `P(x)`.
 
 // ── justification:Certificate ──────────────────────────────────────────────────────
 //
-// Indexed inductive predicate `justification:Certificate : justification:Term -> Prop
-// -> Type 2`. Inhabits a Type (not `Prop`) so certificates are stored
-// and re-checkable — D39 §5 §last-paragraph.
+// Indexed inductive `justification:Certificate : Prop -> Type 2`. Inhabits a Type (not `Prop`)
+// so certificates are stored and re-checkable — D39 §5 §last-paragraph.
 //
 // **Why `Type 2` and not `Type 0`.** A constructor argument's sort may not exceed the inductive's
 // own, or a large type is smuggled into a small one and Girard's paradox follows. `spec_poly` binds
@@ -112,139 +95,55 @@ data justification:Term {
 // This costs nothing at use sites: a certificate's TYPE moves up a universe, its VALUES do not
 // change, and nothing checks `justification:Certificate(j, p)` against a fixed sort.
 
-data justification:Certificate : justification:Term -> Prop -> Type 2 {
-    description = "An indexed inductive predicate over (term, proposition): an inhabitant of Certificate(j, P) is a CHECKED WITNESS that the justification term j grounds a claim to P. It does not assert P — a certificate records grounds, and no rule turns Certificate(j, P) into P. Seven constructors: three groundings, each consuming a witness:Is*As the kernel synthesizes from the layer's witness index rather than from anything an author writes; `app` for Artemov Application; `sum_l` / `sum_r`, which require BOTH branches to be justified (departing from LP's axiom, because `support` reads Sum disjunctively and an unchecked branch would answer a counterfactual with a ground nobody established); and `spec_poly`, which narrows a universal proposition to an instance and leaves the term index untouched, since eliminating a quantifier introduces no ground. It inhabits Type 2 rather than Prop so a certificate is stored and re-checkable, and Type 2 rather than Type 0 because spec_poly binds T : Type 1 and a constructor argument's sort may not exceed the inductive's own.";
+data justification:Certificate : Prop -> Type 2 {
+    description = "A justification for P, retained whole. An inhabitant of Certificate(P) IS the justification term — its constructor tree is the algebra D39 §3 describes, with three categorical groundings at the leaves and the paper's two composition operators above them — and the index says which proposition it justifies. It does not assert P: a certificate records grounds, and no rule turns Certificate(P) into P. Seven constructors: three groundings, each consuming a witness:Is*As the kernel synthesizes from the layer's witness index rather than from anything an author writes; `app` for Artemov Application; `sum_l` / `sum_r`, which require BOTH branches to be justified (departing from LP's axiom, because `support` reads Sum disjunctively and an unchecked branch would answer a counterfactual with a ground nobody established) and which differ only in WHICH constructor was chosen, that being the record of the preferred branch; and `spec_poly`, which narrows a universal proposition to an instance and adds no ground, since eliminating a quantifier introduces none. It inhabits Type 2 rather than Prop so a certificate is stored and re-checkable, and Type 2 rather than Type 0 because spec_poly binds T : Type 1 and a constructor argument's sort may not exceed the inductive's own.
+
+WHY THERE IS NO SEPARATE TERM TYPE. This was `Certificate : justification:Term -> Prop -> Type 2`, indexed by a five-constructor `justification:Term` that restated the derivation's own shape. The index was determined by the certificate — `app`'s term arguments are fixed by its certificate arguments — and nothing read it that could not read the value: `support` walks the constructor tree either way, two derivations of one P are distinguishable as values, `spec_poly` adds no leaf, and nothing compares terms for equality. The paper's primitive is the typing `t : F` — 'the term t is a justification for F' — and it writes the application premise as `j1 : (A -> B)`, which is this shape; `JustifiedBy(j, P)` in its stratification table names the relation, not an encoding. D88 §2.";
 
     declared :
         forall (iri : core:string, P : Prop) =>
         witness:IsDeclaredAs(iri, P) ->
-        justification:Certificate(justification:Declared(iri), P),
+        justification:Certificate(P),
 
     observed :
         forall (iri : core:string, P : Prop) =>
         witness:IsObservedAs(iri, P) ->
-        justification:Certificate(justification:Observed(iri), P),
+        justification:Certificate(P),
 
     verified :
         forall (iri : core:string, P : Prop) =>
         witness:IsVerifiedAs(iri, P) ->
-        justification:Certificate(justification:Verified(iri), P),
+        justification:Certificate(P),
 
-    // Artemov Application: `j1 : (A -> B)` and `j2 : A` give
-    // `App(j1, j2) : B`.
+    // Artemov Application: a justification of `A -> B` applied to one of `A` justifies `B`.
     app :
-        forall (A : Prop, B : Prop,
-                j1 : justification:Term,
-                j2 : justification:Term) =>
-        justification:Certificate(j1, A -> B) ->
-        justification:Certificate(j2, A) ->
-        justification:Certificate(justification:App(j1, j2), B),
+        forall (A : Prop, B : Prop) =>
+        justification:Certificate(A -> B) ->
+        justification:Certificate(A) ->
+        justification:Certificate(B),
 
-    // Artemov Sum. Both constructors take a derivation for EACH branch;
-    // which branch was preferred is still recorded by the choice of `sum_l`
-    // against `sum_r`.
-    //
-    // **This departs from LP's axiom deliberately.** Artemov's `t:F -> (t+s):F`
-    // quantifies over an arbitrary `s`, so the unused summand need not be
-    // justified, groundable, or even name a resource that exists. That is
-    // unsound HERE because `support` reads `Sum` disjunctively and reports the
-    // unchecked branch as a genuine alternative:
-    // `Sum(real_evidence, Declared("urn:does-not-exist"))` type-checked through
-    // the old `sum_l`, and `survives_without(real_evidence_iri)` then returned
-    // TRUE — the conclusion "survives" losing its only grounded evidence, by way
-    // of a branch nothing ever grounded. That is the counterfactual D73 §1.2
-    // calls the whole argument for retaining the polynomial, answered in the
-    // reassuring direction.
-    //
-    // Requiring both branches makes the two objects agree about `Sum`: the term
-    // claims two grounds are available and the certificate now demonstrates
-    // both, so `support`'s term-only reading is sound and
-    // `kernel/src/justification/` stays pure. Under this design an unverified
-    // alternative is not a ground — asserting a fallback obliges you to show the
-    // fallback works.
-    //
-    // Cost, measured: zero at the time of the change. No authored artifact in
-    // the tree used `Sum`; the only occurrences were this declaration and two
-    // synthetic `Exp` values in the reasoning crate's `project.rs` and
-    // `tests/projection.rs`, both deleted at P7. Which is the argument for doing
-    // it before the first real `Sum` is committed.
+    // Artemov Sum, both branches justified — see the description. `sum_l` and `sum_r` have the
+    // same type; the choice of constructor is what records which branch was preferred, and that
+    // is unchanged by the merge because it never lived in the index.
     sum_l :
-        forall (P : Prop,
-                j1 : justification:Term,
-                j2 : justification:Term) =>
-        justification:Certificate(j1, P) ->
-        justification:Certificate(j2, P) ->
-        justification:Certificate(justification:Sum(j1, j2), P),
+        forall (P : Prop) =>
+        justification:Certificate(P) ->
+        justification:Certificate(P) ->
+        justification:Certificate(P),
 
     sum_r :
-        forall (P : Prop,
-                j1 : justification:Term,
-                j2 : justification:Term) =>
-        justification:Certificate(j1, P) ->
-        justification:Certificate(j2, P) ->
-        justification:Certificate(justification:Sum(j1, j2), P),
+        forall (P : Prop) =>
+        justification:Certificate(P) ->
+        justification:Certificate(P) ->
+        justification:Certificate(P),
 
-    // Universal specialization (D39 v2 extension) at ANY domain. Given a
-    // certificate for a universally-quantified proposition `forall y : T, P(y)`,
-    // applying it at a specific instance `x : T` yields a certificate for `P(x)`.
-    // The kernel's NbE beta-reduces `(forall y, P y)(x)` to `P[x/y]` so the
-    // result type matches downstream consumers expecting `P(x)`.
-    //
-    // **The term index is `j`, unchanged.** Specialization narrows the
-    // PROPOSITION; it introduces no ground, so the justification term that
-    // certified the universal certifies the instance. The old result index was
-    // `SpecStr(j, tag)`, whose tag no rule checked — see `justification:Term`'s
-    // header for why that constructor is gone.
-    //
-    // Two consequences, stated rather than discovered later. `spec_poly` is now
-    // a certificate constructor with no corresponding term constructor, so
-    // `spec_poly` and `declared` can both target
-    // `Certificate(Declared(rule), P(x))` — the TERM stops determining which
-    // rule applies at that node. Checking is unaffected because a certificate
-    // names its own constructor, and `app`'s intermediate `A` already made
-    // inferring a certificate from a term undecidable, so this adds no new
-    // limit.
-    //
-    // THE ONLY SPECIALIZATION RULE (eigenius#203). A monomorphic
-    // `spec_str : forall (P : core:string -> Prop, j, t : core:string) => ...`
-    // stood beside this one until 2026-08-21. It was strictly subsumed —
-    // `T := core:string`, `x := t` recovers it exactly — and it was a trap: it
-    // fits rules quantified over IRIs and silently does not fit rules quantified
-    // over classes, which is the shape the DCG parser produces. Someone reaching
-    // for the obvious-looking name got the wrong rule and found out at commit.
-    //
-    // A parsed proposition's arguments are CLASSES (`ontology:compound_kind : lexicon:Entity -> Set -> Prop`),
-    // so a rule shaped
-    //
-    //     forall (g : Set, a : Set) => <parse shape>(g, a) -> onco:RequiresActivity(g, a)
-    //
-    // commits fine — a Set-quantified implication is a `Prop` — but nothing could ELIMINATE the
-    // quantifier, so one bridge was needed per sentence rather than one per parse shape.
-    //
-    // `T : Type 1`, not `T : Set` (eigenius#136). The rule this eliminates may itself
-    // quantify over a KIND — the demo's `forall (m : Set)` over
-    // `HasActivity : Set -> Set -> Prop` — so its domain genuinely is `Set`, and binding
-    // `T : Set` would need `Set : Set` to instantiate. That is impredicative, and an
-    // inconsistent type theory inhabits every `Prop`, so with Rule 21 on the commit gate a
-    // certificate could certify a false claim. Binding one level up costs no expressiveness:
-    // `Set : Type 1` holds by stratification, and every ordinary class `C : Set` satisfies
-    // `C : Type 1` by cumulativity. The level is FIXED at 1, not polymorphic — a rule
-    // quantifying over `Type 1` domains would need `Type 2`, and so on up the ladder.
-    // Genuine universe polymorphism is the standing fix; see the follow-up issue.
-    //
-    // The ladder is not hypothetical, and this comment stated one half of it while the
-    // declaration stated the other: binding `T : Type 1` here is what forces `justification:Certificate`
-    // itself to `Type 2` (see its header). `T : Type 1` is `Sort 2`, so this argument sits at
-    // `Sort 3`, and a constructor argument may not exceed its inductive's universe. The
-    // declaration said `Type 0` and nothing checked, until eigenius#188 ported nanoda's
-    // `check_ctor` universe constraint.
+    // Narrow a universal to an instance. It lost its `j` binder with the merge: `j` was carried
+    // from premise to conclusion unchanged, which is exactly what "specialisation adds no ground"
+    // means, and with the term gone there is nothing left to carry.
     spec_poly :
-        forall (T : Type 1,
-                P : T -> Prop,
-                j : justification:Term,
-                x : T) =>
-        justification:Certificate(j, forall (y : T) => P(y)) ->
-        justification:Certificate(j, P(x)),
+        forall (T : Type 1, P : T -> Prop, x : T) =>
+        justification:Certificate(forall (y : T) => P(y)) ->
+        justification:Certificate(P(x)),
 }
 
 // ── justification:Claim ─────────────────────────────────────────────
@@ -281,8 +180,7 @@ class justification:Claim {
 
 // ── justification:Conclusion (D39 §4.2) ─────────────────────────────────────
 //
-// The chain-resident pairing of a proposition with a justification:Term
-// and a justification:Certificate certificate.
+// The chain-resident pairing of a proposition with the certificate that justifies it.
 //
 // It stays `subclass_of reflection:DerivedResource` because a conclusion IS
 // derived — it is produced by checking, not measured or asserted. What that
@@ -346,7 +244,7 @@ property justification:refutes : core:string {
 // Justification projections (D73 §1.2, eigenius#204)
 // ════════════════════════════════════════════════════════════════════
 //
-// WHAT THE POLYNOMIAL IS FOR. D39 §8 specified collapsing a justification:Term to a scalar grade at
+// WHAT THE POLYNOMIAL IS FOR. D39 §8 specified collapsing a certificate to a scalar grade at
 // commit. It was never implemented and D73 withdrew it — but its replacement was never built
 // either, which left the term retained and nothing able to ask anything of it. These are the
 // questions §1.2 argues the retained term can answer and a stored scalar cannot:

@@ -208,10 +208,6 @@ resource s16:concl_solution_implements : justification:Conclusion {
 
             // justification spine
             j0 = Declared(RULE),
-            j1 = justification:App(j0, Declared(D1)),
-            j2 = justification:App(j1, Declared(D2)),
-            j3 = justification:App(j2, Declared(D3)),
-            j4 = justification:App(j3, Declared(D4)),
 
             // certificate spine — specialise the rule, then discharge the
             // five conformances one at a time via Artemov application.
@@ -225,16 +221,15 @@ resource s16:concl_solution_implements : justification:Conclusion {
                     s16:ConformsThreshold(p) ->
                     s16:ConformsComposition(p) ->
                     s16:ImplementsRequiredFilter(p),
-                Declared(RULE),
                 P,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, Declared(D1), rule_cert, declared(D1, C1)),
-            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, Declared(D2), cert1, declared(D2, C2)),
-            cert3 = app(C3, C4 -> C5 -> IMPL, j2, Declared(D3), cert2, declared(D3, C3)),
-            cert4 = app(C4, C5 -> IMPL, j3, Declared(D4), cert3, declared(D4, C4))
+            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, rule_cert, declared(D1, C1)),
+            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, cert1, declared(D2, C2)),
+            cert3 = app(C3, C4 -> C5 -> IMPL, cert2, declared(D3, C3)),
+            cert4 = app(C4, C5 -> IMPL, cert3, declared(D4, C4))
         in
-        app(C5, IMPL, j4, Declared(D5), cert4, declared(D5, C5))),
+        app(C5, IMPL, cert4, declared(D5, C5))),
                type_expr(alias
             P    = "urn:eigenius:bench:sab16:solution",
             RULE = "urn:eigenius:bench:sab16:impl_rule",
@@ -261,10 +256,6 @@ resource s16:concl_solution_implements : justification:Conclusion {
 
             // justification spine
             j0 = Declared(RULE),
-            j1 = justification:App(j0, Declared(D1)),
-            j2 = justification:App(j1, Declared(D2)),
-            j3 = justification:App(j2, Declared(D3)),
-            j4 = justification:App(j3, Declared(D4)),
 
             // certificate spine — specialise the rule, then discharge the
             // five conformances one at a time via Artemov application.
@@ -278,32 +269,15 @@ resource s16:concl_solution_implements : justification:Conclusion {
                     s16:ConformsThreshold(p) ->
                     s16:ConformsComposition(p) ->
                     s16:ImplementsRequiredFilter(p),
-                Declared(RULE),
                 P,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, j0, Declared(D1), rule_cert, declared(D1, C1)),
-            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, j1, Declared(D2), cert1, declared(D2, C2)),
-            cert3 = app(C3, C4 -> C5 -> IMPL, j2, Declared(D3), cert2, declared(D3, C3)),
-            cert4 = app(C4, C5 -> IMPL, j3, Declared(D4), cert3, declared(D4, C4))
+            cert1 = app(C1, C2 -> C3 -> C4 -> C5 -> IMPL, rule_cert, declared(D1, C1)),
+            cert2 = app(C2, C3 -> C4 -> C5 -> IMPL, cert1, declared(D2, C2)),
+            cert3 = app(C3, C4 -> C5 -> IMPL, cert2, declared(D3, C3)),
+            cert4 = app(C4, C5 -> IMPL, cert3, declared(D4, C4))
         in
         justification:Certificate(
-                   justification:App(
-                       justification:App(
-                           justification:App(
-                               justification:App(
-                                   justification:App(
-                                       Declared("urn:eigenius:bench:sab16:impl_rule"),
-                                       Declared("urn:eigenius:bench:sab16:conf_featurization")
-                                   ),
-                                   Declared("urn:eigenius:bench:sab16:conf_alert_catalogs")
-                               ),
-                               Declared("urn:eigenius:bench:sab16:conf_reduction")
-                           ),
-                           Declared("urn:eigenius:bench:sab16:conf_threshold")
-                       ),
-                       Declared("urn:eigenius:bench:sab16:conf_composition")
-                   ),
                    s16:ImplementsRequiredFilter("urn:eigenius:bench:sab16:solution") )) );
 
 

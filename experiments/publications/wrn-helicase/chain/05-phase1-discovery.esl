@@ -188,13 +188,12 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                     onco:TopDifferentialDependency(g, ACTX) ->
                     onco:TopDifferentialDependency(g, DCTX) ->
                     onco:SelectivelyEssential(g, MSI),
-                Declared(RULE),
                 G,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(TA, TD -> SE, j0, Declared(DDA), rule_cert, declared(DDA, TA))
+            cert1 = app(TA, TD -> SE, rule_cert, declared(DDA, TA))
         in
-        app(TD, SE, justification:App(j0, Declared(DDA)), Declared(DDD), cert1, declared(DDD, TD))),
+        app(TD, SE, cert1, declared(DDD, TD))),
                type_expr(alias
             G    = "WRN",
             ACTX = "Achilles_MSI",
@@ -224,20 +223,12 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                     onco:TopDifferentialDependency(g, ACTX) ->
                     onco:TopDifferentialDependency(g, DCTX) ->
                     onco:SelectivelyEssential(g, MSI),
-                Declared(RULE),
                 G,
                 declared(RULE, RULE_P)
             ),
-            cert1 = app(TA, TD -> SE, j0, Declared(DDA), rule_cert, declared(DDA, TA))
+            cert1 = app(TA, TD -> SE, rule_cert, declared(DDA, TA))
         in
         justification:Certificate(
-                   justification:App(
-                       justification:App(
-                           Declared("urn:eigenius:pub:wrn:discovery_rule"),
-                           Declared("urn:eigenius:pub:wrn:dd_achilles")
-                       ),
-                       Declared("urn:eigenius:pub:wrn:dd_drive")
-                   ),
                    onco:SelectivelyEssential("WRN", "MSI") )) );
 
 

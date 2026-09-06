@@ -178,52 +178,17 @@ fn synthetic_sentence(
     }
     r
 }
-/// Assemble the one judgement a conclusion now carries from the three parts
-/// that used to be separate slots: `holds(kernel, cert, Certificate(j, P))`.
-fn judgement(proposition: Value, justification: serde_json::Value, cert: Value) -> Value {
+/// Assemble the one judgement a conclusion carries: `holds(kernel, cert, Certificate(P))`.
+///
+/// It took a separate justification term until the D88 §2 merge. The certificate IS the term now,
+/// so `cert` is the only derivation here and the type carries the proposition alone. The
+/// `justification` argument is retained so the callers below keep reading as the shapes they are
+/// about; it is no longer part of what gets encoded.
+fn judgement(proposition: Value, _justification: serde_json::Value, cert: Value) -> Value {
     use eigenius_kernel::program::eigentt_type_mirror::{certificate_type, encode_judgement};
-    let typ = certificate_type(&d47(&justification), &proposition, codec())
-        .expect("certificate type encodes");
+    let typ = certificate_type(&proposition, codec()).expect("certificate type encodes");
     encode_judgement("urn:eigenius:eigentt:logic_kernel", &cert, &typ, codec())
         .expect("judgement encodes")
-}
-
-/// Re-encode a plain `{ctor, args}` `justification:Term` literal into the value a term
-/// embedded in a judgement must carry.
-///
-/// This conversion is the encoding boundary the collapse moved. A justification
-/// term used to sit in a slot of its own as a plain `{"ctor", "args"}` dict; it
-/// now rides inside the judgement, which is an `eigentt:Term`-ranged value, so
-/// the D47 codec reads it and a foreign inductive's constructor is named by
-/// `CtorApp` with arguments folded through `App`. Callers below still write the
-/// plain literal because it is what an author reads.
-fn d47(j: &serde_json::Value) -> Value {
-    term_value(&d47_tagged(j))
-}
-
-/// The `App`/`CtorApp` spine, still as a literal, so the recursion composes before
-/// [`term_value`] builds the whole tree in one pass.
-fn d47_tagged(j: &serde_json::Value) -> serde_json::Value {
-    const JT: &str = "urn:eigenius:justification:Term";
-    let (Some(name), args) = (
-        j.get("ctor").and_then(serde_json::Value::as_str),
-        j.get("args")
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-            .unwrap_or_default(),
-    ) else {
-        return j.clone();
-    };
-    let mut acc = json!({"ctor": "CtorApp", "args": [JT, name]});
-    for a in args {
-        let arg = match &a {
-            serde_json::Value::String(s) => json!({"ctor": "LitString", "args": [s]}),
-            serde_json::Value::Object(_) => d47_tagged(&a),
-            other => other.clone(),
-        };
-        acc = json!({"ctor": "App", "args": [acc, arg]});
-    }
-    acc
 }
 
 // ── Phase 10 — end-to-end Holds path ────────────────────────────────

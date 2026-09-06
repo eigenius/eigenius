@@ -83,7 +83,7 @@ resource probe:concl_p : justification:Conclusion {{
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
                verified("urn:eigenius:probe:concl_q", probe:Q),
-               justification:Certificate(Verified("urn:eigenius:probe:concl_q"), probe:P) )
+               justification:Certificate(probe:P) )
     );
 }}
 "#
@@ -99,7 +99,7 @@ resource probe:concl_q : justification:Conclusion {
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
                verified("urn:eigenius:probe:concl_p", probe:P),
-               justification:Certificate(Verified("urn:eigenius:probe:concl_p"), probe:Q) )
+               justification:Certificate(probe:Q) )
     );
 }
 "#;
@@ -145,7 +145,7 @@ resource probe:concl_shared : justification:Conclusion {{
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
                declared("urn:eigenius:probe:premise", probe:P),
-               justification:Certificate(Declared("urn:eigenius:probe:premise"), probe:P) )
+               justification:Certificate(probe:P) )
     );
 }}
 "#
@@ -201,15 +201,9 @@ resource probe:concl_sum : justification:Conclusion {{
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
                sum_r( probe:P,
-                      Verified("urn:eigenius:probe:concl_cyclic"),
-                      Declared("urn:eigenius:probe:solid"),
                       verified("urn:eigenius:probe:concl_cyclic", probe:P),
                       declared("urn:eigenius:probe:solid", probe:P) ),
-               justification:Certificate(
-                   justification:Sum(
-                       Verified("urn:eigenius:probe:concl_cyclic"),
-                       Declared("urn:eigenius:probe:solid")),
-                   probe:P) )
+               justification:Certificate(probe:P) )
     );
 }}
 "#
@@ -230,7 +224,7 @@ resource probe:concl_cyclic : justification:Conclusion {
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
                verified("urn:eigenius:probe:concl_sum", probe:P),
-               justification:Certificate(Verified("urn:eigenius:probe:concl_sum"), probe:P) )
+               justification:Certificate(probe:P) )
     );
 }
 "#;
@@ -262,7 +256,7 @@ resource probe:concl_p : justification:Conclusion {{
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
                verified("urn:eigenius:probe:concl_q", probe:Q),
-               justification:Certificate(Verified("urn:eigenius:probe:concl_q"), probe:P) )
+               justification:Certificate(probe:P) )
     );
 }}
 "#
@@ -278,7 +272,7 @@ resource probe:concl_q : justification:Conclusion {
     justification:judgement = type_expr(
         holds( eigentt:logic_kernel,
                verified("urn:eigenius:probe:concl_p", probe:P),
-               justification:Certificate(Verified("urn:eigenius:probe:concl_p"), probe:Q) )
+               justification:Certificate(probe:Q) )
     );
 }
 "#;

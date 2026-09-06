@@ -299,7 +299,7 @@ pub fn compile_file_with_context(
     // The codec's table is rebuilt from the MERGED constructor table — the chain's plus this
     // file's. A file declares an inductive and writes values of it in the same compile, and
     // encoding a value names its constructor's class (D85 §6.1), so a table from the parent
-    // chain alone cannot encode `justification:Term`'s constructors while compiling
+    // chain alone cannot encode a higher layer's constructors while compiling
     // `justification.esl`.
     compiler.codec_names =
         crate::program::eigentt_type_mirror::CodecNames::from_class_table(&compiler.ctor_arg_names);
@@ -336,9 +336,8 @@ pub fn compile_file_with_context(
 ///
 /// Both indices accumulate across the entire chain — no first-wins
 /// shadowing. When two chain-resident inductives in different
-/// namespaces declare a ctor with the same short name (e.g.
-/// `eigentt:Term.App` and `justification:Term.App`),
-/// both land in `by_short_name[name]`. The ESL surface's bare-name
+/// namespaces declare a ctor with the same short name, both land in
+/// `by_short_name[name]`. The ESL surface's bare-name
 /// lookup turns that into an "ambiguous — qualify as one of [...]"
 /// error rather than picking one silently.
 #[derive(Debug, Default, Clone)]
@@ -538,7 +537,7 @@ struct Compiler {
     /// `ctors_by_short_name`: short name → list of qualifying ctor
     ///   IRIs, for bare-name lookup with ambiguity detection. Two
     ///   inductives that share a ctor short name (e.g.
-    ///   `eigentt:Term.App` and `justification:Term.App`)
+    ///   two inductives declaring the same ctor short name)
     ///   are both recorded; a bare `App(...)` reference becomes a hard
     ///   "ambiguous — qualify as one of [...]" error instead of
     ///   silently picking the chain-order-first one.
@@ -960,7 +959,7 @@ impl Compiler {
     ///   `<ns_uri>:<CtorName>` via the standard namespace table.
     /// - Canonical chain IRI (what the ctor buckets store):
     ///   `<parent_inductive_iri>:<CtorName>`, e.g.
-    ///   `urn:eigenius:justification:Term:Declared`.
+    ///   `urn:eigenius:justification:Certificate:declared`.
     ///
     /// The two never match by string equality, so the resolution
     /// strategy is short-name-based with namespace filtering:
@@ -968,9 +967,14 @@ impl Compiler {
     /// - **Qualified** `ns:Name` → look up `Name` in `ctors_by_short_name`,
     ///   filter the candidate ctor IRIs to those whose parent IRI
     ///   starts with `ns_uri:`. If exactly one match, use it. The
-    ///   namespace prefix is what disambiguates between
-    ///   `eigentt:App` (= `eigentt:Term:App`) and `justification:App`
-    ///   (= `justification:Term:App`).
+    ///   namespace prefix is what disambiguates two inductives in
+    ///   different namespaces that declare the same ctor short name.
+    ///   The collision this used to name — `eigentt:Term.App` against
+    ///   `justification:Term.App` — is gone: the D88 §2 merge deleted
+    ///   `justification:Term`, and the certificate's own constructors
+    ///   are lower-case (`app`), so they no longer collide with
+    ///   `eigentt:Term`'s. The machinery stays because the collision is
+    ///   a property of the chain, not of these two declarations.
     /// - **Bare** `Name` → look up the short name in
     ///   `ctors_by_short_name`. If exactly one ctor IRI matches, use
     ///   it. If two or more, error with an "ambiguous" message that
@@ -2847,7 +2851,7 @@ impl Compiler {
             // through to D52 §12 macro expansion only if it's not a
             // ctor. This is what makes
             // `justification:App(...)` resolve to the
-            // `justification:Term.App` ctor inside a value
+            // a justification constructor inside a value
             // slot — the disambiguator authors need when bare `App`
             // collides with another inductive's ctor short name.
             ast::Value::MacroCall { name, args, pos } => {
@@ -5846,7 +5850,7 @@ mod tests {
         // macro expansion. Without that order, `justification:App(...)`
         // in a `justification:term = ...` slot errors with
         // "macro not declared" instead of resolving to the
-        // `justification:Term.App` ctor.
+        // a justification constructor.
         let resources = esl::compile(
             r#"
             namespace core = "urn:eigenius:core";
@@ -6499,14 +6503,14 @@ mod tests {
     fn reasoning_ontology_esl_compiles() {
         // D39 Phase 3 — the authored justification.esl source must compile
         // cleanly. Locks the structural contract: namespace declarations,
-        // the `justification:Term` five-ctor inductive, and the
+        // the `justification:Certificate` inductive, and the
         // `justification:Certificate` seven-ctor indexed inductive predicate.
         // Any future edit to the file or to the ESL surface that breaks this
         // round-trip needs to be deliberate.
         let source = include_str!("../../../ontologies/justification/justification.esl");
         let resources = esl::compile(source, term_chain()).expect("justification.esl must compile");
 
-        // Expect: 1 justification:Term + 1 justification:Certificate.
+        // Expect: justification:Certificate alone.
         // The three `witness:Is*As` predicates were here until P7 and are NOT
         // any more — see below.
         let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
@@ -6515,10 +6519,13 @@ mod tests {
             .filter(|r| r.is_a().iter().any(|c| c == &inductive_iri))
             .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
             .collect();
-        assert!(
-            inductives.len() >= 2,
-            "expected at least 2 inductive Resources in justification.esl, found {}: {inductives:?}",
-            inductives.len()
+        // ONE, since the D88 §2 merge: `justification:Certificate` alone. `justification:Term`
+        // was the second, and the certificate now IS the term — its constructor tree is the
+        // algebra, indexed by the proposition.
+        assert_eq!(
+            inductives,
+            vec!["urn:eigenius:justification:Certificate".to_string()],
+            "justification.esl declares exactly one inductive"
         );
 
         // **The witness types are declared in CORE, not here.** The kernel
@@ -6636,7 +6643,7 @@ mod tests {
         // `Prop` index), (b) the codec self-reference short-circuit
         // (justification:Certificate's ctors reference justification:Certificate itself), and
         // (c) cross-inductive references (justification:Certificate → ChainWitness +
-        // justification:Term). If any of these regress, the full Phase 6
+        // justification:Certificate). If any of these regress, the full Phase 6
         // synthesis path breaks.
         use crate::layer::LayerBuilder;
         use crate::ontology::eigon_json;
@@ -6681,12 +6688,12 @@ mod tests {
         }
         let layer = Arc::new(user_builder.build(crate::layer::LayerStorage::in_memory()));
 
-        // The five inductive types — Phase 3.
+        // The four inductive types — three witness predicates from core plus the certificate.
+        // `justification:Term` was a fifth until the D88 §2 merge folded it into the certificate.
         for iri_str in &[
             "urn:eigenius:witness:IsDeclaredAs",
             "urn:eigenius:witness:IsObservedAs",
             "urn:eigenius:witness:IsVerifiedAs",
-            "urn:eigenius:justification:Term",
             "urn:eigenius:justification:Certificate",
         ] {
             let class_iri = Iri::parse(iri_str).unwrap();

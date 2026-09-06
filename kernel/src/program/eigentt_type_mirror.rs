@@ -1332,10 +1332,9 @@ fn wrong_shape(ctor: &'static str, slot: usize, details: &str) -> DecodeError {
 ///
 /// The inverse of [`certificate_indices`]. An indexed inductive applied to its
 /// indices encodes as nested `App`s over a `ConstRef` head.
-pub fn certificate_type(j: &Value, p: &Value, names: &CodecNames) -> Result<Value, EncodeError> {
+pub fn certificate_type(p: &Value, names: &CodecNames) -> Result<Value, EncodeError> {
     let head = const_ref(names, "urn:eigenius:justification:Certificate", &[])?;
-    let one = term(names, "App", vec![head, j.clone()])?;
-    term(names, "App", vec![one, p.clone()])
+    term(names, "App", vec![head, p.clone()])
 }
 
 /// Build an `eigentt:Judgement` value — `holds(logic, term, type)` — from an
@@ -1458,23 +1457,22 @@ pub fn decode_judgement(value: &Value, layer: &Layer) -> Result<Judgement, Decod
     }
 }
 
-/// Project the two indices out of a `justification:Certificate(j, P)` type.
+/// Project the proposition out of a `justification:Certificate(P)` type.
 ///
-/// A certificate type is the indexed inductive applied to its two indices, so
-/// it reaches here as `App(App(Const(Certificate), j), P)` — the shape D76
-/// Phase B leaves for a type former applied to arguments.
+/// A certificate type is the indexed inductive applied to its one index, so it reaches here as
+/// `App(Const(Certificate), P)` — the shape D76 Phase B leaves for a type former applied to
+/// arguments.
 ///
-/// This is what lets a conclusion's proposition be recovered from its
-/// judgement rather than stored in a second slot. The emit and check sides
-/// must agree on the result: the witness index hashes `P` projected out here,
-/// while a citing certificate's `verified(iri, P)` supplies `P` directly, and
-/// a mismatch does not error — it silently fails to admit the witness.
-pub fn certificate_indices(typ: &Exp) -> Option<(&Exp, &Exp)> {
-    let (inner, p) = match typ {
-        Exp::App(f, a) => (f.as_ref(), a.as_ref()),
-        _ => return None,
-    };
-    let (head, j) = match inner {
+/// It had two indices until the D88 §2 merge, `(j, P)`, and callers took the term from the first.
+/// The term is now the certificate VALUE, so a caller that wants it reads `judgement.term` and a
+/// caller that wants the proposition reads this.
+///
+/// This is what lets a conclusion's proposition be recovered from its judgement rather than stored
+/// in a second slot. The emit and check sides must agree on the result: the witness index hashes
+/// `P` projected out here, while a citing certificate's `verified(iri, P)` supplies `P` directly,
+/// and a mismatch does not error — it silently fails to admit the witness.
+pub fn certificate_indices(typ: &Exp) -> Option<&Exp> {
+    let (head, p) = match typ {
         Exp::App(f, a) => (f.as_ref(), a.as_ref()),
         _ => return None,
     };
@@ -1483,7 +1481,7 @@ pub fn certificate_indices(typ: &Exp) -> Option<(&Exp, &Exp)> {
         Exp::Const(iri, _) | Exp::EigonClass(iri) | Exp::EigonAxiom(iri)
             if iri.as_str() == "urn:eigenius:justification:Certificate"
     );
-    names_certificate.then_some((j, p))
+    names_certificate.then_some(p)
 }
 
 #[cfg(test)]
