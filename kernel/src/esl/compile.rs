@@ -2664,6 +2664,11 @@ impl Compiler {
                         .collect();
                     r.set(iri("urn:eigenius:core:recommends"), Value::Array(iris?));
                 }
+                ast::ClassItem::Property(prop, value) => {
+                    let prop_iri = self.resolve(prop)?;
+                    let value_iri = self.resolve(value)?;
+                    r.set(iri(&prop_iri), Value::String(value_iri));
+                }
             }
         }
 
@@ -4190,6 +4195,66 @@ mod tests {
 
     fn compile_esl(input: &str) -> Vec<Resource> {
         esl::compile(input, term_chain()).unwrap()
+    }
+
+    /// A class can carry a property that is not one of the three keywords.
+    ///
+    /// The grammar accepted only `description`, `requires` and `recommends` until `2026-09-06`, so
+    /// a class-level annotation had to be authored in JSON. Nothing in the tree needs this yet —
+    /// the change closes a surface gap rather than serving a caller — which is why it is pinned
+    /// here.
+    #[test]
+    fn a_class_can_carry_an_arbitrary_property() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            class ex:Marker { }
+
+            class ex:Document {
+                description = "A text document";
+                ex:marked_by = ex:Marker;
+            }
+            "#,
+        );
+        let doc = resources
+            .iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:Document"))
+            .expect("ex:Document compiles");
+        assert_eq!(
+            doc.get(&Iri::parse("urn:eigenius:example:marked_by").unwrap())
+                .and_then(|v| v.as_str()),
+            Some("urn:eigenius:example:Marker"),
+            "the property must land on the class resource itself"
+        );
+    }
+
+    /// The three keywords still parse as keywords, not as properties.
+    #[test]
+    fn the_class_keywords_are_not_read_as_properties() {
+        let resources = compile_esl(
+            r#"
+            namespace core = "urn:eigenius:core";
+            namespace ex = "urn:eigenius:example";
+
+            property ex:title : core:string { }
+
+            class ex:Doc {
+                description = "d";
+                requires ex:title;
+            }
+            "#,
+        );
+        let doc = resources
+            .iter()
+            .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:Doc"))
+            .expect("ex:Doc compiles");
+        assert!(
+            doc.get(&Iri::parse("urn:eigenius:core:requires").unwrap())
+                .is_some(),
+            "`requires` must still compile to core:requires"
+        );
     }
 
     #[test]

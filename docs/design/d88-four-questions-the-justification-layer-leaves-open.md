@@ -414,13 +414,14 @@ to be two questions.
    `is_witness_candidate` and `trace_category`. Declaring the mapping on the trace classes fixes it
    with no change to `witness:Is*As`.
 
-   That half is scheduled (`next-steps-after-d88.md` B5). It looked as though chain-declaring the
-   mapping would let a layer above bootstrap declare a class grounding `Verified` — the grade no
-   author is supposed to be able to assert. It does not: a class grounds nothing, it selects which
-   category a *trace resource* mints, and `emit_from_trace` mints `Verified` only from a trace
-   carrying `prov:judgement`, which is validated in check mode at commit by a checker that refuses
-   `Checked`. A hand-made `Verified` would need a real proof, from which `Verified` is the correct
-   grade. `trace_category` is a dispatch key, not a soundness boundary.
+   **That half is closed too, and against this document.** Chain-declaring the mapping is a
+   deprecated pattern in `judgements-and-warrants.tex`: *"Grades assigned by class membership, by a
+   trace declaring its own grade, or by the importer that wrote the resource. Replaced by
+   computation from stored evidence."* And a protocol for institutions to supply their own witness
+   kinds is listed as unnecessary — an institution supplies a checkable judgement or its output is
+   *Computed*. `trace_category` is the constant specification governing attributions, which the
+   paper names as a TCB component; it belongs in the kernel. D81 §1.3's observation that the
+   concept lives only in Rust is accurate, and that is the intended condition.
 
 ## 7. Out of scope
 

@@ -364,13 +364,23 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_class_item(&mut self) -> Result<ClassItem, EslError> {
+        // A qualified name is a property assignment on the class itself. The three bare-word
+        // items below are sugar for the properties that come up constantly.
+        if matches!(self.peek(), TokenKind::QualName(_, _)) {
+            let prop = self.parse_qualified_name()?;
+            self.expect(&TokenKind::Eq)?;
+            let value = self.parse_qualified_name()?;
+            self.expect_semicolon()?;
+            return Ok(ClassItem::Property(prop, value));
+        }
         let name = match self.peek().clone() {
             TokenKind::Ident(n) => n,
             _ => {
                 return Err(EslError::parser(
                     Some(self.current_pos()),
                     format!(
-                        "expected class item (description, requires, recommends), found {:?}",
+                        "expected a class item — `description`, `requires`, `recommends`, or a \
+                         qualified property name — found {:?}",
                         self.peek()
                     ),
                 ))

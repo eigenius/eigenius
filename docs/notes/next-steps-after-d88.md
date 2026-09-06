@@ -207,75 +207,57 @@ that matters to the witness machinery — trace kinds that ground a witness — 
 a parentless group: `DeclarationTrace`, `ObservationTrace` and `VerificationTrace` are siblings of
 nothing, while `ExternalExecutionTrace` and `ProgramTrace` sit under `ProductionTrace`.
 
-Even with a single `ChainWitness(category, …)`, something still has to decide that an
-`ExternalExecutionTrace` yields `Declared`. That decision is the hardcoded part, and it is fixable
-by declaring the mapping on the trace classes and having `trace_category` read it — with no change
-to `witness:Is*As`.
+Even with a single `ChainWitness(category, …)`, something still has to decide that a trace of a
+given kind yields `Declared`.
 
-**Scheduled as B5.** D81 §1.3 has the analysis.
+**But that decision belongs in the kernel, and declaring it on the trace classes is a deprecated
+pattern.** See B5 above, refuted `2026-09-06` against the paper. C2 is closed in both halves: the
+merge is declined, and the hardcoded mapping is the specified design rather than a defect.
 
-### B5 — declare the trace-kind → grade mapping (C2b · D81 §1.3)
+### B5 — declare the trace-kind → grade mapping · **REFUTED `2026-09-06`, not built**
 
-`trace_category` and `is_witness_candidate` are the only place the concept *"trace kinds that ground
-a witness"* exists. The second is defined in terms of the first
-(`trace_category(c).is_some() || c == INSTITUTION_EMITTED_DERIVATION || c == REASONING_SENTENCE`),
-so the whole notion is two Rust functions. The ontology has no class, no `subclass_of` edge joining
-the members, and no property marking membership.
+The paper rules against it directly. `judgements-and-warrants.tex` §"Deprecated Architectural
+Patterns" lists, as a pattern to be replaced:
 
-**Shape of the fix:** a property on each trace class naming the category it grounds. Absence means
-it grounds nothing, which covers `ProgramTrace` without a special case. `trace_category` reads the
-property; `is_witness_candidate` becomes "carries the property", plus the two non-trace constants it
-already names separately.
+> **Grades assigned by class membership, by a trace declaring its own grade, or by the importer
+> that wrote the resource.** Replaced by computation from stored evidence. No path exists by which
+> asserting a class confers evidential standing.
 
-**The soundness question was asked and answered `2026-09-05`: no layer restriction is needed.**
+Both shapes I built or proposed are named there. A property on the trace class is "a trace declaring
+its own grade". Deciding the grade by `subclass_of` is "grades assigned by class membership".
 
-It was first posed as *"only bootstrap may declare a class grounding `Verified`"*, which is
-malformed — **a class grounds nothing**. It selects which category a *trace resource* mints, and the
-gate is on the trace, not the class:
+The extensibility premise is refuted in the same list:
 
-1. `emit_from_trace` mints a `Verified` key only from a trace carrying `prov:judgement`
-   (`witness_admission.rs:386`). No judgement, no Verified, whatever the class says.
-2. `prov:judgement` is declared `class_types eigentt:Judgement`, so it is validated in CHECK mode at
-   commit (`validation/rules/eigentt_value.rs:141`): decode both fields, check `type` is a type,
-   check `term` against it, with the kernel's own `check`.
-3. That checker REFUSES `Exp::Checked`, so a hand-authored `holds(logic_lean4, Checked(_), _)` fails
-   `TermIllTyped`; an institution-emitted one never reaches validation, since `structural_validate`
-   runs before `autoonload_dispatch`.
-4. `judgement_proposition_hash` separately refuses a judgement whose type is a `Certificate(...)`.
+> **A protocol for institutions to supply their own witness kinds.** Unnecessary: an institution
+> supplies a judgement in a logic the system checks, or its output is *Computed*.
 
-So a hand-made `Verified` needs a judgement whose term genuinely inhabits the proposition under the
-kernel's checker — a real proof, from which `Verified` is the correct grade. `prov:judgement`'s own
-description already said it: *"the kernel refuses that form at commit, so only the institution that
-ran the check can produce one of these."*
+D81 §3.2 reports that adding a trace kind takes a kernel edit and calls it a limitation — *"the
+extensibility the institution mechanism provides stops at this boundary."* The paper says that
+boundary is intended. An institution with something to contribute either supplies a checkable
+judgement, reaching *Verified*, or its output is `App(Declared(plan), Observed(input))`.
 
-`trace_category` is therefore **not load-bearing for soundness** — it is a dispatch key. `Declared`
-and `Observed` need no protection either: both are postulated by design and stay in the TCB, and
-anyone can already commit a `DeclarationTrace`.
+**And `trace_category` is a TCB element, which I had recorded as the opposite.** The paper: *"the
+`Verified` state is provable, whereas `Declared` and `Observed` states are postulated ... the kernel
+asserts the remaining two as proof constants under a defined constant specification"*, and the TCB
+*"consists of the kernel's native type checker, each hosted external proof checker, each formal
+comorphism, and the constant specification governing attributions."* The rule *"a `DeclarationTrace`
+targeting R postulates `IsDeclaredAs(R, P)`"* is that constant specification. Moving it into chain
+data would move a TCB element somewhere a layer can extend. The earlier note here said the opposite
+— that a class grounds nothing and `Verified` is separately gated — which is true of `Verified` and
+irrelevant to the two grades that are postulated, since having no gate is what postulation means.
 
-**Cost:** one property on the trace classes, `trace_category` and `is_witness_candidate` reading it.
-`is_witness_candidate` needs a `&Layer` threaded in; all three call sites have one
-(`storage/memory.rs:242`, plus the two inside `witness_admission.rs`). Bootstrap edit, so it rides B4's
-reseed.
+D81 §1.3 observes the concept lives in two Rust functions. That observation is correct and the
+condition is intended.
 
-**Blocking discovery, `2026-09-05`: `reflection:ExternalExecutionTrace` is not declared in any
-ontology.** It exists as `wk::EXTERNAL_EXECUTION_TRACE`, as `trace_category`'s fifth arm, and in
-prose — nowhere as a class. `harness-ontology.esl`'s own description records why: eigenius#205
-minted it so a required `prov:derivation` slot could be filled, *"the requirement is what forced the
-class into existence"*, and that requirement was then replaced by `prov:was_generated_by` — *"it no
-longer needs a class to say so."* The class went; the arm stayed.
+**Kept from the attempt:** `crates/eigenius-statistics/tests/d39_composition.rs` builds a chain that
+commits `prov:DeclarationTrace` resources without loading `prov`; the layer is now loaded. And the
+ESL grammar accepts a property on a class, which was a real surface gap — the grammar admitted only
+`description`, `requires` and `recommends`, so a class-level annotation had to be authored in JSON.
+Nothing in the tree uses it; two tests pin it.
 
-`an_external_execution_trace_admits_declared_not_derived` passes only because it builds its layer
-with `LayerBuilder::build`, which does not validate. A committed resource naming an undeclared class
-does not get that far.
-
-So B5 cannot put a property on five classes — there are four. It has to decide first:
-
-| | |
-|---|---|
-| **declare the class** | if an author asserting "a run happened elsewhere" is still a distinct trace kind that should ground `Declared` |
-| **delete the arm** | if `prov:DeclarationTrace` already covers that assertion, which is what the harness description implies |
-
-Answer that before writing the property. Either way it is a smaller change than five classes.
+**Method note.** I built this from `next-steps-after-d88.md`, then read D81, then read the paper,
+in that order. The paper is the governing document and rules against the design in one sentence.
+Read it first.
 
 ## D. Deferred, reasons already recorded
 

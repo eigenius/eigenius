@@ -207,6 +207,22 @@ pub enum ClassItem {
     Description(String),
     Requires(Vec<QualifiedName>),
     Recommends(Vec<QualifiedName>),
+    /// Any other property, set on the class resource itself: `ex:colour = ex:Blue;`.
+    ///
+    /// A class IS a resource, so its declaration can set its properties. `description`, `requires`
+    /// and `recommends` are sugar for the three that come up constantly, and until `2026-09-06`
+    /// they were the only three the grammar accepted — a class could carry no other property, so a
+    /// class-level annotation had to be authored in JSON instead of ESL. Of 882 class resources in
+    /// the shipped JSON ontologies, exactly one hand-authored class carried a property outside that
+    /// set (`core:Property`'s `conditional_requires`); the other 734 occurrences are
+    /// `source_irl` / `was_attributed_to` written by the schema-org importer, which never goes
+    /// through this parser. That is why the gap survived: demand for it was almost zero, and
+    /// `prov:was_attributed_to` — the one property every compiled class carries — is stamped by
+    /// the compiler rather than written as a class item.
+    ///
+    /// The discriminator is the token: a bare `Ident` opens one of the three keywords, a
+    /// `QualName` opens this.
+    Property(QualifiedName, QualifiedName),
 }
 
 /// `property ex:name : core:string { ... }`
