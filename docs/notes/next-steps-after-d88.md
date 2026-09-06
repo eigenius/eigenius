@@ -21,35 +21,40 @@ in the interim cannot be misread as a pass.
 it needed no reseed; it does — see below. Doing it after B2 also shrinks it, since the merge removes
 `j1` and `j2` from `app` outright.
 
-### B1 — infer `app`'s `forall`-bound arguments (D88 §4)
+### B1 — declare the implicit binders (D88 §4)
 
-**Attempted `2026-09-05` and reverted. It is a bootstrap change, not a kernel-only one, so it rides
-B4's reseed with B2 and B3.**
+**Which binders.** Not "the solvable ones" — the ones that carry no authorial content. The grounding
+constructors' `iri` is solvable and must stay written: it *is* the author's citation, and eliding it
+would mean never naming what a claim rests on.
 
-The attempt derived implicitness rather than declaring it: solve every binder by unifying the ctor's
-result type against the expected type, then let the author omit the solved ones, with an
-argument budget deciding how many. That needs no ESL syntax, no `Exp` change and no reseed — and it
-is **unsound at the alignment step**, because "omitted a solvable binder" is indistinguishable from
-"supplied a value for one".
+| ctor | binders | implicit |
+|---|---|---|
+| `declared` / `observed` / `verified` | `iri`, `P` | **none.** `iri` is the citation; `P` at the citation site is a check, not noise |
+| `app` | `A`, `B`, `j1`, `j2` | **all four.** `j1`/`j2` restate the sub-certificates' terms, `B` restates the expected proposition, `A` is the intermediate |
+| `sum_l` / `sum_r` | `P`, `j1`, `j2` | **all three** |
+| `spec_poly` | `T`, `P`, `j`, `x` | `T`, `j`. `x` is the instance the author chose; `P` is higher-order and unsolvable anyway |
 
-Measured: `verified(CLAIM, P)` has two arguments against three specs, and both `iri` and `P` are
-solvable from the expected type. Auto-filling `iri` shifts `CLAIM` onto the `P : Prop` slot —
-`type mismatch: EigonPrimitive(String) ≠ Sort(Zero)`. Caught by
-`a_certificate_citing_the_verified_claim_type_checks`, which is the test written for D88 §1's bridge
-and had no other consumer.
+**The foundation already exists, and it is the type-keyed elision rule.** A `ChainWitness`-typed slot
+is filled by the kernel and never written by the author, and *alignment is decided by the declared
+type before any solving happens* — which is exactly what the reverted attempt lacked. Generalise
+that rule rather than adding binder styles to `Exp::Pi`:
 
-So implicitness has to be **declared**, which means:
+- Declare a marker `eigentt:Implicit`, and write the binder as `forall (A : eigentt:Implicit(Prop), …)`.
+- `peel_ctor_telescope` **unwraps** it: the `CtorArg` records `implicit: true` and the binder's type
+  as the bare `T`. The marker never reaches the type checker, so `Certificate(j1, A -> B)` still sees
+  `A : Prop`. It is a declaration-site annotation that happens to be encoded as a type application.
+- `check_inductive_ctor_args` skips implicit slots when consuming user arguments and solves them by
+  unifying the result type against the expected indices — the same unification D48 Phase D already
+  runs at the end of that function.
+- A binder still unsolved after that (`app`'s `A`, which appears in no result index) is solved by
+  elaborating one explicit argument in inference mode. Unsolved after *that* is an error naming the
+  binder.
 
-- a binder style on `Exp::Pi` (it has none — `Pi(Patt, Box<Exp>, Box<Exp>)`), through the D47 codec;
-- ESL syntax for an implicit binder;
-- marking `justification:Certificate`'s binders, which changes the constructors' encoded types —
-  **a bootstrap edit**.
+**Why not a binder style on `Exp::Pi`:** it would need a new field on `Exp`, a codec change and ESL
+grammar, and would duplicate a mechanism the kernel already has. The marker-type route touches
+`CtorArg`, the peeler and the arg loop, and reuses the elision path that is already sound.
 
-Then the mechanism is the easy part, and most of it exists: `nbe/unify.rs` (D48 Phase C), index
-unification already running on every ctor check (Phase D), and a `MetaCtx` that needs to outlive one
-check (the code names this Phase F). `j1`, `j2` and `B` unify against the expected type; **`A` needs
-one argument elaborated in inference mode**, since it appears in no result index. `spec_poly` stays
-explicit — `P` is higher-order, outside D48 §3.1's fragment.
+Still a bootstrap edit — the constructors' encoded types change — so it rides B4's reseed.
 
 ### B2 — collapse `justification:Term` into `justification:Certificate` (D88 §2)
 
