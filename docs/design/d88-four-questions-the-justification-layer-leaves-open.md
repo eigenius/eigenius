@@ -383,15 +383,34 @@ outright.
 
 ## 6. Genuinely open
 
-Neither of these was asked here, and neither is answered.
+Neither was asked here. The first is unanswered; the second was examined `2026-09-05` and turned out
+to be two questions.
 
 1. **Widening the unification fragment.** `spec_poly`'s `P` needs higher-order unification, which
    D48 §3.1 excludes by design. Whether to widen it is a decision about EigenTT, not about the
-   justification layer.
-2. **One indexed witness family instead of three.** §1 establishes why the types exist; it says
-   nothing about whether `IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs` should be
-   `ChainWitness(category, iri, P)`, which would make `trace_category`'s mapping a value rather than
-   three constants.
+   justification layer. §4's work confirmed the diagnosis from the other side: solving `T` from the
+   premise fails the same way it fails from the result, because the codomain of
+   `forall (y : T) => P(y)` is a meta applied to a bound variable and the whole argument type has to
+   unify for any of it to count.
+2. **One indexed witness family instead of three.** Asked here as a single question — whether
+   `IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs` should be `ChainWitness(category, iri, P)`,
+   *"which would make `trace_category`'s mapping a value rather than three constants."* The two
+   halves of that sentence come apart.
+
+   **The merge is declined.** The constants move rather than disappear: from three decl IRIs
+   (`wk::chain_witness_category_for_iri`) to three constructors of a new category inductive plus a
+   value→enum readback. It also costs what §1 found the types are for — the type declares the
+   trigger and carries the lookup's parameters as its indices, and under the merge the category
+   becomes an argument instead. The families' independence, which a since-deleted
+   `IsVerifiedAs → IsDerivedAs` coercion once violated, would become a value comparison rather than
+   a type distinction.
+
+   **`trace_category` remains hardcoded, and the merge would not have fixed that.** Something still
+   has to decide that an `ExternalExecutionTrace` grounds `Declared`. D81 §1.3 states the defect
+   more sharply than this document did: the set of trace kinds that ground a witness has no class,
+   no `subclass_of` edge joining its members, and no property marking membership — it exists only as
+   `is_witness_candidate` and `trace_category`. Declaring the mapping on the trace classes fixes it
+   with no change to `witness:Is*As`.
 
 ## 7. Out of scope
 

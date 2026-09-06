@@ -1,112 +1,94 @@
 # Next steps after D88
 
-*Written `2026-09-05`, at the tip of `numeric-core-and-verification-judgement`.*
+*Written `2026-09-05` at the tip of `numeric-core-and-verification-judgement`; revised the same day
+as B1 and B2 landed.*
 
 ---
 
 ## A. Close out the current batch
 
-| | | cost |
+| | | state |
 |---|---|---|
-| **A1** | Close eigenius#235 — fully discharged by this branch | — |
-| **A2** | Open the PR | — |
-| **A3** | **Do not reseed yet.** The snapshot is stale (`core-ontology.json` moved in `520137c`, after the image the snapshot was built from), so no snapshot opens at HEAD. The delta is three description strings and cannot touch the parser. Fold this reseed into **B2/B3**'s rather than paying for two | — |
+| **A1** | Close eigenius#235 — fully discharged by this branch | done |
+| **A2** | Open the PR | done |
+| **A3** | The bootstrap manifest has moved **three** times on this branch: `#235`'s description strings, B2's merge, B1's implicit binders. Every persisted store is unresumable until **B4** runs | pending B4 |
 
 `eval-parse-rate.sh` already refuses to score a run with no summary line, so a `ManifestDrift` SKIP
 in the interim cannot be misread as a pass.
 
+A3 first said "do not reseed yet, fold this into B2/B3's rather than paying for two" and priced a
+reseed at ~3h. **Both halves were wrong.** The reseed is ~30 minutes, so the batching argument never
+rested on its cost; what makes batching worth it is the alignment snapshot and the two parse
+measurements that follow it. And B1 moved the manifest too, which the original ordering assumed it
+would not.
+
 ## B. Work D88 decides
 
-**Order:** B2 and B3 first, then B1, then one reseed (B4). B1 was scheduled first on the belief that
-it needed no reseed; it does — see below. Doing it after B2 also shrinks it, since the merge removes
-`j1` and `j2` from `app` outright.
+**Order, as executed:** B2, then B1, then B3, then one reseed (B4). The note first said B2 and B3
+before B1 on the belief that B1 needed no reseed; it did.
 
-### B1 — declare the implicit binders (D88 §4) — **DONE `2026-09-05`**
+### B1 — declare the implicit binders (D88 §4) — **DONE `2026-09-05`** (`4fc8986`)
 
 Built as declared `core:implicit_args` (binder names) with an `implicit(A, B)` ESL clause, not as
-the `eigentt:Implicit(Prop)` marker type recommended below. **The marker was the wrong shape.** It
-annotates the binder's TYPE, so every reader of `core:ctor_type` that does not know about it sees a
-type that does not exist — the mirror generators, `esl::print`, the Lean translation each would
-have to remember to strip it. A separate property is read only by the code that cares; everything
-else sees the true telescope. It also needs no universe-polymorphic marker constant whose own type
-must be right for a thing that is stripped before checking.
+the `eigentt:Implicit(Prop)` marker type the original plan recommended. **The marker was the wrong
+shape.** It annotates the binder's TYPE, so every reader of `core:ctor_type` that does not know
+about it sees a type that does not exist — the mirror generators, `esl::print`, the Lean translation
+each would have to remember to strip it. A separate property is read only by the code that cares;
+everything else sees the true telescope. It also needs no universe-polymorphic marker constant whose
+own type has to be right for a thing that is stripped before checking.
 
-Two kernel changes the plan did not have: a `MetaCtx` spanning the whole constructor check (Phase
-F, as predicted), and componentwise comparison of two anonymous arrows (not predicted — `app`'s
-binders sit inside `Certificate(A -> B)`, and every `Val::Pi` fell through to readback equality).
-Anonymous is the whole soundness argument: nothing is bound, so no variable is introduced and
-nothing can be captured. `solve_meta`'s scope check was strengthened alongside it — metas record
-their creation level and refuse a solution proposed from inside a binder they do not scope over.
-See D88 §4.
+Two kernel changes the plan did not have: a `MetaCtx` spanning the whole constructor check (Phase F,
+as predicted), and componentwise comparison of two anonymous arrows (not predicted — `app`'s binders
+sit inside `Certificate(A -> B)`, and every `Val::Pi` fell through to readback equality). Anonymous
+is the whole soundness argument: nothing is bound, so no variable is introduced and nothing can be
+captured. `solve_meta`'s scope check was strengthened alongside it — metas record their creation
+level and refuse a solution proposed from inside a binder they do not scope over. See D88 §4.
 
-Content: 309 `app` calls lost two arguments each across 14 ESL files, plus 2 `sum_l`, 1 `sum_r`,
-and the notebook's 4. `spec_poly` stayed fully explicit, `T` included.
+Content: 309 `app` calls lost two arguments each across 14 ESL files, plus 2 `sum_l`, 1 `sum_r` and
+the notebook's 4. `spec_poly` stayed fully explicit, `T` included.
 
-The original plan, kept for the record:
+### B2 — collapse `justification:Term` into `justification:Certificate` (D88 §2) — **DONE `2026-09-05`** (`ba1abb6`)
 
-### B1 — declare the implicit binders (D88 §4)
+663 argument deletions across 24 files plus 176 dead alias bindings — ~60× the estimate, which
+counted the notebook and missed the WRN publication chain. See D88 §2. The 32 residual
+`x = Declared(IRI)` aliases it left were removed by hand in `ce670ba`, along with the comments that
+still described `justification:Term` as current.
 
-**Which binders.** Not "the solvable ones" — the ones that carry no authorial content. The grounding
-constructors' `iri` is solvable and must stay written: it *is* the author's citation, and eliding it
-would mean never naming what a claim rests on.
+### B3 — declare the leaf IRI-valued (D88 §3) — **NEXT**
 
-| ctor | binders | implicit |
+**The sub-choice is resolved, and B2 moved the ground under it.** The note offered a `core:iri`
+DataType *or* a format slot on `InductiveArgType`. The second reaches one of the seven slots. It was
+written when the leaves lived on `justification:Term`'s **positional** constructors; B2 deleted
+those, and the survivors are spread across three declaration forms:
+
+| slot | declared as | carrier |
 |---|---|---|
-| `declared` / `observed` / `verified` | `iri`, `P` | **none.** `iri` is the citation; `P` at the citation site is a check, not noise |
-| `app` | `A`, `B`, `j1`, `j2` | **all four.** `j1`/`j2` restate the sub-certificates' terms, `B` restates the expected proposition, `A` is the intermediate |
-| `sum_l` / `sum_r` | `P`, `j1`, `j2` | **all three** |
-| `spec_poly` | `T`, `P`, `j`, `x` | `T`, `j`. `x` is the instance the author chose; `P` is higher-order and unsolvable anyway |
+| `Certificate.declared` / `.observed` / `.verified` — `iri` | typed telescope | `core:ctor_type` (a D47 `Exp::Pi` binder) |
+| `witness:IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs` — index #0 | index telescope | `core:indices` → `InductiveParam.param_kind` |
+| `eigentt:Term.Checked` — `payload_iri` | positional | `core:arg_types` → `InductiveArgType.type_name` |
 
-**The foundation already exists, and it is the type-keyed elision rule.** A `ChainWitness`-typed slot
-is filled by the kernel and never written by the author, and *alignment is decided by the declared
-type before any solving happens* — which is exactly what the reverted attempt lacked. Generalise
-that rule rather than adding binder styles to `Exp::Pi`:
+**So: `core:iri`, a sixth `PrimitiveType`.** All three forms name a *type*; change the type named and
+every form follows. Annotating each form separately is one declaration written three ways.
 
-- Declare a marker `eigentt:Implicit`, and write the binder as `forall (A : eigentt:Implicit(Prop), …)`.
-- `peel_ctor_telescope` **unwraps** it: the `CtorArg` records `implicit: true` and the binder's type
-  as the bare `T`. The marker never reaches the type checker, so `Certificate(j1, A -> B)` still sees
-  `A : Prop`. It is a declaration-site annotation that happens to be encoded as a type application.
-- `check_inductive_ctor_args` skips implicit slots when consuming user arguments and solves them by
-  unifying the result type against the expected indices — the same unification D48 Phase D already
-  runs at the end of that function.
-- A binder still unsolved after that (`app`'s `A`, which appears in no result index) is solved by
-  elaborating one explicit argument in inference mode. Unsolved after *that* is an error naming the
-  binder.
+Two facts worth having before starting:
 
-**Why not a binder style on `Exp::Pi`:** it would need a new field on `Exp`, a codec change and ESL
-grammar, and would duplicate a mechanism the kernel already has. The marker-type route touches
-`CtorArg`, the peeler and the arg loop, and reuses the elision path that is already sound.
+- `core:formats:iri` and a working shape predicate **already exist** (`wk::FMT_IRI`, Rule 4 in
+  `validation/rules/format.rs`). They are property-scoped — `check_format` reads the slot off a
+  `prop_def` — so they do not apply to a constructor binder, but the predicate is reusable rather
+  than something to write.
+- `PrimitiveType` has five variants today and 67 `PrimitiveType::` match sites across the workspace.
 
-Still a bootstrap edit — the constructors' encoded types change — so it rides B4's reseed.
+Then `core:mentions` gets an exact rule instead of `s.starts_with("urn:")`
+(`layer/term_mentions.rs:83`, and the same heuristic at `program/expr.rs:903` and
+`nbe/eval/marshal.rs:35`), and the validator rejects a malformed leaf at commit rather than leaving
+it to whichever consumer parses it first.
 
-### B2 — collapse `justification:Term` into `justification:Certificate` (D88 §2) — **DONE `2026-09-05`**
-
-Landed as `ba1abb6`. Cost 663 argument deletions across 24 files plus 176 dead alias bindings —
-~60× the estimate, which counted the notebook and missed the WRN publication chain. See D88 §2.
-Residue: 32 `x = Declared(IRI)` aliases in 7 files, to be removed by hand.
-
-
-`Justification : Prop -> Type 2`, seven constructors, each losing its term arguments.
-
-- `certificate_indices` → one index. Five call sites; three only test `.is_some()`.
-- `support`, `is_fully_verified`, `wellfounded` walk the certificate value instead of the term index.
-- Remove `justification:Term` from the codec and `well_known`.
-- Rewrite the demo notebook's certificate — it gets **smaller**.
-- Versioned ADT change.
-
-### B3 — declare the leaf IRI-valued (D88 §3)
-
-On `Declared`, `Observed`, `Verified` and `Checked`.
-
-- Choose: a `core:iri` DataType, or a format slot on `InductiveArgType`. **Open sub-choice.**
-- Then `core:mentions` gets an exact rule instead of `s.starts_with("urn:")`, and the validator
-  rejects a malformed leaf at commit instead of leaving it to whichever consumer parses first.
+Bootstrap edit — rides B4.
 
 ### B4 — one reseed, then both baselines
 
-B2 and B3 are bootstrap; A3's stale delta rides along. **The reseed is ~30 minutes**, not the
-several hours this note first assumed — the alignment snapshot and the two parse measurements are
-what the rest of the wall clock goes on.
+B3 is bootstrap; A3's three accumulated deltas ride along. **The reseed is ~30 minutes**; the
+alignment snapshot and the two parse measurements are the rest of the wall clock.
 
 ```sh
 CARGO_FEATURES=use-llm scripts/reseed-lexicon-db.sh --umls-all
@@ -120,14 +102,63 @@ Gates: `grammar_gap == 0`, `missing_lexeme == 0`, `expected-hits 62/62` with the
 `reading_correct >= 30`, `reading_unadjudicated == 0`, `invalid_selected == 0`. A single **live**
 draw is a draw, not a measurement — replay is the comparison.
 
-## C. Decisions, not work
+## C. Decisions
 
-Neither is answered by D88, and neither blocks B.
+### C1 — widen the unification fragment past first-order patterns · **open, nothing blocked**
 
-| | |
-|---|---|
-| **C1** | Widen the unification fragment past first-order patterns, which is what `spec_poly`'s `P` needs. A decision about EigenTT (D48 §3.1), not about the justification layer |
-| **C2** | Replace the three `witness:Is*As` families with one `ChainWitness(category, iri, P)`, making `trace_category`'s mapping a value rather than three constants. Not examined |
+What `spec_poly`'s `P` needs. A decision about EigenTT (D48 §3.1), not about the justification layer.
+
+B1 confirmed the diagnosis from the other side: solving `T` from the *premise* fails for the same
+reason it fails from the result — the domain of `forall (y : T) => P(y)` would fix `T`, but the
+codomain is `P(y)`, a meta applied to a bound variable, and the whole argument type has to unify for
+any of it to count. Nothing is blocked; `spec_poly` stays fully explicit at a cost of one written
+`T` across 15 call sites.
+
+### C2 — examined `2026-09-05`, and it is two questions, not one
+
+**C2a — replace the three `witness:Is*As` families with one `ChainWitness(category, iri, P)`:
+declined.**
+
+The three constants do not disappear, they move: from three decl IRIs
+(`wk::chain_witness_category_for_iri`, read at `program/check_hooks.rs:48`) to three constructors of
+a new `witness:Category` inductive plus a value→enum readback. One new inductive, one more index to
+validate, the same enumeration.
+
+It also costs what D88 §1 found the witness types are *for* — the type declares the trigger and
+carries the lookup's parameters as its indices. Under C2a the category stops being declared by the
+type and becomes an argument. And the independence of the families, which
+`witness_index.rs:1496` tests and which a since-deleted `IsVerifiedAs → IsDerivedAs` match arm once
+violated, degrades from a type distinction to a value comparison.
+
+**C2b — the trace-kind → grade mapping lives in Rust, not the ontology: stands, and C2a does not
+address it.**
+
+This is what C2 was actually about, and merging the families is not a route to it. `trace_category`
+(`layer/witness_index.rs:224`) maps five trace classes onto three categories and a deliberate
+`None`:
+
+```
+DeclarationTrace       → Declared
+ObservationTrace       → Observed
+ProgramTrace           → None        (deliberately)
+VerificationTrace      → Verified
+ExternalExecutionTrace → Declared    (eigenius#205)
+```
+
+D81 §1.1 and §1.3 already state the defect, and more sharply than "three constants": the ontology
+carries no class, property or relation expressing *"this trace kind grounds that grade"*. The set
+that matters to the witness machinery — trace kinds that ground a witness — has no class, no
+`subclass_of` edge joining its members, and no property marking membership; it exists only as
+`is_witness_candidate` (`:197`) and `trace_category` (`:224`), both Rust. Its members span two unrelated families plus
+a parentless group: `DeclarationTrace`, `ObservationTrace` and `VerificationTrace` are siblings of
+nothing, while `ExternalExecutionTrace` and `ProgramTrace` sit under `ProductionTrace`.
+
+Even with a single `ChainWitness(category, …)`, something still has to decide that an
+`ExternalExecutionTrace` yields `Declared`. That decision is the hardcoded part, and it is fixable
+by declaring the mapping on the trace classes and having `trace_category` read it — with no change
+to `witness:Is*As`.
+
+Not scheduled. D81 §1.3 is where the analysis lives.
 
 ## D. Deferred, reasons already recorded
 
@@ -135,3 +166,12 @@ Neither is answered by D88, and neither blocks B.
 |---|---|
 | **D1** | eigenius#236 — D30 emitting chain definitions as Lean `def`s. Drift produces an unmapped constant and `unknown_pp_declar_hard_error` makes nanoda refuse, so drift is refused rather than silent |
 | **D2** | A PROV exporter — needs the in-process Activity gap closed first (`w3c-prov-mapping.md` §5.2) |
+
+## E. Removed
+
+**The ScienceAgentBench tracer tasks, `2026-09-05`** (`6a105cc`). Both task chains, `mol.esl` and
+their two tests carried no unique regression coverage: with B1's first, over-restrictive unification
+rule, twelve tests reject it — `wrn_phase3` (8), `wrn_phase2`, `wrn_phase5`, `d39_composition` and
+the two tracers (1 each). `bench-core.esl` and `harness-ontology.esl` stay; the WRN chain loads both.
+D50 and D51 are marked dormant. One shape is no longer exercised anywhere: `spec_poly` over a
+five-premise rule discharged one premise at a time.
