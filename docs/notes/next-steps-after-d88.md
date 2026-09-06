@@ -191,23 +191,33 @@ it grounds nothing, which covers `ProgramTrace` without a special case. `trace_c
 property; `is_witness_candidate` becomes "carries the property", plus the two non-trace constants it
 already names separately.
 
-**Settle this first — it is what makes B5 a design step and not an ontology edit.** Today the kernel
-decides what grounds what and no ontology edit can change it. Chain-declaring the mapping means a
-layer above bootstrap could declare a trace class that grounds `Verified` — the grade the design says
-no author can assert into existence. Two readings, and I have not established which holds:
+**The soundness question was asked and answered `2026-09-05`: no layer restriction is needed.**
 
-1. **`Verified` is already protected independently.** `emit_from_trace` mints a Verified key only
-   from a trace carrying `prov:judgement` (`witness_index.rs:386`), and per `witness:IsVerifiedAs`'s
-   own description what makes the grade unassertable is the `Checked` term inside that judgement,
-   which the kernel's checker refuses. On this reading the mapping can be chain-declared outright.
-2. **That protection is partial** and the property needs a layer restriction — e.g. only bootstrap
-   may declare a class grounding `Verified`.
+It was first posed as *"only bootstrap may declare a class grounding `Verified`"*, which is
+malformed — **a class grounds nothing**. It selects which category a *trace resource* mints, and the
+gate is on the trace, not the class:
 
-The answer decides whether B5 is a property on five classes plus two functions reading it, or that
-plus a provenance restriction on who may declare it. Do not start the edit before answering it.
+1. `emit_from_trace` mints a `Verified` key only from a trace carrying `prov:judgement`
+   (`witness_index.rs:386`). No judgement, no Verified, whatever the class says.
+2. `prov:judgement` is declared `class_types eigentt:Judgement`, so it is validated in CHECK mode at
+   commit (`validation/rules/eigentt_value.rs:141`): decode both fields, check `type` is a type,
+   check `term` against it, with the kernel's own `check`.
+3. That checker REFUSES `Exp::Checked`, so a hand-authored `holds(logic_lean4, Checked(_), _)` fails
+   `TermIllTyped`; an institution-emitted one never reaches validation, since `structural_validate`
+   runs before `autoonload_dispatch`.
+4. `judgement_proposition_hash` separately refuses a judgement whose type is a `Certificate(...)`.
 
-Bootstrap edit, so it wants B4's reseed. If the question resolves to reading (1) it is small enough
-to land with B3 and ride the same reseed; if (2), it is its own piece of work and gets its own.
+So a hand-made `Verified` needs a judgement whose term genuinely inhabits the proposition under the
+kernel's checker — a real proof, from which `Verified` is the correct grade. `prov:judgement`'s own
+description already said it: *"the kernel refuses that form at commit, so only the institution that
+ran the check can produce one of these."*
+
+`trace_category` is therefore **not load-bearing for soundness** — it is a dispatch key. `Declared`
+and `Observed` need no protection either: both are postulated by design and stay in the TCB, and
+anyone can already commit a `DeclarationTrace`.
+
+**Cost:** one property on five trace classes, `trace_category` and `is_witness_candidate` reading it.
+Bootstrap edit, so it lands with B3 and rides B4's reseed.
 
 ## D. Deferred, reasons already recorded
 

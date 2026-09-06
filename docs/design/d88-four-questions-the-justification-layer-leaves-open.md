@@ -414,11 +414,13 @@ to be two questions.
    `is_witness_candidate` and `trace_category`. Declaring the mapping on the trace classes fixes it
    with no change to `witness:Is*As`.
 
-   That half is scheduled (`next-steps-after-d88.md` B5), and it opens a question this document did
-   not ask: the kernel currently decides what grounds what, and chain-declaring the mapping means a
-   layer above bootstrap could declare a class grounding `Verified` — the grade §1's material says
-   no author can assert into existence. Whether `emit_from_trace`'s `prov:judgement` requirement
-   already closes that, or whether the property needs a layer restriction, is B5's first task.
+   That half is scheduled (`next-steps-after-d88.md` B5). It looked as though chain-declaring the
+   mapping would let a layer above bootstrap declare a class grounding `Verified` — the grade no
+   author is supposed to be able to assert. It does not: a class grounds nothing, it selects which
+   category a *trace resource* mints, and `emit_from_trace` mints `Verified` only from a trace
+   carrying `prov:judgement`, which is validated in check mode at commit by a checker that refuses
+   `Checked`. A hand-made `Verified` would need a real proof, from which `Verified` is the correct
+   grade. `trace_category` is a dispatch key, not a soundness boundary.
 
 ## 7. Out of scope
 
