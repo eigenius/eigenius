@@ -25,7 +25,8 @@ would not.
 ## B. Work D88 decides
 
 **Order, as executed:** B2, then B1, then B3, then one reseed (B4). The note first said B2 and B3
-before B1 on the belief that B1 needed no reseed; it did.
+before B1 on the belief that B1 needed no reseed; it did. B5 arrived from C2's examination and rides
+B4 if its design question resolves cheaply — see below.
 
 ### B1 — declare the implicit binders (D88 §4) — **DONE `2026-09-05`** (`4fc8986`)
 
@@ -87,7 +88,7 @@ Bootstrap edit — rides B4.
 
 ### B4 — one reseed, then both baselines
 
-B3 is bootstrap; A3's three accumulated deltas ride along. **The reseed is ~30 minutes**; the
+B3 is bootstrap, and B5 may be; A3's three accumulated deltas ride along. **The reseed is ~30 minutes**; the
 alignment snapshot and the two parse measurements are the rest of the wall clock.
 
 ```sh
@@ -175,7 +176,38 @@ Even with a single `ChainWitness(category, …)`, something still has to decide 
 by declaring the mapping on the trace classes and having `trace_category` read it — with no change
 to `witness:Is*As`.
 
-Not scheduled. D81 §1.3 is where the analysis lives.
+**Scheduled as B5.** D81 §1.3 has the analysis.
+
+### B5 — declare the trace-kind → grade mapping (C2b · D81 §1.3)
+
+`trace_category` and `is_witness_candidate` are the only place the concept *"trace kinds that ground
+a witness"* exists. The second is defined in terms of the first
+(`trace_category(c).is_some() || c == INSTITUTION_EMITTED_DERIVATION || c == REASONING_SENTENCE`),
+so the whole notion is two Rust functions. The ontology has no class, no `subclass_of` edge joining
+the members, and no property marking membership.
+
+**Shape of the fix:** a property on each trace class naming the category it grounds. Absence means
+it grounds nothing, which covers `ProgramTrace` without a special case. `trace_category` reads the
+property; `is_witness_candidate` becomes "carries the property", plus the two non-trace constants it
+already names separately.
+
+**Settle this first — it is what makes B5 a design step and not an ontology edit.** Today the kernel
+decides what grounds what and no ontology edit can change it. Chain-declaring the mapping means a
+layer above bootstrap could declare a trace class that grounds `Verified` — the grade the design says
+no author can assert into existence. Two readings, and I have not established which holds:
+
+1. **`Verified` is already protected independently.** `emit_from_trace` mints a Verified key only
+   from a trace carrying `prov:judgement` (`witness_index.rs:386`), and per `witness:IsVerifiedAs`'s
+   own description what makes the grade unassertable is the `Checked` term inside that judgement,
+   which the kernel's checker refuses. On this reading the mapping can be chain-declared outright.
+2. **That protection is partial** and the property needs a layer restriction — e.g. only bootstrap
+   may declare a class grounding `Verified`.
+
+The answer decides whether B5 is a property on five classes plus two functions reading it, or that
+plus a provenance restriction on who may declare it. Do not start the edit before answering it.
+
+Bootstrap edit, so it wants B4's reseed. If the question resolves to reading (1) it is small enough
+to land with B3 and ride the same reseed; if (2), it is its own piece of work and gets its own.
 
 ## D. Deferred, reasons already recorded
 

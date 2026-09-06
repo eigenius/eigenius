@@ -414,6 +414,12 @@ to be two questions.
    `is_witness_candidate` and `trace_category`. Declaring the mapping on the trace classes fixes it
    with no change to `witness:Is*As`.
 
+   That half is scheduled (`next-steps-after-d88.md` B5), and it opens a question this document did
+   not ask: the kernel currently decides what grounds what, and chain-declaring the mapping means a
+   layer above bootstrap could declare a class grounding `Verified` — the grade §1's material says
+   no author can assert into existence. Whether `emit_from_trace`'s `prov:judgement` requirement
+   already closes that, or whether the property needs a layer restriction, is B5's first task.
+
 ## 7. Out of scope
 
 `justification:Certificate`'s seven constructors, `Sum`'s departure from LP's axiom, the
