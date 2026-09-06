@@ -13,7 +13,7 @@
 | | question | answer | basis |
 |---|---|---|---|
 | §1 | Do the `witness:Is*As` types earn their place, or should the check key on the constructor? | **They earn it.** The type carries a resolution obligation, so kernel/ontology drift breaks the build instead of silently disabling the check | derived from the code |
-| §2 | Should `justification:Term` merge into `justification:Certificate`? | **Open, and nothing forbids it.** The paper specifies term *shapes* and the typing relation `t : F`, not an encoding; the code has no independent use for the separate term index. Both inputs point at the merge | measured `2026-09-05` |
+| §2 | Should `justification:Term` merge into `justification:Certificate`? | **Yes — nothing requires the split.** The paper specifies term *shapes* and the typing relation `t : F`, not an encoding; the code has no use for the separate term index. Bootstrap edit, versioned ADT, one reseed | measured `2026-09-05` |
 | §3 | Should a term name a chain instance by reference rather than by string? | **The string is sediment.** The leaf already behaves as a reference — `core:mentions` indexes it — but by a prefix heuristic rather than a declared type. Give it one | derived from the index |
 | §4 | Can `app`'s `forall`-bound arguments be inferred? | **`app` yes, `spec_poly` no.** Four of the five pieces already exist | derived from `nbe/unify.rs` |
 
@@ -92,13 +92,15 @@ identifiable as such, which a merged value's constructor tree satisfies.
 does not require it. The merge is a live option rather than a departure, and the current two-index
 encoding is a choice nothing on record argues for.
 
-**What still has to be settled** is not the indexing but one question about the layer's extent. The
-paper states that *"the Verified state corresponds to the configuration lacking the middle layer:
-the system holds `Judgement(L, t, P)` directly."* The justification layer applies to `Declared` and
-`Observed` grounds and their compositions; at the strongest ground there is no justification term at
-all. A merged `Justification(P)` has to say what it means there — whether `Verified` stays outside
-the family, or the family absorbs a case the paper puts outside it. That question is unchanged by
-the encoding and would need answering either way.
+**And the one thing that looked like a blocker is not one.** The paper states that *"the Verified
+state corresponds to the configuration lacking the middle layer: the system holds
+`Judgement(L, t, P)` directly."* That describes the **state** — a claim whose warrant is a checked
+proof carries a `prov:judgement` on its trace and no certificate at all, which is exactly what the
+D87 §6 fixture does. It says nothing about the `verified` **constructor**, which is how a
+*downstream* claim cites such a claim as a ground (D87 §9.2: *"`Certificate(Verified(c), P)` is what
+a downstream claim cites … `c`'s own standing comes from its `justification:proof` judgement, not
+from a certificate over itself"*). State and constructor are different things, and the merge changes
+neither.
 
 Implementation cost does not weigh much: `justification:Term` is a versioned ADT, and the demo
 notebook's certificate is the largest authored artifact that would be rewritten.
@@ -209,9 +211,8 @@ also the only one of the four needing no amendment to the paper.
 
 ## 5. Still open
 
-1. **The merge (§2)** — nothing forbids it; the remaining question is what the justification layer
-   means at `Verified`, which the paper places outside it entirely. That question is independent of
-   the encoding and would need answering either way.
+1. **The merge (§2)** — nothing forbids it and nothing blocks it. Actionable; see §2 for the
+   surface it touches.
 2. **Implicit arguments (§4)** — scoped, not designed. Phase F's `MetaCtx` plus implicit-arg syntax,
    generalising the elision rule the `ChainWitness` hook implements. `app` is in reach; `spec_poly`
    needs a wider unification fragment and is a separate decision.
