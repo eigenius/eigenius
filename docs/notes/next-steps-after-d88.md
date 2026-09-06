@@ -10,7 +10,7 @@
 |---|---|---|
 | **A1** | Close eigenius#235 — fully discharged by this branch | — |
 | **A2** | Open the PR | — |
-| **A3** | **Do not reseed yet.** The snapshot is stale (`core-ontology.json` moved in `520137c`, after the image the snapshot was built from), so no snapshot opens at HEAD. The delta is three description strings and cannot touch the parser. Fold this reseed into **B2/B3**'s rather than paying ~3h twice | — |
+| **A3** | **Do not reseed yet.** The snapshot is stale (`core-ontology.json` moved in `520137c`, after the image the snapshot was built from), so no snapshot opens at HEAD. The delta is three description strings and cannot touch the parser. Fold this reseed into **B2/B3**'s rather than paying for two | — |
 
 `eval-parse-rate.sh` already refuses to score a run with no summary line, so a `ManifestDrift` SKIP
 in the interim cannot be misread as a pass.
@@ -104,7 +104,9 @@ On `Declared`, `Observed`, `Verified` and `Checked`.
 
 ### B4 — one reseed, then both baselines
 
-B2 and B3 are bootstrap; A3's stale delta rides along.
+B2 and B3 are bootstrap; A3's stale delta rides along. **The reseed is ~30 minutes**, not the
+several hours this note first assumed — the alignment snapshot and the two parse measurements are
+what the rest of the wall clock goes on.
 
 ```sh
 CARGO_FEATURES=use-llm scripts/reseed-lexicon-db.sh --umls-all

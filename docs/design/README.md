@@ -63,8 +63,8 @@ The per-subsystem design notes, in number order. New documents are added here as
 | D47 | [Chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md) |
 | D48 | [Indexed inductive families](d48-indexed-inductive-families.md) |
 | D49 | [ChainWitness machinery](d49-chainwitness-machinery.md) |
-| D50 | [Benchmark evaluation approach](d50-benchmark-evaluation-approach.md) |
-| D51 | [Benchmark implementation gaps](d51-benchmark-implementation-gaps.md) |
+| D50 | [Benchmark evaluation approach](d50-benchmark-evaluation-approach.md) — **dormant** |
+| D51 | [Benchmark implementation gaps](d51-benchmark-implementation-gaps.md) — **dormant** |
 | D52 | [Measurement-statistics institution](d52-measurement-statistics-institution.md) |
 | D53 | [Large-data tracking](d53-large-data-tracking.md) |
 | D54 | [Reasoning lemma citation](d54-reasoning-lemma-citation.md) |

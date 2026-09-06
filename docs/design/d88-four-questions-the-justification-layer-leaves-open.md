@@ -334,12 +334,25 @@ answer no for exactly the unsound cases. Nothing reaches it today — the arrow 
 level — which is the point: it is the invariant that a later descent into a dependent binder has to
 satisfy, and it fires instead of capturing.
 
-**A first attempt did descend under the binder, and `sab16_tracer` caught it.** Comparing codomains
-one level in refuses to solve any meta from outside, which is correct but too strong: an `app`
-nested as the argument whose inference fixes an enclosing `app`'s binder is elaborated with **no
-expected type**, so `B` is not fixed up front either. `Certificate(A -> B)` carries both binders,
-and one comparison against the argument's inferred type determines both — but only if the codomain
-can be solved, which under a binder it cannot.
+**A first attempt did descend under the binder.** Comparing codomains one level in refuses to solve
+any meta from outside, which is correct but too strong: an `app` nested as the argument whose
+inference fixes an enclosing `app`'s binder is elaborated with **no expected type**, so `B` is not
+fixed up front either. `Certificate(A -> B)` carries both binders, and one comparison against the
+argument's inferred type determines both — but only if the codomain can be solved, which under a
+binder it cannot.
+
+Twelve tests reject it, across every authored certificate corpus in the tree:
+
+| | |
+|---|---|
+| `wrn_phase3` | 8 |
+| `wrn_phase2`, `wrn_phase5`, `sab16_tracer`, `sab18_tracer` | 1 each |
+| `eigenius-statistics` `d39_composition` | 1 |
+
+The shape they all exercise is left-nested application — `cert2 = app(cert1, …)` through an `alias`
+binding, where the argument that has to be inferred is itself an `app`. The WRN publication chain
+carried 67 such sites against the two tracers' 14, which is why deleting the tracers later the same
+day cost no coverage here.
 
 **`spec_poly` stayed fully explicit, `T` included.** `T` reaches the index only inside `P(x)`.
 Solving it from the premise argument fails for the same reason it fails from the result: the domain

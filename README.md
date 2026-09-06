@@ -946,8 +946,8 @@ system spec) and the **[Implementation Plan](docs/design/implementation-plan.md)
 
 | Document | Description |
 |----------|-------------|
-| [D50: Benchmark Evaluation Approach](docs/design/d50-benchmark-evaluation-approach.md) | Experimental design testing whether forcing the agent to capture reasoning as typed justified propositions improves performance — three conditions (baseline / chain-of-thought / Eigenius-structured), 15 ScienceAgentBench + 11 EngiBench Level 3 tasks, six per-family base ontologies, scoring and pilot phasing |
-| [D51: Benchmark Implementation Gaps](docs/design/d51-benchmark-implementation-gaps.md) | Companion to D50 — the eight implementation gaps ordered along the critical path (D49 machinery, Lean → Reasoning comorphism, D39 v2 artifacts, MCP surface, base ontologies, agent skill, three-condition harness, per-task wiring), per-gap effort sizing and sequencing |
+| [D50: Benchmark Evaluation Approach](docs/design/d50-benchmark-evaluation-approach.md) | **Dormant `2026-09-05`.** Experimental design testing whether forcing the agent to capture reasoning as typed justified propositions improves performance — three conditions (baseline / chain-of-thought / Eigenius-structured), 15 ScienceAgentBench + 11 EngiBench Level 3 tasks, six per-family base ontologies, scoring and pilot phasing |
+| [D51: Benchmark Implementation Gaps](docs/design/d51-benchmark-implementation-gaps.md) | **Dormant `2026-09-05`.** Companion to D50 — the eight implementation gaps ordered along the critical path (D49 machinery, Lean → Reasoning comorphism, D39 v2 artifacts, MCP surface, base ontologies, agent skill, three-condition harness, per-task wiring), per-gap effort sizing and sequencing |
 
 ## Contributing
 

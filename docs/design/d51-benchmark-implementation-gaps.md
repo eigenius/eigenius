@@ -1,6 +1,12 @@
 # D51 — Benchmark Implementation Gaps
 
-*Status: implementation-planning memo · June 2026 · **status-reviewed 2026-06-11***
+*Status: implementation-planning memo · June 2026 · status-reviewed 2026-06-11 · **DORMANT `2026-09-05`***
+
+> **Dormant.** Gaps 4-8 were "not started" at the 2026-06-11 review and were still not started three
+> months later; the harness crate gap 7 names was never created. The two SAB tracer tasks gap 8 had
+> wired, and the `mol` module from gap 5, were deleted `2026-09-05`. `bench-core.esl` and
+> `harness-ontology.esl` survive because the WRN publication chain loads them, not because the
+> pilot is proceeding. The status table below is preserved as written; it describes June 2026.
 
 *Companion to [D50 benchmark evaluation approach](d50-benchmark-evaluation-approach.md). This memo enumerates the implementation work that must close before D50's pilot can be scheduled. Each gap is named, sized roughly, and located in the codebase. Items are ordered along the critical path: items earlier in the list block items later in the list.*
 
