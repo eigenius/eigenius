@@ -1007,6 +1007,7 @@ mod index_conversion_tests {
             indices: vec![(Patt::Unit, Exp::One)],
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: box_unit,
             }],

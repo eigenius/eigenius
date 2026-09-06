@@ -2027,6 +2027,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "nil".to_string(),
                 typ: Exp::const_applied(
                     Arc::new(InductiveDecl {
@@ -2084,6 +2085,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "zero".to_string(),
                 typ: Exp::sort(1),
             }],
@@ -2107,6 +2109,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "succ".to_string(),
                 typ: Exp::sort(1),
             }],
@@ -2179,10 +2182,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "zero".to_string(),
                     typ: Exp::sort(1),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "succ".to_string(),
                     typ: Exp::sort(1),
                 },

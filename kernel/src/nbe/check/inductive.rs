@@ -153,7 +153,14 @@ fn ctor_args_pass_singleton_b(
 /// introduce a hypothesis into the TSO when destructured.
 #[derive(Debug, Clone)]
 enum CtorArg {
-    Value { patt: Patt, typ: Exp },
+    Value {
+        patt: Patt,
+        typ: Exp,
+        /// The author does not write this argument; the kernel solves it. Declared on the
+        /// constructor (`InductiveCtorDecl::implicit`), never inferred from whether it happens to
+        /// be solvable — see that field's note.
+        implicit: bool,
+    },
 }
 
 /// Peel a constructor's Π-telescope past the parameter prefix,
@@ -190,7 +197,7 @@ pub(super) fn validate_indexed_ctor_conclusions(
 
     for ctor in &decl.ctors {
         // Peel the telescope to get non-param args + the conclusion.
-        let (ctor_args, residual) = peel_ctor_telescope(&ctor.typ, n_params);
+        let (ctor_args, residual) = peel_ctor_telescope(&ctor.typ, n_params, &ctor.implicit);
 
         // The conclusion must be an InductiveType application of `decl`
         // with the right arg count. Positivity already verified the name
@@ -297,7 +304,7 @@ fn ctx_with_param_and_arg_binders(
     for arg in ctor_args {
         let c: &CheckCtx = current.as_ref().unwrap_or(ctx);
         match arg {
-            CtorArg::Value { patt, typ } => {
+            CtorArg::Value { patt, typ, .. } => {
                 let typ_val = c
                     .eval(typ, &c.rho.clone())
                     .map_err(|e| format!("ctor arg `{patt:?}`: type evaluation failed: {e}"))?;
@@ -315,7 +322,11 @@ fn ctx_with_param_and_arg_binders(
     }))
 }
 
-fn peel_ctor_telescope(ctor_typ: &Exp, params_to_skip: usize) -> (Vec<CtorArg>, &Exp) {
+fn peel_ctor_telescope<'a>(
+    ctor_typ: &'a Exp,
+    params_to_skip: usize,
+    implicit: &[bool],
+) -> (Vec<CtorArg>, &'a Exp) {
     let mut args: Vec<CtorArg> = Vec::new();
     let mut remaining = params_to_skip;
     let mut current = ctor_typ;
@@ -326,11 +337,82 @@ fn peel_ctor_telescope(ctor_typ: &Exp, params_to_skip: usize) -> (Vec<CtorArg>, 
             args.push(CtorArg::Value {
                 patt: patt.clone(),
                 typ: (**dom).clone(),
+                // Shorter than the telescope, or empty, means the rest are explicit. A declaration
+                // that says nothing about a binder says it is written.
+                implicit: implicit.get(args.len()).copied().unwrap_or(false),
             });
         }
         current = body;
     }
     (args, current)
+}
+
+/// Solve a constructor's **implicit** binders from the type it is checked against.
+///
+/// Returns one slot per `arg_specs` entry: `Some(v)` where unifying the ctor's declared result type
+/// against `expected_indices` determined that binder, `None` otherwise.
+///
+/// **This adds no inference power.** [`check_inductive_ctor_args`] already unifies the constructed
+/// result against the expected indices at the end of its work (D48 Phase D); this runs the same
+/// unification up front with every binder bound to a fresh metavariable, and reports which metas
+/// came back solved. A binder occurring in no result index is not solved — `app`'s `A` — and
+/// neither is one occurring only under a higher-order pattern, since `unify` is the first-order
+/// fragment (D48 §3.1): `spec_poly`'s `P` in `Certificate(j, P(x))` stays unsolved.
+///
+/// All-`None` in inference mode or when unification fails, so the caller behaves as it did before
+/// and a genuine mismatch is reported by the end-of-function check with its own diagnostic.
+fn solve_implicit_binders(
+    ctx: &mut CheckCtx,
+    arg_specs: &[CtorArg],
+    result_typ: &Exp,
+    param_env: &Rho,
+    expected_indices: Option<&[Val]>,
+) -> Vec<Option<Val>> {
+    let none = || vec![None; arg_specs.len()];
+    let Some(expected_indices) = expected_indices else {
+        return none();
+    };
+    if !arg_specs
+        .iter()
+        .any(|CtorArg::Value { implicit, .. }| *implicit)
+    {
+        return none();
+    }
+
+    let mut mctx = crate::nbe::unify::MetaCtx::new();
+    let mut env = param_env.clone();
+    let mut ids = Vec::with_capacity(arg_specs.len());
+    for CtorArg::Value { patt, .. } in arg_specs {
+        let id = mctx.fresh();
+        env = env.extend(
+            patt.clone(),
+            Val::Nt(crate::nbe::val::Neut::Meta(id, Vec::new())),
+        );
+        ids.push(id);
+    }
+
+    let Ok(actual) = ctx.eval(result_typ, &env) else {
+        return none();
+    };
+    let Val::InductiveType {
+        indices: actual_indices,
+        ..
+    } = &actual
+    else {
+        return none();
+    };
+    if actual_indices.len() != expected_indices.len() {
+        return none();
+    }
+    for (a, e) in actual_indices.iter().zip(expected_indices.iter()) {
+        if crate::nbe::unify::unify(ctx.rho.len(), a, e, &mut mctx).is_err() {
+            return none();
+        }
+    }
+
+    ids.iter()
+        .map(|id| mctx.solution(*id).map(|v| mctx.zonk(v)))
+        .collect()
 }
 
 /// Type-check a constructor application's arguments and **return the type it constructs** — the
@@ -376,7 +458,7 @@ pub(super) fn check_inductive_ctor_args(
         })?;
     let ctor = &decl.ctors[ctor_idx];
 
-    let (arg_specs, current) = peel_ctor_telescope(&ctor.typ, decl.params.len());
+    let (arg_specs, current) = peel_ctor_telescope(&ctor.typ, decl.params.len(), &ctor.implicit);
 
     // Permitted arity shapes:
     //
@@ -396,12 +478,25 @@ pub(super) fn check_inductive_ctor_args(
     // The synthesize hook never reads the user's expression at a
     // ChainWitness slot, so eliding it is equivalent to providing a
     // sentinel — but with no boilerplate at the call site.
-    if args.len() > arg_specs.len() {
+    // An implicit binder is never written, so it does not count toward what the author owes.
+    let explicit_specs = arg_specs
+        .iter()
+        .filter(|CtorArg::Value { implicit, .. }| !*implicit)
+        .count();
+    if args.len() > explicit_specs {
         return Err(CheckError::IllFormed(format!(
-            "InductiveCtor `{}.{ctor_name}` expects {} args, got {}",
+            "InductiveCtor `{}.{ctor_name}` takes {explicit_specs} explicit argument(s), got {}{}",
             decl.name,
-            arg_specs.len(),
-            args.len()
+            args.len(),
+            if explicit_specs == arg_specs.len() {
+                String::new()
+            } else {
+                format!(
+                    " ({} of its {} binders are implicit)",
+                    arg_specs.len() - explicit_specs,
+                    arg_specs.len()
+                )
+            }
         )));
     }
 
@@ -411,11 +506,35 @@ pub(super) fn check_inductive_ctor_args(
     for ((patt, _), val) in decl.params.iter().zip(params.iter()) {
         arg_env = arg_env.extend(patt.clone(), val.clone());
     }
+
+    // Fill what the constructor declares implicit. Which slots those are is fixed by the
+    // declaration, so the author's arguments line up with the explicit slots whatever the solver
+    // manages to solve.
+    let solved = solve_implicit_binders(ctx, &arg_specs, current, &arg_env, expected_indices);
+    let mut cursor = 0usize;
     for (i, spec) in arg_specs.iter().enumerate() {
-        let user_arg = args.get(i);
         match spec {
-            CtorArg::Value { patt, typ } => {
+            CtorArg::Value {
+                patt,
+                typ,
+                implicit,
+            } => {
                 let arg_typ_val = ctx.eval(typ, &arg_env)?;
+
+                if *implicit {
+                    let solved_val = solved.get(i).and_then(|s| s.clone()).ok_or_else(|| {
+                        format!(
+                            "InductiveCtor `{}.{ctor_name}`: implicit argument {i} was not \
+                             determined by the expected type. It appears in no result index, or \
+                             only under a higher-order pattern, so nothing here can solve it — \
+                             declare it explicit, or supply the expected type that fixes it.",
+                            decl.name
+                        )
+                    })?;
+                    arg_env = arg_env.extend(patt.clone(), solved_val);
+                    continue;
+                }
+                let user_arg = args.get(cursor);
 
                 // D49 Phase 6 hook — when the expected arg type is a
                 // ChainWitness predicate (`IsDeclaredAs` / `IsObservedAs`
@@ -438,6 +557,7 @@ pub(super) fn check_inductive_ctor_args(
                                 decl.name
                             )
                         })?;
+                        cursor += 1;
                         check(ctx, arg_exp, &arg_typ_val)?;
                         ctx.eval(arg_exp, &ctx.rho)?
                     }
@@ -880,7 +1000,8 @@ pub(super) fn check_match(
         // parameter prefix) from its Π-telescope. Supports both
         // ordinary `Pi` binders and bounded-size `SizedPi` binders;
         // size binders become rigid hypotheses in the arm's TSO.
-        let (arg_specs, _ctor_result) = peel_ctor_telescope(&ctor.typ, decl.params.len());
+        let (arg_specs, _ctor_result) =
+            peel_ctor_telescope(&ctor.typ, decl.params.len(), &ctor.implicit);
 
         if arm.bindings.len() != arg_specs.len() {
             return Err(CheckError::IllFormed(format!(
@@ -911,7 +1032,7 @@ pub(super) fn check_match(
         };
         for (spec, binding) in arg_specs.iter().zip(arm.bindings.iter()) {
             match spec {
-                CtorArg::Value { patt, typ } => {
+                CtorArg::Value { patt, typ, .. } => {
                     let arg_typ_val = ctx.eval(typ, &arg_env)?;
                     let gen = gen_val(&arm_ctx.rho);
                     arm_ctx = arm_ctx.extend(binding, &arg_typ_val, &gen)?;
@@ -938,7 +1059,7 @@ pub(super) fn check_match(
             // Evaluate ctor's conclusion. _ctor_result was discarded
             // above; re-peel to get it.
             let (_arg_specs_recheck, ctor_result) =
-                peel_ctor_telescope(&ctor.typ, decl.params.len());
+                peel_ctor_telescope(&ctor.typ, decl.params.len(), &ctor.implicit);
             let actual_conclusion = arm_ctx.eval(ctor_result, &arg_env)?;
             let actual_indices: &[Val] = match &actual_conclusion {
                 Val::InductiveType { indices, .. } => indices.as_slice(),
@@ -1166,6 +1287,123 @@ mod tests {
 
     use crate::nbe::check::testutil::*;
     use crate::nbe::check::*;
+    // ---------- implicit constructor binders ----------
+
+    /// `Box : Set -> Set` with `wrap : forall (A : Set) => A -> Box(A)`, where `A` is **implicit**.
+    ///
+    /// One index (`A`) and one explicit argument, which is the shape `justification:Certificate`'s
+    /// composition constructors have: a binder the result type determines, and a value argument.
+    fn box_decl(implicit: bool) -> std::sync::Arc<InductiveDecl> {
+        let iri = crate::ontology::iri::Iri::parse("urn:test:Box").unwrap();
+        let self_ref = std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
+            iri: iri.clone(),
+            name: "Box".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
+            sort: Exp::sort(1),
+            ctors: Vec::new(),
+        });
+        let box_a = Exp::const_applied(
+            self_ref.iri.clone(),
+            Vec::new(),
+            vec![Exp::Var("A".to_string())],
+        );
+        std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
+            iri,
+            name: "Box".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Var("A".to_string()), Exp::sort(1))],
+            sort: Exp::sort(1),
+            ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                name: "wrap".to_string(),
+                // forall (A : Set) => A -> Box(A)
+                typ: Exp::Pi(
+                    Patt::Var("A".to_string()),
+                    Box::new(Exp::sort(1)),
+                    Box::new(Exp::Pi(
+                        Patt::Unit,
+                        Box::new(Exp::Var("A".to_string())),
+                        Box::new(box_a),
+                    )),
+                ),
+                implicit: if implicit {
+                    vec![true, false]
+                } else {
+                    Vec::new()
+                },
+            }],
+        })
+    }
+
+    /// The declared-implicit binder is solved from the expected type and not written.
+    ///
+    /// `wrap(u) : Box(One)` — one argument for a two-binder constructor. `A` is fixed by the
+    /// expected index, which is the same unification D48 Phase D runs at the end of the check;
+    /// this just runs it first so the author need not restate the answer.
+    #[test]
+    fn an_implicit_binder_is_solved_from_the_expected_type() {
+        let decl = box_decl(true);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let expected = ctx
+            .eval(
+                &Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One]),
+                &Rho::Nil,
+            )
+            .expect("Box(One) evaluates");
+        let term = Exp::InductiveCtor(decl.iri.clone(), "wrap".to_string(), vec![Exp::Unit]);
+        check(&mut ctx, &term, &expected).expect("`wrap(unit)` checks against `Box(One)`");
+    }
+
+    /// Declaring it implicit is what moves the argument, not the fact that it is solvable.
+    ///
+    /// The same constructor with an empty `implicit` vector takes both arguments, and supplying one
+    /// is an arity error — never a silent shift of `unit` onto the `A : Set` slot. That shift is
+    /// exactly what deriving implicitness from solvability produced (`verified(CLAIM, P)` put a
+    /// string where a `Prop` belonged), and it is why the flag is declared.
+    #[test]
+    fn without_the_declaration_the_same_argument_list_is_an_arity_error() {
+        let decl = box_decl(false);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let expected = ctx
+            .eval(
+                &Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One]),
+                &Rho::Nil,
+            )
+            .expect("Box(One) evaluates");
+        let term = Exp::InductiveCtor(decl.iri.clone(), "wrap".to_string(), vec![Exp::Unit]);
+        let err = check(&mut ctx, &term, &expected)
+            .expect_err("one argument for two explicit binders must not check");
+        // The argument lands on slot 0 (`A : Set`), where `unit` is not a type, so the check
+        // fails there. What matters is that it fails: with no declaration to move it, the
+        // argument stays where the author put it.
+        let msg = format!("{err:?}");
+        assert!(
+            !msg.is_empty(),
+            "the rejection must carry a diagnostic: {msg}"
+        );
+    }
+
+    /// Both binders explicit, both written — the path every other constructor takes, unchanged.
+    #[test]
+    fn an_explicit_declaration_still_takes_every_argument() {
+        let decl = box_decl(false);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let expected = ctx
+            .eval(
+                &Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One]),
+                &Rho::Nil,
+            )
+            .expect("Box(One) evaluates");
+        let term = Exp::InductiveCtor(
+            decl.iri.clone(),
+            "wrap".to_string(),
+            vec![Exp::One, Exp::Unit],
+        );
+        check(&mut ctx, &term, &expected).expect("`wrap(One, unit)` checks against `Box(One)`");
+    }
+
     // ---------- eigenius#138 — the recursor motive is index-aware ----------
 
     /// `SimpleVec(A : Set) : One → Set` with `nil` and `cons` — one index, so the motive must be
@@ -1195,6 +1433,7 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 crate::nbe::term::InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -1203,6 +1442,7 @@ mod tests {
                     ),
                 },
                 crate::nbe::term::InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -1425,12 +1665,14 @@ mod tests {
             "Either2",
             vec![
                 crate::nbe::term::InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "left".to_string(),
                     typ: Exp::EigonClass(
                         crate::ontology::iri::Iri::parse("urn:_:Either2").unwrap(),
                     ),
                 },
                 crate::nbe::term::InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "right".to_string(),
                     typ: Exp::EigonClass(
                         crate::ontology::iri::Iri::parse("urn:_:Either2").unwrap(),
@@ -1454,6 +1696,7 @@ mod tests {
         let decl = mk_prop_decl(
             "SingleProp",
             vec![crate::nbe::term::InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: ctor_typ,
             }],
@@ -1473,6 +1716,7 @@ mod tests {
         let decl = mk_prop_decl(
             "BadProp",
             vec![crate::nbe::term::InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: ctor_typ,
             }],
@@ -1541,6 +1785,7 @@ mod tests {
             ],
             sort: Exp::sort(0),
             ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "refl".to_string(),
                 typ: ctor_typ,
             }],
@@ -1593,6 +1838,7 @@ mod tests {
             indices: vec![(Patt::Unit, Exp::One)],
             sort: Exp::sort(0),
             ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "smuggle".to_string(),
                 typ: ctor_typ,
             }],
@@ -1617,6 +1863,7 @@ mod tests {
         let decl = mk_prop_decl(
             "SingleProp",
             vec![crate::nbe::term::InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: ctor_typ,
             }],
@@ -1662,6 +1909,7 @@ mod tests {
             indices: vec![(Patt::Unit, Exp::One)],
             sort: Exp::sort(0),
             ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: ctor_typ,
             }],
@@ -1712,6 +1960,7 @@ mod tests {
             indices: vec![(Patt::Unit, Exp::One)],
             sort: Exp::sort(0),
             ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: ctor_typ,
             }],
@@ -1747,6 +1996,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![crate::nbe::term::InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -1781,10 +2031,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 crate::nbe::term::InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "zero".to_string(),
                     typ: Exp::EigonClass(crate::ontology::iri::Iri::parse("urn:_:Nat").unwrap()),
                 },
                 crate::nbe::term::InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "succ".to_string(),
                     typ: Exp::Pi(
                         Patt::Unit,
@@ -1887,6 +2139,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "True".to_string(),
                 typ: bool_ty_exp,
             }],
@@ -1936,6 +2189,7 @@ mod tests {
             indices: Vec::new(),
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -2116,10 +2370,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "True".to_string(),
                     typ: bool_ty.clone(),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "False".to_string(),
                     typ: bool_ty.clone(),
                 },

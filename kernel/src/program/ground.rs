@@ -710,6 +710,7 @@ fn decode_ctors(
             build_ctor_type(class_iri, params, arg_types_arr, layer)?
         };
         out.push(InductiveCtorDecl {
+            implicit: Vec::new(),
             name,
             typ: ctor_typ,
         });

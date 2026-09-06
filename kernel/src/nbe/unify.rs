@@ -478,10 +478,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "zero".to_string(),
                     typ: Exp::sort(1), // placeholder; not used by tests
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "succ".to_string(),
                     typ: Exp::sort(1), // placeholder
                 },

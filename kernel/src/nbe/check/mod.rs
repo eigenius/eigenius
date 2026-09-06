@@ -3456,6 +3456,7 @@ mod tests {
             ctors: vec![
                 // nil : Π A:Set. SimpleVec A ()
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -3465,6 +3466,7 @@ mod tests {
                 },
                 // cons : Π A:Set. () → A → SimpleVec A () → SimpleVec A ()
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -3531,6 +3533,7 @@ mod tests {
             indices: vec![(Patt::Unit, Exp::One)],
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -3577,6 +3580,7 @@ mod tests {
             indices: vec![(Patt::Unit, Exp::One)],
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -3648,6 +3652,7 @@ mod tests {
             indices: vec![(Patt::Unit, Exp::One)],
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("u".to_string()),

@@ -507,6 +507,7 @@ impl InductiveDecl {
                 .ctors
                 .iter()
                 .map(|c| InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: c.name.clone(),
                     typ: c.typ.subst_levels(ks, levels),
                 })
@@ -535,6 +536,24 @@ pub struct InductiveCtorDecl {
     /// Full constructor type: a Π-telescope ending in an application
     /// of the parent inductive to its parameters.
     pub typ: Exp,
+    /// Which telescope binders (past the inductive's parameter prefix) the author does not write.
+    ///
+    /// One entry per `CtorArg` the telescope peels to; an empty vector means every argument is
+    /// explicit, which is what every constructor outside `justification:Certificate` declares.
+    ///
+    /// **Beside the type rather than inside it.** A marker in the binder's type — `A :
+    /// Implicit(Prop)` — would have to survive the constructor's own well-formedness check, where
+    /// `A -> B` demands `A : Sort _` and `Implicit(Prop)` is not one. Keeping the flag out of `typ`
+    /// leaves the universe check, positivity and the D48 Phase B terminal check reading exactly
+    /// what they read before.
+    ///
+    /// **Declared, not derived.** Solving a binder from the expected type does not license eliding
+    /// it: "the author omitted a solvable binder" and "the author supplied a value for one" are the
+    /// same argument list, so deriving implicitness misaligns everything after the first elided
+    /// slot. Measured `2026-09-05` on `verified(CLAIM, P)` — auto-filling `iri` moved `CLAIM` onto
+    /// the `P : Prop` slot. Alignment has to be fixed by the declaration, before any solving, which
+    /// is how the `ChainWitness` slots have always worked.
+    pub implicit: Vec<bool>,
 }
 
 impl Patt {
@@ -922,6 +941,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
         ctors: vec![
             // nil : Π A:Set. List A
             InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -931,6 +951,7 @@ fn build_list_decl() -> Arc<InductiveDecl> {
             },
             // cons : Π A:Set. A → List A → List A
             InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "cons".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -979,6 +1000,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
         ctors: vec![
             // none : Π A:Set. Option A
             InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "none".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -988,6 +1010,7 @@ fn build_option_decl() -> Arc<InductiveDecl> {
             },
             // some : Π A:Set. A → Option A
             InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "some".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),

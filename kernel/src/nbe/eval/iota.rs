@@ -284,10 +284,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "base".to_string(),
                     typ: foo_ty.clone(),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "rall".to_string(),
                     // (Set -> Foo) -> Foo
                     typ: Exp::Pi(
@@ -383,10 +385,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "base".to_string(),
                     typ: foo_ty.clone(),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "rall".to_string(),
                     // (One -> Foo) -> Foo
                     typ: Exp::Pi(
@@ -457,10 +461,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "True".to_string(),
                     typ: bool_ty.clone(),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "False".to_string(),
                     typ: bool_ty,
                 },
@@ -543,10 +549,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "leaf".to_string(),
                     typ: tree_ty.clone(),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "node".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("l".to_string()),
@@ -633,6 +641,7 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -641,6 +650,7 @@ mod tests {
                     ),
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -777,6 +787,7 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 crate::nbe::term::InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -785,6 +796,7 @@ mod tests {
                     ),
                 },
                 crate::nbe::term::InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
