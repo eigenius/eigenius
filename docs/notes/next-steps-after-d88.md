@@ -17,18 +17,39 @@ in the interim cannot be misread as a pass.
 
 ## B. Work D88 decides
 
-Do **B1 first** — it needs no reseed and it shrinks B2's notebook rewrite.
+**Order:** B2 and B3 first, then B1, then one reseed (B4). B1 was scheduled first on the belief that
+it needed no reseed; it does — see below. Doing it after B2 also shrinks it, since the merge removes
+`j1` and `j2` from `app` outright.
 
 ### B1 — infer `app`'s `forall`-bound arguments (D88 §4)
 
-Kernel only. No ontology edit, no reseed.
+**Attempted `2026-09-05` and reverted. It is a bootstrap change, not a kernel-only one, so it rides
+B4's reseed with B2 and B3.**
 
-- Thread a `MetaCtx` that outlives one constructor check (the code names this Phase F).
-- Add implicit-argument syntax, and generalise `check_inductive_ctor_args`' elision rule from
-  "trailing `ChainWitness`-typed" to "solvable by unification".
-- `j1`, `j2`, `B` unify against the expected type. **`A` needs one argument elaborated in inference
-  mode**, since it appears in no result index — that is the one real change to the arg loop.
-- `spec_poly` stays explicit: `P` is higher-order, outside D48 §3.1's fragment.
+The attempt derived implicitness rather than declaring it: solve every binder by unifying the ctor's
+result type against the expected type, then let the author omit the solved ones, with an
+argument budget deciding how many. That needs no ESL syntax, no `Exp` change and no reseed — and it
+is **unsound at the alignment step**, because "omitted a solvable binder" is indistinguishable from
+"supplied a value for one".
+
+Measured: `verified(CLAIM, P)` has two arguments against three specs, and both `iri` and `P` are
+solvable from the expected type. Auto-filling `iri` shifts `CLAIM` onto the `P : Prop` slot —
+`type mismatch: EigonPrimitive(String) ≠ Sort(Zero)`. Caught by
+`a_certificate_citing_the_verified_claim_type_checks`, which is the test written for D88 §1's bridge
+and had no other consumer.
+
+So implicitness has to be **declared**, which means:
+
+- a binder style on `Exp::Pi` (it has none — `Pi(Patt, Box<Exp>, Box<Exp>)`), through the D47 codec;
+- ESL syntax for an implicit binder;
+- marking `justification:Certificate`'s binders, which changes the constructors' encoded types —
+  **a bootstrap edit**.
+
+Then the mechanism is the easy part, and most of it exists: `nbe/unify.rs` (D48 Phase C), index
+unification already running on every ctor check (Phase D), and a `MetaCtx` that needs to outlive one
+check (the code names this Phase F). `j1`, `j2` and `B` unify against the expected type; **`A` needs
+one argument elaborated in inference mode**, since it appears in no result index. `spec_poly` stays
+explicit — `P` is higher-order, outside D48 §3.1's fragment.
 
 ### B2 — collapse `justification:Term` into `justification:Certificate` (D88 §2)
 

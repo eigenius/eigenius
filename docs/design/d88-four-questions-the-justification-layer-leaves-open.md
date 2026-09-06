@@ -267,12 +267,13 @@ not deliberation.
 |---|---|---|
 | §2 | collapse `justification:Term` into `justification:Certificate`, leaving `Justification : Prop -> Type 2` | bootstrap edit to a versioned ADT, one reseed. `certificate_indices`' five call sites (three only test `.is_some()`), `support` / `is_fully_verified` / `wellfounded` walking the certificate value instead of the term index, and the demo notebook's certificate — which gets **smaller**, since it stops spelling out the term at every node |
 | §3 | declare the leaf IRI-valued, on `Declared` / `Observed` / `Verified` / `Checked` | bootstrap edit, same reseed. The open sub-choice is `core:iri` as a DataType versus a format slot on `InductiveArgType` |
-| §4 | infer `app`'s four `forall`-bound arguments | kernel change, no ontology edit and no reseed. Phase F's longer-lived `MetaCtx`, implicit-argument syntax, and one argument elaborated in inference mode to solve `A` |
+| §4 | infer `app`'s `forall`-bound arguments | **bootstrap edit**, same reseed. Implicitness must be *declared* — deriving it from solvability misaligns the author's remaining arguments (measured `2026-09-05`), so it needs a binder style on `Exp::Pi` through the D47 codec, ESL syntax, and marking the constructors |
 
 §1 decides the opposite — the `witness:Is*As` types stay — so there is no work under it.
 
-§2 and §3 are both bootstrap and should ride one reseed. §4 is independent of both, and doing it
-first would shrink the notebook rewrite §2 requires.
+All three are bootstrap and should ride one reseed. §4 was thought independent of the other two; it
+is not, and doing it *after* §2 also shrinks it, since the merge removes `j1` and `j2` from `app`
+outright.
 
 ## 6. Genuinely open
 
