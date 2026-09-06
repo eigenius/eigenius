@@ -69,8 +69,8 @@ fn build_composition_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    // Reasoning layer — provides justification:Certificate + justification:Term
-    // inductives the certificate type-checks against.
+    // Reasoning layer — provides the justification:Certificate inductive the
+    // certificate type-checks against.
     let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
     // Compiled against `reflection`, the layer it sits on: D85 §6.1 values name their
     // constructors' arguments, and `eigentt:Term` declares those names down the chain.

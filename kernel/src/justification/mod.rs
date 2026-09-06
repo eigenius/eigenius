@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Projections of a retained `justification:Term` — D73 §1.2, eigenius#204.
+//! Projections of a retained `justification:Certificate` — D73 §1.2, eigenius#204.
 //!
 //! **Why this is in the kernel, beside `witness/` rather than inside `nbe/`.** The two
 //! modules answer different questions and stay apart: `witness/` answers *does the chain
 //! admit this ground* — keys, hashes, α-canonicalisation; `justification/` answers *what
-//! does this term rest on*. `nbe/` is the wrong home for either, because this is a reading
+//! does this certificate rest on*. `nbe/` is the wrong home for either, because this is a reading
 //! of one particular inductive, not type theory.
 //!
 //! It moved here from the reasoning crate's `project.rs` (deleted at P7) because the kernel needs
@@ -82,7 +82,7 @@ use crate::nbe::term::Exp;
 /// lie in the safe-looking direction.
 pub const MAX_SUPPORT_SETS: usize = 4096;
 
-/// The three grounding families, as they appear at a `justification:Term` leaf.
+/// The three grounding families, as they appear at a certificate leaf.
 ///
 /// A `Derived` variant read the `DerivedEvidence(iri)` constructor until the three-grounds change.
 /// A computed claim now grounds as `App(Declared(plan), Observed(inputs))`, so it projects to TWO

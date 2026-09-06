@@ -166,10 +166,6 @@ resource inferred:sentence : justification:Conclusion {
                    umlscui:C0388246) )
                ) );
 
-    // The justification TERM — the same shape as the certificate's `justification:App(j1, j2)`, recorded on its
-    // own so the warrant is readable (and indexable) without re-checking the proof. The gate
-    // requires the certificate to be a proof about exactly this term.
-
     // The proposition concluded: B from the `app` above. Sentence 2 of the paragraph asserts this
     // very same proposition directly — that is the point of the demo, not a redundancy.
 }

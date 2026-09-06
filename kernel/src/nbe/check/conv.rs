@@ -927,9 +927,8 @@ mod index_conversion_tests {
         .expect("the same application converts with itself");
     }
 
-    /// A two-index family rejects a mismatch in the *second* index — the shape
-    /// of `justification:Certificate : justification:Term -> Prop -> Type 0`, whose
-    /// index #1 is the proposition the certificate is about.
+    /// A two-index family rejects a mismatch in the *second* index. The check must
+    /// walk the whole index vector, not stop at the first agreeing pair.
     #[test]
     fn a_mismatch_in_a_later_index_is_rejected() {
         let decl = Arc::new(InductiveDecl {

@@ -69,11 +69,12 @@ fn justifiedby_can_be_written_as_a_type() {
     // so this exercises the index telescope without the `Prop`
     // obligation Rule 21 puts on `canonical_proposition`.
     //
-    // Index #0's declared kind is `justification:Term`. Before
-    // the fix it decoded to `EigonClass(justification:Term)` while the
-    // supplied argument `Declared(...)` infers to
-    // `InductiveType(justification:Term, [])`, so this failed with
-    // `InductiveType(…) ≠ EigonClass(…)`.
+    // The bug was in how an index's declared kind decodes. When the family
+    // still carried a `justification:Term` index, that kind decoded to
+    // `EigonClass(justification:Term)` while the supplied argument inferred to
+    // `InductiveType(justification:Term, [])`, so the type failed to check with
+    // `InductiveType(…) ≠ EigonClass(…)`. The D88 §2 merge left one index, the
+    // proposition, and it decodes through the same path.
     let src = r#"
         namespace core       = "urn:eigenius:core";
         namespace justification = "urn:eigenius:justification";
@@ -119,6 +120,6 @@ fn justifiedby_index_rejects_a_non_proposition() {
     let errs = eigenius_kernel::validation::Validator::new(probe).validate();
     assert!(
         !errs.is_empty(),
-        "a string in justification:Certificate's justification:Term index was accepted"
+        "a string in justification:Certificate's proposition index was accepted"
     );
 }

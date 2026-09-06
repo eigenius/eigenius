@@ -224,9 +224,9 @@ impl CodecNames {
 
     /// Find the one inductive declaring `ctor`, for a caller that has only the name.
     ///
-    /// Ambiguity is an error, not a guess: `App` belongs to `eigentt:Term`,
-    /// `justification:Term` AND `formulas:FormulaTerm`, and picking one silently is how a
-    /// value ends up stating a class its slot does not admit.
+    /// Ambiguity is an error, not a guess: `App` belongs to `eigentt:Term` AND
+    /// `formulas:FormulaTerm`, and picking one silently is how a value ends up
+    /// stating a class its slot does not admit.
     /// Does `inductive` declare `ctor`?
     pub fn lookup_declares(&self, inductive: &str, ctor: &str) -> bool {
         self.by_class
