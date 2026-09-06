@@ -24,32 +24,63 @@
 D87 §7 rules out deleting `Certificate.verified`'s premise: the constructor becomes unconditional
 and `Verified` becomes assertable by anyone writing a certificate. It leaves open a third option —
 keep the condition, drop the type, and check `verified(iri, P)` by a rule keyed on the
-**constructor**. The witness is a side condition in all but name: the author elides it
+**constructor**. The witness looks like a side condition in all but name: the author elides it
 (`declared(RULE, RULE_P)`, two arguments for a three-argument constructor),
-`CheckHooks::synthesize_chain_witness` fills it, nothing persists it, and it carries no information
-the trace does not.
+`CheckHooks::synthesize_chain_witness` fills it, and nothing persists it.
 
-**The answer turns on how drift fails.**
+### What the witness type does
 
-The hook keys on the expected **type** being a witness-category inductive, matching `decl.name`
-against the three `witness:Is*As` IRIs declared in `core-ontology.json`. The constructor's premise
-`witness:IsDeclaredAs(iri, P)` names that type, so it must resolve. If the kernel's expectation and
-the ontology diverge, the premise names something that does not resolve and the ontology fails to
-compile — loudly, at build time.
+Checking a certificate reaches `check_inductive_ctor_args`, which walks the constructor's arguments
+and evaluates each declared argument type. At the elided slot that value is
 
-A constructor-keyed rule hard-codes `justification:Certificate.verified` instead. Rename or
-restructure that constructor and the kernel stops matching: the side condition never fires, and
-`verified` is unconditional in effect with nothing to say so — silently, at run time, on the
-soundness-critical path.
+```
+Val::InductiveType { decl: witness:IsDeclaredAs, indices: [LitString(iri), P] }
+```
 
-The type carries a resolution obligation, not information, and the obligation is what makes drift
-loud. `justification.esl`'s header records the same concern: the hook *"still carries an 'the chain
-ontology drifted from the kernel's expectation' guard."*
+and `synthesize_chain_witness` does three things with it (`check_hooks.rs:44-88`):
+
+| | |
+|---|---|
+| **trigger** | `chain_witness_category_for_iri(decl.iri)` — anything else returns `Ok(None)` and the argument is checked normally. The type alone decides whether a chain query happens |
+| **slot** | the argument exists because the premise is declared, and that is what makes the constructor conditional |
+| **parameters** | `indices[0]` must be a `LitString` (the resource IRI), `indices[1]` is read back as the proposition. **`(iri, P)` reach the lookup as the type's own indices** |
+
+The third job is the one that is easy to miss. The kernel never reads the constructor's arguments to
+find out what to look up — it reads the *type's* indices, and validates their shape as it goes.
+
+### The drift scenarios
+
+"Drift" here means the kernel's expectation and the chain ontology stop agreeing — both are bootstrap
+files, so this is an edit to `core-ontology.json` or `justification.esl`, not a user action.
+
+**With the type (today):**
+
+| edit | what happens |
+|---|---|
+| `witness:IsDeclaredAs` renamed or removed in core | `Certificate.declared`'s premise names it, so the reference does not resolve, the inductive declaration cannot be built, and **bootstrap fails**. The kernel does not start |
+| a third index added to the predicate | the premise still resolves, and the hook answers *"ChainWitness predicate `…` expected 2 indices (iri, P), got 3"*. This is the guard `justification.esl`'s header calls *"the chain ontology drifted from the kernel's expectation"* |
+| the indices reordered, `P` first | *"iri index must be LitString, got …"* |
+
+Every mode produces a named error, and two of them stop the process before any certificate is
+checked.
+
+**Keyed on the constructor instead:**
+
+| edit | what happens |
+|---|---|
+| `Certificate.verified` renamed, or the family restructured | the kernel's match fails. There is no premise left to fill, so nothing is missing and nothing errors: `verified(iri, P)` type-checks, `Certificate(Verified(iri), P)` is inhabited for **any** proposition, and the chain admits `Verified` on an author's say-so. **Silent, and a soundness failure rather than a crash** |
+| the constructor's arguments reordered | the kernel reads argument 0 as the IRI positionally. Nothing declares which argument is which, so there is nothing to check the assumption against |
+
+### Why that settles it
+
+The type carries a **resolution obligation** — the constructor's premise names something that must
+exist, with a shape the hook validates. A constructor-keyed rule carries a **name match**, which
+degrades to "no match, no check". One fails loudly and early; the other fails silently on the
+soundness-critical path, and the failure looks exactly like success.
 
 **Scope of the claim.** Nothing checks that `Certificate.verified` *has* a premise, so the type does
-not protect against `justification.esl` dropping it. Both files are bootstrap, so either edit costs
-a reseed and neither is a user action. The claim is only that one mechanism fails loudly under drift
-and the other fails silently.
+not protect against `justification.esl` dropping it outright. The claim is only that of the two
+mechanisms, one turns drift into an error and the other turns it into an unconditional constructor.
 
 ## 2. Nothing requires the separate term index — not the code, not the paper
 
