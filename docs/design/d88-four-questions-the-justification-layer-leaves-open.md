@@ -12,7 +12,7 @@
 
 | | question | answer | basis |
 |---|---|---|---|
-| §1 | Do the `witness:Is*As` types earn their place, or should the check key on the constructor? | **They earn it.** The type carries a resolution obligation, so kernel/ontology drift breaks the build instead of silently disabling the check | derived from the code |
+| §1 | Do the `witness:Is*As` types earn their place, or should the check key on the constructor? | **They earn it — on layering, not soundness.** The type declares the trigger and carries the lookup's parameters as its indices, so the kernel needs no knowledge of the justification vocabulary | derived from the code |
 | §2 | Should `justification:Term` merge into `justification:Certificate`? | **Yes — nothing requires the split.** The paper specifies term *shapes* and the typing relation `t : F`, not an encoding; the code has no use for the separate term index. Bootstrap edit, versioned ADT, one reseed | measured `2026-09-05` |
 | §3 | Should a term name a chain instance by reference rather than by string? | **The string is sediment.** The leaf already behaves as a reference — `core:mentions` indexes it — but by a prefix heuristic rather than a declared type. Give it one | derived from the index |
 | §4 | Can `app`'s `forall`-bound arguments be inferred? | **`app` yes, `spec_poly` no.** Four of the five pieces already exist | derived from `nbe/unify.rs` |
@@ -48,39 +48,57 @@ and `synthesize_chain_witness` does three things with it (`check_hooks.rs:44-88`
 The third job is the one that is easy to miss. The kernel never reads the constructor's arguments to
 find out what to look up — it reads the *type's* indices, and validates their shape as it goes.
 
-### The drift scenarios
+### This is not a soundness question
 
-"Drift" here means the kernel's expectation and the chain ontology stop agreeing — both are bootstrap
-files, so this is an edit to `core-ontology.json` or `justification.esl`, not a user action.
+Both `core-ontology.json` and `justification.esl` are bootstrap files the kernel ships. Editing
+either is a change to the kernel's own vocabulary by someone who could equally edit the kernel, so
+neither mechanism sits on a different side of a trust boundary from the other. The paper's TCB —
+*"the kernel's native type checker, each hosted external proof checker, each formal comorphism, and
+the constant specification governing attributions"* — is about what can make a false proposition
+accepted from outside, and a bootstrap edit is not in that model.
 
-**With the type (today):**
+So the question is a layering and maintenance question, and answering it in soundness language would
+be dressing it up.
+
+### The argument: the type declares what the kernel would otherwise assume
+
+`synthesize_chain_witness` learns everything it needs from the type: whether to fire, from
+`decl.iri`; what to look up, from `indices[0]` and `indices[1]`; and whether those are well-shaped,
+by checking them. All of that is **declared in core**, which the kernel owns.
+
+Keyed on the constructor, the kernel would instead name `justification:Certificate.verified` — a
+declaration in a layer above it — and read `(iri, P)` off argument positions, which nothing declares.
+`witness_index.rs` crosses that line exactly once today, for `justification:Conclusion`, and marks it
+as an exception: *"the D49 witness machinery is the one kernel site that is intrinsically
+reasoning-aware."* A constructor-keyed rule would make the exception the mechanism.
+
+**And that is what distinguishes §1 from §2 and §3.** Those collapse genuine duplication — the term
+index and the untyped leaf each restate something another artifact already carries. The witness type
+restates nothing: it is the only place the trigger and the lookup's parameters are written down.
+Removing it does not delete a duplicate, it moves a declaration into kernel code as a hard-coded
+name.
+
+### What drift looks like, as a maintenance property
+
+Not a soundness argument, and worth stating separately for that reason. "Drift" is the kernel's
+expectation and the bootstrap ontology ceasing to agree.
+
+**With the type**, every mode is a named error and two stop the process before a certificate is ever
+checked:
 
 | edit | what happens |
 |---|---|
-| `witness:IsDeclaredAs` renamed or removed in core | `Certificate.declared`'s premise names it, so the reference does not resolve, the inductive declaration cannot be built, and **bootstrap fails**. The kernel does not start |
-| a third index added to the predicate | the premise still resolves, and the hook answers *"ChainWitness predicate `…` expected 2 indices (iri, P), got 3"*. This is the guard `justification.esl`'s header calls *"the chain ontology drifted from the kernel's expectation"* |
-| the indices reordered, `P` first | *"iri index must be LitString, got …"* |
+| `witness:IsDeclaredAs` renamed or removed in core | `Certificate.declared`'s premise names it, the reference does not resolve, the inductive declaration cannot be built, and **bootstrap fails** |
+| a third index added | the premise still resolves; the hook answers *"ChainWitness predicate `…` expected 2 indices (iri, P), got 3"* — the guard `justification.esl`'s header calls *"the chain ontology drifted from the kernel's expectation"* |
+| the indices reordered | *"iri index must be LitString, got …"* |
 
-Every mode produces a named error, and two of them stop the process before any certificate is
-checked.
-
-**Keyed on the constructor instead:**
-
-| edit | what happens |
-|---|---|
-| `Certificate.verified` renamed, or the family restructured | the kernel's match fails. There is no premise left to fill, so nothing is missing and nothing errors: `verified(iri, P)` type-checks, `Certificate(Verified(iri), P)` is inhabited for **any** proposition, and the chain admits `Verified` on an author's say-so. **Silent, and a soundness failure rather than a crash** |
-| the constructor's arguments reordered | the kernel reads argument 0 as the IRI positionally. Nothing declares which argument is which, so there is nothing to check the assumption against |
-
-### Why that settles it
-
-The type carries a **resolution obligation** — the constructor's premise names something that must
-exist, with a shape the hook validates. A constructor-keyed rule carries a **name match**, which
-degrades to "no match, no check". One fails loudly and early; the other fails silently on the
-soundness-critical path, and the failure looks exactly like success.
+**Keyed on the constructor**, a rename makes the match fail. There is no premise left to fill, so
+nothing is missing and nothing errors: `verified(iri, P)` type-checks and
+`Certificate(Verified(iri), P)` is inhabited for any proposition. The refactor that caused it looks
+like it worked.
 
 **Scope of the claim.** Nothing checks that `Certificate.verified` *has* a premise, so the type does
-not protect against `justification.esl` dropping it outright. The claim is only that of the two
-mechanisms, one turns drift into an error and the other turns it into an unconditional constructor.
+not protect against `justification.esl` dropping it outright.
 
 ## 2. Nothing requires the separate term index — not the code, not the paper
 
