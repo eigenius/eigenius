@@ -104,15 +104,32 @@ draw is a draw, not a measurement — replay is the comparison.
 
 ## C. Decisions
 
-### C1 — widen the unification fragment past first-order patterns · **open, nothing blocked**
+### C1 — widen the unification fragment past first-order patterns · **not needed**
 
-What `spec_poly`'s `P` needs. A decision about EigenTT (D48 §3.1), not about the justification layer.
+**Nothing is broken without it.** `spec_poly` works today and every certificate using it
+type-checks, because the author writes `T`, `P` and `x` out. No test is skipped and nothing is
+unsound. Earlier phrasing here — *"what `spec_poly`'s `P` needs"* — read as though `P` were
+defective; what needs C1 is making `P` **implicit**, which is ergonomics.
 
-B1 confirmed the diagnosis from the other side: solving `T` from the *premise* fails for the same
-reason it fails from the result — the domain of `forall (y : T) => P(y)` would fix `T`, but the
-codomain is `P(y)`, a meta applied to a bound variable, and the whole argument type has to unify for
-any of it to count. Nothing is blocked; `spec_poly` stays fully explicit at a cost of one written
-`T` across 15 call sites.
+What it would buy, measured `2026-09-05` across every authored certificate in the tree:
+
+| | |
+|---|---|
+| `spec_poly` call sites | 7 |
+| characters written for `T` | 321 |
+| characters written for `P` | 1,622 |
+| total an author could stop writing | **1,943** |
+
+`x` stays explicit either way: it is the instance the author chose, the same authorial-content
+argument that keeps the grounding constructors' `iri` written.
+
+`T` is gated on C1 as well, which is not obvious — it looks first-order. Solving it from the premise
+requires the whole of `Certificate(forall (y : T) => P(y))` to unify, and that type's codomain is
+`P(y)`, a meta applied to a bound variable. Unification is all-or-nothing per argument, so `T`
+cannot be recovered while `P` cannot.
+
+So the trade is a change to EigenTT's unification fragment (D48 §3.1) against 1,943 characters at 7
+sites. Poor ratio today. It changes if universal rules get used more heavily than 7 sites suggest.
 
 ### C2 — examined `2026-09-05`, and it is two questions, not one
 

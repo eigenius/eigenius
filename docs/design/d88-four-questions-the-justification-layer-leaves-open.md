@@ -386,12 +386,14 @@ outright.
 Neither was asked here. The first is unanswered; the second was examined `2026-09-05` and turned out
 to be two questions.
 
-1. **Widening the unification fragment.** `spec_poly`'s `P` needs higher-order unification, which
-   D48 §3.1 excludes by design. Whether to widen it is a decision about EigenTT, not about the
-   justification layer. §4's work confirmed the diagnosis from the other side: solving `T` from the
-   premise fails the same way it fails from the result, because the codomain of
-   `forall (y : T) => P(y)` is a meta applied to a bound variable and the whole argument type has to
-   unify for any of it to count.
+1. **Widening the unification fragment.** Making `spec_poly`'s `P` implicit needs higher-order
+   unification, which D48 §3.1 excludes by design. Nothing is broken without it: `spec_poly` works
+   and its certificates type-check, because the author writes `T`, `P` and `x` out. The gain is
+   1,943 characters across the 7 `spec_poly` sites in the tree, against a change to EigenTT's
+   unification fragment. §4's work confirmed that `T` is gated on the same widening, which is not
+   obvious — solving it from the premise requires the whole of
+   `Certificate(forall (y : T) => P(y))` to unify, and that type's codomain is `P(y)`, a meta
+   applied to a bound variable.
 2. **One indexed witness family instead of three.** Asked here as a single question — whether
    `IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs` should be `ChainWitness(category, iri, P)`,
    *"which would make `trace_category`'s mapping a value rather than three constants."* The two
