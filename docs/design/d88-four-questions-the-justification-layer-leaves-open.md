@@ -240,20 +240,33 @@ larger decision than this question.
 burden is: `app` is the node that repeats, nested four deep in `stats-and-reasoning.json`. It is
 also the only one of the four needing no amendment to the paper.
 
-## 5. Still open
+## 5. Work this decides
 
-1. **The merge (§2)** — nothing forbids it and nothing blocks it. Actionable; see §2 for the
-   surface it touches.
-2. **Implicit arguments (§4)** — scoped, not designed. Phase F's `MetaCtx` plus implicit-arg syntax,
-   generalising the elision rule the `ChainWitness` hook implements. `app` is in reach; `spec_poly`
-   needs a wider unification fragment and is a separate decision.
-3. **The typed leaf (§3)** — scoped, not designed. Whether it is a `core:iri` DataType or a format
-   slot on `InductiveArgType` is open; both are bootstrap edits.
-4. **One indexed witness family.** §1 answers why the types exist, not whether the three should be
+Three of the four questions are answered *yes, change it*. What remains for each is implementation,
+not deliberation.
+
+| | change | cost |
+|---|---|---|
+| §2 | collapse `justification:Term` into `justification:Certificate`, leaving `Justification : Prop -> Type 2` | bootstrap edit to a versioned ADT, one reseed. `certificate_indices`' five call sites (three only test `.is_some()`), `support` / `is_fully_verified` / `wellfounded` walking the certificate value instead of the term index, and the demo notebook's certificate — which gets **smaller**, since it stops spelling out the term at every node |
+| §3 | declare the leaf IRI-valued, on `Declared` / `Observed` / `Verified` / `Checked` | bootstrap edit, same reseed. The open sub-choice is `core:iri` as a DataType versus a format slot on `InductiveArgType` |
+| §4 | infer `app`'s four `forall`-bound arguments | kernel change, no ontology edit and no reseed. Phase F's longer-lived `MetaCtx`, implicit-argument syntax, and one argument elaborated in inference mode to solve `A` |
+
+§1 decides the opposite — the `witness:Is*As` types stay — so there is no work under it.
+
+§2 and §3 are both bootstrap and should ride one reseed. §4 is independent of both, and doing it
+first would shrink the notebook rewrite §2 requires.
+
+## 6. Genuinely open
+
+Neither of these was asked here, and neither is answered.
+
+1. **Widening the unification fragment.** `spec_poly`'s `P` needs higher-order unification, which
+   D48 §3.1 excludes by design. Whether to widen it is a decision about EigenTT, not about the
+   justification layer.
+2. **One indexed witness family instead of three.** §1 establishes why the types exist; it says
+   nothing about whether `IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs` should be
    `ChainWitness(category, iri, P)`, which would make `trace_category`'s mapping a value rather than
    three constants.
-5. **`support` cost** — worth re-measuring if §2 proceeds. It currently walks a small tree of IRIs;
-   a derivation is larger.
 
 ## 6. Out of scope
 
