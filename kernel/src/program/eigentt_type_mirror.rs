@@ -356,6 +356,7 @@ pub(crate) fn encode_term(exp: &Exp, names: &CodecNames) -> Result<Value, Encode
             use crate::nbe::term::PrimitiveType;
             let iri_str = match prim {
                 PrimitiveType::String => wk::STRING,
+                PrimitiveType::Iri => wk::IRI_TYPE,
                 PrimitiveType::Integer => wk::INTEGER,
                 PrimitiveType::Float => wk::FLOAT,
                 PrimitiveType::Boolean => wk::BOOLEAN,
@@ -1233,6 +1234,7 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
     use crate::ontology::well_known as wk;
     match iri.as_str() {
         wk::STRING => return Ok(Exp::EigonPrimitive(PrimitiveType::String)),
+        wk::IRI_TYPE => return Ok(Exp::EigonPrimitive(PrimitiveType::Iri)),
         wk::INTEGER => return Ok(Exp::EigonPrimitive(PrimitiveType::Integer)),
         wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),

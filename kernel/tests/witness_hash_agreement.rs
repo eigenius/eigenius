@@ -26,7 +26,7 @@
 //! the unfolded body. Slice 1 makes the emit side decode first.
 //!
 //! What this file pins is the property that has to hold, on the shape the DCG parser actually emits.
-//! The kernel-side test (`layer::witness_index::tests::emit_and_check_sides_agree_on_the_hash`)
+//! The kernel-side test (`layer::witness_admission::tests::emit_and_check_sides_agree_on_the_hash`)
 //! covers the simple shapes; it cannot construct **the definite description**
 //! `Fst(the(Σx. …))` — every parsed sentence contains one — because `ontology:the` is not in a
 //! core-only layer, and `Fst` of a bare `Sig` is ill-typed (a projection of a *type*, not of a pair).

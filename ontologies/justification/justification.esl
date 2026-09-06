@@ -101,17 +101,17 @@ data justification:Certificate : Prop -> Type 2 {
 WHY THERE IS NO SEPARATE TERM TYPE. This was `Certificate : justification:Term -> Prop -> Type 2`, indexed by a five-constructor `justification:Term` that restated the derivation's own shape. The index was determined by the certificate — `app`'s term arguments are fixed by its certificate arguments — and nothing read it that could not read the value: `support` walks the constructor tree either way, two derivations of one P are distinguishable as values, `spec_poly` adds no leaf, and nothing compares terms for equality. The paper's primitive is the typing `t : F` — 'the term t is a justification for F' — and it writes the application premise as `j1 : (A -> B)`, which is this shape; `JustifiedBy(j, P)` in its stratification table names the relation, not an encoding. D88 §2.";
 
     declared :
-        forall (iri : core:string, P : Prop) =>
+        forall (iri : core:iri, P : Prop) =>
         witness:IsDeclaredAs(iri, P) ->
         justification:Certificate(P),
 
     observed :
-        forall (iri : core:string, P : Prop) =>
+        forall (iri : core:iri, P : Prop) =>
         witness:IsObservedAs(iri, P) ->
         justification:Certificate(P),
 
     verified :
-        forall (iri : core:string, P : Prop) =>
+        forall (iri : core:iri, P : Prop) =>
         witness:IsVerifiedAs(iri, P) ->
         justification:Certificate(P),
 

@@ -32,7 +32,7 @@
 //! call itself part of the TCB on that basis: *"the witness itself is postulated, and a wrong
 //! admission cannot be caught downstream because an axiom has no proof to re-check."*
 //!
-//! **The INDEX is a cache, and that is what closes P7's open question** (`judgements-warrants-
+//! **The index — when there was one — was a cache, and that is what closes P7's open question** (`judgements-warrants-
 //! build-plan.md` §"Open after P7": *"the index is a cache over relations — rebuildable,
 //! droppable"*). Nothing about a witness is stored; every answer is recomputed from the layer's
 //! Trace resources and the propositions they name. Delete this module's caches and the answers do
@@ -205,9 +205,20 @@ pub fn is_witness_candidate(resource: &Resource) -> bool {
 
 /// The witness category a Trace class attests, or `None` if the class is not a Trace.
 ///
-/// All THREE grounding families are here (eigenius#200), across five Trace classes: `ProgramTrace`
-/// grounds nothing and `ExternalExecutionTrace` grounds `Declared`. It said "four" until P4's
-/// three-grounds change removed `Derived`. `VerificationTrace` was absent until
+/// All THREE grounding families are here (eigenius#200), across four Trace classes: `ProgramTrace`
+/// grounds nothing. It said "four" grounding families until P4's three-grounds change removed
+/// `Derived`, and "five" Trace classes until `2026-09-05` removed the arm for
+/// `reflection:ExternalExecutionTrace`.
+///
+/// **That fifth arm named a class no ontology declared.** eigenius#205 minted the class so a
+/// required `prov:derivation` slot — typed at `prov:ProductionTrace`, so unable to name the
+/// `DeclarationTrace` a transcription carries — could be filled. The requirement was then replaced
+/// by `prov:was_generated_by`, which is uniform across a kernel run and a transcribed one, and the
+/// class went with it. The constant, this arm and the remedy string below outlived it. Nothing in
+/// the tree was ever an instance: the WRN chain names it only in comments explaining what it
+/// stopped doing, and the one test that built one used `LayerBuilder::build`, which does not
+/// validate. The two namespaces it was spelled in — `reflection:` in the constant, `prov:` in
+/// `witness:IsDeclaredAs`'s description — never agreed either. `VerificationTrace` was absent until
 /// `2026-08-21` on the reasoning that it would arrive with D49 §7's comorphism-reified
 /// `VerifiedPropositionView` — a chain artifact holding a Lean proof's proposition in EigenTT form.
 /// That deferred the wrong half, and the view is now deleted: it is how a Lean proof's proposition
@@ -240,7 +251,6 @@ fn trace_category(class_iri: &str) -> Option<WitnessCategory> {
         // it. This arm was the one place the old four-category split had the right instinct:
         // it already refused to call a run record a ground of its own kind. Now that
         // `ProgramTrace` grounds nothing either, the two agree.
-        wk::EXTERNAL_EXECUTION_TRACE => Some(WitnessCategory::Declared),
         _ => None,
     }
 }
@@ -637,7 +647,7 @@ pub fn synthesize_chain_witness(
             WitnessCategory::Declared => (
                 "declared",
                 format!(
-                    "commit a prov:DeclarationTrace (or a reflection:ExternalExecutionTrace) whose                      prov:resource is {iri}, and give {iri} a reflection:canonical_proposition                      matching the proposition above"
+                    "commit a prov:DeclarationTrace whose prov:resource is {iri}, and give {iri}                      a reflection:canonical_proposition matching the proposition above"
                 ),
             ),
             WitnessCategory::Observed => (
@@ -734,7 +744,7 @@ mod tests {
     }
 
     #[test]
-    fn build_witness_index_emits_declared_for_declaration_trace() {
+    fn emit_from_trace_emits_declared_for_declaration_trace() {
         let mut b = LayerBuilder::new(
             "test",
             Some(std::sync::Arc::clone(crate::testing::term_chain())),
@@ -763,7 +773,7 @@ mod tests {
     }
 
     #[test]
-    fn build_witness_index_no_emission_when_canonical_prop_missing() {
+    fn emit_from_trace_no_emission_when_canonical_prop_missing() {
         // Phase-4 behaviour: no Asserts(iri) default yet (deferred to
         // Phase 5). When the target lacks `canonical_proposition`, the
         // witness emitter skips emission.
@@ -880,7 +890,7 @@ mod tests {
     }
 
     #[test]
-    fn build_witness_index_emits_asserts_default_when_canonical_prop_missing() {
+    fn emit_from_trace_emits_asserts_default_when_canonical_prop_missing() {
         // With core ontology loaded, a DeclarationTrace pointing at a
         // target that lacks canonical_proposition still emits a witness
         // — the witness key uses Asserts(target_iri) as the proposition.

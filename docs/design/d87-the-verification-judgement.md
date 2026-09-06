@@ -15,7 +15,7 @@ are all closed — 1 in §6, 2 and 3 in §9 itself.*
 ## 1. The defect
 
 eigenius#160 made a checked Lean proof reach the *verified* grade by emitting a `prov:VerificationTrace`.
-`witness_index::emit_from_trace` follows the trace's `prov:resource` to the claim, hashes the
+`witness_admission::emit_from_trace` follows the trace's `prov:resource` to the claim, hashes the
 claim's `reflection:canonical_proposition`, and admits `IsVerifiedAs`. Nothing re-checks anything;
 the kernel takes the trace's word that nanoda ran.
 
@@ -44,7 +44,7 @@ values are declared, and the second is named for this: `logic_kernel`, and `logi
 re-checked in process by the `nanoda_lib` kernel reimplementation."*
 
 The route is already implemented for one resource class. `emit_from_reasoning_sentence`
-(`witness_index.rs:291`) reads `justification:proof` off a `justification:Conclusion`, decodes the
+(`witness_admission.rs:291`) reads `justification:proof` off a `justification:Conclusion`, decodes the
 judgement, **refuses it when the type is a `Certificate`** — a certificate judgement establishes
 nothing about the proposition — and keys `Verified` off the proof's own type.
 
@@ -361,7 +361,7 @@ rather than inside the kernel's own conversion.
 So the three predicates stay declared and the kernel still synthesises their inhabitants. What
 changes is what that synthesis IS: a decision procedure over chain relations rather than an
 admission decision, so a wrong answer is catchable by recomputation instead of being an axiom with
-no proof to re-check. `witness_index.rs`'s header claim — *"this module is inside the TCB … the
+no proof to re-check. `witness_admission.rs`'s header claim — *"this module is inside the TCB … the
 witness itself is postulated, and a wrong admission cannot be caught downstream"* — is what stops
 being true, for the reason P7 predicted.
 
@@ -385,7 +385,7 @@ the expected type is a witness-category inductive — so any constructor in any 
 witness by naming the type, and the kernel needs no knowledge of `justification:Certificate`.
 Without the type it would key on the constructor, pulling the reasoning vocabulary into the
 checker, which is the direction the layer-ordering argument in those declarations' own descriptions
-warns against. That argument is already partly compromised: `witness_index.rs` hard-codes
+warns against. That argument is already partly compromised: `witness_admission.rs` hard-codes
 `justification:Conclusion` as `REASONING_SENTENCE`.
 
 ## 8. Cost

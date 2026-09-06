@@ -487,7 +487,7 @@ Two constraints that design will have to state, recorded here so this note's dia
 a specification:
 
 - **δ and ι are not in αβη.** Proposition identity in the kernel is `decode → eval (β/δ/ι) → readback
-  → α-canonicalize → hash` (`kernel/src/layer/witness_index.rs:127`). Unification up to αβη covers α
+  → α-canonicalize → hash` (`kernel/src/layer/witness_admission.rs:127`). Unification up to αβη covers α
   and β; definitional unfolding (D66's δ-transparency, the reason `hash_stored_proposition` decodes
   against the layer instead of hashing stored JSON) and ι are not covered, and need either unfolding
   before unification or definitions expressed as clauses.

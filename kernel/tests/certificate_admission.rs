@@ -241,7 +241,7 @@ fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     );
 
     // The DeclarationTrace pointing at the target. Its presence is
-    // what makes `build_witness_index` emit the Declared witness key.
+    // what makes `emit_from_trace` emit the Declared witness key.
     let trace_iri_str = format!("{target_iri_str}-decl-trace");
     let mut trace = Resource::new(Iri::parse(&trace_iri_str).unwrap());
     trace.set(
@@ -630,7 +630,9 @@ fn arity_mismatch_in_certificate_is_rejected() {
         "args": ["urn:foo"],
     });
     // Certificate with only ONE App-arg — `justification:Certificate.declared`
-    // expects three (iri, P, witness).
+    // expects three (iri, P, witness). The one supplied is a `Sort`, so it lands on the `iri`
+    // binder and mismatches there; since B3 that binder is `core:iri`, which is what the
+    // diagnostic names.
     let certificate = term_value(&json!({
         "ctor": "App",
         "args": [
@@ -647,25 +649,27 @@ fn arity_mismatch_in_certificate_is_rejected() {
     assert!(
         errors
             .iter()
-            .any(|e| e.contains("type mismatch: Sort(Succ(Zero)) \u{2260} EigonPrimitive(String)")),
+            .any(|e| e.contains("type mismatch: Sort(Succ(Zero)) \u{2260} EigonPrimitive(Iri)")),
         "an arity mismatch must be reported as the type mismatch it is, got:\n{}",
         errors.join("\n")
     );
 }
 
-// ── eigenius#205: a declared-external execution admits Declared, never Derived ──
+// ── eigenius#205: a transcribed external run is attested as Declared, and no more ──
 
 #[test]
-fn an_external_execution_trace_admits_declared_not_derived() {
-    // `Derived` holds a trace tied to a KERNEL-INITIATED activity — running a program, invoking an
-    // institution, a query that writes back. An author writing down that a program ran elsewhere is
-    // making a different claim: there is no `f : I -> O`, so no specification, so nothing entailed
-    // (D73 §3.3). `ExternalExecutionTrace` carries that claim and `trace_category` maps it to
-    // Declared.
+fn a_transcribed_external_run_admits_declared_not_observed() {
+    // An author writing down that a program ran elsewhere has no `f : I -> O`, so no
+    // specification, so nothing entailed (D73 §3.3). What attests it is an ordinary
+    // `prov:DeclarationTrace` carrying `prov:was_generated_by` — the shape every site in the WRN
+    // publication chain uses.
     //
-    // The kernel cannot tell a hand-authored `ProgramTrace` from one it minted — no "kernel-only,
-    // refused from input" mechanism exists anywhere in the validator — so the distinction has to be
-    // carried by the CLASS. This test is that distinction.
+    // This test named `reflection:ExternalExecutionTrace` until `2026-09-05`. eigenius#205 minted
+    // that class so a required `prov:derivation` slot could be filled; `prov:was_generated_by`
+    // replaced the requirement, the class was removed, and the `trace_category` arm outlived it.
+    // The test kept passing because `LayerBuilder::build` does not validate, so an `is_a` naming
+    // an undeclared class raised nothing. The claim being tested survives the class: a
+    // transcription grounds `Declared` and not `Observed`.
     use eigenius_kernel::layer::layer_admits_witness;
     use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
 
@@ -702,7 +706,7 @@ fn an_external_execution_trace_admits_declared_not_derived() {
     trace.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::String(
-            Iri::parse(wk::EXTERNAL_EXECUTION_TRACE)
+            Iri::parse(wk::DECLARATION_TRACE)
                 .unwrap()
                 .as_str()
                 .to_string(),
@@ -733,7 +737,7 @@ fn an_external_execution_trace_admits_declared_not_derived() {
 
     assert!(
         layer_admits_witness(&layer, &key(WitnessCategory::Declared)),
-        "an ExternalExecutionTrace must admit IsDeclaredAs — someone asserts the run happened"
+        "a transcribed run must admit IsDeclaredAs — someone asserts the run happened"
     );
     assert!(
         !layer_admits_witness(&layer, &key(WitnessCategory::Observed)),

@@ -148,7 +148,7 @@ waiting on.
 Three steps, in order:
 
 1. ~~**Verify the word "plausibly."**~~ **Answered `2026-09-05`: yes for both, and the kernel
-   already does it.** `layer_admits_witness` (`kernel/src/layer/witness_index.rs`) consults no
+   already does it.** `layer_admits_witness` (`kernel/src/layer/witness_admission.rs`) consults no
    committed witness. It is a pure function of the layer's Trace-class resources — reached through
    the triple index on `prov:resource`, or by iterating the layer when it is still in-flight — plus
    the target's `reflection:canonical_proposition`, or D39 §4.1's `Asserts(target_iri)` default when
@@ -186,7 +186,7 @@ Three steps, in order:
    holds. So step 3 became: say so where it was claimed otherwise, and prove the part that was
    newly true.
 
-   - `witness_index.rs`'s header asserted *"this module is inside the TCB … the witness itself is
+   - `witness_admission.rs`'s header asserted *"this module is inside the TCB … the witness itself is
      postulated, and a wrong admission cannot be caught downstream because an axiom has no proof to
      re-check."* Rewritten: a wrong answer is now catchable by recomputation.
    - **`a_verdict_is_recomputable_from_what_the_trace_pins`** is the gate. It takes the five inputs
@@ -235,7 +235,7 @@ Per `judgements-warrants-build-plan.md` §"Verification, every phase". Status `2
 | a `Checked(t)` round-trips the D47 codec, and is refused by the externalizer | `eigentt_type_mirror`, `externalize_test` | **done**, plus the arm that matters more — a hand-authored `holds(logic_lean4, …)` is refused at commit |
 | a `Holds` emits a judgement whose type is the claim's proposition | `notebook_fixture_test` | **done** |
 | the verdict is recomputable from the trace alone | `a_verdict_is_recomputable_from_what_the_trace_pins` | **done**; it found `prov:checked_declaration` |
-| the diagnostic still names the family, the IRI and the property | `witness_index` | **done**, and now names the right remedy per family |
+| the diagnostic still names the family, the IRI and the property | `witness_admission` | **done**, and now names the right remedy per family |
 | the demo artifacts re-derive | `gen_verification_demo` | **done** — two documents now, the demo and the near-miss |
 | the reseed, then both parse baselines | `scripts/reseed-lexicon-db.sh --umls-all` | **done** `2026-09-05` — see below |
 

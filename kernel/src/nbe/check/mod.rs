@@ -536,6 +536,28 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
              {:?}. (A type-level function has a Π type, not a Sort.)",
             readback_val(ctx.rho.len(), &Val::Sort(n.clone()))
         ))),
+        // A string literal against `core:iri`. This is the ONLY way to reach
+        // `PrimitiveType::Iri` (D88 §3): `check_infer` answers `String` for every `LitString`,
+        // because a bare literal cannot know which of the two it is meant to be. The declared type
+        // is what says so, which is the point of declaring it.
+        //
+        // Why this rather than making `Iri` infer, or making `String` convert to `Iri`: both would
+        // admit any string wherever an IRI is declared, which is the state B3 exists to leave. The
+        // subtyping runs the other way — `PrimitiveType::subtype_of` has `Iri <: String` and not
+        // the converse — and it is consulted where a value already carries a type, not here.
+        //
+        // Everything authored stays valid without a rewrite: the 396 grounding-constructor call
+        // sites keep writing `declared("urn:...", P)` and land in this arm instead of the generic
+        // inference path.
+        (Exp::LitString(s), Val::EigonPrimitive(crate::nbe::term::PrimitiveType::Iri)) => {
+            match crate::ontology::iri::Iri::parse(s) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(CheckError::TypeMismatch(format!(
+                    "`{s}` is declared `core:iri` but is not one: {e}"
+                ))),
+            }
+        }
+
         // Lambda against Pi type
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
             let gen = gen_val(&ctx.rho);
@@ -4138,7 +4160,7 @@ mod tests {
     }
 
     #[test]
-    fn synthesis_hook_routes_through_layer_witness_index_for_admitted_witness() {
+    fn synthesis_hook_routes_through_layer_witness_admission_for_admitted_witness() {
         // End-to-end: build a layer carrying a DeclarationTrace, which
         // populates the witness index with the corresponding Declared
         // witness. Calling the hook with the matching expected type

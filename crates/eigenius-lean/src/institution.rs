@@ -376,7 +376,7 @@ fn do_proof_check(
     // eigenius#160 — a `Holds` that promotes nothing is the verdict this institution existed to
     // avoid. The trace is what carries the check off this call and onto the chain: committed
     // beside the Verdict, it makes `layer_admits_witness` answer `Verified` for the claim's own
-    // proposition (`witness_index::emit_from_trace`), which is the grade D28 §1 names as the
+    // proposition (`witness_admission::emit_from_trace`), which is the grade D28 §1 names as the
     // reason a proof-checking institution exists.
     let mut outcome = QueryOutcome::from_output(verdict_resource(wk::VERDICT_HOLDS, None));
     if let Some((claim_iri, proposition)) = claim.as_ref() {
@@ -441,7 +441,7 @@ const LOGIC_LEAN4: &str = "urn:eigenius:eigentt:logic_lean4";
 /// everything else is provenance about the occasion.
 ///
 /// `prov:judgement` holds `holds(logic_lean4, Checked(payload), P)` — nanoda verified the artifact
-/// at `payload` against `P` (D87 §2). It is what `witness_index::emit_from_trace` reads to admit a
+/// at `payload` against `P` (D87 §2). It is what `witness_admission::emit_from_trace` reads to admit a
 /// `Verified` witness, keyed off this judgement's own `type`. Before it existed the checker's
 /// result was computed and discarded, and the trace was a note that a check RAN, with `Verified`
 /// admitted on the strength of the note.

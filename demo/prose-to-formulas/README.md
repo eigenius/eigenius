@@ -237,7 +237,7 @@ WitnessKey { category: Derived, iri: claim_iri, prop_hash: sha256(encode(P)) }
 ```
 
 `lookup_chain_witness` walks the layer and every ancestor
-([`witness_index.rs`](../../kernel/src/layer/witness_index.rs)). The key is minted on the other side
+([`witness_admission.rs`](../../kernel/src/layer/witness_admission.rs)). The key is minted on the other side
 by the parser's `prov:DeclarationTrace`: a trace whose `prov:resource` points at the
 claim emits `IsDeclaredAs claim_iri P`, where `P` is the claim's own `canonical_proposition`.
 

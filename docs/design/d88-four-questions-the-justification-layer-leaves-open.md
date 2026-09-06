@@ -68,7 +68,7 @@ by checking them. All of that is **declared in core**, which the kernel owns.
 
 Keyed on the constructor, the kernel would instead name `justification:Certificate.verified` — a
 declaration in a layer above it — and read `(iri, P)` off argument positions, which nothing declares.
-`witness_index.rs` crosses that line exactly once today, for `justification:Conclusion`, and marks it
+`witness_admission.rs` crosses that line exactly once today, for `justification:Conclusion`, and marks it
 as an exception: *"the D49 witness machinery is the one kernel site that is intrinsically
 reasoning-aware."* A constructor-keyed rule would make the exception the mechanism.
 

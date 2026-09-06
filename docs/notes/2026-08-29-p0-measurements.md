@@ -110,7 +110,7 @@ modules, so the conclusion is unchanged — but a sweep that greps the class nam
 them during P5, and they are in the kernel.
 
 **Eight of the 29 files carry occurrences only in test modules**: `eigenius-obograph/src/lib.rs`,
-`commit/orchestrator.rs`, `layer/index.rs`, `layer/merge/conflict.rs`, `layer/witness_index.rs`,
+`commit/orchestrator.rs`, `layer/index.rs`, `layer/merge/conflict.rs`, `layer/witness_admission.rs`,
 `nbe/check/mod.rs`, `validation/mod.rs`, `validation/rules/eigentt_value.rs`.
 
 **The one read-shaped site is not a reader.** `institution/dispatch.rs:540` is

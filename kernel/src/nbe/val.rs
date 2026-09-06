@@ -154,12 +154,12 @@ pub enum Val {
     ///
     /// The kernel synthesises one during `justification:Certificate.*` constructor
     /// type-checking, via `CheckHooks::synthesize_chain_witness` →
-    /// `layer::witness_index::layer_admits_witness`, which reads
+    /// `layer::witness_admission::layer_admits_witness`, which reads
     /// `DeclarationTrace` / `ObservationTrace` / `VerificationTrace`
     /// resources by **direct lookup on the key's IRI**.
     /// There is no materialised index — the `OnceLock<BTreeMap<..>>`
     /// this comment used to describe was removed in D66 slice 0; see
-    /// `witness_index.rs`'s module docs.
+    /// `witness_admission.rs`'s module docs.
     ///
     /// **It used to be a trust boundary and no longer is** (the P7 closeout, `2026-09-05`). This
     /// comment read: *"the witness itself is postulated, so `layer_admits_witness` is inside the

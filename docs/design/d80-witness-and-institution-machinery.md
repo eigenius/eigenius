@@ -75,7 +75,7 @@ implementation."*
 | the `JustifiedBy` / `JustificationTerm` vocabulary | the reasoning ontology (the institution's) |
 | **when** a witness is demanded | the institution's `ValidateJustification`, AutoOnLoad at commit |
 | **synthesis** — inhabiting a `JustifiedBy.*` argument position | the **kernel type checker** (`nbe/check/witness.rs` → `EffectHooks::synthesize_chain_witness`) |
-| **admission** — does the chain admit this key | the **kernel** (`layer/witness_index.rs`), a pure function of Trace-class resources — *nothing persisted* |
+| **admission** — does the chain admit this key | the **kernel** (`layer/witness_admission.rs`), a pure function of Trace-class resources — *nothing persisted* |
 
 So the institution owns the vocabulary and the trigger; the kernel owns creation and checking. That
 places the reasoning institution squarely in §3.3's row-2 cell — in-process, AutoOnLoad, no
@@ -207,7 +207,7 @@ re-dispatches only what the commit pipeline already re-dispatches on an ordinary
   does — name set from `core:mentions`, comparison by `conjunction_entails`. **Not** re-dispatch (it
   reproduces the wrong answer) and **not** trace invalidation (the trace attested a true thing).
   Gates: `witness_credit_survives_redefinition_of_a_class_the_proposition_quantifies_over`
-  (`witness_index.rs:1184`) **flips** and is renamed, closing D75 §3.4; a *narrowing* redefinition
+  (`witness_admission.rs:1184`) **flips** and is renamed, closing D75 §3.4; a *narrowing* redefinition
   still admits, since only widening is unsound; same-layer first-hit-wins is untouched, asserted by a
   lookup benchmark on the unchanged path.
   **`redefining_a_class_does_not_change_the_hash_of_a_proposition_over_it` (`:1133`) must NOT flip** —
@@ -240,7 +240,7 @@ with it.
 - **Proposition identity stays environment-blind.** W1 changes the lookup walk; it does not put the
   layer into `hash_proposition_exp`. Making the environment part of proposition identity is the
   alternative fix for D75 §3.4 and a much larger change — it forks every existing witness key.
-  `witness_index.rs:1136` already names the assertion that would have to move.
+  `witness_admission.rs:1136` already names the assertion that would have to move.
 - **External-runtime institution dispatch.** W3 re-dispatches *in-process* verdicts only. Verdicts
   produced by an external runtime are marked, not recomputed: re-execution there is unbounded in time
   and depends on a foreign runtime. Scheduling it is a separate surface.
@@ -252,5 +252,5 @@ with it.
 - D39 (justification logic), D49 §6 (chain-witness admission), D52 (institution-emitted derivations)
 - D20 §8 (`CascadeItem::InvalidatedTrace`), D78 §4 (`conjunction_entails`)
 - D79 (`core:mentions`, which W1 and W3 both consume)
-- `layer/witness_index.rs`, `nbe/check/witness.rs`, `program/check_hooks.rs`,
+- `layer/witness_admission.rs`, `nbe/check/witness.rs`, `program/check_hooks.rs`,
   `commit/phases.rs` (`dispatch_auto_on_load_for_layer`), `crates/eigenius-reasoning/src/validate.rs`

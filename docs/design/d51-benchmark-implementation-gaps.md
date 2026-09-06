@@ -57,8 +57,8 @@ The rest of this memo covers each gap in turn: what needs to be built, where it 
 ## 2. Gap 1 — D49 `ChainWitness` machinery (excl. Lean)
 
 **Status (2026-06-11): ✅ Done** (landed in `#76`, be687e3). Every build site below is in the tree:
-- `kernel/src/layer/witness_index.rs` — `WitnessKey { category, iri, prop_hash }`, `WitnessCategory` (4 variants), `build_witness_index`, `lookup_chain_witness` (parent-chain walk), `synthesize_chain_witness` (with the D49 §5 diagnostic), the D39 §4.1 `Asserts(iri)` default-proposition helper, and the D49 §4 `IsVerifiedAs → IsDerivedAs` lookup-time coercion. 10 unit tests.
-- `kernel/src/layer/mod.rs` — `OnceLock<BTreeMap<WitnessKey, ()>>` on `Layer`, lazily built via `chain_witness_index()`.
+- `kernel/src/layer/witness_admission.rs` — `WitnessKey { category, iri, prop_hash }`, `WitnessCategory` (4 variants), `build_witness_index`, `lookup_chain_witness` (parent-chain walk), `synthesize_chain_witness` (with the D49 §5 diagnostic), the D39 §4.1 `Asserts(iri)` default-proposition helper, and the D49 §4 `IsVerifiedAs → IsDerivedAs` lookup-time coercion. 10 unit tests.
+- `kernel/src/layer/mod.rs` — `OnceLock<BTreeMap<WitnessKey, ()>>` on `Layer`, lazily built via `chain_witness_admission()`.
 - `kernel/src/nbe/val.rs` — `Val::ChainWitness(WitnessKey)` opaque variant, key-based definitional equality.
 - `kernel/src/nbe/check/mod.rs` — witness synthesis hook (`try_synthesize_chain_witness`) over the four `Is*As` predicates at `JustifiedBy.*` constructor check time; elidable witness slots.
 - `kernel/src/ontology/well_known.rs` — `CANONICAL_PROPOSITION` and `ASSERTS` IRI constants plus the three trace-class constants.
@@ -70,7 +70,7 @@ The only deferred sub-item is the `VerificationTrace` emit branch (the `IsVerifi
 
 **Build sites**:
 
-- `kernel/src/layer/witness_index.rs` (new) — `WitnessKey` struct (`category` × `iri` × `prop_hash`), `BTreeMap<WitnessKey, ()>` materialised per `Layer`, `build_witness_index(&Layer)` builder, `OnceLock` for lazy construction.
+- `kernel/src/layer/witness_admission.rs` (new) — `WitnessKey` struct (`category` × `iri` × `prop_hash`), `BTreeMap<WitnessKey, ()>` materialised per `Layer`, `build_witness_index(&Layer)` builder, `OnceLock` for lazy construction.
 - `kernel/src/layer/mod.rs` — wire `OnceLock<BTreeMap<WitnessKey, ()>>` into `Layer`; expose `lookup_chain_witness(&Layer, &WitnessKey) -> bool` walking the parent chain.
 - `kernel/src/nbe/val.rs` — add `Val::ChainWitness { key: WitnessKey }` variant per D49 §8.
 - `kernel/src/nbe/check.rs` — when type-checking a `JustifiedBy.declared` / `.observed` / `.derived` constructor, synthesise the witness via `lookup_chain_witness`; on miss, emit `TypeError::NoAdmittedChainWitness { … }` with the diagnostic shape D49 §5 specifies.
@@ -89,7 +89,7 @@ A checked Lean proof now reaches the *verified* grade, and no comorphism, `lean_
 transformation, or `VerifiedPropositionView` was built to get there. On `Verdict::Holds` the
 institution emits a `prov:VerificationTrace` naming the claim
 (`crates/eigenius-lean/src/institution.rs::verification_trace`); the kernel commits it in the
-`verdict_provenance` layer; `witness_index::emit_from_trace` follows `prov:resource` to the claim
+`verdict_provenance` layer; `witness_admission::emit_from_trace` follows `prov:resource` to the claim
 and reads its `reflection:canonical_proposition` — the same code path that serves
 `IsDeclaredAs` / `IsObservedAs`, with no Verified-specific arm. Asserted end to end by
 `notebook_fixture_test::a_holds_verdict_admits_a_verified_witness`.
@@ -111,12 +111,12 @@ the bootstrap manifest and forces a reseed.
 The rest of this section records the design as it stood on `2026-06-11`. What existed then:
 
 - `ontologies/justification/justification.esl` — `reasoning:VerifiedPropositionView : reflection:DerivedResource` is declared (requires `source_verified_resource` + `reflection:canonical_proposition`), ready to receive comorphism-reified views. The file comment notes "Phase 8 wires the comorphism; this declaration goes ahead of it."
-- `kernel/src/layer/witness_index.rs` / `nbe/check.rs` — the `IsVerifiedAs` lookup hook and the `IsVerifiedAs → IsDerivedAs` coercion are wired; no further kernel change is needed on the *consumer* side once the producer lands.
+- `kernel/src/layer/witness_admission.rs` / `nbe/check.rs` — the `IsVerifiedAs` lookup hook and the `IsVerifiedAs → IsDerivedAs` coercion are wired; no further kernel change is needed on the *consumer* side once the producer lands.
 
 What remains (the load-bearing pieces, all deferred to "Phase 8"):
 - The `lean_to_reasoning` comorphism *resource* declaration (source `lean:LeanProofTerm`, target `reasoning:VerifiedPropositionView`, `AutoOnLoad`). Note: `reasoning.esl` §330 defers the *Reasoning → Lean* direction to gh #73 pending a real D30 term/type translation; the *Lean → Reasoning* direction here is the one gap 2 needs.
 - `crates/eigenius-lean-worker/src/lean_to_reasoning.rs` — the inverse-D30 transformation. Does not exist (the crate's `src/` holds only `lean_project.rs`, `lean_ffi.rs`, `lean_sys.rs`, `lib.rs`).
-- The `VerificationTrace` branch of the witness emitter in `witness_index.rs` (reads `canonical_proposition` off the reified view). The file explicitly marks this "deferred to the Phase-7 / D49 §7 integration."
+- The `VerificationTrace` branch of the witness emitter in `witness_admission.rs` (reads `canonical_proposition` off the reified view). The file explicitly marks this "deferred to the Phase-7 / D49 §7 integration."
 - The 2+2=4 round-trip test plus the universe-polymorphism negative test.
 
 **Pilot relevance**: none of the 8 chem+bio SAB tasks need a `JustifiedBy.verified` warrant (those warrant Lean-proved propositions), so gap 2 does **not** block the chem+bio pilot. It is required only for the four-gate concrete demo (D50 §9) and any future task family that cites a Lean verdict. Recommend completing it in parallel with, not ahead of, gaps 4–8.
@@ -130,7 +130,7 @@ This gap intentionally adds *no kernel trait surface* — the cross-institution 
 - `ontologies/justification/reasoning-ontology.json` (in the same authoring pass as gap 3) — declare the `reasoning:VerifiedPropositionView` class. `is_a [reflection:DerivedResource]`; requires `reasoning:source_verified_resource` (IRI of the user-authored `VerifiedResource`) and `reflection:canonical_proposition` (D47-encoded EigenTT `Prop` term). The view's `derivation` invariant is satisfied by the comorphism's reify trace.
 - `ontologies/lean/lean-ontology.json` (or wherever existing Lean comorphisms are declared) — declare the `lean_to_reasoning` comorphism per D14 §3-§5. Source class: `lean:LeanProofTerm`. Target class: `reasoning:VerifiedPropositionView`. Transformation: a reference to the inverse-D30 transformation Component (below). Dispatch role: `AutoOnLoad` on `lean:LeanProofTerm` commits. `exact: false` — not faithful for the full Lean fragment.
 - `crates/eigenius-lean-worker/src/lean_to_reasoning.rs` (new) — the comorphism's transformation implementation. Reads the chain-mirrored `lean:LeanExpr` proposition from the source `VerifiedResource`, runs the inverse of D30's forward translation on the trivially-mappable `Prop` fragment, returns the EigenTT `Exp` as the comorphism's typed payload to be reified. Propositions outside the v1 fragment (universe polymorphism, Lean-specific definitional unfolding rules not mirrored in EigenTT) cause the transformation to fail with a `Verdict::Fails` whose diagnostic names the inexpressible feature — the reify step does not commit a view, and no `IsVerifiedAs` witness becomes admissible.
-- `kernel/src/layer/witness_index.rs` — the `VerificationTrace` branch of the witness emitter (gap 1) reads `canonical_proposition` from the *reified* `VerifiedPropositionView` (looked up by `source_verified_resource = trace.resource`) rather than from the user-authored VerifiedResource. **No special dispatch path** — the same code that reads the property for `IsDeclaredAs` / `IsObservedAs` / `IsDerivedAs` reads it for `IsVerifiedAs`, just from a different chain resource. This branch should land as part of gap 1's witness-emitter implementation; gap 2 makes it work end-to-end by providing the comorphism that produces the view.
+- `kernel/src/layer/witness_admission.rs` — the `VerificationTrace` branch of the witness emitter (gap 1) reads `canonical_proposition` from the *reified* `VerifiedPropositionView` (looked up by `source_verified_resource = trace.resource`) rather than from the user-authored VerifiedResource. **No special dispatch path** — the same code that reads the property for `IsDeclaredAs` / `IsObservedAs` / `IsDerivedAs` reads it for `IsVerifiedAs`, just from a different chain resource. This branch should land as part of gap 1's witness-emitter implementation; gap 2 makes it work end-to-end by providing the comorphism that produces the view.
 
 **Test surface**: a hand-authored `VerifiedResource` with a small Lean proof (e.g., `2 + 2 = 4` in Nat). Confirm: (a) on commit, the Lean → Reasoning comorphism's AutoOnLoad fires and reifies a `VerifiedPropositionView` with the EigenTT-form proposition; (b) the witness `IsVerifiedAs iri (Eq Nat (2+2) 4)` is admissible at the next type-check; (c) a separate `VerifiedResource` whose proposition uses universe polymorphism fails the comorphism reify with a diagnostic, no view is committed, and the witness is correctly absent. The diagnostic surfaces both at comorphism-dispatch time (a Verdict resource) and at downstream `JustifiedBy.verified` type-check time (the witness lookup misses with a hint pointing back at the Verdict).
 

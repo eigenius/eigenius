@@ -462,21 +462,49 @@ fn go<'x, 't: 'x, 'p: 't>(
 
         Exp::EigonPrimitive(p) => {
             use eigenius_kernel::nbe::term::PrimitiveType;
-            let n = match p {
-                PrimitiveType::String => "String",
-                PrimitiveType::Integer => "Int",
-                PrimitiveType::Boolean => "Bool",
-                PrimitiveType::Float => "Float",
-                // `Float` has the same problem `LitFloat` has, and `Json` is a chain-side
-                // carrier with no Lean image at all.
-                PrimitiveType::Json => {
-                    return outside(
-                        "EigonPrimitive(Json)",
-                        "a chain-side carrier type with no \
+            let n =
+                match p {
+                    PrimitiveType::String => "String",
+                    PrimitiveType::Integer => "Int",
+                    PrimitiveType::Boolean => "Bool",
+                    PrimitiveType::Float => "Float",
+                    // `Float` has the same problem `LitFloat` has, and `Json` is a chain-side
+                    // carrier with no Lean image at all.
+                    PrimitiveType::Json => {
+                        return outside(
+                            "EigonPrimitive(Json)",
+                            "a chain-side carrier type with no \
                          Lean image",
-                    )
-                }
-            };
+                        )
+                    }
+                    // `Iri` is a REFINEMENT of `String` (D88 §3), and refusing it is a decision about
+                    // the TCB, not about expressibility.
+                    //
+                    // The shape exists on both sides. Lean has URI types — `Std.Http.URI` with
+                    // `URI.parse?` and `URI.Query` in the networking stack, and the simpler
+                    // `System.Uri` (`pathToUri`, `fileUriToPath?`) that LSP uses — and this file
+                    // already builds refinements through [`subtype_of`], so `Subtype String isIri` is
+                    // writable here.
+                    //
+                    // What blocks it is what that mapping WOULD BE. Each formal comorphism is in the
+                    // TCB (see the D86 note below), so emitting `Subtype String p` asserts that our
+                    // `Iri::parse` and Lean's `p` accept the same strings. Neither available `p`
+                    // supports that assertion: `Std.Http.URI` is HTTP-oriented while our IRIs are
+                    // `urn:` URNs, `System.Uri` is `file://`-oriented, and RFC 3987 IRIs admit
+                    // non-ASCII that an RFC 3986 URI parser does not. Lean's own URI logic is still
+                    // split between `Init.System.Uri` and `Std.Http`, with consolidation into one
+                    // RFC 3986-compliant `Std.URI` an open RFC (#13922).
+                    //
+                    // So: refuse, and name what lifts the refusal — a general `Std.URI` whose accepted
+                    // set we can state agrees with `Iri::parse`, at which point this becomes a
+                    // `subtype_of` call and a TCB entry that can be reviewed on its merits.
+                    PrimitiveType::Iri => return outside(
+                        "EigonPrimitive(Iri)",
+                        "a refinement of String; Lean's URI types (Std.Http.URI, System.Uri) are \
+                         each narrower than an RFC 3987 IRI, so asserting they agree with \
+                         Iri::parse would be an unsupportable TCB entry. Pending a general Std.URI",
+                    ),
+                };
             lean_const(tc.ctx, cx, n)
         }
 

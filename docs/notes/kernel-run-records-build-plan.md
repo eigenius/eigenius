@@ -20,7 +20,7 @@ ordering: *"this issue makes routes 1 and 3 mint → then `ProgramTrace` can be 
 | | |
 |---|---|
 | `WitnessCategory` variants | `Declared`, `Observed`, `Verified` — `witness/mod.rs:51` |
-| `trace_category(wk::PROGRAM_TRACE)` | `None`, deliberately — `layer/witness_index.rs` |
+| `trace_category(wk::PROGRAM_TRACE)` | `None`, deliberately — `layer/witness_admission.rs` |
 | `IsDerivedAs` | removed; *"It could only ever be consumed by `justification:Certificate.derived`, which is gone with the `DerivedEvidence` term constructor, so no lookup can ask for it — removing the constant is forced by the algebra"* (`well_known.rs:588`) |
 
 So #206's destination is gone, and with it the #205 "enforcement half" it was gating: restricting

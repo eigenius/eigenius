@@ -430,6 +430,8 @@ pub const SOURCE_IRL: &str = "urn:eigenius:core:source_irl";
 // --- DataType IRIs ---
 
 pub const STRING: &str = "urn:eigenius:core:string";
+/// An absolute IRI — a refinement of [`STRING`], not a separate carrier (D88 §3).
+pub const IRI_TYPE: &str = "urn:eigenius:core:iri";
 pub const INTEGER: &str = "urn:eigenius:core:integer";
 pub const FLOAT: &str = "urn:eigenius:core:float";
 pub const BOOLEAN: &str = "urn:eigenius:core:boolean";
@@ -536,13 +538,6 @@ pub const PROGRAM_TRACE: &str = "urn:eigenius:prov:ProgramTrace";
 /// itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
 pub const VERIFICATION_TRACE: &str = "urn:eigenius:prov:VerificationTrace";
 
-/// Trace recording that an author ASSERTS a computation ran somewhere the kernel did not initiate
-/// (eigenius#205). Admits `IsDeclaredAs`: a transcription has no `f : I -> O`, so no
-/// specification, so nothing entailed (D73 §3.3). Not a weaker [`PROGRAM_TRACE`] — a different
-/// claim, and the one trace kind that already refused to treat a run record as a ground of its own
-/// kind before the three-grounds change made that uniform.
-pub const EXTERNAL_EXECUTION_TRACE: &str = "urn:eigenius:reflection:ExternalExecutionTrace";
-
 /// `prov:resource` — the target IRI a Trace points at. Common to
 /// all four Trace classes (semantically; for `ProgramTrace` the role is
 /// played by the output resource's own IRI, not a separate property).
@@ -561,7 +556,7 @@ pub const TIMESTAMP: &str = "urn:eigenius:prov:timestamp";
 
 /// `prov:judgement` — the checker's RESULT on a [`VERIFICATION_TRACE`]: `holds(logic, t, P)`
 /// (D87 §2). What the trace ESTABLISHED, as against what it records about the occasion, and what
-/// `witness_index::emit_from_trace` reads to key `Verified` — off this judgement's own `type`
+/// `witness_admission::emit_from_trace` reads to key `Verified` — off this judgement's own `type`
 /// rather than off the target's stored `canonical_proposition`.
 pub const PROV_JUDGEMENT: &str = "urn:eigenius:prov:judgement";
 

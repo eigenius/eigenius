@@ -79,17 +79,45 @@ Two facts worth having before starting:
   than something to write.
 - `PrimitiveType` has five variants today and 67 `PrimitiveType::` match sites across the workspace.
 
-Then `core:mentions` gets an exact rule instead of `s.starts_with("urn:")`
-(`layer/term_mentions.rs:83`, and the same heuristic at `program/expr.rs:903` and
-`nbe/eval/marshal.rs:35`), and the validator rejects a malformed leaf at commit rather than leaving
-it to whichever consumer parses it first.
-
 Bootstrap edit — rides B4.
+
+**The exact `core:mentions` rule is NOT part of this; it is B6.** D88 §3 wrote the declaration and
+the consumer as one step and they are not: `json_mentions_of_value` walks an ENCODED term, where a
+string's role is invisible without the constructor schema, so declaring the leaf does not by itself
+retire `s.starts_with("urn:")`.
+
+### B6 — make `core:mentions` read the declaration (D88 §3, second half)
+
+The mechanism, found while doing B3 so it is not rediscovered: each argument of an encoded value is
+carried under a property named `<ctor-class>-<arg-name>`, and **those are real chain resources
+carrying `core:data_type`** — which is how B3's retyping first surfaced, as an `allows_only`
+violation on `eigentt:Term-Checked-payload_iri`. So the walk can resolve each property definition
+and treat `core:iri` as a reference, reusing the `match data_type` dispatch `layer/index.rs:324`
+already performs at the top level.
+
+Two reasons it is its own change rather than a rider on B3:
+
+- `json_mentions_of_value` needs a `&Layer` threaded in. Both callers have one
+  (`validation/mod.rs:1381`, `layer/index.rs:334`), as does `storage/memory.rs:242` for the
+  sibling `is_witness_candidate`.
+- It **narrows** the index's mention set, which the current walker over-approximates on purpose —
+  its own doc says *"counting it is the correct answer, not an over-approximation to apologise
+  for."* Changing what the index contains needs its own tests, not a rider's.
+
+The same heuristic also sits at `program/expr.rs:903` and `nbe/eval/marshal.rs:35`; whether those
+are the same question is B6's to answer.
 
 ### B4 — one reseed, then both baselines
 
 B3 is bootstrap, and B5 may be; A3's three accumulated deltas ride along. **The reseed is ~30 minutes**; the
 alignment snapshot and the two parse measurements are the rest of the wall clock.
+
+**Use the scripted protocols; do not drive the harness by hand.** `measure-parse-rate.sh` is the
+MEASUREMENT half and `eval-parse-rate.sh` is the SCORING half — the second exists because reading
+these numbers by eye is how they get read wrong, and its header names three traps that have each
+produced a false result (`grammar-gap` counted from the per-unit listing, which omits gaps; a run
+with no summary line scored as if it completed; a cap-only run compared against a reranked one).
+`measure-parse-rate.sh` chains into it automatically.
 
 ```sh
 CARGO_FEATURES=use-llm scripts/reseed-lexicon-db.sh --umls-all
@@ -97,10 +125,18 @@ scripts/build-alignment-snapshot.sh --base <base> --out <aligned>
 scripts/measure-parse-rate.sh --snapshot <aligned> \
   --replay experiments/parsing/ranks/2026-08-22-productiontrace.json \
   --selections experiments/parsing/selections/2026-08-22-productiontrace-live.json
+scripts/eval-parse-rate.sh --baseline <run.log>   # if scoring a run separately
 ```
 
+`measure-parse-rate.sh` builds **release** and that is load-bearing, not a speed choice: a debug
+build overflows the stack in NbE readback, the parse dies, and the harness reports it as a
+GRAMMAR-GAP indistinguishable from a real one. It also autodetects the newest snapshot, so
+`--snapshot` is only needed to override that.
+
 Gates: `grammar_gap == 0`, `missing_lexeme == 0`, `expected-hits 62/62` with the miss-set unchanged,
-`reading_correct >= 30`, `reading_unadjudicated == 0`, `invalid_selected == 0`. A single **live**
+`reading_correct >= 30`, `reading_unadjudicated == 0`, `invalid_selected == 0`. `eval-parse-rate.sh`
+enforces these against the two committed baselines — `baseline.json` gates the grammar and lexicon,
+`selection-baseline.json` gates the ranker; they re-baseline on different triggers. A single **live**
 draw is a draw, not a measurement — replay is the comparison.
 
 ## C. Decisions
@@ -145,14 +181,14 @@ validate, the same enumeration.
 It also costs what D88 §1 found the witness types are *for* — the type declares the trigger and
 carries the lookup's parameters as its indices. Under C2a the category stops being declared by the
 type and becomes an argument. And the independence of the families, which
-`witness_index.rs:1496` tests and which a since-deleted `IsVerifiedAs → IsDerivedAs` match arm once
+`witness_admission.rs:1496` tests and which a since-deleted `IsVerifiedAs → IsDerivedAs` match arm once
 violated, degrades from a type distinction to a value comparison.
 
 **C2b — the trace-kind → grade mapping lives in Rust, not the ontology: stands, and C2a does not
 address it.**
 
 This is what C2 was actually about, and merging the families is not a route to it. `trace_category`
-(`layer/witness_index.rs:224`) maps five trace classes onto three categories and a deliberate
+(`layer/witness_admission.rs:224`) maps five trace classes onto three categories and a deliberate
 `None`:
 
 ```
@@ -198,7 +234,7 @@ malformed — **a class grounds nothing**. It selects which category a *trace re
 gate is on the trace, not the class:
 
 1. `emit_from_trace` mints a `Verified` key only from a trace carrying `prov:judgement`
-   (`witness_index.rs:386`). No judgement, no Verified, whatever the class says.
+   (`witness_admission.rs:386`). No judgement, no Verified, whatever the class says.
 2. `prov:judgement` is declared `class_types eigentt:Judgement`, so it is validated in CHECK mode at
    commit (`validation/rules/eigentt_value.rs:141`): decode both fields, check `type` is a type,
    check `term` against it, with the kernel's own `check`.
@@ -216,8 +252,30 @@ ran the check can produce one of these."*
 and `Observed` need no protection either: both are postulated by design and stay in the TCB, and
 anyone can already commit a `DeclarationTrace`.
 
-**Cost:** one property on five trace classes, `trace_category` and `is_witness_candidate` reading it.
-Bootstrap edit, so it lands with B3 and rides B4's reseed.
+**Cost:** one property on the trace classes, `trace_category` and `is_witness_candidate` reading it.
+`is_witness_candidate` needs a `&Layer` threaded in; all three call sites have one
+(`storage/memory.rs:242`, plus the two inside `witness_admission.rs`). Bootstrap edit, so it rides B4's
+reseed.
+
+**Blocking discovery, `2026-09-05`: `reflection:ExternalExecutionTrace` is not declared in any
+ontology.** It exists as `wk::EXTERNAL_EXECUTION_TRACE`, as `trace_category`'s fifth arm, and in
+prose — nowhere as a class. `harness-ontology.esl`'s own description records why: eigenius#205
+minted it so a required `prov:derivation` slot could be filled, *"the requirement is what forced the
+class into existence"*, and that requirement was then replaced by `prov:was_generated_by` — *"it no
+longer needs a class to say so."* The class went; the arm stayed.
+
+`an_external_execution_trace_admits_declared_not_derived` passes only because it builds its layer
+with `LayerBuilder::build`, which does not validate. A committed resource naming an undeclared class
+does not get that far.
+
+So B5 cannot put a property on five classes — there are four. It has to decide first:
+
+| | |
+|---|---|
+| **declare the class** | if an author asserting "a run happened elsewhere" is still a distinct trace kind that should ground `Declared` |
+| **delete the arm** | if `prov:DeclarationTrace` already covers that assertion, which is what the harness description implies |
+
+Answer that before writing the property. Either way it is a smaller change than five classes.
 
 ## D. Deferred, reasons already recorded
 

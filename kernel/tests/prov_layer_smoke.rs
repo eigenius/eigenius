@@ -74,7 +74,7 @@ fn every_prov_declaration_resolves() {
 /// A run's output carries an `ObservationTrace`, and the chain admits `Observed` for it.
 ///
 /// This pins the contract between what `server::programs::execute_program` emits and what
-/// `witness_index::emit_from_trace` reads — the part of kernel-run-records §2 that can
+/// `witness_admission::emit_from_trace` reads — the part of kernel-run-records §2 that can
 /// silently break. `execute_program` is `pub(super)` behind the gRPC service, so the trace
 /// is built here exactly as that code builds it: `is_a: [prov:ObservationTrace]`,
 /// `prov:resource` at the output, `prov:was_generated_by` at the run activity, and

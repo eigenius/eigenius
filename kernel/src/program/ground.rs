@@ -38,6 +38,7 @@ pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String>
     // Check for primitive types first
     match class_iri.as_str() {
         wk::STRING => return Ok(Val::EigonPrimitive(PrimitiveType::String)),
+        wk::IRI_TYPE => return Ok(Val::EigonPrimitive(PrimitiveType::Iri)),
         wk::INTEGER => return Ok(Val::EigonPrimitive(PrimitiveType::Integer)),
         wk::FLOAT => return Ok(Val::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => return Ok(Val::EigonPrimitive(PrimitiveType::Boolean)),
@@ -273,6 +274,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
 
     match data_type_str.as_str() {
         wk::STRING => Ok(Val::EigonPrimitive(PrimitiveType::String)),
+        wk::IRI_TYPE => Ok(Val::EigonPrimitive(PrimitiveType::Iri)),
         wk::INTEGER => Ok(Val::EigonPrimitive(PrimitiveType::Integer)),
         wk::FLOAT => Ok(Val::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => Ok(Val::EigonPrimitive(PrimitiveType::Boolean)),
@@ -317,6 +319,7 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
             {
                 match et_iri_val.as_str() {
                     wk::STRING => Val::EigonPrimitive(PrimitiveType::String),
+                    wk::IRI_TYPE => Val::EigonPrimitive(PrimitiveType::Iri),
                     wk::INTEGER => Val::EigonPrimitive(PrimitiveType::Integer),
                     wk::FLOAT => Val::EigonPrimitive(PrimitiveType::Float),
                     wk::BOOLEAN => Val::EigonPrimitive(PrimitiveType::Boolean),
@@ -1030,6 +1033,7 @@ fn decode_arg_type(class_iri: &Iri, value: &Value, layer: &Layer) -> Result<Exp,
     // Primitive type IRIs get folded to the corresponding Exp form.
     match arg_iri.as_str() {
         wk::STRING => return Ok(Exp::EigonPrimitive(PrimitiveType::String)),
+        wk::IRI_TYPE => return Ok(Exp::EigonPrimitive(PrimitiveType::Iri)),
         wk::INTEGER => return Ok(Exp::EigonPrimitive(PrimitiveType::Integer)),
         wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),

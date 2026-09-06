@@ -401,10 +401,33 @@ pub enum Constraint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrimitiveType {
     String,
+    /// An absolute IRI. A REFINEMENT of [`PrimitiveType::String`], not a separate carrier: its
+    /// values are `Exp::LitString`, and the difference is that checking one parses it (D88 §3).
+    ///
+    /// It exists so a slot that holds a reference to a chain resource SAYS SO. The grounding
+    /// constructors' leaf, the `witness:Is*As` iri index and `eigentt:Term.Checked`'s payload all
+    /// named `core:string` and were read back as references by a prefix heuristic —
+    /// `s.starts_with("urn:")` in three places — which is a guess about a string rather than a
+    /// declaration about a slot.
+    ///
+    /// `LitString` INFERS to `String`, never to this: a bare literal cannot know which it is
+    /// meant to be. `Iri` is reachable only in CHECK mode, where a declared type asks for it. That
+    /// asymmetry is deliberate and is what keeps every existing authored literal valid.
+    Iri,
     Integer,
     Float,
     Boolean,
     Json,
+}
+
+impl PrimitiveType {
+    /// Whether a value of `self` is admissible where `other` is expected.
+    ///
+    /// Only `Iri <: String` holds — every IRI is a string. The converse does not: that is the
+    /// whole point of declaring the slot.
+    pub fn subtype_of(self, other: PrimitiveType) -> bool {
+        self == other || (self == PrimitiveType::Iri && other == PrimitiveType::String)
+    }
 }
 
 /// Declaration of an inductive type (Phase 11b, D19).
