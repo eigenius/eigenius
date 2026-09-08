@@ -2,6 +2,10 @@
 
 `2026-09-07`, branch `numeric-core-and-verification-judgement`.
 
+**Superseded `2026-09-07`: B4 ran on the corpus machine and all gates pass.** See
+`docs/notes/next-steps-after-d88.md` §B4 for the snapshot paths and numbers. What follows is the
+handoff as written before that run; it is kept for the transfer checklist, which is still accurate.
+
 Everything through B6, the Lean version gate and the `justification.esl` rewrite is committed and
 pushed. **B4's reseed has not run.** It is the next step, and it runs on the machine that has the
 source corpora.

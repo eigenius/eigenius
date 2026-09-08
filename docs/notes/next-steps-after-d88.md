@@ -11,7 +11,7 @@ as B1 and B2 landed.*
 |---|---|---|
 | **A1** | Close eigenius#235 — fully discharged by this branch | done |
 | **A2** | Open the PR | done |
-| **A3** | The bootstrap manifest has moved **three** times on this branch: `#235`'s description strings, B2's merge, B1's implicit binders. Every persisted store is unresumable until **B4** runs | pending B4 |
+| **A3** | The bootstrap manifest has moved **three** times on this branch: `#235`'s description strings, B2's merge, B1's implicit binders. Every persisted store is unresumable until **B4** runs | done — B4 ran `2026-09-07` |
 
 `eval-parse-rate.sh` already refuses to score a run with no summary line, so a `ManifestDrift` SKIP
 in the interim cannot be misread as a pass.
@@ -107,7 +107,14 @@ Two reasons it is its own change rather than a rider on B3:
 The same heuristic also sits at `program/expr.rs:903` and `nbe/eval/marshal.rs:35`; whether those
 are the same question is B6's to answer.
 
-### B4 — one reseed, then both baselines
+### B4 — one reseed, then both baselines — **DONE `2026-09-07`** (`5114c99`)
+
+Ran on the corpus machine. Snapshots: base `../db-snapshot/wordnet-umls-2026-09-07` (3.75 GiB, 93
+files), aligned `../db-snapshot/wordnet-umls-aligned-2026-09-07` (3.6 GiB). All gates pass —
+`grammar-gap 0`, `missing-lexeme 0`, expected-hits 62/62 with the miss-set unchanged,
+`reading-correct 30/41`, `reading-unadjudicated 0`, `invalid-selected 0`; runtime 42.58s.
+Two numbers moved without breaching a gate: `encoded` 2 → 1, and `total-readings` 613 → 674
+(ceiling 700), `total-skeletons` 170 → 171 (ceiling 250).
 
 B3 is bootstrap, and B5 may be; A3's three accumulated deltas ride along. **The reseed is ~30 minutes**; the
 alignment snapshot and the two parse measurements are the rest of the wall clock.
