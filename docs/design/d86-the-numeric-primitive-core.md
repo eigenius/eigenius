@@ -1,6 +1,8 @@
 # D86 — The numeric primitive core over `core:float`
 
-*Status: **proposed** `2026-09-04` · design note.*
+*Status: **proposed** `2026-09-04` · design note. **§3.1 and §4 corrected `2026-09-06`** — the
+kernel-reduction premise was false on the pinned toolchain, and §1's lemma-inheritance argument with
+it. Read those two corrections before building on this.*
 
 *Companion documents: [D74](d74-eigentt-to-lean-externalization.md) §4.8 (floats are translated;
 the relation is not), [D30](d30-eigon-to-lean-faithful-translation.md) (what the mirror emits),
@@ -45,8 +47,51 @@ discipline (one mangling function called by both sides) applied one level up.
 
 ### 3.1 `core:float` ↔ `Float`
 
-Done (D74 §4.8). IEEE 754/854 binary64. Lean's `Float` is a structure over a `UInt64` bit pattern
-with a `binary64.Valid` proof, and its arithmetic reduces in the kernel.
+Done (D74 §4.8). IEEE 754/854 binary64.
+
+**CORRECTION `2026-09-06`.** This section read *"Lean's `Float` is a structure over a `UInt64` bit
+pattern with a `binary64.Valid` proof, and its arithmetic reduces in the kernel."* **On the pinned
+toolchain that is false, and several conclusions below rested on it.** In `lean4export` output from
+Lean `v4.29.1`, `Float.ofScientific` is declared **`opaque`** — with `floatSpec`, `Float.neg`,
+`Float.beq`, `Float.scaleB` and `UInt64.toFloat`. `Float` is an `@[extern]` binding to the C++
+runtime's `double`, so no kernel reduces it: not `nanoda_lib`'s, and not Lean's own. `decide` gets
+stuck; only `native_decide` evaluates a float, by compiling and trusting the result, which is what
+an independent re-checker exists to avoid.
+
+**This is version-dependent, and the version matters more than the workaround.** Lean `4.33.0`
+redefined `Float` to wrap a `Float.Model`, after which float arithmetic and `Float.ofScientific`
+**do** reduce in the kernel. We are pinned to `v4.29.1` (`lean/research/*/lean-toolchain`), so the
+design below is written for the opaque regime.
+
+**Read against `4.33.1`, which is installed locally, the change is larger than "it now reduces."**
+`Init/Data/Float.lean` becomes a 290-byte shim over `Init.Data.Float.Model`. `Float` becomes
+`structure Float where ofModel :: toModel : Float.Model`, with `Float.Model` a subtype of `UInt64`.
+`Float.add`, `sub`, `mul`, `div`, `neg`, `beq`, `ofBits` and `toBits` stop being `opaque` and become
+`def`s with logical content; `Float.scaleB` stays `opaque`. And the ordering relations **change
+signature**:
+
+| | `v4.29.1` | `v4.33.1` |
+|---|---|---|
+| `Float.lt` / `Float.le` | `Float → Float → Prop`, via the `opaque` `floatSpec` | `Float → Float → Bool`, via `Float.Model` |
+| `instLEFloat` | `⟨Float.le⟩`, already a `Prop` | `⟨fun a b => a.le b⟩`, through the `Bool → Prop` coercion |
+
+The surface term the externalizer emits — `@LE.le.{0} Float instLEFloat x y` (`NumericRel::Le`) —
+elaborates under both, so the *shape* of what we generate survives the upgrade. What changes is what
+it means definitionally: under `4.33.1` the kernel can unfold it to `UInt64` arithmetic on
+`Float.Model`. The same applies to §3.3's `(x == y) = true`, which sits on `Float.beq`.
+
+**What that obliges on upgrade, which is not obvious.** Our re-checker is `nanoda_lib`, and it
+implements no float semantics at all — the string `float` does not appear in its source. Under
+`4.29.1` that is *correct*: Lean's kernel cannot reduce these either, and a re-checker must reject
+exactly what Lean rejects. Under `4.33+` it becomes *incomplete*: Lean's kernel would accept
+definitional equalities nanoda still refuses, so nanoda would reject proofs Lean accepts. `nanoda_lib`
+declares no Lean version, so nothing in the build surfaces that skew.
+
+**So a Lean upgrade past 4.33 is not a free upgrade.** It requires nanoda to implement `Float.Model`
+reduction, and until it does, the pin is load-bearing. §5's literal normalization (`externalize.rs`,
+`float_literal`) is the workaround for the opaque regime and should be read as version-scoped rather
+than permanent: once both kernels reduce floats, the two `OfScientific` encodings of one value become
+definitionally equal and the normalization stops being necessary.
 
 ### 3.2 One ordering relation: `≤`
 
@@ -120,6 +165,43 @@ larger obligation, for no gain in what claims can be *stated*.
 **True.** A claim can state a relation between measured quantities, and a Lean proof of that
 relation can be checked against it — with the quantities meaning IEEE doubles, rounding included,
 which is what the pipeline actually produced.
+
+**The founding argument in §1 does not survive either.** §1 rejects a bespoke chain relation on the
+grounds that *"a proof about it inherits none of Lean's order lemmas, so the exercise buys
+nothing."* Because the kernel cannot evaluate floats, **Lean and Mathlib carry practically no
+`Float` lemmas** — Mathlib does continuous mathematics over `Real` and exact computation over `Rat`.
+There is no order-lemma library to inherit, so the argument that chose `Float` over an exact type is
+hollow in both directions: the arithmetic does not reduce (§3.1) and the lemmas do not exist.
+
+**Which points at `Rat`.** `Rat` is purely inductive over `Nat`/`Int` and reduces in any conforming
+kernel, so a numeric proposition becomes something a checker **decides** rather than matches
+syntactically — and Mathlib's order library applies. D52 makes this affordable: the institution
+already abstracts raw data away, so only the asserted thresholds and p-value bounds appear in
+propositions. `mean_of(s)` stays an opaque `Rat`-valued constant; nothing needs the dataset as `Rat`.
+
+**If that pivot is taken, `core:float` maps to the EXACT binary64 rational, not the author's
+decimal.** A stored `0.05` is `0.05000000000000000277…`, not `1/20`. Mapping to the decimal is
+prettier and silently changes the value — and near an alpha threshold that delta can let a proof
+succeed in Lean where the host computation failed, which is D74 §5's failure mode arriving through
+the back door. §3.3 already settles the principle: IEEE semantics are what a measurement means. The
+resulting rationals are ugly; that is presentation, not verification.
+
+**And it is emitted as a normalized structure literal, not as a division.** Lean's `Rat`
+(`Init/Data/Rat/Basic.lean`) is `structure Rat where mk' :: num : Int; den : Nat := 1;
+den_nz : den ≠ 0; reduced : num.natAbs.Coprime den` — the reduced form is an *invariant*, carried by
+two proof fields. Writing `def alpha : Rat := 3602879701896397 / 72057594037927936` puts `HDiv.hDiv`
+in the term, so every `def_eq` against it drives `Rat.div → Rat.inv → Rat.mul → Rat.normalize →
+Nat.gcd`. That is the reduction §3.1's normalization exists to avoid, reintroduced on the exact type.
+Emitting `Rat.mk' 3602879701896397 72057594037927936 _ _` instead makes `def_eq` structural on two
+literals plus proof irrelevance (`nanoda_lib` `tc.rs:988`, `proof_irrel_eq`) — no arithmetic per
+comparison. `num_rational::BigRational::from_float` already returns the reduced pair, so the
+invariant comes for free from the translation.
+
+The proof fields still get checked, but once, at declaration: `den_nz` and `reduced` are `by decide`,
+and discharging `reduced` runs a `gcd` on 56-bit operands. nanoda accelerates that on `BigUint`
+(`tc.rs:393`, `Gcd => mk_nat_lit_quick(nat_gcd(..))`), so it is one GMP gcd per literal rather than
+per comparison. That is the affordable shape, and it is the same discipline as §3.1: put the
+canonical form in the term, keep arithmetic out of the checking loop.
 
 **Not true.** The correspondence in §3.2 and §3.3 is asserted, not checked. Two primitives is the
 smallest set that supports the claim shapes the WRN chain contains, and the argument for each is

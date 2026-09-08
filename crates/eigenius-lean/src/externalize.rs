@@ -811,8 +811,38 @@ fn float_literal<'t, 'p: 't>(
         Some((int, frac)) => (format!("{int}{frac}"), frac.len() as i64),
         None => (significand.to_string(), 0),
     };
-    let mantissa = BigUint::from_str(&digits).expect("`{:e}` emits decimal digits");
-    let scale = exp10 - fraction_len;
+    let mut mantissa = BigUint::from_str(&digits).expect("`{:e}` emits decimal digits");
+    let mut scale = exp10 - fraction_len;
+
+    // ── Match what Lean's ELABORATOR builds, not what `{:e}` renders ──────────────────────────
+    //
+    // `def_eq` cannot help here, and that is by design rather than an oversight in nanoda:
+    // `Float.ofScientific` is `opaque` in the export (with `floatSpec`, `Float.neg`, `Float.beq`,
+    // `Float.scaleB`, `UInt64.toFloat`), because Lean's `Float` is an `@[extern]` binding to the
+    // C++ runtime's `double`. NO kernel — Lean's or nanoda's — reduces it, so two `OfScientific`
+    // applications denoting one `f64` are definitionally distinct unless they are syntactically
+    // identical. The two sides therefore have to AGREE ON A FORM.
+    //
+    // Lean builds its from the SOURCE token: `d….f…` gives mantissa `d…f…` and exponent
+    // `len(f…)`. `{:e}` gives the shortest round-trip scientific form, which has no fractional
+    // digits whenever the value is a whole number. The two coincide only by luck — `0.1` and
+    // `-0.42` matched, `1.0` and `0.0` did not, which is what the first D86 test found.
+    //
+    // So: render as a person writes it, a plain decimal with at least one fractional digit, by
+    // folding a non-negative scale into the mantissa. `1.0` becomes `(10, true, 1)`, `0.0`
+    // becomes `(0, true, 1)`, `100.0` becomes `(1000, true, 1)` — each the term Lean elaborates
+    // for that literal.
+    //
+    // ABOVE `PLAIN_DECIMAL_LIMIT` this stops being what anyone writes: `1e300` as a plain decimal
+    // is 302 digits, and a Lean author writes `1e300`, which is the scientific form `{:e}`
+    // already produces. The bound is where human notation switches, and it is a convention — the
+    // one place a form is chosen rather than derived. Getting it wrong fails the check loudly
+    // rather than silently, because a mismatched statement is a `Fails` naming both sides.
+    const PLAIN_DECIMAL_LIMIT: i64 = 20;
+    if (0..=PLAIN_DECIMAL_LIMIT).contains(&scale) {
+        mantissa *= BigUint::from(10u32).pow((scale + 1) as u32);
+        scale = -1;
+    }
 
     // `@OfScientific.ofScientific.{0}` — the level is fixed by the type it builds, `Float :
     // Type 0`, not by the enclosing declaration's parameters. `lean_const` takes the target's,
