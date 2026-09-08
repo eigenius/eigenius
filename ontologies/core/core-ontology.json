@@ -706,7 +706,7 @@
             "urn:eigenius:core:arg_name": "iri",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:iri",
               "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           },
@@ -995,7 +995,7 @@
             "urn:eigenius:core:arg_name": "decl_iri",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:iri",
               "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           },

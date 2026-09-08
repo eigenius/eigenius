@@ -331,7 +331,7 @@ pub fn extract_indexable_triples(layer: &Layer) -> Vec<OwnedTriple> {
                 // triples at all, so nothing could ask what depends on a term.
                 wk::INDUCTIVE => {
                     let mut names = BTreeSet::new();
-                    crate::layer::term_mentions::json_mentions_of_value(value, &mut names);
+                    crate::layer::term_mentions::json_mentions_of_value(value, layer, &mut names);
                     for name in names {
                         distinct_mentions.insert(name.clone());
                         mention_pairs.push((subject_iri.clone(), name));

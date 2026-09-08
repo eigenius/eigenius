@@ -1133,7 +1133,7 @@ impl Validator {
         // like a guard with nothing to catch. The recursion was still refused, but by a
         // decode failure with an unrelated message.
         if let Some(id) = res_id {
-            if mentions_iri(body_value, id) {
+            if mentions_iri(body_value, &self.layer, id) {
                 fail(
                     &mut errors,
                     Some(body_prop.clone()),
@@ -1376,9 +1376,13 @@ struct ComorphismFormatRef<'a> {
 ///
 /// Delegates to the one walker that reads both shapes, rather than keeping a second one that
 /// only understood the tagged dict.
-fn mentions_iri(v: &crate::ontology::resource::Value, target: &Iri) -> bool {
+fn mentions_iri(
+    v: &crate::ontology::resource::Value,
+    layer: &crate::layer::Layer,
+    target: &Iri,
+) -> bool {
     let mut out = std::collections::BTreeSet::new();
-    crate::layer::term_mentions::json_mentions_of_value(v, &mut out);
+    crate::layer::term_mentions::json_mentions_of_value(v, layer, &mut out);
     out.contains(target)
 }
 

@@ -74,6 +74,17 @@
 //! moved NOTHING, because those edits were all `//` comments — the compiler strips them, while a
 //! `description = "…"` is a resource property and hashes.
 //!
+//! IT FIRED ON B6 (`2026-09-06`), on ONE layer, `core`. Two constructor arguments on
+//! `eigentt:Term` were retyped from `core:string` to `core:iri`: `ConstRef.iri` and
+//! `CtorApp.decl_iri`. Both name a declaration and always did; B3 declared three OTHER leaves
+//! IRI-valued (`Certificate.declared`/`.observed`/`.verified`, the `witness:Is*As` index,
+//! `Term.Checked.payload_iri`) and did not reach these, which went unnoticed because the mentions
+//! walker recovered them by matching `urn:` and so never needed the declaration. B6 removes that
+//! heuristic, and the retype is what keeps a `ConstRef` target a dependency once it is gone.
+//! `CtorApp.ctor_name` deliberately stays `core:string`: constructors have no chain-resolvable
+//! identity (D79 §2.2.1), so it names no declaration. The reseed this obliges is B4, which the
+//! entry below already owes.
+//!
 //! IT FIRED AGAIN ON B1 (`2026-09-05`): `core` and `justification`. `core` gained the
 //! `core:implicit_args` property and a `recommends` on `core:InductiveCtor`; `justification`
 //! declares `app`'s `A`/`B` and `sum_l`/`sum_r`'s `P` implicit, which changes those
@@ -127,7 +138,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "core:0649ee06317973fedaf2e05f81999144a04a781d8318819a0e000f2f43eb7244
+const EXPECTED: &str = "core:edf37aede849867bcc5921b6ca718bfdfc0ed7b88aadfda970d63f0704e0c1ad
 eigentt-type-fragment:52bcfe935009fb7f32400dcb344ab884f29937692370aa4e3cc5a24d87250028
 program:429718a323b6bfcc3ff858277f73b2c15de724f9d1c1c2c2c220748295b3c726
 reflection:2455ee11766bc20134ed820e69c006951de44aa9e486abb36938d1a5361c0569
