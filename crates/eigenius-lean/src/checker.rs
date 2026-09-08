@@ -69,6 +69,101 @@ pub enum CheckError {
     /// disk on every call until upstream takes a `Reader`.
     #[error("failed to stage export bytes: {0}")]
     TempFile(#[from] std::io::Error),
+
+    /// The export was produced by a Lean the numeric correspondence was not written against.
+    ///
+    /// See [`SUPPORTED_LEAN_MINOR`] for why this is a hard stop rather than a warning.
+    #[error(
+        "export was produced by Lean {found}, but this build's Lean correspondence is written \
+         against {supported}.x — see D86 §3.1. Regenerate the export with the pinned toolchain, \
+         or update the correspondence and `SUPPORTED_LEAN_MINOR` together."
+    )]
+    UnsupportedLeanVersion {
+        /// `meta.lean.version` as the export declares it.
+        found: String,
+        /// The `major.minor` series this build understands.
+        supported: &'static str,
+    },
+
+    /// The export's first line is not the `lean4export` metadata header.
+    #[error("export carries no `meta.lean.version` header; it is not a lean4export file")]
+    MissingLeanVersion,
+}
+
+/// The Lean `major.minor` series this build's Lean correspondence is written against.
+///
+/// **Why this is checked, and why nothing checked it before.** A `lean4export` file declares
+/// three versions in its first line — the exporter's, the format's, and Lean's:
+///
+/// ```text
+/// {"meta":{"exporter":{"name":"lean4export","version":"3.1.0"},
+///          "format":{"version":"3.1.0"},
+///          "lean":{"githash":"f72c35b…","version":"4.29.1"}}}
+/// ```
+///
+/// `nanoda_lib`'s parser gates `format.version` against a supported range and parses
+/// `lean.version` into `LeanMeta` without ever looking at it. So the format was gated and Lean
+/// was not, and the gap is not cosmetic: what `Float` MEANS changed under us in Lean `4.33.0`.
+/// `Float` became a structure over `Float.Model` (a `UInt64` subtype), `Float.beq`/`add`/`neg`
+/// stopped being `opaque`, and `Float.lt`/`Float.le` changed signature from
+/// `Float → Float → Prop` to `Float → Float → Bool`.
+///
+/// **The failure that gap produces is silent, which is why it is a hard stop.** The terms
+/// `externalize.rs` builds — `@LE.le.{0} Float instLEFloat x y`, and `(x == y) = true` over
+/// `instBEqFloat` — still elaborate under `4.33`, so nothing fails to parse and nothing fails to
+/// type-check. What changes is that Lean's kernel can now reduce them and `nanoda_lib` still
+/// cannot, so nanoda becomes INCOMPLETE relative to Lean: it refuses definitional equalities Lean
+/// accepts, and proofs that are fine in Lean come back as `Verdict::Fails` with a diagnostic
+/// about defeq that names no version. D86 §3.1 has the table.
+///
+/// **The pin is the toolchain, and this constant must track it.** Every `lean-toolchain` in
+/// `lean/` reads `leanprover/lean4:v4.29.1`; `lean_toolchain_pin_matches_the_supported_series`
+/// in `tests/lean_version_gate_test.rs` fails if this constant and those files disagree, so the
+/// two cannot drift. Moving past `4.29` means updating the correspondence and this constant in
+/// one change, not discovering the skew from a confusing defeq failure months later.
+///
+/// The check is on `major.minor`: a patch bump cannot change a definition's shape, and gating it
+/// would fail loudly for no reason.
+pub const SUPPORTED_LEAN_MINOR: &str = "4.29";
+
+/// Read `meta.lean.version` from a `lean4export` file's first line.
+///
+/// Split out from the gate so the test suite can assert on the parse independently of the
+/// comparison, and because `nanoda_lib` exposes no accessor for it — `LeanMeta` is private, so
+/// the header is read here rather than taken off the parsed `ExportFile`.
+pub fn lean_version_of(bytes: &[u8]) -> Option<String> {
+    let first = bytes.split(|b| *b == b'\n').next()?;
+    let meta: serde_json::Value = serde_json::from_slice(first).ok()?;
+    Some(
+        meta.get("meta")?
+            .get("lean")?
+            .get("version")?
+            .as_str()?
+            .to_string(),
+    )
+}
+
+/// `4.29.1` -> `4.29`. `None` when there is no `major.minor` to take.
+fn minor_series(version: &str) -> Option<&str> {
+    let (major, rest) = version.split_once('.')?;
+    let minor = rest.split('.').next()?;
+    if major.is_empty() || minor.is_empty() {
+        return None;
+    }
+    Some(&version[..major.len() + 1 + minor.len()])
+}
+
+/// Refuse an export produced by a Lean whose `Float` semantics this build was not written
+/// against. See [`SUPPORTED_LEAN_MINOR`].
+fn gate_lean_version(bytes: &[u8]) -> Result<(), CheckError> {
+    let found = lean_version_of(bytes).ok_or(CheckError::MissingLeanVersion)?;
+    match minor_series(&found) {
+        Some(series) if series == SUPPORTED_LEAN_MINOR => Ok(()),
+        _ => Err(CheckError::UnsupportedLeanVersion {
+            found,
+            supported: SUPPORTED_LEAN_MINOR,
+        }),
+    }
 }
 
 /// Check a `lean4export`-format JSON export for the named theorem.
@@ -102,6 +197,20 @@ pub fn check_proof(
     expected: Option<&ExpectedStatement<'_>>,
 ) -> Result<Verdict, CheckError> {
     use std::io::Write;
+
+    // The export must come from the Lean this build's correspondence targets — but only when
+    // there is a correspondence in play. `expected.is_some()` is exactly the condition under
+    // which `externalize` runs, and externalization is the only thing here that hard-codes what
+    // Lean constants mean: `LE.le` with `instLEFloat`, `OfScientific.ofScientific`, `Neg.neg`,
+    // `Subtype`. A name-level check (`expected: None`) asserts only that the export is internally
+    // sound and holds the target — Lean's own declarations against Lean's own kernel rules, which
+    // nanoda's format-version gate already covers and which no correspondence of ours touches.
+    //
+    // A skew does not make a proof wrong, it makes the verdict meaningless, so it is a
+    // `CheckError` and not a `Verdict::Fails` — the claim is unjudgeable, not refuted.
+    if expected.is_some() {
+        gate_lean_version(bytes)?;
+    }
 
     let mut tmp = tempfile::NamedTempFile::new()?;
     tmp.as_file_mut().write_all(bytes)?;
