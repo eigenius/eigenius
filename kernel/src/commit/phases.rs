@@ -35,8 +35,9 @@ use std::sync::Arc;
 
 use crate::context::{ExecutionContext, ExecutionMode};
 use crate::institution::dispatch::{
-    allocate_invocation_iri, build_runtime_invocation_resource, build_verdict_resource,
-    dispatch_auto_on_load_for_layer, finalize_emitted_resource, VerdictReading,
+    allocate_activity_iri, allocate_invocation_iri, build_in_process_activity_resource,
+    build_runtime_invocation_resource, build_verdict_resource, dispatch_auto_on_load_for_layer,
+    finalize_emitted_resource, VerdictReading,
 };
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
@@ -451,6 +452,18 @@ pub fn autoonload_dispatch(state: &mut CommitState<'_>) -> Result<PhaseControl, 
             &invocation_iri,
             &derive_verdict_iri(&invocation_iri),
         );
+        // G5 — an in-process dispatch produced no Activity at all, so a chain-wide provenance
+        // export carried Activities for externally dispatched work and none for the rest
+        // (`w3c-prov-mapping.md` §5.2). The statistics and Lean institutions both run in process,
+        // which is to say the gap covered the institutions that matter.
+        //
+        // The verdict's IRI is deliberately NOT derived from this. `derive_verdict_iri_for` keys
+        // off a `RuntimeInvocation` when there is one and falls back to the subject otherwise;
+        // routing an Activity into that slot would change the IRI of every in-process verdict on
+        // every existing chain, which is a chain-identity change and not what closing a provenance
+        // hole should cost.
+        let activity_iri = allocate_activity_iri();
+        let activity = build_in_process_activity_resource(dispatch, &activity_iri);
         let verdict = build_verdict_resource(
             dispatch,
             invocation.as_ref().map(|_| &invocation_iri),
@@ -475,6 +488,9 @@ pub fn autoonload_dispatch(state: &mut CommitState<'_>) -> Result<PhaseControl, 
         if let Some(inv) = invocation.as_ref() {
             provenance.push(inv.clone());
         }
+        if let Some(act) = activity.as_ref() {
+            provenance.push(act.clone());
+        }
         if let Some(v) = verdict {
             provenance.push(v);
         }
@@ -497,6 +513,7 @@ pub fn autoonload_dispatch(state: &mut CommitState<'_>) -> Result<PhaseControl, 
                     &layer,
                     dispatch,
                     invocation.as_ref().map(|_| &invocation_iri),
+                    activity.as_ref().map(|_| &activity_iri),
                     raw_derivation.clone(),
                 ) {
                     provenance.push(stamped);
