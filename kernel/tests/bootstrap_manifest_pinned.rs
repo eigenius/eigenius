@@ -74,6 +74,18 @@
 //! moved NOTHING, because those edits were all `//` comments — the compiler strips them, while a
 //! `description = "…"` is a resource property and hashes.
 //!
+//! IT FIRED ON THE `justification.esl` REWRITE (`2026-09-07`), on ONE layer, `justification`.
+//! The file's comments and `description` properties were rewritten to state the current design
+//! rather than the sequence of edits that produced it, and to frame it on
+//! `docs/design/judgements-and-warrants.tex` — the paper this branch implements — rather than on
+//! the D-documents that preceded it. No declaration changed: same seven constructors, same
+//! signatures, same `requires`/`recommends`, same properties. The hash moved because a
+//! `description` is a resource property and hashes, while a `//` comment is stripped. Nothing
+//! else in the manifest moved, which is the check that the edit was confined to prose. One
+//! substantive correction rode along: a comment asserted that `justification:Conclusion` "stays
+//! `subclass_of reflection:DerivedResource`" — the class declares no parent, and that class was
+//! deleted.
+//!
 //! IT FIRED ON B6 (`2026-09-06`), on ONE layer, `core`. Two constructor arguments on
 //! `eigentt:Term` were retyped from `core:string` to `core:iri`: `ConstRef.iri` and
 //! `CtorApp.decl_iri`. Both name a declaration and always did; B3 declared three OTHER leaves
@@ -149,7 +161,7 @@ runtime:ada851931aeff9eed036621b306ca3eb25c0044d600c84dcad77c67973c1a22e
 formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:d6faf931474f38e64da8c4cafb1180eaf1dbf9800112466eb4cedc0279bbae28
-justification:7399baf8d4310557a1ebbf6df9a080fb8d44c4e6c9327b3ab57f27df4d317d38
+justification:f78f06361385f031bcc8561cf30aa85a9e3ec001327b7c0535ff363dd61cab85
 statistics:c0fa9ce038ad7b3a61a884c32432686eaa0a50fbc6c437cff8fbdbf6ce2dda6d
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
