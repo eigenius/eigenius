@@ -215,12 +215,12 @@ The categories \emph{Computed} and \emph{Sampled} are not independent grounds. I
 
 \begin{table}[h]
 \small
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}llll@{}}
 \toprule
-\textbf{name} & \textbf{shape} & \textbf{condition} \\
+\textbf{name} & \textbf{shape} & \textbf{ground set} & \textbf{condition} \\
 \midrule
-\emph{Computed} & $\mathrm{App}(\mathrm{Declared}(f : I \to O), \mathrm{Observed}(\mathit{input}))$ & the plan is declared a function \\
-\emph{Sampled} & a bare $\mathrm{Observed}$ leaf & no $I \to O$ is assertable \\
+\emph{Computed} & $\mathrm{App}(\mathrm{Declared}(f : I \to O), \mathrm{Observed}(\mathit{input}))$ & $\{\mathit{Declared}, \mathit{Observed}\}$ & the plan is declared a function \\
+\emph{Sampled} & a bare $\mathrm{Observed}$ leaf & $\{\mathit{Observed}\}$ & no $I \to O$ is assertable \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -228,6 +228,8 @@ The categories \emph{Computed} and \emph{Sampled} are not independent grounds. I
 This distinction is structural. The application operation requires a premise of the form $j_1 : (A \to B)$; thus, a plan is applicable if and only if it is an implication. Neither \emph{Computed} nor \emph{Sampled} are stored as explicit state names.
 
 A computed conclusion remains valid regardless of whether a run occurred. If the analysis plan denotes a function, the output is mathematically determined by the input. The execution record constitutes provenance, not warrant. Conversely, for a stochastic process, the output is not strictly determined by the input. In this case, the execution record \emph{is} the evidence, yielding an observation rather than an application. This structural asymmetry prevents the two from sharing a unified ground.
+
+Neither shape yields a \emph{Verified} ground: the ground set of each contains no checked judgement, and in \emph{Computed} the typing $f : I \to O$ is itself declared rather than proven. Strengthening both properties changes the ground. Where the typing is dependent, $f : (i : I) \to O(i)$, and is proven rather than asserted, and the input commits as a term, the application $f\,i : O(i)$ is checked by the kernel and establishes a \emph{Verified} ground. Because satisfaction is inhabitation (\S\ref{sec:inhabitation}), evaluation and proof coincide in this case. The proposition so established is indexed by that specific input and does not generalize over $I$; a general statement over $I$ remains a separate obligation.
 
 The foundational design rule dictates that the chain records only the proposition actually established, and every bridging inference constitutes a declared premise attributed to a specific owner.
 
@@ -327,6 +329,7 @@ translation & what that implies for, say, compound efficacy & a further claim ac
 The \emph{Computed} shape attaches strictly to the immediate statement. It manifests as an application of the declared plan to the observed sample set, where the plan's formal specification serves as the premise and carries the scope marker. The translation phase is not represented by a primitive shape. It requires a distinct application with its own declared leaf. Consequently, any query assessing whether the translated conclusion is fully verified evaluates to false.
 
 \subsection{The Scope of Inhabitation Semantics}
+\label{sec:inhabitation}
 
 Institution theory relies on a classical formulation where the satisfaction relation evaluates sentences against models~\cite{gb92}. Under inhabitation semantics, truth corresponds to term inhabitation. By the Brouwer-Heyting-Kolmogorov (BHK) interpretation~\cite{tvd88} and the propositions-as-types principle~\cite{mltt}, the assertion that $P$ holds is equivalent to the statement that $\sem{P}$ possesses an inhabitant. In the initial model, the relations $\vdash$ and $\models$ coincide by construction.
 
