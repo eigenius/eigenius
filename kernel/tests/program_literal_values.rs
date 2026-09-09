@@ -194,27 +194,38 @@ fn literal_terms_carry_their_payload() {
     assert_eq!(field("urn:eigenius:example:flag"), Exp::LitBool(true));
 }
 
-/// A string literal that is a `urn:` / `http` IRI still decodes to
-/// `Exp::Var` — the pre-canonicalisation resource-reference heuristic.
-/// Unchanged by #142; pinned so the fix is not read as having removed
-/// it.
+/// An IRI-shaped string literal decodes to `Exp::LitString`, like every other string.
+///
+/// It used to decode to `Exp::Var`. This test pinned that, and its own comment says why: the
+/// heuristic predated #142 and the pin existed so #142 would not be misread as having removed it.
+/// Removing it is now the intent. A `program:Literal` means a literal; a reference is a
+/// `program:Var` carrying `program:name`, which is a declaration rather than a reading of the text.
+///
+/// What the heuristic cost ran the other way. An author could not put an IRI in a program as DATA:
+/// every `urn:` or `http` string silently became a free variable, and a free variable whose name is
+/// an IRI nothing declares fails far from the literal that caused it.
 #[test]
-fn iri_shaped_string_literal_still_decodes_as_a_reference() {
-    let mut r = Resource::new_embedded();
-    r.set(
-        iri("urn:eigenius:core:is_a"),
-        Value::Array(vec![Value::String(
-            "urn:eigenius:program:Literal".to_string(),
-        )]),
-    );
-    r.set(
-        iri("urn:eigenius:program:value"),
-        Value::String("urn:eigenius:example:thing".to_string()),
-    );
-    let exp = eigenius_kernel::program::expr::parse_expression(&r, &empty_layer()).unwrap();
-    assert_eq!(
-        exp,
-        Exp::Var("urn:eigenius:example:thing".to_string()),
-        "IRI-shaped string literals remain resource references"
-    );
+fn an_iri_shaped_string_literal_is_a_string() {
+    for text in [
+        "urn:eigenius:example:thing",
+        "http://purl.obolibrary.org/obo/GO_0006281",
+    ] {
+        let mut r = Resource::new_embedded();
+        r.set(
+            iri("urn:eigenius:core:is_a"),
+            Value::Array(vec![Value::String(
+                "urn:eigenius:program:Literal".to_string(),
+            )]),
+        );
+        r.set(
+            iri("urn:eigenius:program:value"),
+            Value::String(text.to_string()),
+        );
+        let exp = eigenius_kernel::program::expr::parse_expression(&r, &empty_layer()).unwrap();
+        assert_eq!(
+            exp,
+            Exp::LitString(text.to_string()),
+            "an IRI-shaped literal is data, not a reference"
+        );
+    }
 }

@@ -894,17 +894,22 @@ fn parse_reduce(resource: &Resource, layer: &Layer) -> Result<Exp, String> {
     ))
 }
 
-/// Literal value
+/// Literal value.
+///
+/// **A literal is a literal.** This used to return `Exp::Var` when the string parsed as an IRI and
+/// began with `urn:` or `http`, which made the node mean two things and decided between them by
+/// looking at the text. A reference already has its own declared form — `program:Var` carrying
+/// `program:name`, which the ESL compiler emits for `ast::Expr::Var` and resolves to a full IRI —
+/// so the heuristic was a second, undeclared route to it. What it cost was the other direction: a
+/// genuine string literal whose content happened to be IRI-shaped became a variable reference, and
+/// an author writing `"urn:eigenius:pub:wrn:dd_achilles"` as DATA had no way to say so.
+///
+/// The same reading is what B6 removed from the mentions walker (`layer/term_mentions.rs`): a bare
+/// string is not a reference, and where one is, a declaration says so.
 fn parse_literal(resource: &Resource) -> Result<Exp, String> {
     let val_prop = Iri::parse("urn:eigenius:program:value").unwrap();
     match resource.get(&val_prop) {
-        Some(Value::String(s)) => {
-            // A string literal that *might* be an IRI reference (heuristic on `urn:` / `http`).
-            if Iri::parse(s).is_ok() && (s.starts_with("urn:") || s.starts_with("http")) {
-                return Ok(Exp::Var(s.clone())); // Resource reference
-            }
-            Ok(Exp::LitString(s.clone()))
-        }
+        Some(Value::String(s)) => Ok(Exp::LitString(s.clone())),
         Some(Value::Integer(n)) => Ok(Exp::LitInt(*n)),
         Some(Value::Float(f)) => Ok(Exp::LitFloat(*f)),
         Some(Value::Boolean(b)) => Ok(Exp::LitBool(*b)),
@@ -957,6 +962,39 @@ mod tests {
             .build(crate::layer::LayerStorage::in_memory());
         let exp = parse_expression(&r, &layer).unwrap();
         assert!(matches!(exp, Exp::Var(ref n) if n == "x"));
+    }
+
+    /// A `program:Literal` holding an IRI-shaped string is a STRING.
+    ///
+    /// It used to become `Exp::Var`, on the strength of the `urn:` prefix, so a program could not
+    /// carry an IRI as data. The reference form is `program:Var`, tested directly above, and it is
+    /// reached by declaring the node rather than by how the text reads.
+    #[test]
+    fn a_literal_holding_an_iri_shaped_string_stays_a_string() {
+        let layer = crate::layer::LayerBuilder::new("empty", None)
+            .build(crate::layer::LayerStorage::in_memory());
+
+        for text in [
+            "urn:eigenius:pub:wrn:dd_achilles",
+            "http://purl.obolibrary.org/obo/GO_0006281",
+        ] {
+            let mut r = Resource::new_embedded();
+            r.set(
+                Iri::parse("urn:eigenius:core:is_a").unwrap(),
+                Value::Array(vec![Value::String(
+                    "urn:eigenius:program:Literal".to_string(),
+                )]),
+            );
+            r.set(
+                Iri::parse("urn:eigenius:program:value").unwrap(),
+                Value::String(text.to_string()),
+            );
+            let exp = parse_expression(&r, &layer).unwrap();
+            assert!(
+                matches!(exp, Exp::LitString(ref got) if got == text),
+                "{text} parsed as {exp:?}, not a string literal"
+            );
+        }
     }
 
     #[test]
