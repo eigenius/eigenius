@@ -212,10 +212,6 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
         app(
                    // outer c1 : specialise the literature rule at EIG_0291.
                    instantiate(
-                       // T : the domain
-                       core:string,
-                       fun (x : core:string) =>
-                           screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
                        EIG,
                        declared(RULE, RULE_P)
                    ),
@@ -228,21 +224,8 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                            // inner c1'' : nested instantiate — specialise the
                            // bridge at s, then at c.
                            instantiate(
-                               // T : the domain
-                               core:string,
-                               fun (c : core:string) =>
-                                   screen:sample_for(SS, c)
-                                   -> stats:lt(stats:mean_of(SS), 100.0)
-                                   -> screen:HasLowIC50(c),
                                EIG,
                                instantiate(
-                                   // T : the domain
-                                   core:string,
-                                   fun (s : core:string) =>
-                                       forall (c : core:string) =>
-                                           screen:sample_for(s, c)
-                                           -> stats:lt(stats:mean_of(s), 100.0)
-                                           -> screen:HasLowIC50(c),
                                    SS,
                                    declared(BRIDGE, BRIDGE_P)
                                )

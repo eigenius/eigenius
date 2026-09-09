@@ -140,7 +140,7 @@ data justification:Grounds : Prop -> Type 2 {
     // reason: the domain of `forall (y : T) => P(y)` would fix `T`, but the codomain is `P(y)`
     // and unification of the whole argument type has to succeed for any of it to count.
     // Widening that fragment is a decision about EigenTT, tracked in D88 §6.
-    instantiate :
+    instantiate implicit(T, P) :
         forall (T : Type 1, P : T -> Prop, x : T) =>
         justification:Grounds(forall (y : T) => P(y)) ->
         justification:Grounds(P(x)),

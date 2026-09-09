@@ -77,8 +77,6 @@ resource poly:concl : justification:Conclusion {
     justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(app(instantiate(
-                       Set,
-                       (fun (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m)),
                        poly:Model,
                        declared(
                            "urn:eigenius:demo:poly:rule",

@@ -128,17 +128,6 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                    //   where rule_cert : justification:Grounds(Declared(rule),
                    //                                 forall x, P(x))
                    instantiate(
-                       // T : the domain
-                       core:string,
-                       // P : core:string -> Prop
-                       //
-                       // Deliberately uses a different binder name (`x`) than
-                       // the rule's `canonical_proposition` (which uses `c`)
-                       // to exercise admission's alpha-canonical
-                       // hashing: alpha-equivalent propositions must hash to
-                       // the same key.
-                       fun (x : core:string) =>
-                           screen:HasLowIC50(x) -> screen:StrongInhibitor(x),
                        // t : core:string
                        "urn:eigenius:demo:screen:EIG_0291",
                        // rule_cert : justification:Grounds(forall x, P(x))

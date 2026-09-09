@@ -1454,8 +1454,15 @@ class p:Cat { description = "a dog"; }"#;
                 "`{ground}` declares nothing implicit"
             );
         }
-        // `instantiate`'s `T` reaches the index only under a higher-order pattern — D88 §6.
-        assert!(flags("instantiate").is_empty());
+        // `instantiate` hides `T` and `P`, writing only the instance and the premise.
+        //
+        // This asserted the opposite — that nothing was implicit, because `?P x` against the
+        // expected index is not a pattern and cannot be solved. That reasoning was about the
+        // wrong equation. `P` is determined from the PREMISE, where `?P y` is a meta applied to
+        // one distinct bound variable — the Miller pattern, with a unique solution — and `T`
+        // falls out of the same unification's domain. What is genuinely unsolvable is the
+        // expected-index equation, which is why `x` stays explicit.
+        assert_eq!(flags("instantiate"), vec![true, true, false, false]);
     }
 
     #[test]

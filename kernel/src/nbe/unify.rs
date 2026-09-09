@@ -62,7 +62,7 @@ use crate::nbe::check::eq_nf;
 use crate::nbe::readback::readback_val;
 use crate::nbe::term::Patt;
 use crate::nbe::val::{MetaId, Neut, Val};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A registry of unification metavariables and their solutions.
 ///
@@ -153,6 +153,10 @@ pub enum UnifyError {
     },
     /// A closure could not be instantiated while comparing under a binder.
     Eval(String),
+    /// The proposed solution has a shape the scope check cannot see inside — one carrying a
+    /// `Rho`, or an uninterpreted payload — so whether a variable escapes is undecidable. The
+    /// solve is refused: an undecidable solution is not a safe one.
+    Undecidable { meta: MetaId, shape: String },
 }
 
 impl std::fmt::Display for UnifyError {
@@ -171,6 +175,11 @@ impl std::fmt::Display for UnifyError {
                  only distinct bound variables are admitted in Phase C"
             ),
             UnifyError::DoubleSolve(id) => write!(f, "metavariable {id} solved twice"),
+            UnifyError::Undecidable { meta, shape } => write!(
+                f,
+                "metavariable {meta}: cannot decide whether the proposed solution ({shape}) \
+                 mentions a variable out of scope — refusing rather than guessing"
+            ),
             UnifyError::EscapesBinder {
                 meta,
                 meta_level,
@@ -419,24 +428,32 @@ fn solve_meta(
         });
     }
 
-    // PROTOTYPE (D89 experiment): a pattern spine is solved by abstracting the rhs over exactly
-    // the variables the spine names — `?P G#0 ≟ B` gives `?P := λ G#0. B`. Readback is what makes
-    // the scope question decidable here: it forces every closure, so the resulting `Exp` mentions
-    // each variable syntactically, and "does the solution mention a variable this meta does not
-    // scope over" becomes a walk over `Exp::Var` rather than over a `Val` whose closures hide
-    // their environments.
+    // A pattern spine is solved by abstracting the rhs over exactly the variables the spine names:
+    // `?P x ≟ B` gives `?P := λ x. B`. The spine is what makes the scope question answerable —
+    // it enumerates the variables this meta is allowed to keep, so the check is "does the solution
+    // mention any OTHER variable introduced at or above the meta's own level".
     if !bound_levels.is_empty() {
-        let body = readback_val(level, rhs);
-        let escaping = free_gen_levels(&body)
-            .into_iter()
-            .find(|l| *l >= mctx.level_of(id) && !bound_levels.contains(l));
-        if let Some(at_level) = escaping {
+        let meta_level = mctx.level_of(id);
+        let Some(mentioned) = mentioned_gen_levels(rhs, level, &mut Vec::new()) else {
+            // The walk met a shape it cannot see inside — one carrying a `Rho`, or an
+            // uninterpreted payload. A variable may hide there, so the solution is refused
+            // rather than admitted on a walk that would answer "no escape" for the unsound case.
+            return Err(UnifyError::Undecidable {
+                meta: id,
+                shape: format!("{:?}", readback_val(level, rhs)),
+            });
+        };
+        if let Some(&at_level) = mentioned
+            .iter()
+            .find(|l| **l >= meta_level && !bound_levels.contains(l))
+        {
             return Err(UnifyError::EscapesBinder {
                 meta: id,
-                meta_level: mctx.level_of(id),
+                meta_level,
                 at_level,
             });
         }
+        let body = readback_val(level, rhs);
         let abstracted = bound_levels.iter().rev().fold(body, |acc, l| {
             crate::nbe::term::Exp::Lam(Patt::Var(format!("G#{l}")), Box::new(acc))
         });
@@ -487,27 +504,157 @@ fn as_meta_spine(neut: &Neut) -> Option<(MetaId, Vec<Val>)> {
     }
 }
 
-/// PROTOTYPE (D89 experiment): the de Bruijn levels of `G#n` variables occurring in an `Exp`.
+/// The generated-variable levels a value mentions, or `None` when the shape cannot be decided.
 ///
-/// Readback names a generated variable `G#{level}` (`readback.rs`), so a solution's free variables
-/// are recoverable syntactically once the value has been read back.
-fn free_gen_levels(exp: &crate::nbe::term::Exp) -> Vec<usize> {
-    // Prefix-AGNOSTIC on purpose. `Neut::Gen(j, name)` reads back as `Var("{name}{j}")` keeping
-    // whatever tag the producer chose, and the tree uses at least `G#` (readback), `TC#`
-    // (env::gen_val) and ad-hoc tags in tests. Keying on one prefix silently misses the others,
-    // which is a scope check that passes exactly the cases it exists to refuse. Parsing the
-    // trailing digits off any name over-approximates instead: a user variable ending in digits is
-    // read as generated and the solve is refused, which fails closed.
-    crate::nbe::subst::free_vars(exp)
-        .iter()
-        .filter_map(|n| {
-            let digits = n.len() - n.trim_end_matches(|c: char| c.is_ascii_digit()).len();
-            if digits == 0 {
-                return None;
+/// **Levels, not names.** An earlier version read the value back and parsed digits off the free
+/// variable names. That could not work: `Neut::Gen(j, name)` reads back as `Var("{name}{j}")`
+/// keeping whatever tag the producer chose, and the tree uses at least `G#` (readback), `TC#`
+/// (`env::gen_val`) and ad-hoc tags in tests. Keyed on one prefix it misses the others — a scope
+/// check that admits exactly the cases it exists to refuse. Parsing trailing digits off any name
+/// avoided that by over-approximating, at the cost of reading a user variable named `foo12` as
+/// generated. Neither is a check you want guarding soundness, so this reads the levels directly.
+///
+/// **`None` means undecidable, and callers must refuse.** `Val::Record`, `Fun`, `Data` and
+/// `NtFun` / `NtMatch` carry a `Rho`, and `TemplateVal` / `ResourceVal` carry payloads this does
+/// not interpret; a variable can hide inside any of them. Rather than walk them wrongly, they
+/// answer `None`. That is the fail-closed direction: an undecidable solution is not solved.
+///
+/// Binders are entered the way readback enters them — instantiate the closure with a fresh
+/// generated variable, and record that level as BOUND so the walk does not report its own
+/// scaffolding as a free occurrence.
+fn mentioned_gen_levels(v: &Val, depth: usize, bound: &mut Vec<usize>) -> Option<BTreeSet<usize>> {
+    let mut out = BTreeSet::new();
+    walk_val(v, depth, bound, &mut out)?;
+    Some(out)
+}
+
+fn walk_val(
+    v: &Val,
+    depth: usize,
+    bound: &mut Vec<usize>,
+    out: &mut BTreeSet<usize>,
+) -> Option<()> {
+    match v {
+        // No variables.
+        Val::Sort(_)
+        | Val::One
+        | Val::Unit
+        | Val::EigonClass(_)
+        | Val::EigonPrimitive(_)
+        | Val::LitString(_)
+        | Val::LitInt(_)
+        | Val::LitFloat(_)
+        | Val::LitBool(_)
+        // A `WitnessKey` — an IRI and a proposition hash. No variables.
+        | Val::ChainWitness(_) => Some(()),
+
+        Val::Pair(a, b) => {
+            walk_val(a, depth, bound, out)?;
+            walk_val(b, depth, bound, out)
+        }
+        Val::Con(_, inner) | Val::Refl(inner) => walk_val(inner, depth, bound, out),
+        Val::Id(t, x, y) => {
+            walk_val(t, depth, bound, out)?;
+            walk_val(x, depth, bound, out)?;
+            walk_val(y, depth, bound, out)
+        }
+        Val::List(vs) => {
+            for x in vs {
+                walk_val(x, depth, bound, out)?;
             }
-            n[n.len() - digits..].parse::<usize>().ok()
-        })
-        .collect()
+            Some(())
+        }
+        Val::InductiveType { params, indices, .. } => {
+            for x in params.iter().chain(indices.iter()) {
+                walk_val(x, depth, bound, out)?;
+            }
+            Some(())
+        }
+        Val::InductiveVal { args, .. } => {
+            for x in args {
+                walk_val(x, depth, bound, out)?;
+            }
+            Some(())
+        }
+        Val::Refine(inner, _) => walk_val(inner, depth, bound, out),
+
+        // Binders: enter as readback does, and mark the variable we introduce as bound.
+        Val::Lam(c) => {
+            let v = Val::Nt(Neut::Gen(depth, "walk#".to_string()));
+            let body = c.apply(v).ok()?;
+            bound.push(depth);
+            let r = walk_val(&body, depth + 1, bound, out);
+            bound.pop();
+            r
+        }
+        Val::Pi(dom, c) | Val::Sig(dom, c) => {
+            walk_val(dom, depth, bound, out)?;
+            let v = Val::Nt(Neut::Gen(depth, "walk#".to_string()));
+            let body = c.apply(v).ok()?;
+            bound.push(depth);
+            let r = walk_val(&body, depth + 1, bound, out);
+            bound.pop();
+            r
+        }
+
+        Val::Nt(n) => walk_neut(n, depth, bound, out),
+
+        // Carries a `Rho` or an uninterpreted payload — a variable can hide inside. Undecidable.
+        Val::Record(..) | Val::Fun(..) | Val::Data(..) | Val::TemplateVal(..) => None,
+        Val::ResourceVal(_) => None,
+    }
+}
+
+fn walk_neut(
+    n: &Neut,
+    depth: usize,
+    bound: &mut Vec<usize>,
+    out: &mut BTreeSet<usize>,
+) -> Option<()> {
+    match n {
+        Neut::Gen(level, _) => {
+            if !bound.contains(level) {
+                out.insert(*level);
+            }
+            Some(())
+        }
+        Neut::Const(..) | Neut::EigonAxiom(_) | Neut::Checked(_) => Some(()),
+        Neut::Meta(_, spine) => {
+            for x in spine {
+                walk_val(x, depth, bound, out)?;
+            }
+            Some(())
+        }
+        Neut::App(head, arg) => {
+            walk_neut(head, depth, bound, out)?;
+            walk_val(arg, depth, bound, out)
+        }
+        Neut::Fst(inner) | Neut::Snd(inner) => walk_neut(inner, depth, bound, out),
+        Neut::PropAccess(inner, _) => walk_neut(inner, depth, bound, out),
+        Neut::NtMap(f, inner) => {
+            walk_val(f, depth, bound, out)?;
+            walk_neut(inner, depth, bound, out)
+        }
+        Neut::NtReduce(f, z, inner) => {
+            walk_val(f, depth, bound, out)?;
+            walk_val(z, depth, bound, out)?;
+            walk_neut(inner, depth, bound, out)
+        }
+        Neut::NtRec {
+            motive,
+            minors,
+            major,
+            ..
+        } => {
+            walk_val(motive, depth, bound, out)?;
+            for m in minors {
+                walk_val(m, depth, bound, out)?;
+            }
+            walk_neut(major, depth, bound, out)
+        }
+        // Carry a `Rho`. Undecidable, so refused.
+        Neut::NtFun(..) | Neut::NtMatch { .. } => None,
+    }
 }
 
 /// Verify a meta's spine is a sequence of distinct bound variables
@@ -955,6 +1102,53 @@ mod tests {
             "expected an escaping-binder refusal, got {err:?}"
         );
         assert!(mctx.solution(id).is_none(), "nothing may have been solved");
+    }
+
+    /// The scope check reads LEVELS, so a generated variable's name tag cannot hide it.
+    ///
+    /// This is the regression the level walk exists for. An earlier version read the solution back
+    /// and looked for `G#`-prefixed names; `Neut::Gen` keeps whatever tag its producer chose, and
+    /// the tree uses at least `G#`, `TC#` and ad-hoc tags in tests. Keyed on one prefix, this case
+    /// SOLVED — admitting a variable out of scope, which is precisely what the check exists to
+    /// refuse. Each tag below must be refused identically.
+    #[test]
+    fn the_scope_check_does_not_depend_on_a_variables_name_tag() {
+        for tag in ["G#", "TC#", "x", "foo", ""] {
+            let mut mctx = MetaCtx::new();
+            let id = mctx.fresh(0);
+            let m = Val::Nt(Neut::Meta(id, vec![Val::Nt(Neut::Gen(1, tag.to_string()))]));
+            let escaping = Val::Nt(Neut::Gen(0, tag.to_string()));
+            let err = unify(2, &m, &escaping, &mut mctx).expect_err(
+                "a variable the spine does not name is out of scope whatever it is called",
+            );
+            assert!(
+                matches!(err, UnifyError::EscapesBinder { .. }),
+                "tag {tag:?} should escape, got {err:?}"
+            );
+            assert!(
+                mctx.solution(id).is_none(),
+                "tag {tag:?} must not be solved"
+            );
+        }
+    }
+
+    /// A shape the walk cannot see inside is refused, not admitted.
+    ///
+    /// `Val::Fun` carries a `Rho`, so a variable can hide in its environment. The check answers
+    /// "undecidable" and the solve fails closed rather than reporting no escape.
+    #[test]
+    fn an_undecidable_shape_is_refused_rather_than_solved() {
+        let mut mctx = MetaCtx::new();
+        let id = mctx.fresh(0);
+        let m = Val::Nt(Neut::Meta(id, vec![bound_var(0)]));
+        let opaque = Val::Fun(Vec::new(), crate::nbe::env::Rho::Nil);
+        let err = unify(1, &m, &opaque, &mut mctx)
+            .expect_err("a shape the scope check cannot inspect must not be solved");
+        assert!(
+            matches!(err, UnifyError::Undecidable { .. }),
+            "expected an undecidable refusal, got {err:?}"
+        );
+        assert!(mctx.solution(id).is_none());
     }
 
     #[test]

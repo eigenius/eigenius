@@ -548,6 +548,10 @@ pub(super) fn check_inductive_ctor_args(
     // Which slots are implicit is fixed by the declaration, so the author's arguments line up
     // with the explicit slots whatever the solver manages to solve.
     let mut implicits = open_implicit_binders(ctx, &arg_specs, current, &arg_env, expected_indices);
+    // The environment as it stands before any argument binds — the post-loop implicit-binder
+    // check re-walks the telescope from here, since each binder's declared type may mention the
+    // ones before it.
+    let param_env_for_implicit_checks = arg_env.clone();
     // Slots still standing as an unsolved meta in `arg_env`, in declaration order. Each is either
     // solved by an argument below or reported at the end.
     let mut pending: Vec<usize> = Vec::new();
@@ -660,6 +664,45 @@ pub(super) fn check_inductive_ctor_args(
             decl.name
         )));
     }
+    // Every implicit binder is CHECKED against its declared type, the same as an explicit
+    // argument was inside the loop. It happens here rather than at each binder's own slot
+    // because a binder may still be unsolved when the loop passes it — `instantiate`'s `T` is
+    // determined by the premise, two slots later.
+    //
+    // This was missing entirely, and was invisible while `app` was the only implicit
+    // constructor: its `A` and `B` are both `Prop`, solved by unifying a well-typed
+    // `Grounds(A -> B)`, so they could not be wrong. `instantiate`'s `T : Type 1` is the first
+    // implicit binder whose declared type constrains anything — rewrite it to `T : Set` and
+    // inferring `T := Set` is `Set : Set`, which without this check was admitted.
+    // `kernel/tests/instantiate_universe.rs` is the regression.
+    {
+        let mut check_env = param_env_for_implicit_checks.clone();
+        for (i, spec) in arg_specs.iter().enumerate() {
+            let CtorArg::Value {
+                patt,
+                typ,
+                implicit,
+            } = spec;
+            let declared = implicits.zonk(&ctx.eval(typ, &check_env)?);
+            let bound = implicits
+                .solution(i)
+                .unwrap_or_else(|| implicits.binder_value(i));
+            if *implicit {
+                if let Some(v) = implicits.solution(i) {
+                    let solved = crate::nbe::readback::readback_val(ctx.rho.len(), &v);
+                    check(ctx, &solved, &declared).map_err(|e| {
+                        CheckError::TypeMismatch(format!(
+                            "InductiveCtor `{}.{ctor_name}`: the value inferred for implicit \
+                             binder `{patt:?}` does not inhabit its declared type: {e}",
+                            decl.name
+                        ))
+                    })?;
+                }
+            }
+            check_env = check_env.extend(patt.clone(), bound);
+        }
+    }
+
     // Substituting the solved metas is what turns the binders bound above into real values.
     let actual_result = implicits.zonk(&ctx.eval(current, &arg_env)?);
     let Some(expected_indices) = expected_indices else {

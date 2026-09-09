@@ -113,14 +113,15 @@ resource inferred:sentence : justification:Conclusion {
                    // so the certificate index stays `Declared(rule)`. The `declared(…)` proof's
                    // proposition must match the rule resource's `canonical_proposition` exactly — the
                    // witness key hashes it.
+                   // `T` and `P` are implicit: `T` is fixed by the instance's own type and `P`
+                   // by the premise's universal, so only the instance and the premise are
+                   // written. This call also carried a fifth argument until now — a
+                   // `justification:Declared(rule)` tag from the constructor's older shape, which
+                   // no longer exists. Nothing caught it: `esl_round_trip.rs` parses this file
+                   // and reprints it, and the type-checked version of this site lives in
+                   // `kernel/tests/fixtures/instantiate_set_domain.esl`, so the arity here was
+                   // never checked against the declaration.
                    justification:instantiate(
-                       Set,
-                       (fun (m : Set) =>
-                           onco_typed:HasActivity(m, umlscui:C0388246)
-                             -> onco_typed:RequiresActivity(m, umlscui:C0388246)),
-                       justification:Declared(
-                           "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase"
-                       ),
                        msi,
                        justification:declared(
                            "urn:eigenius:demo:onco-typed:lit_rule_exo_implies_helicase",
