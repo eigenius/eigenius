@@ -28,7 +28,7 @@ mod tracer;
 pub use hooks::{Decision, EffectHooks};
 use iota::iota_reduce_impl;
 use mapreduce::{eval_map_impl, eval_reduce_impl};
-pub use marshal::{resource_value_to_val, val_to_resource_value};
+pub use marshal::{resource_value_to_val, string_role_of, val_to_resource_value, StringRole};
 pub(crate) use tracer::{NoTrace, Tracer, TreeTracer};
 
 /// Evaluation error — replaces panics in the NbE evaluator (issue #19).
@@ -651,9 +651,16 @@ pub(crate) fn eval_impl<T: Tracer>(
             let (v, source_node) = ev(e)?;
             match v {
                 Val::ResourceVal(r) => {
-                    // Direct property access on a known resource
+                    // Direct property access on a known resource.
+                    //
+                    // Whether a string value is a reference is decided by the property's declared
+                    // `core:data_type`, not by whether the text starts with `urn:`. With no layer
+                    // there is no declaration to read, and the strict answer is text.
+                    let role = ctx
+                        .layer()
+                        .map_or(StringRole::Text, |l| string_role_of(l, prop));
                     let result = match r.get(prop) {
-                        Some(val) => resource_value_to_val(val),
+                        Some(val) => resource_value_to_val(val, role),
                         None => {
                             tracing::warn!(
                                 { field::OPERATION } = operation::NBE_EVAL,

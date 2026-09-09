@@ -18,21 +18,53 @@
 use crate::nbe::val::Val;
 use crate::ontology::iri::Iri;
 
+/// What a string-valued slot holds: a reference to a chain resource, or text.
+///
+/// The distinction used to be guessed from the text — `urn:` or `http` meant reference — which
+/// reads a property value and answers a question about its DECLARATION. A string is text unless a
+/// declaration says otherwise, the same rule `layer::term_mentions` applies after B6.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StringRole {
+    /// The slot is declared `core:iri`, `core:resource` or `core:resource_array`.
+    Reference,
+    /// Anything else, including a slot whose declaration cannot be resolved.
+    Text,
+}
+
+/// How a property's values should be read, from that property's declared `core:data_type`.
+///
+/// Unresolvable is [`StringRole::Text`] and that is the whole point: inventing a resource
+/// reference out of a string nothing declared as one is the defect this replaced.
+pub fn string_role_of(layer: &crate::layer::Layer, prop: &Iri) -> StringRole {
+    use crate::ontology::well_known as wk;
+    let data_type = layer
+        .resolve(prop)
+        .and_then(|p| {
+            Iri::parse(wk::DATA_TYPE_PROP)
+                .ok()
+                .and_then(|k| p.get(&k).cloned())
+        })
+        .and_then(|v| v.as_str().map(str::to_string));
+    match data_type.as_deref() {
+        Some(wk::IRI_TYPE) | Some(wk::RESOURCE) | Some(wk::RESOURCE_ARRAY) => StringRole::Reference,
+        _ => StringRole::Text,
+    }
+}
+
 /// Convert an Eigon resource Value to a EigenTT Val.
 ///
-/// Uses a heuristic IRI check: strings starting with "urn:" or "http"
-/// are treated as class references (`Val::EigonClass`). This can
-/// misclassify string property values that happen to look like IRIs.
-/// The principled fix is type-directed conversion consulting the
-/// property's declared `data_type` — deferred to Phase 11+ when the
-/// type checker has full property-type awareness during evaluation.
-pub fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
+/// `role` decides what a string means, and comes from the declaration of the property the value
+/// sits under — see [`string_role_of`]. An array passes its own role down, which is right: the
+/// elements of a `core:resource_array` are references and the elements of a string array are not.
+///
+/// Callers with no layer pass [`StringRole::Text`]. That is not a fallback to the old guess; it is
+/// the same strict reading, applied where no declaration is reachable.
+pub fn resource_value_to_val(v: &crate::ontology::resource::Value, role: StringRole) -> Val {
     use crate::ontology::resource::Value as RVal;
     match v {
         RVal::String(s) => {
-            // Check if it looks like an IRI reference
-            if let Ok(iri) = Iri::parse(s) {
-                if s.starts_with("urn:") || s.starts_with("http") {
+            if role == StringRole::Reference {
+                if let Ok(iri) = Iri::parse(s) {
                     return Val::EigonClass(iri);
                 }
             }
@@ -56,7 +88,12 @@ pub fn resource_value_to_val(v: &crate::ontology::resource::Value) -> Val {
         RVal::Float(f) => Val::LitFloat(*f),
         RVal::Boolean(b) => Val::LitBool(*b),
         RVal::Embedded(r) => Val::ResourceVal(r.clone()),
-        RVal::Array(items) => Val::List(items.iter().map(resource_value_to_val).collect()),
+        RVal::Array(items) => Val::List(
+            items
+                .iter()
+                .map(|i| resource_value_to_val(i, role))
+                .collect(),
+        ),
         RVal::Json(_) => Val::Unit,
     }
 }
@@ -137,9 +174,70 @@ mod tests {
     fn resource_value_array_to_list_val() {
         use crate::ontology::resource::Value as RVal;
         let arr = RVal::Array(vec![RVal::Integer(1), RVal::Integer(2), RVal::Integer(3)]);
-        let v = resource_value_to_val(&arr);
+        let v = resource_value_to_val(&arr, StringRole::Text);
         match v {
             Val::List(items) => assert_eq!(items.len(), 3),
+            other => panic!("expected List, got {other:?}"),
+        }
+    }
+
+    /// The same IRI-shaped string is a reference or text depending on the DECLARATION, and on
+    /// nothing about the string.
+    ///
+    /// Both slots below hold the identical text. The prefix test this replaced returned
+    /// `EigonClass` for both, which invented a resource reference wherever a `core:string` slot
+    /// happened to hold something IRI-shaped — a description quoting an IRI, a label, a lexical
+    /// entry naming an ontology term.
+    #[test]
+    fn a_strings_role_comes_from_the_declaration_not_the_text() {
+        use crate::ontology::resource::Value as RVal;
+        use crate::ontology::well_known as wk;
+
+        fn declare(builder: &mut crate::layer::LayerBuilder, iri_str: &str, data_type: &str) {
+            let mut r = crate::ontology::resource::Resource::new(Iri::parse(iri_str).unwrap());
+            r.set(
+                Iri::parse(wk::DATA_TYPE_PROP).unwrap(),
+                RVal::String(data_type.to_string()),
+            );
+            builder.add_resource(r).unwrap();
+        }
+
+        let mut builder = crate::layer::LayerBuilder::new("decls", None);
+        declare(&mut builder, "urn:eigenius:t:label", wk::STRING);
+        declare(&mut builder, "urn:eigenius:t:target", wk::IRI_TYPE);
+        let layer = builder.build(crate::layer::LayerStorage::in_memory());
+
+        let label = Iri::parse("urn:eigenius:t:label").unwrap();
+        let target = Iri::parse("urn:eigenius:t:target").unwrap();
+        let undeclared = Iri::parse("urn:eigenius:t:never_declared").unwrap();
+
+        assert_eq!(string_role_of(&layer, &label), StringRole::Text);
+        assert_eq!(string_role_of(&layer, &target), StringRole::Reference);
+        // Nothing declares it, so nothing says it is a reference.
+        assert_eq!(string_role_of(&layer, &undeclared), StringRole::Text);
+
+        let text = RVal::String("urn:eigenius:pub:wrn:dd_achilles".to_string());
+        assert!(
+            matches!(resource_value_to_val(&text, StringRole::Reference), Val::EigonClass(i) if i.as_str() == "urn:eigenius:pub:wrn:dd_achilles")
+        );
+        assert!(matches!(
+            resource_value_to_val(&text, StringRole::Text),
+            Val::ResourceVal(_)
+        ));
+    }
+
+    /// An array passes its own role down: the elements of a `core:resource_array` are references,
+    /// and the elements of a string array are not.
+    #[test]
+    fn an_arrays_elements_take_the_arrays_role() {
+        use crate::ontology::resource::Value as RVal;
+        let arr = RVal::Array(vec![RVal::String("urn:eigenius:t:a".to_string())]);
+        match resource_value_to_val(&arr, StringRole::Reference) {
+            Val::List(items) => assert!(matches!(items[0], Val::EigonClass(_))),
+            other => panic!("expected List, got {other:?}"),
+        }
+        match resource_value_to_val(&arr, StringRole::Text) {
+            Val::List(items) => assert!(matches!(items[0], Val::ResourceVal(_))),
             other => panic!("expected List, got {other:?}"),
         }
     }
