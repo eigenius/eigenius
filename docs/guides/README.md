@@ -91,6 +91,13 @@ ESL **computes**; EigenQL **retrieves and filters**; formula **expresses typed e
 
 If you're new to the platform: start with [platform chapter 14](platform/14-notebook.md) (the notebook UX) — it's the lowest-friction first touch. Then read [platform chapters 1, 2, 5](platform/01-introduction.md) for orientation, install, and the kernel/orchestrator topology under the notebook, and dip into [ESL chapters 1, 6](esl/01-introduction.md) + [EigenQL chapters 1, 2](eigenql/01-introduction.md) + [formula chapter 1](formula/01-introduction.md) when you want to write your own ontologies, programs, queries, and typed expression trees.
 
+## The epistemic stack
+
+[**The epistemic stack**](epistemic-stack.md) — one document across four strata: the proposition
+(`eigentt:proposition`), the grounds (`justification:Grounds`), the proof (`eigentt:Judgement`), and
+the institutions that supply either. The per-piece guides go deeper on their own piece; this is the
+one that says how they compose, worked through chains that run in CI.
+
 ## Beyond the guides
 
 Spec-first design documents in [`docs/design/`](../design/) cover the underlying architecture and the per-subsystem decisions:
