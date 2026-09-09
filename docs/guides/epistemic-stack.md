@@ -11,6 +11,21 @@ The design paper is [*Judgements, Warrants, and Logics*](../design/judgements-an
 conformance record is the implementation companion in `../publications/`. This is neither: it is the
 tour.
 
+**Who this is for.** Someone who needs to understand *why* the system is shaped this way — a new
+engineer, a reviewer, or someone building teaching material from it. It assumes comfort with types
+and functions and a rough idea of what a proof assistant does. It does **not** assume you know this
+codebase, Martin-Löf type theory, justification logic, institution theory, or categorial grammar;
+each is introduced. Appendices A–E at the end carry the glossary, notation, build status, and the
+provenance of every number quoted — read those first if you are writing from this rather than
+working in the tree.
+
+**What Eigenius is, in one paragraph.** A typed knowledge graph. Facts live as *resources* — records
+with an identity (an IRI), a set of classes, and typed properties — organised into immutable
+*layers* that stack into a *chain*. Adding a layer is a *commit*, and validation runs at commit time:
+a layer that violates the rules is rejected rather than stored. What distinguishes it from an
+ordinary graph database is that the type system is a full dependent type theory, so a property can
+hold a *proposition* or a *proof*, and the database can check them.
+
 ---
 
 ## The problem, stated once
@@ -449,3 +464,120 @@ source rather than taken on trust:
 The WRN chain is not a toy either — it encodes a published *Nature* result, and the paper it encodes
 is at `references/publications/WRN-Helicase-Nature.pdf`. §4's parse numbers are measured against its
 first page.
+
+---
+
+# Appendices
+
+*These exist so the document stands on its own. If you are working in the tree you can skip them; if
+you are writing teaching material from it, start here.*
+
+## A. Glossary
+
+Terms this document uses without stopping to define them.
+
+| term | meaning |
+|---|---|
+| **resource** | a record: an identity (IRI), a set of classes, typed properties. The unit of storage. |
+| **IRI** | the identifier of a resource, e.g. `urn:eigenius:pub:wrn:discovery_rule`. |
+| **class** | a type of resource. Resolves to a **Σ-type** of its required and recommended properties — a dependent record, not a tag. |
+| **property** | a typed field. Declares a data type and optionally `class_types` (which inductive its values inhabit). |
+| **layer** | an immutable set of resources with a parent pointer. |
+| **chain** | the stack of layers, ordered by those pointers. Lookup walks it. |
+| **commit** | adding a layer. Validation runs here; a bad layer is rejected, never stored. |
+| **bootstrap chain** | the ~20 layers defining the system's own vocabulary, loaded before any user data. |
+| **ESL** | the surface syntax you author resources in (the code blocks above). |
+| **EigenTT** | the kernel's dependent type theory, and the `eigentt:` vocabulary mirroring it onto the chain. |
+| **term** | a value of the type theory — a proposition, a proof, a lambda. Stored via `type_expr(…)`. |
+| **institution** | a participating logic, in Goguen & Burstall's sense (§3). **Not** an organisation. |
+| **comorphism** | a declared translation between two institutions. |
+| **AutoOnLoad** | the hook by which a commit dispatches to an institution — how a proof gets checked when it lands. |
+| **witness index** | the per-layer index the kernel consults to synthesize a `witness:Is*As`. Keyed `(category, iri, hash(P))`. |
+| **certificate** | the older name for a `Grounds` term. Renamed because *certificate* implies factivity; you may still meet it in `docs/design/`. |
+
+## B. Notation
+
+| written | read as |
+|---|---|
+| `t : P` | `t` is a proof of `P` / a term of type `P` |
+| `Π`, `forall (x : A) => B` | dependent function type |
+| `Σ` | dependent pair / record type |
+| `Prop`, `Set`, `Type 1` | universes: propositions, small types, larger types |
+| `Grounds(P)` | the type of grounds for `P` — an **indexed family**, `P` is the index |
+| `holds(L, t, P)` | a judgement: a checker of logic `L` verified `t` against `P` |
+| `⟦·⟧` | the map from a grammatical category to its type (§4) |
+| `S\NP`, `(S\NP)/NP` | categorial slots: a thing wanting an NP to its left / left then right |
+| `s·t`, `s+t`, `!t` | justification-logic application, sum, proof checker |
+
+## C. Status — built, and not
+
+**Slideware must not present the unbuilt as shipped.** Verified against the tree on `2026-09-08`.
+
+| capability | state |
+|---|---|
+| the type theory, `Prop`/proof irrelevance, indexed families | built, load-bearing |
+| the `Grounds` algebra and its seven constructors | built; every example above type-checks in CI |
+| warrant projections (`support`, `leaves_of`, `is_fully_verified`, `survives_without`) | built, as a **Rust API** |
+| witness admission from a trace | built |
+| the statistics institution (recompute → `Holds` → `Computed`) | built |
+| Lean → chain: proof checked, `Verified` witness admitted | built, end to end |
+| the DCG grammar engine and lexicon | built; measured numbers in §4 |
+| **a conclusion carrying its own `proof_judgement`** | **declared, populated nowhere** |
+| **chain → Lean (the reverse comorphism)** | **not built**; needs an EigenTT→Lean term translation that is unspecified |
+| **warrant as a query** | **not built.** The projections are Rust. A justification term is opaque to the query language — no pattern binds one. "Warrant becomes a query" must not be read as "an EigenQL query" |
+| `instantiate` with implicit `T`/`P` | prototyped, not landed |
+
+The third and fourth rows are the ones most likely to be over-claimed. **Verified is reachable
+today only through the Lean route** — an external checker's judgement on a trace. The configuration
+where the kernel itself proves a chain claim is designed and empty.
+
+## D. Where the numbers come from
+
+Every quoted figure, with its method, so it can be cited or re-run.
+
+- **62 units, grammar-gap 0, missing-lexeme 0, 30/41 reading-correct** — `scripts/measure-parse-rate.sh`
+  over the WRN paper's first page, release build with the reranker, scored by `eval-parse-rate.sh`
+  against committed baselines. Run `2026-09-08`, 42.90s. Identical to the run of `2026-09-07`.
+- **The WRN projection table (§7)** — assertions in `kernel/tests/justification_projection.rs`, run
+  by CI on every commit. Not a measurement; a test that fails if the answers change.
+- **~8.6M resources** — WordNet plus a UMLS domain import, loaded as a chained layer stack.
+
+Two cautions for anyone quoting these. The parse measurement **must** run release with the reranker:
+a debug build overflows the stack in normalization and the harness reports the dead parse as a
+grammar gap indistinguishable from a real one, and a cap-only run inflates gaps by construction.
+And 30/41 is *reading-level* correctness on ambiguous units — not "97% accurate" or any such
+compression.
+
+## E. Terms that mislead, and how to say it instead
+
+Traps this document's own authors have fallen into.
+
+- **"Trace" means two unrelated things.** `prov:*Trace` records how a *resource came to exist*;
+  `program:traces:*Trace` records how a *program evaluated*. They shared a namespace once and the
+  confusion was real enough to force a rename.
+- **"Institution" is Goguen & Burstall's technical term** — a logic packaged with signatures,
+  sentences, models and satisfaction. Not an organisation, not an institution in the everyday sense.
+  A slide that says "institutions like universities" is wrong.
+- **"Declaration" is overloaded.** `justification:Declaration` is an assertion by an accountable
+  agent. A *declaration* in type theory is a named constant. Context disambiguates; a slide may not.
+- **Do not say a certificate "proves" anything.** It records grounds. The entire design exists to
+  keep those apart, so the vocabulary has to hold the line: grounds *ground*, proofs *prove*.
+- **Do not call `Declared` weak or `Verified` strong.** They answer different questions. A declared
+  bridge from a domain expert may be exactly the right warrant; the system's contribution is making
+  it *visible and attributable*, not grading it down.
+- **"The kernel proves your claims" is false today.** See Appendix C.
+
+## F. What would make good figures
+
+For teaching material, the four that carry the most:
+
+1. **The three strata as a stack** — `Judgement(kernel, c, Grounds(P))` over `Grounds(P)` over `P`,
+   with a struck-through arrow from `Grounds(P)` to `P` labelled *no rule*. That one image is the
+   design.
+2. **A justification term as a tree** — the §7 WRN conclusion, leaves coloured by ground, with the
+   projection questions as callouts on the same picture.
+3. **The Lean round trip** — proof lands → nanoda re-checks → correspondence check → trace with
+   judgement → witness admitted → downstream certificate type-checks. Six boxes; the near-miss
+   fixture as a red branch off the correspondence check.
+4. **A parse as a derivation** — "HeLa depends on BRCA1" with categories underneath and the
+   resulting `Prop` term at the root, showing that the derivation *is* the term.

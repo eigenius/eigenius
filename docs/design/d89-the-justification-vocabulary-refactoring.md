@@ -2,7 +2,7 @@
 
 `2026-09-08`. Branch `numeric-core-and-verification-judgement`.
 
-**Status: decided, unbuilt.** Records what `ontologies/justification/justification.esl` should
+**Status: BUILT `2026-09-08`, reseeded and gated — see §5b.** Records what `ontologies/justification/justification.esl` should
 declare and what each declaration should be called, and why the present shape differs. The paper is
 [`judgements-and-warrants.tex`](judgements-and-warrants.tex); D81 (`4ad5620`) ran the first cleanup
 pass against its Appendix A, removing the reasoning institution and crate, `justification:Projection`,
@@ -46,7 +46,8 @@ Measured facts behind that table:
   `../notes/end-to-end-scenarios-and-integration-gaps.md`).
 - **`Conclusion` requires a certificate**, which makes the paper's own *Verified* configuration —
   "the system holds `Judgement(L, t, P)` directly" — unrepresentable on the class that owns
-  `justification:proof`.
+  `justification:proof`. (Still true after the refactor in one respect: `proof_judgement` is
+  declared and populated nowhere, so the kernel-proved configuration remains designed and empty.)
 
 ## 2. The factoring
 
@@ -107,7 +108,7 @@ deleted rather than made redundant.
 |---|---|
 | `justification:Certificate : Prop -> Type 2` | `justification:Grounds : Prop -> Type 2` |
 | `declared`, `observed`, `verified`, `app`, `sum_l`, `sum_r` | unchanged |
-| `spec_poly` | `instantiate`, with `implicit(T, P)` |
+| `spec_poly` | `instantiate`; `implicit(T, P)` prototyped but NOT landed (§5a) |
 
 Rationale for each rename:
 
@@ -273,6 +274,37 @@ generated. A landed version needs canonical naming at readback, or a readback th
 rather than reconstructing them from names.
 
 Prototype lives in the working tree, uncommitted, marked `PROTOTYPE (D89 experiment)`.
+
+## 5b. The reseed — **DONE `2026-09-08`** (`82cdb04`)
+
+Four manifest moves batched into one reseed: the renames, the EigenTT layer merge, the `reflection:`
+dissolution, and `core:meta_level`. Snapshots: base `../db-snapshot/wordnet-umls-2026-09-08`
+(3.76 GiB, 88 files), aligned `wordnet-umls-aligned-2026-09-08` (3.6 GiB). WordNet plus all 27 UMLS
+chunks committed clean — roughly 8.6M resources, every one validated against the rebuilt bootstrap.
+That is the evidence the refactor holds outside the fixtures: the importers emit against the new
+vocabulary, so a bad `requires`, a mis-namespaced property or a layer-order inversion would have
+been a rejected commit rather than a silent difference.
+
+All gates pass, and **every number is identical to the pre-refactor run of `2026-09-07`**:
+
+| | 2026-09-07 (before) | 2026-09-08 (after) |
+|---|---|---|
+| units | 62 | 62 |
+| grammar-gap / missing-lexeme | 0 / 0 | 0 / 0 |
+| expected-hits | 62/62, miss-set unchanged | 62/62, miss-set unchanged |
+| encoded | 1 | 1 |
+| total-readings (ceiling 700) | 674 | 674 |
+| total-skeletons (ceiling 250) | 171 | 171 |
+| reading-correct | 30/41 | 30/41 |
+| structure | 33/41 | 33/41 |
+| invalid-selected | 0 | 0 |
+| runtime | 42.58s | 42.90s |
+
+The histogram matches bucket for bucket. `Certificate` became `Grounds`, `Claim` became
+`Declaration`, the proposition property moved namespace twice and layer once, a bootstrap layer
+merged into core, `reflection:` dissolved into two namespaces, 76 aliases came out — and the chain
+parses the same 62 units into the same 674 readings and selects the same 30. **Nothing changed about
+what the chain means.**
 
 ## 6. Cost and sequencing
 

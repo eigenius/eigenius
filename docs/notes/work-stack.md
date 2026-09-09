@@ -23,10 +23,11 @@ any detour.
 > `core:meta_level`. `every_esl_declares_its_prefixes` was added because a cross-namespace rename
 > introduces prefixes a residue grep cannot see.
 >
-> **Next: the reseed.** Four manifest moves are batched into it. `CARGO_FEATURES=use-llm
-> scripts/reseed-lexicon-db.sh --umls-all`, then `build-alignment-snapshot.sh`, then
-> `measure-parse-rate.sh` against the committed baselines — `next-steps-after-d88.md` §B4 has the
-> protocol and the gates. Nothing persisted is resumable until it runs.
+> **Reseed done `2026-09-08`** (D89 §5b). Snapshots `wordnet-umls-2026-09-08` (3.76 GiB) and
+> `wordnet-umls-aligned-2026-09-08` (3.6 GiB); ~8.6M resources committed clean against the rebuilt
+> bootstrap. All gates pass and **every parse number is identical to the pre-refactor run** — 62
+> units, grammar-gap 0, 674 readings, 30/41 reading-correct, histogram matching bucket for bucket.
+> The rename was a rename.
 >
 > **Open, and deliberately not done here.** `instantiate` keeps all four arguments;
 > `implicit(T, P)` needs the unifier work in `a28077e`, whose scope check identifies generated
