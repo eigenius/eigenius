@@ -9,7 +9,31 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **ACTIVE: entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
+> **ACTIVE: entry −1 (`2026-09-08`). D89 — the justification vocabulary.**
+> [`docs/design/d89-the-justification-vocabulary-refactoring.md`](../design/d89-the-justification-vocabulary-refactoring.md)
+> decides what changes; [`d89-rename-execution-plan.md`](d89-rename-execution-plan.md) decides how.
+>
+> **Landed.** The renames (`Certificate`→`Grounds`, `Claim`→`Declaration`,
+> `judgement`→`grounds_judgement`, `proof`→`proof_judgement`,
+> `reflection:canonical_proposition`→`eigentt:proposition`, `spec_poly`→`instantiate`);
+> `subject_iri` and `refutes` deleted; `Declaration` requires an attribution; `EncodedClaim`
+> subclasses it; the two observed-side resources reclassified. Then three things the plan did not
+> foresee: the EigenTT fragment merged into core (the namespaces stay, the layers could not),
+> `reflection:` dissolved into `program:traces:` and `institution:`, and `universe_level` became
+> `core:meta_level`. `every_esl_declares_its_prefixes` was added because a cross-namespace rename
+> introduces prefixes a residue grep cannot see.
+>
+> **Reseed done `2026-09-08`** (D89 §5b). Snapshots `wordnet-umls-2026-09-08` (3.76 GiB) and
+> `wordnet-umls-aligned-2026-09-08` (3.6 GiB); ~8.6M resources committed clean against the rebuilt
+> bootstrap. All gates pass and **every parse number is identical to the pre-refactor run** — 62
+> units, grammar-gap 0, 674 readings, 30/41 reading-correct, histogram matching bucket for bucket.
+> The rename was a rename.
+>
+> **Open, and deliberately not done here.** `instantiate` keeps all four arguments;
+> `implicit(T, P)` needs the unifier work in `a28077e`, whose scope check identifies generated
+> variables by name and cannot do so reliably. Enabling it later costs a second reseed.
+
+> **entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
 > (`docs/design/judgements-and-warrants.tex`) is the design; **P0 of
 > `docs/notes/judgements-warrants-build-plan.md` is the next task** — measurement only, no code.
 > The paper supersedes the D83 markdown draft (removed) and two of D82's conclusions: the
@@ -38,7 +62,7 @@ any detour.
 >    demo passes. See D79 §7 for what each phase actually did versus what was planned — three of
 >    seven differed.
 > 2. **D80 — witness and institution machinery.** Two facts earned under a binding that survive it
->    changing: witness credit (D75 §3.4, standing test at `witness_index.rs:1184`) and institution
+>    changing: witness credit (D75 §3.4, standing test at `witness_admission.rs:1184`) and institution
 >    verdicts whose bound data was rebound. Both fire on a *linear* commit. W0 (what revocation
 >    means) → W1 binding-aware lookup → W2 AutoOnLoad baseline → W3 provenance closure.
 > 3. **D77 — merge as a pushout.** #225. Last because it needs recheckers to call, and for witnesses

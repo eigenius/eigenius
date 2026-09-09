@@ -172,8 +172,8 @@ De-facto public API by item:
 
 | Item | Principal consumers | Purpose |
 | --- | --- | --- |
-| `val::Val` (esp. `ResourceVal`, `ChainWitness`, `InductiveVal`) | institution trait (`Institution::invoke` returns `Val`), program/eval_io, witness, query/evaluate, commit, layer/witness_index, dcg; external: reasoning, lean, statistics | Universal value across the institution/component boundary — the hottest coupling point |
-| `term::Exp` + decls | esl/compile, dcg (parser/pretty/category/lexicon), program/{expr,ground,eigentt_type_mirror}, layer/witness_index; external: reasoning | Syntax construction/inspection |
+| `val::Val` (esp. `ResourceVal`, `ChainWitness`, `InductiveVal`) | institution trait (`Institution::invoke` returns `Val`), program/eval_io, witness, query/evaluate, commit, layer/witness_admission, dcg; external: reasoning, lean, statistics | Universal value across the institution/component boundary — the hottest coupling point |
+| `term::Exp` + decls | esl/compile, dcg (parser/pretty/category/lexicon), program/{expr,ground,eigentt_type_mirror}, layer/witness_admission; external: reasoning | Syntax construction/inspection |
 | `eval::{eval, eval_ctx, eval_traced, EvalCtx, EvalError}` | program/eval_io (sole `EvalCtx::IO` builder, eval_io.rs:106), server/parse, dcg, validation, layer/merge; external: reasoning, cli | Evaluation; IO program execution |
 | `check::{check, check_infer, check_type, CheckCtx, eq_nf, …}` | program/{ground,axiom_env,expr}, dcg, witness, validation/rules/eigentt_value; external: reasoning/validate | Type checking of decoded/parsed terms |
 | `readback::readback_val` | server/parse, program/{ground,expr}, dcg, witness | Normal forms for storage/encoding |

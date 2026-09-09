@@ -60,6 +60,7 @@
 
 use crate::nbe::check::eq_nf;
 use crate::nbe::readback::readback_val;
+use crate::nbe::term::Patt;
 use crate::nbe::val::{MetaId, Neut, Val};
 use std::collections::BTreeMap;
 
@@ -71,6 +72,14 @@ use std::collections::BTreeMap;
 pub struct MetaCtx {
     next: u32,
     solutions: BTreeMap<MetaId, Val>,
+    /// The de Bruijn level in scope when each metavariable was created.
+    ///
+    /// A meta stands for a value that could have been written where it was created, so its
+    /// solution may mention only what was in scope there. Variables bound *inside* the value
+    /// being unified are not: solving `?a` to something mentioning them would let a bound
+    /// variable escape its binder, and the resulting term names a variable that does not exist
+    /// at the meta's own site. [`solve_meta`] enforces this.
+    levels: BTreeMap<MetaId, usize>,
 }
 
 impl MetaCtx {
@@ -78,11 +87,20 @@ impl MetaCtx {
         Self::default()
     }
 
-    /// Allocate a fresh unsolved metavariable.
-    pub fn fresh(&mut self) -> MetaId {
+    /// Allocate a fresh unsolved metavariable that scopes over `level` binders.
+    ///
+    /// `level` is the caller's current de Bruijn level — how many variables are in scope where
+    /// the unknown stands. It bounds what the meta may be solved to; see [`MetaCtx::levels`].
+    pub fn fresh(&mut self, level: usize) -> MetaId {
         let id = MetaId(self.next);
         self.next += 1;
+        self.levels.insert(id, level);
         id
+    }
+
+    /// The level `id` was created at, or 0 for a meta this context did not allocate.
+    fn level_of(&self, id: MetaId) -> usize {
+        self.levels.get(&id).copied().unwrap_or(0)
     }
 
     /// Look up a metavariable's solution if it has been solved.
@@ -124,6 +142,17 @@ pub enum UnifyError {
     /// inner workings of `solve` enforce single-assignment; this
     /// surfaces if a caller manipulates the `MetaCtx` directly.
     DoubleSolve(MetaId),
+    /// Solving the metavariable was attempted from inside a binder it does not scope over.
+    /// The solution would mention a variable that is not in scope where the meta stands.
+    EscapesBinder {
+        meta: MetaId,
+        /// The level the meta was created at.
+        meta_level: usize,
+        /// The level unification had descended to when the solution was proposed.
+        at_level: usize,
+    },
+    /// A closure could not be instantiated while comparing under a binder.
+    Eval(String),
 }
 
 impl std::fmt::Display for UnifyError {
@@ -142,6 +171,18 @@ impl std::fmt::Display for UnifyError {
                  only distinct bound variables are admitted in Phase C"
             ),
             UnifyError::DoubleSolve(id) => write!(f, "metavariable {id} solved twice"),
+            UnifyError::EscapesBinder {
+                meta,
+                meta_level,
+                at_level,
+            } => write!(
+                f,
+                "metavariable {meta} stands at level {meta_level} but a solution was proposed \
+                 at level {at_level}, inside {} binder(s) it does not scope over — the solution \
+                 would name a variable that does not exist where the meta stands",
+                at_level - meta_level
+            ),
+            UnifyError::Eval(msg) => write!(f, "evaluation failed while unifying: {msg}"),
         }
     }
 }
@@ -189,6 +230,18 @@ pub fn unify(level: usize, lhs: &Val, rhs: &Val, mctx: &mut MetaCtx) -> Result<(
         // One side is an unsolved Meta — solve it against the other.
         (Val::Nt(Neut::Meta(id, spine)), _) => solve_meta(level, *id, spine, &rhs, mctx),
         (_, Val::Nt(Neut::Meta(id, spine))) => solve_meta(level, *id, spine, &lhs, mctx),
+
+        // PROTOTYPE (D89 experiment): a meta APPLIED to arguments. Evaluation never populates
+        // `Neut::Meta`'s spine — it builds `Neut::App(Meta(id, []), arg)` chains — so this is the
+        // only form `?P y` actually takes, and without this arm it falls through to `eq_nf`.
+        (Val::Nt(ln), _) if as_meta_spine(ln).is_some() => {
+            let (id, spine) = as_meta_spine(ln).expect("guarded above");
+            solve_meta(level, id, &spine, &rhs, mctx)
+        }
+        (_, Val::Nt(rn)) if as_meta_spine(rn).is_some() => {
+            let (id, spine) = as_meta_spine(rn).expect("guarded above");
+            solve_meta(level, id, &spine, &lhs, mctx)
+        }
 
         // Both are InductiveType applications — same decl + recurse
         // on params + indices.
@@ -260,13 +313,67 @@ pub fn unify(level: usize, lhs: &Val, rhs: &Val, mctx: &mut MetaCtx) -> Result<(
             unify(level, lb, rb, mctx)
         }
 
+        // Two ANONYMOUS arrows, compared componentwise so metas on either side can be solved.
+        //
+        // `justification:Grounds.app` is why. Its first argument is declared
+        // `Certificate(A -> B)`, so with `A` and `B` implicit the index to unify is a `Val::Pi`
+        // carrying a meta in its domain, its codomain, or both. Readback equality cannot see
+        // inside it, and `A` occurs in no result index, so this is the only place `A` can be
+        // determined at all — and in inference mode, where nothing fixes `B` up front either,
+        // the same comparison is what determines `B`.
+        //
+        // **Anonymous is what makes this safe, and why the arm is restricted to it.** A
+        // `Patt::Unit` binder cannot be referenced, so neither codomain mentions it, so no
+        // variable is introduced and both sides are compared at the SAME level. `solve_meta`'s
+        // scope check therefore never has to decide whether a solution captured something: there
+        // is nothing to capture. A named binder falls through to `eq_nf` below, unchanged.
+        //
+        // It is also why this is not a behaviour change for meta-free types. Readback preserves
+        // `Patt::Unit` (D49 witness-key byte stability), so for two anonymous arrows readback
+        // equality already IS componentwise equality. The pair `eq_nf` separates and this would
+        // not — an anonymous arrow against a named-but-unused binder — is exactly what the guard
+        // excludes.
+        (Val::Pi(ld, lc), Val::Pi(rd, rc))
+            if matches!(lc.patt, Patt::Unit) && matches!(rc.patt, Patt::Unit) =>
+        {
+            unify(level, ld, rd, mctx)?;
+            let lbody = lc
+                .apply(Val::Unit)
+                .map_err(|e| UnifyError::Eval(format!("{e:?}")))?;
+            let rbody = rc
+                .apply(Val::Unit)
+                .map_err(|e| UnifyError::Eval(format!("{e:?}")))?;
+            unify(level, &lbody, &rbody, mctx)
+        }
+
+        // PROTOTYPE (D89 experiment): two NAMED binders, instantiated with a fresh generated
+        // variable and compared one level down. This is what `instantiate`'s premise type
+        // `Certificate(forall (y : T) => P(y))` needs, and what the anonymous restriction above
+        // deliberately excluded.
+        //
+        // **Both sides must be named.** An anonymous arrow against a named-but-unused binder reads
+        // back differently — readback preserves `Patt::Unit` for D49's witness-key byte stability —
+        // so identifying them here would make two propositions with different witness keys unify.
+        // `meta_free_function_types_are_still_compared_by_readback` pins that, and an unguarded
+        // version of this arm breaks it.
+        (Val::Pi(ld, lc), Val::Pi(rd, rc))
+            if !matches!(lc.patt, Patt::Unit) && !matches!(rc.patt, Patt::Unit) =>
+        {
+            unify(level, ld, rd, mctx)?;
+            let v = Val::Nt(Neut::Gen(level, "G#".to_string()));
+            let lbody = lc
+                .apply(v.clone())
+                .map_err(|e| UnifyError::Eval(format!("{e:?}")))?;
+            let rbody = rc
+                .apply(v)
+                .map_err(|e| UnifyError::Eval(format!("{e:?}")))?;
+            unify(level + 1, &lbody, &rbody, mctx)
+        }
+
         // Everything else: fall back to structural equality. This
-        // covers Val::Sort, Val::One, Val::Unit, Val::Pi, Val::Sig,
-        // Val::Lam, Val::Id, Val::Refl, EigonClass, EigonPrimitive,
-        // etc. — for these Phase C v1 treats unification as eq_nf.
-        // A future Phase C+ may push unification under binders for
-        // Pi/Sig/Lam, but those cases aren't exercised by D48's
-        // motivating use cases (Vec, Fin, Eq indices).
+        // covers Val::Sort, Val::One, Val::Unit, Val::Lam, Val::Id,
+        // Val::Refl, EigonClass, EigonPrimitive, etc. — for these
+        // Phase C v1 treats unification as eq_nf.
         _ => eq_nf(level, &lhs, &rhs).map_err(|_| mismatch(level, &lhs, &rhs)),
     }
 }
@@ -312,20 +419,95 @@ fn solve_meta(
         });
     }
 
-    // For Phase C v1 we only solve the bare-rhs case (spine empty).
-    // Non-empty spines arise for higher-order metavariables that
-    // Phase C does not yet construct.
+    // PROTOTYPE (D89 experiment): a pattern spine is solved by abstracting the rhs over exactly
+    // the variables the spine names — `?P G#0 ≟ B` gives `?P := λ G#0. B`. Readback is what makes
+    // the scope question decidable here: it forces every closure, so the resulting `Exp` mentions
+    // each variable syntactically, and "does the solution mention a variable this meta does not
+    // scope over" becomes a walk over `Exp::Var` rather than over a `Val` whose closures hide
+    // their environments.
     if !bound_levels.is_empty() {
-        return Err(UnifyError::NonPatternSpine {
+        let body = readback_val(level, rhs);
+        let escaping = free_gen_levels(&body)
+            .into_iter()
+            .find(|l| *l >= mctx.level_of(id) && !bound_levels.contains(l));
+        if let Some(at_level) = escaping {
+            return Err(UnifyError::EscapesBinder {
+                meta: id,
+                meta_level: mctx.level_of(id),
+                at_level,
+            });
+        }
+        let abstracted = bound_levels.iter().rev().fold(body, |acc, l| {
+            crate::nbe::term::Exp::Lam(Patt::Var(format!("G#{l}")), Box::new(acc))
+        });
+        let solution = crate::nbe::eval::eval(&abstracted, &crate::nbe::env::Rho::Nil)
+            .map_err(|e| UnifyError::Eval(format!("{e:?}")))?;
+        return mctx.solve(id, solution);
+    }
+
+    // Scope check, for the bare metas this actually solves. `id` stands for a value writable
+    // where it was created; `level` is where unification has got to. Descending through a binder
+    // raises `level`, and what the two sides agree on down there may mention that binder's
+    // variable — a variable that does not exist where `id` stands. Refuse rather than inspect the
+    // proposed solution: a `Val` hides variables inside closure environments, so "does this
+    // mention a variable above level N" is not decidable by a structural walk, and a walk that
+    // treats closures as opaque would answer no for exactly the unsound cases.
+    //
+    // A meta with a non-empty spine is a different question — the spine names the variables it
+    // does scope over — and is rejected above regardless, so this rule governs the whole of what
+    // gets solved.
+    let meta_level = mctx.level_of(id);
+    if level > meta_level {
+        return Err(UnifyError::EscapesBinder {
             meta: id,
-            spine: format!(
-                "Phase C v1 only solves bare metavariables (empty spine); got {} bound vars",
-                bound_levels.len()
-            ),
+            meta_level,
+            at_level: level,
         });
     }
 
     mctx.solve(id, rhs.clone())
+}
+
+/// PROTOTYPE (D89 experiment): peel a neutral `App` chain down to a `Meta` head.
+///
+/// Evaluation builds `?P y` as `Neut::App(Meta(id, []), y)`, never as `Meta(id, [y])`, so this is
+/// what recovers the `(meta, spine)` pair the pattern rules are written against.
+fn as_meta_spine(neut: &Neut) -> Option<(MetaId, Vec<Val>)> {
+    match neut {
+        Neut::Meta(id, spine) if !spine.is_empty() => Some((*id, spine.clone())),
+        Neut::App(head, arg) => {
+            let (id, mut spine) = as_meta_spine(head).or_else(|| match head.as_ref() {
+                Neut::Meta(id, s) if s.is_empty() => Some((*id, Vec::new())),
+                _ => None,
+            })?;
+            spine.push(arg.as_ref().clone());
+            Some((id, spine))
+        }
+        _ => None,
+    }
+}
+
+/// PROTOTYPE (D89 experiment): the de Bruijn levels of `G#n` variables occurring in an `Exp`.
+///
+/// Readback names a generated variable `G#{level}` (`readback.rs`), so a solution's free variables
+/// are recoverable syntactically once the value has been read back.
+fn free_gen_levels(exp: &crate::nbe::term::Exp) -> Vec<usize> {
+    // Prefix-AGNOSTIC on purpose. `Neut::Gen(j, name)` reads back as `Var("{name}{j}")` keeping
+    // whatever tag the producer chose, and the tree uses at least `G#` (readback), `TC#`
+    // (env::gen_val) and ad-hoc tags in tests. Keying on one prefix silently misses the others,
+    // which is a scope check that passes exactly the cases it exists to refuse. Parsing the
+    // trailing digits off any name over-approximates instead: a user variable ending in digits is
+    // read as generated and the solve is refused, which fails closed.
+    crate::nbe::subst::free_vars(exp)
+        .iter()
+        .filter_map(|n| {
+            let digits = n.len() - n.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+            if digits == 0 {
+                return None;
+            }
+            n[n.len() - digits..].parse::<usize>().ok()
+        })
+        .collect()
 }
 
 /// Verify a meta's spine is a sequence of distinct bound variables
@@ -396,31 +578,44 @@ fn meta_occurs_neut(meta: MetaId, n: &Neut) -> bool {
 }
 
 /// Substitute all solved metas with their solutions throughout `val`.
-fn zonk_val(mctx: &MetaCtx, val: &Val) -> Val {
-    match val {
-        Val::Nt(Neut::Meta(id, spine)) => {
-            if let Some(sol) = mctx.solution(*id) {
-                // For Phase C v1 (bare metas), the solution is applied
-                // directly. Spine application would be needed for
-                // higher-order metas — out of scope.
-                if spine.is_empty() {
-                    zonk_val(mctx, sol)
-                } else {
-                    // Solution exists but the spine is non-empty:
-                    // shouldn't happen in Phase C v1 since solve_meta
-                    // rejects non-empty spines. Defensive: preserve.
-                    Val::Nt(Neut::Meta(
-                        *id,
-                        spine.iter().map(|v| zonk_val(mctx, v)).collect(),
-                    ))
-                }
-            } else {
-                Val::Nt(Neut::Meta(
-                    *id,
-                    spine.iter().map(|v| zonk_val(mctx, v)).collect(),
-                ))
+/// PROTOTYPE (D89 experiment): apply a zonked head to a zonked argument, beta-reducing when the
+/// head became a lambda. Substituting a solved higher-order meta is not complete without this —
+/// `?P` solved to `λ y. B` leaves `(λ y. B) x` standing where the caller expects `B`.
+fn zonk_apply(head: Val, arg: Val) -> Val {
+    match head {
+        Val::Lam(ref clos) => clos.apply(arg.clone()).unwrap_or_else(|_| {
+            Val::Nt(Neut::App(
+                Box::new(Neut::Gen(usize::MAX, "zonk#stuck".to_string())),
+                Box::new(arg),
+            ))
+        }),
+        Val::Nt(n) => Val::Nt(Neut::App(Box::new(n), Box::new(arg))),
+        other => other,
+    }
+}
+
+/// PROTOTYPE (D89 experiment): zonk a neutral, resolving `App` chains whose head is a solved meta.
+fn zonk_neut(mctx: &MetaCtx, n: &Neut) -> Val {
+    match n {
+        Neut::Meta(id, spine) => {
+            let spine: Vec<Val> = spine.iter().map(|v| zonk_val(mctx, v)).collect();
+            match mctx.solution(*id) {
+                Some(sol) => spine.into_iter().fold(zonk_val(mctx, sol), zonk_apply),
+                None => Val::Nt(Neut::Meta(*id, spine)),
             }
         }
+        Neut::App(head, arg) => {
+            let h = zonk_neut(mctx, head);
+            let a = zonk_val(mctx, arg);
+            zonk_apply(h, a)
+        }
+        other => Val::Nt(other.clone()),
+    }
+}
+
+fn zonk_val(mctx: &MetaCtx, val: &Val) -> Val {
+    match val {
+        Val::Nt(n) => zonk_neut(mctx, n),
         Val::Pair(a, b) => Val::Pair(Box::new(zonk_val(mctx, a)), Box::new(zonk_val(mctx, b))),
         Val::Con(c, v) => Val::Con(c.clone(), Box::new(zonk_val(mctx, v))),
         Val::Refl(v) => Val::Refl(Box::new(zonk_val(mctx, v))),
@@ -478,10 +673,12 @@ mod tests {
             sort: Exp::sort(1),
             ctors: vec![
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "zero".to_string(),
                     typ: Exp::sort(1), // placeholder; not used by tests
                 },
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "succ".to_string(),
                     typ: Exp::sort(1), // placeholder
                 },
@@ -510,7 +707,7 @@ mod tests {
     }
 
     fn fresh_meta(mctx: &mut MetaCtx) -> (MetaId, Val) {
-        let id = mctx.fresh();
+        let id = mctx.fresh(0);
         (id, Val::Nt(Neut::Meta(id, Vec::new())))
     }
 
@@ -549,6 +746,91 @@ mod tests {
         let mut mctx = MetaCtx::new();
         let err = unify(0, &zero, &one, &mut mctx).unwrap_err();
         assert!(matches!(err, UnifyError::Mismatch { .. }));
+    }
+
+    // ---- unification under a binder ----
+
+    fn arrow(dom: Val, cod: Exp) -> Val {
+        Val::Pi(
+            Box::new(dom),
+            crate::nbe::val::Clos::new(Patt::Unit, cod, crate::nbe::env::Rho::Nil),
+        )
+    }
+
+    /// A meta in a function type's DOMAIN is solved by comparing the two types componentwise.
+    ///
+    /// `?a -> One` against `Prop -> One`. Readback equality cannot solve this: `?a` and `Prop`
+    /// read back differently, and the whole `Val::Pi` used to fall through to `eq_nf`. This is
+    /// how `justification:Grounds.app`'s `A` — which occurs in no result index — is
+    /// determined from its first argument's type.
+    #[test]
+    fn a_meta_in_a_function_types_domain_is_solved() {
+        let mut mctx = MetaCtx::new();
+        let (id, m) = fresh_meta(&mut mctx);
+        let lhs = arrow(m, Exp::One);
+        let rhs = arrow(Val::sort(0), Exp::One);
+        unify(0, &lhs, &rhs, &mut mctx).unwrap();
+        assert!(
+            matches!(mctx.solution(id), Some(Val::Sort(_))),
+            "?a should be solved to Prop, got {:?}",
+            mctx.solution(id)
+        );
+    }
+
+    /// Differing codomains are still a mismatch — descending into the binder compares, it does
+    /// not excuse.
+    #[test]
+    fn a_solvable_domain_does_not_excuse_a_mismatched_codomain() {
+        let mut mctx = MetaCtx::new();
+        let (_, m) = fresh_meta(&mut mctx);
+        let lhs = arrow(m, Exp::One);
+        let rhs = arrow(Val::sort(0), Exp::sort(0));
+        unify(0, &lhs, &rhs, &mut mctx).unwrap_err();
+    }
+
+    /// A metavariable is not solved from inside a binder it does not scope over.
+    ///
+    /// `?a` stands at level 0. Unifying it against something at level 1 means the two sides only
+    /// agree under a binder, and the solution could name that binder's variable — a variable that
+    /// does not exist where `?a` was written. The unifier refuses rather than capturing it.
+    #[test]
+    fn a_meta_is_not_solved_from_under_a_binder_it_does_not_scope_over() {
+        let mut mctx = MetaCtx::new();
+        let (id, m) = fresh_meta(&mut mctx);
+        let err = unify(1, &m, &Val::One, &mut mctx).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                UnifyError::EscapesBinder {
+                    meta_level: 0,
+                    at_level: 1,
+                    ..
+                }
+            ),
+            "expected an escaping-binder refusal, got {err:?}"
+        );
+        assert!(mctx.solution(id).is_none(), "nothing may have been solved");
+    }
+
+    /// Types with no metavariable keep taking `eq_nf` verbatim.
+    ///
+    /// An anonymous arrow and a named-but-unused binder read back differently — readback preserves
+    /// `Patt::Unit` for D49's witness-key byte stability — so `eq_nf` separates them. Componentwise
+    /// comparison would not, which is why the new arms are gated on a meta being present.
+    #[test]
+    fn meta_free_function_types_are_still_compared_by_readback() {
+        let mut mctx = MetaCtx::new();
+        let anonymous = arrow(Val::One, Exp::One);
+        let named = Val::Pi(
+            Box::new(Val::One),
+            crate::nbe::val::Clos::new(
+                Patt::Var("x".to_string()),
+                Exp::One,
+                crate::nbe::env::Rho::Nil,
+            ),
+        );
+        unify(0, &anonymous, &named, &mut mctx)
+            .expect_err("eq_nf distinguishes these, and with no meta present it decides");
     }
 
     // ---- metavariable solving ----
@@ -639,7 +921,7 @@ mod tests {
         // ?m applied to a non-bound-variable spine — rejected because
         // Phase C only solves first-order patterns with empty spines.
         let mut mctx = MetaCtx::new();
-        let id = mctx.fresh();
+        let id = mctx.fresh(0);
         let bad_spine = vec![Val::Unit]; // not a Neut::Gen
         let m = Val::Nt(Neut::Meta(id, bad_spine));
         let err = unify(0, &m, &Val::sort(0), &mut mctx).unwrap_err();
@@ -655,17 +937,40 @@ mod tests {
         assert!(mctx.solution(id).is_some());
     }
 
+    /// The spine names what the meta may keep; anything else still escapes.
+    ///
+    /// `?P` is created at level 0 and reached under two binders. Its spine names only the variable
+    /// at level 1, so a solution mentioning the one at level 0 would carry a variable out of the
+    /// binder that introduced it. Readback is what makes this decidable: it forces every closure,
+    /// so the free variables of the proposed solution are visible syntactically.
     #[test]
-    fn meta_with_pattern_spine_currently_unsupported() {
-        // A spine of distinct bound vars passes the pattern check but
-        // Phase C v1 still rejects non-empty spines (lambda
-        // construction is deferred).
+    fn a_pattern_spine_still_refuses_a_solution_mentioning_a_variable_it_does_not_name() {
         let mut mctx = MetaCtx::new();
-        let id = mctx.fresh();
+        let id = mctx.fresh(0);
+        let m = Val::Nt(Neut::Meta(id, vec![bound_var(1)]));
+        let err = unify(2, &m, &bound_var(0), &mut mctx)
+            .expect_err("G#0 is not in the spine and not in scope where ?P stands");
+        assert!(
+            matches!(err, UnifyError::EscapesBinder { .. }),
+            "expected an escaping-binder refusal, got {err:?}"
+        );
+        assert!(mctx.solution(id).is_none(), "nothing may have been solved");
+    }
+
+    #[test]
+    fn meta_with_pattern_spine_is_solved_by_abstraction() {
+        // A spine of distinct bound vars is a Miller pattern: the solution abstracts the rhs over
+        // exactly the variables the spine names. `?id G#0 G#1 ≟ Prop` gives `λ_ _. Prop`.
+        let mut mctx = MetaCtx::new();
+        let id = mctx.fresh(0);
         let spine = vec![bound_var(0), bound_var(1)];
         let m = Val::Nt(Neut::Meta(id, spine));
-        let err = unify(2, &m, &Val::sort(0), &mut mctx).unwrap_err();
-        assert!(matches!(err, UnifyError::NonPatternSpine { .. }));
+        unify(2, &m, &Val::sort(0), &mut mctx).expect("a pattern spine is solvable");
+        let sol = mctx.solution(id).expect("?id is solved");
+        assert!(
+            matches!(sol, Val::Lam(_)),
+            "the solution abstracts over the spine, got {sol:?}"
+        );
     }
 
     // ---- inductive type unification (D48's main consumer) ----

@@ -259,23 +259,26 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         source: include_str!("../../../ontologies/core/core-ontology.json"),
         format: OntologyFormat::Json,
     },
-    // eigentt-type-fragment (D47) — chain-mirrored EigenTT type language for
-    // axiom and theorem statements (D46 §10 axioms, future propositional
-    // institutions). Depends only on core (`string`, `integer`, `InductiveType`,
-    // `InductiveCtor`, `InductiveArgType`).
-    BootstrapOntology {
-        name: "eigentt-type-fragment",
-        source: include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
-        format: OntologyFormat::Json,
-    },
+    // D47's chain-mirrored EigenTT type language was a layer of its own here until it was merged
+    // into core. The namespaces stay separate — `core:` and `eigentt:` name different things — but
+    // the LAYERS could not: core's `param_kind`, `type_name` and `ctor_type` carry `eigentt:Term`
+    // values, so `Term`, `expected_type` and `is_a_type` had already been pulled down into core to
+    // resolve the cycle, and a boundary nothing can load one side of is not a boundary. A namespace
+    // is a naming convention, not a layer assertion (eigenius#188 / N4).
     BootstrapOntology {
         name: "program",
         source: include_str!("../../../ontologies/program/program-ontology.json"),
         format: OntologyFormat::Json,
     },
+    // program:traces — the per-step evaluation record of a `program:` program: LetTrace, MapTrace,
+    // ReduceTrace, CaseTrace, ConstructTrace, ProjectTrace, ComponentTrace, one for nearly every
+    // construct the layer below declares. Was `reflection`, which named why the vocabulary existed
+    // (the kernel describing itself) rather than what is in it, and so accumulated three unrelated
+    // families. NOT `prov:Trace`: these record how a program EVALUATED, those record how a resource
+    // CAME TO EXIST.
     BootstrapOntology {
-        name: "reflection",
-        source: include_str!("../../../ontologies/reflection/reflection-ontology.json"),
+        name: "program-traces",
+        source: include_str!("../../../ontologies/program/program-traces.json"),
         format: OntologyFormat::Json,
     },
     // prov — the provenance axis (Agent / Activity / the four provenance Traces
@@ -337,7 +340,7 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         format: OntologyFormat::Json,
     },
     // reasoning (D39 Phase 8) — the Justification Logic institution's chain
-    // artifacts (ChainWitness predicates, justification:Term, justification:Conclusion,
+    // artifacts (ChainWitness predicates, justification:Grounds, justification:Conclusion,
     // the institution + QueryClasses + ExportFormat). ESL source = single source
     // of truth. Depends on core / eigentt / reflection / institution.
     BootstrapOntology {
@@ -1006,10 +1009,9 @@ class p:Cat { description = "a dog"; }"#;
         assert!(!reflection.is_root());
         let program = reflection.parent().unwrap();
         assert!(!program.is_root());
-        let eigentt_type = program.parent().unwrap();
-        assert!(!eigentt_type.is_root());
-        // Core layer (parent of eigentt-type-fragment) should be root.
-        assert!(eigentt_type.parent().unwrap().is_root());
+        // `program`'s parent is core, and core is the root. The EigenTT type fragment sat between
+        // them until it was merged into core — the namespaces stayed separate, the layers did not.
+        assert!(program.parent().unwrap().is_root());
     }
 
     #[test]
@@ -1248,28 +1250,60 @@ class p:Cat { description = "a dog"; }"#;
         }
     }
 
+    /// Every `program:Component` the bootstrap declares is implemented somewhere.
+    ///
+    /// Replaces a hand-maintained list of names to resolve, which could only ever confirm that a
+    /// declaration exists — the property that was already true of `components:Combine`, `Extract`
+    /// and `Transform`, declared `implementation: "builtin"` and `deterministic: true` while
+    /// being implemented nowhere. Three of the four components declaring determinism were
+    /// phantoms, and an unregistered IRI evaluated to a stuck neutral that committed with a
+    /// `ProgramTrace` over a step that never ran (eigenius#144). Deleting the three declarations
+    /// fixes the instances; checking the declarations against the implementations is what stops
+    /// a fourth.
+    ///
+    /// The two implementation sites are [`ComponentRegistry::default`] (in-process) and
+    /// `server::lifecycle::REMOTE_COMPONENTS` (dispatched to the orchestrator).
     #[test]
-    fn can_resolve_builtin_components() {
-        let ctx = bootstrap().unwrap();
-        for comp in [
-            "Identity",
-            "CompleteText",
-            "CompleteJson",
-            "Combine",
-            "Extract",
-            "Transform",
-            "HttpRequest",
-        ] {
-            let iri = Iri::parse(&format!("urn:eigenius:program:components:{comp}")).unwrap();
-            assert!(
-                ctx.resolve(&iri).is_some(),
-                "should resolve component {comp}"
-            );
-        }
+    fn every_declared_component_is_implemented() {
+        let component_class = Iri::parse("urn:eigenius:program:Component").unwrap();
+
+        let registry = crate::program::component::ComponentRegistry::default();
+        let implemented: std::collections::BTreeSet<String> = registry
+            .list()
+            .into_iter()
+            .chain(
+                crate::server::lifecycle::REMOTE_COMPONENTS
+                    .iter()
+                    .map(|s| (*s).to_string()),
+            )
+            .collect();
+
+        let program_json = include_str!("../../../ontologies/program/program-ontology.json");
+        let declared: Vec<String> = eigon_json::parse_document(program_json)
+            .expect("the program ontology parses")
+            .into_iter()
+            .filter(|r| r.is_a().iter().any(|c| c == &component_class))
+            .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
+            .collect();
+
+        assert!(
+            !declared.is_empty(),
+            "the bootstrap declares no `program:Component` at all, so this test checks nothing"
+        );
+
+        let phantom: Vec<&String> = declared
+            .iter()
+            .filter(|iri| !implemented.contains(*iri))
+            .collect();
+        assert!(
+            phantom.is_empty(),
+            "these components are declared and implemented nowhere — a program applying one \
+             fails `ComponentDispatchFailed` at run time rather than at commit: {phantom:?}"
+        );
     }
 
     #[test]
-    fn can_resolve_reflection_classes() {
+    fn can_resolve_program_trace_classes() {
         let ctx = bootstrap().unwrap();
         // Only the EVALUATION family is left here. The provenance traces
         // (ProgramTrace / DeclarationTrace / ObservationTrace / VerificationTrace)
@@ -1284,10 +1318,10 @@ class p:Cat { description = "a dog"; }"#;
             "CaseTrace",
             "ConstructTrace",
         ] {
-            let iri = Iri::parse(&format!("urn:eigenius:reflection:{class}")).unwrap();
+            let iri = Iri::parse(&format!("urn:eigenius:program:traces:{class}")).unwrap();
             assert!(
                 ctx.resolve(&iri).is_some(),
-                "should resolve reflection class {class}"
+                "should resolve program:traces class {class}"
             );
         }
     }
@@ -1360,7 +1394,7 @@ class p:Cat { description = "a dog"; }"#;
 
     #[test]
     fn bootstrap_resolves_the_justification_layer_artifacts() {
-        // The two indexed inductives (justification:Term + justification:Certificate) and the
+        // The indexed inductive (justification:Grounds) and the
         // two resource classes, plus the three witness predicates the certificate ctors
         // reference — those now resolve from CORE, which is the point of the P7 move: the
         // kernel constructs their inhabitants, so they cannot be owned by a layer above it.
@@ -1369,10 +1403,9 @@ class p:Cat { description = "a dog"; }"#;
             "urn:eigenius:witness:IsDeclaredAs",
             "urn:eigenius:witness:IsObservedAs",
             "urn:eigenius:witness:IsVerifiedAs",
-            "urn:eigenius:justification:Term",
-            "urn:eigenius:justification:Certificate",
+            "urn:eigenius:justification:Grounds",
             "urn:eigenius:justification:Conclusion",
-            "urn:eigenius:justification:VerifiedPropositionView",
+            "urn:eigenius:justification:Declaration",
         ] {
             let parsed = Iri::parse(iri).unwrap();
             assert!(
@@ -1380,6 +1413,49 @@ class p:Cat { description = "a dog"; }"#;
                 "bootstrap should resolve justification-layer artifact `{iri}`"
             );
         }
+    }
+
+    /// `core:implicit_args` survives the whole round trip: ESL clause, chain property, decoded
+    /// `InductiveCtorDecl::implicit`.
+    ///
+    /// Positions, not just presence. The list is authored as names precisely so a name and the
+    /// telescope cannot drift apart, and this is where the translation lands.
+    #[test]
+    fn the_certificates_implicit_binders_reach_the_kernel_declaration() {
+        let ctx = bootstrap().unwrap();
+        let iri = Iri::parse("urn:eigenius:justification:Grounds").unwrap();
+        let resource = ctx
+            .resolve(&iri)
+            .expect("justification:Grounds is chain-resident");
+        let decl = match crate::program::ground::resolve_inductive_type(&iri, &resource, ctx.head())
+            .expect("justification:Grounds resolves as an inductive")
+        {
+            crate::nbe::val::Val::InductiveType { decl, .. } => decl,
+            other => panic!("expected an inductive type former, got {other:?}"),
+        };
+        let flags = |name: &str| {
+            decl.ctors
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("no constructor `{name}`"))
+                .implicit
+                .clone()
+        };
+        // `app : forall (A : Prop, B : Prop) => Cert(A -> B) -> Cert(A) -> Cert(B)`
+        assert_eq!(flags("app"), vec![true, true, false, false]);
+        // `sum_l : forall (P : Prop) => Cert(P) -> Cert(P) -> Cert(P)`
+        assert_eq!(flags("sum_l"), vec![true, false, false]);
+        assert_eq!(flags("sum_r"), vec![true, false, false]);
+        // The grounding constructors write everything: the `iri` IS the author's citation, and
+        // eliding it would mean never naming what a claim rests on.
+        for ground in ["declared", "observed", "verified"] {
+            assert!(
+                flags(ground).is_empty(),
+                "`{ground}` declares nothing implicit"
+            );
+        }
+        // `instantiate`'s `T` reaches the index only under a higher-order pattern — D88 §6.
+        assert!(flags("instantiate").is_empty());
     }
 
     #[test]

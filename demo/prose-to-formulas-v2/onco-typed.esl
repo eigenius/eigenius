@@ -47,7 +47,6 @@
 // vocabulary the lexicon contains, and this lexicon is WordNet + UMLS. When RO/GO enter the
 // lexicon, the move is to define RO-named predicates over those entries — not to rename these.
 
-namespace logic    = "urn:eigenius:logic";
 namespace eigentt  = "urn:eigenius:eigentt";
 namespace ontology = "urn:eigenius:ontology";
 namespace wn       = "urn:eigenius:wn";

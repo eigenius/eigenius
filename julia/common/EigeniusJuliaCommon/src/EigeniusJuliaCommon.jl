@@ -174,7 +174,7 @@ end
 # type at the encoder step, encodes each derivation as its own
 # Eigon-CBOR resource, and threads them through the substrate wire
 # protocol so the kernel commits them as
-# `reflection:InstitutionEmittedDerivation`s under the gated subject
+# `institution:EmittedDerivation`s under the gated subject
 # (D52 §6).
 #
 # Bare-verdict handlers continue to work unchanged — they return the
@@ -186,7 +186,7 @@ end
 Wraps an institution query handler's gate Verdict (`output`) and zero-
 or-more side-effect derivation resources. The JuliaWorker recognises
 this type and threads both halves across the substrate boundary; the
-kernel stamps the `reflection:InstitutionEmittedDerivation` marker and
+kernel stamps the `institution:EmittedDerivation` marker and
 the `from_subject` / `runtime_invocation` linkage properties on each
 derivation before committing.
 

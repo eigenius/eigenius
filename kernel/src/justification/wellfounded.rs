@@ -43,7 +43,7 @@
 //! ## The carve-out is required, not convenient
 //!
 //! The condition is **vacuous on a premise with no support to inspect** — a
-//! `justification:Claim` under a `prov:DeclarationTrace` has none: its bridge rests on
+//! `justification:Declaration` under a `prov:DeclarationTrace` has none: its bridge rests on
 //! institutional trust rather than a derived proposition. This is not leniency.
 //! Artemov's constant specifications permit self-referential axioms `c : A(c)`, and
 //! that self-referentiality is strictly necessary for realizing certain S4 theorems in
@@ -65,8 +65,8 @@ use crate::ontology::iri::Iri;
 
 /// `justification:Conclusion` — the class whose instances carry a term to inspect.
 const CONCLUSION: &str = "urn:eigenius:justification:Conclusion";
-/// `justification:judgement` — `holds(kernel, c, Certificate(j, P))`.
-const JUDGEMENT: &str = "urn:eigenius:justification:judgement";
+/// `justification:grounds_judgement` — `holds(kernel, c, Certificate(j, P))`.
+const JUDGEMENT: &str = "urn:eigenius:justification:grounds_judgement";
 
 /// Why a conclusion is not well-founded.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,10 +136,14 @@ fn term_of(layer: &Layer, iri: &Iri) -> Option<Result<crate::nbe::term::Exp, Str
         Ok(j) => j,
         Err(e) => return Some(Err(format!("judgement does not decode: {e}"))),
     };
+    // The certificate itself, not an index of its type. It used to come from
+    // `certificate_indices(&judgement.typ).0` — the term the type carried alongside the
+    // proposition — and with that index merged into the certificate (D88 §2) the derivation is
+    // the judgement's own `term`: `holds(kernel, c, Certificate(P))`.
     match crate::program::eigentt_type_mirror::certificate_indices(&judgement.typ) {
-        Some((j_exp, _p)) => Some(Ok(j_exp.clone())),
+        Some(_) => Some(Ok(judgement.term.clone())),
         None => Some(Err(
-            "judgement's type is not a `justification:Certificate(j, P)`".to_string(),
+            "judgement's type is not a `justification:Grounds(P)`".to_string()
         )),
     }
 }

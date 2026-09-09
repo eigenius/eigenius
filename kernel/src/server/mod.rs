@@ -60,7 +60,7 @@ mod gc;
 pub mod helpers;
 mod hooks;
 mod inspect;
-mod lifecycle;
+pub(crate) mod lifecycle;
 mod load;
 mod parse;
 pub use parse::ParseConfig;
@@ -607,7 +607,7 @@ impl EigeniusService {
     /// chain-resident smart-constructor macro (e.g.
     /// `stats:SingleSampleEstimate(...)`) or references ctors
     /// declared in a parent layer's inductive (e.g.
-    /// `justification:Certificate.app` consumed from a `type_expr(...)`
+    /// `justification:Grounds.app` consumed from a `type_expr(...)`
     /// certificate body). When `branch` is None, falls back to
     /// `compile_with_institutions` (institution-aware, layer-blind).
     #[allow(clippy::result_large_err)]

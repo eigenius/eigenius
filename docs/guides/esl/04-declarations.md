@@ -194,7 +194,7 @@ The structural property the framework upholds: **every Prop-level belief in a ch
 
 ### Composing with D39 reasoning
 
-To cite an axiom from a [D39 reasoning sentence](09-institutions.md), pair the `axiom` declaration with a [D49](../../design/d49-chainwitness-machinery.md) `DeclarationTrace` pointing at the axiom resource — that admits the `IsDeclaredAs(axiom_iri, statement)` witness the certificate's `justification:Certificate.declared` constructor consumes:
+To cite an axiom from a [D39 reasoning sentence](09-institutions.md), pair the `axiom` declaration with a [D49](../../design/d49-chainwitness-machinery.md) `DeclarationTrace` pointing at the axiom resource — that admits the `IsDeclaredAs(axiom_iri, statement)` witness the certificate's `justification:Grounds.declared` constructor consumes:
 
 ```esl
 axiom ex:strong_inhibitor_implication :
@@ -377,7 +377,7 @@ There is no ambiguity with a qualified type: `ex:Tree` lexes as one `QualName` t
 
 ### Indexed — D48 indexed families
 
-Indexed inductives carry an **index telescope** between the parameters and the result sort. Each constructor's conclusion specifies *values* for the indices (not just the types), and pattern matching against an indexed scrutinee can refine the expected type per arm. This is the surface that lets us express length-indexed vectors, equality on a type, the [D39 `justification:Certificate(justification, proposition)`](../../design/d39-justification-logic.md) certificate, and any other family where the conclusion shape depends on the scrutinee.
+Indexed inductives carry an **index telescope** between the parameters and the result sort. Each constructor's conclusion specifies *values* for the indices (not just the types), and pattern matching against an indexed scrutinee can refine the expected type per arm. This is the surface that lets us express length-indexed vectors, equality on a type, the [D39 `justification:Grounds(justification, proposition)`](../../design/d39-justification-logic.md) certificate, and any other family where the conclusion shape depends on the scrutinee.
 
 ```esl
 data ex:Vec(A : core:Set) : core:Nat -> Set {

@@ -42,7 +42,7 @@ const SOURCE: &str = "urn:eigenius:prov:was_generated_by";
 const OUTPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:output_content_hash";
 const INPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:input_content_hash";
 const COVERAGE: &str = "urn:eigenius:obj:d57:coverage";
-const CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
+const PROPOSITION: &str = "urn:eigenius:eigentt:proposition";
 /// The `obj:GeneratorConforms` predicate the chain's m3 conformance leg uses.
 const GENERATOR_CONFORMS: &str = "urn:eigenius:obj:d57:GeneratorConforms";
 /// The subject the schema.org objective is about.
@@ -101,7 +101,7 @@ pub fn build_report(
     // The term shape is the D47 App-spine the reasoning institution reads:
     // `App(ConstRef(pred), LitString(arg))`.
     r.set(
-        iri(CANONICAL_PROPOSITION),
+        iri(PROPOSITION),
         Value::Json(serde_json::json!({
             "ctor": "App",
             "args": [
@@ -160,7 +160,7 @@ mod tests {
         // The worker sets its own canonical_proposition — GeneratorConforms("schema_org")
         // as the D47 App-spine — so a chain declaration written against this
         // proposition hashes to the same key.
-        let Some(Value::Json(prop)) = back.get(&iri(CANONICAL_PROPOSITION)) else {
+        let Some(Value::Json(prop)) = back.get(&iri(PROPOSITION)) else {
             panic!("report must carry canonical_proposition");
         };
         assert_eq!(prop["ctor"], serde_json::json!("App"));

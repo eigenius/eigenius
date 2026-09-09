@@ -11,7 +11,6 @@
 // Each consecutive pair is (x = ms_deletions, y = avg_WRN_dep).
 
 namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace wrn        = "urn:eigenius:demo:wrncorr";
 namespace prov       = "urn:eigenius:prov";

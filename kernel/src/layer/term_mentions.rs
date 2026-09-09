@@ -57,7 +57,7 @@
 //! invalidation.
 
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::Value;
+use crate::ontology::resource::{Resource, Value};
 use std::collections::BTreeSet;
 
 /// Every IRI a term-valued property names, in either shape.
@@ -76,20 +76,304 @@ use std::collections::BTreeSet;
 /// `is_a`, which the tagged form spelled as the bare string `"ConstRef"` and no consumer could
 /// resolve. The class is a real dependency — Rule 25 requires it to be declared — so counting it
 /// is the correct answer, not an over-approximation to apologise for.
-pub fn json_mentions_of_value(v: &Value, out: &mut BTreeSet<Iri>) {
+pub fn json_mentions_of_value(v: &Value, layer: &crate::layer::Layer, out: &mut BTreeSet<Iri>) {
     match v {
-        Value::Array(items) => items.iter().for_each(|i| json_mentions_of_value(i, out)),
-        // Same rule as inside a term: any string that parses as a `urn:` IRI counts.
-        Value::String(s) if s.starts_with("urn:") => {
+        Value::Array(items) => items
+            .iter()
+            .for_each(|i| json_mentions_of_value(i, layer, out)),
+        // STRICT (B6): a bare string is not a reference. Where one is, a declaration says so —
+        // `spine_mentions` reads the constructor's argument types, and `is_a` is reached as a
+        // class below. This is the narrowing: a `LitString` whose contents happen to be
+        // IRI-shaped is data, and indexing it invented a dependency nothing declared.
+        Value::String(_) => {}
+        Value::Embedded(r) => {
+            // The value names its constructor's class in `is_a`, and Rule 25 requires that class
+            // to be declared — a real dependency, reached here rather than by string shape.
+            for c in r.is_a() {
+                out.insert(c.clone());
+            }
+            // B6 — an application spine whose head names a constructor can be read against that
+            // constructor's DECLARED argument types instead of guessed at. When that read
+            // succeeds it decides every argument; when it does not, fall through to the
+            // structural walk below.
+            if spine_mentions(r, layer, out) {
+                return;
+            }
+            for (prop_iri, val) in r.properties() {
+                mentions_under_property(prop_iri, val, layer, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The mentions carried by one property of a value resource, decided by that property's declared
+/// `core:data_type` — the second half of B6, and the one that reaches a `ConstRef`.
+///
+/// A `ConstRef` is not an application: it is a value resource whose target sits on
+/// `Term-ConstRef-iri`. `spine_mentions` cannot see it, so the property's own declaration is what
+/// says the string is a reference. `ctor_classes` derives these properties from the inductive's
+/// `core:ctors`, so the type is on the chain rather than in this reader.
+fn mentions_under_property(
+    prop_iri: &Iri,
+    v: &Value,
+    layer: &crate::layer::Layer,
+    out: &mut BTreeSet<Iri>,
+) {
+    use crate::ontology::well_known as wk;
+    let data_type = layer
+        .resolve(prop_iri)
+        .and_then(|p| {
+            Iri::parse(wk::DATA_TYPE_PROP)
+                .ok()
+                .and_then(|k| p.get(&k).cloned())
+        })
+        .and_then(|v| v.as_str().map(str::to_string));
+    match data_type.as_deref() {
+        Some(wk::IRI_TYPE) | Some(wk::RESOURCE) | Some(wk::RESOURCE_ARRAY) => {
+            push_iri_strings(v, out)
+        }
+        _ => json_mentions_of_value(v, layer, out),
+    }
+}
+
+/// Every IRI-parsable string in `v`, one level of array included.
+fn push_iri_strings(v: &Value, out: &mut BTreeSet<Iri>) {
+    match v {
+        Value::String(s) => {
             if let Ok(iri) = Iri::parse(s) {
                 out.insert(iri);
             }
         }
-        Value::Embedded(r) => r
-            .properties()
-            .values()
-            .for_each(|v| json_mentions_of_value(v, out)),
+        Value::Array(items) => items.iter().for_each(|i| push_iri_strings(i, out)),
         _ => {}
+    }
+}
+
+/// Read an `App` spine against its head constructor's declared argument types.
+///
+/// **B6 / D88 §3.** Returns `true` when it handled the node — the spine's head is a `CtorApp`
+/// naming a constructor whose argument types resolve — and `false` to fall back.
+///
+/// **Why the fallback is the heuristic and not silence.** A premise citation that stops reaching
+/// the index is a dependency the well-foundedness check cannot see, and P6 enforces
+/// well-foundedness over exactly these edges. Over-approximating is what this module does today;
+/// under-approximating would be new, and wrong in the direction that loses data. So an
+/// unresolvable constructor keeps the old behaviour for that subtree.
+fn spine_mentions(r: &Resource, layer: &crate::layer::Layer, out: &mut BTreeSet<Iri>) -> bool {
+    let Some((head, args)) = collect_spine(r) else {
+        return false;
+    };
+    let Some((decl_iri, ctor_name)) = ctor_app_target(head) else {
+        return false;
+    };
+    let Some(arg_types) = explicit_arg_types(layer, &decl_iri, &ctor_name) else {
+        return false;
+    };
+    // The constructor and the inductive are both dependencies of any term naming them.
+    out.insert(decl_iri);
+    for c in head.is_a() {
+        out.insert(c.clone());
+    }
+    // Spine arguments fill the explicit binders in order. There may be FEWER than the telescope
+    // declares — an elided witness slot, an implicit binder — so a positional prefix is the
+    // correspondence, and a spine longer than the telescope falls back rather than guessing.
+    if args.len() > arg_types.len() {
+        return false;
+    }
+    for (arg, ty) in args.iter().zip(arg_types.iter()) {
+        match ty.as_str() {
+            // Declared to hold a reference. The argument arrives as a `LitString` — the term
+            // language has no IRI former — so its string IS the mention.
+            crate::ontology::well_known::IRI_TYPE => lit_string_iri(arg, out),
+            // Anything else is either another term (recurse) or data (nothing). Recursing into a
+            // non-term is harmless: a literal's own value sits under a `core:string` property and
+            // contributes nothing.
+            _ => json_mentions_of_value(&Value::Embedded(Box::new(arg.clone())), layer, out),
+        }
+    }
+    true
+}
+
+/// Flatten `App(App(App(h, a), b), c)` into `(h, [a, b, c])`, or `None` if `r` is not an `App`.
+fn collect_spine(r: &Resource) -> Option<(&Resource, Vec<Resource>)> {
+    fn head_arg(r: &Resource) -> Option<(&Resource, &Resource)> {
+        let is_app = r.is_a().first()?.as_str().ends_with("-App");
+        if !is_app {
+            return None;
+        }
+        let mut head = None;
+        let mut arg = None;
+        for (k, v) in r.properties() {
+            let Value::Embedded(inner) = v else { continue };
+            if k.as_str().ends_with("-head") {
+                head = Some(inner.as_ref());
+            } else if k.as_str().ends_with("-arg") {
+                arg = Some(inner.as_ref());
+            }
+        }
+        Some((head?, arg?))
+    }
+    let (mut h, a) = head_arg(r)?;
+    let mut args = vec![a.clone()];
+    while let Some((inner_h, inner_a)) = head_arg(h) {
+        args.push(inner_a.clone());
+        h = inner_h;
+    }
+    args.reverse();
+    Some((h, args))
+}
+
+/// `(inductive, ctor_name)` when `r` is a `CtorApp` value resource.
+fn ctor_app_target(r: &Resource) -> Option<(Iri, String)> {
+    if !r.is_a().first()?.as_str().ends_with("-CtorApp") {
+        return None;
+    }
+    let mut decl = None;
+    let mut name = None;
+    for (k, v) in r.properties() {
+        let Some(s) = v.as_str() else { continue };
+        if k.as_str().ends_with("-decl_iri") {
+            decl = Iri::parse(s).ok();
+        } else if k.as_str().ends_with("-ctor_name") {
+            name = Some(s.to_string());
+        }
+    }
+    Some((decl?, name?))
+}
+
+/// A constructor's EXPLICIT argument types, in spine order, as the IRIs they name.
+///
+/// Two declaration forms, because the tree has both (D88 §3): a positional constructor carries
+/// `core:arg_types`, and an indexed one carries its whole type as a `core:ctor_type` telescope.
+/// Binders named in `core:implicit_args` (B1) are skipped — they are not written at the use site,
+/// so they occupy no spine position.
+fn explicit_arg_types(
+    layer: &crate::layer::Layer,
+    inductive: &Iri,
+    ctor_name: &str,
+) -> Option<Vec<String>> {
+    use crate::ontology::well_known as wk;
+    let ind = layer.resolve(inductive)?;
+    let Value::Array(ctors) = ind.get(&Iri::parse(wk::CTORS).ok()?)? else {
+        return None;
+    };
+    let ctor = ctors.iter().find_map(|c| match c {
+        Value::Embedded(r)
+            if r.get(&Iri::parse(wk::CTOR_NAME).ok()?)
+                .and_then(|v| v.as_str())
+                == Some(ctor_name) =>
+        {
+            Some(r.as_ref())
+        }
+        _ => None,
+    })?;
+
+    let implicit: BTreeSet<String> = match ctor.get(&Iri::parse(wk::IMPLICIT_ARGS).ok()?) {
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        _ => BTreeSet::new(),
+    };
+
+    // Positional form.
+    if let Some(Value::Array(args)) = ctor.get(&Iri::parse(wk::ARG_TYPES).ok()?) {
+        return Some(
+            args.iter()
+                .filter_map(|a| match a {
+                    Value::Embedded(r) => {
+                        let name = r
+                            .get(&Iri::parse(wk::ARG_NAME).ok()?)
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        if implicit.contains(name) {
+                            return None;
+                        }
+                        Some(const_ref_iri(r.get(&Iri::parse(wk::TYPE_NAME).ok()?)?))
+                    }
+                    _ => None,
+                })
+                .collect(),
+        );
+    }
+
+    // Telescope form: walk the `Pi` chain, taking each binder's domain.
+    let ty = ctor.get(&Iri::parse(wk::CTOR_TYPE).ok()?)?;
+    let mut out = Vec::new();
+    let mut cur = match ty {
+        Value::Embedded(r) => r.as_ref().clone(),
+        _ => return None,
+    };
+    loop {
+        if !cur.is_a().first().is_some_and(|c| {
+            let c = c.as_str();
+            c.ends_with("-Pi") || c.ends_with("-Arrow")
+        }) {
+            break;
+        }
+        let mut name = String::new();
+        let mut dom = None;
+        let mut body = None;
+        for (k, v) in cur.properties() {
+            let ks = k.as_str();
+            if ks.ends_with("-name") {
+                name = v.as_str().unwrap_or_default().to_string();
+            } else if ks.ends_with("-dom") {
+                dom = Some(v.clone());
+            } else if ks.ends_with("-body") {
+                if let Value::Embedded(b) = v {
+                    body = Some(b.as_ref().clone());
+                }
+            }
+        }
+        if !implicit.contains(&name) {
+            out.push(dom.as_ref().map(const_ref_iri).unwrap_or_default());
+        }
+        match body {
+            Some(b) => cur = b,
+            None => break,
+        }
+    }
+    Some(out)
+}
+
+/// The IRI a `ConstRef` domain names, or the empty string for any other shape. A domain that is
+/// not a bare constant — `Prop`, an application, another Pi — is not a reference slot, and the
+/// empty string routes it to the recursive arm.
+fn const_ref_iri(v: &Value) -> String {
+    match v {
+        Value::Embedded(r)
+            if r.is_a()
+                .first()
+                .is_some_and(|c| c.as_str().ends_with("-ConstRef")) =>
+        {
+            r.properties()
+                .iter()
+                .find(|(k, _)| k.as_str().ends_with("-iri"))
+                .and_then(|(_, v)| v.as_str())
+                .unwrap_or_default()
+                .to_string()
+        }
+        Value::String(s) => s.clone(),
+        _ => String::new(),
+    }
+}
+
+/// A `LitString`'s value, as a mention. The term language has no IRI former, so a slot declared
+/// `core:iri` is filled by a `LitString` whose string is the reference.
+fn lit_string_iri(r: &Resource, out: &mut BTreeSet<Iri>) {
+    for c in r.is_a() {
+        out.insert(c.clone());
+    }
+    for (k, v) in r.properties() {
+        if k.as_str().ends_with("-value") {
+            if let Some(s) = v.as_str() {
+                if let Ok(i) = Iri::parse(s) {
+                    out.insert(i);
+                }
+            }
+        }
     }
 }
 
@@ -104,6 +388,7 @@ mod tests {
             &crate::testing::term_value(
                 &serde_json::json!({"ctor": "ConstRef", "args": ["urn:eigenius:test:Nat", []]}),
             ),
+            crate::testing::term_chain(),
             &mut out,
         );
         // The referenced constant AND `Term-ConstRef`, the class the value states. Both are
@@ -123,6 +408,7 @@ mod tests {
             &crate::testing::term_value(
                 &serde_json::json!({"ctor": "CtorApp", "args": ["urn:eigenius:test:Nat", "succ"]}),
             ),
+            crate::testing::term_chain(),
             &mut out,
         );
         assert!(
@@ -141,6 +427,7 @@ mod tests {
                     {"ctor": "ConstRef", "args": ["urn:eigenius:lexicon:cat_np", []]},
                     {"ctor": "ConstRef", "args": ["urn:eigenius:wn:n00001740", []]}]},
                 {"ctor": "ConstRef", "args": ["urn:eigenius:lexicon:num_sg", []]}]})),
+            crate::testing::term_chain(),
             &mut out,
         );
         for expected in [
@@ -172,7 +459,11 @@ mod tests {
             Value::String("urn:eigenius:core:Level".into()),
         );
         let mut out = BTreeSet::new();
-        json_mentions_of_value(&Value::Embedded(Box::new(inner)), &mut out);
+        json_mentions_of_value(
+            &Value::Embedded(Box::new(inner)),
+            crate::testing::term_chain(),
+            &mut out,
+        );
         let got: Vec<&str> = out.iter().map(Iri::as_str).collect();
         assert_eq!(
             got,
@@ -194,6 +485,7 @@ mod tests {
             &crate::testing::term_value(
                 &serde_json::json!({"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]}),
             ),
+            crate::testing::term_chain(),
             &mut out,
         );
         let got: Vec<&str> = out.iter().map(Iri::as_str).collect();
@@ -205,5 +497,35 @@ mod tests {
             ],
             "only the constructor classes: {out:?}"
         );
+    }
+
+    /// **What B6 is for**: a string that merely LOOKS like an IRI, in a slot declared to hold
+    /// data, is no longer a dependency.
+    ///
+    /// The predecessor matched `s.starts_with("urn:")` at any depth, so a `LitString` carrying an
+    /// audit tag or an IRI-shaped payload was indexed as a reference to a declaration nothing
+    /// named. `Term-LitString-value` is declared `core:string`; reading the declaration is what
+    /// tells it apart from `Term-ConstRef-iri`, which is declared `core:iri`.
+    #[test]
+    fn a_lit_string_that_looks_like_an_iri_is_not_a_mention() {
+        let mut out = BTreeSet::new();
+        json_mentions_of_value(
+            &crate::testing::term_value(
+                &serde_json::json!({"ctor": "LitString", "args": ["urn:eigenius:test:NotADep"]}),
+            ),
+            crate::testing::term_chain(),
+            &mut out,
+        );
+        assert!(
+            !out.iter()
+                .any(|i| i.as_str() == "urn:eigenius:test:NotADep"),
+            "a `core:string` slot holds DATA — indexing its contents invents a dependency on a \
+             declaration nothing referenced. Got {out:?}"
+        );
+        // The constructor's class is still a dependency: the value names it in `is_a`, and
+        // Rule 25 requires it to be declared.
+        assert!(out
+            .iter()
+            .any(|i| i.as_str() == "urn:eigenius:eigentt:Term-LitString"));
     }
 }

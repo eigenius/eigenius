@@ -155,7 +155,7 @@ pub enum ValidationRule {
     /// (`Sort(1)` and up), an unapplied predicate, or a literal. Distinct
     /// from [`ValidationRule::TermIllTyped`]: the term is well-typed,
     /// it is simply not an assertion. Every downstream consumer of these
-    /// slots — the witness index, `justification:Certificate` certificate checking —
+    /// slots — the witness index, `justification:Grounds` certificate checking —
     /// reads them as propositions by construction, so this is the gate
     /// that makes that construction true. See eigenius#175.
     TermNotAProposition,
@@ -1133,7 +1133,7 @@ impl Validator {
         // like a guard with nothing to catch. The recursion was still refused, but by a
         // decode failure with an unrelated message.
         if let Some(id) = res_id {
-            if mentions_iri(body_value, id) {
+            if mentions_iri(body_value, &self.layer, id) {
                 fail(
                     &mut errors,
                     Some(body_prop.clone()),
@@ -1225,7 +1225,7 @@ impl Validator {
         resource: &Resource,
         res_id: &Option<Iri>,
     ) -> Vec<ValidationError> {
-        let this_level = match resource.get(&iri(wk::UNIVERSE_LEVEL)) {
+        let this_level = match resource.get(&iri(wk::META_LEVEL)) {
             Some(Value::Integer(n)) => *n,
             _ => return vec![], // No universe_level → domain resource, skip
         };
@@ -1258,9 +1258,7 @@ impl Validator {
 
             for ref_iri in &ref_iris {
                 if let Some(referenced) = self.layer.resolve(ref_iri) {
-                    if let Some(Value::Integer(ref_level)) =
-                        referenced.get(&iri(wk::UNIVERSE_LEVEL))
-                    {
+                    if let Some(Value::Integer(ref_level)) = referenced.get(&iri(wk::META_LEVEL)) {
                         if *ref_level >= this_level {
                             errors.push(ValidationError {
                                 resource_id: res_id.clone(),
@@ -1376,9 +1374,13 @@ struct ComorphismFormatRef<'a> {
 ///
 /// Delegates to the one walker that reads both shapes, rather than keeping a second one that
 /// only understood the tagged dict.
-fn mentions_iri(v: &crate::ontology::resource::Value, target: &Iri) -> bool {
+fn mentions_iri(
+    v: &crate::ontology::resource::Value,
+    layer: &crate::layer::Layer,
+    target: &Iri,
+) -> bool {
     let mut out = std::collections::BTreeSet::new();
-    crate::layer::term_mentions::json_mentions_of_value(v, &mut out);
+    crate::layer::term_mentions::json_mentions_of_value(v, layer, &mut out);
     out.contains(target)
 }
 
@@ -1732,7 +1734,7 @@ mod tests {
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:level0",
-                vec![(wk::UNIVERSE_LEVEL, Value::Integer(0))],
+                vec![(wk::META_LEVEL, Value::Integer(0))],
             ))
             .unwrap();
 
@@ -1741,7 +1743,7 @@ mod tests {
             .add_resource(make_resource(
                 "urn:eigenius:test:level1",
                 vec![
-                    (wk::UNIVERSE_LEVEL, Value::Integer(1)),
+                    (wk::META_LEVEL, Value::Integer(1)),
                     (
                         "urn:eigenius:test:ref_prop",
                         Value::String("urn:eigenius:test:level0".to_string()),
@@ -1773,7 +1775,7 @@ mod tests {
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:peer_a",
-                vec![(wk::UNIVERSE_LEVEL, Value::Integer(1))],
+                vec![(wk::META_LEVEL, Value::Integer(1))],
             ))
             .unwrap();
 
@@ -1781,7 +1783,7 @@ mod tests {
             .add_resource(make_resource(
                 "urn:eigenius:test:peer_b",
                 vec![
-                    (wk::UNIVERSE_LEVEL, Value::Integer(1)),
+                    (wk::META_LEVEL, Value::Integer(1)),
                     (
                         "urn:eigenius:test:ref_prop",
                         Value::String("urn:eigenius:test:peer_a".to_string()),
@@ -1822,7 +1824,7 @@ mod tests {
             .add_resource(make_resource(
                 "urn:eigenius:test:meta1",
                 vec![
-                    (wk::UNIVERSE_LEVEL, Value::Integer(1)),
+                    (wk::META_LEVEL, Value::Integer(1)),
                     (
                         "urn:eigenius:test:ref_prop",
                         Value::String("urn:eigenius:test:domain_thing".to_string()),
@@ -1853,7 +1855,7 @@ mod tests {
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:trace",
-                vec![(wk::UNIVERSE_LEVEL, Value::Integer(1))],
+                vec![(wk::META_LEVEL, Value::Integer(1))],
             ))
             .unwrap();
 
@@ -1861,7 +1863,7 @@ mod tests {
             .add_resource(make_resource(
                 "urn:eigenius:test:meta_trace",
                 vec![
-                    (wk::UNIVERSE_LEVEL, Value::Integer(2)),
+                    (wk::META_LEVEL, Value::Integer(2)),
                     (
                         "urn:eigenius:test:ref_prop",
                         Value::String("urn:eigenius:test:trace".to_string()),
@@ -1893,7 +1895,7 @@ mod tests {
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:too_high",
-                vec![(wk::UNIVERSE_LEVEL, Value::Integer(3))],
+                vec![(wk::META_LEVEL, Value::Integer(3))],
             ))
             .unwrap();
 
@@ -1975,7 +1977,7 @@ mod tests {
         );
     }
 
-    /// `trace_tree` is class-typed to the `reflection:Trace` base class:
+    /// `trace_tree` is class-typed to the `program:traces:Trace` base class:
     /// a well-typed node (any concrete trace class, via `subclass_of`)
     /// passes Rule 8; an untyped embedded resource — the shape the old
     /// placeholder encoding produced — is rejected at the tree root.
@@ -2013,7 +2015,7 @@ mod tests {
         };
 
         // Well-typed root: a concrete trace node class matches the
-        // `reflection:Trace` constraint via subclass_of.
+        // `program:traces:Trace` constraint via subclass_of.
         let typed_tree = crate::program::trace::trace_to_resource(
             &crate::program::trace::Trace::Seq(Vec::new()),
         );
@@ -2074,13 +2076,13 @@ mod tests {
         set_is_a(&mut deep, "urn:eigenius:reflection:NoSuchTrace");
         // Wrap it in a valid LetTrace body_trace.
         let mut let_trace = Resource::new_embedded();
-        set_is_a(&mut let_trace, "urn:eigenius:reflection:LetTrace");
+        set_is_a(&mut let_trace, "urn:eigenius:program:traces:LetTrace");
         let_trace.set(
-            iri("urn:eigenius:reflection:name"),
+            iri("urn:eigenius:program:traces:name"),
             Value::String("x".to_string()),
         );
         let_trace.set(
-            iri("urn:eigenius:reflection:body_trace"),
+            iri("urn:eigenius:program:traces:body_trace"),
             Value::Embedded(Box::new(deep)),
         );
 

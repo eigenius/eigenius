@@ -67,7 +67,7 @@ Layer access happens at three moments:
 
 3. **Constraint firing** ([`kernel/src/nbe/check/mod.rs`](../../../kernel/src/nbe/check/mod.rs) `NativeDecide` arm). When a property's declared constraint (e.g., `min_value`, regex pattern, or institution-decided predicate) needs to fire during type-check, the kernel reaches through the property IRI to the layer to find the constraint, then dispatches.
 
-4. **Chain-witness admission** (see [§6.4a](#6-4a-witness-predicates-admitting-propositions-from-layer-state) below). When the type-checker elaborates a `justification:Certificate.declared` / `.observed` / `.verified` grounding constructor, it consults the layer's witness index for an admitted `IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs` predicate at the cited IRI + proposition.
+4. **Chain-witness admission** (see [§6.4a](#6-4a-witness-predicates-admitting-propositions-from-layer-state) below). When the type-checker elaborates a `justification:Grounds.declared` / `.observed` / `.verified` grounding constructor, it consults the layer's witness index for an admitted `IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs` predicate at the cited IRI + proposition.
 
 Two consequences:
 
@@ -91,7 +91,7 @@ Each says "the resource at this IRI was committed with this canonical propositio
 |---|---|
 | `IsDeclaredAs(iri, P)` | `prov:DeclarationTrace` + a resource at IRI with `canonical_proposition = P` |
 | `IsObservedAs(iri, P)` | `prov:ObservationTrace` + a resource at IRI with `canonical_proposition = P` |
-| `IsVerifiedAs(iri, P)` | a `justification:Conclusion` at IRI carrying a `justification:proof` of `P` |
+| `IsVerifiedAs(iri, P)` | a `justification:Conclusion` at IRI carrying a `justification:proof_judgement` of `P` |
 
 **Three families, and `prov:ProgramTrace` admits none of them.** There is no
 `IsDerivedAs`: the fact that a computation ran grounds nothing, because a computed
@@ -106,7 +106,7 @@ being graded nominate its own grade, and it made the ground a KIND OF RESOURCE, 
 reading and a rule were different types rather than the same kind of thing with
 different origins. Which ground applies is now which TRACE the resource carries.
 
-These predicates are **opaque from the surface** — there is no ESL constructor that takes a chain identifier and produces a witness. The kernel materialises them during type-check by querying the layer's `chain_witness_index` (a `BTreeMap<WitnessKey, ()>` keyed by `(category, iri, prop_hash)`), populated at layer construction time from the layer's trace resources. The `prop_hash` is SHA-256 of the [D47-encoded](../../design/d47-chain-mirrored-eigentt-type-fragment.md) canonical proposition; two requests for the same `(category, iri, P)` hit the same key regardless of where `P` is mentioned in the program.
+These predicates are **opaque from the surface** — there is no ESL constructor that takes a chain identifier and produces a witness. The kernel materialises them during type-check by querying the layer's `chain_witness_admission` (a `BTreeMap<WitnessKey, ()>` keyed by `(category, iri, prop_hash)`), populated at layer construction time from the layer's trace resources. The `prop_hash` is SHA-256 of the [D47-encoded](../../design/d47-chain-mirrored-eigentt-type-fragment.md) canonical proposition; two requests for the same `(category, iri, P)` hit the same key regardless of where `P` is mentioned in the program.
 
 ### Why this mechanism exists
 
@@ -133,7 +133,7 @@ When the kernel can't find an admitted witness for a justification's grounding c
 
 Witnesses are derived state — they live in the layer's in-memory index, recomputed at construction time from the layer's trace resources. Voiding a layer removes the trace resources from any chain resolution that excludes the voided layer; the witness derived from those traces becomes unadmissible in that resolution. Downstream reasoning sentences whose grounding constructors cite the voided witness fail to type-check through that resolution but remain admissible through resolutions that include the layer. This is the same provenance discipline `class` and `property` resources follow — there's no special witness-only voiding mechanism.
 
-Source: [`Layer::chain_witness_index`](../../../kernel/src/layer/), [`synthesise_chain_witness`](../../../kernel/src/nbe/check/mod.rs).
+Source: [`Layer::chain_witness_admission`](../../../kernel/src/layer/), [`synthesise_chain_witness`](../../../kernel/src/nbe/check/mod.rs).
 
 ## 6.5. Why this matters in practice
 

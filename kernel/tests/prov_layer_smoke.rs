@@ -17,14 +17,14 @@
 //! `prov` carries the provenance axis — Agent, Activity, the four provenance
 //! Traces, and the relations between them — split out of `reflection` because
 //! that ontology had come to hold two unrelated families under one word:
-//! `reflection:Trace` with `LetTrace` / `MapTrace` / `CaseTrace` records how a
+//! `program:traces:Trace` with `LetTrace` / `MapTrace` / `CaseTrace` records how a
 //! PROGRAM EVALUATED, while the parentless `DeclarationTrace` /
 //! `ObservationTrace` / `ProductionTrace` / `VerificationTrace` record HOW A
 //! RESOURCE CAME TO EXIST.
 //!
 //! The layer sits ABOVE `reflection` and that direction is forced:
 //! `prov:ProgramTrace` points into the evaluation family through
-//! `prov:trace_tree` and `reflection:output`, and nothing in `reflection` points
+//! `prov:trace_tree` and `program:traces:output`, and nothing in `reflection` points
 //! back.
 
 use eigenius_kernel::ontology::iri::Iri;
@@ -74,13 +74,13 @@ fn every_prov_declaration_resolves() {
 /// A run's output carries an `ObservationTrace`, and the chain admits `Observed` for it.
 ///
 /// This pins the contract between what `server::programs::execute_program` emits and what
-/// `witness_index::emit_from_trace` reads — the part of kernel-run-records §2 that can
+/// `witness_admission::emit_from_trace` reads — the part of kernel-run-records §2 that can
 /// silently break. `execute_program` is `pub(super)` behind the gRPC service, so the trace
 /// is built here exactly as that code builds it: `is_a: [prov:ObservationTrace]`,
 /// `prov:resource` at the output, `prov:was_generated_by` at the run activity, and
 /// `prov:timestamp` — the three the class requires.
 ///
-/// The output carries no `reflection:canonical_proposition`, so the witness keys on D39
+/// The output carries no `eigentt:proposition`, so the witness keys on D39
 /// §4.1's default `Asserts(iri)`, which is what an unannotated program output asserts.
 ///
 /// **Why `Observed` and not nothing.** A run's outcome is *sampled*: the paper's criterion

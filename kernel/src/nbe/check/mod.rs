@@ -402,7 +402,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         //
         // This was `check(ctx, a, &Val::sort(1))` — "is a type" spelled as "inhabits `Set`". The
         // hardcoded 1 made every type ABOVE `Set` unusable in any position routed through here:
-        // `justification:Certificate.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
+        // `justification:Grounds.instantiate` binds `T : Type 1` and then writes `P : T -> Prop`, at
         // which point checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Cumulativity runs the
         // wrong way for this — it lets a SMALLER type be used where a larger one is wanted, and the
         // question here is not "how big" but "is it a type at all". Same defect as the `Level` `Ord`
@@ -441,7 +441,7 @@ pub fn check_inductive_declaration(
 ///
 /// [`check_type`]'s fallback was `check(ctx, a, &Val::sort(1))` — "is a type" spelled as "inhabits
 /// `Set`". The hardcoded 1 made every type ABOVE `Set` unusable in any position routed through
-/// there: `justification:Certificate.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
+/// there: `justification:Grounds.instantiate` binds `T : Type 1` and then writes `P : T -> Prop`, at
 /// which point checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Cumulativity runs the wrong
 /// way for this — it lets a SMALLER type be used where a larger one is wanted, and the question
 /// here is not "how big" but "is it a type at all". Same defect as the `Level` `Ord` derive removed
@@ -536,6 +536,28 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
              {:?}. (A type-level function has a Π type, not a Sort.)",
             readback_val(ctx.rho.len(), &Val::Sort(n.clone()))
         ))),
+        // A string literal against `core:iri`. This is the ONLY way to reach
+        // `PrimitiveType::Iri` (D88 §3): `check_infer` answers `String` for every `LitString`,
+        // because a bare literal cannot know which of the two it is meant to be. The declared type
+        // is what says so, which is the point of declaring it.
+        //
+        // Why this rather than making `Iri` infer, or making `String` convert to `Iri`: both would
+        // admit any string wherever an IRI is declared, which is the state B3 exists to leave. The
+        // subtyping runs the other way — `PrimitiveType::subtype_of` has `Iri <: String` and not
+        // the converse — and it is consulted where a value already carries a type, not here.
+        //
+        // Everything authored stays valid without a rewrite: the 396 grounding-constructor call
+        // sites keep writing `declared("urn:...", P)` and land in this arm instead of the generic
+        // inference path.
+        (Exp::LitString(s), Val::EigonPrimitive(crate::nbe::term::PrimitiveType::Iri)) => {
+            match crate::ontology::iri::Iri::parse(s) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(CheckError::TypeMismatch(format!(
+                    "`{s}` is declared `core:iri` but is not one: {e}"
+                ))),
+            }
+        }
+
         // Lambda against Pi type
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
             let gen = gen_val(&ctx.rho);
@@ -715,7 +737,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         //
         // The arm this replaces read `Val::Sort(_)` and so admitted
         // `SomeClass : Prop` — a class standing where a proposition is
-        // expected (`justification:Certificate(j, P)`, `reflection:canonical_proposition`,
+        // expected (`justification:Grounds(j, P)`, `eigentt:proposition`,
         // anything Rule 21 checks at the commit gate) with no diagnostic
         // (eigenius#191). Same check-vs-infer disagreement eigenius#136
         // removed for `Sort`.
@@ -1317,6 +1339,29 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
                 ))
             })
         }
+        // D87 §4.3 — a reference to a proof an EXTERNAL checker verified. Refused here, and the
+        // refusal is the enforcement.
+        //
+        // The alternatives are both wrong. Checking it would mean re-proving the proposition
+        // without the export, which the kernel cannot do. Admitting it at whatever type the
+        // judgement names would make `Verified` assertable by anybody who writes the judgement —
+        // the laundering the two-layer separation exists to forbid, and worse than the
+        // proof-as-axiom shape D87 §4.1 withdrew, since an axiom at least has to be declared.
+        //
+        // So a HAND-AUTHORED `holds(logic_lean4, Checked(a), P)` is rejected at commit, by the
+        // `eigentt:Judgement` check-mode rule that runs this. An INSTITUTION-EMITTED one is never
+        // asked: `structural_validate` runs before `autoonload_dispatch` in `commit::pipeline`,
+        // and the followup slice is `[build, persist]` with no validation phase. The two paths
+        // already differ in whether they validate, so "kernel-only, refused from input" — which
+        // eigenius#205 recorded as existing nowhere in the validator — falls out of the pipeline's
+        // shape rather than from a guard placed here.
+        //
+        // What makes the emitted judgement worth anything is not this check but D87 §5: the
+        // export bytes, the target name, the proposition, the permitted axiom set and the checker
+        // identity are all on the chain, so anyone can re-run nanoda and get the same verdict.
+        Exp::Checked(iri) => Err(CheckError::IllFormed(format!(
+            "`Checked({iri})` names a proof an external checker verified; the kernel has no proof              of the proposition it is offered against and will not admit one. A              `holds(logic_lean4, Checked(_), _)` judgement is produced by the institution that ran              the check, not written by an author"
+        ))),
         // eigenius#71 / D49 — literal values infer to their primitive
         // type (`Val::EigonPrimitive(PrimitiveType::*)`). Round-trips
         // through D47 as the `LitString` / `LitInt` / `LitFloat` /
@@ -1656,8 +1701,8 @@ mod tests {
         (c, refs.into_iter().next().expect("one declaration"))
     }
 
-    /// `data D : Set` standing where a proposition is expected. `justification:Certificate(j, P)`,
-    /// `reflection:canonical_proposition` and everything else Rule 21 checks take a `Prop` in that
+    /// `data D : Set` standing where a proposition is expected. `justification:Grounds(j, P)`,
+    /// `eigentt:proposition` and everything else Rule 21 checks take a `Prop` in that
     /// slot, so this is the same stakes argument as eigenius#191 with a different constructor.
     #[test]
     fn a_set_level_inductive_does_not_inhabit_prop() {
@@ -1667,7 +1712,7 @@ mod tests {
     }
 
     /// The other half, and the reason the fix is a deletion rather than a `m >= 1` guard: a
-    /// `Prop`-sorted inductive — `logic:And`, `justification:Certificate`, the witness predicates —
+    /// `Prop`-sorted inductive — `logic:And`, `justification:Grounds`, the witness predicates —
     /// must still check against `Set` by cumulativity. Nine of the twelve probe hits measured on
     /// `2026-08-22` were exactly this shape, so a guard written the obvious way would have broken
     /// them.
@@ -3433,6 +3478,7 @@ mod tests {
             ctors: vec![
                 // nil : Π A:Set. SimpleVec A ()
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "nil".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -3442,6 +3488,7 @@ mod tests {
                 },
                 // cons : Π A:Set. () → A → SimpleVec A () → SimpleVec A ()
                 InductiveCtorDecl {
+                    implicit: Vec::new(),
                     name: "cons".to_string(),
                     typ: Exp::Pi(
                         Patt::Var("A".to_string()),
@@ -3508,6 +3555,7 @@ mod tests {
             indices: vec![(Patt::Unit, Exp::One)],
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -3554,6 +3602,7 @@ mod tests {
             indices: vec![(Patt::Unit, Exp::One)],
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "nil".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("A".to_string()),
@@ -3605,7 +3654,7 @@ mod tests {
         }
     }
 
-    /// A param-free indexed inductive — the shape `justification:Certificate` has.
+    /// A param-free indexed inductive — the shape `justification:Grounds` has.
     /// `Flag : One -> Type 0` with `mk : Π (u : One). Flag u`.
     fn flag_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
@@ -3625,6 +3674,7 @@ mod tests {
             indices: vec![(Patt::Unit, Exp::One)],
             sort: Exp::sort(1),
             ctors: vec![InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "mk".to_string(),
                 typ: Exp::Pi(
                     Patt::Var("u".to_string()),
@@ -3959,9 +4009,9 @@ mod tests {
 
     #[test]
     fn d48_ctor_with_meta_index_in_expected_solves() {
-        // EigenTT doesn't yet have implicit-arg syntax to *create*
-        // metas at user-facing sites, but we can construct one
-        // directly to exercise the unification path. The expected
+        // A constructor's declared-implicit binders create metas (`solve_implicit_binders`);
+        // here one is constructed directly to exercise the unification path from the other
+        // side — a meta sitting in the EXPECTED index. The expected
         // type `SimpleVec A ?m` — when checked against `nil A` which
         // produces `SimpleVec A ()` — should unify ?m := Unit.
         //
@@ -3970,7 +4020,7 @@ mod tests {
         // checker resolves them via the unifier.
         let decl = simple_vec_decl();
         let mut mctx = crate::nbe::unify::MetaCtx::new();
-        let m_id = mctx.fresh();
+        let m_id = mctx.fresh(0);
         let m = Val::Nt(crate::nbe::val::Neut::Meta(m_id, Vec::new()));
         let mut c = ctx().declaring(decl.clone());
         // `nil` takes 0 non-param args; the `A` param flows in from
@@ -4110,7 +4160,7 @@ mod tests {
     }
 
     #[test]
-    fn synthesis_hook_routes_through_layer_witness_index_for_admitted_witness() {
+    fn synthesis_hook_routes_through_layer_witness_admission_for_admitted_witness() {
         // End-to-end: build a layer carrying a DeclarationTrace, which
         // populates the witness index with the corresponding Declared
         // witness. Calling the hook with the matching expected type
@@ -4129,7 +4179,7 @@ mod tests {
             RVal::Array(vec![RVal::String(wk_local::CLASS.to_string())]),
         );
         target.set(
-            Iri::parse(wk_local::CANONICAL_PROPOSITION).unwrap(),
+            Iri::parse(wk_local::PROPOSITION).unwrap(),
             encode_type(&prop_exp, crate::testing::codec_names()).unwrap(),
         );
 

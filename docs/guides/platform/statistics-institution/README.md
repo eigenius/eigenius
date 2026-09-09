@@ -27,7 +27,7 @@ Every `stats:StatisticalAnalysisPlan` resource carries the same seven slots, plu
 | `sample_set` | IRI of a `SampleSetResource` | The raw replicates the verifier recomputes against. |
 | `null_hypothesis` | EigenTT proposition | The null the test is rejecting against — propagated to the verdict for audit. |
 | `alternative_hypothesis` | EigenTT proposition | The alternative the test is asserting — used for diagnostic shape. |
-| `canonical_proposition` (`reflection:` inherited) | EigenTT proposition | The predicate the claim establishes when the test holds. This is the proposition a downstream plan-reproducibility `justification:Claim` is written against; the witness index hashes it, and the two must match. |
+| `canonical_proposition` (`reflection:` inherited) | EigenTT proposition | The predicate the claim establishes when the test holds. This is the proposition a downstream plan-reproducibility `justification:Declaration` is written against; the witness index hashes it, and the two must match. |
 | `alpha` | Float | Type-I error threshold, unadjusted. Multiple-testing correction is a higher-level institution. |
 | `effect_size` | `Absolute(magnitude, units)` / `Relative(ratio)` / `StandardizedCohensD` / `StandardizedHedgesG` | The asserted effect — for `SingleSampleEstimate`, the threshold the mean must cross. |
 | `directionality` | `TwoSided()` / `OneSidedWitnessed(witness_iri)` | Whether the test is two-sided (the safe default) or one-sided with a chain-resident impossibility witness ([§7.1](#7-1-opinionated-stance-onesidedwitnessed-requires-an-impossibility-witness)). |
@@ -164,7 +164,7 @@ claim_eig0291_lowic50                      [StatisticalAnalysisPlan]
 Verdict("Fails", AlphaNotCrossed: computed p = 0.218..., threshold alpha = 0.05)
 ```
 
-The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness index](../justification-logic/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) hashes it, so an author's plan-reproducibility `justification:Claim` can be written against exactly it; downstream [D39 conclusions](../justification-logic/README.md) then ground on `App(Declared(plan_yields), Observed(sample_set))`, consuming the `IsDeclaredAs` and `IsObservedAs` witnesses.
+The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness index](../justification-logic/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) hashes it, so an author's plan-reproducibility `justification:Declaration` can be written against exactly it; downstream [D39 conclusions](../justification-logic/README.md) then ground on `App(Declared(plan_yields), Observed(sample_set))`, consuming the `IsDeclaredAs` and `IsObservedAs` witnesses.
 
 Every byte that went into the verification — the three raw IC50 readings, the asserted parameters, the recomputation procedure, the resulting verdict — sits on the chain as a typed, queryable, content-addressed resource. The verdict is reproducible: you can re-run `validate_analysis_plan` against the same chain state and get bit-identical numerics, because the institution uses deterministic IEEE-754 arithmetic.
 
@@ -210,7 +210,7 @@ The high-level shape, modeled on the IC50 fixture:
        stats:alternative_hypothesis = type_expr(
            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
        );
-       reflection:canonical_proposition = type_expr(
+       eigentt:proposition = type_expr(
            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
        );
 
@@ -264,7 +264,7 @@ raw IC50 readings + prov:ObservationTrace   → witness index admits IsObservedA
   → D52 validate_analysis_plan AutoOnLoad fires
   → Verdict::Holds; a per-effect StatisticalAnalysisResult carries the derived proposition
   → that result RECORDS the run and admits NO witness
-  → an author commits a justification:Claim: Asserts(s) -> HasLowIC50(...)
+  → an author commits a justification:Declaration: Asserts(s) -> HasLowIC50(...)
       + prov:DeclarationTrace          → admits IsDeclaredAs(plan_yields, ...)
   → D39 justification:Conclusion cites App(Declared(plan_yields), Observed(sample_set))
   → Rule 21 checks its judgement at commit (no institution, no verdict — P7)
@@ -290,7 +290,7 @@ Full walkthrough: [composition guide §7 stats+reasoning](../../composition/07-s
 - **`Verdict::Fails` with `WrongTestForDesign`** — the bundle's product position has no dispatch arm. Either the SampleSet smart constructor produces a position the verifier doesn't yet support (check the [phase-completeness matrix](#phase-completeness-matrix)), or the macro is being misused (e.g., a `Bundle(...)` literal with the wrong axis ctors). The diagnostic prints the actual position tuple.
 - **A `Verdict::Fails` naming the SampleSet or an axis slot** — the SampleSet's `sample_set_value` couldn't be decoded as a `Bundle(...)`. Usually means a smart constructor was used incorrectly (wrong number of args, wrong axis ctor names). Compare against the smart-constructor signatures in [`ontologies/statistics/statistics.esl`](../../../../ontologies/statistics/statistics.esl).
 - **`Verdict::Fails` with `OutlierExclusion not yet wired for {dispatch}`** — you asserted a non-`Identity` exclusion functor on a dispatch position that doesn't yet support it. Either use `Identity()` for now, or follow the GitHub issue link in the diagnostic to track the extension.
-- **Claim accepted but a downstream D39 conclusion fails with `no admitted IsDeclaredAs witness`** — the plan committed, but no reproducibility declaration was written against the result's proposition, or the cited IRI admits no witness. Three things to check, in order. Is the sentence citing the *plan*? It should cite the per-effect `StatisticalAnalysisResult` at `{plan_iri}:result:{effect_name}`: the plan carries no `canonical_proposition`, and the result is the artifact the kernel stamps `reflection:InstitutionEmittedDerivation`, which is what makes it self-attest a witness with no companion trace. Did the effect actually reject? A per-effect `Fails` carries no `canonical_proposition` by design, so it admits no witness. Did the plan go through `load`? A plan committed by `FIBER INTO` or as program output was never gated, so no result exists at all.
+- **Claim accepted but a downstream D39 conclusion fails with `no admitted IsDeclaredAs witness`** — the plan committed, but no reproducibility declaration was written against the result's proposition, or the cited IRI admits no witness. Three things to check, in order. Is the sentence citing the *plan*? It should cite the per-effect `StatisticalAnalysisResult` at `{plan_iri}:result:{effect_name}`: the plan carries no `canonical_proposition`, and the result is the artifact the kernel stamps `institution:EmittedDerivation`, which is what makes it self-attest a witness with no companion trace. Did the effect actually reject? A per-effect `Fails` carries no `canonical_proposition` by design, so it admits no witness. Did the plan go through `load`? A plan committed by `FIBER INTO` or as program output was never gated, so no result exists at all.
 
 **Diagnostics are strings, not variants.** `AlphaNotCrossed`, `WrongTestForDesign` and `EpistemicScopeViolation` are conventional prefixes the handler writes into the one `urn:eigenius:institution:diagnostic` slot. Most other rejections carry a prose sentence with no prefix. Match on text, not on a type.
 

@@ -89,15 +89,10 @@ fn build_full_chain() -> ExecutionContext {
     }
     let core = Arc::new(core_builder.build(LayerStorage::in_memory()));
 
-    let reflection_json = include_str!("../../ontologies/reflection/reflection-ontology.json");
+    let reflection_json = include_str!("../../ontologies/program/program-traces.json");
     let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for r in reflection_resources {
-        reflection_builder.add_resource(r).unwrap();
-    }
-    let eigentt_json = include_str!("../../ontologies/eigentt/eigentt-type-fragment.json");
-    let eigentt_resources = eigon_json::parse_document(eigentt_json).unwrap();
-    for r in eigentt_resources {
         reflection_builder.add_resource(r).unwrap();
     }
     let institution_json = include_str!("../../ontologies/institution/institution-ontology.json");
@@ -172,58 +167,23 @@ fn synthetic_sentence(
     // instead of three.
     if let (Some(p), Some(j), Some(c)) = (proposition, justification, certificate) {
         r.set(
-            Iri::parse("urn:eigenius:justification:judgement").unwrap(),
+            Iri::parse("urn:eigenius:justification:grounds_judgement").unwrap(),
             judgement(p, j, c),
         );
     }
     r
 }
-/// Assemble the one judgement a conclusion now carries from the three parts
-/// that used to be separate slots: `holds(kernel, cert, Certificate(j, P))`.
-fn judgement(proposition: Value, justification: serde_json::Value, cert: Value) -> Value {
+/// Assemble the one judgement a conclusion carries: `holds(kernel, cert, Certificate(P))`.
+///
+/// It took a separate justification term until the D88 §2 merge. The certificate IS the term now,
+/// so `cert` is the only derivation here and the type carries the proposition alone. The
+/// `justification` argument is retained so the callers below keep reading as the shapes they are
+/// about; it is no longer part of what gets encoded.
+fn judgement(proposition: Value, _justification: serde_json::Value, cert: Value) -> Value {
     use eigenius_kernel::program::eigentt_type_mirror::{certificate_type, encode_judgement};
-    let typ = certificate_type(&d47(&justification), &proposition, codec())
-        .expect("certificate type encodes");
+    let typ = certificate_type(&proposition, codec()).expect("certificate type encodes");
     encode_judgement("urn:eigenius:eigentt:logic_kernel", &cert, &typ, codec())
         .expect("judgement encodes")
-}
-
-/// Re-encode a plain `{ctor, args}` `justification:Term` literal into the value a term
-/// embedded in a judgement must carry.
-///
-/// This conversion is the encoding boundary the collapse moved. A justification
-/// term used to sit in a slot of its own as a plain `{"ctor", "args"}` dict; it
-/// now rides inside the judgement, which is an `eigentt:Term`-ranged value, so
-/// the D47 codec reads it and a foreign inductive's constructor is named by
-/// `CtorApp` with arguments folded through `App`. Callers below still write the
-/// plain literal because it is what an author reads.
-fn d47(j: &serde_json::Value) -> Value {
-    term_value(&d47_tagged(j))
-}
-
-/// The `App`/`CtorApp` spine, still as a literal, so the recursion composes before
-/// [`term_value`] builds the whole tree in one pass.
-fn d47_tagged(j: &serde_json::Value) -> serde_json::Value {
-    const JT: &str = "urn:eigenius:justification:Term";
-    let (Some(name), args) = (
-        j.get("ctor").and_then(serde_json::Value::as_str),
-        j.get("args")
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-            .unwrap_or_default(),
-    ) else {
-        return j.clone();
-    };
-    let mut acc = json!({"ctor": "CtorApp", "args": [JT, name]});
-    for a in args {
-        let arg = match &a {
-            serde_json::Value::String(s) => json!({"ctor": "LitString", "args": [s]}),
-            serde_json::Value::Object(_) => d47_tagged(&a),
-            other => other.clone(),
-        };
-        acc = json!({"ctor": "App", "args": [acc, arg]});
-    }
-    acc
 }
 
 // ── Phase 10 — end-to-end Holds path ────────────────────────────────
@@ -276,7 +236,7 @@ fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     );
 
     // The DeclarationTrace pointing at the target. Its presence is
-    // what makes `build_witness_index` emit the Declared witness key.
+    // what makes `emit_from_trace` emit the Declared witness key.
     let trace_iri_str = format!("{target_iri_str}-decl-trace");
     let mut trace = Resource::new(Iri::parse(&trace_iri_str).unwrap());
     trace.set(
@@ -315,7 +275,7 @@ fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     )
 }
 
-/// Build a `justification:Certificate.declared(iri, P, witness_placeholder)` D47
+/// Build a `justification:Grounds.declared(iri, P, witness_placeholder)` D47
 /// certificate where the witness slot is `UnitVal` — the kernel
 /// ignores the user's value and synthesizes the witness. `P` is
 /// supplied as a pre-encoded D47 sub-tree so callers can mismatch
@@ -331,7 +291,7 @@ fn justified_by_declared_certificate(
             {"ctor": "App", "args": [
                 {"ctor": "App", "args": [
                     {"ctor": "CtorApp", "args": [
-                        "urn:eigenius:justification:Certificate",
+                        "urn:eigenius:justification:Grounds",
                         "declared",
                     ]},
                     {"ctor": "LitString", "args": [iri_str]},
@@ -404,10 +364,7 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
         Iri::parse(wk::DESCRIPTION).unwrap(),
         Value::String("A declared axiom standing in for a real class under test.".to_string()),
     );
-    target.set(
-        Iri::parse(wk_local::CANONICAL_PROPOSITION).unwrap(),
-        prop_value,
-    );
+    target.set(Iri::parse(wk_local::PROPOSITION).unwrap(), prop_value);
 
     let trace_iri_str = format!("{target_iri_str}-decl-trace");
     let mut trace = Resource::new(Iri::parse(&trace_iri_str).unwrap());
@@ -532,7 +489,7 @@ fn a_certificate_matching_an_admitted_witness_type_checks() {
     // The headline test: a complete justified-reasoning commit
     // validates clean. Chain has a DeclarationTrace
     // emitting an admitted `IsDeclaredAs(target, Asserts(target))`
-    // witness; the certificate's `justification:Certificate.declared` ctor's third
+    // witness; the certificate's `justification:Grounds.declared` ctor's third
     // arg slot is filled in by the kernel's Phase 9 synthesis hook;
     // the type-check succeeds.
     let target = "urn:test:phase10:axiom";
@@ -645,7 +602,7 @@ fn a_certificate_citing_an_untraced_iri_is_rejected() {
 #[test]
 fn arity_mismatch_in_certificate_is_rejected() {
     // Regression check on the arity-mismatch path: a certificate
-    // whose justification:Certificate.declared application is missing the witness
+    // whose justification:Grounds.declared application is missing the witness
     // arg slot (1 App-arg instead of 3) fails the kernel's
     // `check_inductive_ctor_args` arity assertion. It is rejected for
     // a different reason than missing-witness — confirming the
@@ -664,13 +621,15 @@ fn arity_mismatch_in_certificate_is_rejected() {
         "ctor": "Declared",
         "args": ["urn:foo"],
     });
-    // Certificate with only ONE App-arg — `justification:Certificate.declared`
-    // expects three (iri, P, witness).
+    // Certificate with only ONE App-arg — `justification:Grounds.declared`
+    // expects three (iri, P, witness). The one supplied is a `Sort`, so it lands on the `iri`
+    // binder and mismatches there; since B3 that binder is `core:iri`, which is what the
+    // diagnostic names.
     let certificate = term_value(&json!({
         "ctor": "App",
         "args": [
             {"ctor": "CtorApp", "args": [
-                "urn:eigenius:justification:Certificate",
+                "urn:eigenius:justification:Grounds",
                 "declared",
             ]},
             {"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]},
@@ -682,25 +641,27 @@ fn arity_mismatch_in_certificate_is_rejected() {
     assert!(
         errors
             .iter()
-            .any(|e| e.contains("type mismatch: Sort(Succ(Zero)) \u{2260} EigonPrimitive(String)")),
+            .any(|e| e.contains("type mismatch: Sort(Succ(Zero)) \u{2260} EigonPrimitive(Iri)")),
         "an arity mismatch must be reported as the type mismatch it is, got:\n{}",
         errors.join("\n")
     );
 }
 
-// ── eigenius#205: a declared-external execution admits Declared, never Derived ──
+// ── eigenius#205: a transcribed external run is attested as Declared, and no more ──
 
 #[test]
-fn an_external_execution_trace_admits_declared_not_derived() {
-    // `Derived` holds a trace tied to a KERNEL-INITIATED activity — running a program, invoking an
-    // institution, a query that writes back. An author writing down that a program ran elsewhere is
-    // making a different claim: there is no `f : I -> O`, so no specification, so nothing entailed
-    // (D73 §3.3). `ExternalExecutionTrace` carries that claim and `trace_category` maps it to
-    // Declared.
+fn a_transcribed_external_run_admits_declared_not_observed() {
+    // An author writing down that a program ran elsewhere has no `f : I -> O`, so no
+    // specification, so nothing entailed (D73 §3.3). What attests it is an ordinary
+    // `prov:DeclarationTrace` carrying `prov:was_generated_by` — the shape every site in the WRN
+    // publication chain uses.
     //
-    // The kernel cannot tell a hand-authored `ProgramTrace` from one it minted — no "kernel-only,
-    // refused from input" mechanism exists anywhere in the validator — so the distinction has to be
-    // carried by the CLASS. This test is that distinction.
+    // This test named `reflection:ExternalExecutionTrace` until `2026-09-05`. eigenius#205 minted
+    // that class so a required `prov:derivation` slot could be filled; `prov:was_generated_by`
+    // replaced the requirement, the class was removed, and the `trace_category` arm outlived it.
+    // The test kept passing because `LayerBuilder::build` does not validate, so an `is_a` naming
+    // an undeclared class raised nothing. The claim being tested survives the class: a
+    // transcription grounds `Declared` and not `Observed`.
     use eigenius_kernel::layer::layer_admits_witness;
     use eigenius_kernel::witness::{WitnessCategory, WitnessKey};
 
@@ -728,16 +689,13 @@ fn an_external_execution_trace_admits_declared_not_derived() {
         Iri::parse(wk::DECLARED_BY).unwrap(),
         Value::String("urn:eigenius:prov:agent:unattributed".into()),
     );
-    artifact.set(
-        Iri::parse(wk::CANONICAL_PROPOSITION).unwrap(),
-        term_value(&prop),
-    );
+    artifact.set(Iri::parse(wk::PROPOSITION).unwrap(), term_value(&prop));
 
     let mut trace = Resource::new(Iri::parse("urn:test:v205:transcribed-trace").unwrap());
     trace.set(
         Iri::parse(wk::IS_A).unwrap(),
         Value::Array(vec![Value::String(
-            Iri::parse(wk::EXTERNAL_EXECUTION_TRACE)
+            Iri::parse(wk::DECLARATION_TRACE)
                 .unwrap()
                 .as_str()
                 .to_string(),
@@ -768,7 +726,7 @@ fn an_external_execution_trace_admits_declared_not_derived() {
 
     assert!(
         layer_admits_witness(&layer, &key(WitnessCategory::Declared)),
-        "an ExternalExecutionTrace must admit IsDeclaredAs — someone asserts the run happened"
+        "a transcribed run must admit IsDeclaredAs — someone asserts the run happened"
     );
     assert!(
         !layer_admits_witness(&layer, &key(WitnessCategory::Observed)),
@@ -787,15 +745,15 @@ fn an_external_execution_trace_admits_declared_not_derived() {
 
 #[test]
 fn a_conclusion_with_no_judgement_is_rejected() {
-    // `justification:Conclusion` requires `justification:judgement`
+    // `justification:Conclusion` requires `justification:grounds_judgement`
     // (ontologies/justification/justification.esl:303). It used to require three separate
     // slots checked by three paths, with nothing requiring them to be about the same claim.
     let ctx = build_full_chain();
     let errors = commit_and_validate(&ctx, synthetic_sentence(None, None, None));
     assert!(
-        errors
-            .iter()
-            .any(|e| e.contains("urn:eigenius:justification:judgement") && e.contains("missing")),
+        errors.iter().any(
+            |e| e.contains("urn:eigenius:justification:grounds_judgement") && e.contains("missing")
+        ),
         "a Conclusion carrying no judgement must be rejected, got:\n{}",
         errors.join("\n")
     );
@@ -815,7 +773,7 @@ fn a_judgement_the_codec_cannot_read_is_rejected() {
     let ctx = build_full_chain();
     let mut sentence = synthetic_sentence(None, None, None);
     sentence.set(
-        Iri::parse("urn:eigenius:justification:judgement").unwrap(),
+        Iri::parse("urn:eigenius:justification:grounds_judgement").unwrap(),
         term_value(&json!({"ctor": "UnitVal", "args": []})),
     );
     let errors = commit_and_validate(&ctx, sentence);

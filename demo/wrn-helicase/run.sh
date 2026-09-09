@@ -434,7 +434,7 @@ echo
 # wrn-phase1-biological-sap.esl cites the 3b warrant (concl_viab_KM12_biological)
 # and records the F4 dual-SAP fact — loaded here, after 3b committed its witness.
 echo "--- Step 4: Load WRN reasoning chain (biological-SAP, phase2, phase3, phase5) ---"
-# 08a FIRST, and before 06. It declares the `justification:Claim` + `prov:DeclarationTrace`
+# 08a FIRST, and before 06. It declares the `justification:Declaration` + `prov:DeclarationTrace`
 # for each program-yields-result warrant, which is where the `IsDeclaredAs` witness comes
 # from; 06's certificate has a `Declared(…)` leaf over
 # `wrn:viab_KM12_bio_lme4_yields_result`, so without this the load fails with

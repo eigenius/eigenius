@@ -52,18 +52,18 @@
 //! IT FIRED FOR THE PROVENANCE SPLIT (`2026-08-30`), on ONE new layer, `prov`. The provenance
 //! axis — Agent, Activity, the four provenance Traces and the relations between them — moves out
 //! of `reflection` into its own namespace, because `reflection` had come to hold two unrelated
-//! families under one word: `reflection:Trace` with LetTrace / MapTrace / CaseTrace records how a
+//! families under one word: `program:traces:Trace` with LetTrace / MapTrace / CaseTrace records how a
 //! PROGRAM EVALUATED, while the parentless DeclarationTrace / ObservationTrace / ProductionTrace /
 //! VerificationTrace record HOW A RESOURCE CAME TO EXIST. `prov` sits ABOVE `reflection` and that
 //! direction is forced: `prov:ProgramTrace` reaches into the evaluation family through
-//! `prov:trace_tree` and `reflection:output`, and nothing in `reflection` reaches back. This entry
+//! `prov:trace_tree` and `program:traces:output`, and nothing in `reflection` reaches back. This entry
 //! records only the layer's ADDITION; the migration that empties the moved declarations out of
 //! `reflection` moves that layer too and is recorded separately.
 //!
 //! IT FIRED ON THE THREE-GROUNDS CHANGE (`2026-08-30`): `justification`, `statistics` and
 //! `reflection`. `justification` is the substantive one — `justification:Term` went from seven
-//! constructors to five (`DerivedEvidence` and `SpecStr` removed), `justification:Certificate`
-//! lost `derived`, `sum_l`/`sum_r` now take a derivation for EACH branch, `spec_poly` dropped its
+//! constructors to five (`DerivedEvidence` and `SpecStr` removed), `justification:Grounds`
+//! lost `derived`, `sum_l`/`sum_r` now take a derivation for EACH branch, `instantiate` dropped its
 //! unchecked audit tag and leaves the term index at `j`, and `witness:IsDerivedAs` is gone. The
 //! other two are description strings only, which move a hash just as surely: `statistics` and
 //! `reflection` described the deleted mechanism in class descriptions, and `prov:proof_term`
@@ -73,6 +73,36 @@
 //! the edits were the intended ones. Editing `ontologies/encoding/encoding.esl` in the same pass
 //! moved NOTHING, because those edits were all `//` comments — the compiler strips them, while a
 //! `description = "…"` is a resource property and hashes.
+//!
+//! IT FIRED ON THE `justification.esl` REWRITE (`2026-09-07`), on ONE layer, `justification`.
+//! The file's comments and `description` properties were rewritten to state the current design
+//! rather than the sequence of edits that produced it, and to frame it on
+//! `docs/design/judgements-and-warrants.tex` — the paper this branch implements — rather than on
+//! the D-documents that preceded it. No declaration changed: same seven constructors, same
+//! signatures, same `requires`/`recommends`, same properties. The hash moved because a
+//! `description` is a resource property and hashes, while a `//` comment is stripped. Nothing
+//! else in the manifest moved, which is the check that the edit was confined to prose. One
+//! substantive correction rode along: a comment asserted that `justification:Conclusion` "stays
+//! `subclass_of reflection:DerivedResource`" — the class declares no parent, and that class was
+//! deleted.
+//!
+//! IT FIRED ON B6 (`2026-09-06`), on ONE layer, `core`. Two constructor arguments on
+//! `eigentt:Term` were retyped from `core:string` to `core:iri`: `ConstRef.iri` and
+//! `CtorApp.decl_iri`. Both name a declaration and always did; B3 declared three OTHER leaves
+//! IRI-valued (`Certificate.declared`/`.observed`/`.verified`, the `witness:Is*As` index,
+//! `Term.Checked.payload_iri`) and did not reach these, which went unnoticed because the mentions
+//! walker recovered them by matching `urn:` and so never needed the declaration. B6 removes that
+//! heuristic, and the retype is what keeps a `ConstRef` target a dependency once it is gone.
+//! `CtorApp.ctor_name` deliberately stays `core:string`: constructors have no chain-resolvable
+//! identity (D79 §2.2.1), so it names no declaration. The reseed this obliges is B4, which the
+//! entry below already owes.
+//!
+//! IT FIRED AGAIN ON B1 (`2026-09-05`): `core` and `justification`. `core` gained the
+//! `core:implicit_args` property and a `recommends` on `core:InductiveCtor`; `justification`
+//! declares `app`'s `A`/`B` and `sum_l`/`sum_r`'s `P` implicit, which changes those
+//! constructors' chain-resident declarations. Both are content, so both hash. The reseed this
+//! obliges is B4 in `docs/notes/next-steps-after-d88.md`, which also carries B2's merge and the
+//! three stale description strings from `#235`.
 //!
 //! IT FIRED FOR eigenius#188 A SECOND TIME (`2026-08-23`), on **`core` and
 //! `eigentt-type-fragment`**. The level algebra moved DOWN to `core:Level` and `core:result_sort`
@@ -120,27 +150,26 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "core:f8c7f18a36095456322d47bc5a6d26264d03e8141cf3b0320f4a7077dbcde333
-eigentt-type-fragment:52bcfe935009fb7f32400dcb344ab884f29937692370aa4e3cc5a24d87250028
-program:5de328f01c89486f1fac0e6be3fc44e08f0f0c886bd43305820c06a12287fde1
-reflection:2455ee11766bc20134ed820e69c006951de44aa9e486abb36938d1a5361c0569
-prov:742e0152373443a999e8f6562932277fe8b37da64a2ae0ce35f03ab598f9a4d9
+const EXPECTED: &str = "core:9c0040b24f794fb3fe95a4ab9befd60178e8405ae727acfda38ab01ca175abb3
+program:429718a323b6bfcc3ff858277f73b2c15de724f9d1c1c2c2c220748295b3c726
+program-traces:89a26cb0570d90ac8e0943687cc0f175e1cd1ea78a025196a247b636d1440f7a
+prov:694b3195028f88f8043209f81f70824fb12bdee45f8e57db381a041c96687c5d
 obo:b515192765257daf466b28bb4154d6155461c8c2d1302f945ec785f8a00bb959
-institution:94d7ba70bdb49cde8febceb2cef67d1421076b8c336e05cfe15f6e4c6aae263b
+institution:149ab16a9b3d48e3839a1881d1a72230d7c88d1281f109c58eb8b5f944e68379
 runtime:ada851931aeff9eed036621b306ca3eb25c0044d600c84dcad77c67973c1a22e
 formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
-lean-institution:d6faf931474f38e64da8c4cafb1180eaf1dbf9800112466eb4cedc0279bbae28
-justification:ee21375589e59a9cfe15e2279e8d75a9c2e706eb442d63e789525ba2f2d482b6
-statistics:3ba48d9b24245a117defab3ff706945907652ce40be0a1b4a6956deb0d0070b8
+lean-institution:3a4cd1b1a75a5032fda484dea529bcf79678ec4d4fd060e13c6ef00d782e5fc2
+justification:3d04cdd23811f3604a4a9b190100838582c2278fb20dece5d4e7ba7f0f89118f
+statistics:8c955279b691648a948061c47cd8ff2ada4c9edd9a05c756b373a5aa83c3b466
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
-reference:33277845534074177e7c9015b0669c2fad20e35a8adc592f7df362914ecb152b
+reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
-lexicon:520cf5997238198cfa1cae985f77c359c76f95f0d81562f84bd585c6c49a7061
+lexicon:7ee38132e0b9d11e8ef91d88a8bcc8f81996715f66effd46e22c41ee6df80d7f
 ontology:7fb72a75946ca50e84df1aa1ae9207dc57676b96ef3c53879e82e4421f1aef43
-closed-class:33288e5e89e02bdf5ae493742599a9da95d9fd949eb665831be8353a93f7eaf4
-encoding:af1273fd9c4103623b79ce16a0ab33ea2269f980c7779fafc80d9a49c9b94f10
+closed-class:a691050fcb75087947ef1b6c426b35b9ca872b9b1c8b7b76d020d4518463acee
+encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 
 /// Per-layer diff, so the failure says WHICH ontology moved rather than only that something did. On

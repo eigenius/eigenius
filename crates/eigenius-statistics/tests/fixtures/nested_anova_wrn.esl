@@ -4,7 +4,6 @@
 // (p=0.37). group A = sgWRN1/2/3 (each 6 reps), group B = sgCh2-2/-4 (6 each).
 
 namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace demo       = "urn:eigenius:demo:nested";
 namespace agent = "urn:eigenius:prov:agent";

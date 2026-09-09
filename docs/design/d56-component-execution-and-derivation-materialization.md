@@ -41,7 +41,7 @@ D56 adds that third kind: a **RuntimeScript component**. A program body applies 
 
 ### 3.1 The witness is already minted — no new machinery
 
-`build_witness_index` (witness_index.rs) emits `IsDerivedAs(output_iri, P)` for any committed `ProgramTrace` whose output resource carries `canonical_proposition` (`emit_from_trace`, D49 §6 / D6b §6). So a program that runs the wrapped-R script produces — purely by committing its trace — exactly the witness a downstream `derived(output_iri, P)` certificate discharges against. **No `InstitutionEmittedDerivation` stamping, no pending-invocation marker, no second commit path.** The statistics institution's `IsDerivedAs` (via `InstitutionEmittedDerivation`) and the program's `IsDerivedAs` (via `ProgramTrace`) are two producers feeding the one witness index the reasoning checker reads.
+`build_witness_index` (witness_admission.rs) emits `IsDerivedAs(output_iri, P)` for any committed `ProgramTrace` whose output resource carries `canonical_proposition` (`emit_from_trace`, D49 §6 / D6b §6). So a program that runs the wrapped-R script produces — purely by committing its trace — exactly the witness a downstream `derived(output_iri, P)` certificate discharges against. **No `InstitutionEmittedDerivation` stamping, no pending-invocation marker, no second commit path.** The statistics institution's `IsDerivedAs` (via `InstitutionEmittedDerivation`) and the program's `IsDerivedAs` (via `ProgramTrace`) are two producers feeding the one witness index the reasoning checker reads.
 
 ### 3.2 Why the provenance difference is the point
 

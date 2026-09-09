@@ -67,7 +67,7 @@ recompute **plans** (emitters) → recompute **conclusions** (consumers) →
 wrapped-R warrants → reasoning phases (2/3/5) → a biological-SAP layer. Two
 institutions compose through the shared chain: the **statistics institution**
 writes `IsDerivedAs` witnesses; the **reasoning institution** reads them via the
-D49 ChainWitness index to discharge `justification:Certificate` certificates. Declared rules
+D49 ChainWitness index to discharge `justification:Grounds` certificates. Declared rules
 bridge statistical facts to domain conclusions, and the reasoning institution
 also discharges **imported published claims** (the literature warrants below) as
 Declared premises inside those certificates.
@@ -119,7 +119,7 @@ unknown function is rejected at commit). `chain/02-literature.esl` carries **18
 `Reference`s** (real, validated DOIs + PMIDs) and **18 CiTO-typed `Citation`s**.
 
 Eleven of those citations are **warrants**: a `Citation` carrying a
-`reflection:canonical_proposition` (the imported claim, e.g.
+`eigentt:proposition` (the imported claim, e.g.
 `litclaim:WRNActivitiesSeparable("WRN")`) plus a `DeclarationTrace` that admits
 it as an `IsDeclaredAs` witness. These are wired as **genuine logical premises**,
 not provenance sidecars — the reasoning certificates discharge them with

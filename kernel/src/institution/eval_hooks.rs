@@ -919,8 +919,10 @@ mod tests {
         });
         let ctx = EvalCtx::effectful(None, engine as Arc<dyn crate::nbe::eval::EffectHooks>);
 
-        // `Transform(input)` — Transform is declared `implementation: "builtin"` and
-        // `deterministic: true` in the program ontology, and implemented nowhere.
+        // `Transform(input)` — a component IRI nothing registers. It was declared
+        // `implementation: "builtin"` and `deterministic: true` in the program ontology while
+        // being implemented nowhere; the declaration is deleted, and the IRI stays here as an
+        // unregistered name, which is what this test is about.
         let input = Exp::EigonResource(Box::new(crate::ontology::resource::Resource::new(
             Iri::parse("urn:eigenius:test:144:input").unwrap(),
         )));

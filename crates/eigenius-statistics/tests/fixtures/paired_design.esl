@@ -13,8 +13,6 @@
 // Verifier runs the paired t-test on per-pair differences.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace bp         = "urn:eigenius:demo:bp";
@@ -73,7 +71,7 @@ resource bp:trial_trace : prov:ObservationTrace {
 resource bp:claim_treatment_lowers_bp : stats:StatisticalAnalysisPlan {
     stats:sample_set = bp:trial_2026_03_20;
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         bp:TreatmentChangesBP("urn:eigenius:demo:bp:drug_Y")
     );
 

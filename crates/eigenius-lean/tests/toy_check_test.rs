@@ -12,24 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Phase 20a.3 acceptance: `check_proof` admits a hand-vendored
-//! well-typed Lean export and rejects a broken one, returning a
-//! structured diagnostic in both cases.
+//! Phase 20a.3 acceptance: `check_proof` admits a hand-vendored well-typed Lean export and
+//! rejects a broken one, returning a structured diagnostic in both cases.
 //!
-//! The vendored fixtures are derived from `nanoda_lib`'s own
-//! `test_resources/ProjFromProp/export`:
+//! `toy_proof_holds.json` is `PUnit`, its constructor `PUnit.unit` and its recursor `PUnit.rec`:
+//! a minimal closed Lean environment holding the target name `PUnit`. **Regenerated from the
+//! pinned toolchain `2026-09-07`** with
+//! `cd lean/research/sigma-fixture && lake exe lean4export SigmaFixture -- PUnit`.
 //!
-//! - `toy_proof_holds.json` — the first 26 lines (meta + the
-//!   `PUnit` inductive declaration + its constructor `PUnit.unit`
-//!   and recursor `PUnit.rec`). Every declaration in the truncated
-//!   prefix type-checks; the file is a minimal closed Lean
-//!   environment that holds the target name `PUnit`.
-//! - `toy_proof_fails.json` — the full ProjFromProp file. It defines
-//!   `explosion_helper`/`explosion` whose checking fails inside
-//!   `infer_proj` for a `Prop`-valued projection (the same scenario
-//!   nanoda's own `check_proj_from_prop` test exercises). The
-//!   type-checker panics; `check_proof` traps the panic and surfaces
-//!   the diagnostic via `Verdict::Fails`.
+//! It was previously the first 26 lines of `nanoda_lib`'s `test_resources/ProjFromProp/export`,
+//! which declared Lean `4.27.0-rc1` while everything else in the tree pins `4.29.1`. Nothing was
+//! wrong with it — the exported body is BYTE-IDENTICAL between the two versions, `PUnit` being
+//! that stable — but `externalize_test.rs` uses this file as the environment it externalizes
+//! propositions INTO, so it was asserting our Lean correspondence against a version we do not
+//! ship. `checker::SUPPORTED_LEAN_MINOR` now refuses that, which is how the skew was found.
+//! Regenerating also makes the fixture reproducible from a command in this repository rather
+//! than a hand-truncated upstream artifact.
+//!
+//! `toy_proof_fails.json` stays vendored from `ProjFromProp/export` at `4.27.0-rc1`, and stays
+//! that way deliberately: it is a hand-crafted UNSOUND export that no compiler emits, so there
+//! is no toolchain to regenerate it from. It is only ever used for name-level checks, where no
+//! correspondence of ours is involved and the version gate does not apply. It defines
+//! `explosion_helper`/`explosion`, whose checking fails inside `infer_proj` for a `Prop`-valued
+//! projection (the scenario nanoda's own `check_proj_from_prop` test exercises). The
+//! type-checker panics; `check_proof` traps the panic and surfaces the diagnostic via
+//! `Verdict::Fails`.
 
 use eigenius_lean::{check_proof, Verdict};
 

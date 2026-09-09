@@ -215,8 +215,7 @@ fn oci_runtime_converts_schemaorg_through_a_real_container() {
     // The worker set its canonical_proposition (GeneratorConforms("schema_org"))
     // and it survived the real container round-trip — this is the proposition a
     // chain declaration about the generator is written against.
-    let Some(Value::Json(prop)) = report.get(&iri("urn:eigenius:reflection:canonical_proposition"))
-    else {
+    let Some(Value::Json(prop)) = report.get(&iri("urn:eigenius:eigentt:proposition")) else {
         panic!("report must carry canonical_proposition");
     };
     assert_eq!(

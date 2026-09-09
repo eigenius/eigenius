@@ -22,8 +22,6 @@
 // FullFactorial(2), _, CrossSectional)`.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace kx         = "urn:eigenius:demo:kx";
@@ -97,7 +95,7 @@ resource kx:cross_factorial_trace : prov:ObservationTrace {
 resource kx:claim_cell_means_differ : stats:StatisticalAnalysisPlan {
     stats:sample_set = kx:cross_factorial_2026_04_02;
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         kx:CellMeansDifferAcrossFactors("urn:eigenius:demo:kx:design_2026_04_02")
     );
 

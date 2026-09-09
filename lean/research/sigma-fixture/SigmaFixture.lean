@@ -47,3 +47,57 @@ theorem measured_neg_refl :
 theorem quantifies_over_float :
     ∀ (x : Float), EigeniusFFI.eigenius.test.Measured x → EigeniusFFI.eigenius.test.Measured x :=
   fun _ h => h
+
+-- D86 — the numeric primitive core. These are the SHAPES the externalizer builds for the three
+-- chain relations, written out so the round trip has something real to compare against. Before
+-- these, `NumericRel`'s correspondence table had no test at all: the two asserted relations
+-- (`Le`, `Eq`) and the three derived from them (`Ge`, `Gt`, `Lt`) were reviewed as TCB and never
+-- exercised.
+--
+-- Each is `A -> A` for the same reason `measured_refl` is: the point is the TYPE the externalizer
+-- has to reproduce, and an implication from a proposition to itself is provable without deciding
+-- anything about `Float`. Deciding these is a different matter — `Float`'s operations are
+-- `@[extern]` and do not reduce in the kernel, which is D86 §4's "asserted, not checked".
+
+-- `stats:le(0.1, 0.5)` — `@LE.le.{0} Float instLEFloat`.
+theorem le_refl_float :
+    ((0.1 : Float) ≤ 0.5) → ((0.1 : Float) ≤ 0.5) :=
+  fun h => h
+
+-- `stats:float_ieee_eq(0.1, 0.1)` — `(a == b) = true` over `instBEqFloat`, NOT Lean's `Eq` on
+-- `Float`, which is structural and separates `0.0` from `-0.0` (D86 §3.3).
+theorem ieee_eq_refl_float :
+    (((0.1 : Float) == 0.1) = true) → (((0.1 : Float) == 0.1) = true) :=
+  fun h => h
+
+-- `stats:lt(-0.42, 0.0)` — derived as `le(a,b) ∧ ¬eq(a,b)`, the conjunct being what makes `<`
+-- come out FALSE at signed zero where `≤` and IEEE `==` both hold (D86 §3.2). `-0.42` is the
+-- shape a recomputed Spearman rho takes in the WRN chain.
+theorem lt_refl_float :
+    ((((-0.42 : Float) ≤ 0.0) ∧ ¬(((-0.42 : Float) == 0.0) = true)) →
+     (((-0.42 : Float) ≤ 0.0) ∧ ¬(((-0.42 : Float) == 0.0) = true))) :=
+  fun h => h
+
+-- Same derived shape, at the SAME values `le_refl_float` uses, to tell a structural mismatch in
+-- the And/Not derivation apart from one in the literals.
+theorem lt_simple_float :
+    ((((0.1 : Float) ≤ 0.5) ∧ ¬(((0.1 : Float) == 0.5) = true)) →
+     (((0.1 : Float) ≤ 0.5) ∧ ¬(((0.1 : Float) == 0.5) = true))) :=
+  fun h => h
+
+-- Isolating probes for the literal, not the relation: `le` is one of the two ASSERTED
+-- correspondences and carries no And/Not, so a failure here is the float form alone.
+theorem le_neg_nonzero_float :
+    ((-0.42 : Float) ≤ 0.5) → ((-0.42 : Float) ≤ 0.5) :=
+  fun h => h
+
+theorem le_against_zero_float :
+    ((0.1 : Float) ≤ 0.0) → ((0.1 : Float) ≤ 0.0) :=
+  fun h => h
+
+-- Probe: whole-number floats. `{:e}` renders `1.0` as "1e0" while Lean elaborates the literal
+-- `1.0` as mantissa 10 with one fractional digit. If these disagree the zero fix is one instance
+-- of a wider mismatch, not the class.
+theorem le_whole_float :
+    ((1.0 : Float) ≤ 2.0) → ((1.0 : Float) ≤ 2.0) :=
+  fun h => h

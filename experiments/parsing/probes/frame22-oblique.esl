@@ -27,8 +27,6 @@
 //   (2) ADD the oblique-PP entries the corrected classification would emit —
 //       `(S\NP)/cat_pp_arg(prep_any)`, the same shape `FrameKind::PpOblique` produces.
 // ════════════════════════════════════════════════════════════════════
-namespace core      = "urn:eigenius:core";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace lexicon   = "urn:eigenius:lexicon";
 namespace wn        = "urn:eigenius:wn";
 

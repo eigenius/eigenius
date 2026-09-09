@@ -270,7 +270,7 @@ impl ExternalInstitution {
         // Decode each emitted CBOR into a chain-shaped Resource. The
         // kernel commit pipeline stamps the linkage properties before
         // committing, plus the
-        // `reflection:InstitutionEmittedDerivation` marker on anything
+        // `institution:EmittedDerivation` marker on anything
         // that is not a `prov:Trace` — institutions are responsible
         // only for the domain-specific shape + `canonical_proposition`.
         // An external prover reaches the Verified grade the same way

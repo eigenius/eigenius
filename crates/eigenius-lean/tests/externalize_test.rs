@@ -16,7 +16,7 @@
 //!
 //! `notebook_demo_fixture_lands_holds` cannot cover this: its claim
 //! (`urn:eigenius:demo:lean:patient_1`) carries only `is_a` and no
-//! `reflection:canonical_proposition`, so `claim_proposition` returns `None` and the check is
+//! `eigentt:proposition`, so `claim_proposition` returns `None` and the check is
 //! skipped. A green run there says nothing about this path — which is the failure mode this
 //! whole line of work keeps finding, so it is stated rather than left to be rediscovered.
 //!
@@ -113,6 +113,36 @@ fn a_proposition_outside_the_fragment_is_refused_by_name() {
             );
         }
         other => panic!("an unrepresentable proposition must not Hold; got {other:?}"),
+    }
+}
+
+/// D87 §4.2 — a checked-proof reference is refused, and the refusal names it.
+///
+/// It is evidence, not a proposition: it names the artifact nanoda examined, so there is nothing
+/// on the Lean side to translate it INTO. Externalization manufactures a goal from a chain
+/// proposition, and `Checked` can only ever appear as `holds`'s `term` argument, never inside the
+/// `type` this walks — so meeting one here means a caller put evidence where a proposition goes.
+#[test]
+fn a_checked_proof_reference_is_refused_by_name() {
+    let v = check(
+        "PUnit.unit",
+        &Exp::Checked(
+            eigenius_kernel::ontology::iri::Iri::parse("urn:eigenius:demo:lean:proof_payload")
+                .unwrap(),
+        ),
+    );
+    match v {
+        Verdict::Fails { diagnostic } => {
+            assert!(
+                diagnostic.contains("Checked"),
+                "the refusal must name the variant; got {diagnostic}"
+            );
+            assert!(
+                diagnostic.contains("evidence"),
+                "and say why it is out — it is evidence, not a proposition; got {diagnostic}"
+            );
+        }
+        other => panic!("a checked-proof reference must not Hold as a proposition; got {other:?}"),
     }
 }
 
@@ -435,4 +465,188 @@ fn a_non_finite_float_is_refused() {
         ),
         other => panic!("NaN must be refused; got {other:?}"),
     }
+}
+
+// ─── D86 — the numeric primitive core, round-tripped ──────────────────────────────────────────
+//
+// The correspondence table (`externalize.rs`, `NumericRel`) maps five chain relations onto Lean:
+// `Le` and `Eq` are ASSERTED and each enters the TCB; `Ge`, `Gt` and `Lt` are derived from them.
+// Until these tests it had **no consumer and no coverage** — reviewed as TCB, and never once
+// exercised against a real Lean declaration. That is the gap `docs/notes/
+// end-to-end-scenarios-and-integration-gaps.md` records as G2.
+//
+// What each asserts: a chain proposition built from the relation externalizes to the Lean term the
+// table claims it denotes. The fixture theorems are `A -> A` for the same reason `measured_refl`
+// is — the subject is the TYPE, and deciding these is a different matter, since `Float`'s
+// operations are `@[extern]` and do not reduce in the kernel (D86 §4: "asserted, not checked").
+
+/// A chain relation applied to two floats, as `Arrow(rel, rel)` to match the fixture's shape.
+fn numeric(rel_iri: &str, a: f64, b: f64) -> Exp {
+    let iri = eigenius_kernel::ontology::iri::Iri::parse(rel_iri).unwrap();
+    let p = || {
+        Exp::App(
+            Box::new(Exp::App(
+                Box::new(Exp::EigonAxiom(iri.clone())),
+                Box::new(Exp::LitFloat(a)),
+            )),
+            Box::new(Exp::LitFloat(b)),
+        )
+    };
+    Exp::Arrow(Box::new(p()), Box::new(p()))
+}
+
+/// `stats:le` is one of the two ASSERTED correspondences — `@LE.le.{0} Float instLEFloat`.
+#[test]
+fn the_chain_le_relation_externalizes_to_leans_float_order() {
+    let v = check_measured(
+        "le_refl_float",
+        &numeric("urn:eigenius:measurements:le", 0.1, 0.5),
+    );
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// `stats:float_ieee_eq` is the other — `(a == b) = true` over `instBEqFloat`, and pointedly NOT
+/// Lean's `Eq` on `Float`, which is structural and would separate `0.0` from `-0.0` (D86 §3.3).
+#[test]
+fn the_chain_equality_externalizes_to_ieee_equality_not_structural_eq() {
+    let v = check_measured(
+        "ieee_eq_refl_float",
+        &numeric("urn:eigenius:measurements:float_ieee_eq", 0.1, 0.1),
+    );
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// `stats:lt` is DERIVED — `le(a,b) ∧ ¬eq(a,b)` — and the conjunct is load-bearing: it is what
+/// makes `<` come out false at signed zero, where `≤` and IEEE `==` both hold (D86 §3.2). The
+/// value is the shape a recomputed Spearman rho takes in the WRN chain.
+#[test]
+fn the_chain_lt_relation_externalizes_to_the_derived_conjunction() {
+    let v = check_measured(
+        "lt_refl_float",
+        &numeric("urn:eigenius:measurements:lt", -0.42, 0.0),
+    );
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// And a DIFFERENT threshold must not match. Without this the three above would pass just as well
+/// if the externalizer emitted a constant nobody checked the arguments of.
+#[test]
+fn a_different_threshold_does_not_match_the_proved_one() {
+    let v = check_measured(
+        "lt_refl_float",
+        &numeric("urn:eigenius:measurements:lt", -0.42, 1.0),
+    );
+    assert!(
+        !matches!(v, Verdict::Holds),
+        "`lt(-0.42, 1.0)` is not the proposition `lt_refl_float` states; got {v:?}"
+    );
+}
+
+/// **The zero literal, which is where D86's first test found a real defect.**
+///
+/// `{:e}` renders `0.0` as `"0e0"`, folding to `0 * 10^0` and emitting
+/// `ofScientific 0 Bool.false 0`. Lean elaborates the literal `0.0` from its source form —
+/// mantissa `0`, one fractional digit — giving `ofScientific 0 Bool.true 1`. Same `Float`,
+/// different term, and the statement check is structural.
+///
+/// It was isolated rather than guessed at: `lt(0.1, 0.5)` held and `le(-0.42, 0.5)` held while
+/// `lt(-0.42, 0.0)` failed, which rules out both the derived `And`/`Not` and the negative
+/// mantissa and leaves the zero. `le` carries no conjunction, so this pins the literal alone.
+///
+/// Not an edge case: `lt(rho, 0.0)` is the shape every WRN recompute conclusion takes, so before
+/// this every zero-threshold claim would have failed to match a Lean proof of that same claim.
+#[test]
+fn a_zero_literal_matches_the_form_lean_elaborates() {
+    let v = check_measured(
+        "le_against_zero_float",
+        &numeric("urn:eigenius:measurements:le", 0.1, 0.0),
+    );
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// The same derived shape at non-zero values, which held throughout — kept as the control that
+/// makes the test above mean "the zero" rather than "the relation".
+#[test]
+fn the_derived_lt_holds_at_non_zero_values() {
+    let v = check_measured(
+        "lt_simple_float",
+        &numeric("urn:eigenius:measurements:lt", 0.1, 0.5),
+    );
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// A negative mantissa is not the problem either — `Neg.neg` over `ofScientific 42 true 2`.
+#[test]
+fn a_negative_operand_matches_under_a_numeric_relation() {
+    let v = check_measured(
+        "le_neg_nonzero_float",
+        &numeric("urn:eigenius:measurements:le", -0.42, 0.5),
+    );
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// **Whole numbers, which showed the zero was one instance of a wider mismatch.**
+///
+/// A first fix special-cased zero and left this failing. `{:e}` renders `1.0` as `"1e0"` —
+/// `ofScientific 1 Bool.false 0` — while Lean elaborates `1.0` to mantissa **10**, exponent 1,
+/// read straight out of the export as `{"natVal": "10"}`. Every whole-number threshold was in
+/// the same position as the zero, and so was every value whose shortest round-trip form carries
+/// no fractional digit.
+///
+/// The rule the externalizer now follows is Lean's own: fold a non-negative scale into the
+/// mantissa so the literal always has a fractional digit, which is what a person writes and what
+/// the elaborator turns that into.
+#[test]
+fn a_whole_number_literal_matches_the_form_lean_elaborates() {
+    let v = check_measured(
+        "le_whole_float",
+        &numeric("urn:eigenius:measurements:le", 1.0, 2.0),
+    );
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
+}
+
+/// **Signed zero splits the literal, and this pins that it does.**
+///
+/// `le_against_zero_float` states `(0.1 : Float) ≤ 0.0`. IEEE says `-0.0 == 0.0` is TRUE, so
+/// `le(0.1, -0.0)` and `le(0.1, 0.0)` denote the same proposition about doubles — and D86 §3.3
+/// is explicit that IEEE semantics are what a measurement means. They still do not match.
+///
+/// **This is not a bug against the invariant the externalizer states.** That invariant is "emit
+/// what Lean's elaborator builds", and Lean elaborates the token `-0.0` to
+/// `Neg.neg (OfScientific 0 true 1)` exactly as `float_literal` does. `{:e}` renders `-0.0` as
+/// `"-0e0"`, so `negative` is true and the `Neg.neg` wrapper goes on; `0.0` renders `"0e0"` and
+/// gets the bare application. `Float.neg` is `opaque` on the pinned toolchain (D86 §3.1), so no
+/// kernel brings the two together.
+///
+/// **What it does show is where §3.3's doctrine and §5's literal matching disagree.** Two
+/// IEEE-equal values get definitionally distinct terms. The blast radius is one shape — a
+/// literal `-0.0` on one side of the boundary and `0.0` on the other — and nothing in the
+/// repository writes one today, which is why this is a pin and not a fix.
+///
+/// **D86 §4's `Rat` pivot dissolves it:** `BigRational::from_float(-0.0)` is `0/1`, the same
+/// rational `0.0` maps to, so the two collapse to one term. When the pivot lands this test
+/// should flip to `Holds` — and that flip is the point of writing it down now.
+#[test]
+fn signed_zero_does_not_match_unsigned_zero_though_ieee_equates_them() {
+    let v = check_measured(
+        "le_against_zero_float",
+        &numeric("urn:eigenius:measurements:le", 0.1, -0.0),
+    );
+    assert!(
+        !matches!(v, Verdict::Holds),
+        "pinning current behaviour: `-0.0` carries a `Neg.neg` the theorem's `0.0` does not, and \
+         `Float.neg` is opaque. If this now Holds, the `Rat` pivot (D86 §4) landed — flip the \
+         assertion. Got {v:?}"
+    );
+}
+
+/// The control for the test above: the same theorem, the same left operand, unsigned zero on the
+/// right. Without this, the refusal above could be about `0.1` or about the relation.
+#[test]
+fn unsigned_zero_matches_at_the_same_position() {
+    let v = check_measured(
+        "le_against_zero_float",
+        &numeric("urn:eigenius:measurements:le", 0.1, 0.0),
+    );
+    assert!(matches!(v, Verdict::Holds), "got {v:?}");
 }

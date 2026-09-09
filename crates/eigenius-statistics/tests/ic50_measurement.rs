@@ -61,15 +61,10 @@ fn build_ic50_chain() -> ExecutionContext {
     }
     let core = Arc::new(core_builder.build(LayerStorage::in_memory()));
 
-    let reflection_json = include_str!("../../../ontologies/reflection/reflection-ontology.json");
+    let reflection_json = include_str!("../../../ontologies/program/program-traces.json");
     let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for r in reflection_resources {
-        reflection_builder.add_resource(r).unwrap();
-    }
-    let eigentt_json = include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json");
-    let eigentt_resources = eigon_json::parse_document(eigentt_json).unwrap();
-    for r in eigentt_resources {
         reflection_builder.add_resource(r).unwrap();
     }
     let institution_json =
@@ -259,7 +254,7 @@ fn confirmatory_claim_recomputes_to_holds() {
 #[test]
 fn a_statistical_analysis_result_grounds_nothing_on_its_own() {
     // A `StatisticalAnalysisResult` used to admit an `IsDerivedAs` witness on its own IRI, off its
-    // `reflection:InstitutionEmittedDerivation` marker, so `DerivedEvidence(<plan>:result)` was a
+    // `institution:EmittedDerivation` marker, so `DerivedEvidence(<plan>:result)` was a
     // ground: the fact that a computation ran carried the claim.
     //
     // It does not. A computed claim rests on the assertion that the plan denotes a function
@@ -282,7 +277,7 @@ fn a_statistical_analysis_result_grounds_nothing_on_its_own() {
 
     // The SAR still carries the proposition it computed — the record is intact.
     let canonical_prop = sar_arc
-        .get(&Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap())
+        .get(&Iri::parse("urn:eigenius:eigentt:proposition").unwrap())
         .expect("SAR must still carry canonical_proposition — it is the record of what ran")
         .clone();
 

@@ -51,8 +51,7 @@ fn build_chain() -> ExecutionContext {
     let reflection = {
         let mut b = LayerBuilder::new("reflection", Some(core));
         for src in [
-            include_str!("../../../ontologies/reflection/reflection-ontology.json"),
-            include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
+            include_str!("../../../ontologies/program/program-traces.json"),
             include_str!("../../../ontologies/institution/institution-ontology.json"),
         ] {
             for r in eigon_json::parse_document(src).unwrap() {
@@ -131,7 +130,7 @@ fn wilcoxon_recomputes_wrn_msi_vs_mss_to_holds() {
         .unwrap_or("")
         .to_string();
     let has_canonical = result
-        .get(&Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap())
+        .get(&Iri::parse("urn:eigenius:eigentt:proposition").unwrap())
         .is_some();
 
     // (a) Holds — MSI lines are far more WRN-dependent; Wilcoxon rejects.

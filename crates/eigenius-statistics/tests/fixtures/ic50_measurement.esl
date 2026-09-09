@@ -35,12 +35,10 @@
 //     see the institution emit its own SAR in-test, separate from
 //     this pre-authored chain artefact.)
 //   - No ProgramTrace. The SAR's `is_a` membership in
-//     `reflection:InstitutionEmittedDerivation` is what the D49
+//     `institution:EmittedDerivation` is what the D49
 //     witness emitter walks.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace screen     = "urn:eigenius:demo:screen";
@@ -56,6 +54,7 @@ namespace screen_confirmatory_result =
 namespace agent = "urn:eigenius:prov:agent";
 namespace prov       = "urn:eigenius:prov";
 namespace justification = "urn:eigenius:justification";
+namespace institution = "urn:eigenius:institution";
 
 // ── Provenance activities ────────────────────────────────────────────
 // `prov:was_generated_by` is resource-typed: the event that produced an
@@ -162,7 +161,7 @@ resource screen:claim_eig0291_confirmatory_holds : stats:StatisticalAnalysisPlan
 // Pre-authored `StatisticalAnalysisResult` for the confirmatory SAP.
 // Mirrors the kernel-emitted shape: multi-class header carries both
 // `stats:StatisticalAnalysisResult` and the
-// `reflection:InstitutionEmittedDerivation` marker the D49 witness
+// `institution:EmittedDerivation` marker the D49 witness
 // emitter walks. `from_subject` points back at the SAP;
 // `canonical_proposition` carries the strictly-statistical claim the
 // verifier would derive (`stats:lt(stats:mean_of(s), 100.0)`).
@@ -175,15 +174,15 @@ resource screen:claim_eig0291_confirmatory_holds : stats:StatisticalAnalysisPlan
 
 resource screen_confirmatory_result:main_effect :
     stats:StatisticalAnalysisResult,
-    reflection:InstitutionEmittedDerivation
+    institution:EmittedDerivation
 {
-    reflection:from_subject          = screen:claim_eig0291_confirmatory_holds;
+    institution:from_subject          = screen:claim_eig0291_confirmatory_holds;
     stats:verdict_ctor               = "Holds";
     stats:computed_statistic         = -7.50;
     stats:computed_p_value           = 0.00034;
     stats:effect_name                = "main_effect";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(
             stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
             100.0
@@ -216,11 +215,11 @@ resource screen:warrant_plan_reproducibility : prov:Source {
     core:short_name = "warrant_plan_reproducibility";
 }
 
-resource screen:claim_eig0291_confirmatory_holds_yields_main_effect : justification:Claim {
+resource screen:claim_eig0291_confirmatory_holds_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_plan_reproducibility;
     prov:rationale    = "Applying claim_eig0291_confirmatory_holds to the confirmatory sample set yields its main_effect: the one-sample t-test against the 100 nM threshold. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset")
         -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"), 100.0)
     );

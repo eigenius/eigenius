@@ -76,9 +76,17 @@
 //! ```sh
 //! cd lean/research/capstone-proof
 //! lake build
-//! lake exe lean4export Capstone -- patient_weight_nonneg \
+//! lake exe lean4export Capstone -- \
+//!   patient_weight_nonneg healthy_refl capstone_healthy_refl \
+//!   healthy_patient_1 healthy_patient_2 \
 //!   > ../../../crates/eigenius-lean/test_resources/capstone_proof.json
 //! ```
+//!
+//! **Every target this fixture serves has to be named.** `lean4export` exports the transitive
+//! closure of the declarations it is given and nothing else, so a name left off the list is
+//! simply absent from the bytes and every consumer of it fails with `UnknownConstant`. This
+//! comment used to name `patient_weight_nonneg` alone while the committed fixture carried three
+//! declarations, which meant the documented command did not reproduce the file it documents.
 
 use std::sync::Arc;
 
@@ -113,7 +121,7 @@ fn bootstrap_head() -> std::sync::Arc<eigenius_kernel::layer::Layer> {
 /// The theorem this test's proof discharges.
 ///
 /// Not `patient_weight_nonneg`: D74's statement check manufactures the goal from the claim's
-/// `reflection:canonical_proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
+/// `eigentt:proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
 /// (a structure-field access, and Lean's `≤` at an instance nothing maps to — D86).
 const TARGET_THEOREM: &str = "capstone_healthy_refl";
 
@@ -284,7 +292,7 @@ fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
         );
         let names = CodecNames::from_layer(&bootstrap_head());
         patient.set(
-            iri(wk::CANONICAL_PROPOSITION),
+            iri(wk::PROPOSITION),
             encode_type(&prop, &names).expect("the capstone proposition encodes"),
         );
     }

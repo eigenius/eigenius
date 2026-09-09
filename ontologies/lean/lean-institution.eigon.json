@@ -38,7 +38,7 @@
       "urn:eigenius:core:Class"
     ],
     "urn:eigenius:core:short_name": "LeanProofTerm",
-    "urn:eigenius:core:description": "A Lean 4 proof term submitted for verification. `claim_iri` names the claim whose `reflection:canonical_proposition` becomes the Lean goal (D74): the proof is bound to the claim because the goal is manufactured from it, so the binding is required rather than recommended. `lean:proposition` and `lean:mirror_iri` were here and are deleted with checks 2c and 2a — `def_eq` against the externalized claim subsumes both (D74 §6.3.1).",
+    "urn:eigenius:core:description": "A Lean 4 proof term submitted for verification. `claim_iri` names the claim whose `eigentt:proposition` becomes the Lean goal (D74): the proof is bound to the claim because the goal is manufactured from it, so the binding is required rather than recommended. `lean:proposition` and `lean:mirror_iri` were here and are deleted with checks 2c and 2a — `def_eq` against the externalized claim subsumes both (D74 §6.3.1).",
     "urn:eigenius:core:requires": [
       "urn:eigenius:lean:proof_payload",
       "urn:eigenius:lean:target_name",

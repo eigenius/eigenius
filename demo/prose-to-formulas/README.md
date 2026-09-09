@@ -139,7 +139,7 @@ resource that cites the measurement.)
 
 | | what warrants it | grade | authoring cost |
 |---|---|---|---|
-| **pinned literature rule** | a published `∀m. A → B` on the chain, specialized with `spec_poly` and applied to a claim a sentence established | Declared | one rule, reused |
+| **pinned literature rule** | a published `∀m. A → B` on the chain, specialized with `instantiate` and applied to a claim a sentence established | Declared | one rule, reused |
 | **prose modus ponens** | `A` and `A → B` **both parsed from sentences** — the grammar renders `if` as native implication | **Derived** | none |
 
 The lift from prose to domain vocabulary is not a third way: `onco-typed.esl` *defines* the domain
@@ -177,7 +177,7 @@ standalone claim against anything. What rejects is the **certificate**.
 
 | property | what it holds | encoding |
 |---|---|---|
-| `justification:proposition` | the domain claim `C` | D47 `eigentt:Term` |
+| `eigentt:proposition` | the domain claim `C` | D47 `eigentt:Term` |
 | `justification:term` | the *reason shape*: `App(SpecStr(Declared(rule), tag), DerivedEvidence(claim))` | D32 §3.7 tagged dict — a `justification:Term` **value** |
 | `justification:certificate` | the proof that the reason warrants the claim | D47 `eigentt:Term` |
 
@@ -193,15 +193,15 @@ type-check.
 1. **Decode** `proposition` and `certificate` through the D47 codec against the current chain — where
    `ConstRef`s (`umlscui:C…`, `wn:…`) re-resolve to real classes and axioms.
 2. **Lift** `justification` into a `Val::InductiveVal` typed at `justification:Term`.
-3. **Resolve** the `justification:Certificate` inductive declaration from the layer.
+3. **Resolve** the `justification:Grounds` inductive declaration from the layer.
 4. **Type-check the proposition at `Prop`** (`Sort(0)`) and evaluate it.
 5. **Construct the expected type** — the crux:
 
    ```text
-   justification:Certificate(justification_val, proposition_val)
+   justification:Grounds(justification_val, proposition_val)
    ```
 
-   `justification:Certificate : justification:Term -> Prop -> Type 0` is an **indexed** inductive, so the
+   `justification:Grounds : justification:Term -> Prop -> Type 0` is an **indexed** inductive, so the
    justification and the proposition sit in its *index slots*: the expected type is parameterised by
    exactly the reason given and exactly the claim made.
 6. **Type-check the certificate against that type** with the kernel's NbE checker.
@@ -215,15 +215,15 @@ specializing the ∀-quantified literature rule at the model:
 ```text
 app( A, B,
      SpecStr(Declared(rule), tag),  DerivedEvidence(claim_1),
-     spec_poly( Set, (fun m => A(m) → B(m)), Declared(rule),
+     instantiate( Set, (fun m => A(m) → B(m)), Declared(rule),
                 «MSI cancer models», tag,
                 declared(rule, ∀m. A(m) → B(m), _) ),   ← the pinned rule, Declared, specialized
      derived (claim_1, A, _) )                          ← the parser's output, Derived
 ```
 
-`spec_poly` eliminates the quantifier: from `justification:Certificate(j, ∀y:T. P(y))` it yields
-`justification:Certificate(SpecStr(j, tag), P(x))`. `app` then composes: from `j1 : justification:Certificate(_, A → B)` and
-`j2 : justification:Certificate(_, A)` it yields `justification:Certificate(App(j1,j2), B)`. **`A` must be the same term on both
+`instantiate` eliminates the quantifier: from `justification:Grounds(j, ∀y:T. P(y))` it yields
+`justification:Grounds(SpecStr(j, tag), P(x))`. `app` then composes: from `j1 : justification:Grounds(_, A → B)` and
+`j2 : justification:Grounds(_, A)` it yields `justification:Grounds(App(j1,j2), B)`. **`A` must be the same term on both
 sides** — the specialized rule's antecedent and the claim's proposition must be *identical*, not
 merely compatible. Both reach it through the `HasActivity` definition, which unfolds to exactly the
 committed parse (`has_activity_unfolds_to_exactly_the_committed_parse`), so the match holds by
@@ -237,7 +237,7 @@ WitnessKey { category: Derived, iri: claim_iri, prop_hash: sha256(encode(P)) }
 ```
 
 `lookup_chain_witness` walks the layer and every ancestor
-([`witness_index.rs`](../../kernel/src/layer/witness_index.rs)). The key is minted on the other side
+([`witness_admission.rs`](../../kernel/src/layer/witness_admission.rs)). The key is minted on the other side
 by the parser's `prov:DeclarationTrace`: a trace whose `prov:resource` points at the
 claim emits `IsDeclaredAs claim_iri P`, where `P` is the claim's own `canonical_proposition`.
 
@@ -261,8 +261,8 @@ kernel therefore looks up                  (Derived, claim_1, sha256(P))
 
 The proposition is **hashed into the key**, so this is exact structural identity — no similarity
 metric, no threshold. `sha256(P) ≠ sha256(P → False)`, the lookup misses, no inhabitant exists for
-`justification:Certificate(DerivedEvidence(claim_1), P)`, `app` cannot be applied, and the certificate fails against
-`justification:Certificate(justification, C)`.
+`justification:Grounds(DerivedEvidence(claim_1), P)`, `app` cannot be applied, and the certificate fails against
+`justification:Grounds(justification, C)`.
 
 Two things follow. The paragraph has to be an **argument**, not a list of facts — the edit only bites
 because a certificate names the premise. And the rejection is indifferent to *how* the prose changed:
@@ -290,7 +290,7 @@ reads rather than a D47 encoding of it:
 
 ```
 resource formulas:claim_1 : encoding:EncodedClaim {
-    reflection:canonical_proposition = type_expr(wn:v02203362_t(eigentt:fst(ontology:the(
+    eigentt:proposition = type_expr(wn:v02203362_t(eigentt:fst(ontology:the(
         (exists x0 : wn:n13440063 => logic:And(ontology:compound_kind(x0, wn:n14606137),
         ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246)))))), …));
 }
@@ -330,7 +330,7 @@ Two witnesses stand behind the intact commit, and neither is about biology.
 Both are Declared since eigenius#201, and that is the honest reading: nothing in this demo derives
 a claim about biology. What differs is only who asserts and on what basis.
 
-`spec_poly` and `app` compose them and the result commits at **Declared** — a conclusion is no
+`instantiate` and `app` compose them and the result commits at **Declared** — a conclusion is no
 better than its weakest link, and the rule is the weak one.
 
 So the chain says *"the paper says the measurement, and we declare a rule under which it entails
@@ -369,26 +369,26 @@ formula one term, so the lift Declares nothing — but a rule relating two propo
 about the world, graded Declared.
 
 That is a property of the logic, not an authoring shortcut: **there is no implication introduction.**
-No rule produces `justification:Certificate(_, A → B)` — `app` yields `B`, `sum_l`/`sum_r` yield `P`,
-`spec_poly` yields `P(x)`. An implication enters only through a grounding, so a rule
+No rule produces `justification:Grounds(_, A → B)` — `app` yields `B`, `sum_l`/`sum_r` yield `P`,
+`instantiate` yields `P(x)`. An implication enters only through a grounding, so a rule
 connecting propositions must be asserted; it cannot be proved.
 
-## Appendix: `spec_poly`
+## Appendix: `instantiate`
 
 The elimination this demo's certificate uses:
 
 ```esl
-spec_poly :
+instantiate :
     forall (T : Type 1, P : T -> Prop, j : justification:Term, x : T, tag : core:string) =>
-    justification:Certificate(j, forall (y : T) => P(y)) -> justification:Certificate(SpecStr(j, tag), P(x)),
+    justification:Grounds(j, forall (y : T) => P(y)) -> justification:Grounds(SpecStr(j, tag), P(x)),
 ```
 
 The only specialization rule in [`reasoning.esl`](../../ontologies/justification/justification.esl) (landed
 2026-08-03; `reasoning.esl` is bootstrapped, so adding it cost a lexicon reseed). A monomorphic
 `spec_str` over `core:string` stood beside it until 2026-08-21, when it was retired as strictly
-subsumed (eigenius#203). `spec_poly` binds the domain type and the instance on the *proof* side
+subsumed (eigenius#203). `instantiate` binds the domain type and the instance on the *proof* side
 while the justification term carries only a string tag, so `justification:Term` needed no change;
-only `justification:Certificate` gained a constructor. The domain binder is `Type 1`, not `Set`: a rule whose own
+only `justification:Grounds` gained a constructor. The domain binder is `Type 1`, not `Set`: a rule whose own
 quantifier ranges over `Set` would otherwise need `Set : Set` to instantiate (eigenius#136).
 `inference.esl` applies it at `T := Set` to specialize the literature rule at «MSI cancer models» —
 a nested compound-kind term, not a class IRI. (D66 §9 records an undiagnosed universe question

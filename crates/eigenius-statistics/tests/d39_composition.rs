@@ -26,7 +26,7 @@
 //!     `App(Declared(plan_iri), Observed(sample_set_iri))` consumes.
 //!  2. The reasoning sentence `App(Declared(rule),
 //!     App(Declared(plan), Observed(s)))` type-checks against
-//!     `justification:Certificate(_, StrongInhibitor(EIG_0291))`.
+//!     `justification:Grounds(_, StrongInhibitor(EIG_0291))`.
 //!
 //! This is the proof point that D52 §8 actually works end-to-end —
 //! the statistics institution produces a chain artifact that D39
@@ -50,15 +50,10 @@ fn build_composition_chain() -> ExecutionContext {
     }
     let core = Arc::new(core_builder.build(LayerStorage::in_memory()));
 
-    let reflection_json = include_str!("../../../ontologies/reflection/reflection-ontology.json");
+    let reflection_json = include_str!("../../../ontologies/program/program-traces.json");
     let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for r in reflection_resources {
-        reflection_builder.add_resource(r).unwrap();
-    }
-    let eigentt_json = include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json");
-    let eigentt_resources = eigon_json::parse_document(eigentt_json).unwrap();
-    for r in eigentt_resources {
         reflection_builder.add_resource(r).unwrap();
     }
     let institution_json =
@@ -69,8 +64,29 @@ fn build_composition_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(reflection_builder.build(LayerStorage::in_memory()));
 
-    // Reasoning layer — provides justification:Certificate + justification:Term
-    // inductives the certificate type-checks against.
+    // Prov layer. This chain commits resources typed `prov:DeclarationTrace` and expects them to
+    // admit a Declared witness, and until `2026-09-06` it did that without loading `prov` at all:
+    // `trace_category` matches the class IRI as a string, so a trace class the chain never
+    // declares still grounds a witness. The test passed on a chain that could not resolve the
+    // class it was using.
+    //
+    // Loading `prov` is not required for the test to pass — the string match does not consult the
+    // chain — but a fixture should declare what it uses. The same gap, in the other direction,
+    // is how `reflection:ExternalExecutionTrace` survived in `trace_category` for months while
+    // being declared in no ontology at all.
+    let prov_resources = esl::compile(
+        include_str!("../../../ontologies/prov/prov.esl"),
+        &reflection,
+    )
+    .expect("prov.esl compiles");
+    let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
+    for r in prov_resources {
+        prov_builder.add_resource(r).unwrap();
+    }
+    let reflection = Arc::new(prov_builder.build(LayerStorage::in_memory()));
+
+    // Reasoning layer — provides the justification:Grounds inductive the
+    // certificate type-checks against.
     let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
     // Compiled against `reflection`, the layer it sits on: D85 §6.1 values name their
     // constructors' arguments, and `eigentt:Term` declares those names down the chain.
@@ -163,10 +179,10 @@ fn statistics_verdict_composes_with_universal_rule_via_d39() {
     // by its ProgramTrace (see ic50_measurement.rs's
     // `claim_admits_is_derived_as_witness_via_program_trace` test).
     // The IsDeclaredAs witness for the universal rule is admitted by
-    // its DeclarationTrace. spec_poly specializes the rule at
+    // its DeclarationTrace. instantiate specializes the rule at
     // EIG_0291; App composes the specialized implication with the
     // derived evidence; the result type-checks against
-    // `justification:Certificate(_, StrongInhibitor(EIG_0291))`. Holds.
+    // `justification:Grounds(_, StrongInhibitor(EIG_0291))`. Holds.
     assert!(
         errors.is_empty(),
         "the universal rule applied to the confirmatory IC50 claim should derive \

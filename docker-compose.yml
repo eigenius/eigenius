@@ -61,6 +61,19 @@ services:
       # here is harmless — the proposers report a missing key and the run fails
       # closed rather than silently degrading to an unranked parse.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # D87 §9.3 — the checker identity the kernel stamps onto every
+      # prov:VerificationTrace. Empty here on purpose: compose BUILDS the image
+      # (`build:` below), and a locally built image has no registry digest, only a
+      # local image ID — which is the sha256 of the image config, not what any
+      # registry served or signed. With it empty the kernel records `source_pin`
+      # instead: the nanoda_lib revision it links plus the Lean toolchain whose
+      # export format it parses, which binds the checker's source and not the
+      # build. Absence is itself informative — "not deployed by digest" — so
+      # there is nothing to fall back past.
+      #
+      # Set it when running a registry image:
+      #   EIGENIUS_IMAGE_DIGEST=$(docker buildx imagetools inspect <ref> --format '{{.Manifest.Digest}}')
+      - EIGENIUS_IMAGE_DIGEST=${EIGENIUS_IMAGE_DIGEST:-}
     command: ["serve", "--port", "50051", "--orchestrator", "http://orchestrator:8080", "--db", "/var/lib/eigenius/db"]
     volumes:
       - eigenius_db:/var/lib/eigenius/db

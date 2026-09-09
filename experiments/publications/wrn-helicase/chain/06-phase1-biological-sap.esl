@@ -27,10 +27,7 @@
 // not by the in-process recompute tests.
 
 namespace core          = "urn:eigenius:core";
-namespace reflection    = "urn:eigenius:reflection";
-namespace stats         = "urn:eigenius:measurements";
 namespace onco          = "urn:eigenius:benchmark:onco";
-namespace bench         = "urn:eigenius:benchmark";
 namespace wrn           = "urn:eigenius:pub:wrn";
 namespace justification = "urn:eigenius:justification";
 namespace eigentt       = "urn:eigenius:eigentt";
@@ -50,16 +47,13 @@ class wrn:CompetitionTable {
 // lme4 program commits (onco:ViabilityDependenceAtBiologicalUnit("WRN","KM12")).
 // Mirrors concl_vivo's shape (D54 certificate over a wrapped-R derived result).
 resource wrn:concl_viab_KM12_biological : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
-               type_expr(app(core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table"), onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12"), Declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:viab_KM12_competition_table"),
-                       declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table") -> onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")),
+               type_expr(app(declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result", core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table") -> onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12")),
                        observed("urn:eigenius:pub:wrn:viab_KM12_competition_table", core:Asserts("urn:eigenius:pub:wrn:viab_KM12_competition_table")))),
-               type_expr(justification:Certificate(
-                   justification:App(Declared("urn:eigenius:pub:wrn:viab_KM12_bio_lme4_yields_result"), Observed("urn:eigenius:pub:wrn:viab_KM12_competition_table")),
+               type_expr(justification:Grounds(
                    onco:ViabilityDependenceAtBiologicalUnit("WRN", "KM12") )) );
 }
 

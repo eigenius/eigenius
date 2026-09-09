@@ -13,8 +13,6 @@
 // paths.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace decay      = "urn:eigenius:demo:decay";
@@ -93,7 +91,7 @@ resource decay:half_life_sampleset_trace : prov:ObservationTrace {
 resource decay:claim_short_half_life_onesided : stats:StatisticalAnalysisPlan {
     stats:sample_set = decay:half_life_sampleset;
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
     );
 
@@ -118,7 +116,7 @@ resource decay:claim_short_half_life_onesided_trace : prov:ProgramTrace {
 resource decay:claim_short_half_life_bad_witness : stats:StatisticalAnalysisPlan {
     stats:sample_set = decay:half_life_sampleset;
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
     );
 
@@ -167,7 +165,7 @@ resource assay:noisy_readout_sampleset_trace : prov:ObservationTrace {
 resource assay:claim_low_readout_esd : stats:StatisticalAnalysisPlan {
     stats:sample_set = assay:noisy_readout_sampleset;
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         assay:HasLowReadout("urn:eigenius:demo:assay:plate_X")
     );
 
@@ -215,7 +213,7 @@ resource methods:concordance_sampleset_trace : prov:ObservationTrace {
 resource methods:claim_methods_agree : stats:MethodComparisonAnalysisPlan {
     stats:sample_set = methods:concordance_sampleset;
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         methods:MethodsAgree("urn:eigenius:demo:methods:assay_vs_LCMS")
     );
 
@@ -256,7 +254,7 @@ resource methods:disagreement_sampleset_trace : prov:ObservationTrace {
 resource methods:claim_methods_disagree : stats:MethodComparisonAnalysisPlan {
     stats:sample_set = methods:disagreement_sampleset;
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         methods:MethodsAgree("urn:eigenius:demo:methods:biased_assay_vs_LCMS")
     );
 

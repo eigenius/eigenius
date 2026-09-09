@@ -19,7 +19,7 @@
 //   1. The imported CLAIM (what a citation warrants) is **Declared**.
 //      `reference:Citation` is a `reflection:DeclaredResource`: a citation is an
 //      asserted act, and when it imports a claim (a *literature warrant*) the
-//      claim IS its `reflection:canonical_proposition`. Consuming nodes cite the
+//      claim IS its `eigentt:proposition`. Consuming nodes cite the
 //      warrant through the existing `justification:Declared` mechanism.
 //
 //   2. The reference IDENTITY + METADATA follows **CSL-JSON / Dublin Core**.
@@ -56,7 +56,7 @@
 //       reference:reference_label        = "16";   // the WRN paper's own [16]
 //       prov:rationale             = "A C911 (seed-preserving, target-
 //           disrupted) control isolates on-target from shRNA seed off-target.";
-//       reflection:canonical_proposition = type_expr( onco:SeedControlIsValid("C911") );
+//       eigentt:proposition = type_expr( onco:SeedControlIsValid("C911") );
 //   }
 //   // (3) a node CITES the warrant via the existing reasoning mechanism —
 //   //     e.g. wrn:seed_control_rule's justification gains
@@ -64,9 +64,7 @@
 
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace reference  = "urn:eigenius:reference";
-namespace prov       = "urn:eigenius:prov";
 
 // ── The bibliographic WORK (CSL-JSON / Dublin Core aligned) ──────────────
 //
@@ -166,12 +164,12 @@ resource reference:cites_as_authority : reference:CitationType {
 // citing document's local label. A Citation IS a reflection:DeclaredResource —
 // a citation is an asserted act — so a *literature warrant* (a Citation that
 // imports a domain claim) simply carries that claim as its
-// reflection:canonical_proposition, and consuming nodes discharge it via
+// eigentt:proposition, and consuming nodes discharge it via
 // justification:Declared on the Citation's IRI. (reference:cites is the
 // link to the cited work; declared_by records who asserted the Citation.)
 
 class reference:Citation {
-    description = "A citation — one citing entity's use of a reference:Reference. Carries the cited work (reference:cites), the CiTO citation function (reference:citation_type), and the citing document's own in-text label (reference:reference_label). As a DeclaredResource it may carry an imported claim in reflection:canonical_proposition (then it is a 'literature warrant' a node can discharge via Declared); a Citation without one is pure provenance. All citing-doc-local data lives here, not on the global Reference.";
+    description = "A citation — one citing entity's use of a reference:Reference. Carries the cited work (reference:cites), the CiTO citation function (reference:citation_type), and the citing document's own in-text label (reference:reference_label). As a DeclaredResource it may carry an imported claim in eigentt:proposition (then it is a 'literature warrant' a node can discharge via Declared); a Citation without one is pure provenance. All citing-doc-local data lives here, not on the global Reference.";
     requires reference:cites;
     recommends reference:citation_type, reference:reference_label;
 }

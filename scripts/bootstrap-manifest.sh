@@ -34,9 +34,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Order and paths mirror BOOTSTRAP_SPECS in kernel/src/bootstrap/mod.rs.
 SPECS=(
   "core:ontologies/core/core-ontology.json"
-  "eigentt-type-fragment:ontologies/eigentt/eigentt-type-fragment.json"
   "program:ontologies/program/program-ontology.json"
-  "reflection:ontologies/reflection/reflection-ontology.json"
+  "program-traces:ontologies/program/program-traces.json"
   "obo:ontologies/obo/obo-meta-ontology.json"
   "institution:ontologies/institution/institution-ontology.json"
   "runtime:ontologies/runtime/runtime-substrate-ontology.json"

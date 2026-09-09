@@ -895,7 +895,7 @@ pub(super) fn build_run_records(i: RunRecordInputs<'_>) -> RunRecords {
         );
     }
     // What the run was applied to (eigenius#147). Never populated before: the only thing
-    // written was `reflection:input_hash` (`program/trace.rs:313`), a different property,
+    // written was `program:traces:input_hash` (`program/trace.rs:313`), a different property,
     // so a trace recorded that a run happened without naming its subject.
     //
     // Embedded, always — **not** referenced by IRI even when the input carries one. A run
@@ -946,7 +946,7 @@ pub(super) fn build_run_records(i: RunRecordInputs<'_>) -> RunRecords {
     );
     // Recommended: universe_level = 0 (traces about domain resources)
     trace_resource.set(
-        Iri::parse(crate::ontology::well_known::UNIVERSE_LEVEL).unwrap(),
+        Iri::parse(crate::ontology::well_known::META_LEVEL).unwrap(),
         Value::Integer(0),
     );
 
@@ -1134,7 +1134,7 @@ mod tests {
     /// §3.4 / eigenius#147 — the trace names what the run was applied to.
     ///
     /// `prov:input` was never populated. The only thing written was
-    /// `reflection:input_hash` (`program/trace.rs:313`), a different property, so a
+    /// `program:traces:input_hash` (`program/trace.rs:313`), a different property, so a
     /// `ProgramTrace` recorded that a run happened without naming its subject — while
     /// `prov:input`'s domain is `ProgramTrace` and the class recommends it.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

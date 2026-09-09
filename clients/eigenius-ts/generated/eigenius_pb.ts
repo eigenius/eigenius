@@ -1590,7 +1590,7 @@ export type DispatchExternalResponse = Message<"eigenius.v1.DispatchExternalResp
    * artefacts of validation (D52 §6 institution-emitted derivations).
    * Each entry is a CBOR-encoded Eigon resource that the kernel commits
    * alongside the gate Verdict as a chain-resident
-   * `reflection:InstitutionEmittedDerivation` under the gated subject.
+   * `institution:EmittedDerivation` under the gated subject.
    * Empty for substrate-hosted institutions whose only job is the
    * pass/fail gate (i.e. zero-or-more semantics, not exactly-one).
    *

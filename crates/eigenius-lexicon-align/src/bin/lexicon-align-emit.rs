@@ -83,12 +83,8 @@ fn as_str(v: Option<&Value>) -> Option<String> {
     }
 }
 
-/// `urn:eigenius:reflection:epistemic:declared` → `epistemic:declared`
 fn qname(iri: &str) -> String {
-    for (ns, pfx) in [
-        ("urn:eigenius:reflection:epistemic:", "epistemic:"),
-        ("urn:eigenius:lexicon:", "lexicon:"),
-    ] {
+    for (ns, pfx) in [("urn:eigenius:lexicon:", "lexicon:")] {
         if let Some(local) = iri.strip_prefix(ns) {
             return format!("{pfx}{local}");
         }

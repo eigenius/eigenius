@@ -251,12 +251,12 @@ agree on `prop_hash` do not compute it the same way:
 | side | path | normalizes? |
 |---|---|---|
 | **lookup** (type-check) | `kernel/src/program/check_hooks.rs:76` — `readback_val(level, &indices[1])`, then `WitnessKey::from_exp` | **yes** — the proposition arrives as a `Val`, already evaluated by NbE, so δ has happened |
-| **emit** (witness-index build) | `kernel/src/layer/witness_index.rs:206,223,249` — `hash_proposition_value(encoded_prop)` on the stored `Value::Json` | **no** — hashes what the author typed |
+| **emit** (witness-index build) | `kernel/src/layer/witness_admission.rs:206,223,249` — `hash_proposition_value(encoded_prop)` on the stored `Value::Json` | **no** — hashes what the author typed |
 
 **Where the emit side actually runs.** Not at layer build or persist. `build_witness_index` is called
-lazily from `Layer::chain_witness_index` through a `OnceLock` (`kernel/src/layer/mod.rs:541-546`), and
+lazily from `Layer::chain_witness_admission` through a `OnceLock` (`kernel/src/layer/mod.rs:541-546`), and
 the trigger is `check_layer_with_coercion` during **type-checking**, when a certificate needs a witness
-(`kernel/src/layer/witness_index.rs:356`). The index is a pure function of the layer's resources and is
+(`kernel/src/layer/witness_admission.rs:356`). The index is a pure function of the layer's resources and is
 **not persisted** — content-addressing covers it transitively through the Trace resources. So it is
 built at most once per layer per process, and only for layers something asks about.
 
@@ -314,11 +314,11 @@ This is a smaller change than "evaluate in the layer": the emit side must decode
 `hash_proposition_value` is infallible today, so witness-index construction cannot fail. Decoding can —
 and there is nowhere for the failure to go:
 
-- `build_witness_index(layer) -> BTreeMap<WitnessKey, ()>` (`kernel/src/layer/witness_index.rs:75`) has
+- `build_witness_index(layer) -> BTreeMap<WitnessKey, ()>` (`kernel/src/layer/witness_admission.rs:75`) has
   **no error channel**.
 - Its per-resource emitters return `Option<WitnessKey>` and `None` is dropped without a trace
   (`emit_from_reasoning_sentence`, `emit_from_institution_derivation`, `emit_from_trace`).
-- `Layer::chain_witness_index` builds it inside `OnceLock::get_or_init`
+- `Layer::chain_witness_admission` builds it inside `OnceLock::get_or_init`
   (`kernel/src/layer/mod.rs:541-546`), which cannot return a `Result`.
 
 So a proposition that failed to decode would produce no key, the lookup would miss, and the citing
@@ -361,9 +361,9 @@ differently* / (after slice 1) *proposition failed to decode*. Surfacing the thi
 reason `prop_hash` is in the key at all (`kernel/src/witness/mod.rs:86-89`), and it is invisible today
 because the answer is one membership bit.
 
-Scope: `check_layer_with_coercion` (`kernel/src/layer/witness_index.rs:356`) is the only consumer of the
-whole map — it calls `contains_key`. Every other call site is `let _ = layer.chain_witness_index();`,
-force-population that becomes a no-op and is deleted. `Layer::chain_witness_index`, its `OnceLock`
+Scope: `check_layer_with_coercion` (`kernel/src/layer/witness_admission.rs:356`) is the only consumer of the
+whole map — it calls `contains_key`. Every other call site is `let _ = layer.chain_witness_admission();`,
+force-population that becomes a no-op and is deleted. `Layer::chain_witness_admission`, its `OnceLock`
 field, `build_witness_index`, and `chain_witness_index_for_test_set` all go.
 
 Preserve exactly: the Derived→Verified coercion, the `Asserts(iri)` default, and the parent-chain walk.
@@ -701,7 +701,7 @@ cannot be deferred.)*
 | `Decl::Def` never emitted from ESL | only `kernel/src/program/expr.rs:358` |
 | `Let` reserved for type-position δ-binding | `kernel/src/esl/lexer.rs:48-54` |
 | Lookup side normalizes | `kernel/src/program/check_hooks.rs:76` |
-| Emit side does not | `kernel/src/layer/witness_index.rs:206,223,249` |
+| Emit side does not | `kernel/src/layer/witness_admission.rs:206,223,249` |
 | α-canonicalization is a targeted patch | `kernel/src/witness/mod.rs:130-136,181` |
 | Index errors discarded | `kernel/src/layer/mod.rs:1165,1176` |
 | `spec_poly` applied at `Set` | `demo/prose-to-formulas-v2/inference.esl:112` (slice 3; previously the generated `bridges.esl`) |

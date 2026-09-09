@@ -135,7 +135,7 @@ pub enum Response {
         /// Side-effect resources the language runtime emitted as
         /// artefacts of validation — each a CBOR-encoded Eigon
         /// resource that becomes a chain-resident
-        /// `reflection:InstitutionEmittedDerivation` under the
+        /// `institution:EmittedDerivation` under the
         /// gated subject. Empty Vec for institutions whose only job
         /// is the pass/fail gate (D52 §6).
         #[serde(default)]

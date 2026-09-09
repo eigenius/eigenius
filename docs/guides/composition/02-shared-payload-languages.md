@@ -329,7 +329,7 @@ data eigentt:Term : Type 0 {
 A chain-resident value of `eigentt:Term` IS a typed proposition (when it lives in `Prop` per [D46](../../design/d46-prop-universe-and-proof-irrelevance.md)) or a type expression. The author surface is [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) — the syntactic counterpart of `formula(...)` for the proposition language:
 
 ```esl
-reflection:canonical_proposition = type_expr(
+eigentt:proposition = type_expr(
     screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
 );
 ```
@@ -358,7 +358,7 @@ property (D85 §6.1):
 | Institution | What it reads `eigentt:Term` for |
 |---|---|
 | **D52 statistics** ([tutorial](../platform/statistics-institution/README.md)) | The `StatisticalAnalysisPlan`'s `null_hypothesis` / `alternative_hypothesis` / `canonical_proposition` slots carry chain-mirrored propositions. The §7.4 epistemic-scope check walks the proposition's head predicate to look up its `is_a` scope markers. |
-| **D39 reasoning** ([tutorial](../platform/justification-logic/README.md)) | The `justification:Conclusion`'s `proposition` slot. The certificate's `justification:Certificate(j, P)` indices read it. The grounding constructors (`declared`/`observed`/`derived`/`verified`) hash it to compute the witness-index key. |
+| **D39 reasoning** ([tutorial](../platform/justification-logic/README.md)) | The `justification:Conclusion`'s `proposition` slot. The certificate's `justification:Grounds(j, P)` indices read it. The grounding constructors (`declared`/`observed`/`derived`/`verified`) hash it to compute the witness-index key. |
 | **D49 chain-witness index** ([§6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state)) | Reads `canonical_proposition` from every chain-resident resource carrying one, together with the `prov` trace attesting how it came to exist, and computes a SHA-256 hash to key the witness-admission table. |
 | **Lean institution** ([tutorial](../platform/lean-institution/README.md)) | The `lean_to_reasoning` comorphism reifies a Lean proof's proposition as a `justification:VerifiedPropositionView` with a `canonical_proposition` slot — same chain shape, written by the comorphism instead of by the original author. |
 

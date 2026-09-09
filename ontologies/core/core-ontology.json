@@ -188,6 +188,7 @@
     "urn:eigenius:core:domain": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:allows_only": [
       "urn:eigenius:core:string",
+      "urn:eigenius:core:iri",
       "urn:eigenius:core:integer",
       "urn:eigenius:core:float",
       "urn:eigenius:core:boolean",
@@ -385,6 +386,12 @@
   },
 
   {
+    "@id": "urn:eigenius:core:iri",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
+    "urn:eigenius:core:description": "An absolute IRI. A REFINEMENT of core:string, not a separate carrier: values are string literals, and what differs is that checking one parses it. Declared so a slot holding a reference to a chain resource says so — the justification grounding constructors' leaf, the witness:Is*As iri index and eigentt:Term.Checked's payload all named core:string, and every consumer that wanted to know whether a string was a reference guessed with a starts_with(\"urn:\") prefix test, in three separate places. A guess about a string is not a declaration about a slot. Subtyping runs one way only: an IRI is admissible where a string is expected, never the converse, which is the whole content of the declaration. A bare literal INFERS to core:string and never to this, because a literal cannot know which it was meant to be; core:iri is reachable only in checking mode, where a declared type asks for it. That asymmetry is what let the change land without rewriting a single authored citation. D88 §3.",
+    "urn:eigenius:core:short_name": "iri"
+  },
+  {
     "@id": "urn:eigenius:core:string",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:DataType"],
     "urn:eigenius:core:description": "UTF-8 string. May carry format, content_type, and/or content_encoding constraints via the property definition.",
@@ -510,7 +517,8 @@
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
     "urn:eigenius:core:description": "A single constructor of an InductiveType: a name and an ordered list of argument types. The constructor's result type is the inductive itself applied to its parameters.",
     "urn:eigenius:core:short_name": "InductiveCtor",
-    "urn:eigenius:core:requires": ["urn:eigenius:core:ctor_name"]
+    "urn:eigenius:core:requires": ["urn:eigenius:core:ctor_name"],
+    "urn:eigenius:core:recommends": ["urn:eigenius:core:implicit_args"]
   },
   {
     "@id": "urn:eigenius:core:InductiveArgType",
@@ -657,7 +665,7 @@
     "@id": "urn:eigenius:eigentt:Term",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "Term",
-    "urn:eigenius:core:description": "Chain-mirrored EigenTT type fragment. Encodes closed EigenTT type expressions (axiom statements, theorem statements, propositional institutional artifacts) as queryable chain values. Covers the type-level subset of EigenTT's Exp — universes, dependent binders, propositional equality, references to chain-declared type formers, and the size sort. Declared in CORE rather than beside eigentt:Axiom because core:param_kind and core:type_name carry eigentt:Term values and a lower layer cannot reference a higher one; the IRI keeps its eigentt: prefix because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4). The value shape follows D32 §3.7's `{\"ctor\": <name>, \"args\": [...]}` form; the validator checks each value tree against the ctor schema declared here. See D47.",
+    "urn:eigenius:core:description": "Chain-mirrored EigenTT type fragment. Encodes closed EigenTT type expressions (axiom statements, theorem statements, propositional institutional artifacts) as queryable chain values. Covers the type-level subset of EigenTT's Exp — universes, dependent binders, propositional equality, references to chain-declared type formers, and the size sort. One ctor is not type-level: `Checked(payload_iri)` (D87 \u00a74.2), a reference to a proof an external checker verified, which appears only as `eigentt:Judgement.holds`'s `term` argument. It is its own ctor rather than a `ConstRef` because `ConstRef` resolves by the target's class and yields EigonClass / EigonAxiom / Const, none of which a `lean:LeanProofPayload` instance is \u2014 and because putting 'asserted without proof' and 'checked by nanoda' in one form is the conflation D87 \u00a74.1 withdrew. The kernel's `check` REFUSES it: it has no proof of the proposition and will not manufacture one, so a hand-authored `holds(logic_lean4, Checked(_), _)` is rejected at commit, while an institution-emitted one \u2014 minted after the checker returned \u2014 never reaches validation, because `structural_validate` runs before `autoonload_dispatch` and the followup pipeline slice has no validation phase. Declared in CORE rather than beside eigentt:Axiom because core:param_kind and core:type_name carry eigentt:Term values and a lower layer cannot reference a higher one; the IRI keeps its eigentt: prefix because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4). The value shape follows D32 §3.7's `{\"ctor\": <name>, \"args\": [...]}` form; the validator checks each value tree against the ctor schema declared here. See D47.",
     "urn:eigenius:core:ctors": [
       {
         "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
@@ -698,7 +706,7 @@
             "urn:eigenius:core:arg_name": "iri",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:iri",
               "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           },
@@ -920,6 +928,21 @@
       },
       {
         "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "Checked",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "payload_iri",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:iri",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
         "urn:eigenius:core:ctor_name": "LitString",
         "urn:eigenius:core:arg_types": [
           {
@@ -972,7 +995,7 @@
             "urn:eigenius:core:arg_name": "decl_iri",
             "urn:eigenius:core:type_name": {
               "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:iri",
               "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           },
@@ -1109,6 +1132,15 @@
     "urn:eigenius:eigentt:is_a_type": true
   },
   {
+    "@id": "urn:eigenius:core:implicit_args",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Names of the constructor's telescope binders the author does not write. Each listed name must bind somewhere in `ctor_type`'s telescope past the inductive's parameter prefix; a name matching no binder, or matching more than one, is rejected when the declaration is decoded. The kernel solves an implicit binder by unifying the constructor's result type against the type it is checked against, and, for a binder occurring in no result index, by inferring the argument whose declared type mentions it. IMPLICITNESS IS DECLARED, NOT DERIVED: a binder is elided because this list says so, never because the checker happens to be able to solve it. Deriving it from solvability shifts the author's arguments onto the slots it elides \u2014 `verified(CLAIM, P)` put a string where a Prop belonged \u2014 because which slot an argument lands on then depends on what the solver managed. Carried as names rather than positions so that a list and the telescope it describes cannot silently disagree. D88 \u00a74.",
+    "urn:eigenius:core:short_name": "implicit_args",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:value_array",
+    "urn:eigenius:core:element_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:core:InductiveCtor"]
+  },
+  {
     "@id": "urn:eigenius:core:macro_decl_json",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
     "urn:eigenius:core:description": "The JSON-encoded macro declaration (parameters + expansion) carried by a core:Macro resource; the ESL compiler decodes it back into a MacroDecl at compile time.",
@@ -1198,7 +1230,7 @@
     "@id": "urn:eigenius:core:Asserts",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "Asserts",
-    "urn:eigenius:core:description": "Atomic propositional assertion: `Asserts(iri) : Prop` carries no inhabitants of its own — the type has zero constructors — so different IRIs produce distinct propositions whose only inhabitation paths are institutional dispatch (typically Lean producing a proof term the in-kernel checker validates) or introduction as an `eigentt:Axiom`. The uniform-parameter shape — `iri` as a parameter, not an index — keeps the declaration trivial; with D48 indexed families now landed an alternative `Asserts : core:iri -> Prop` indexed encoding is expressible but not used here, since the parameter shape is the cleaner default. The witness emitter for `DeclarationTrace` / `ObservationTrace` / `ProgramTrace` resources uses `Asserts(target_iri)` as the default canonical proposition when the target carries no explicit `reflection:canonical_proposition`. The witness-emitter integration of that default is staged with D39's `justification:Certificate` consumer-site work so both sides agree on the iri-argument encoding.",
+    "urn:eigenius:core:description": "Atomic propositional assertion: `Asserts(iri) : Prop` carries no inhabitants of its own — the type has zero constructors — so different IRIs produce distinct propositions whose only inhabitation paths are institutional dispatch (typically Lean producing a proof term the in-kernel checker validates) or introduction as an `eigentt:Axiom`. The uniform-parameter shape — `iri` as a parameter, not an index — keeps the declaration trivial; with D48 indexed families now landed an alternative `Asserts : core:iri -> Prop` indexed encoding is expressible but not used here, since the parameter shape is the cleaner default. The witness emitter for `DeclarationTrace` / `ObservationTrace` / `ProgramTrace` resources uses `Asserts(target_iri)` as the default canonical proposition when the target carries no explicit `eigentt:proposition`. The witness-emitter integration of that default is staged with D39's `justification:Grounds` consumer-site work so both sides agree on the iri-argument encoding.",
     "urn:eigenius:core:type_params": [
       {
         "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveParam"],
@@ -1744,7 +1776,7 @@
     "@id": "urn:eigenius:witness:IsDeclaredAs",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "IsDeclaredAs",
-    "urn:eigenius:core:description": "An accountable agent asserted, on this chain, that the resource at `iri` states `P`. The weakest of the three grades and the one every other rests on: a declaration establishes that somebody is answerable for the claim, not that the claim is true. Admitted by a `prov:DeclarationTrace`, and by a `prov:ExternalExecutionTrace`, which asserts that a run happened elsewhere and so grounds nothing stronger (eigenius#205). Declared in CORE rather than beside `justification:Certificate` because the kernel CONSTRUCTS inhabitants of this type \u2014 `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the layer's witness index holds a matching key \u2014 and a type the kernel inhabits cannot be owned by a layer above it: an ontology edit could otherwise change the arity the kernel's synthesis hook assumes, or remove the declaration the hook resolves by IRI. The `witness:` prefix is kept because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4), the same rule that puts `eigentt:Term` here. Signature is `core:string -> Prop -> Prop`: the IRI of the underlying resource and the proposition it carries. ZERO ctors, deliberately \u2014 no user-constructible inhabitant exists, so the only route to a value of this type is the kernel's synthesis against a committed trace.",
+    "urn:eigenius:core:description": "An accountable agent asserted, on this chain, that the resource at `iri` states `P`. The weakest of the three grades and the one every other rests on: a declaration establishes that somebody is answerable for the claim, not that the claim is true. Admitted by a `prov:DeclarationTrace`, including the one an author commits to assert that a run happened elsewhere \u2014 a transcription has no specification, so it grounds nothing stronger (eigenius#205). That case had its own class for a while; the requirement that forced it into existence was replaced by `prov:was_generated_by`, and the class went with it on `2026-09-05`. Declared in CORE rather than beside `justification:Grounds` because the kernel CONSTRUCTS inhabitants of this type \u2014 `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the layer's witness index holds a matching key \u2014 and a type the kernel inhabits cannot be owned by a layer above it: an ontology edit could otherwise change the arity the kernel's synthesis hook assumes, or remove the declaration the hook resolves by IRI. The LOOKUP is a decision procedure \u2014 a deterministic function of the layer's Trace resources, recomputed every time and persisted nowhere, so the index is a cache (the P7 closeout, `2026-09-05`). The FACT is postulated, and stays in the trusted computing base permanently: recomputing the lookup recomputes the same trusted assertion, since nothing can check that the agent really asserted this or that the recording really occurred. `judgements-and-warrants.tex` names postulation the correct semantic operation for an attribution, and names the constant specification governing attributions as part of the TCB. The type stays declared because the premise is what makes `justification:Grounds`'s grounding constructor conditional \u2014 without it the constructor is unconditional and the grade becomes assertable by anyone writing a certificate. The `witness:` prefix is kept because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4), the same rule that puts `eigentt:Term` here. Signature is `core:iri -> Prop -> Prop`: the IRI of the underlying resource and the proposition it carries. The first index was `core:string` until D88 \u00a73 declared the leaf, which is what makes the slot state that it holds a reference rather than leaving every consumer to guess with a `urn:` prefix test. ZERO ctors, deliberately \u2014 no user-constructible inhabitant exists, so the only route to a value of this type is the kernel's synthesis against a committed trace.",
     "urn:eigenius:core:type_params": [],
     "urn:eigenius:core:indices": [
       {
@@ -1752,7 +1784,7 @@
         "urn:eigenius:core:param_name": "_",
         "urn:eigenius:core:param_kind": {
           "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-          "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+          "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:iri",
           "urn:eigenius:eigentt:Term-ConstRef-levels": []
         }
       },
@@ -1776,7 +1808,7 @@
     "@id": "urn:eigenius:witness:IsObservedAs",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "IsObservedAs",
-    "urn:eigenius:core:description": "A measurement of the world produced the resource at `iri`, whose proposition is `P`. Admitted by a `prov:ObservationTrace`. Distinct from Declared in what backs it \u2014 an instrument rather than an agent's word \u2014 and neither entails the other: an unattributed reading is not declared, and a declaration nobody measured is not observed. Declared in CORE rather than beside `justification:Certificate` because the kernel CONSTRUCTS inhabitants of this type \u2014 `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the layer's witness index holds a matching key \u2014 and a type the kernel inhabits cannot be owned by a layer above it: an ontology edit could otherwise change the arity the kernel's synthesis hook assumes, or remove the declaration the hook resolves by IRI. The `witness:` prefix is kept because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4), the same rule that puts `eigentt:Term` here. Signature is `core:string -> Prop -> Prop`: the IRI of the underlying resource and the proposition it carries. ZERO ctors, deliberately \u2014 no user-constructible inhabitant exists, so the only route to a value of this type is the kernel's synthesis against a committed trace.",
+    "urn:eigenius:core:description": "A measurement of the world produced the resource at `iri`, whose proposition is `P`. Admitted by a `prov:ObservationTrace`. Distinct from Declared in what backs it \u2014 an instrument rather than an agent's word \u2014 and neither entails the other: an unattributed reading is not declared, and a declaration nobody measured is not observed. Declared in CORE rather than beside `justification:Grounds` because the kernel CONSTRUCTS inhabitants of this type \u2014 `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the layer's witness index holds a matching key \u2014 and a type the kernel inhabits cannot be owned by a layer above it: an ontology edit could otherwise change the arity the kernel's synthesis hook assumes, or remove the declaration the hook resolves by IRI. The LOOKUP is a decision procedure \u2014 a deterministic function of the layer's Trace resources, recomputed every time and persisted nowhere, so the index is a cache (the P7 closeout, `2026-09-05`). The FACT is postulated, and stays in the trusted computing base permanently: recomputing the lookup recomputes the same trusted assertion, since nothing can check that the agent really asserted this or that the recording really occurred. `judgements-and-warrants.tex` names postulation the correct semantic operation for an attribution, and names the constant specification governing attributions as part of the TCB. The type stays declared because the premise is what makes `justification:Grounds`'s grounding constructor conditional \u2014 without it the constructor is unconditional and the grade becomes assertable by anyone writing a certificate. The `witness:` prefix is kept because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4), the same rule that puts `eigentt:Term` here. Signature is `core:iri -> Prop -> Prop`: the IRI of the underlying resource and the proposition it carries. The first index was `core:string` until D88 \u00a73 declared the leaf, which is what makes the slot state that it holds a reference rather than leaving every consumer to guess with a `urn:` prefix test. ZERO ctors, deliberately \u2014 no user-constructible inhabitant exists, so the only route to a value of this type is the kernel's synthesis against a committed trace.",
     "urn:eigenius:core:type_params": [],
     "urn:eigenius:core:indices": [
       {
@@ -1784,7 +1816,7 @@
         "urn:eigenius:core:param_name": "_",
         "urn:eigenius:core:param_kind": {
           "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-          "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+          "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:iri",
           "urn:eigenius:eigentt:Term-ConstRef-levels": []
         }
       },
@@ -1808,7 +1840,7 @@
     "@id": "urn:eigenius:witness:IsVerifiedAs",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "IsVerifiedAs",
-    "urn:eigenius:core:description": "A proof of `P` about the resource at `iri` was checked by a proof checker. The strongest grade, and the only one no author can assert into existence: it is reached exclusively through a checked judgement. Admitted by a `prov:VerificationTrace`. Nothing in the tree currently emits one \u2014 the producer is the Lean institution under eigenius#160. Declared in CORE rather than beside `justification:Certificate` because the kernel CONSTRUCTS inhabitants of this type \u2014 `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the layer's witness index holds a matching key \u2014 and a type the kernel inhabits cannot be owned by a layer above it: an ontology edit could otherwise change the arity the kernel's synthesis hook assumes, or remove the declaration the hook resolves by IRI. The `witness:` prefix is kept because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4), the same rule that puts `eigentt:Term` here. Signature is `core:string -> Prop -> Prop`: the IRI of the underlying resource and the proposition it carries. ZERO ctors, deliberately \u2014 no user-constructible inhabitant exists, so the only route to a value of this type is the kernel's synthesis against a committed trace.",
+    "urn:eigenius:core:description": "A proof of `P` about the resource at `iri` was checked by a proof checker. The strongest grade, and the only one no author can assert into existence: it is reached exclusively through a checked judgement. Admitted by a `prov:VerificationTrace`, keyed off the `prov:judgement` that trace carries \u2014 `holds(logic, t, P)`, the checker's own result \u2014 rather than off whatever the target resource says about itself. The Lean institution emits one on every `Holds` (eigenius#160, `2026-09-03`). What makes this the grade no author can assert is not the type's zero arity but the `Checked` term inside that judgement: the kernel's own checker REFUSES it, having no proof of `P` and no way to manufacture one, so a hand-authored `holds(logic_lean4, ...)` is rejected at commit while the institution's emission never reaches validation (D87 \u00a74.3). Declared in CORE rather than beside `justification:Grounds` because the kernel CONSTRUCTS inhabitants of this type \u2014 `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the layer's witness index holds a matching key \u2014 and a type the kernel inhabits cannot be owned by a layer above it: an ontology edit could otherwise change the arity the kernel's synthesis hook assumes, or remove the declaration the hook resolves by IRI. Unlike the other two, this family is PROVABLE rather than postulated \u2014 `judgements-and-warrants.tex`: *the Verified state is provable, whereas Declared and Observed states are postulated*. D87 \u00a75 is what makes the proof re-runnable in practice: the trace carries the checker's judgement plus the permitted axiom set, the checked declaration and the checker's identity, so any party can re-run the check and reach the same verdict. The lookup is a decision procedure over the layer's Trace resources and the index over it is a cache. The type stays declared because the premise is what makes `justification:Grounds.verified` conditional \u2014 without it the constructor is unconditional and the grade becomes assertable by anyone writing a certificate. The `witness:` prefix is kept because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4), the same rule that puts `eigentt:Term` here. Signature is `core:iri -> Prop -> Prop`: the IRI of the underlying resource and the proposition it carries. The first index was `core:string` until D88 \u00a73 declared the leaf, which is what makes the slot state that it holds a reference rather than leaving every consumer to guess with a `urn:` prefix test. ZERO ctors, deliberately \u2014 no user-constructible inhabitant exists, so the only route to a value of this type is the kernel's synthesis against a committed trace.",
     "urn:eigenius:core:type_params": [],
     "urn:eigenius:core:indices": [
       {
@@ -1816,7 +1848,7 @@
         "urn:eigenius:core:param_name": "_",
         "urn:eigenius:core:param_kind": {
           "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
-          "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:string",
+          "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:iri",
           "urn:eigenius:eigentt:Term-ConstRef-levels": []
         }
       },
@@ -1835,5 +1867,156 @@
       "urn:eigenius:core:is_a": ["urn:eigenius:core:Level-Zero"]
     },
     "urn:eigenius:core:ctors": []
+  },
+  
+  {
+    "@id": "urn:eigenius:core:meta_level",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "Universe stratification level. Level N traces reference level N-1 resources.",
+    "urn:eigenius:core:short_name": "meta_level",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
+    "urn:eigenius:core:min_value": 0,
+    "urn:eigenius:core:max_value": 2
+  },
+  {
+    "@id": "urn:eigenius:eigentt:Axiom",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Axiom",
+    "urn:eigenius:core:description": "A named axiom: a closed term whose type the kernel admits without checking the term itself. The `axiom_statement` property carries an EigenTT type expression (typically inhabiting Prop) that the axiom is asserted to inhabit. Conversion treats the axiom IRI as opaque — never delta-unfolded. Voiding the layer that introduces an axiom removes it from the kernel environment for any chain resolution that excludes that layer. See D46 §10. An axiom is the *denotation* of the lexical entries whose `lexicon:sem` names it (a WordNet verb/adjective sense); its `core:description` carries that sense's natural-language gloss, so the concept-`core:description` text index (D63 lexicon-augmentation §6a index c) makes the gloss searchable for OOV grounding across all parts of speech.",
+    "urn:eigenius:core:requires": ["urn:eigenius:eigentt:axiom_statement"],
+    "urn:eigenius:core:recommends": ["urn:eigenius:eigentt:axiom_justification", "urn:eigenius:core:description"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:axiom_statement",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "axiom_statement",
+    "urn:eigenius:core:description": "The EigenTT type the axiom inhabits — typically a Prop. Encoded as a chain-mirrored EigenTT type expression per D47 (eigentt:Term).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:Term"],
+    "urn:eigenius:eigentt:is_a_type": true,
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Axiom"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:axiom_justification",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "axiom_justification",
+    "urn:eigenius:core:description": "Free-form note: why this axiom is being admitted, what trust assumption it encodes, what metatheory justifies it. For auditability — axioms are chain-traceable.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Axiom"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:Definition",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Definition",
+    "urn:eigenius:core:description": "A named, chain-resident TRANSPARENT definition (D66). Unlike an `eigentt:Axiom`, whose IRI evaluates to a rigid neutral and never unfolds, a Definition names a body that decode substitutes at the use site. `definition_body` holds the body as a lambda chain `Lam(x1, T1, Lam(x2, T2, … B))`; arity and parameter types are read off `definition_type`, so nothing is stored twice. The body is stored ALREADY NORMALIZED — a definition's identity for equality and hashing is the normal form of its right-hand side (D66 D9), which is what lets a use decode to a normal term without evaluating. Recursive bodies are rejected at commit: decode would not terminate.",
+    "urn:eigenius:core:requires": ["urn:eigenius:eigentt:definition_type", "urn:eigenius:eigentt:definition_body"],
+    "urn:eigenius:core:recommends": ["urn:eigenius:eigentt:definition_opaque", "urn:eigenius:core:description"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:definition_type",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "definition_type",
+    "urn:eigenius:core:description": "The declared type of the definition, e.g. `Set -> Set -> Set -> Prop`. Arity and parameter types are read from here rather than duplicated, so a stored arity can never contradict the type. D47-encoded (eigentt:Term).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:Term"],
+    "urn:eigenius:eigentt:is_a_type": true,
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Definition"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:definition_body",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "definition_body",
+    "urn:eigenius:core:description": "The right-hand side as a lambda chain, stored in NORMAL FORM (D66 D9). Decode peels one leading `Lam` per supplied argument and substitutes, never forming a beta-redex, so a use decodes straight to a normal term. D47-encoded (eigentt:Term).",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": ["urn:eigenius:eigentt:Term"],
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Definition"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:definition_opaque",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:short_name": "definition_opaque",
+    "urn:eigenius:core:description": "When true, decode does NOT unfold this definition: the IRI stays a rigid constant, like an axiom, and the definition's identity is the folded name rather than the normal form of its body (the D66 D9 carve-out). This is the strict-vs-unrestricted decode mode of issue #95. Absent means transparent.",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:boolean",
+    "urn:eigenius:core:domain": ["urn:eigenius:eigentt:Definition"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:Logic",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:short_name": "Logic",
+    "urn:eigenius:core:description": "A logic whose proof language the system HOSTS A CHECKER for. An inhabitant is a resource, not a bare tag, because admitting a logic is a governance act that carries evidence: which checker implementation, which comorphism, and the two arguments the design requires \u2014 soundness of the external turnstile against its satisfaction relation, and satisfaction-preservation by the comorphism. A nullary constructor could carry none of that. Adding a logic is therefore declaring a resource, which is also why this is a class rather than an inductive: the admissible set is the set of declared individuals, extended by a layer rather than by editing a type. Distinct from `prov:proof_system`, which records which verifier ran and is deliberately an open string \u2014 recording a verifier must not be a bootstrap edit, whereas admitting one to the trusted computing base must be. A logic with no hosted checker is not an inhabitant: it produces no judgement and cannot reach Verified.",
+    "urn:eigenius:core:recommends": ["urn:eigenius:core:description"]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:logic_kernel",
+    "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Logic"],
+    "urn:eigenius:core:short_name": "logic_kernel",
+    "urn:eigenius:core:description": "The kernel's own type checker. The degenerate and privileged case: the type IS the proposition, so no comorphism is needed and the satisfaction-preservation obligation is vacuous. Under inhabitation semantics the assertion that the checker accepts `t : P` and the assertion that `P` holds are the same statement, so soundness is discharged by construction rather than argued."
+  },
+  {
+    "@id": "urn:eigenius:eigentt:logic_lean4",
+    "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Logic"],
+    "urn:eigenius:core:short_name": "logic_lean4",
+    "urn:eigenius:core:description": "Lean 4, re-checked in process by the `nanoda_lib` kernel reimplementation. Because that checker is statically linked into the host kernel, admitting this logic puts the whole of `nanoda_lib` inside the trusted computing base. Needs a comorphism relating the native Lean proposition to the graph proposition, and the primary risk it carries is not that the Lean kernel accepts falsehoods but that the translated proposition fails to denote the target one."
+  },
+  {
+    "@id": "urn:eigenius:eigentt:Judgement",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveType"],
+    "urn:eigenius:core:short_name": "Judgement",
+    "urn:eigenius:core:description": "A CHECKED triple: a checker for `logic` verified `term` against `type`. This is the checkable unit, and the reification of justification logic's proof-checker operator \u2014 LP's positive-introspection axiom `t:F -> !t:(t:F)` names the evidence `!t` that `t` proves `F`, which is what a checker returns and what this constructor persists. An algebra carrying application and sum but no `!` runs the checker at commit time and discards the result; a judgement keeps it. It generalises the native `Ann(e, T)` annotation in the two ways annotation cannot serve: an annotation cannot name which logic's checker ran, and it is erased during evaluation, so it cannot be cited. Storage cost over an annotation is the logic tag alone, because an annotated term already carries its type inline. A slot ranging over this type is checked in CHECK mode \u2014 decode both fields, check `type` is a type, check `term` against it \u2014 so no slot relies on inference and no exemption list is needed.",
+    "urn:eigenius:core:ctors": [
+      {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
+        "urn:eigenius:core:ctor_name": "holds",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "logic",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Logic",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "term",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          },
+          {
+            "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveArgType"],
+            "urn:eigenius:core:arg_name": "type",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-ConstRef"],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "@id": "urn:eigenius:eigentt:proposition",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "The proposition this resource asserts, as an eigentt:Term. The WARRANT axis's input: warrant is what evidence exists for a proposition, so a resource carrying one can be asked the question and a resource carrying none cannot. That is the whole test, and it is mechanical. Carried no domain constraint after the grade classes were deleted — its domain had been DeclaredResource / ObservedResource / DerivedResource, which named three ways a resource came to exist and so constrained the warrant slot by a provenance fact, which is the conflation this ontology no longer makes.",
+    "urn:eigenius:core:short_name": "proposition",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:eigentt:Term"
+    ],
+    "urn:eigenius:eigentt:expected_type": {
+      "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-Sort"],
+      "urn:eigenius:eigentt:Term-Sort-level": {
+        "urn:eigenius:core:is_a": ["urn:eigenius:core:Level-Zero"]
+      }
+    }
   }
 ]

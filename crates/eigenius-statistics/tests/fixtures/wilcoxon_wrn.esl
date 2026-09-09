@@ -14,7 +14,6 @@
 // MSS, so mean_diff_of(s) = mean(MSI) − mean(MSS) < 0.
 
 namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace wrn        = "urn:eigenius:demo:wrndep";
 namespace prov       = "urn:eigenius:prov";

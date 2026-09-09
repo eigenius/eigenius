@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `justification:Certificate.spec_poly` at a `Set`-quantified rule (eigenius#136).
+//! `justification:Grounds.instantiate` at a `Set`-quantified rule (eigenius#136).
 //!
-//! The fixture is the `spec_poly` site of `demo/prose-to-formulas-v2/inference.esl`
+//! The fixture is the `instantiate` site of `demo/prose-to-formulas-v2/inference.esl`
 //! reduced to a chain that builds in memory: a rule quantified over `Set` (the
 //! subject is a kind, so the domain of the quantifier is `Set`), eliminated at a
 //! concrete class.
 //!
-//! `reasoning.esl` binds `spec_poly`'s domain as `T : Set`, so eliminating that
+//! `reasoning.esl` binds `instantiate`'s domain as `T : Set`, so eliminating that
 //! rule instantiates `T := Set` — `Set : Set`, which the checker admitted only
 //! through the lenient arm eigenius#136 removed. The two tests below pin both
 //! ends: as shipped the certificate now fails with a universe-stratification
 //! diagnostic, and raising the binder one universe (`T : Type 1`) is enough to
 //! make it hold again. Which reformulation the reasoning ontology takes —
 //! the level-1 bump, or universe-polymorphic binders — is an open decision;
-//! `spec_poly`'s signature is part of `docs/spec/ai-computed-provenance-1.0.md`.
+//! `instantiate`'s signature is part of `docs/spec/ai-computed-provenance-1.0.md`.
 
 use std::sync::Arc;
 
@@ -47,8 +47,7 @@ fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext
 
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for src in [
-        include_str!("../../ontologies/reflection/reflection-ontology.json"),
-        include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
+        include_str!("../../ontologies/program/program-traces.json"),
         include_str!("../../ontologies/institution/institution-ontology.json"),
     ] {
         for r in eigon_json::parse_document(src).unwrap() {
@@ -103,7 +102,7 @@ fn build_chain(reasoning_source: &str, fixture_source: &str) -> ExecutionContext
 fn judgement_diagnostic(reasoning_source: &str) -> String {
     let ctx = build_chain(
         reasoning_source,
-        include_str!("fixtures/spec_poly_set_domain.esl"),
+        include_str!("fixtures/instantiate_set_domain.esl"),
     );
     let sentence_iri = Iri::parse("urn:eigenius:demo:poly:concl").expect("sentence IRI");
     ctx.resolve(&sentence_iri)
@@ -128,13 +127,13 @@ fn judgement_diagnostic(reasoning_source: &str) -> String {
 /// The shipped ontology binds `T : Type 1`, so instantiating `T := Set` is
 /// `Set : Type 1` — legal by stratification — and the demo's certificate holds.
 #[test]
-fn spec_poly_holds_as_shipped() {
+fn instantiate_holds_as_shipped() {
     let diagnostic = judgement_diagnostic(include_str!(
         "../../ontologies/justification/justification.esl"
     ));
     assert!(
         diagnostic.is_empty(),
-        "spec_poly at T := Set must hold against the shipped `T : Type 1` binder; \
+        "instantiate at T := Set must hold against the shipped `T : Type 1` binder; \
          got: {diagnostic}"
     );
 }
@@ -145,12 +144,12 @@ fn spec_poly_holds_as_shipped() {
 /// Rewriting the shipped source rather than keeping a stale copy — a second copy would
 /// drift, and the assertion below fails loudly if the binder ever moves again.
 #[test]
-fn spec_poly_at_a_set_domain_is_rejected() {
+fn instantiate_at_a_set_domain_is_rejected() {
     let source = include_str!("../../ontologies/justification/justification.esl")
         .replace("forall (T : Type 1,", "forall (T : Set,");
     assert!(
         source.contains("forall (T : Set,"),
-        "the `spec_poly` domain binder moved — this rewrite no longer applies"
+        "the `instantiate` domain binder moved — this rewrite no longer applies"
     );
     let diagnostic = judgement_diagnostic(&source);
     assert!(

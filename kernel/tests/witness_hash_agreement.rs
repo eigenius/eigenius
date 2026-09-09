@@ -26,7 +26,7 @@
 //! the unfolded body. Slice 1 makes the emit side decode first.
 //!
 //! What this file pins is the property that has to hold, on the shape the DCG parser actually emits.
-//! The kernel-side test (`layer::witness_index::tests::emit_and_check_sides_agree_on_the_hash`)
+//! The kernel-side test (`layer::witness_admission::tests::emit_and_check_sides_agree_on_the_hash`)
 //! covers the simple shapes; it cannot construct **the definite description**
 //! `Fst(the(Σx. …))` — every parsed sentence contains one — because `ontology:the` is not in a
 //! core-only layer, and `Fst` of a bare `Sig` is ill-typed (a projection of a *type*, not of a pair).
@@ -58,10 +58,7 @@ fn chain_with_parse_vocabulary() -> Arc<Layer> {
     let core = Arc::new(core.build(LayerStorage::in_memory()));
 
     let mut refl = LayerBuilder::new("reflection", Some(core));
-    for src in [
-        include_str!("../../ontologies/reflection/reflection-ontology.json"),
-        include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
-    ] {
+    for src in [include_str!("../../ontologies/program/program-traces.json")] {
         for r in eigon_json::parse_document(src).unwrap() {
             refl.add_resource(r).unwrap();
         }
@@ -723,6 +720,7 @@ fn nested_definitions_unfold_all_the_way_at_decode() {
     let src = r#"
         namespace ont = "urn:eigenius:ontology";
         namespace d   = "urn:eigenius:demo:esl";
+        namespace lexicon = "urn:eigenius:lexicon";
         def d:Inner(x : Set) : lexicon:Entity = ont:kind_of(x);
         def d:Outer(g : Set, a : Set) : Prop  = ont:prep_of(d:Inner(g), d:Inner(a));
     "#;
@@ -865,7 +863,7 @@ fn a_proposition_using_a_definition_type_checks_at_commit() {
         Value::String("urn:eigenius:prov:agent:unattributed".into()),
     );
     claim.set(
-        iri(wk::CANONICAL_PROPOSITION),
+        iri(wk::PROPOSITION),
         encode_type(
             &app2(
                 Exp::EigonAxiom(iri("urn:eigenius:demo:esl:Activity")),
@@ -971,9 +969,10 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         namespace prov = "urn:eigenius:prov";
         namespace core = "urn:eigenius:core";
         namespace p = "urn:eigenius:demo:parse";
+        namespace justification = "urn:eigenius:justification";
         resource p:claim : core:Resource {{
             prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
-            reflection:canonical_proposition = type_expr(
+            eigentt:proposition = type_expr(
                 {verb_axiom}(
                     eigentt:fst(ontology:the(
                         (exists x0 : {activity} =>
@@ -995,6 +994,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         namespace onco = "urn:eigenius:demo:onco";
         namespace core = "urn:eigenius:core";
         namespace d = "urn:eigenius:demo:def";
+        namespace justification = "urn:eigenius:justification";
 
         def onco:{def_name}(m : Set, g : Set) : Prop =
             {verb_axiom}(
@@ -1005,7 +1005,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
 
         resource d:claim : core:Resource {{
             prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
-            reflection:canonical_proposition = type_expr(
+            eigentt:proposition = type_expr(
                 onco:{def_name}({MSI}, umlscui:C0388246)
             );
         }}"#
@@ -1026,7 +1026,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
     let prop_of = |rs: &[Resource], id: &str| {
         rs.iter()
             .find(|r| r.id().map(|i| i.as_str()) == Some(id))
-            .and_then(|r| r.get(&iri(wk::CANONICAL_PROPOSITION)).cloned())
+            .and_then(|r| r.get(&iri(wk::PROPOSITION)).cloned())
             .expect("claim carries a proposition")
     };
     let parse_stored = prop_of(&parse_rs, "urn:eigenius:demo:parse:claim");

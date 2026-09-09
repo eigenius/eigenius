@@ -67,6 +67,11 @@ pub struct AutoOnLoadDispatch {
     /// against (= `QueryClass.query_handler`). Lifted onto the
     /// RuntimeInvocation's `script` property.
     pub signature_iri: Iri,
+    /// When the handler was entered and left, RFC3339. Measured by the kernel around every
+    /// dispatch, in-process or not — the substrate captures its own for externally dispatched
+    /// work, and this is the only source for work that never leaves the process.
+    pub started_at: String,
+    pub completed_at: String,
     /// The verdict the institution returned.
     pub verdict: VerdictReading,
     /// The institution's output `Resource` — the institution-level
@@ -80,7 +85,7 @@ pub struct AutoOnLoadDispatch {
     /// Side-effect resources the institution emitted as artefacts of
     /// validation — committed alongside the Verdict when it Holds,
     /// dropped when it Fails. Each derivation is marked
-    /// `reflection:InstitutionEmittedDerivation` and carries a
+    /// `institution:EmittedDerivation` and carries a
     /// `canonical_proposition` recording what the run produced. It grounds
     /// nothing on its own: the witness emitter used to walk these to admit
     /// `IsDerivedAs(derivation_iri, P)`, but a computed claim rests on the plan
@@ -242,7 +247,10 @@ pub fn dispatch_auto_on_load_for_resource(
                 }
             };
 
-            match institution.query(&query_class.query_handler, &marshaled, ctx) {
+            let started_at = now_rfc3339();
+            let queried = institution.query(&query_class.query_handler, &marshaled, ctx);
+            let completed_at = now_rfc3339();
+            match queried {
                 Ok(out) => {
                     let verdict = parse_verdict(&out.output);
                     if let VerdictReading::Malformed(reason) = &verdict {
@@ -260,6 +268,8 @@ pub fn dispatch_auto_on_load_for_resource(
                         subject_iri: res_id.clone(),
                         query_class_iri: query_class_iri.clone(),
                         signature_iri: query_class.query_handler.clone(),
+                        started_at,
+                        completed_at,
                         verdict,
                         output: out.output,
                         derivations: out.derivations,
@@ -492,6 +502,77 @@ pub fn build_runtime_invocation_resource(
     Some(r)
 }
 
+/// Current time, RFC3339 with millisecond precision — the shape the substrate's own
+/// `DispatchTrace::now_rfc3339` produces, so a chain carrying both kinds of Activity has one
+/// timestamp format rather than two.
+fn now_rfc3339() -> String {
+    humantime::format_rfc3339_millis(std::time::SystemTime::now()).to_string()
+}
+
+/// Build the `prov:Activity` for an IN-PROCESS dispatch — the half of provenance that had no
+/// record at all (`w3c-prov-mapping.md` §5.2).
+///
+/// **Why an Activity and not a `RuntimeInvocation`.** `RuntimeInvocation` subclasses
+/// `prov:Activity` and requires `language`, `environment` and `script` — the reproducibility
+/// surface of a run the substrate executed. An in-process institution call has none of those:
+/// there is no image to pin, no language runtime, no environment to name. Emitting one anyway
+/// would mean inventing values for the three properties that exist so an external run can be
+/// re-executed, which is the opposite of what they are for. `prov:Activity` requires nothing and
+/// recommends exactly what the kernel does know.
+///
+/// Returns `None` when the substrate already supplied a partial — that path builds the richer
+/// `RuntimeInvocation` instead — or when the dispatch had no subject IRI (an embedded resource,
+/// which commits no chain-side provenance either way).
+pub fn build_in_process_activity_resource(
+    dispatch: &AutoOnLoadDispatch,
+    activity_iri: &Iri,
+) -> Option<Resource> {
+    use crate::ontology::well_known as wk;
+
+    if dispatch.partial_invocation.is_some() {
+        return None;
+    }
+    let subject_iri = dispatch.subject_iri.as_ref()?;
+    let mut r = Resource::new(activity_iri.clone());
+    r.set(
+        Iri::parse(wk::IS_A).expect("static IRI"),
+        Value::Array(vec![Value::String(
+            "urn:eigenius:prov:Activity".to_string(),
+        )]),
+    );
+    r.set(
+        Iri::parse("urn:eigenius:prov:used").expect("static IRI"),
+        Value::Array(vec![Value::iri(&subject_iri.clone())]),
+    );
+    r.set(
+        Iri::parse("urn:eigenius:prov:started_at").expect("static IRI"),
+        Value::String(dispatch.started_at.clone()),
+    );
+    r.set(
+        Iri::parse("urn:eigenius:prov:completed_at").expect("static IRI"),
+        Value::String(dispatch.completed_at.clone()),
+    );
+    r.set(
+        Iri::parse(wk::SHORT_NAME).expect("static IRI"),
+        Value::String("in_process_dispatch".to_string()),
+    );
+    r.set(
+        Iri::parse(wk::DESCRIPTION).expect("static IRI"),
+        Value::String(format!(
+            "In-process AutoOnLoad dispatch of QueryClass `{}` against `{}`, handled by `{}`.",
+            dispatch.query_class_iri, subject_iri, dispatch.signature_iri
+        )),
+    );
+    Some(r)
+}
+
+/// Allocate an IRI for a fresh in-process `prov:Activity`. Distinct prefix from
+/// `allocate_invocation_iri` so the two kinds of Activity are told apart by IRI alone.
+pub fn allocate_activity_iri() -> Iri {
+    Iri::parse(&format!("urn:eigenius:activity:{}", uuid::Uuid::new_v4()))
+        .expect("uuid-derived IRI parses")
+}
+
 /// Allocate an IRI for a fresh `RuntimeInvocation`. Uses a v4 UUID
 /// so concurrent dispatches don't collide; the `urn:eigenius:invocation:`
 /// prefix matches D31 §6.3's Verdict-IRI derivation rule.
@@ -501,20 +582,20 @@ pub fn allocate_invocation_iri() -> Iri {
 }
 
 /// Stamp the kernel-set linkage properties on each resource an institution
-/// emitted alongside its verdict: `reflection:from_subject` to the gated
-/// subject IRI, and `reflection:runtime_invocation` to the producing
+/// emitted alongside its verdict: `institution:from_subject` to the gated
+/// subject IRI, and `institution:runtime_invocation` to the producing
 /// RuntimeInvocation IRI (when one was allocated for this dispatch).
 ///
 /// The institution sets the resource's `@id` (typically a suffix off the gated
 /// subject, e.g. `{analysis_iri}:result:{effect_name}`) and the domain-specific
 /// properties. The kernel adds only the linkage, plus — for a derivation — the
-/// `reflection:InstitutionEmittedDerivation` marker class.
+/// `institution:EmittedDerivation` marker class.
 ///
 /// **The marker is not stamped on a `prov:Trace`.** Two kinds come through this
 /// channel. A derivation records WHAT A RUN PRODUCED and grounds nothing, which
 /// is what the marker class asserts. A trace records what the check
 /// ESTABLISHED, and grounds a witness: a `prov:VerificationTrace` from the Lean
-/// institution is what `witness_index::trace_category` reads to admit `Verified`
+/// institution is what `witness_admission::trace_category` reads to admit `Verified`
 /// (eigenius#160). Stamping the marker on one would put "grounds nothing" on the
 /// single resource whose purpose is to be a ground. Decided by
 /// [`Layer::is_subclass_of`], not a list of trace IRIs, so a new `prov:Trace`
@@ -527,6 +608,11 @@ pub fn finalize_emitted_resource(
     layer: &Layer,
     dispatch: &AutoOnLoadDispatch,
     runtime_invocation_iri: Option<&Iri>,
+    // The in-process `prov:Activity` this emission came out of, when there was no
+    // `RuntimeInvocation` (G5). Stamped as `prov:was_generated_by`, which is the property that
+    // actually means "the Activity that produced this" — `institution:runtime_invocation` is typed
+    // at `RuntimeInvocation` and cannot name a plain Activity.
+    activity_iri: Option<&Iri>,
     mut emitted: Resource,
 ) -> Option<Resource> {
     use crate::ontology::well_known as wk;
@@ -571,6 +657,12 @@ pub fn finalize_emitted_resource(
         Iri::parse(wk::FROM_SUBJECT).expect("static IRI"),
         Value::iri(&subject_iri.clone()),
     );
+    if let Some(act) = activity_iri {
+        emitted.set(
+            Iri::parse("urn:eigenius:prov:was_generated_by").expect("static IRI"),
+            Value::iri(&act.clone()),
+        );
+    }
     if let Some(inv) = runtime_invocation_iri {
         emitted.set(
             Iri::parse(wk::RUNTIME_INVOCATION).expect("static IRI"),
@@ -723,6 +815,8 @@ mod tests {
         );
 
         let dispatch = AutoOnLoadDispatch {
+            started_at: "2026-01-01T00:00:00.000Z".to_string(),
+            completed_at: "2026-01-01T00:00:00.001Z".to_string(),
             subject_iri: Some(iri("urn:eigenius:test:subject")),
             query_class_iri: iri("urn:eigenius:test:qc"),
             signature_iri: iri("urn:eigenius:test:sig"),

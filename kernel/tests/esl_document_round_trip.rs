@@ -97,6 +97,20 @@ fn cases() -> Vec<(&'static str, &'static str, &'static str)> {
             "#,
         ),
         (
+            // The `implicit(...)` clause is the only part of a `data` declaration whose surface
+            // form has no counterpart in `core:ctor_type` — it is a separate property — so the
+            // printer has to reassemble it from somewhere else. This is where that is checked.
+            "a constructor declaring implicit binders (D88 §4)",
+            "urn:eigenius:ex:Cert",
+            r#"
+            namespace ex = "urn:eigenius:ex";
+            data ex:Cert : Prop -> Type 2 {
+                lit : forall (P : Prop) => ex:Cert(P),
+                app implicit(A, B) : forall (A : Prop, B : Prop) => ex:Cert(A -> B) -> ex:Cert(A) -> ex:Cert(B),
+            }
+            "#,
+        ),
+        (
             "data with a description and named arguments (eigenius#221)",
             "urn:eigenius:ex:Tree",
             r#"
@@ -260,7 +274,7 @@ fn every_shipped_inductive_round_trips_through_esl() {
     for file in [
         "../ontologies/core/core-ontology.json",
         "../ontologies/formulas/formulas-ontology.json",
-        "../ontologies/reflection/reflection-ontology.json",
+        "../ontologies/program/program-traces.json",
     ] {
         let Ok(text) = std::fs::read_to_string(file) else {
             continue;

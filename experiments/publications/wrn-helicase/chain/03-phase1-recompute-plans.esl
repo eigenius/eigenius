@@ -39,8 +39,6 @@
 // stats:lt(mean_diff_of(s), 0) — MSI strictly more WRN-dependent.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace onco       = "urn:eigenius:benchmark:onco";
@@ -134,12 +132,12 @@ resource wrn:wrn_dep_plan_trace : prov:ProgramTrace {
 // Monomorphic (specialised to this sample set + WRN/MSI), mirroring the
 // drug_screening.esl bridge.
 
-resource wrn:bridge_msi_selective : justification:Claim {
+resource wrn:bridge_msi_selective : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_selective_essentiality_criterion;
     prov:rationale   = "If a sample set measuring WRN dependency by MSI status has its MSI-group mean strictly below its MSS-group mean (MSI more dependent), WRN is selectively essential in MSI. The directional statistical claim is the warrant.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.0)
         ->
         onco:SelectivelyEssential("WRN", "MSI")
@@ -228,12 +226,12 @@ resource wrn:wrn_corr_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_mutator_load : justification:Claim {
+resource wrn:bridge_mutator_load : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_mutator_load_criterion;
     prov:rationale   = "If WRN dependency negatively correlates with mutator load (#MS deletions) across MSI lines, WRN dependency tracks mutator load — supporting the refinement that a stronger mutator phenotype drives WRN dependence.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:spearman_rho("urn:eigenius:pub:wrn:wrn_corr_sampleset"), 0.0)
         ->
         onco:DependencyCorrelatesWithMutatorLoad("WRN", "MSI")
@@ -317,12 +315,12 @@ resource wrn:mutator_load_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_lineage_mutator : justification:Claim {
+resource wrn:bridge_lineage_mutator : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_lineage_mutator_criterion;
     prov:rationale   = "If among MSI lines the uncommon-lineage group has its mean MS-deletion load strictly below the common-lineage group, the common MSI lineages carry an elevated mutator load. The directional statistical claim is the warrant for the lineage restriction of the biomarker.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mutator_load_sampleset"), 0.0)
         ->
         onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon")
@@ -392,12 +390,12 @@ resource wrn:coloc_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_coloc : justification:Claim {
+resource wrn:bridge_coloc : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_nucleolar_delocalization_criterion;
     prov:rationale   = "If WRN–fibrillarin colocalization in MSI lines is strictly below the lineage-matched MSS group, WRN is delocalized from the nucleolus in MSI. The directional statistical claim is the warrant.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:coloc_sampleset"), 0.0)
         ->
         onco:ReducedNucleolarColocalization("WRN", "MSI")
@@ -465,12 +463,12 @@ resource wrn:hcr_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_hcr : justification:Claim {
+resource wrn:bridge_hcr : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_mmr_restoration_criterion;
     prov:rationale   = "If the MMR-deficient parental's mismatch-repair capacity is strictly below the MMR-restored Ch3+5 group, MMR restoration restores functional repair — confirming the model's MMR defect is genuine. The directional statistical claim is the warrant.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:hcr_sampleset"), 0.0)
         ->
         onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5")
@@ -603,12 +601,12 @@ resource wrn:wrn_recq_plan_trace : prov:ProgramTrace {
 // (MSI mean dependency strictly below MSS in the RecQ cohort); its
 // rationale records the three other RecQ helicases' kernel-computed,
 // non-significant p-values as the declared basis for "only WRN".
-resource wrn:recq_uniqueness_rule : justification:Claim {
+resource wrn:recq_uniqueness_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_recq_family_specificity;
     prov:rationale   = "Among the RecQ helicases tested MSI-vs-MSS in the same Achilles CRISPR-CERES cohort (32 MSI / 413 MSS, all lineages): only WRN has a significant MSI-selective dependency (Wilcoxon P = 1.1e-8, median -0.49 vs -0.11; kernel-recomputed via wrn_recq_plan). BLM (P = 0.65), RECQL (P = 0.58) and RECQL5 (P = 0.11) are all non-significant (kernel-computed against the same pinned snapshot); RECQL4 is absent from the 18Q4 CERES matrix (paper Ext Data 1c: n.s.). A null is not derivable, so the non-selectivity of the other three is a declared scientific judgment — at this n and effect scale, their non-significance indicates no MSI-selective dependency. Given WRN's significant selective dependency, WRN is therefore the only MSI-selective RecQ helicase.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_recq_sampleset"), 0.0)
         ->
         onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases")
@@ -647,12 +645,12 @@ resource wrn:biomarker_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_biomarker : justification:Claim {
+resource wrn:bridge_biomarker : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_biomarker_criterion;
     prov:rationale   = "If MSI status predicts WRN dependency with PPV >= 0.7 AND sensitivity >= 0.9 (at the dependency < -0.5 threshold), MSI is a strong biomarker for WRN dependency — a predictive relationship comparable to established oncogene dependency biomarkers (KRAS/BRAF). The two classifier-quality facts are the warrant.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:ge(stats:ppv("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.7)
         ->
         stats:ge(stats:sensitivity("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.9)
@@ -730,12 +728,12 @@ resource wrn:p53_dep_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_p53_modulates : justification:Claim {
+resource wrn:bridge_p53_modulates : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_p53_contribution_criterion;
     prov:rationale   = "If WRN dependence differs by p53 status across MSI lines (p53-intact mean strictly below p53-impaired — more dependent), then p53 status modulates WRN dependence: it contributes to, but does not solely determine, the dependence (both strata remain dependent; DSBs are toxic independent of p53).";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:p53_dep_sampleset"), 0.0)
         ->
         onco:ModulatesDependence("TP53", "WRN")
@@ -859,12 +857,12 @@ resource wrn:viab_OVK18_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_viability : justification:Claim {
+resource wrn:bridge_viability : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_selective_viability_criterion;
     prov:rationale   = "If WRN depletion significantly impairs viability (sgWRN below negative controls in the competition assay) in MSI lines — recomputed for KM12 (two-way ANOVA P=2.7e-19) and OVK18 (P=1.2e-7) — while sparing MSS lines (ES2 P=0.37, SW620 P=0.23, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion selectively impairs MSI viability.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)
         ->
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0)
@@ -1011,12 +1009,12 @@ resource wrn:cc_OVK18_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_cellcycle : justification:Claim {
+resource wrn:bridge_cellcycle : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_cellcycle_arrest_criterion;
     prov:rationale   = "If WRN depletion significantly reduces the S-phase fraction (sgWRN %S below negative controls) across MSI lines — recomputed for KM12 (two-way ANOVA P=6.1e-7), SW48 (P=3.5e-4), OVK18 (P=2.6e-6) — while sparing MSS lines (SW620 P=0.16, SW837 P=0.67, ES2 P=0.69, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion causes MSI-selective cell-cycle arrest — a downstream consequence of DSB-driven DDR.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)
         ->
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)
@@ -1163,12 +1161,12 @@ resource wrn:apop_OVK18_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_apoptosis : justification:Claim {
+resource wrn:bridge_apoptosis : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_apoptosis_induction_criterion;
     prov:rationale   = "If WRN depletion significantly raises the apoptotic fraction (sgWRN apoptosis above negative controls) across MSI lines — recomputed for KM12 (two-way ANOVA P=3.4e-3), SW48 (P=3.6e-4), OVK18 (P=3.6e-5) — while sparing MSS lines (SW620 P=0.10, SW837 P=0.41, ES2 P=0.57, non-significant; recomputed to Fail, the declared 'spared' judgment since a null is not derivable), then WRN depletion causes MSI-selective apoptosis — a downstream consequence of DSB-driven DDR.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)
         ->
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)
@@ -1232,12 +1230,12 @@ resource wrn:apop_shrna_KM12_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_apop_shrna : justification:Claim {
+resource wrn:bridge_apop_shrna : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_apoptosis_shrna_criterion;
     prov:rationale   = "If WRN knockDOWN (shWRN) raises the apoptotic fraction above the shRFP control in the MSI line KM12 — recomputed here — while the lineage-matched MSS line SW837 is spared (control ~12 vs shWRN ~8.6, not elevated; a null is not derivable, so 'spared' is the declared judgment), then WRN loss causes MSI apoptosis via an shRNA reagent orthogonal to the CRISPR knockout — establishing the apoptosis is on-target, not a Cas9 artifact.";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"), 0.0)
         ->
         onco:CausesApoptosis("WRN", "MSI")
@@ -1402,12 +1400,12 @@ resource wrn:mmr_resens2_plan_trace : prov:ProgramTrace {
 }
 
 // ── Declared bridge: the three contrasts compose the causal dissection ──
-resource wrn:bridge_mmr_restoration : justification:Claim {
+resource wrn:bridge_mmr_restoration : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_mmr_restoration_criterion;
     prov:rationale   = "If restoring MMR raises WRN-depletion viability (Ch2 below Ch3+5+sgCh2-2, recomputed two-way ANOVA P=5.7e-20) AND re-knocking-out MLH1 in the restored line re-lowers it (Ch3+5+sgMLH1-1 below Ch3+5+sgCh2-2, P=3.3e-12; Ch3+5+sgMLH1-2 below Ch3+5+sgCh2-2, P=1.6e-16), then the rescue is attributable to MMR (the MLH1-KO controls isolate MMR from the chromosome transfer) and restoring MMR PARTIALLY rescues WRN dependence. 'Partially' is load-bearing: the rescue is modest (Ch3+5 shWRN viability ≈0.71, not restored to 1.0), so dMMR contributes to but does not fully explain WRN dependence (cf. D-REFINE mutator load).";
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)
         ->
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)
@@ -1517,11 +1515,11 @@ resource wrn:rescue_e84a_plan_trace : prov:ProgramTrace {
     prov:timestamp = "2019-01-01T00:00:00Z";
 }
 
-resource wrn:bridge_rescue_wt : justification:Claim {
+resource wrn:bridge_rescue_wt : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_on_target_rescue_criterion;
     prov:rationale   = "If re-expressing WT WRN cDNA significantly raises sgWRN-EIJ viability above the GFP control (recomputed two-sample t-test P=2.4e-7), the cDNA rescues the depletion — the EIJ reagent spares the cDNA, so functional WRN is restored.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)
         ->
         onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
@@ -1534,11 +1532,11 @@ resource wrn:bridge_rescue_wt_trace : prov:DeclarationTrace {
     prov:timestamp   = "2026-06-13T08:00:00Z";
 }
 
-resource wrn:bridge_rescue_e84a : justification:Claim {
+resource wrn:bridge_rescue_e84a : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_exonuclease_dispensable_criterion;
     prov:rationale   = "If the exonuclease-dead (E84A) WRN cDNA significantly raises sgWRN-EIJ viability above the GFP control (recomputed two-sample t-test P=3.4e-6), it still rescues — the exonuclease activity is dispensable for the rescue.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)
         ->
         onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
@@ -1735,11 +1733,11 @@ resource wrn:warrant_plan_reproducibility : prov:Source {
     core:short_name = "warrant_plan_reproducibility";
 }
 
-resource wrn:wrn_dep_plan_yields_main_effect : justification:Claim {
+resource wrn:wrn_dep_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying wrn_dep_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.0)
     );
 }
@@ -1750,11 +1748,11 @@ resource wrn:wrn_dep_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:mutator_load_plan_yields_main_effect : justification:Claim {
+resource wrn:mutator_load_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying mutator_load_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:mutator_load_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mutator_load_sampleset"), 0.0)
     );
 }
@@ -1765,11 +1763,11 @@ resource wrn:mutator_load_plan_yields_main_effect_trace : prov:DeclarationTrace 
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:coloc_plan_yields_main_effect : justification:Claim {
+resource wrn:coloc_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying coloc_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:coloc_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:coloc_sampleset"), 0.0)
     );
 }
@@ -1780,11 +1778,11 @@ resource wrn:coloc_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:apop_shrna_KM12_plan_yields_main_effect : justification:Claim {
+resource wrn:apop_shrna_KM12_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying apop_shrna_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_shrna_KM12_sampleset"), 0.0)
     );
 }
@@ -1795,11 +1793,11 @@ resource wrn:apop_shrna_KM12_plan_yields_main_effect_trace : prov:DeclarationTra
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:hcr_plan_yields_main_effect : justification:Claim {
+resource wrn:hcr_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying hcr_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:hcr_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:hcr_sampleset"), 0.0)
     );
 }
@@ -1810,11 +1808,11 @@ resource wrn:hcr_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:wrn_recq_plan_yields_main_effect : justification:Claim {
+resource wrn:wrn_recq_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying wrn_recq_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:wrn_recq_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:wrn_recq_sampleset"), 0.0)
     );
 }
@@ -1825,11 +1823,11 @@ resource wrn:wrn_recq_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:biomarker_plan_yields_ppv : justification:Claim {
+resource wrn:biomarker_plan_yields_ppv : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying biomarker_plan to its recorded sample set yields that set's ppv. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset") -> stats:ge(stats:ppv("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.7)
     );
 }
@@ -1840,11 +1838,11 @@ resource wrn:biomarker_plan_yields_ppv_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:biomarker_plan_yields_sensitivity : justification:Claim {
+resource wrn:biomarker_plan_yields_sensitivity : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying biomarker_plan to its recorded sample set yields that set's sensitivity. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:wrn_dep_sampleset") -> stats:ge(stats:sensitivity("urn:eigenius:pub:wrn:wrn_dep_sampleset"), 0.9)
     );
 }
@@ -1855,11 +1853,11 @@ resource wrn:biomarker_plan_yields_sensitivity_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:p53_dep_plan_yields_main_effect : justification:Claim {
+resource wrn:p53_dep_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying p53_dep_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:p53_dep_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:p53_dep_sampleset"), 0.0)
     );
 }
@@ -1870,11 +1868,11 @@ resource wrn:p53_dep_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:viab_KM12_plan_yields_main_effect : justification:Claim {
+resource wrn:viab_KM12_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying viab_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:viab_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_KM12_sampleset"), 0.0)
     );
 }
@@ -1885,11 +1883,11 @@ resource wrn:viab_KM12_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:viab_OVK18_plan_yields_main_effect : justification:Claim {
+resource wrn:viab_OVK18_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying viab_OVK18_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:viab_OVK18_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:viab_OVK18_sampleset"), 0.0)
     );
 }
@@ -1900,11 +1898,11 @@ resource wrn:viab_OVK18_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:cc_KM12_plan_yields_main_effect : justification:Claim {
+resource wrn:cc_KM12_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying cc_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:cc_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_KM12_sampleset"), 0.0)
     );
 }
@@ -1915,11 +1913,11 @@ resource wrn:cc_KM12_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:cc_SW48_plan_yields_main_effect : justification:Claim {
+resource wrn:cc_SW48_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying cc_SW48_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:cc_SW48_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_SW48_sampleset"), 0.0)
     );
 }
@@ -1930,11 +1928,11 @@ resource wrn:cc_SW48_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:cc_OVK18_plan_yields_main_effect : justification:Claim {
+resource wrn:cc_OVK18_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying cc_OVK18_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:cc_OVK18_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:cc_OVK18_sampleset"), 0.0)
     );
 }
@@ -1945,11 +1943,11 @@ resource wrn:cc_OVK18_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:apop_KM12_plan_yields_main_effect : justification:Claim {
+resource wrn:apop_KM12_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying apop_KM12_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:apop_KM12_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_KM12_sampleset"), 0.0)
     );
 }
@@ -1960,11 +1958,11 @@ resource wrn:apop_KM12_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:apop_SW48_plan_yields_main_effect : justification:Claim {
+resource wrn:apop_SW48_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying apop_SW48_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:apop_SW48_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_SW48_sampleset"), 0.0)
     );
 }
@@ -1975,11 +1973,11 @@ resource wrn:apop_SW48_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:apop_OVK18_plan_yields_main_effect : justification:Claim {
+resource wrn:apop_OVK18_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying apop_OVK18_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:apop_OVK18_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:apop_OVK18_sampleset"), 0.0)
     );
 }
@@ -1990,11 +1988,11 @@ resource wrn:apop_OVK18_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:mmr_rescue_plan_yields_main_effect : justification:Claim {
+resource wrn:mmr_rescue_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying mmr_rescue_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:mmr_rescue_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_rescue_sampleset"), 0.0)
     );
 }
@@ -2005,11 +2003,11 @@ resource wrn:mmr_rescue_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:mmr_resens1_plan_yields_main_effect : justification:Claim {
+resource wrn:mmr_resens1_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying mmr_resens1_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:mmr_resens1_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens1_sampleset"), 0.0)
     );
 }
@@ -2020,11 +2018,11 @@ resource wrn:mmr_resens1_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:mmr_resens2_plan_yields_main_effect : justification:Claim {
+resource wrn:mmr_resens2_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying mmr_resens2_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:mmr_resens2_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:mmr_resens2_sampleset"), 0.0)
     );
 }
@@ -2035,11 +2033,11 @@ resource wrn:mmr_resens2_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:rescue_wt_plan_yields_main_effect : justification:Claim {
+resource wrn:rescue_wt_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying rescue_wt_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:rescue_wt_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_wt_sampleset"), 0.0)
     );
 }
@@ -2050,11 +2048,11 @@ resource wrn:rescue_wt_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:rescue_e84a_plan_yields_main_effect : justification:Claim {
+resource wrn:rescue_e84a_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying rescue_e84a_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:rescue_e84a_sampleset") -> stats:lt(stats:mean_diff_of("urn:eigenius:pub:wrn:rescue_e84a_sampleset"), 0.0)
     );
 }
@@ -2065,11 +2063,11 @@ resource wrn:rescue_e84a_plan_yields_main_effect_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-08-29T00:00:00Z";
 }
 
-resource wrn:wrn_corr_plan_yields_main_effect : justification:Claim {
+resource wrn:wrn_corr_plan_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = wrn:warrant_plan_reproducibility;
     prov:rationale    = "Applying wrn_corr_plan to its recorded sample set yields that set's main_effect. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:pub:wrn:wrn_corr_sampleset") -> stats:lt(stats:spearman_rho("urn:eigenius:pub:wrn:wrn_corr_sampleset"), 0.0)
     );
 }

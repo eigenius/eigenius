@@ -73,7 +73,7 @@ These are inputs, not conclusions. Each is a question the analysis must answer.
 | # | encoding | where |
 |---|---|---|
 | 1 | `reflection:{Declared,Observed,Derived,Verified}Resource` | `ontologies/reflection/` |
-| 2 | `reflection:{Declaration,Observation,Program,Verification,ExternalExecution}Trace` — **five** classes onto four grades | `kernel/src/layer/witness_index.rs:179` (`trace_category`) |
+| 2 | `reflection:{Declaration,Observation,Program,Verification,ExternalExecution}Trace` — **five** classes onto four grades | `kernel/src/layer/witness_admission.rs:179` (`trace_category`) |
 | 3 | `WitnessCategory::{Declared,Observed,Derived,Verified}` | `kernel/src/witness/mod.rs` |
 | 4 | `witness:Is{Declared,Observed,Derived,Verified}As` | `ontologies/justification/justification.esl` |
 | 5 | `JustifiedBy.{declared,observed,derived,verified}` | same |
@@ -102,7 +102,7 @@ convenience? What stops an importer from stamping `VerifiedResource` on anything
 
 - **`ChainWitness`** — evidence for a `JustifiedBy` certificate, synthesized by the kernel type
   checker (`kernel/src/nbe/check/witness.rs` → `EffectHooks::synthesize_chain_witness` →
-  `kernel/src/layer/witness_index.rs`).
+  `kernel/src/layer/witness_admission.rs`).
 - **Merge `Witness` resolution** — a D20 §6.1 merge *strategy* taking a witness **function**
   (`kernel/src/layer/merge/witnessed.rs`, `MergeError::WitnessTypeMismatch`).
 

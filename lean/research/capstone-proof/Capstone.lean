@@ -61,6 +61,33 @@ theorem healthy_refl :
       EigeniusFFI.eigenius.demo.lean.Healthy p → EigeniusFFI.eigenius.demo.lean.Healthy p :=
   fun _ h => h
 
+/-- The notebook demo's actual target since D87 §6, and the reason `healthy_refl` is no longer it.
+
+`healthy_refl` is a tautology over ALL Patients: its statement never mentions any particular one,
+so the claim it was checked against paired a resource IRI with a proposition that said nothing
+about that resource — *"any resource IRI would serve equally"*. The demo showed the plumbing ran,
+not that it discriminated.
+
+This statement is about `patient_1` and nothing else. The demo commits a second claim, identical
+in shape but about `patient_2`, against this same proof; `def_eq` refuses it, which is what shows
+`Holds` meaning *"this proof proves THIS claim"* rather than *"a theorem with this name
+type-checks"* (eigenius#159). -/
+theorem healthy_patient_1 :
+    EigeniusFFI.eigenius.demo.lean.Healthy EigeniusFFI.eigenius.demo.lean.patient_1 :=
+  ⟨by decide, by decide⟩
+
+/-- The near-miss's other half, and the reason it is a theorem rather than nothing at all.
+
+The demo checks the claim `Healthy patient_2` against the proof of `healthy_patient_1`, and that
+must fail. It would fail without this declaration too — the externalizer would not find
+`patient_2` among the export's names — but it would fail as `UnknownConstant`, which reads as *the
+mirror is missing something*. With both individuals and both theorems exported, the near-miss
+fails on `def_eq` alone: both propositions are true, both are proved, and the check still refuses
+the mismatched pairing. That is the property eigenius#159 is about. -/
+theorem healthy_patient_2 :
+    EigeniusFFI.eigenius.demo.lean.Healthy EigeniusFFI.eigenius.demo.lean.patient_2 :=
+  ⟨by decide, by decide⟩
+
 /-- The capstone test's target, for the same reason `healthy_refl` is the demo's: the claim's
 `reflection:canonical_proposition` must be expressible in D74 §4, and `∀ p, 0.0 ≤ p.weight.val`
 is not. -/

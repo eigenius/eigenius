@@ -59,8 +59,9 @@ fn esl_layer(name: &str, src: &str, parent: Arc<Layer>) -> Arc<Layer> {
     Arc::new(b.build(LayerStorage::in_memory()))
 }
 
-/// core → reflection(+eigentt, institution, ingest) → prov → logic → lexicon-schema → reference —
-/// the chain `ontologies/encoding/encoding.esl`'s header documents it loads after.
+/// core → reflection(+eigentt, institution, ingest) → prov → justification → logic →
+/// lexicon-schema → reference — the chain `ontologies/encoding/encoding.esl`'s header documents it
+/// loads after.
 fn parent_chain() -> Arc<Layer> {
     let core = json_layer(
         "core",
@@ -71,8 +72,7 @@ fn parent_chain() -> Arc<Layer> {
         "reflection",
         Some(core),
         &[
-            include_str!("../../ontologies/reflection/reflection-ontology.json"),
-            include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
+            include_str!("../../ontologies/program/program-traces.json"),
             include_str!("../../ontologies/institution/institution-ontology.json"),
             include_str!("../../ontologies/ingest/ingest-ontology.json"),
         ],
@@ -80,10 +80,18 @@ fn parent_chain() -> Arc<Layer> {
     // `prov` sits above reflection and below everything that names an agent, a
     // trace or an attribution — which is most of the stack.
     let prov = esl_layer("prov", include_str!("../../ontologies/prov/prov.esl"), refl);
+    // `enc:EncodedClaim` subclasses `justification:Declaration` (D89 §3) — the parser's output is a
+    // declaration whose accountable agent is the source document's authors or the pipeline's
+    // operating agent, which is what `prov:was_attributed_to` on it already recorded.
+    let justification = esl_layer(
+        "justification",
+        include_str!("../../ontologies/justification/justification.esl"),
+        prov,
+    );
     let logic = esl_layer(
         "logic",
         include_str!("../../ontologies/logic/logic.esl"),
-        prov,
+        justification,
     );
     let lexicon = esl_layer(
         "lexicon-schema",

@@ -324,14 +324,14 @@ mod value_walk_tests {
             )]),
         );
         holder.set(
-            Iri::parse("urn:eigenius:justification:judgement").expect("iri"),
+            Iri::parse("urn:eigenius:justification:grounds_judgement").expect("iri"),
             judgement.clone(),
         );
 
         let walked =
             embed_typed_resource_refs_recursively(holder, layer).expect("the walk succeeds");
         let after = walked
-            .get(&Iri::parse("urn:eigenius:justification:judgement").expect("iri"))
+            .get(&Iri::parse("urn:eigenius:justification:grounds_judgement").expect("iri"))
             .expect("the judgement is still there");
         assert_eq!(
             after, &judgement,

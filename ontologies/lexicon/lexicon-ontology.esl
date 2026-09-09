@@ -18,11 +18,8 @@
 
 namespace core       = "urn:eigenius:core";
 namespace normalizers = "urn:eigenius:core:normalizers";
-namespace reflection = "urn:eigenius:reflection";
-namespace epistemic  = "urn:eigenius:reflection:epistemic";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace lexicon    = "urn:eigenius:lexicon";
-namespace prov       = "urn:eigenius:prov";
 
 // ── The entity top (D63 §8.3, decision ii) ────────────────────────────
 // The single foundational entity type — the universe a general predicate's

@@ -546,42 +546,6 @@
     "urn:eigenius:program:component:fallible": true
   },
   {
-    "@id": "urn:eigenius:program:components:Combine",
-    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
-    "urn:eigenius:core:description": "Merge properties from multiple inputs into one resource.",
-    "urn:eigenius:core:short_name": "Combine",
-    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
-    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
-    "urn:eigenius:program:component:implementation": "builtin",
-    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:pure",
-    "urn:eigenius:program:component:deterministic": true,
-    "urn:eigenius:program:component:fallible": false
-  },
-  {
-    "@id": "urn:eigenius:program:components:Extract",
-    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
-    "urn:eigenius:core:description": "Extract specific properties from a resource.",
-    "urn:eigenius:core:short_name": "Extract",
-    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
-    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
-    "urn:eigenius:program:component:implementation": "builtin",
-    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:pure",
-    "urn:eigenius:program:component:deterministic": true,
-    "urn:eigenius:program:component:fallible": false
-  },
-  {
-    "@id": "urn:eigenius:program:components:Transform",
-    "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
-    "urn:eigenius:core:description": "Apply property mappings and renames to a resource.",
-    "urn:eigenius:core:short_name": "Transform",
-    "urn:eigenius:program:component:input_type": "urn:eigenius:core:Class",
-    "urn:eigenius:program:component:output_type": "urn:eigenius:core:Class",
-    "urn:eigenius:program:component:implementation": "builtin",
-    "urn:eigenius:program:component:capability_level": "urn:eigenius:program:capability_levels:pure",
-    "urn:eigenius:program:component:deterministic": true,
-    "urn:eigenius:program:component:fallible": false
-  },
-  {
     "@id": "urn:eigenius:program:components:HttpRequest",
     "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
     "urn:eigenius:core:description": "HTTP request to an external service.",

@@ -8,7 +8,6 @@
 // With criteria min_ppv = 0.7 (Holds) and min_sensitivity = 0.9 (Holds).
 
 namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace demo       = "urn:eigenius:demo:classify";
 namespace prov       = "urn:eigenius:prov";

@@ -11,7 +11,6 @@
 
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace prov       = "urn:eigenius:prov";
 namespace wrnact     = "urn:eigenius:pub:wrn:activity";
 namespace bench      = "urn:eigenius:benchmark";

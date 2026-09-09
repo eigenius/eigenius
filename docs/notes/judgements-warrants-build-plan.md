@@ -33,7 +33,7 @@ are over `ontologies/`, `demo/`, `experiments/`.
 | `eigentt:Term` | **21 Rust source files**, **52 ontology sites** |
 | `urn:eigenius:reasoning` namespace | **~650 occurrences in 103 files** (131 full IRIs, 521 short-form) |
 | `*Evidence` grounding-constructor names | **480 occurrences in 56 files** |
-| witness machinery | `witness/mod.rs` 397 lines (≈145 of them tests), `layer/witness_index.rs` 521, `program/check_hooks.rs` 101 |
+| witness machinery | `witness/mod.rs` 397 lines (≈145 of them tests), `layer/witness_admission.rs` 521, `program/check_hooks.rs` 101 |
 | reasoning crate (post-move, `2026-08-29`) | `extract.rs` 1025, `project.rs` 605, `validate.rs` 265, `institution.rs` 182, `entailment.rs` 113, `consistency.rs` 79, `startup.rs` 33 — **2369 lines in 8 files** |
 | `DerivedEvidence` / `IsDerivedAs` in authored artifacts | **153 occurrences** (90 + 63) in **25 files** |
 | validation rules | 15 files under `kernel/src/validation/rules/` |
@@ -224,13 +224,13 @@ Measured `2026-08-29`. **Two readers take the proposition alone**, and neither b
 
 | reader | reads | disposition |
 |---|---|---|
-| `witness_index.rs:264` `emit_from_reasoning_sentence` | `proposition` alone, to build the `Verified` `WitnessKey` | see below |
+| `witness_admission.rs:264` `emit_from_reasoning_sentence` | `proposition` alone, to build the `Verified` `WitnessKey` | see below |
 | `entailment.rs:73` | `proposition` alone, scanning committed sentences | P7 deletes the file |
 
 `validate.rs:65-66` reads `proposition` and `certificate` as a pair, which is the assumed use.
 
 **The witness key survives the collapse, and the reason is that it never depended on the slot.**
-`hash_stored_proposition` (`witness_index.rs`) does **not** hash the stored JSON — it runs
+`hash_stored_proposition` (`witness_admission.rs`) does **not** hash the stored JSON — it runs
 `decode_type` to an `Exp` first and hashes *that*, through `hash_proposition_exp`. The emit side is
 already a decode-then-hash path. After the collapse it decodes the judgement, takes its `type`,
 projects the second index argument of `Certificate(j, P)`, and hashes the same `Exp`. What is
@@ -249,7 +249,7 @@ silently and a `Verified` witness simply fails to be admitted.
 |---|---|
 | `proposition`, `term`, `certificate` properties | collapse into `judgement` — **P2**, where `Judgement`-ranged slots and the uniform rule arrive |
 | P3's proof-term slot | lands as the second, optional judgement, not a fourth slot |
-| `emit_from_reasoning_sentence` (`witness_index.rs:262`) | already rekeyed to the checked judgement by P3; reads the new slot |
+| `emit_from_reasoning_sentence` (`witness_admission.rs:262`) | already rekeyed to the checked judgement by P3; reads the new slot |
 | `extract.rs`'s `extract_justification` | reads the justification slot today; must read the judgement. **Change the slot before P7 moves the file into the kernel**, so the move is a relocation and not a relocation plus a rewrite |
 | `subclass_of DerivedResource` | already on P5's retype list; unchanged by this |
 | `VerifiedPropositionView`, `EntailmentRequest`, `ConsistencyRequest` | reference sentences; P7 deletes all three with the institution |
@@ -439,7 +439,7 @@ enforced, with a test each. No exemption list remains in `eigentt_value.rs`.
   IRI into `reflection:proof_term`. For `proof_system = kernel`, `proof_term` names a term the kernel
   checked at `t : P`. A certificate has type `Certificate(j, P)`, not `P`, and no rule
   connects them.
-- `emit_from_reasoning_sentence` (`kernel/src/layer/witness_index.rs`) stops minting `Verified` from
+- `emit_from_reasoning_sentence` (`kernel/src/layer/witness_admission.rs`) stops minting `Verified` from
   `is_a` membership plus a hashable proposition. It keys off the checked judgement.
 
 **Exit gate — write this test first and watch it fail.** Build a `Declared` claim, cite it from a
@@ -1288,8 +1288,8 @@ reworks are listed separately below, because they are not deletions and must not
 | `Ground::Derived` variant | `crates/eigenius-reasoning/src/project.rs:71` | P4 |
 | `PROPOSITION_SLOTS` | `kernel/src/ontology/well_known.rs:544` | P2 |
 | `DECLARED_RESOURCE`, `OBSERVED_RESOURCE`, `DERIVED_RESOURCE`, `VERIFIED_RESOURCE` | `well_known.rs:449-452` | P5 |
-| `emit_from_institution_derivation` | `kernel/src/layer/witness_index.rs:279` | P4 |
-| the coercion branch of `check_layer_with_coercion` | `witness_index.rs:444` | P4 |
+| `emit_from_institution_derivation` | `kernel/src/layer/witness_admission.rs:279` | P4 |
+| the coercion branch of `check_layer_with_coercion` | `witness_admission.rs:444` | P4 |
 | `chain_witness_category_for_short_name` | `kernel/src/program/check_hooks.rs:93` | P7 |
 | `impl Institution for ReasoningInstitution` | `crates/eigenius-reasoning/src/institution.rs:131` | P7 |
 | `entailment.rs` (113 lines), `consistency.rs` (79 lines) | `crates/eigenius-reasoning/src/` | P7 |
@@ -1299,9 +1299,9 @@ reworks are listed separately below, because they are not deletions and must not
 
 ### Rust — reworked, not removed
 
-- `trace_category` (`witness_index.rs:186`) — five arms to two; P5 may retire it in favour of reading
+- `trace_category` (`witness_admission.rs:186`) — five arms to two; P5 may retire it in favour of reading
   the provenance shape.
-- `emit_from_reasoning_sentence` (`witness_index.rs:262`) — keyed to the checked judgement instead of
+- `emit_from_reasoning_sentence` (`witness_admission.rs:262`) — keyed to the checked judgement instead of
   `is_a` membership. P3.
 - `verification_trace` (`crates/eigenius-reasoning/src/validate.rs:186`) — `proof_term` names a proof
   of `P` rather than the sentence's own IRI. P3.

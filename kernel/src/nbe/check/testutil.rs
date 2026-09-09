@@ -92,10 +92,12 @@ pub(crate) fn nat_decl() -> Arc<InductiveDecl> {
         sort: Exp::sort(1),
         ctors: vec![
             InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "zero".to_string(),
                 typ: nat_ty.clone(),
             },
             InductiveCtorDecl {
+                implicit: Vec::new(),
                 name: "succ".to_string(),
                 typ: Exp::Pi(Patt::Unit, Box::new(nat_ty.clone()), Box::new(nat_ty)),
             },

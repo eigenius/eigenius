@@ -1,10 +1,70 @@
 # D49 — `ChainWitness` Machinery
 
-*Status: design memo · June 2026*
+*Status: **largely superseded** `2026-09-05` · design memo · June 2026. Read §4, §5 and §6 as
+live; read §1's four families, §2's coercion, §3's table and §7 entirely as history. See
+**"What is still true"** below before relying on anything here.*
 
 *Companion documents: [D39 justification logic (v2 draft)](d39-justification-logic.md), [D46 Prop universe + axiom framework](d46-prop-universe-and-proof-irrelevance.md), [D47 chain-mirrored EigenTT type fragment](d47-chain-mirrored-eigentt-type-fragment.md), [D48 indexed inductive families](d48-indexed-inductive-families.md), [D41 commit pipeline](d41-commit-pipeline.md).*
 
 *This memo settles the implementation shape of the `ChainWitness` predicate family that D39 v2 §5 introduces. It is the soundness boundary for the Reasoning institution — every grounding fact entering the type system passes through these witnesses — so getting the table location, the synthesis algorithm, the trace hook points, and the Lean checker integration right matters more than getting them done quickly. D39 implementation depends on this design landing first.*
+
+---
+
+## What is still true — `2026-09-05`
+
+**Not the sentence directly above.** *"It is the soundness boundary for the Reasoning institution"*
+was withdrawn by the P7 closeout: the Reasoning institution is gone, and what this machinery does
+is recompute a decision from relations the chain already holds, so a wrong answer is catchable by
+running it again rather than being an axiom with no proof to re-check. The index is a cache —
+rebuildable, droppable — which is what `judgements-warrants-build-plan.md` §"Open after P7" asked.
+
+### Eliminated
+
+| here | what happened |
+|---|---|
+| §1, §2 — **four** `IsXxAs` families | **three.** P4's three-grounds change removed `IsDerivedAs`; *"removing the constant is forced by the algebra"* |
+| §2, §4 — the `IsVerifiedAs → IsDerivedAs` coercion | **gone.** `witness_categories_do_not_coerce_into_one_another` calls it *"the spend half of the laundering P3 closed the mint half of"* |
+| §1, §6 — a `ProgramTrace` commit admits a witness | **gone.** `trace_category(PROGRAM_TRACE)` is `None`: a computed claim rests on `App(Declared(plan), Observed(inputs))`, not on the fact that a run happened |
+| §3 — the materialised `BTreeMap<WitnessKey, ()>` on `Layer` | **gone** (D66 slice 0). Direct lookup on the key's IRI. This was the memo's central engineering decision |
+| §5 — `prop_hash = sha256(canonical_cbor(encode_type(P)))` | **changed** (D66 §4). The hash is over the *decoded* `Exp`, because a definition is written folded and seen unfolded |
+| §7 — the Lean → Reasoning comorphism and `VerifiedPropositionView` | **gone entirely.** D74's forward externalization replaced the route (D51 §3); the class is deleted, and [D87](d87-the-verification-judgement.md) puts the checker's result on the trace as `prov:judgement`, which is what `Verified` is now keyed off |
+| §9 — EntailmentQuery cost, the `OnceLock` | moot. P7 deleted the QueryClass; the index it costed does not exist |
+| the closing note — *"the witness machinery is the soundness boundary, so build it first"* | withdrawn, as above |
+
+### Live
+
+- **§4's key**, `(category, iri, prop_hash)`. This memo calls `prop_hash` *"effectively redundant"*;
+  it is the opposite. It is what makes the proposition an author wrote and the proposition the
+  chain records comparable across folding, α-renaming and encoding — D66 §4 and D82 §3.5 are both
+  bugs in exactly that comparison.
+- **§5's shape**: encode → hash → key → parent-chain walk → first-hit-wins → typed diagnostic.
+  First-hit-wins is sound because layers are immutable.
+- **§6's no-new-hooks property.** Witnesses fall out of trace commits; the commit pipeline needs no
+  witness phase. The most durable idea here, and untouched.
+- **§3's *reasoning*** for per-layer scope, even though the table it justified is gone: layers are
+  the unit of immutable commitment, lookup composes through the existing walk, content-addressing
+  stays honest, persistence is free.
+- **§8's opaque value.** `Val::ChainWitness` — no eliminator, no readback, proof-irrelevant.
+
+### What the machinery is for, stated without the inflation
+
+There is no epistemic status on the chain to bridge *from*: eigenius#23 deleted
+`epistemic_status`, and no grade is stored anywhere. What the chain holds is traces and the
+propositions their targets carry. So a witness is **the name of a query result** over trace
+relations, in a position where a derivation can consume it.
+
+Something has to occupy that position because the composition constructors (`app`, `sum_l`/`sum_r`,
+`spec_poly`) are pure logic and will compose ungrounded leaves happily, while `support` and
+`is_fully_verified` read the justification TERM at query time — so with nothing checking the
+leaves, `Verified("anything")` would read as verified. **The certificate checks the composition;
+the witness grounds the leaves.**
+
+Three things are load-bearing: the query (`layer_admits_witness`), proposition identity
+(`hash_proposition_exp`, α-canonicalization, and the emit/check agreement
+`emit_and_check_sides_agree_on_the_hash` pins), and the seam in `check` where a type-theoretic
+derivation depends on a database fact. Only the third needs a *type*, and only because a
+constructor argument must have one — so whether the `witness:Is*As` types earn their place against
+a constructor-keyed side condition is open (D87 §7).
 
 ---
 
@@ -137,7 +197,7 @@ In all four cases the witness emitter performs the same operation: locate the `c
 
 The `reflection:canonical_proposition` property is a new optional addition to `DeclaredResource` / `ObservedResource` / `DerivedResource`, of `data_type: resource` carrying an `eigentt:Term` payload. Absent value defaults to the `Asserts(iri)` term (built by the witness-emission path; not stored on the resource). The validator type-checks the `canonical_proposition` at commit — this is **Rule 21** (`check_type_expr_well_typed`, `kernel/src/validation/rules/eigentt_value.rs`): it decodes the D47 payload (→ `TypeExprMalformed` on failure) then runs `nbe::check_infer` against the chain (→ `TypeExprIllTyped` on failure); a mis-typed proposition rejects the resource entirely (and therefore the Trace, and therefore the witness). Rule 21 is **not** canonical-specific — it keys off the declared range (`class_types ∋ eigentt:Term`), so *every* eigentt-valued slot (`objective:proposition`, `lexicon:prop`, …) is decoded + type-checked uniformly: the type system decides what is a checkable proposition, not a property name. It **consolidated** what were three overlapping checks — the earlier decode-only `canonical_proposition` check, `check_inductive_value`'s parallel `ConstRef`/`CtorApp` resolution walk for `eigentt:Term`, and the type-check itself — into one validator (decode + `check_infer`), with no duplicate diagnostics. (v1 asserts well-typedness, not strictly `: Prop`; tightening canonical slots to exactly `Prop` is an additive refinement — the load-bearing case, an ill-typed proposition, is already rejected.) For `ReasoningSentence` specifically (D39 §4.2), the validator reads `proposition` in place of `canonical_proposition` (since `ReasoningSentence` already requires the field by §4.2's invariants) — no duplicate storage required. For `VerifiedPropositionView` (§7 below), the property is *required* (not just optional) — the view's whole purpose is to surface the EigenTT-encoded proposition that the Lean → Reasoning comorphism produced, and a view without it is malformed.
 
-Implementation site: `kernel/src/layer/witness_index.rs` (new). One function, `build_witness_index(&Layer) -> BTreeMap<WitnessKey, ()>`, called from `Layer::build_post_resources` (or wherever the Layer's post-commit derived state is computed). The function walks `layer.resources`, dispatches on Trace class, and populates the map.
+Implementation site: `kernel/src/layer/witness_admission.rs` (new). One function, `build_witness_index(&Layer) -> BTreeMap<WitnessKey, ()>`, called from `Layer::build_post_resources` (or wherever the Layer's post-commit derived state is computed). The function walks `layer.resources`, dispatches on Trace class, and populates the map.
 
 Calling this lazily on first witness lookup (rather than eagerly at Layer construction) avoids paying the cost for Layers that no `JustifiedBy` certificate ever references. Use `OnceLock<BTreeMap<WitnessKey, ()>>` on the Layer.
 
@@ -215,7 +275,7 @@ Implementation sites:
 - `ontologies/reasoning/reasoning-ontology.json` — adds the `VerifiedPropositionView` class declaration with the two required properties.
 - `ontologies/lean/lean-ontology.json` (or wherever the Lean comorphisms are declared) — adds the `lean_to_reasoning` comorphism declaration.
 - `crates/eigenius-lean-worker/src/lean_to_reasoning.rs` (new) — the comorphism transformation implementation. Reads the chain-mirrored `lean:LeanExpr` proposition, calls `nanoda_lib`'s type accessor on the proof to confirm it inhabits the proposition (already done by the existing AutoOnLoad), runs the inverse-D30 translation, returns an EigenTT `Exp`. The comorphism's reify wrapping (committing the view resource) uses the existing D14 §9.3 step 4 chain-reinsertion path — no new infrastructure.
-- `kernel/src/layer/witness_index.rs` — the `VerificationTrace` branch of the witness emitter reads `canonical_proposition` from the *reified* `VerifiedPropositionView` (looked up by `source_verified_resource = trace.resource`) rather than from the user-authored VerifiedResource. Same code path as the other three families once the view exists.
+- `kernel/src/layer/witness_admission.rs` — the `VerificationTrace` branch of the witness emitter reads `canonical_proposition` from the *reified* `VerifiedPropositionView` (looked up by `source_verified_resource = trace.resource`) rather than from the user-authored VerifiedResource. Same code path as the other three families once the view exists.
 
 The witness emission is layer-deterministic because the comorphism reify is deterministic for a given proof term and a given Lean institution version. If the Lean institution's translation surface changes between versions, the affected `VerifiedPropositionView` resources at older content hashes remain valid — re-verification produces new views at new content hashes, and the old IRI references still resolve to the old propositions. This matches how D24 schema-migration semantics handle versioned chain artifacts.
 

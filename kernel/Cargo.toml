@@ -21,6 +21,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 schemars = { version = "0.8.12", optional = true }
 ciborium = "0.2"
 hex = "0.4"
+# RFC3339 timestamps for the in-process dispatch Activity (G5). Same version the
+# substrate uses to format the ones it captures, so both ends agree on the shape.
+humantime = "2"
 # Concurrent cache for the bounded two-pool resource cache (D23 §5.3 /
 # Phase 14c). W-TinyLFU eviction outperforms LRU/ARC on skewed access
 # patterns and the crate is production-grade in Rust services.

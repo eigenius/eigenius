@@ -637,6 +637,13 @@ pub(crate) fn eval_impl<T: Tracer>(
             Val::Nt(crate::nbe::val::Neut::EigonAxiom(iri.clone())),
             T::leaf(),
         )),
+        // D87 §4.2 — a reference to an externally checked proof. Nothing to reduce, so it is its
+        // own neutral head. It never reaches here through a judgement, because `check_infer`
+        // refuses it before evaluation; eval is total, so the arm exists.
+        Exp::Checked(iri) => Ok((
+            Val::Nt(crate::nbe::val::Neut::Checked(iri.clone())),
+            T::leaf(),
+        )),
         Exp::EigonPrimitive(p) => Ok((Val::EigonPrimitive(*p), T::leaf())),
         Exp::EigonResource(r) => Ok((Val::ResourceVal(r.clone()), T::leaf())),
 

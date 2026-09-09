@@ -113,8 +113,8 @@ def main():
     for r in doc if isinstance(doc, list) else [doc]:
         if not r["@id"].endswith(suffix):
             continue
-        p = r.get("urn:eigenius:reflection:canonical_proposition") or r.get(
-            "urn:eigenius:justification:proposition"
+        p = r.get("urn:eigenius:eigentt:proposition") or r.get(
+            "urn:eigenius:eigentt:proposition"
         )
         if p:
             print("   ", render(p))

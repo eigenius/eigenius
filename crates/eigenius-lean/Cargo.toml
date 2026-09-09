@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+build = "build.rs"
 description = "Lean 4 verification institution for Eigenius. Wraps nanoda_lib as an in-process proof checker; the kernel binary registers a LeanInstitution that dispatches proof_check verdicts through this crate. See D28, Phase 20a."
 
 [dependencies]

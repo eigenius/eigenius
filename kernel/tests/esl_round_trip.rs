@@ -116,7 +116,7 @@ fn print_then_compile(term: &Value, prop_ns: &str, layer: &Layer) -> Result<Valu
         ns.preamble()
     );
     // Against a layer, not bare: constructor short names resolve through the chain's ctor table
-    // (`collect_ctors_from_layer`), which is where `justification:Certificate`'s ctors live. This is
+    // (`collect_ctors_from_layer`), which is where `justification:Grounds`'s ctors live. This is
     // also how decompiled ESL is meant to be reloaded.
     let resources = esl::compile(&src, layer).map_err(|errs| {
         let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();

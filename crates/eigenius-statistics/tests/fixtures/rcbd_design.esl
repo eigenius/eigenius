@@ -16,8 +16,6 @@
 // CrossSectional)`. Phase 4.0's new dispatch arm.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace dr         = "urn:eigenius:demo:dr";
@@ -99,7 +97,7 @@ resource dr:dose_response_trace : prov:ObservationTrace {
 resource dr:claim_dose_response_exists : stats:StatisticalAnalysisPlan {
     stats:sample_set = dr:dose_response_2026_04_15;
 
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         dr:DoseResponseExists("urn:eigenius:demo:dr:experiment_2026_04_15")
     );
 

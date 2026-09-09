@@ -3307,7 +3307,7 @@ fn gate_verdict_resource(ctor_name: &str, diagnostic: Option<&str>) -> Resource 
 /// `{analysis_iri}:result:{effect_name}` — deterministic from the
 /// (analysis, effect) pair so re-runs collapse idempotently. The
 /// kernel adds `is_a [DerivedResource, InstitutionEmittedDerivation]`
-/// + `reflection:from_subject` + `reflection:runtime_invocation`; we
+/// + `institution:from_subject` + `institution:runtime_invocation`; we
 ///   set the domain class (`stats:StatisticalAnalysisResult`) plus the per-effect
 ///   payload.
 fn measurement_result_resource(

@@ -11,8 +11,11 @@ param environment string
 @description('Azure region')
 param location string = resourceGroup().location
 
-@description('Container image tag')
+@description('Container image tag. Still used by the orchestration service; the KERNEL is pinned by digest instead — see kernelImageDigest.')
 param imageTag string
+
+@description('Registry digest of the kernel image, as `sha256:…`. A tag is mutable, so a tag-pinned deployment is not reproducible even in principle; the kernel additionally records this value as the checker identity on every prov:VerificationTrace it writes (D87 §9.3).')
+param kernelImageDigest string
 
 @description('ACR login server')
 param acrLoginServer string
@@ -50,7 +53,7 @@ module kernel 'modules/kernel.bicep' = {
     location: location
     environment: environment
     environmentId: env.outputs.environmentId
-    imageTag: imageTag
+    imageDigest: kernelImageDigest
     acrLoginServer: acrLoginServer
   }
 }

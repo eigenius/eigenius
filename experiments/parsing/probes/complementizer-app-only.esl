@@ -65,7 +65,6 @@
 // ════════════════════════════════════════════════════════════════════
 
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
 namespace core      = "urn:eigenius:core";
 
 resource lexicon:that_comp : lexicon:LexicalEntry {

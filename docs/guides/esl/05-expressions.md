@@ -306,7 +306,7 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
     stats:null_hypothesis = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
-    reflection:canonical_proposition = type_expr(
+    eigentt:proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
 
@@ -400,10 +400,10 @@ The resulting value lands in the resource's property slot just like any other pr
 
 ### Where this appears in practice
 
-- `reflection:canonical_proposition` on every resource carrying a proposition (StatisticalAnalysisPlan, justification:Claim, custom institution-emitted derived resources) — the proposition the resource asserts.
+- `eigentt:proposition` on every resource carrying a proposition (StatisticalAnalysisPlan, justification:Declaration, custom institution-emitted derived resources) — the proposition the resource asserts.
 - `eigentt:axiom_statement` on every `axiom` declaration ([§4.4a](04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)) — surface-compiled via the same lowering path.
 - `stats:null_hypothesis` / `stats:alternative_hypothesis` on `StatisticalAnalysisPlan` — the null and alternative the verifier reports in the verdict's audit trail.
-- `justification:proposition` on `justification:Conclusion` — the proposition the certificate type-checks against.
+- `eigentt:proposition` on `justification:Conclusion` — the proposition the certificate type-checks against.
 - `core:ctor_type` on the typed-ctor form of indexed inductives — emitted by the compiler from the `data` declaration, not authored as a literal.
 
 Source: [`parse_type_expr`](../../../kernel/src/esl/parser.rs), [`lower_type_expr_to_exp`](../../../kernel/src/esl/compile.rs), [`encode_type_expr_to_value`](../../../kernel/src/esl/compile.rs), [`eigentt_type_mirror::encode_type`](../../../kernel/src/program/eigentt_type_mirror.rs).

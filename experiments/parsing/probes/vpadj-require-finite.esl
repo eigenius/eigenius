@@ -46,10 +46,6 @@
 // ════════════════════════════════════════════════════════════════════
 
 namespace lexicon   = "urn:eigenius:lexicon";
-namespace logic     = "urn:eigenius:logic";
-namespace ontology  = "urn:eigenius:ontology";
-namespace epistemic = "urn:eigenius:reflection:epistemic";
-namespace measurements = "urn:eigenius:measurements";
 namespace core         = "urn:eigenius:core";
 
 resource lexicon:between_prep : lexicon:LexicalEntry {

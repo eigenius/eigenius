@@ -13,26 +13,26 @@
 // limitations under the License.
 
 //! End-to-end D39 v2 demo: a universally-quantified literature rule
-//! applied to a specific compound via `justification:Certificate.spec_poly`
+//! applied to a specific compound via `justification:Grounds.instantiate`
 //! constructor.
 //!
 //! Closes the conceptual gap in the original `drug_screening.esl`
 //! fixture: the rule is now universal (`forall c, HasLowIC50(c) ->
 //! StrongInhibitor(c)`) rather than pre-specialised to EIG_0291.
-//! The certificate uses the `spec_poly`
-//! justification:Certificate ctor to apply the rule at "urn:EIG_0291"; the kernel's
+//! The certificate uses the `instantiate`
+//! justification:Grounds ctor to apply the rule at "urn:EIG_0291"; the kernel's
 //! NbE beta-reduces `(forall c, P c)("urn:EIG_0291")` to
 //! `P("urn:EIG_0291")` so the result type matches the App composition.
 //!
 //! What this exercises:
 //! - The `lower_type_expr_to_exp` bound-variable-with-args fix:
 //!   `screen:HasLowIC50(c)` inside a forall body lowers cleanly.
-//! - The `justification:Certificate.spec_poly` constructor in `justification.esl`.
+//! - The `justification:Grounds.instantiate` constructor in `justification.esl`.
 //!   It leaves the justification TERM unchanged — narrowing a universal to an
 //!   instance changes the proposition and introduces no ground — so there is no
 //!   matching term constructor. `SpecStr(j, tag)` was that constructor, and its
 //!   tag was the only unchecked argument in the algebra.
-//! - Kernel beta-reduction at the spec_poly result type during
+//! - Kernel beta-reduction at the instantiate result type during
 //!   certificate type-checking.
 //! - End-to-end `Verdict::Holds` from a chain author using the
 //!   universal rule shape that real literature rules actually have.
@@ -54,15 +54,10 @@ fn build_universal_rule_chain() -> ExecutionContext {
     }
     let core = Arc::new(core_builder.build(LayerStorage::in_memory()));
 
-    let reflection_json = include_str!("../../ontologies/reflection/reflection-ontology.json");
+    let reflection_json = include_str!("../../ontologies/program/program-traces.json");
     let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for r in reflection_resources {
-        reflection_builder.add_resource(r).unwrap();
-    }
-    let eigentt_json = include_str!("../../ontologies/eigentt/eigentt-type-fragment.json");
-    let eigentt_resources = eigon_json::parse_document(eigentt_json).unwrap();
-    for r in eigentt_resources {
         reflection_builder.add_resource(r).unwrap();
     }
     let institution_json = include_str!("../../ontologies/institution/institution-ontology.json");
@@ -120,7 +115,7 @@ fn build_universal_rule_chain() -> ExecutionContext {
 }
 
 #[test]
-fn universal_rule_with_spec_poly_validates_to_holds() {
+fn universal_rule_with_instantiate_validates_to_holds() {
     let ctx = build_universal_rule_chain();
 
     let sentence_iri =
@@ -144,7 +139,22 @@ fn universal_rule_with_spec_poly_validates_to_holds() {
 
     assert!(
         diagnostic.is_empty(),
-        "expected Holds for the universal rule + spec_poly certificate; \
+        "expected Holds for the universal rule + instantiate certificate; \
          got: {diagnostic}"
+    );
+
+    // The filter above reads only the conclusion's errors, so a violation on any OTHER resource in
+    // the fixture is dropped. That is not hypothetical: `screen:m_eig0291` sat as a
+    // `justification:Claim` with no attribution, and when D89 made the attribution required the
+    // fixture carried a MissingRequired this test could not see. The whole layer is the assertion.
+    let all: Vec<String> = eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .map(|e| format!("{:?}: {}", e.resource_id, e.message))
+        .collect();
+    assert!(
+        all.is_empty(),
+        "the fixture layer must validate clean, got:\n{}",
+        all.join("\n")
     );
 }

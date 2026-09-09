@@ -27,7 +27,7 @@ const NS = "urn:eigenius:reflection";
 // The ProgramTrace RESOURCE's metadata moved to `prov:` (P5 — "move the provenance axis onto
 // prov"); the trace TREE's nodes did not. `kernel/src/program/trace.rs` writes every node
 // property under `reflection:` and `kernel/src/server/programs.rs` writes the surrounding
-// metadata under `prov:`, so this file needs both. Reading `reflection:trace_tree` found
+// metadata under `prov:`, so this file needs both. Reading `program:traces:trace_tree` found
 // nothing and the panel rendered an empty tree beside a perfectly good trace — the run's
 // component steps, their token counts and latencies were all on the chain, unread.
 const PROV = "urn:eigenius:prov";

@@ -119,7 +119,7 @@ grow.
 Two observations, both mechanical:
 
 **The 5→4 collapse in row 3 lives in a Rust `match`, not in the ontology.** `trace_category`
-(`kernel/src/layer/witness_index.rs:179`) maps the five trace classes onto four categories, sending
+(`kernel/src/layer/witness_admission.rs:179`) maps the five trace classes onto four categories, sending
 `ExternalExecutionTrace → Declared` (eigenius#205). The ontology carries no class, property or
 relation expressing *"this trace kind grounds that grade"* — see §1.3.
 
@@ -156,7 +156,7 @@ The set that matters to the witness machinery — *trace kinds that ground a wit
 - no `subclass_of` edge joining its members (they span two families and a parentless group),
 - no property marking membership.
 
-`is_witness_candidate` (`kernel/src/layer/witness_index.rs:156`) and `trace_category` (`:179`) are
+`is_witness_candidate` (`kernel/src/layer/witness_admission.rs:156`) and `trace_category` (`:179`) are
 where the concept is defined. Both are Rust.
 
 ### 1.4 "Witness" names two unrelated things — **settled**
@@ -165,7 +165,7 @@ where the concept is defined. Both are Rust.
 |---|---|---|
 | what it is | evidence inhabiting a `JustifiedBy.*` argument | a `MergeComorphism` realising the **universal arrow** at a conflicting IRI |
 | shape | a `WitnessKey` — `(category, iri, proposition hash)` | a function `(A, A, Option<A>) → A` |
-| where | `kernel/src/witness/mod.rs`, `kernel/src/layer/witness_index.rs`, `kernel/src/nbe/check/witness.rs` | `kernel/src/layer/merge/witnessed.rs` (D20 §6.1) |
+| where | `kernel/src/witness/mod.rs`, `kernel/src/layer/witness_admission.rs`, `kernel/src/nbe/check/witness.rs` | `kernel/src/layer/merge/witnessed.rs` (D20 §6.1) |
 | persisted | **no** — derived from Trace-class resources on demand | the comorphism resource is; the application's result is |
 | errors | `WitnessTypeMismatch`, `WitnessTargetNotResolvable`, `WitnessTermNotAFunction` — all `MergeError` | *(same list — they belong to merge)* |
 
@@ -190,7 +190,7 @@ finds merge code.
 | `hash_proposition_value` | 149 | hash from an encoded chain value |
 | `alpha_canonicalize_proposition_json` | 181 | α-normalisation before hashing |
 
-**Kernel — `kernel/src/layer/witness_index.rs`** *(despite the name, no index is materialised)*
+**Kernel — `kernel/src/layer/witness_admission.rs`** *(despite the name, no index is materialised)*
 
 | name | line | role |
 |---|---|---|
@@ -257,7 +257,7 @@ Every lifecycle has **two independent carriers** of its grade, and nothing recon
 | **class membership** — `is_a reflection:*Resource` | asserted by the author, or inherited from a class that subclasses it | the validator's `requires` / `recommends` |
 | **witness admission** — a `WitnessKey` | computed by `layer_admits_witness` from traces and two hard-coded self-attesting classes | the type checker, when a `JustifiedBy.*` argument needs inhabiting |
 
-`layer_admits_witness` (`kernel/src/layer/witness_index.rs:66`) **never consults the epistemic
+`layer_admits_witness` (`kernel/src/layer/witness_admission.rs:66`) **never consults the epistemic
 classes.** Its self-attesting route matches on exactly two class IRIs —
 `reasoning:ReasoningSentence → Verified` and `reflection:InstitutionEmittedDerivation → Derived` —
 and its trace route matches on `trace_category`. `reflection:DeclaredResource` and its three
@@ -347,7 +347,7 @@ The only lifecycle where the kernel both produces the resource and grants the wi
    institution's AutoOnLoad QueryClass during commit; statistics emits one derivation per ANOVA
    effect, carrying `from_subject` (required) and `canonical_proposition` (recommended).
 2. **Witness, self-attesting.** `emit_from_institution_derivation`
-   (`kernel/src/layer/witness_index.rs:272`) reads `canonical_proposition` off the derivation and
+   (`kernel/src/layer/witness_admission.rs:272`) reads `canonical_proposition` off the derivation and
    keys `Derived` against the derivation's **own** IRI. No trace is consulted.
 3. **Silent on absence.** `canonical_proposition` is only *recommended*. A derivation without it
    returns `None` — no witness, no error. The doc comment names two causes: "kernel merge dropped
@@ -360,7 +360,7 @@ The only lifecycle where the kernel both produces the resource and grants the wi
 #### Route A — the reasoning institution (works)
 
 1. **Witness, self-attesting.** `emit_from_reasoning_sentence`
-   (`kernel/src/layer/witness_index.rs:255`) grants `WitnessCategory::Verified` to **any**
+   (`kernel/src/layer/witness_admission.rs:255`) grants `WitnessCategory::Verified` to **any**
    `ReasoningSentence` whose `reasoning:proposition` hashes. It performs **no check that the
    sentence's certificate validated.**
 2. **The guard is elsewhere.** `qc_validate_justification` is declared AutoOnLoad
@@ -399,7 +399,7 @@ the commit by the same mechanism (§2.4 route A step 2). Lean is not an on-deman
 |---|---|---|
 | 1. Lean checks the proof term, returns a `Verdict` | `do_proof_check` (`crates/eigenius-lean/src/institution.rs:306`) | **exists**, and runs at commit |
 | 2. a `lean_to_reasoning` comorphism reifies a `reasoning:VerifiedPropositionView` | D49 §7 | **does not exist** — the identifier appears nowhere in the tree except one ontology comment |
-| 3. the witness emitter looks the view up by `source_verified_resource` and reads its `canonical_proposition` | D49 §7 | **does not exist** — `target_proposition_hash` (`kernel/src/layer/witness_index.rs:317`) has three slots: `canonical_proposition`, `reasoning:proposition`, and the `Asserts(iri)` default. The view is not among them |
+| 3. the witness emitter looks the view up by `source_verified_resource` and reads its `canonical_proposition` | D49 §7 | **does not exist** — `target_proposition_hash` (`kernel/src/layer/witness_admission.rs:317`) has three slots: `canonical_proposition`, `reasoning:proposition`, and the `Asserts(iri)` default. The view is not among them |
 
 Nothing Lean-side stamps `reflection:VerifiedResource`, mints a `VerificationTrace`, or reifies a
 view — `grep` over `crates/eigenius-lean/` for all three returns nothing. A `Holds` verdict is a
@@ -426,7 +426,7 @@ declared notion of a *post-condition on success* — what a passing gate is enti
 decided by each handler's own code, and one of the two handlers decides nothing.
 
 **The receiving end is ready and nothing arrives on it.** `trace_category` *does* have its
-`VerificationTrace` arm (`kernel/src/layer/witness_index.rs:184`, added under eigenius#200), so the emitter half was
+`VerificationTrace` arm (`kernel/src/layer/witness_admission.rs:184`, added under eigenius#200), so the emitter half was
 completed while the producer half was not. The two halves were fixed in opposite order.
 
 **The ontology asserts the missing path as fact.** `reasoning:VerifiedPropositionView`'s own
@@ -567,8 +567,8 @@ ontology cannot express, and each is the sole definition of that relation.
 | list | where | what it decides |
 |---|---|---|
 | `PROPOSITION_SLOTS` | `kernel/src/ontology/well_known.rs:545` | which of the 28 `eigentt:Term`-ranged properties must inhabit `Prop`, not merely type-check — **6 of them** |
-| `trace_category` | `kernel/src/layer/witness_index.rs:179` | which trace class grounds which grade — the 5→4 map |
-| the self-attesting arms | `kernel/src/layer/witness_index.rs:74-88` | which classes ground a witness *without* a trace — exactly `reasoning:ReasoningSentence` and `reflection:InstitutionEmittedDerivation` |
+| `trace_category` | `kernel/src/layer/witness_admission.rs:179` | which trace class grounds which grade — the 5→4 map |
+| the self-attesting arms | `kernel/src/layer/witness_admission.rs:74-88` | which classes ground a witness *without* a trace — exactly `reasoning:ReasoningSentence` and `reflection:InstitutionEmittedDerivation` |
 
 **The first is documented as a deliberate compensation for what the range cannot say:**
 
@@ -609,7 +609,7 @@ own stamp creates; nothing checks that the other seven producers (§1.6) do the 
 | institution `Verdict` | **yes** (provenance) | — |
 | `InstitutionEmittedDerivation` | **yes**, on `Holds` only | — |
 | **`ChainWitness` / `WitnessKey`** | **no** | recomputed per lookup from Trace-class resources and the two self-attesting classes |
-| the witness *index* | **no** — despite the file name, nothing is materialised | direct lookup per key (`kernel/src/layer/witness_index.rs:20-28`) |
+| the witness *index* | **no** — despite the file name, nothing is materialised | direct lookup per key (`kernel/src/layer/witness_admission.rs:20-28`) |
 
 The asymmetry that matters: **the evidence is persisted and the entitlement is not.** A witness is a
 function of the chain, recomputed on demand.
@@ -708,7 +708,7 @@ and the self-attesting `Derived` arm (§2.3) — both exist because the trace th
 witness through was never produced.
 
 **The witness index was to be materialised**: *"Use `OnceLock<BTreeMap<WitnessKey, ()>>` on the
-Layer"* (D49 §3, §6). Nothing is. The filename `kernel/src/layer/witness_index.rs` is the residue, which is why
+Layer"* (D49 §3, §6). Nothing is. The filename `kernel/src/layer/witness_admission.rs` is the residue, which is why
 §3.4 has to say "despite the name, no index is materialised".
 
 **WASM was the primary intended runtime**, not a speculative third value — D14 §12 specifies
@@ -775,7 +775,7 @@ commit actually uses (`kernel/tests/dock_assay_demo.rs:699`).
 **Three semantic relations are kernel-only, and one needn't be.** `PROPOSITION_SLOTS` is well
 argued and commit-enforced. The self-attesting arms have a *plausible* soundness reason — an
 ontology that could declare its own class self-attesting could mint `Verified` at will — but the
-skeptic searched `kernel/src/layer/witness_index.rs`, `kernel/src/witness/mod.rs`, `kernel/src/ontology/well_known.rs` and D49 and **found that
+skeptic searched `kernel/src/layer/witness_admission.rs`, `kernel/src/witness/mod.rs`, `kernel/src/ontology/well_known.rs` and D49 and **found that
 argument stated nowhere**. Against `trace_category` the candidate got *stronger*: the ontology
 already declares `reflection:epistemic_status` with `allows_only` over exactly the four grade
 individuals, and already attaches it to `ProgramTrace`'s `recommends` as *"Epistemic status of the
@@ -812,7 +812,7 @@ inputs, different times; a conversion between them would be a category error.
 |---|---|---|
 | `kernel/src/institution/runtime.rs:69` | derivations are *"Empty for institutions whose only job is the pass/fail gate (e.g. Reasoning / Lean)"* | falsified by `crates/eigenius-reasoning/src/validate.rs:163` since eigenius#200 |
 | `reasoning:VerifiedPropositionView`'s description | the emitter *"looks up the view … and reads `canonical_proposition`"* | no such lookup exists (§2.4 route B) |
-| `kernel/src/layer/witness_index.rs` — the filename | an index | nothing is materialised (§3.4, §4.4) |
+| `kernel/src/layer/witness_admission.rs` — the filename | an index | nothing is materialised (§3.4, §4.4) |
 
 The second is the serious one, for the reason §2.4 gives: an ontology is chain-resident and reads as
 current in a way a code comment does not.
