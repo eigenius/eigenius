@@ -21,7 +21,7 @@
 # (`notebooks/examples/lean-verification-demo.eigon.json`) which
 # bundles the nine chain resources the audit chain walks through:
 # the Patient class, the `Healthy` axiom its propositions apply, two
-# named individuals, a justification:Claim about each (one of which
+# named individuals, a justification:Declaration about each (one of which
 # carries the `canonical_proposition` the proof is checked against),
 # RuntimePackageMirror, LeanProofPayload (the `lean4export` bytes),
 # and LeanProofTerm. AutoOnLoad fires
@@ -49,7 +49,7 @@
 #   - Patient                       — the class
 #   - Healthy                       — the predicate, an eigentt:Axiom
 #   - patient_1 / patient_2         — named individuals (eigentt:Axiom). Entities: no proposition
-#   - claim_patient_1_healthy       — justification:Claim, carrying Healthy(patient_1)
+#   - claim_patient_1_healthy       — justification:Declaration, carrying Healthy(patient_1)
 #   - claim_patient_2_healthy       — the same shape about patient_2
 #   - mirror                        — RuntimePackageMirror (the Lake project)
 #   - proof_payload                 — LeanProofPayload (verbatim lean4export bytes)

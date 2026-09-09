@@ -21,7 +21,7 @@ The most-used reference chapters are:
 - **[`julia-institutions/`](julia-institutions/)** — slow-walk tutorials for each of the v1 Julia institutions
 - **[`lean-institution/`](lean-institution/)** — the platform's first verification institution: Lean 4 in-process via `nanoda_lib`
 - **[`statistics-institution/`](statistics-institution/)** — D52 measurement-statistics institution: recompute statistical claims from raw replicate data, opinionated stances (one-sided witnessing, dual-verdict outlier exclusion, Passing-Bablok for method comparison, epistemic-scope guard)
-- **[`justification-logic/`](justification-logic/)** — D39 justification-logic institution: type-check `justification:Certificate` certificates against (justification, proposition) pairs, composing chain artifacts as evidence through the D49 witness-index mechanism
+- **[`justification-logic/`](justification-logic/)** — D39 justification-logic institution: type-check `justification:Grounds` certificates against (justification, proposition) pairs, composing chain artifacts as evidence through the D49 witness-index mechanism
 
 ## Chapters
 
@@ -96,7 +96,7 @@ Passing-Bablok, §7.4 epistemic-scope guard). See
 ### Reasoning institution (D39)
 
 The platform's justification-logic institution. In-process; type-checks
-`justification:Certificate(justification, proposition)` certificates against
+`justification:Grounds(justification, proposition)` certificates against
 justification:Conclusion resources at commit. Grounding constructors consume
 chain witnesses admitted by the D49 witness index, composing chain
 artifacts (axioms, observations, statistics verdicts, formal proofs)

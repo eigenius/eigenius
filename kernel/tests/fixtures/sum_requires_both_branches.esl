@@ -37,11 +37,11 @@ resource screen:warrant_two_source_agreement : prov:Source {
     core:short_name = "warrant_two_source_agreement";
 }
 
-resource screen:review_a : justification:Claim {
+resource screen:review_a : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_two_source_agreement;
     prov:rationale    = "First independent review designates EIG_0291 a strong inhibitor.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
     );
 }
@@ -53,11 +53,11 @@ resource screen:review_a_trace : prov:DeclarationTrace {
     prov:timestamp    = "2026-04-10T09:00:00Z";
 }
 
-resource screen:review_b : justification:Claim {
+resource screen:review_b : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_two_source_agreement;
     prov:rationale    = "Second independent review reaches the same designation.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
     );
 }
@@ -72,12 +72,11 @@ resource screen:review_b_trace : prov:DeclarationTrace {
 // ─── The conclusion that SHOULD commit: both branches ground ───────
 
 resource screen:concl_two_real_sources : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares. Its
     // `term` and `type` arguments are declared `eigentt:Term`, so each is a
     // `type_expr(...)`, and the `alias` bindings — term-surface sugar — scope
     // inside each one rather than over the judgement.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             A = "urn:eigenius:demo:screen:review_a",
@@ -91,6 +90,6 @@ resource screen:concl_two_real_sources : justification:Conclusion {
             B = "urn:eigenius:demo:screen:review_b",
             P = screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
         in
-        justification:Certificate(
+        justification:Grounds(
                    P )) );
 }

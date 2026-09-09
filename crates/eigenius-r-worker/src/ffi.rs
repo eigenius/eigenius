@@ -37,7 +37,7 @@ use std::sync::{Mutex, OnceLock};
 use eigenius_kernel::ontology::eigon_cbor;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::{Resource, Value};
-use eigenius_kernel::ontology::well_known::{CANONICAL_PROPOSITION, IS_A};
+use eigenius_kernel::ontology::well_known::{IS_A, PROPOSITION};
 use eigenius_runtime_substrate::rpc::protocol::HealthInfo;
 
 use crate::RWorker;
@@ -641,7 +641,7 @@ fn codec_names() -> &'static eigenius_kernel::program::eigentt_type_mirror::Code
 }
 
 /// `r_eigon_set_proposition(bid, pred_iri, args)` → status. Sets the
-/// inherited `reflection:canonical_proposition` slot to a D47-encoded
+/// inherited `justification:proposition` slot to a D47-encoded
 /// predicate application `pred(arg₁, …, argₙ)` over string-literal
 /// arguments — the same term shape the statistics institution emits, so a
 /// wrapped-R `DerivedResource` composes with the reasoning institution
@@ -686,7 +686,7 @@ pub unsafe extern "C" fn r_eigon_set_proposition(bid: SEXP, pred_iri: SEXP, args
         };
     }
 
-    let prop = Iri::parse(CANONICAL_PROPOSITION).expect("CANONICAL_PROPOSITION is a static IRI");
+    let prop = Iri::parse(PROPOSITION).expect("PROPOSITION is a static IRI");
     let mut reg = builder_registry().lock().unwrap();
     let rc = match reg.get_mut(&id) {
         Some(r) => {

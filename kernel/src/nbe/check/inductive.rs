@@ -401,7 +401,7 @@ impl Implicits {
 ///
 /// A binder occurring in no result index is *not* solved here — `app`'s `A`, which occurs only in
 /// an argument type. Neither is one occurring only under a higher-order pattern, since `unify` is
-/// the first-order fragment (D48 §3.1): `spec_poly`'s `P` in `Certificate(P(x))` stays unsolved.
+/// the first-order fragment (D48 §3.1): `instantiate`'s `P` in `Certificate(P(x))` stays unsolved.
 /// The argument loop finishes the first kind; the second is an error naming the binder.
 ///
 /// In inference mode there is nothing to unify against, so every meta comes back unsolved.
@@ -465,7 +465,7 @@ fn open_implicit_binders(
 /// Before this returned a type, the `Exp::InductiveCtor` inference arm passed empty expected
 /// indices and answered `indices: []`, which made **every indexed inductive's constructor
 /// un-inferable** (`index arity mismatch (actual has N, expected has 0)`) and would have answered
-/// with the wrong type had it passed. That is not a corner case: `justification:Certificate` is
+/// with the wrong type had it passed. That is not a corner case: `justification:Grounds` is
 /// indexed, so no `justification:certificate` could pass validation Rule 21 at commit — including the
 /// WRN case study's own `chain/04-phase1-recompute-conclusions.esl` (found 2026-08-03).
 pub(super) fn check_inductive_ctor_args(
@@ -1369,7 +1369,7 @@ mod tests {
 
     /// `Box : Set -> Set` with `wrap : forall (A : Set) => A -> Box(A)`, where `A` is **implicit**.
     ///
-    /// One index (`A`) and one explicit argument, which is the shape `justification:Certificate`'s
+    /// One index (`A`) and one explicit argument, which is the shape `justification:Grounds`'s
     /// composition constructors have: a binder the result type determines, and a value argument.
     fn box_decl(implicit: bool) -> std::sync::Arc<InductiveDecl> {
         let iri = crate::ontology::iri::Iri::parse("urn:test:Box").unwrap();
@@ -1482,7 +1482,7 @@ mod tests {
         check(&mut ctx, &term, &expected).expect("`wrap(One, unit)` checks against `Box(One)`");
     }
 
-    /// `C : Set -> Set` with `justification:Certificate.app`'s exact shape:
+    /// `C : Set -> Set` with `justification:Grounds.app`'s exact shape:
     ///
     /// ```text
     /// lit : forall (X : Set) => C(X)
@@ -2661,7 +2661,7 @@ mod tests {
     // hypothesis that lets recursive calls on `n` type-check as
     // strictly-decreasing.
 
-    /// `justification:Certificate.spec_poly`'s shape, at `C : Set -> Set`:
+    /// `justification:Grounds.instantiate`'s shape, at `C : Set -> Set`:
     ///
     /// ```text
     /// lit  : forall (X : Set) => C(X)
@@ -2734,7 +2734,7 @@ mod tests {
     }
 
     /// The domain `T` is instantiated at `String` and `x` at a string literal, mirroring every
-    /// real `spec_poly` call site, where `x` is an IRI. A literal infers; `Exp::Unit` does not,
+    /// real `instantiate` call site, where `x` is an IRI. A literal infers; `Exp::Unit` does not,
     /// and the difference decides whether `T` is reachable at all.
     fn spec_string_domain() -> Exp {
         Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::String)

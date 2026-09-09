@@ -28,7 +28,7 @@
 //! makes the counterfactual answers below sharp — every ground is load-bearing.
 //!
 //! Two constructors left this term in the three-grounds change and neither altered its support.
-//! The rule's application at WRN was `SpecStr(Declared(rule), "WRN")`; `spec_poly` now leaves the
+//! The rule's application at WRN was `SpecStr(Declared(rule), "WRN")`; `instantiate` now leaves the
 //! term at `Declared(rule)`, because narrowing a universal to an instance changes the proposition
 //! and introduces no ground. The two recomputes were `DerivedEvidence` leaves; they are
 //! `Declared` because the chain declares each recompute's reproducibility, which is the claim they
@@ -49,8 +49,8 @@ const DRIVE: &str = "urn:eigenius:pub:wrn:dd_drive";
 fn decl() -> Arc<InductiveDecl> {
     Arc::new(InductiveDecl {
         uparams: Vec::new(),
-        iri: Iri::parse("urn:eigenius:justification:Certificate").unwrap(),
-        name: "justification:Certificate".to_string(),
+        iri: Iri::parse("urn:eigenius:justification:Grounds").unwrap(),
+        name: "justification:Grounds".to_string(),
         params: Vec::new(),
         indices: Vec::new(),
         sort: Exp::sort(1),

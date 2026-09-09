@@ -20,7 +20,7 @@
 //! ```text
 //!   enc:DiscourseUnit    prose + character span in the source
 //!   enc:ScopedUnit       (thin — unscoped; the whole chain is the scope)
-//!   enc:EncodedClaim     reflection:canonical_proposition = the parsed Prop, D47-encoded
+//!   enc:EncodedClaim     justification:proposition = the parsed Prop, D47-encoded
 //!   prov:DeclarationTrace ─▶ IsDeclaredAs claim_iri P   ← the witness downstream cites
 //!   enc:DecisionPoint    which reading was taken, out of how many, and on whose authority
 //! ```

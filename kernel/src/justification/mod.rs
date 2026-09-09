@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Projections of a retained `justification:Certificate` — D73 §1.2, eigenius#204.
+//! Projections of a retained `justification:Grounds` — D73 §1.2, eigenius#204.
 //!
 //! **Why this is in the kernel, beside `witness/` rather than inside `nbe/`.** The two
 //! modules answer different questions and stay apart: `witness/` answers *does the chain
@@ -53,7 +53,7 @@
 //! | `App(a, b)` | `{ sa ∪ sb : sa ∈ support(a), sb ∈ support(b) }` — CONJUNCTIVE, both needed |
 //! | `Sum(a, b)` | `support(a) ∪ support(b)` — DISJUNCTIVE, either suffices |
 
-//! There is no specialization row. `spec_poly` used to build `SpecStr(j, tag)`, whose support was
+//! There is no specialization row. `instantiate` used to build `SpecStr(j, tag)`, whose support was
 //! `support(j)` — specialization changes the proposition, not the grounds. Now that the rule leaves
 //! the term at `j`, that identity holds by there being nothing to project.
 //!
@@ -126,7 +126,7 @@ pub struct Leaf {
 /// Why a term could not be projected.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProjectError {
-    /// A constructor outside `justification:Certificate`'s seven forms.
+    /// A constructor outside `justification:Grounds`'s seven forms.
     UnknownCtor(String),
     /// A grounding constructor whose argument is not a string literal IRI.
     MalformedLeaf(String),
@@ -142,7 +142,7 @@ impl std::fmt::Display for ProjectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownCtor(c) => {
-                write!(f, "`{c}` is not a justification:Certificate constructor")
+                write!(f, "`{c}` is not a justification:Grounds constructor")
             }
             Self::MalformedLeaf(c) => {
                 write!(f, "`{c}`'s argument is not a string literal IRI")
@@ -221,10 +221,10 @@ pub fn support(certificate: &Exp) -> Result<Vec<BTreeSet<Leaf>>, ProjectError> {
             Ok(sa)
         }
         // Narrowing a universal to an instance adds no ground, so the support is the premise's.
-        // This is the row the module docs used to say did not exist: `spec_poly` left the term
+        // This is the row the module docs used to say did not exist: `instantiate` left the term
         // index alone, so there was nothing to project. With the term merged into the certificate
         // the node is present in the value and has to be walked through.
-        "spec_poly" => {
+        "instantiate" => {
             let inner = args.last().ok_or(ProjectError::Arity {
                 ctor: ctor.to_string(),
                 got: 0,
@@ -303,8 +303,8 @@ mod tests {
     fn decl() -> Arc<InductiveDecl> {
         Arc::new(InductiveDecl {
             uparams: Vec::new(),
-            iri: Iri::parse("urn:eigenius:justification:Certificate").unwrap(),
-            name: "justification:Certificate".to_string(),
+            iri: Iri::parse("urn:eigenius:justification:Grounds").unwrap(),
+            name: "justification:Grounds".to_string(),
             params: Vec::new(),
             indices: Vec::new(),
             sort: Exp::sort(1),
@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn specialization_is_no_longer_a_term_at_all() {
-        // `spec_poly` used to build `SpecStr(j, tag)` and `support` passed the grounds through it,
+        // `instantiate` used to build `SpecStr(j, tag)` and `support` passed the grounds through it,
         // because instantiating a universal changes the PROPOSITION and not what it rests on. The
         // rule now leaves the term at `j`, so that pass-through is the identity on nothing —
         // and a term still carrying the old constructor is refused rather than silently projected.

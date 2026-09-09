@@ -172,7 +172,7 @@ fn synthetic_sentence(
     // instead of three.
     if let (Some(p), Some(j), Some(c)) = (proposition, justification, certificate) {
         r.set(
-            Iri::parse("urn:eigenius:justification:judgement").unwrap(),
+            Iri::parse("urn:eigenius:justification:grounds_judgement").unwrap(),
             judgement(p, j, c),
         );
     }
@@ -280,7 +280,7 @@ fn build_chain_with_declared_axiom(target_iri_str: &str) -> ExecutionContext {
     )
 }
 
-/// Build a `justification:Certificate.declared(iri, P, witness_placeholder)` D47
+/// Build a `justification:Grounds.declared(iri, P, witness_placeholder)` D47
 /// certificate where the witness slot is `UnitVal` — the kernel
 /// ignores the user's value and synthesizes the witness. `P` is
 /// supplied as a pre-encoded D47 sub-tree so callers can mismatch
@@ -296,7 +296,7 @@ fn justified_by_declared_certificate(
             {"ctor": "App", "args": [
                 {"ctor": "App", "args": [
                     {"ctor": "CtorApp", "args": [
-                        "urn:eigenius:justification:Certificate",
+                        "urn:eigenius:justification:Grounds",
                         "declared",
                     ]},
                     {"ctor": "LitString", "args": [iri_str]},
@@ -369,10 +369,7 @@ fn build_chain_with_explicit_canonical_proposition(target_iri_str: &str) -> Exec
         Iri::parse(wk::DESCRIPTION).unwrap(),
         Value::String("A declared axiom standing in for a real class under test.".to_string()),
     );
-    target.set(
-        Iri::parse(wk_local::CANONICAL_PROPOSITION).unwrap(),
-        prop_value,
-    );
+    target.set(Iri::parse(wk_local::PROPOSITION).unwrap(), prop_value);
 
     let trace_iri_str = format!("{target_iri_str}-decl-trace");
     let mut trace = Resource::new(Iri::parse(&trace_iri_str).unwrap());
@@ -497,7 +494,7 @@ fn a_certificate_matching_an_admitted_witness_type_checks() {
     // The headline test: a complete justified-reasoning commit
     // validates clean. Chain has a DeclarationTrace
     // emitting an admitted `IsDeclaredAs(target, Asserts(target))`
-    // witness; the certificate's `justification:Certificate.declared` ctor's third
+    // witness; the certificate's `justification:Grounds.declared` ctor's third
     // arg slot is filled in by the kernel's Phase 9 synthesis hook;
     // the type-check succeeds.
     let target = "urn:test:phase10:axiom";
@@ -610,7 +607,7 @@ fn a_certificate_citing_an_untraced_iri_is_rejected() {
 #[test]
 fn arity_mismatch_in_certificate_is_rejected() {
     // Regression check on the arity-mismatch path: a certificate
-    // whose justification:Certificate.declared application is missing the witness
+    // whose justification:Grounds.declared application is missing the witness
     // arg slot (1 App-arg instead of 3) fails the kernel's
     // `check_inductive_ctor_args` arity assertion. It is rejected for
     // a different reason than missing-witness — confirming the
@@ -629,7 +626,7 @@ fn arity_mismatch_in_certificate_is_rejected() {
         "ctor": "Declared",
         "args": ["urn:foo"],
     });
-    // Certificate with only ONE App-arg — `justification:Certificate.declared`
+    // Certificate with only ONE App-arg — `justification:Grounds.declared`
     // expects three (iri, P, witness). The one supplied is a `Sort`, so it lands on the `iri`
     // binder and mismatches there; since B3 that binder is `core:iri`, which is what the
     // diagnostic names.
@@ -637,7 +634,7 @@ fn arity_mismatch_in_certificate_is_rejected() {
         "ctor": "App",
         "args": [
             {"ctor": "CtorApp", "args": [
-                "urn:eigenius:justification:Certificate",
+                "urn:eigenius:justification:Grounds",
                 "declared",
             ]},
             {"ctor": "Sort", "args": [{"ctor": "Zero", "args": []}]},
@@ -697,10 +694,7 @@ fn a_transcribed_external_run_admits_declared_not_observed() {
         Iri::parse(wk::DECLARED_BY).unwrap(),
         Value::String("urn:eigenius:prov:agent:unattributed".into()),
     );
-    artifact.set(
-        Iri::parse(wk::CANONICAL_PROPOSITION).unwrap(),
-        term_value(&prop),
-    );
+    artifact.set(Iri::parse(wk::PROPOSITION).unwrap(), term_value(&prop));
 
     let mut trace = Resource::new(Iri::parse("urn:test:v205:transcribed-trace").unwrap());
     trace.set(
@@ -756,15 +750,15 @@ fn a_transcribed_external_run_admits_declared_not_observed() {
 
 #[test]
 fn a_conclusion_with_no_judgement_is_rejected() {
-    // `justification:Conclusion` requires `justification:judgement`
+    // `justification:Conclusion` requires `justification:grounds_judgement`
     // (ontologies/justification/justification.esl:303). It used to require three separate
     // slots checked by three paths, with nothing requiring them to be about the same claim.
     let ctx = build_full_chain();
     let errors = commit_and_validate(&ctx, synthetic_sentence(None, None, None));
     assert!(
-        errors
-            .iter()
-            .any(|e| e.contains("urn:eigenius:justification:judgement") && e.contains("missing")),
+        errors.iter().any(
+            |e| e.contains("urn:eigenius:justification:grounds_judgement") && e.contains("missing")
+        ),
         "a Conclusion carrying no judgement must be rejected, got:\n{}",
         errors.join("\n")
     );
@@ -784,7 +778,7 @@ fn a_judgement_the_codec_cannot_read_is_rejected() {
     let ctx = build_full_chain();
     let mut sentence = synthetic_sentence(None, None, None);
     sentence.set(
-        Iri::parse("urn:eigenius:justification:judgement").unwrap(),
+        Iri::parse("urn:eigenius:justification:grounds_judgement").unwrap(),
         term_value(&json!({"ctor": "UnitVal", "args": []})),
     );
     let errors = commit_and_validate(&ctx, sentence);

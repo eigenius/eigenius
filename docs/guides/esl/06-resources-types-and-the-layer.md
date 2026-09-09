@@ -67,7 +67,7 @@ Layer access happens at three moments:
 
 3. **Constraint firing** ([`kernel/src/nbe/check/mod.rs`](../../../kernel/src/nbe/check/mod.rs) `NativeDecide` arm). When a property's declared constraint (e.g., `min_value`, regex pattern, or institution-decided predicate) needs to fire during type-check, the kernel reaches through the property IRI to the layer to find the constraint, then dispatches.
 
-4. **Chain-witness admission** (see [§6.4a](#6-4a-witness-predicates-admitting-propositions-from-layer-state) below). When the type-checker elaborates a `justification:Certificate.declared` / `.observed` / `.verified` grounding constructor, it consults the layer's witness index for an admitted `IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs` predicate at the cited IRI + proposition.
+4. **Chain-witness admission** (see [§6.4a](#6-4a-witness-predicates-admitting-propositions-from-layer-state) below). When the type-checker elaborates a `justification:Grounds.declared` / `.observed` / `.verified` grounding constructor, it consults the layer's witness index for an admitted `IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs` predicate at the cited IRI + proposition.
 
 Two consequences:
 
@@ -91,7 +91,7 @@ Each says "the resource at this IRI was committed with this canonical propositio
 |---|---|
 | `IsDeclaredAs(iri, P)` | `prov:DeclarationTrace` + a resource at IRI with `canonical_proposition = P` |
 | `IsObservedAs(iri, P)` | `prov:ObservationTrace` + a resource at IRI with `canonical_proposition = P` |
-| `IsVerifiedAs(iri, P)` | a `justification:Conclusion` at IRI carrying a `justification:proof` of `P` |
+| `IsVerifiedAs(iri, P)` | a `justification:Conclusion` at IRI carrying a `justification:proof_judgement` of `P` |
 
 **Three families, and `prov:ProgramTrace` admits none of them.** There is no
 `IsDerivedAs`: the fact that a computation ran grounds nothing, because a computed

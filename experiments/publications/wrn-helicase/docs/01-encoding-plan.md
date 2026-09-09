@@ -279,7 +279,7 @@ Nodes from §1; each edge `A ⇐ B` reads "A is justified by B". This is the `ju
 - `C-MMR ⇐ {HCT116-Ch3+5 Observed[22], MLH1-KO Observed, FM-HCR Observed[49], M-ANOVA}` and `⇐` the Declared interpretation that dMMR contributes-but-not-fully (citing analogy [26]).
 - Cross-cutting Declared axioms: `AX-SL` (synthetic-lethality schema [1]), `AX-DSB-TOX` (DSBs toxic independent of p53 [19]) — used to license `C-MMR`'s "p53-impaired MSI still sensitive" sub-claim.
 
-Encoding each edge as a kernel-checked `justification:Certificate` certificate is the Phase-by-phase work; the headline is that `C-MAIN`'s certificate composes the entire graph, and the data-backed leaves (`D-DIFF`, `D-REFINE`, …) carry *recomputed* warrants.
+Encoding each edge as a kernel-checked `justification:Grounds` certificate is the Phase-by-phase work; the headline is that `C-MAIN`'s certificate composes the entire graph, and the data-backed leaves (`D-DIFF`, `D-REFINE`, …) carry *recomputed* warrants.
 
 ---
 

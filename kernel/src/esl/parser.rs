@@ -2017,7 +2017,7 @@ impl<'a> Parser<'a> {
     ///   [`IndexKind::Named`].
     /// - A sort literal (`Prop` / `Set` / `Type N`) — needed for
     ///   indexed inductives that range over types as values, e.g.
-    ///   `justification:Certificate : Prop → Type 2`
+    ///   `justification:Grounds : Prop → Type 2`
     ///   and `ChainWitness.IsDeclaredAs : core:string → Prop → Prop`;
     ///   carries through as [`IndexKind::Sort`].
     ///
@@ -3870,7 +3870,7 @@ mod tests {
 
     #[test]
     fn data_indexed_accepts_sort_literals_in_intermediate_indices() {
-        // D39 §5 justification:Certificate / D49 ChainWitness predicates need Sort
+        // D39 §5 justification:Grounds / D49 ChainWitness predicates need Sort
         // literals (Prop, Set, Type N) as intermediate index kinds, not
         // just bare names or class IRIs.
         let file = parse_str(

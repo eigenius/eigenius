@@ -1330,12 +1330,12 @@ fn wrong_shape(ctor: &'static str, slot: usize, details: &str) -> DecodeError {
     }
 }
 
-/// Build a `justification:Certificate(j, P)` TYPE from encoded indices.
+/// Build a `justification:Grounds(j, P)` TYPE from encoded indices.
 ///
 /// The inverse of [`certificate_indices`]. An indexed inductive applied to its
 /// indices encodes as nested `App`s over a `ConstRef` head.
 pub fn certificate_type(p: &Value, names: &CodecNames) -> Result<Value, EncodeError> {
-    let head = const_ref(names, "urn:eigenius:justification:Certificate", &[])?;
+    let head = const_ref(names, "urn:eigenius:justification:Grounds", &[])?;
     term(names, "App", vec![head, p.clone()])
 }
 
@@ -1459,7 +1459,7 @@ pub fn decode_judgement(value: &Value, layer: &Layer) -> Result<Judgement, Decod
     }
 }
 
-/// Project the proposition out of a `justification:Certificate(P)` type.
+/// Project the proposition out of a `justification:Grounds(P)` type.
 ///
 /// A certificate type is the indexed inductive applied to its one index, so it reaches here as
 /// `App(Const(Certificate), P)` — the shape D76 Phase B leaves for a type former applied to
@@ -1481,7 +1481,7 @@ pub fn certificate_indices(typ: &Exp) -> Option<&Exp> {
     let names_certificate = matches!(
         head,
         Exp::Const(iri, _) | Exp::EigonClass(iri) | Exp::EigonAxiom(iri)
-            if iri.as_str() == "urn:eigenius:justification:Certificate"
+            if iri.as_str() == "urn:eigenius:justification:Grounds"
     );
     names_certificate.then_some(p)
 }

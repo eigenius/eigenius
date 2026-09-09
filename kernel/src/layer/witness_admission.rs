@@ -83,12 +83,12 @@ use crate::witness::{hash_proposition_exp, WitnessCategory, WitnessKey};
 /// D54: the `justification:Conclusion` class IRI and its `proposition`
 /// property. Named here (rather than in `well_known`) because the D49
 /// witness machinery is the one kernel site that is intrinsically
-/// reasoning-aware — it builds the witnesses `justification:Certificate` consumes.
-const REASONING_SENTENCE: &str = "urn:eigenius:justification:Conclusion";
-const CONCLUSION_JUDGEMENT: &str = "urn:eigenius:justification:judgement";
+/// reasoning-aware — it builds the witnesses `justification:Grounds` consumes.
+const CONCLUSION_CLASS: &str = "urn:eigenius:justification:Conclusion";
+const CONCLUSION_GROUNDS_JUDGEMENT: &str = "urn:eigenius:justification:grounds_judgement";
 /// The conclusion's optional PROOF judgement — `holds(logic, t, P)`. This, and
 /// not the certificate judgement, is what establishes `Verified`.
-const CONCLUSION_PROOF: &str = "urn:eigenius:justification:proof";
+const CONCLUSION_PROOF_JUDGEMENT: &str = "urn:eigenius:justification:proof_judgement";
 
 /// Does `layer` itself admit `key`?
 ///
@@ -123,8 +123,8 @@ pub fn layer_admits_witness(layer: &Layer, key: &WitnessKey) -> bool {
     if let Some(resource) = layer.get_resource(&key.iri) {
         let is_a = resource.is_a();
         let emitted = match key.category {
-            WitnessCategory::Verified if is_a.iter().any(|c| c.as_str() == REASONING_SENTENCE) => {
-                emit_from_reasoning_sentence(layer, &resource)
+            WitnessCategory::Verified if is_a.iter().any(|c| c.as_str() == CONCLUSION_CLASS) => {
+                emit_from_conclusion(layer, &resource)
             }
             _ => None,
         };
@@ -199,7 +199,7 @@ pub fn is_witness_candidate(resource: &Resource) -> bool {
         let c = c.as_str();
         trace_category(c).is_some()
             || c == wk::INSTITUTION_EMITTED_DERIVATION
-            || c == REASONING_SENTENCE
+            || c == CONCLUSION_CLASS
     })
 }
 
@@ -228,7 +228,7 @@ pub fn is_witness_candidate(resource: &Resource) -> bool {
 /// for it exactly as it does for the other three — nothing about the Verified category needs
 /// special handling here.
 ///
-/// The consequence of the omission was a witness with no artifact: `emit_from_reasoning_sentence`
+/// The consequence of the omission was a witness with no artifact: `emit_from_conclusion`
 /// synthesised a Verified key straight from the sentence, so every Verified witness on every chain
 /// was traceless, breaking D39 §5's invariant that the trace and the witness are two projections of
 /// one validator event.
@@ -316,10 +316,10 @@ where
 ///
 /// The conclusion carries up to two judgements, and they say different things:
 ///
-/// - `justification:judgement` is `holds(kernel, c, Certificate(j, P))` — *a
+/// - `justification:grounds_judgement` is `holds(kernel, c, Certificate(j, P))` — *a
 ///   checker verified the certificate c*. It does **not** say `P`. A
 ///   certificate records the grounds a claim rests on; it is not factive.
-/// - `justification:proof` is `holds(logic, t, P)` — *a checker verified `t`
+/// - `justification:proof_judgement` is `holds(logic, t, P)` — *a checker verified `t`
 ///   against `P` itself*. That is factive, and it is what `Verified` means.
 ///
 /// **Only the second admits a witness.** Minting `Verified` from the first was
@@ -336,9 +336,9 @@ where
 /// `P` directly; `hash_proposition_exp` hashes the decoded `Exp`, so both sides
 /// hash the same term — see
 /// `a_projected_proposition_hashes_as_the_same_proposition_stored_flat`.
-fn emit_from_reasoning_sentence(layer: &Layer, sentence: &Resource) -> Option<WitnessKey> {
+fn emit_from_conclusion(layer: &Layer, sentence: &Resource) -> Option<WitnessKey> {
     let sentence_iri = sentence.id().cloned()?;
-    let proof_iri = Iri::parse(CONCLUSION_PROOF).ok()?;
+    let proof_iri = Iri::parse(CONCLUSION_PROOF_JUDGEMENT).ok()?;
     let stored = sentence.get(&proof_iri)?;
     let proof = crate::program::eigentt_type_mirror::decode_judgement(stored, layer).ok()?;
 
@@ -350,7 +350,7 @@ fn emit_from_reasoning_sentence(layer: &Layer, sentence: &Resource) -> Option<Wi
             { field::OPERATION } = operation::WITNESS_DECODE,
             { field::ERROR_KIND } = "proof_is_a_certificate",
             resource_iri = %sentence_iri,
-            "justification:proof holds a certificate judgement, not a proof of the \
+            "justification:proof_judgement holds a certificate judgement, not a proof of the \
              proposition; no Verified witness admitted"
         );
         return None;
@@ -389,7 +389,7 @@ fn emit_from_trace(
     // the judgement, whose inputs the trace also pins (`prov:permitted_axioms`,
     // `prov:checker_identity`), so the verdict is recomputable rather than postulated.
     //
-    // The refuse-a-certificate check is [`emit_from_reasoning_sentence`]'s, for the same reason: a
+    // The refuse-a-certificate check is [`emit_from_conclusion`]'s, for the same reason: a
     // judgement whose type is a `Certificate(...)` says a checker verified the CERTIFICATE, which
     // establishes nothing about the proposition, and minting `Verified` from one launders a
     // conclusion resting on nothing but `Declared(...)` into a proof one citation downstream.
@@ -448,16 +448,16 @@ fn judgement_proposition_hash(layer: &Layer, trace: &Resource, stored: &Value) -
 ///
 /// Three slots can hold it, tried in order:
 ///
-/// 1. `reflection:canonical_proposition` — the general slot.
+/// 1. `justification:proposition` — the general slot.
 /// 2. `justification:proposition` — where a `justification:Conclusion` keeps the same thing under a different
 ///    name. **Required for correctness, not convenience** (eigenius#200): the self-attesting path
-///    [`emit_from_reasoning_sentence`] reads slot 2, so without this arm a `VerificationTrace`
+///    [`emit_from_conclusion`] reads slot 2, so without this arm a `VerificationTrace`
 ///    targeting a sentence would fall through to slot 3 and key the witness against
 ///    `Asserts(sentence_iri)` — a DIFFERENT hash from the one the sentence itself emits, and the
 ///    one no certificate cites.
 /// 3. the D39 §4.1 default `Asserts(target_iri)`.
 fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -> Option<[u8; 32]> {
-    if let Some(encoded) = Iri::parse(wk::CANONICAL_PROPOSITION)
+    if let Some(encoded) = Iri::parse(wk::PROPOSITION)
         .ok()
         .and_then(|i| target.get(&i))
     {
@@ -468,12 +468,8 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
     // exists at all: without it a trace targeting a conclusion falls through to
     // `Asserts(iri)`, a different hash from the one the conclusion itself
     // emits, and no certificate cites that.
-    if target
-        .is_a()
-        .iter()
-        .any(|c| c.as_str() == REASONING_SENTENCE)
-    {
-        if let Some(stored) = Iri::parse(CONCLUSION_JUDGEMENT)
+    if target.is_a().iter().any(|c| c.as_str() == CONCLUSION_CLASS) {
+        if let Some(stored) = Iri::parse(CONCLUSION_GROUNDS_JUDGEMENT)
             .ok()
             .and_then(|i| target.get(&i))
         {
@@ -494,7 +490,7 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
 /// encodes via the D47 codec, and hashes.
 ///
 /// **Both ends of the witness machinery use the same construction.**
-/// When a future `justification:Certificate.declared(iri, Asserts(iri))` constructor
+/// When a future `justification:Grounds.declared(iri, Asserts(iri))` constructor
 /// is type-checked, the consumer side (D49 §5 / `synthesize_chain_witness`)
 /// receives the same `Exp` from the user's proof term, encodes it via
 /// the same `encode_type` path, and arrives at the same hash. The
@@ -529,7 +525,7 @@ pub fn default_asserts_proposition_hash(layer: &Layer, target_iri: &Iri) -> Opti
 /// Public synthesis variant of [`default_asserts_proposition_hash`]
 /// that returns the full `Exp` rather than the hash. Used by the
 /// `synthesize_chain_witness` consumer site when the agent's
-/// `justification:Certificate.declared` constructor doesn't carry an explicit
+/// `justification:Grounds.declared` constructor doesn't carry an explicit
 /// proposition (i.e. the consumer wants the default to compare
 /// against). Same `Asserts(iri)` shape; same Exp; same hash.
 pub fn default_asserts_proposition(
@@ -594,16 +590,16 @@ pub fn lookup_chain_witness(layer: &Layer, key: &WitnessKey) -> bool {
 /// **D49 §5 synthesis algorithm — Phase 6 foundation.** Look up a
 /// `ChainWitness` inhabitant for `(category, iri, proposition)` and, on
 /// hit, return a `Val::ChainWitness(key)` value the kernel's NbE checker
-/// can use as the synthesised witness argument to a `justification:Certificate.*`
+/// can use as the synthesised witness argument to a `justification:Grounds.*`
 /// constructor. On miss, surface the precise diagnostic D49 §5
 /// specifies — naming the missing predicate family, the IRI, and what
-/// the chain needs to admit for this `justification:Certificate.*` constructor to
+/// the chain needs to admit for this `justification:Grounds.*` constructor to
 /// become well-typed.
 ///
 /// This function is the kernel-side surface the D39 Reasoning
-/// institution's `justification:Certificate` constructor type-checker calls into. The
+/// institution's `justification:Grounds` constructor type-checker calls into. The
 /// integration site — where `check_infer` in `nbe/check.rs` recognises a
-/// `justification:Certificate.declared` / `.observed` / `.derived` / `.verified`
+/// `justification:Grounds.declared` / `.observed` / `.derived` / `.verified`
 /// constructor and dispatches here — lands during D39 implementation
 /// (per D51 gap 3); this function is the stable contract that integration
 /// can call against starting today.
@@ -641,19 +637,19 @@ pub fn synthesize_chain_witness(
         // P7 names this "the system's most-used error message", and what makes it usable is that
         // it says what to COMMIT, not merely that a lookup missed. The remedy differs by family
         // and used to be stated as one: every miss recommended a matching
-        // `reflection:canonical_proposition`, which is the fix for two of the three and no help
+        // `justification:proposition`, which is the fix for two of the three and no help
         // at all for the third — nobody reaches `Verified` by editing a property.
         let (ctor, remedy) = match category {
             WitnessCategory::Declared => (
                 "declared",
                 format!(
-                    "commit a prov:DeclarationTrace whose prov:resource is {iri}, and give {iri}                      a reflection:canonical_proposition matching the proposition above"
+                    "commit a prov:DeclarationTrace whose prov:resource is {iri}, and give {iri}                      a justification:proposition matching the proposition above"
                 ),
             ),
             WitnessCategory::Observed => (
                 "observed",
                 format!(
-                    "commit a prov:ObservationTrace whose prov:resource is {iri}, and give {iri} a                      reflection:canonical_proposition matching the proposition above"
+                    "commit a prov:ObservationTrace whose prov:resource is {iri}, and give {iri} a                      justification:proposition matching the proposition above"
                 ),
             ),
             // No property an author can write reaches this one, which is the point of the grade.
@@ -665,7 +661,7 @@ pub fn synthesize_chain_witness(
             ),
         };
         Err(format!(
-            "no admitted {} witness for IRI {} with the supplied proposition, so the              justification:Certificate.{} constructor citing it is not well-typed. To admit it:              {}. Where the resource carries no canonical_proposition the default proposition is              Asserts({}), so a certificate must cite that instead.",
+            "no admitted {} witness for IRI {} with the supplied proposition, so the              justification:Grounds.{} constructor citing it is not well-typed. To admit it:              {}. Where the resource carries no canonical_proposition the default proposition is              Asserts({}), so a certificate must cite that instead.",
             category.label(),
             iri,
             ctor,
@@ -696,7 +692,7 @@ mod tests {
             Value::Array(vec![Value::String(wk::CLASS.to_string())]),
         );
         let encoded = encode_type(prop, crate::testing::codec_names()).unwrap();
-        r.set(iri(wk::CANONICAL_PROPOSITION), encoded);
+        r.set(iri(wk::PROPOSITION), encoded);
         r
     }
 
@@ -712,7 +708,7 @@ mod tests {
         let mut r = Resource::new(iri(sentence_iri));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(REASONING_SENTENCE.to_string())]),
+            Value::Array(vec![Value::String(CONCLUSION_CLASS.to_string())]),
         );
         // `holds(kernel, t, P)` — the proof's TYPE is the proposition itself,
         // with no certificate to unwrap. That is what makes it factive.
@@ -729,7 +725,7 @@ mod tests {
             crate::testing::codec_names(),
         )
         .unwrap();
-        r.set(iri(CONCLUSION_PROOF), proof);
+        r.set(iri(CONCLUSION_PROOF_JUDGEMENT), proof);
         r
     }
 
@@ -1026,9 +1022,9 @@ mod tests {
     /// `Judgement(kernel, c, Certificate(j, P))` says *a checker verified the
     /// certificate c*. It does NOT say `P`. Only `Judgement(L, t, P)` — a
     /// proof term checked against the proposition itself, which is what
-    /// `justification:proof` carries — establishes `Verified`.
+    /// `justification:proof_judgement` carries — establishes `Verified`.
     ///
-    /// Closed by keying the `Verified` witness off `justification:proof` —
+    /// Closed by keying the `Verified` witness off `justification:proof_judgement` —
     /// a proof of the proposition — rather than off the certificate judgement.
     #[test]
     fn a_declared_grounded_conclusion_is_not_admitted_as_verified() {
@@ -1044,7 +1040,7 @@ mod tests {
         // premise. Nothing here is proved.
         let j = encode_type(
             &Exp::InductiveCtor(
-                iri("urn:eigenius:justification:Certificate"),
+                iri("urn:eigenius:justification:Grounds"),
                 "declared".into(),
                 vec![
                     Exp::LitString("urn:eigenius:test:p3:premise".into()),
@@ -1067,9 +1063,9 @@ mod tests {
         let mut r = Resource::new(iri(conclusion_iri));
         r.set(
             iri(wk::IS_A),
-            Value::Array(vec![Value::String(REASONING_SENTENCE.to_string())]),
+            Value::Array(vec![Value::String(CONCLUSION_CLASS.to_string())]),
         );
-        r.set(iri(CONCLUSION_JUDGEMENT), judgement);
+        r.set(iri(CONCLUSION_GROUNDS_JUDGEMENT), judgement);
 
         let mut b = LayerBuilder::new("p3_gate", Some(head));
         b.add_resource(r).unwrap();
@@ -1185,7 +1181,7 @@ mod tests {
             let p = encode_type(&prop, crate::testing::codec_names()).unwrap();
             let j = encode_type(
                 &Exp::InductiveCtor(
-                    iri("urn:eigenius:justification:Certificate"),
+                    iri("urn:eigenius:justification:Grounds"),
                     "declared".into(),
                     vec![
                         Exp::LitString("urn:eigenius:test:premise".into()),
@@ -1384,7 +1380,7 @@ mod tests {
             "diagnostic should hint at canonical_proposition: {err}"
         );
         assert!(
-            err.contains("justification:Certificate.declared"),
+            err.contains("justification:Grounds.declared"),
             "diagnostic should name the consuming constructor: {err}"
         );
         assert!(
@@ -1396,7 +1392,7 @@ mod tests {
     /// The remedy a miss names is the one that works for THAT family.
     ///
     /// P7 calls this the system's most-used error message, and it stated one remedy for all
-    /// three: commit a matching `reflection:canonical_proposition`. That is the fix for two of
+    /// three: commit a matching `justification:proposition`. That is the fix for two of
     /// them and no help at all for `Verified`, where no property an author can write reaches the
     /// grade — which is the point of the grade. A diagnostic that sends someone to edit a
     /// property they can edit, for a result only a checker can produce, costs more than saying
@@ -1476,7 +1472,7 @@ mod tests {
         let prop = Exp::sort(0);
 
         // Parented on the bootstrap: a conclusion's judgement names
-        // `eigentt:logic_kernel` and `justification:Certificate` by reference,
+        // `eigentt:logic_kernel` and `justification:Grounds` by reference,
         // and the emitter resolves both through the chain. A parent-less layer
         // could carry the old flat proposition (a bare `Sort`, resolving
         // nothing) but cannot carry a judgement.

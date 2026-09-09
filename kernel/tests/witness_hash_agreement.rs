@@ -865,7 +865,7 @@ fn a_proposition_using_a_definition_type_checks_at_commit() {
         Value::String("urn:eigenius:prov:agent:unattributed".into()),
     );
     claim.set(
-        iri(wk::CANONICAL_PROPOSITION),
+        iri(wk::PROPOSITION),
         encode_type(
             &app2(
                 Exp::EigonAxiom(iri("urn:eigenius:demo:esl:Activity")),
@@ -971,9 +971,10 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         namespace prov = "urn:eigenius:prov";
         namespace core = "urn:eigenius:core";
         namespace p = "urn:eigenius:demo:parse";
+        namespace justification = "urn:eigenius:justification";
         resource p:claim : core:Resource {{
             prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
-            reflection:canonical_proposition = type_expr(
+            justification:proposition = type_expr(
                 {verb_axiom}(
                     eigentt:fst(ontology:the(
                         (exists x0 : {activity} =>
@@ -995,6 +996,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         namespace onco = "urn:eigenius:demo:onco";
         namespace core = "urn:eigenius:core";
         namespace d = "urn:eigenius:demo:def";
+        namespace justification = "urn:eigenius:justification";
 
         def onco:{def_name}(m : Set, g : Set) : Prop =
             {verb_axiom}(
@@ -1005,7 +1007,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
 
         resource d:claim : core:Resource {{
             prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
-            reflection:canonical_proposition = type_expr(
+            justification:proposition = type_expr(
                 onco:{def_name}({MSI}, umlscui:C0388246)
             );
         }}"#
@@ -1026,7 +1028,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
     let prop_of = |rs: &[Resource], id: &str| {
         rs.iter()
             .find(|r| r.id().map(|i| i.as_str()) == Some(id))
-            .and_then(|r| r.get(&iri(wk::CANONICAL_PROPOSITION)).cloned())
+            .and_then(|r| r.get(&iri(wk::PROPOSITION)).cloned())
             .expect("claim carries a proposition")
     };
     let parse_stored = prop_of(&parse_rs, "urn:eigenius:demo:parse:claim");

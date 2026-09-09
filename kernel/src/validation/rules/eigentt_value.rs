@@ -335,7 +335,7 @@ fn paired_slot(prop_iri: &Iri, owner: &Resource) -> Option<(&'static str, Value)
 /// `<class>-<arg>` (D85 §6.1), so the test is exactly that naming: the property belongs to the
 /// class the owner instantiates.
 ///
-/// It matters because a term's ARGUMENTS are open. `justification:Certificate`'s `declared`
+/// It matters because a term's ARGUMENTS are open. `justification:Grounds`'s `declared`
 /// constructor is `forall (iri : core:string, P : Prop) => …`, so the `Pi`'s body mentions
 /// `iri`, which is bound by the `Pi` and by nothing below it. Checking that body standalone
 /// reports `unbound variable in type context: iri` — which is what happened the moment D85 §5
@@ -542,7 +542,7 @@ mod tests {
     }
 
     /// A `reflection:DeclaredResource` carrying `value` in the real
-    /// `reflection:canonical_proposition` slot, whose declared obligation is
+    /// `justification:proposition` slot, whose declared obligation is
     /// `inhabits(Prop)` — so the propositionhood check applies.
     fn claim_with_proposition(id: &str, value: Value) -> Resource {
         let mut r = Resource::new(iri(id));
@@ -554,7 +554,7 @@ mod tests {
             iri("urn:eigenius:prov:was_attributed_to"),
             Value::String("test:eigentt_value".into()),
         );
-        r.set(iri(wk::CANONICAL_PROPOSITION), value);
+        r.set(iri(wk::PROPOSITION), value);
         r
     }
 

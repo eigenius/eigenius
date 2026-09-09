@@ -22,6 +22,7 @@ namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace dr         = "urn:eigenius:demo:dr";
 namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
 
 // ── Provenance activities ────────────────────────────────────────────
 // `prov:was_generated_by` is resource-typed: the event that produced an
@@ -99,7 +100,7 @@ resource dr:dose_response_trace : prov:ObservationTrace {
 resource dr:claim_dose_response_exists : stats:StatisticalAnalysisPlan {
     stats:sample_set = dr:dose_response_2026_04_15;
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         dr:DoseResponseExists("urn:eigenius:demo:dr:experiment_2026_04_15")
     );
 

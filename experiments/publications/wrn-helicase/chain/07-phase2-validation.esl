@@ -82,7 +82,7 @@ resource wrn:va_fail_k577m : bench:ToolArtifact {
     // dodge. `prov:was_generated_by` is uniform across a kernel run and a
     // transcribed one, and the trace still points back through prov:resource.
     prov:was_generated_by = wrnact:fig_2b_2c_rescue;
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ")
     );
 }
@@ -103,11 +103,11 @@ resource wrn:va_fail_k577m_trace : prov:DeclarationTrace {
 // control that sgWRN2 (targeting BOTH endogenous and exogenous WRN) is NOT
 // rescued — attributes the viability loss to WRN inactivation, ruling out
 // off-target effects of the silencing reagent.
-resource wrn:ontarget_rule : justification:Claim {
+resource wrn:ontarget_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_on_target_rescue_logic;
     prov:rationale   = "sgWRN-EIJ silences endogenous WRN but not exogenous WRN cDNA. If re-expressing WRN cDNA rescues the viability loss from sgWRN-EIJ — while a reagent targeting both endogenous and exogenous WRN (sgWRN2) is not rescued — the phenotype is attributable to loss of WRN, not to an off-target effect of the silencing reagent. Hence the depletion phenotype is on-target.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
         ->
         onco:OnTarget("WRN", "MSI_viability")
@@ -123,11 +123,11 @@ resource wrn:ontarget_rule_trace : prov:DeclarationTrace {
 // Helicase-required rule. A catalytic-dead construct that fails to rescue
 // localises the essential activity: helicase-dead (K577M) failing to rescue
 // means the helicase activity is required for the phenotype.
-resource wrn:helicase_rule : justification:Claim {
+resource wrn:helicase_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_structure_function_dissection;
     prov:rationale   = "WRN is both a 3'-5' exonuclease and a 3'-5' helicase, and these activities are SEPARABLE — the E84A and K577M point mutants each ablate one without the other (Swanson 2004 [14], a litclaim premise). Given that separability, rescuing sgWRN-EIJ with catalytic-dead constructs localises the essential activity: a helicase-dead (K577M) cDNA that FAILS to rescue (while WT does) shows the helicase activity is required for the MSI viability phenotype.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         litclaim:WRNActivitiesSeparable("WRN")
         ->
         onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ")
@@ -145,11 +145,11 @@ resource wrn:helicase_rule_trace : prov:DeclarationTrace {
 // Exonuclease-dispensable rule. A catalytic-dead construct that STILL
 // rescues shows that activity is dispensable: exonuclease-dead (E84A)
 // rescuing means the exonuclease activity is not required.
-resource wrn:exo_rule : justification:Claim {
+resource wrn:exo_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_structure_function_dissection;
     prov:rationale   = "Given that WRN's exonuclease and helicase activities are SEPARABLE (E84A ablates only the exonuclease; Swanson 2004 [14], a litclaim premise), an exonuclease-dead (E84A) WRN cDNA that still rescues sgWRN-EIJ (rescue not attenuated) shows the exonuclease activity is dispensable for the MSI viability phenotype.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         litclaim:WRNActivitiesSeparable("WRN")
         ->
         onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
@@ -174,10 +174,9 @@ resource wrn:exo_rule_trace : prov:DeclarationTrace {
 
 // D-ONTARGET: the viability loss is attributable to WRN inactivation.
 resource wrn:concl_ontarget : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             c_rescue_wt_re_0_CLAIM = "urn:eigenius:pub:wrn:rescue_wt_plan_yields_main_effect",
@@ -224,16 +223,15 @@ resource wrn:concl_ontarget : justification:Conclusion {
             RES   = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ"),
             OT    = onco:OnTarget("WRN", "MSI_viability")
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:OnTarget("WRN", "MSI_viability") )) );
 }
 
 // D-HELICASE (a): helicase activity is required.
 resource wrn:concl_helicase_required : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             RULE = "urn:eigenius:pub:wrn:helicase_rule",
@@ -256,16 +254,15 @@ resource wrn:concl_helicase_required : justification:Conclusion {
             RULE_P = SEP -> FR -> RA,
             cert1 = app(declared(RULE, RULE_P), declared(LIT, SEP))
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:RequiresActivity("WRN", "helicase") )) );
 }
 
 // D-HELICASE (b): exonuclease activity is dispensable.
 resource wrn:concl_exo_dispensable : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             c_rescue_e84a__0_CLAIM = "urn:eigenius:pub:wrn:rescue_e84a_plan_yields_main_effect",
@@ -320,7 +317,7 @@ resource wrn:concl_exo_dispensable : justification:Conclusion {
             RULE_P = SEP -> RES -> DA,
             cert1 = app(declared(RULE, RULE_P), declared(LIT, SEP))
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:DispensableActivity("WRN", "exonuclease") )) );
 }
 

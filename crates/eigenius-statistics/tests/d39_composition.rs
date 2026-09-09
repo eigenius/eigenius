@@ -26,7 +26,7 @@
 //!     `App(Declared(plan_iri), Observed(sample_set_iri))` consumes.
 //!  2. The reasoning sentence `App(Declared(rule),
 //!     App(Declared(plan), Observed(s)))` type-checks against
-//!     `justification:Certificate(_, StrongInhibitor(EIG_0291))`.
+//!     `justification:Grounds(_, StrongInhibitor(EIG_0291))`.
 //!
 //! This is the proof point that D52 §8 actually works end-to-end —
 //! the statistics institution produces a chain artifact that D39
@@ -90,7 +90,7 @@ fn build_composition_chain() -> ExecutionContext {
     }
     let reflection = Arc::new(prov_builder.build(LayerStorage::in_memory()));
 
-    // Reasoning layer — provides the justification:Certificate inductive the
+    // Reasoning layer — provides the justification:Grounds inductive the
     // certificate type-checks against.
     let reasoning_source = include_str!("../../../ontologies/justification/justification.esl");
     // Compiled against `reflection`, the layer it sits on: D85 §6.1 values name their
@@ -184,10 +184,10 @@ fn statistics_verdict_composes_with_universal_rule_via_d39() {
     // by its ProgramTrace (see ic50_measurement.rs's
     // `claim_admits_is_derived_as_witness_via_program_trace` test).
     // The IsDeclaredAs witness for the universal rule is admitted by
-    // its DeclarationTrace. spec_poly specializes the rule at
+    // its DeclarationTrace. instantiate specializes the rule at
     // EIG_0291; App composes the specialized implication with the
     // derived evidence; the result type-checks against
-    // `justification:Certificate(_, StrongInhibitor(EIG_0291))`. Holds.
+    // `justification:Grounds(_, StrongInhibitor(EIG_0291))`. Holds.
     assert!(
         errors.is_empty(),
         "the universal rule applied to the confirmatory IC50 claim should derive \

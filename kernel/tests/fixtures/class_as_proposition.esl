@@ -1,6 +1,6 @@
 // A class used where a proposition is required (eigenius#191).
 //
-// `justification:Certificate.declared` binds `P : Prop`, so its second argument is
+// `justification:Grounds.declared` binds `P : Prop`, so its second argument is
 // checked against `Sort(0)`. `screen:CellLine` is an `Exp::EigonClass`, which
 // inference puts in `Sort(1)`; check mode admitted it against every universe,
 // `Prop` included, so the certificate below type-checked and the sentence
@@ -26,12 +26,12 @@ data screen:IsInhibitory : Prop {
 
 // ── The class-as-proposition sentence ────────────────────────────────
 
-resource screen:rule_class : justification:Claim {
+resource screen:rule_class : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_illustrative;
     prov:rationale   = "Declares a CLASS as though it were a proposition.";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         screen:CellLine
     );
 }
@@ -44,31 +44,30 @@ resource screen:rule_class_trace : prov:DeclarationTrace {
 }
 
 resource screen:concl_class : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:screen:CellLine";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms. The type is
     // `Certificate(P)` — one index since the D88 §2 merge, the certificate being the term.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(declared(
                    "urn:eigenius:demo:screen:rule_class",
                    screen:CellLine,
                    Prop
                )),
-               type_expr(justification:Certificate( screen:CellLine )) );
+               type_expr(justification:Grounds( screen:CellLine )) );
 
 
 }
 
 // ── The control: a genuine Prop in the same slot ─────────────────────
 
-resource screen:rule_prop : justification:Claim {
+resource screen:rule_prop : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_illustrative;
     prov:rationale   = "Declares a genuine Prop-sorted proposition.";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         screen:IsInhibitory
     );
 }
@@ -81,19 +80,18 @@ resource screen:rule_prop_trace : prov:DeclarationTrace {
 }
 
 resource screen:concl_prop : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:screen:IsInhibitory";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms. The type is
     // `Certificate(P)` — one index since the D88 §2 merge, the certificate being the term.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(declared(
                    "urn:eigenius:demo:screen:rule_prop",
                    screen:IsInhibitory,
                    Prop
                )),
-               type_expr(justification:Certificate( screen:IsInhibitory )) );
+               type_expr(justification:Grounds( screen:IsInhibitory )) );
 
 
 }

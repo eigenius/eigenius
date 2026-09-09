@@ -291,7 +291,7 @@ pub fn check_proof(
 
 /// The claim's proposition, and what externalizing it needs.
 pub struct ExpectedStatement<'a> {
-    /// The claim's `reflection:canonical_proposition`, decoded.
+    /// The claim's `justification:proposition`, decoded.
     pub proposition: &'a Exp,
     /// Resolves a chain IRI's `core:short_name` for D30's mangling.
     pub layer: &'a Layer,

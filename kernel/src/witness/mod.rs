@@ -16,11 +16,11 @@
 //!
 //! Soundness boundary for the D39 Reasoning institution: the four
 //! `ChainWitness.IsXxAs : core:iri → Prop → Prop` predicate families are
-//! consumed by the `justification:Certificate` indexed inductive's grounding constructors
+//! consumed by the `justification:Grounds` indexed inductive's grounding constructors
 //! to project the chain's existing class-membership + Trace-emission facts
 //! into the type system. Witnesses are kernel-internal — ESL has no
 //! constructor for them; the kernel synthesises inhabitants at
-//! `justification:Certificate.declared` / `.observed` / `.derived` / `.verified`
+//! `justification:Grounds.declared` / `.observed` / `.derived` / `.verified`
 //! type-check time by looking up a per-`Layer` witness index that the
 //! Layer builds from its Trace resources.
 //!
@@ -45,7 +45,7 @@ use sha2::{Digest, Sha256};
 /// implemented a lattice over the categories which the design rejects, and it
 /// was not driven by the ontology's `subclass_of` — it was a match arm. It went
 /// with the category: `Derived` could only be consumed by
-/// `justification:Certificate.derived`, and a computed claim now grounds as
+/// `justification:Grounds.derived`, and a computed claim now grounds as
 /// `App(Declared(plan), Observed(inputs))`, which needs no category of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum WitnessCategory {
@@ -83,11 +83,11 @@ impl WitnessCategory {
 /// The `(category, iri)` pair determines exactly one canonical proposition
 /// per resource per D49 §4 / D39 §4.1's `canonical_proposition` semantics
 /// (default `Asserts(iri)`; explicit value via the optional
-/// `reflection:canonical_proposition` property — including for `Verified`,
+/// `justification:proposition` property — including for `Verified`,
 /// which reads the claim's own proposition through the `VerificationTrace`
 /// that names it, not a reified view). Keeping
 /// `prop_hash` in the key still matters: it surfaces "the
-/// `justification:Certificate.declared` constructor was instantiated with the wrong
+/// `justification:Grounds.declared` constructor was instantiated with the wrong
 /// proposition for this IRI" as a type error at type-check time, rather
 /// than silently admitting a witness for a mismatched proposition.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

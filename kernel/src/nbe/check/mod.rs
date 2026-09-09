@@ -402,7 +402,7 @@ pub fn check_type(ctx: &mut CheckCtx, exp: &Exp) -> Result<(), CheckError> {
         //
         // This was `check(ctx, a, &Val::sort(1))` — "is a type" spelled as "inhabits `Set`". The
         // hardcoded 1 made every type ABOVE `Set` unusable in any position routed through here:
-        // `justification:Certificate.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
+        // `justification:Grounds.instantiate` binds `T : Type 1` and then writes `P : T -> Prop`, at
         // which point checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Cumulativity runs the
         // wrong way for this — it lets a SMALLER type be used where a larger one is wanted, and the
         // question here is not "how big" but "is it a type at all". Same defect as the `Level` `Ord`
@@ -441,7 +441,7 @@ pub fn check_inductive_declaration(
 ///
 /// [`check_type`]'s fallback was `check(ctx, a, &Val::sort(1))` — "is a type" spelled as "inhabits
 /// `Set`". The hardcoded 1 made every type ABOVE `Set` unusable in any position routed through
-/// there: `justification:Certificate.spec_poly` binds `T : Type 1` and then writes `P : T -> Prop`, at
+/// there: `justification:Grounds.instantiate` binds `T : Type 1` and then writes `P : T -> Prop`, at
 /// which point checking `T` against `Set` fails `Sort(2) </: Sort(1)`. Cumulativity runs the wrong
 /// way for this — it lets a SMALLER type be used where a larger one is wanted, and the question
 /// here is not "how big" but "is it a type at all". Same defect as the `Level` `Ord` derive removed
@@ -737,7 +737,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         //
         // The arm this replaces read `Val::Sort(_)` and so admitted
         // `SomeClass : Prop` — a class standing where a proposition is
-        // expected (`justification:Certificate(j, P)`, `reflection:canonical_proposition`,
+        // expected (`justification:Grounds(j, P)`, `justification:proposition`,
         // anything Rule 21 checks at the commit gate) with no diagnostic
         // (eigenius#191). Same check-vs-infer disagreement eigenius#136
         // removed for `Sort`.
@@ -1701,8 +1701,8 @@ mod tests {
         (c, refs.into_iter().next().expect("one declaration"))
     }
 
-    /// `data D : Set` standing where a proposition is expected. `justification:Certificate(j, P)`,
-    /// `reflection:canonical_proposition` and everything else Rule 21 checks take a `Prop` in that
+    /// `data D : Set` standing where a proposition is expected. `justification:Grounds(j, P)`,
+    /// `justification:proposition` and everything else Rule 21 checks take a `Prop` in that
     /// slot, so this is the same stakes argument as eigenius#191 with a different constructor.
     #[test]
     fn a_set_level_inductive_does_not_inhabit_prop() {
@@ -1712,7 +1712,7 @@ mod tests {
     }
 
     /// The other half, and the reason the fix is a deletion rather than a `m >= 1` guard: a
-    /// `Prop`-sorted inductive — `logic:And`, `justification:Certificate`, the witness predicates —
+    /// `Prop`-sorted inductive — `logic:And`, `justification:Grounds`, the witness predicates —
     /// must still check against `Set` by cumulativity. Nine of the twelve probe hits measured on
     /// `2026-08-22` were exactly this shape, so a guard written the obvious way would have broken
     /// them.
@@ -3654,7 +3654,7 @@ mod tests {
         }
     }
 
-    /// A param-free indexed inductive — the shape `justification:Certificate` has.
+    /// A param-free indexed inductive — the shape `justification:Grounds` has.
     /// `Flag : One -> Type 0` with `mk : Π (u : One). Flag u`.
     fn flag_decl() -> Arc<InductiveDecl> {
         let self_ref = Arc::new(InductiveDecl {
@@ -4179,7 +4179,7 @@ mod tests {
             RVal::Array(vec![RVal::String(wk_local::CLASS.to_string())]),
         );
         target.set(
-            Iri::parse(wk_local::CANONICAL_PROPOSITION).unwrap(),
+            Iri::parse(wk_local::PROPOSITION).unwrap(),
             encode_type(&prop_exp, crate::testing::codec_names()).unwrap(),
         );
 

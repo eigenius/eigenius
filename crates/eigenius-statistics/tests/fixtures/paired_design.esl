@@ -19,6 +19,7 @@ namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace bp         = "urn:eigenius:demo:bp";
 namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
 
 // ── Provenance activities ────────────────────────────────────────────
 // `prov:was_generated_by` is resource-typed: the event that produced an
@@ -73,7 +74,7 @@ resource bp:trial_trace : prov:ObservationTrace {
 resource bp:claim_treatment_lowers_bp : stats:StatisticalAnalysisPlan {
     stats:sample_set = bp:trial_2026_03_20;
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         bp:TreatmentChangesBP("urn:eigenius:demo:bp:drug_Y")
     );
 

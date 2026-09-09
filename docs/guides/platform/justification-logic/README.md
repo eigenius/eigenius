@@ -2,7 +2,7 @@
 
 Slow-walk worked example of D39 Justification Logic. Walks the closed audit chain end-to-end
 against a concrete drug-screening scenario — from a committed conclusion back through the
-`justification:Certificate` certificate, the chain witnesses that admitted the grounding
+`justification:Grounds` certificate, the chain witnesses that admitted the grounding
 constructors, the trace resources that admitted the witnesses, and the raw chain artifacts those
 traces point at.
 
@@ -29,7 +29,7 @@ Ontology: [`ontologies/justification/justification.esl`](../../../../ontologies/
 
 [Lean](../lean-institution/README.md) is a *verification* institution: chain authors commit a Lean proof term and the institution re-checks the proof against an exported theorem statement. The proof is its own thing, authored in Lean, exported as bytes, re-checked by a bundled `nanoda_lib`. The chain attests that the proof checks. Lean needs an institution because the kernel cannot check a Lean proof itself.
 
-D39 needs none, and that is the difference. Chain authors commit a conclusion carrying one judgement, `holds(kernel, c, Certificate(j, P))`, where the certificate is a `justification:Certificate(justification, proposition)` term — an inhabitant of an indexed inductive family declared in the chain's own type theory. The grounding terms reference chain artifacts (an axiom, an observed measurement, a derived claim, a verified Lean proof) and the kernel admits the corresponding chain witnesses by resolving, at type-check time, the one chain resource each cited IRI names. The chain attests both that the certificate type-checks *and* that every cited chain artifact actually exists.
+D39 needs none, and that is the difference. Chain authors commit a conclusion carrying one judgement, `holds(kernel, c, Certificate(j, P))`, where the certificate is a `justification:Grounds(justification, proposition)` term — an inhabitant of an indexed inductive family declared in the chain's own type theory. The grounding terms reference chain artifacts (an axiom, an observed measurement, a derived claim, a verified Lean proof) and the kernel admits the corresponding chain witnesses by resolving, at type-check time, the one chain resource each cited IRI names. The chain attests both that the certificate type-checks *and* that every cited chain artifact actually exists.
 
 Two consequences of this difference shape the rest of the tutorial:
 
@@ -45,8 +45,8 @@ Reasoning leaves a typed audit trail. These shapes are pre-existing chain artifa
 | Resource | Role |
 |---|---|
 | `axiom` declaration → `eigentt:Axiom` | Author-asserted propositional statement ([ESL §4.4a](../../esl/04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)). Paired with a `prov:DeclarationTrace` to admit `IsDeclaredAs`. |
-| `justification:Claim` + `prov:DeclarationTrace` | Any chain-resident declared assertion (literature rule, statistical-to-domain bridge, a claim that a plan denotes a function of its input). The class REQUIRES `reflection:canonical_proposition`, and the matching trace admits `IsDeclaredAs(iri, canonical_proposition)`. |
-| `justification:Claim` + `prov:ObservationTrace` | Bench measurement, instrument log entry. The trace names the `prov:Activity` that produced it and admits `IsObservedAs(iri, canonical_proposition)`. |
+| `justification:Declaration` + `prov:DeclarationTrace` | Any chain-resident declared assertion (literature rule, statistical-to-domain bridge, a claim that a plan denotes a function of its input). The class REQUIRES `justification:proposition`, and the matching trace admits `IsDeclaredAs(iri, canonical_proposition)`. |
+| `justification:Declaration` + `prov:ObservationTrace` | Bench measurement, instrument log entry. The trace names the `prov:Activity` that produced it and admits `IsObservedAs(iri, canonical_proposition)`. |
 | `prov:ProgramTrace` | A record that a program run happened. **It admits no witness and grounds nothing.** |
 
 **Three witness families, not four.** `trace_category` (`kernel/src/layer/witness_admission.rs`) maps `DeclarationTrace → Declared`, `ObservationTrace → Observed`, `VerificationTrace → Verified`, and `ProgramTrace → None`.
@@ -65,15 +65,15 @@ A `Verdict` (`ctor_name: "Holds" / "Fails"`) used to be committed alongside it a
 outcome. Nothing is emitted now: the check is validation, and validation reports errors rather than
 producing resources.
 
-**How a prior conclusion becomes citable.** `layer_admits_witness` matches a resource whose `is_a` includes `justification:Conclusion` and emits a `Verified` witness keyed on its own IRI — but **only off `justification:proof`**, the judgement `holds(logic, t, P)`, which says a checker verified `t` against `P` itself.
+**How a prior conclusion becomes citable.** `layer_admits_witness` matches a resource whose `is_a` includes `justification:Conclusion` and emits a `Verified` witness keyed on its own IRI — but **only off `justification:proof_judgement`**, the judgement `holds(logic, t, P)`, which says a checker verified `t` against `P` itself.
 
-It does NOT mint from `justification:judgement`. That judgement is `holds(kernel, c, Certificate(j, P))`: it says a checker verified the certificate `c`, and a certificate records the grounds a claim rests on without asserting the claim. No rule turns `Certificate(j, P)` into `P`. Minting `Verified` from it laundered a conclusion resting on nothing but `Declared(…)` into a proof exactly one citation downstream, and `is_fully_verified` then answered true for it. A conclusion with no proof term therefore admits no witness here — a deliberate tightening: a lemma is citable as `verified` only if it was proved, not merely justified. Compose with `Certificate.app` over the cited conclusion's certificate instead.
+It does NOT mint from `justification:grounds_judgement`. That judgement is `holds(kernel, c, Certificate(j, P))`: it says a checker verified the certificate `c`, and a certificate records the grounds a claim rests on without asserting the claim. No rule turns `Certificate(j, P)` into `P`. Minting `Verified` from it laundered a conclusion resting on nothing but `Declared(…)` into a proof exactly one citation downstream, and `is_fully_verified` then answered true for it. A conclusion with no proof term therefore admits no witness here — a deliberate tightening: a lemma is citable as `verified` only if it was proved, not merely justified. Compose with `Certificate.app` over the cited conclusion's certificate instead.
 
 Soundness sits at the commit boundary: a conclusion whose judgement does not check fails validation, so every committed conclusion passed the check.
 
 ## D49 witness admission — how the kernel admits grounding witnesses
 
-When the type-checker elaborates a `justification:Certificate.declared` / `.observed` / `.verified` grounding constructor, it needs to produce a value of the corresponding `IsDeclaredAs(iri, P)` / `IsObservedAs(iri, P)` / `IsVerifiedAs(iri, P)` predicate. These predicates have **zero surface constructors** — the kernel admits inhabitants only by consulting layer state.
+When the type-checker elaborates a `justification:Grounds.declared` / `.observed` / `.verified` grounding constructor, it needs to produce a value of the corresponding `IsDeclaredAs(iri, P)` / `IsObservedAs(iri, P)` / `IsVerifiedAs(iri, P)` predicate. These predicates have **zero surface constructors** — the kernel admits inhabitants only by consulting layer state.
 
 ### Admission is a direct lookup — nothing is materialized
 
@@ -91,7 +91,7 @@ pub struct WitnessKey {
 
 1. **Skip.** `LayerHandle::has_witness_candidates` is stamped at write time over the layer's resources. A layer holding no Trace, no `InstitutionEmittedDerivation` and no `justification:Conclusion` answers `false` with no probe at all — a lexicon layer stops here.
 2. **Self-attesting.** `Layer::get_resource` on the key's IRI, which is layer-local. If that resource is a `justification:Conclusion` and the key's category is `Verified`, or an `InstitutionEmittedDerivation` and the category is `Derived`, build the key it would emit and compare it to the key asked for.
-3. **Trace-attested.** Find a Trace resource *defined in this layer* whose `prov:resource` points at the key's IRI — through the triple index when the layer is already stored, by iterating the layer when it is still in flight, which is the case during `autoonload_dispatch`. Resolve the target (a chain walk, since a trace here may attest a resource in an ancestor), read its `reflection:canonical_proposition` — or fall back to the D39 §4.1 default `Asserts(target_iri)` when it carries none — hash it, and compare.
+3. **Trace-attested.** Find a Trace resource *defined in this layer* whose `prov:resource` points at the key's IRI — through the triple index when the layer is already stored, by iterating the layer when it is still in flight, which is the case during `autoonload_dispatch`. Resolve the target (a chain walk, since a trace here may attest a resource in an ancestor), read its `justification:proposition` — or fall back to the D39 §4.1 default `Asserts(target_iri)` when it carries none — hash it, and compare.
 
 An earlier implementation did materialize an index: `build_witness_index` walked the layer at construction and cached a `BTreeMap<WitnessKey, ()>` in a `OnceLock` on the `Layer`, and lookup was a membership test. **D66 slice 0 removed all of it.** The map cost memory proportional to the layer's trace count for the layer's whole lifetime and reduced every miss to a bare `false` carrying no reason; direct lookup is O(1) in memory and holds the specific resource at the point of the decision. There is no `Layer::chain_witness_admission` method and nothing is cached.
 
@@ -99,7 +99,7 @@ Both ends of the key hash the proposition the same way. The emitter *decodes* th
 
 ### Lookup at type-check time
 
-When the kernel encounters `justification:Certificate.observed(iri, P)` and needs to fill in `witness : IsObservedAs(iri, P)`, `synthesize_chain_witness` runs the D49 §5 algorithm:
+When the kernel encounters `justification:Grounds.observed(iri, P)` and needs to fill in `witness : IsObservedAs(iri, P)`, `synthesize_chain_witness` runs the D49 §5 algorithm:
 
 ```text
 1. prop_hash = sha256(canonical_cbor(encode_type(P)))     // D47 codec
@@ -116,7 +116,7 @@ When the kernel encounters `justification:Certificate.observed(iri, P)` and need
 
 The walk reuses the existing `Arc<Layer>` parent-chain walk (the one resource resolution uses) — no new traversal abstraction. First hit wins, which is sound because layer immutability means a once-admitted witness stays admitted in all descendants. The `Val::ChainWitness` value carries no payload beyond the key; proof irrelevance ([ESL §7.1](../../esl/07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom)) makes any two witnesses of the same `(category, iri, P)` definitionally equal.
 
-A miss returns a **free-form `String`**, not a structured error value. It names the predicate family (`IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs`), the IRI, the property the resource would have to carry, and the `justification:Certificate.*` constructor that would become well-typed. There is no diagnostic enum anywhere on this path — see [the check](#the-four-step-validatejustification-check) below.
+A miss returns a **free-form `String`**, not a structured error value. It names the predicate family (`IsDeclaredAs` / `IsObservedAs` / `IsVerifiedAs`), the IRI, the property the resource would have to carry, and the `justification:Grounds.*` constructor that would become well-typed. There is no diagnostic enum anywhere on this path — see [the check](#the-four-step-validatejustification-check) below.
 
 ### Voiding semantics
 
@@ -124,7 +124,7 @@ Witnesses are derived state, recomputed at every lookup. Voiding a layer removes
 
 ## What a commit checks
 
-`justification:Conclusion` requires **one** slot, `justification:judgement`, holding
+`justification:Conclusion` requires **one** slot, `justification:grounds_judgement`, holding
 `holds(kernel, c, Certificate(j, P))`. It replaced three separate slots — `proposition`, `term` and
 `certificate` — which were checked by three separate paths with nothing requiring them to be about
 the same claim: a certificate for one proposition could sit beside a different proposition and both
@@ -135,7 +135,7 @@ gets checked.
 `eigentt:Term`-ranged slot, so it owns this one, and it applies the kernel's own annotation rule:
 
 1. **Decode.** The judgement is a D47-encoded tree; a slot that does not decode reports
-   ``urn:eigenius:justification:judgement does not decode as an eigentt:Judgement: …`` naming the
+   ``urn:eigenius:justification:grounds_judgement does not decode as an eigentt:Judgement: …`` naming the
    ctor it choked on.
 2. **`check_type(j.typ)`.** The judgement's type must *be* a type. Supplying `Sort(Zero)` — `Prop`
    itself — where a proposition belongs fails here, as `universe stratification: Sort(0) does not
@@ -151,7 +151,7 @@ gets checked.
 
 A conclusion that fails any of these **fails validation, and the commit is rejected**. Nothing is
 stamped on a conclusion that passes; a later conclusion may cite it as `Verified(iri)` only if it
-carries a `justification:proof`. No coercion covers a weaker form: a `Derived` lookup used to fall
+carries a `justification:proof_judgement`. No coercion covers a weaker form: a `Derived` lookup used to fall
 back to the matching `Verified` key, which let a proof-checked conclusion satisfy a `derived(…)`
 citation and collapsed the distinction between "a program produced this" and "the kernel verified
 this".
@@ -173,12 +173,12 @@ The capstone fixture at [`kernel/tests/fixtures/drug_screening.esl`](../../../..
 ```text
 HasLowIC50, StrongInhibitor                     [PopulationLevel-marked predicates in Prop]
   ↑ canonical_proposition
-rule_strong                                     [justification:Claim — literature rule]
+rule_strong                                     [justification:Declaration — literature rule]
   │ ↑ prov:resource
   │  rule_strong_trace                          [DeclarationTrace — admits IsDeclaredAs]
   │
   ↑ canonical_proposition
-bridge_eig0291_lowic50                          [justification:Claim — statistical → domain]
+bridge_eig0291_lowic50                          [justification:Declaration — statistical → domain]
   │ ↑ prov:resource
   │  bridge_eig0291_lowic50_trace               [DeclarationTrace — admits IsDeclaredAs]
   │
@@ -204,12 +204,12 @@ concl_eig0291_strong                            [justification:Conclusion]
 (admitted — nothing is emitted)
 ```
 
-The conclusion's certificate is two nested [`justification:Certificate.app`](../../esl/09-institutions.md#9102-the-justifiedby-certificate-predicate) calls composing three sub-certificates. The inner `app` applies the bridge to the statistical result: `declared(bridge, lt(mean_of(s), 100.0) -> HasLowIC50(EIG_0291))` against `derived(result, lt(mean_of(s), 100.0))`, yielding `HasLowIC50(EIG_0291)`. The outer `app` applies the literature rule to that, yielding `StrongInhibitor(EIG_0291)`. Both grounding constructors are written with the trailing witness slot elided; the kernel fills each in.
+The conclusion's certificate is two nested [`justification:Grounds.app`](../../esl/09-institutions.md#9102-the-justifiedby-certificate-predicate) calls composing three sub-certificates. The inner `app` applies the bridge to the statistical result: `declared(bridge, lt(mean_of(s), 100.0) -> HasLowIC50(EIG_0291))` against `derived(result, lt(mean_of(s), 100.0))`, yielding `HasLowIC50(EIG_0291)`. The outer `app` applies the literature rule to that, yielding `StrongInhibitor(EIG_0291)`. Both grounding constructors are written with the trailing witness slot elided; the kernel fills each in.
 
 Two details of the shape are worth naming, because both are easy to get wrong when authoring:
 
-- **The computed ground cites the plan's reproducibility declaration and the sample set — not the result.** `claim_eig0291_lowic50` is a `StatisticalAnalysisPlan` and carries no `canonical_proposition`; the verifier derives the proposition from `(dispatch, effect_size, directionality)` and emits it on a `StatisticalAnalysisResult` at `{plan_iri}:result:{effect_name}`. That result RECORDS what ran and admits no witness. What a citation needs is a `justification:Claim` asserting that the plan denotes a function of its input (`Asserts(s) -> lt(mean_of(s), 100.0)`) under a `prov:DeclarationTrace`, plus the sample set's `prov:ObservationTrace`.
-- **The statistical proposition and the domain proposition are different propositions,** and the bridge between them is a chain-resident `justification:Claim` rather than something the statistics author folded into the plan. The chain attests only what the verifier proved — `lt(mean_of(s), 100.0)` — and the translation into `HasLowIC50` is itself citable and auditable.
+- **The computed ground cites the plan's reproducibility declaration and the sample set — not the result.** `claim_eig0291_lowic50` is a `StatisticalAnalysisPlan` and carries no `canonical_proposition`; the verifier derives the proposition from `(dispatch, effect_size, directionality)` and emits it on a `StatisticalAnalysisResult` at `{plan_iri}:result:{effect_name}`. That result RECORDS what ran and admits no witness. What a citation needs is a `justification:Declaration` asserting that the plan denotes a function of its input (`Asserts(s) -> lt(mean_of(s), 100.0)`) under a `prov:DeclarationTrace`, plus the sample set's `prov:ObservationTrace`.
+- **The statistical proposition and the domain proposition are different propositions,** and the bridge between them is a chain-resident `justification:Declaration` rather than something the statistics author folded into the plan. The chain attests only what the verifier proved — `lt(mean_of(s), 100.0)` — and the translation into `HasLowIC50` is itself citable and auditable.
 
 The fixture pre-authors the `StatisticalAnalysisResult` rather than dispatching the statistics institution, because it exercises witness admission directly; institution dispatch is covered in the `eigenius-statistics` crate's own end-to-end tests.
 
@@ -233,11 +233,11 @@ The high-level shape, modeled on the drug-screening fixture:
 2. **Commit the grounding artifacts.** Each grounding constructor needs a chain artifact carrying a proposition, plus its matching trace. For a literature rule:
 
    ```esl
-   resource screen:rule_strong : justification:Claim {
+   resource screen:rule_strong : justification:Declaration {
        prov:was_attributed_to  = agent:eigenius_core_team;
        prov:had_primary_source = screen:warrant_smith_et_al_2024;
        prov:rationale = "IC50 < 100 nM is the standard threshold.";
-       reflection:canonical_proposition = type_expr(
+       justification:proposition = type_expr(
            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
            ->
            screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
@@ -251,29 +251,29 @@ The high-level shape, modeled on the drug-screening fixture:
    }
    ```
 
-   `justification:Claim` REQUIRES `reflection:canonical_proposition`, and that is the proposition the witness key hashes — so what your `declared(...)` constructor writes has to be that one, not a restatement of it. `prov:was_attributed_to` is required by the trace: a declaration with no agent behind it asserts nothing anybody can be held to.
+   `justification:Declaration` REQUIRES `justification:proposition`, and that is the proposition the witness key hashes — so what your `declared(...)` constructor writes has to be that one, not a restatement of it. `prov:was_attributed_to` is required by the trace: a declaration with no agent behind it asserts nothing anybody can be held to.
 
-   **For a computed ground you commit two artifacts, not one.** A [D52 StatisticalAnalysisPlan](../statistics-institution/README.md) carries no proposition, and its per-effect `StatisticalAnalysisResult` RECORDS what ran and admits no witness — the fact that a computation happened grounds nothing. What a citation needs is a `justification:Claim` asserting that the plan denotes a function of its input, under a `prov:DeclarationTrace`, plus the sample set's `prov:ObservationTrace`:
+   **For a computed ground you commit two artifacts, not one.** A [D52 StatisticalAnalysisPlan](../statistics-institution/README.md) carries no proposition, and its per-effect `StatisticalAnalysisResult` RECORDS what ran and admits no witness — the fact that a computation happened grounds nothing. What a citation needs is a `justification:Declaration` asserting that the plan denotes a function of its input, under a `prov:DeclarationTrace`, plus the sample set's `prov:ObservationTrace`:
 
    ```esl
-   resource screen:plan_yields_lowic50 : justification:Claim {
+   resource screen:plan_yields_lowic50 : justification:Declaration {
        prov:was_attributed_to  = agent:eigenius_core_team;
        prov:had_primary_source = screen:warrant_plan_reproducibility;
        prov:rationale = "Applying claim_eig0291_lowic50 to its recorded sample set yields that set's main effect. A claim about the method, pinned at the input it is applied to.";
-       reflection:canonical_proposition = type_expr(
+       justification:proposition = type_expr(
            core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset")
            -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"), 100.0)
        );
    }
    ```
 
-3. **Author the conclusion.** ONE required slot — `justification:judgement`, D47-encoded via [`type_expr(...)`](../../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions). The proposition and the justification term are not separate fields; they appear inside the judgement's TYPE, where the kernel checks that the certificate actually inhabits `Certificate(j, P)`. They used to be three fields checked by three paths with nothing requiring them to be about the same claim, so a certificate for one proposition sat happily beside a different proposition.
+3. **Author the conclusion.** ONE required slot — `justification:grounds_judgement`, D47-encoded via [`type_expr(...)`](../../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions). The proposition and the justification term are not separate fields; they appear inside the judgement's TYPE, where the kernel checks that the certificate actually inhabits `Certificate(j, P)`. They used to be three fields checked by three paths with nothing requiring them to be about the same claim, so a certificate for one proposition sat happily beside a different proposition.
 
    ```esl
    resource screen:concl_eig0291_strong : justification:Conclusion {
        justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
-       justification:judgement = type_expr(
+       justification:grounds_judgement = type_expr(
            alias
                EIG  = "urn:eigenius:demo:screen:EIG_0291",
                SS   = "urn:eigenius:demo:screen:m_eig0291_sampleset",
@@ -292,7 +292,7 @@ The high-level shape, modeled on the drug-screening fixture:
                        Declared(RULE), computed,
                        declared(RULE, LOW -> screen:StrongInhibitor(EIG)),
                        cs ),
-                  justification:Certificate(
+                  justification:Grounds(
                       justification:App(Declared(RULE), computed),
                       screen:StrongInhibitor(EIG) ) )
        );
@@ -309,7 +309,7 @@ The high-level shape, modeled on the drug-screening fixture:
 
 The computed ground in the worked example rests on a [D52 StatisticalAnalysisPlan](../statistics-institution/README.md). The statistics institution's `validate_analysis_plan` AutoOnLoad gate has already fired on the plan at commit, recomputed it from raw replicates, and emitted two things: a `Verdict`, and one `StatisticalAnalysisResult` per effect carrying the derived `canonical_proposition`. The kernel stamps that result `reflection:InstitutionEmittedDerivation` and sets `reflection:from_subject` to the plan.
 
-**That result admits no witness.** It records what the run produced, which grounds nothing on its own. Its `canonical_proposition` is still load-bearing, but as the proposition an author's plan-reproducibility `justification:Claim` is written AGAINST — the two must hash to the same key, which is what ties the declaration to what actually ran.
+**That result admits no witness.** It records what the run produced, which grounds nothing on its own. Its `canonical_proposition` is still load-bearing, but as the proposition an author's plan-reproducibility `justification:Declaration` is written AGAINST — the two must hash to the same key, which is what ties the declaration to what actually ran.
 
 The `Verdict` itself is not citable: under the D52 verdict-versus-derivation split it carries no `canonical_proposition`, so no witness key can be built for it. The citable artifact is always the proposition-bearer.
 
@@ -321,12 +321,12 @@ This is the load-bearing composition pattern: **D52 turns raw data into a propos
 
 A failed gate gives you one string on the `Verdict`, under `urn:eigenius:institution:diagnostic`. Match it by prefix.
 
-- **`certificate does not type-check against justification:Certificate(justification, proposition): no admitted Is…As witness for IRI …`** — no layer in the resolution admits the cited `(category, iri, proposition)`. Four common causes:
+- **`certificate does not type-check against justification:Grounds(justification, proposition): no admitted Is…As witness for IRI …`** — no layer in the resolution admits the cited `(category, iri, proposition)`. Four common causes:
   1. The grounding resource was never committed, or the IRI is wrong, or it sits in a layer outside the current chain resolution.
-  2. The companion trace was never committed — a `justification:Claim` without its `prov:DeclarationTrace` admits nothing — or the trace is defined in a different layer from the one holding it, since the trace-attested route requires the trace to be *defined* in the layer where it is found.
+  2. The companion trace was never committed — a `justification:Declaration` without its `prov:DeclarationTrace` admits nothing — or the trace is defined in a different layer from the one holding it, since the trace-attested route requires the trace to be *defined* in the layer where it is found.
   3. The proposition does not match: the resource's `canonical_proposition` is structurally different from what the certificate constructor writes. The message names the property the resource must carry; compare the two term by term.
   4. The cited IRI names a plan rather than the derivation the verifier emitted (see [composition](#composition-with-the-statistics-institution)), or a `Verdict` rather than the proposition-bearer.
-- **The same prefix, with the kernel's own type error after it** — the certificate's shape does not match the justification's. Every mismatch of constructor, index or type arrives through this one path, so read the kernel's error: `justification:Certificate.observed` consumes `IsObservedAs`, which only an `ObservationTrace` admits, and using it to ground a `Declared(iri)` term is a category mismatch. Match the certificate constructor name to the term's grounding-ctor name — `declared` for `Declared`, `observed` for `Observed`, `verified` for `Verified`.
+- **The same prefix, with the kernel's own type error after it** — the certificate's shape does not match the justification's. Every mismatch of constructor, index or type arrives through this one path, so read the kernel's error: `justification:Grounds.observed` consumes `IsObservedAs`, which only an `ObservationTrace` admits, and using it to ground a `Declared(iri)` term is a category mismatch. Match the certificate constructor name to the term's grounding-ctor name — `declared` for `Declared`, `observed` for `Observed`, `verified` for `Verified`.
 - **`proposition does not type-check at Prop: …`** — the `proposition` slot's `type_expr(...)` body lowered to a `Set`/`Type(n)`-typed expression instead of `Prop`. Common cause: the predicate's `data` declaration was written with `: Set`, or with no result-sort clause, instead of `: … -> Prop`. Re-declare the predicate with a `Prop` result sort.
 - **`malformed proposition: …` / `malformed certificate: …`** — the D47 decode failed. Check that `proposition` and `certificate` are `type_expr(...)` values rather than raw JSON.
 - **`justification:Conclusion missing required … property`, arriving as an institution error rather than a verdict** — a required slot is absent. The class's `requires` enforcement should have rejected this at commit; reaching the handler means the institution was dispatched against a resource that did not come through the commit path.
@@ -335,7 +335,7 @@ A failed gate gives you one string on the `Verdict`, under `urn:eigenius:institu
 
 ## Cross-references
 
-- [**ESL §9.10 — the justification vocabulary**](../../esl/09-institutions.md#9-10-the-justification-vocabulary--d39-justification-logic) — surface syntax reference: the five `justification:Term` constructors, the seven `justification:Certificate` constructors, the `justification:Conclusion` resource shape, and the worked example this sub-guide expands on.
+- [**ESL §9.10 — the justification vocabulary**](../../esl/09-institutions.md#9-10-the-justification-vocabulary--d39-justification-logic) — surface syntax reference: the five `justification:Term` constructors, the seven `justification:Grounds` constructors, the `justification:Conclusion` resource shape, and the worked example this sub-guide expands on.
 - [**ESL §6.4a — Witness predicates**](../../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) — the kernel-side view of the four `ChainWitness.Is*As` families.
 - [**ESL §7.1 — Universes**](../../esl/07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom) — `Prop`, proof irrelevance, and why distinct evidence chains for the same proposition produce judgmentally-equal certificates.
 - [**Statistics institution tutorial**](../statistics-institution/README.md) — the D52 institution whose per-effect results carry the propositions a plan-reproducibility declaration is written against.
@@ -344,7 +344,7 @@ A failed gate gives you one string on the `Verdict`, under `urn:eigenius:institu
 - [**D49 Chain-witness machinery**](../../../design/d49-chainwitness-machinery.md) — companion spec for the witness machinery this tutorial walks. Read it as design intent: it specifies the materialized per-layer index that D66 slice 0 replaced with direct lookup, and a structured diagnostic taxonomy that was never built.
 - [**D46 Prop universe and proof irrelevance**](../../../design/d46-prop-universe-and-proof-irrelevance.md) — the universe-formation rules the reasoning predicates depend on.
 - [**D47 Chain-mirrored EigenTT type fragment**](../../../design/d47-chain-mirrored-eigentt-type-fragment.md) — the codec the proposition and certificate slots ride on.
-- [**D48 Indexed inductive families**](../../../design/d48-indexed-inductive-families.md) — the type theory that makes `justification:Certificate : justification:Term -> Prop -> Type 0` expressible.
+- [**D48 Indexed inductive families**](../../../design/d48-indexed-inductive-families.md) — the type theory that makes `justification:Grounds : justification:Term -> Prop -> Type 0` expressible.
 - [`kernel/src/validation/rules/eigentt_value.rs`](../../../../kernel/src/validation/rules/eigentt_value.rs) — Rule 21, the check.
 - [`kernel/tests/certificate_admission.rs`](../../../../kernel/tests/certificate_admission.rs) — the witness machinery end to end, including where admission must fail.
 - [`ontologies/justification/justification.esl`](../../../../ontologies/justification/justification.esl) — ontology source.

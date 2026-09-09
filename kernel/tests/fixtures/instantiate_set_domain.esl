@@ -1,7 +1,7 @@
-// Reduction of the `spec_poly`-at-`Set` site in
+// Reduction of the `instantiate`-at-`Set` site in
 // `demo/prose-to-formulas-v2/inference.esl` to a chain that builds in
 // memory: a literature rule quantified over `Set` (its subject is a
-// kind, not a name), eliminated with `justification:Certificate.spec_poly` at a
+// kind, not a name), eliminated with `justification:Grounds.instantiate` at a
 // concrete class.
 
 namespace core          = "urn:eigenius:core";
@@ -33,12 +33,12 @@ data poly:HasActivity : Set -> Prop {
 data poly:RequiresActivity : Set -> Prop {
 }
 
-resource poly:rule : justification:Claim {
+resource poly:rule : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = poly:warrant_illustrative_dependency_rule;
     prov:rationale   = "Illustrative. Quantified over the MODEL, which is a kind, so the domain of the quantifier is Set.";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         forall (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m)
     );
 }
@@ -50,11 +50,11 @@ resource poly:rule_trace : prov:DeclarationTrace {
     prov:timestamp   = "2026-08-18T00:00:00Z";
 }
 
-resource poly:obs : justification:Claim {
+resource poly:obs : justification:Declaration {
     prov:was_generated_by      = poly:act_illustrative;
     prov:observed_at = "2026-08-18T00:00:00Z";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         poly:HasActivity(poly:Model)
     );
 }
@@ -66,13 +66,12 @@ resource poly:obs_trace : prov:ObservationTrace {
 }
 
 resource poly:concl : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:poly:Model";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
-               type_expr(app(spec_poly(
+               type_expr(app(instantiate(
                        Set,
                        (fun (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m)),
                        poly:Model,
@@ -88,7 +87,7 @@ resource poly:concl : justification:Conclusion {
                        ()
                    )
                )),
-               type_expr(justification:Certificate(
+               type_expr(justification:Grounds(
                    poly:RequiresActivity(poly:Model) )) );
 
 

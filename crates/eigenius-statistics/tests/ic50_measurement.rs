@@ -282,7 +282,7 @@ fn a_statistical_analysis_result_grounds_nothing_on_its_own() {
 
     // The SAR still carries the proposition it computed — the record is intact.
     let canonical_prop = sar_arc
-        .get(&Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap())
+        .get(&Iri::parse("urn:eigenius:justification:proposition").unwrap())
         .expect("SAR must still carry canonical_proposition — it is the record of what ran")
         .clone();
 

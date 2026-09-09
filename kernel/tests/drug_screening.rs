@@ -35,8 +35,8 @@
 //!    to D39 reasoning.
 //! 5. A `justification:Conclusion` claiming `StrongInhibitor(EIG_0291)`,
 //!    justified by `App(Declared(rule), App(Declared(plan), Observed(s)))`,
-//!    with a `justification:Certificate.app` certificate composing
-//!    `justification:Certificate.declared` + `justification:Certificate.derived`.
+//!    with a `justification:Grounds.app` certificate composing
+//!    `justification:Grounds.declared` + `justification:Grounds.derived`.
 //!
 //! This is the modernization of the original fixture, which committed
 //! the bench measurement as a plain `reflection:ObservedResource` whose

@@ -25,7 +25,7 @@
 //! 3. `urn:eigenius:demo:lean:patient_1` / `patient_2` — NAMED INDIVIDUALS. Chain axioms of type
 //!    `Patient`, so a proposition can mention one; entities, so neither carries a proposition.
 //! 4. `urn:eigenius:demo:lean:claim_patient_1_healthy` / `claim_patient_2_healthy` —
-//!    `justification:Claim`s, each carrying `Healthy(<its subject>)`.
+//!    `justification:Declaration`s, each carrying `Healthy(<its subject>)`.
 //! 5. `urn:eigenius:demo:lean:mirror` — `LeanPackageMirror` carrying the embedded Lake archive.
 //! 6. `urn:eigenius:demo:lean:proof_payload` — `LeanProofPayload` with the verbatim
 //!    `lean4export` bytes.
@@ -40,7 +40,7 @@
 //!
 //! ## What D87 §6 changed here, and why
 //!
-//! `patient_1` used to be a `Patient` INSTANCE carrying a `reflection:canonical_proposition`, and
+//! `patient_1` used to be a `Patient` INSTANCE carrying a `justification:proposition`, and
 //! that proposition was `∀ (p : Patient), Healthy(p) → Healthy(p)` — closed, universally
 //! quantified, and never mentioning `patient_1`. So the witness the chain admitted paired a
 //! resource IRI with a proposition that said nothing about that resource: *any* IRI would have
@@ -81,7 +81,7 @@ use eigenius_runtime_substrate::mirror_generator::MirrorGenerator;
 /// The theorem the demo's proof discharges: `Healthy patient_1`.
 ///
 /// Not `patient_weight_nonneg`: D74's statement check manufactures the goal from the claim's
-/// `reflection:canonical_proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
+/// `justification:proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
 /// (a structure-field access, and `Float`).
 ///
 /// Not `healthy_refl` either, since D87 §6. That one is `∀ p, Healthy p → Healthy p` — true of
@@ -230,7 +230,7 @@ fn patient_class_resource() -> Resource {
 /// A resource that is merely `is_a: [Patient]` is an entity the term language cannot mention,
 /// which is why the old fixture's proposition quantified over all Patients instead of naming one.
 ///
-/// It carries no proposition. Patients do not assert things; the `justification:Claim` beside it
+/// It carries no proposition. Patients do not assert things; the `justification:Declaration` beside it
 /// does, and this is what that claim is about.
 fn named_individual_resource(
     individual_iri: &str,
@@ -265,10 +265,10 @@ fn named_individual_resource(
     r
 }
 
-/// A `justification:Claim` carrying `Healthy(<subject>)` — a proposition ABOUT its subject.
+/// A `justification:Declaration` carrying `Healthy(<subject>)` — a proposition ABOUT its subject.
 ///
-/// `justification:Claim` and not `justification:Conclusion`: a Conclusion `requires
-/// justification:judgement`, the kernel's own `holds(kernel, c, Certificate(j, P))`, and this
+/// `justification:Declaration` and not `justification:Conclusion`: a Conclusion `requires
+/// justification:grounds_judgement`, the kernel's own `holds(kernel, c, Certificate(j, P))`, and this
 /// claim's warrant is a Lean proof rather than a certificate over chain grounds. D87 §6 reached
 /// for `Conclusion` because `subject_iri` was the only way to say what a ∀-quantified proposition
 /// was about; with the proposition naming its subject directly, `Claim` is the class the ontology
@@ -285,7 +285,7 @@ fn claim_resource(
     r.set(
         iri(wk::IS_A),
         Value::Array(vec![Value::String(
-            "urn:eigenius:justification:Claim".to_string(),
+            "urn:eigenius:justification:Declaration".to_string(),
         )]),
     );
     r.set(
@@ -309,7 +309,7 @@ fn claim_resource(
     );
     let names = CodecNames::from_layer(chain);
     r.set(
-        iri(wk::CANONICAL_PROPOSITION),
+        iri(wk::PROPOSITION),
         encode_type(&prop, &names).expect("the demo proposition is inside the D47 codec"),
     );
     r

@@ -92,7 +92,7 @@ reasoning stack is the **statistics → reasoning** pipeline:
    `justification:Conclusion` whose certificate cites the computed ground
    `App(Declared(plan_yields), Observed(sample_set))`, Rule 21 checks its
    judgement as part of validating the layer — no institution and no gate,
-   since P7. The kernel's NbE checker walks the inner `justification:Certificate.app`, consults the
+   since P7. The kernel's NbE checker walks the inner `justification:Grounds.app`, consults the
    witness index for the `IsDeclaredAs` entry (the plan's reproducibility
    claim) and the `IsObservedAs` entry (the sample set's observation trace),
    and the certificate type-checks.

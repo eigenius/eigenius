@@ -79,11 +79,10 @@ fn a_two_layer_cycle_is_rejected() {
     let lower = format!(
         r#"{HEADER}
 resource probe:concl_p : justification:Conclusion {{
-    justification:subject_iri = "urn:eigenius:probe:subject";
-    justification:judgement = type_expr(
+    justification:grounds_judgement = type_expr(
         holds( eigentt:logic_kernel,
                verified("urn:eigenius:probe:concl_q", probe:Q),
-               justification:Certificate(probe:P) )
+               justification:Grounds(probe:P) )
     );
 }}
 "#
@@ -95,11 +94,10 @@ namespace justification = "urn:eigenius:justification";
 namespace probe         = "urn:eigenius:probe";
 
 resource probe:concl_q : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:probe:subject";
-    justification:judgement = type_expr(
+    justification:grounds_judgement = type_expr(
         holds( eigentt:logic_kernel,
                verified("urn:eigenius:probe:concl_p", probe:P),
-               justification:Certificate(probe:Q) )
+               justification:Grounds(probe:Q) )
     );
 }
 "#;
@@ -135,17 +133,16 @@ fn a_shared_class_between_proposition_and_premise_is_not_a_cycle() {
         r#"{HEADER}
 // The premise is Declared, so the condition is vacuous on it — and `probe:P`
 // appears in BOTH the premise's proposition and the conclusion's.
-resource probe:premise : justification:Claim {{
+resource probe:premise : justification:Declaration {{
     prov:was_attributed_to = agent:eigenius_core_team;
-    reflection:canonical_proposition = type_expr( probe:P );
+    justification:proposition = type_expr( probe:P );
 }}
 
 resource probe:concl_shared : justification:Conclusion {{
-    justification:subject_iri = "urn:eigenius:probe:subject";
-    justification:judgement = type_expr(
+    justification:grounds_judgement = type_expr(
         holds( eigentt:logic_kernel,
                declared("urn:eigenius:probe:premise", probe:P),
-               justification:Certificate(probe:P) )
+               justification:Grounds(probe:P) )
     );
 }}
 "#
@@ -188,21 +185,20 @@ fn a_declared_premise_is_vacuously_well_founded() {
 fn a_cycle_in_one_sum_branch_does_not_reject_when_the_other_carries_it() {
     let lower = format!(
         r#"{HEADER}
-resource probe:solid : justification:Claim {{
+resource probe:solid : justification:Declaration {{
     prov:was_attributed_to = agent:eigenius_core_team;
-    reflection:canonical_proposition = type_expr( probe:P );
+    justification:proposition = type_expr( probe:P );
 }}
 
 // Grounded on `Sum(Verified(concl_cyclic), Declared(solid))`: the left branch cycles
 // back through this conclusion, the right branch is a Declared premise with no support
 // to inspect. One good alternative is enough.
 resource probe:concl_sum : justification:Conclusion {{
-    justification:subject_iri = "urn:eigenius:probe:subject";
-    justification:judgement = type_expr(
+    justification:grounds_judgement = type_expr(
         holds( eigentt:logic_kernel,
                sum_r( verified("urn:eigenius:probe:concl_cyclic", probe:P),
                       declared("urn:eigenius:probe:solid", probe:P) ),
-               justification:Certificate(probe:P) )
+               justification:Grounds(probe:P) )
     );
 }}
 "#
@@ -219,11 +215,10 @@ namespace justification = "urn:eigenius:justification";
 namespace probe         = "urn:eigenius:probe";
 
 resource probe:concl_cyclic : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:probe:subject";
-    justification:judgement = type_expr(
+    justification:grounds_judgement = type_expr(
         holds( eigentt:logic_kernel,
                verified("urn:eigenius:probe:concl_sum", probe:P),
-               justification:Certificate(probe:P) )
+               justification:Grounds(probe:P) )
     );
 }
 "#;
@@ -251,11 +246,10 @@ fn the_cycle_is_rejected_by_the_validator_not_just_the_library() {
     let lower = format!(
         r#"{HEADER}
 resource probe:concl_p : justification:Conclusion {{
-    justification:subject_iri = "urn:eigenius:probe:subject";
-    justification:judgement = type_expr(
+    justification:grounds_judgement = type_expr(
         holds( eigentt:logic_kernel,
                verified("urn:eigenius:probe:concl_q", probe:Q),
-               justification:Certificate(probe:P) )
+               justification:Grounds(probe:P) )
     );
 }}
 "#
@@ -267,11 +261,10 @@ namespace justification = "urn:eigenius:justification";
 namespace probe         = "urn:eigenius:probe";
 
 resource probe:concl_q : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:probe:subject";
-    justification:judgement = type_expr(
+    justification:grounds_judgement = type_expr(
         holds( eigentt:logic_kernel,
                verified("urn:eigenius:probe:concl_p", probe:P),
-               justification:Certificate(probe:Q) )
+               justification:Grounds(probe:Q) )
     );
 }
 "#;

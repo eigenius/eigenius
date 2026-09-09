@@ -167,13 +167,13 @@ Two sentences of controlled prose from the WRN paper — a measurement (*"MSI ca
 ./demo/prose-to-formulas-v2/run.sh --reparse
 ```
 
-Under D66 there is **no lift step**: `onco-typed.esl` *defines* the domain predicates over the parser's own lexicon (`def`), so a parsed sentence and its domain formula are the same term by definitional equality. The result is `RequiresActivity(MSI, WRN, helicase)` justified twice — once because sentence 2 asserts it (its own parse witness, nothing Declared), once because it *follows* from sentence 1 plus the published rule specialized at the model with [`spec_poly`](../esl/09-institutions.md#9102-the-justifiedby-certificate-predicate). The derived route carries strictly more assumptions and commits at `Declared`; the point is not that it is better-warranted but that it **knows what it depends on**. Negate the measurement and the two routes come apart in the same run: sentence 2's claim still commits, the derivation that cited sentence 1's parse has nothing left to stand on and is rejected.
+Under D66 there is **no lift step**: `onco-typed.esl` *defines* the domain predicates over the parser's own lexicon (`def`), so a parsed sentence and its domain formula are the same term by definitional equality. The result is `RequiresActivity(MSI, WRN, helicase)` justified twice — once because sentence 2 asserts it (its own parse witness, nothing Declared), once because it *follows* from sentence 1 plus the published rule specialized at the model with [`instantiate`](../esl/09-institutions.md#9102-the-justifiedby-certificate-predicate). The derived route carries strictly more assumptions and commits at `Declared`; the point is not that it is better-warranted but that it **knows what it depends on**. Negate the measurement and the two routes come apart in the same run: sentence 2's claim still commits, the derivation that cited sentence 1's parse has nothing left to stand on and is rejected.
 
 Two ways a claim gets justified here. The intact/edited pair is exercised end to end by [`crates/eigenius-encoding/tests/acceptance.rs`](../../../crates/eigenius-encoding/tests/acceptance.rs), which runs against a DB snapshot (`EIGENIUS_DB_SNAPSHOT`, `--ignored`). The `justification_routes.rs` test that used to be cited here went with `crates/eigenius-reasoning` at P7.
 
 | | What warrants it | Grade | Authoring cost |
 |---|---|---|---|
-| **pinned literature rule** | a published `∀m. A → B` on the chain, specialized with `spec_poly` and applied to a claim an earlier sentence established | Declared | one rule, reused |
+| **pinned literature rule** | a published `∀m. A → B` on the chain, specialized with `instantiate` and applied to a claim an earlier sentence established | Declared | one rule, reused |
 | **prose modus ponens** | `A` and `A → B` both parsed from sentences — the grammar renders `if` as native implication | **Derived** | none |
 
 The second is the only one that Declares nothing: `"S₁ if S₂"` parses to a genuine top-level implication whose antecedent is verbatim the premise sentence's own parse, so `app` composes them with no human assertion in between. (A third way — generated **shape rules**, one Declared rule per parse shape — was retired by D66's definitional lift.)
@@ -218,7 +218,7 @@ The demos exercise overlapping but distinct subsystems:
 |---|---|
 | `demo/run.sh` | Bootstrap, JSON+ESL load, query, program run with `CompleteText` |
 | `demo/patent/run.sh` | `CompleteJson` structured extraction, two-step LLM pipeline, `Construct` |
-| `demo/prose-to-formulas/run.sh` | DCG parse → `EncodedClaim`, the definitional lift (`def`, D66), a `spec_poly`-specialized literature rule, prose modus ponens, certificate rejection on edited prose |
+| `demo/prose-to-formulas/run.sh` | DCG parse → `EncodedClaim`, the definitional lift (`def`, D66), a `instantiate`-specialized literature rule, prose modus ponens, certificate rejection on edited prose |
 
 For coverage, run both LLM demos. For speed, `demo/run.sh` alone covers the most common failure modes. The prose-to-formulas demo needs the lexicon snapshot staged first (§8.5), so it doesn't belong in a cold CI job.
 

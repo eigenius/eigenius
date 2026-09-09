@@ -240,7 +240,7 @@ fn var_value(
 /// walks of the layer the user file is being committed against.
 ///
 /// Without these seeds, cross-file references (e.g.
-/// `justification:Certificate`'s ctors used in a sentence, or a
+/// `justification:Grounds`'s ctors used in a sentence, or a
 /// `stats:IID(...)` macro called in a fixture) resolve only against
 /// decls in the current file. With them, child files cite parent-
 /// layer ctors and macros without re-declaring.
@@ -959,7 +959,7 @@ impl Compiler {
     ///   `<ns_uri>:<CtorName>` via the standard namespace table.
     /// - Canonical chain IRI (what the ctor buckets store):
     ///   `<parent_inductive_iri>:<CtorName>`, e.g.
-    ///   `urn:eigenius:justification:Certificate:declared`.
+    ///   `urn:eigenius:justification:Grounds:declared`.
     ///
     /// The two never match by string equality, so the resolution
     /// strategy is short-name-based with namespace filtering:
@@ -1848,7 +1848,7 @@ impl Compiler {
                     // shape like `P(x)` where `P : T -> Prop` is a
                     // forall-bound function. Curry into `Exp::App` chain
                     // so EigenTT's NbE can beta-reduce at use time —
-                    // required by D39's `justification:Certificate.spec` constructor
+                    // required by D39's `justification:Grounds.spec` constructor
                     // whose result type writes `P(t)` for a forall-bound
                     // `P` and `t`.
                     let head = Exp::Var(name.name.clone());
@@ -1896,8 +1896,8 @@ impl Compiler {
                 // matches a declared ctor (in-file or chain-resident),
                 // emit `Exp::InductiveCtor` rather than
                 // `Exp::EigonClass` / `InductiveType`. Required for
-                // D39 §5 `justification:Certificate.declared : ... ->
-                // justification:Certificate(Declared iri) P` and any similar
+                // D39 §5 `justification:Grounds.declared : ... ->
+                // justification:Grounds(Declared iri) P` and any similar
                 // shape where a ctor of one inductive appears in
                 // another inductive's index/result-type position.
                 //
@@ -6117,7 +6117,7 @@ mod tests {
         )
         .expect("both forms compile");
 
-        let prop_iri = iri("urn:eigenius:reflection:canonical_proposition");
+        let prop_iri = iri("urn:eigenius:justification:proposition");
         let with_alias = resources
             .iter()
             .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:with_alias"))
@@ -6173,7 +6173,7 @@ mod tests {
         )
         .expect("scope-shadowing form compiles");
 
-        let prop_iri = iri("urn:eigenius:reflection:canonical_proposition");
+        let prop_iri = iri("urn:eigenius:justification:proposition");
         let scope_test = resources
             .iter()
             .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:scope_test"))
@@ -6706,14 +6706,14 @@ mod tests {
     fn reasoning_ontology_esl_compiles() {
         // D39 Phase 3 — the authored justification.esl source must compile
         // cleanly. Locks the structural contract: namespace declarations,
-        // the `justification:Certificate` inductive, and the
-        // `justification:Certificate` seven-ctor indexed inductive predicate.
+        // the `justification:Grounds` inductive, and the
+        // `justification:Grounds` seven-ctor indexed inductive predicate.
         // Any future edit to the file or to the ESL surface that breaks this
         // round-trip needs to be deliberate.
         let source = include_str!("../../../ontologies/justification/justification.esl");
         let resources = esl::compile(source, term_chain()).expect("justification.esl must compile");
 
-        // Expect: justification:Certificate alone.
+        // Expect: justification:Grounds alone.
         // The three `witness:Is*As` predicates were here until P7 and are NOT
         // any more — see below.
         let inductive_iri = iri(crate::ontology::well_known::INDUCTIVE_TYPE);
@@ -6722,12 +6722,12 @@ mod tests {
             .filter(|r| r.is_a().iter().any(|c| c == &inductive_iri))
             .filter_map(|r| r.id().map(|i| i.as_str().to_string()))
             .collect();
-        // ONE, since the D88 §2 merge: `justification:Certificate` alone. `justification:Term`
+        // ONE, since the D88 §2 merge: `justification:Grounds` alone. `justification:Term`
         // was the second, and the certificate now IS the term — its constructor tree is the
         // algebra, indexed by the proposition.
         assert_eq!(
             inductives,
-            vec!["urn:eigenius:justification:Certificate".to_string()],
+            vec!["urn:eigenius:justification:Grounds".to_string()],
             "justification.esl declares exactly one inductive"
         );
 
@@ -6755,7 +6755,7 @@ mod tests {
         let class_iri = iri(crate::ontology::well_known::CLASS);
         for expected in &[
             "urn:eigenius:justification:Conclusion",
-            "urn:eigenius:justification:Claim",
+            "urn:eigenius:justification:Declaration",
         ] {
             assert!(
                 resources
@@ -6842,11 +6842,11 @@ mod tests {
     fn reasoning_ontology_resolves_through_codec() {
         // End-to-end sanity check: reasoning.esl compiled on top of the
         // core ontology resolves cleanly through `resolve_class_type`.
-        // Exercises (a) the new Sort-typed-index path (justification:Certificate's
+        // Exercises (a) the new Sort-typed-index path (justification:Grounds's
         // `Prop` index), (b) the codec self-reference short-circuit
-        // (justification:Certificate's ctors reference justification:Certificate itself), and
-        // (c) cross-inductive references (justification:Certificate → ChainWitness +
-        // justification:Certificate). If any of these regress, the full Phase 6
+        // (justification:Grounds's ctors reference justification:Grounds itself), and
+        // (c) cross-inductive references (justification:Grounds → ChainWitness +
+        // justification:Grounds). If any of these regress, the full Phase 6
         // synthesis path breaks.
         use crate::layer::LayerBuilder;
         use crate::ontology::eigon_json;
@@ -6882,10 +6882,22 @@ mod tests {
         let reflection =
             Arc::new(reflection_builder.build(crate::layer::LayerStorage::in_memory()));
 
+        // `prov` sits between `reflection` and `justification` in BOOTSTRAP_CHAIN, and
+        // `justification:Declaration` requires `prov:was_attributed_to` — the attribution is half
+        // of what makes a declaration one (D89 §3). Without this layer the chain here is not the
+        // chain the ontology is written against.
+        let prov_source = include_str!("../../../ontologies/prov/prov.esl");
+        let prov_resources = esl::compile(prov_source, &reflection).expect("prov.esl must compile");
+        let mut prov_builder = LayerBuilder::new("prov", Some(reflection));
+        for r in prov_resources {
+            prov_builder.add_resource(r).unwrap();
+        }
+        let prov = Arc::new(prov_builder.build(crate::layer::LayerStorage::in_memory()));
+
         let source = include_str!("../../../ontologies/justification/justification.esl");
         let user_resources =
             esl::compile(source, term_chain()).expect("reasoning.esl must compile");
-        let mut user_builder = LayerBuilder::new("justification", Some(reflection));
+        let mut user_builder = LayerBuilder::new("justification", Some(prov));
         for r in user_resources {
             user_builder.add_resource(r).unwrap();
         }
@@ -6897,7 +6909,7 @@ mod tests {
             "urn:eigenius:witness:IsDeclaredAs",
             "urn:eigenius:witness:IsObservedAs",
             "urn:eigenius:witness:IsVerifiedAs",
-            "urn:eigenius:justification:Certificate",
+            "urn:eigenius:justification:Grounds",
         ] {
             let class_iri = Iri::parse(iri_str).unwrap();
             resolve_class_type(&class_iri, &layer)
@@ -6913,7 +6925,7 @@ mod tests {
         // an unresolved class.
         for iri_str in &[
             "urn:eigenius:justification:Conclusion",
-            "urn:eigenius:justification:Claim",
+            "urn:eigenius:justification:Declaration",
         ] {
             let class_iri = Iri::parse(iri_str).unwrap();
             resolve_class_type(&class_iri, &layer)

@@ -14,14 +14,14 @@
 
 //! A class is not a proposition (eigenius#191).
 //!
-//! `justification:Certificate.declared` binds `P : Prop`, so its second argument
+//! `justification:Grounds.declared` binds `P : Prop`, so its second argument
 //! is checked against `Sort(0)`. Check mode carried
 //! `(Exp::EigonClass(_), Val::Sort(_)) => Ok(())`, admitting an `EigonClass`
 //! against every universe including `Prop`, while `check_infer` gives
 //! `Sort(1)`. A certificate could therefore name a class where its
 //! proposition belongs and the sentence validated as Holds.
 //!
-//! Same chain and handler as `spec_poly_universe.rs`, so the judgement is
+//! Same chain and handler as `instantiate_universe.rs`, so the judgement is
 //! exercised where Rule 21 exercises it, not only at the `check` API.
 
 use std::sync::Arc;

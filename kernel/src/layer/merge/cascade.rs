@@ -367,7 +367,7 @@ fn cascade_for_quotient(
 ///
 /// The path is why this reads the walk's `path` argument rather than only its leaves: the item
 /// this produces names WHERE the dangling reference sits, and a caller reading
-/// `PropertyPath([justification:judgement, eigentt:Judgement-holds-term])` can find it.
+/// `PropertyPath([justification:grounds_judgement, eigentt:Judgement-holds-term])` can find it.
 fn collect_orphaned_refs(
     resource: &Resource,
     resource_iri: &Iri,

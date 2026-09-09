@@ -51,15 +51,15 @@ used to, and the conflation is what this method most often gets wrong.
 Most resources have provenance and no warrant. A lexicon entry, a class
 declaration, an imported concept carries no proposition, so asking what proves it
 is a **category error**, not an unanswered question. The test is mechanical: does
-the resource carry a `reflection:canonical_proposition`.
+the resource carry a `justification:proposition`.
 
 **There are three grounds, not four.** A ground is what a certificate cites.
 
 | Ground | Means | What it needs on chain | Witness |
 |---|---|---|---|
-| **Declared** | asserted on authority/design | a `justification:Claim` carrying the proposition + a `prov:DeclarationTrace` naming the agent | `IsDeclaredAs` |
+| **Declared** | asserted on authority/design | a `justification:Declaration` carrying the proposition + a `prov:DeclarationTrace` naming the agent | `IsDeclaredAs` |
 | **Observed** | read off the world | the observed resource + a `prov:ObservationTrace` naming the `prov:Activity` that produced it | `IsObservedAs` |
-| **Verified** | kernel-checked | a `justification:Conclusion` carrying a `justification:proof` — the judgement `holds(logic, t, P)` | `IsVerifiedAs` |
+| **Verified** | kernel-checked | a `justification:Conclusion` carrying a `justification:proof_judgement` — the judgement `holds(logic, t, P)` | `IsVerifiedAs` |
 
 **`Computed` is not a fourth ground; it is a term shape.** A computed claim is
 `App(Declared(plan), Observed(inputs))`: the plan is DECLARED to denote a function
@@ -83,7 +83,7 @@ resource-typed, so *which claims rest on this instrument* is a join.
 
 Each witness is emitted by the per-layer witness index **from a trace resource**
 whose `prov:resource` points at the target and whose target carries
-`reflection:canonical_proposition` — so `declared(iri, P)` / `observed(iri, P)`
+`justification:proposition` — so `declared(iri, P)` / `observed(iri, P)`
 only resolve when that trace exists in an **ancestor layer** of the citing
 conclusion (load emitters before consumers — the recompute-plans-before-conclusions
 split).
@@ -173,7 +173,7 @@ resource lit:smith_2020 : reference:Reference {
 resource lit:cite_smith : reference:Citation {
     reference:cites          = lit:smith_2020;
     reference:citation_type  = reference:cites_as_authority;   // or uses_method_in / cites_as_evidence / ...
-    reflection:canonical_proposition = type_expr( obj:KnownFact("x") );
+    justification:proposition = type_expr( obj:KnownFact("x") );
     core:description = "what this work establishes that we build on";
 }
 resource lit:cite_smith_trace : prov:DeclarationTrace {
@@ -210,15 +210,15 @@ cites it. Three shapes:
   --language oci` + `eigenius run` — the WRN wrapped-program pattern, no new
   institution.
 
-  **The run is not the ground.** Commit a `justification:Claim` asserting that the
+  **The run is not the ground.** Commit a `justification:Declaration` asserting that the
   plan denotes a function of its input, with a `prov:DeclarationTrace` behind it,
   and cite the composite:
 ```esl
-resource obj:plan_yields_result : justification:Claim {
+resource obj:plan_yields_result : justification:Declaration {
     prov:was_attributed_to  = agent:<who-vouches>;
     prov:had_primary_source = obj:warrant_plan_reproducibility;
     prov:rationale = "Applying <plan> to its recorded input yields <result>. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         core:Asserts("urn:eigenius:obj:<slug>:input") -> obj:Result("x")
     );
 }
@@ -230,7 +230,7 @@ resource obj:plan_yields_result_trace : prov:DeclarationTrace {
 
 resource obj:concl_x : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:obj:<slug>:subject";
-    justification:judgement   = type_expr(
+    justification:grounds_judgement   = type_expr(
         holds( eigentt:logic_kernel,
                app( core:Asserts("urn:eigenius:obj:<slug>:input"), obj:Result("x"),
                     Declared("urn:eigenius:obj:<slug>:plan_yields_result"),
@@ -239,7 +239,7 @@ resource obj:concl_x : justification:Conclusion {
                              core:Asserts("urn:eigenius:obj:<slug>:input") -> obj:Result("x")),
                     observed("urn:eigenius:obj:<slug>:input",
                              core:Asserts("urn:eigenius:obj:<slug>:input")) ),
-               justification:Certificate(
+               justification:Grounds(
                    justification:App(
                        Declared("urn:eigenius:obj:<slug>:plan_yields_result"),
                        Observed("urn:eigenius:obj:<slug>:input")),
@@ -257,8 +257,8 @@ happily beside a different `proposition`. Now the pairing is what gets checked.
 The judgement reads: *the kernel verified that this certificate grounds this
 proposition*. It does **not** say the proposition is true — that is the point of the
 separation, and no rule turns one into the other.
-- **Declared** rule/judgment — a `justification:Claim` carrying the rule as
-  `reflection:canonical_proposition`, with `prov:rationale`, a
+- **Declared** rule/judgment — a `justification:Declaration` carrying the rule as
+  `justification:proposition`, with `prov:rationale`, a
   `prov:DeclarationTrace`, and `prov:was_attributed_to` naming who stands behind it.
   A declaration with no agent asserts nothing anybody can be held to. If the reason
   it was asserted is itself a resource — a criterion, a convention, a citation —

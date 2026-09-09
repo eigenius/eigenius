@@ -141,7 +141,7 @@ fn esl_against_pending(
         }
         // The VerificationTrace assertion that stood here is retired with the reasoning
         // institution. It pinned P3's narrowing — a trace is minted only alongside a
-        // `justification:proof`, so a certificate-only conclusion owes none — against the
+        // `justification:proof_judgement`, so a certificate-only conclusion owes none — against the
         // handler that minted them. That minter goes with the crate, and the Lean
         // institution becomes the producer of `Verified` witnesses (eigenius#160), so the
         // property this asserted now holds vacuously here and is #160's to re-pin.

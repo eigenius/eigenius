@@ -183,7 +183,7 @@ resource screen_confirmatory_result:main_effect :
     stats:computed_p_value           = 0.00034;
     stats:effect_name                = "main_effect";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         stats:lt(
             stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"),
             100.0
@@ -216,11 +216,11 @@ resource screen:warrant_plan_reproducibility : prov:Source {
     core:short_name = "warrant_plan_reproducibility";
 }
 
-resource screen:claim_eig0291_confirmatory_holds_yields_main_effect : justification:Claim {
+resource screen:claim_eig0291_confirmatory_holds_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_plan_reproducibility;
     prov:rationale    = "Applying claim_eig0291_confirmatory_holds to the confirmatory sample set yields its main_effect: the one-sample t-test against the 100 nM threshold. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         core:Asserts("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset")
         -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset"), 100.0)
     );

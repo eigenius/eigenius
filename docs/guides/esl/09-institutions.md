@@ -281,40 +281,40 @@ data justification:Term {
 
 Three grounds and the paper's two composition operators — *"an algebra of justification terms that supports application and sum."*
 
-- **`Declared(iri)`** — cite an `axiom` declaration ([§4.4a](04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)) or any other `justification:Claim` (a literature rule, a statistical-to-domain bridge, a claim that a plan denotes a function of its input). The chain attests *that an accountable agent asserted it*, not that it has been independently verified.
+- **`Declared(iri)`** — cite an `axiom` declaration ([§4.4a](04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)) or any other `justification:Declaration` (a literature rule, a statistical-to-domain bridge, a claim that a plan denotes a function of its input). The chain attests *that an accountable agent asserted it*, not that it has been independently verified.
 - **`Observed(iri)`** — cite a resource read off the world (bench measurement, instrument log, released dataset). The chain attests *that it was observed, by the activity its `prov:ObservationTrace` names* — not what its semantic interpretation is.
-- **`Verified(iri)`** — cite a conclusion carrying a `justification:proof`, the judgement `holds(logic, t, P)`. The chain attests *that a checker verified `t` against `P` itself*.
+- **`Verified(iri)`** — cite a conclusion carrying a `justification:proof_judgement`, the judgement `holds(logic, t, P)`. The chain attests *that a checker verified `t` against `P` itself*.
 - **`App(j1, j2)`** — Artemov Application: if `j1` justifies `A -> B` and `j2` justifies `A`, then `App(j1, j2)` justifies `B`.
 - **`Sum(j1, j2)`** — Artemov Sum: two independent grounds for the same conclusion. `sum_l` / `sum_r` record which was preferred, and **both require a derivation for each branch** (see below).
 
 **There is no `Derived` ground, and that is the design's central claim in miniature.** A computed claim does not rest on the fact that a computation ran. It rests on two things a run cannot supply: the assertion that the plan denotes a function `I -> O` — which an accountable agent makes, and which no execution establishes, because determinism is a fact about the environment rather than something recoverable from a run record — and the inputs it was applied to. So a computed ground is the APPLICATION `App(Declared(plan), Observed(inputs))`, and `Sampled` is a bare `Observed` leaf. Both are *term shapes*, not fundamental grounds.
 
-**There is no `SpecStr` either.** It was a third operation the paper's algebra does not have, and its second field was the only unchecked argument anywhere in the algebra: `spec_poly` bound the instance `x : T` and the tag independently, with nothing relating them, so the tag was a free string the author picked and no rule validated. The RULE survives (below); only the term record went, and specialization now leaves the term unchanged — which is right, because eliminating a quantifier narrows the proposition and introduces no ground.
+**There is no `SpecStr` either.** It was a third operation the paper's algebra does not have, and its second field was the only unchecked argument anywhere in the algebra: `instantiate` bound the instance `x : T` and the tag independently, with nothing relating them, so the tag was a free string the author picked and no rule validated. The RULE survives (below); only the term record went, and specialization now leaves the term unchanged — which is right, because eliminating a quantifier narrows the proposition and introduces no ground.
 
-### 9.10.2. The `justification:Certificate` certificate predicate
+### 9.10.2. The `justification:Grounds` certificate predicate
 
-`justification:Certificate : justification:Term -> Prop -> Type 2` is an [indexed inductive family](04-declarations.md#indexed-d48-indexed-families): its two indices are the term and the proposition. It lives in a `Type`, not `Prop`, so certificates are stored and re-checkable.
+`justification:Grounds : justification:Term -> Prop -> Type 2` is an [indexed inductive family](04-declarations.md#indexed-d48-indexed-families): its two indices are the term and the proposition. It lives in a `Type`, not `Prop`, so certificates are stored and re-checkable.
 
-Seven constructors: three groundings, `app`, the two `Sum` arms, and `spec_poly`:
+Seven constructors: three groundings, `app`, the two `Sum` arms, and `instantiate`:
 
 ```esl
-data justification:Certificate : justification:Term -> Prop -> Type 2 {
-    declared : forall (iri, P) => witness:IsDeclaredAs(iri, P) -> justification:Certificate(Declared(iri), P),
-    observed : forall (iri, P) => witness:IsObservedAs(iri, P) -> justification:Certificate(Observed(iri), P),
-    verified : forall (iri, P) => witness:IsVerifiedAs(iri, P) -> justification:Certificate(Verified(iri), P),
+data justification:Grounds : justification:Term -> Prop -> Type 2 {
+    declared : forall (iri, P) => witness:IsDeclaredAs(iri, P) -> justification:Grounds(Declared(iri), P),
+    observed : forall (iri, P) => witness:IsObservedAs(iri, P) -> justification:Grounds(Observed(iri), P),
+    verified : forall (iri, P) => witness:IsVerifiedAs(iri, P) -> justification:Grounds(Verified(iri), P),
 
     app : forall (A, B, j1, j2) =>
-        justification:Certificate(j1, A -> B) -> justification:Certificate(j2, A) -> justification:Certificate(App(j1, j2), B),
+        justification:Grounds(j1, A -> B) -> justification:Grounds(j2, A) -> justification:Grounds(App(j1, j2), B),
 
     // BOTH branches must be justified — see below.
     sum_l : forall (P, j1, j2) =>
-        justification:Certificate(j1, P) -> justification:Certificate(j2, P) -> justification:Certificate(Sum(j1, j2), P),
+        justification:Grounds(j1, P) -> justification:Grounds(j2, P) -> justification:Grounds(Sum(j1, j2), P),
     sum_r : forall (P, j1, j2) =>
-        justification:Certificate(j1, P) -> justification:Certificate(j2, P) -> justification:Certificate(Sum(j1, j2), P),
+        justification:Grounds(j1, P) -> justification:Grounds(j2, P) -> justification:Grounds(Sum(j1, j2), P),
 
-    spec_poly : forall (T : Type 1, P : T -> Prop, j, x : T) =>
-        justification:Certificate(j, forall (y : T) => P(y)) ->
-        justification:Certificate(j, P(x)),
+    instantiate : forall (T : Type 1, P : T -> Prop, j, x : T) =>
+        justification:Grounds(j, forall (y : T) => P(y)) ->
+        justification:Grounds(j, P(x)),
 }
 ```
 
@@ -322,9 +322,9 @@ The three grounding constructors each consume a [`ChainWitness.Is*As`](06-resour
 
 **`sum_l` / `sum_r` depart from LP's axiom deliberately.** Artemov's `t:F -> (t+s):F` quantifies over an arbitrary `s`, so the unused summand need not be justified or even name a resource that exists. That is unsound here, because `support` reads `Sum` disjunctively and reports the unchecked branch as a genuine alternative: `Sum(real_evidence, Declared("urn:does-not-exist"))` type-checked, and `survives_without(real_evidence)` then returned **true** — the conclusion "survived" losing its only ground by way of a branch nothing ever grounded. Requiring both branches makes the term and the certificate agree about `Sum`. Asserting a fallback obliges you to show the fallback works.
 
-**`spec_poly` leaves the term index at `j`.** Specialization narrows the PROPOSITION and introduces no ground, so the term that certified the universal certifies the instance. One consequence, stated rather than discovered later: `spec_poly` and `declared` can both target `Certificate(Declared(rule), P(x))`, so the TERM stops determining which rule applies at that node. Checking is unaffected because a certificate names its own constructor.
+**`instantiate` leaves the term index at `j`.** Specialization narrows the PROPOSITION and introduces no ground, so the term that certified the universal certifies the instance. One consequence, stated rather than discovered later: `instantiate` and `declared` can both target `Certificate(Declared(rule), P(x))`, so the TERM stops determining which rule applies at that node. Checking is unaffected because a certificate names its own constructor.
 
-**No implication introduction.** No constructor produces `justification:Certificate(_, A -> B)` — `app` yields `B`, `sum_l` / `sum_r` yield `P`, `spec_poly` yields `P` at an instance. An implication therefore enters only through a grounding: asserted as a resource, witnessed by a trace. There is no deduction theorem here, so a rule relating propositions cannot be *derived*; it must be Declared, and quantifying it and eliminating with `spec_poly` is what lets one rule serve many instances.
+**No implication introduction.** No constructor produces `justification:Grounds(_, A -> B)` — `app` yields `B`, `sum_l` / `sum_r` yield `P`, `instantiate` yields `P` at an instance. An implication therefore enters only through a grounding: asserted as a resource, witnessed by a trace. There is no deduction theorem here, so a rule relating propositions cannot be *derived*; it must be Declared, and quantifying it and eliminating with `instantiate` is what lets one rule serve many instances.
 
 ### 9.10.3. The `justification:Conclusion` resource
 
@@ -332,8 +332,8 @@ The chain-resident reasoning step. It carries **one** required slot, and that is
 
 ```esl
 class justification:Conclusion {
-    requires justification:judgement;
-    recommends justification:proof,
+    requires justification:grounds_judgement;
+    recommends justification:proof_judgement,
                justification:subject_iri,
                justification:refutes;
 }
@@ -341,10 +341,10 @@ class justification:Conclusion {
 
 Property shapes:
 
-- **`justification:judgement`** — an `eigentt:Judgement`: `holds(kernel, c, Certificate(j, P))`, read as *the kernel verified that certificate `c` grounds a claim to `P`*. It does **not** assert `P`: a certificate records grounds, and no rule turns `Certificate(j, P)` into `P`.
+- **`justification:grounds_judgement`** — an `eigentt:Judgement`: `holds(kernel, c, Certificate(j, P))`, read as *the kernel verified that certificate `c` grounds a claim to `P`*. It does **not** assert `P`: a certificate records grounds, and no rule turns `Certificate(j, P)` into `P`.
 
   This replaces the three slots the class used to carry — `proposition`, `term`, `certificate` — which were checked by three separate paths with nothing requiring them to be about the same claim. A certificate for one proposition could sit beside a different proposition and both checked clean. Folding them into the judgement's TYPE is what makes the pairing the thing that gets checked.
-- **`justification:proof`** (recommended) — a second judgement, `holds(logic, t, P)`: a checker verified `t` against `P` itself. This is factive, and **only this admits an `IsVerifiedAs` witness**. A conclusion carrying no proof term is not citable as `Verified(iri)`, however well justified it is.
+- **`justification:proof_judgement`** (recommended) — a second judgement, `holds(logic, t, P)`: a checker verified `t` against `P` itself. This is factive, and **only this admits an `IsVerifiedAs` witness**. A conclusion carrying no proof term is not citable as `Verified(iri)`, however well justified it is.
 - **`justification:subject_iri`** (recommended) — the principal Resource this conclusion is about. A first-class EigenQL index for "what have I concluded about X?".
 - **`justification:refutes`** (recommended) — IRI of a prior conclusion this one supersedes.
 
@@ -358,7 +358,7 @@ The agent claims `StrongInhibitor(EIG_0291)`. The justification applies a litera
 resource screen:concl_eig0291_strong : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
-    justification:judgement = type_expr(
+    justification:grounds_judgement = type_expr(
         alias
             EIG  = "urn:eigenius:demo:screen:EIG_0291",
             SS   = "urn:eigenius:demo:screen:m_eig0291_sampleset",
@@ -377,7 +377,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                     Declared(RULE), computed,
                     declared(RULE, LOW -> screen:StrongInhibitor(EIG)),
                     cs ),
-               justification:Certificate(
+               justification:Grounds(
                    justification:App(Declared(RULE), computed),
                    screen:StrongInhibitor(EIG) ) )
     );
@@ -388,9 +388,9 @@ At commit, the `ValidateJustification` AutoOnLoad gate fires:
 
 1. Decode the judgement's three fields: the logic, the certificate term, and its type.
 2. Check the type is a type, then check the certificate against it — the contract `eigentt:Judgement` states.
-3. Checking walks `justification:Certificate.app`, which requires sub-certificates for `Certificate(j1, A -> B)` and `Certificate(j2, A)`.
+3. Checking walks `justification:Grounds.app`, which requires sub-certificates for `Certificate(j1, A -> B)` and `Certificate(j2, A)`.
 4. Each grounding constructor requires a chain witness the kernel synthesizes:
-   - `IsDeclaredAs("urn:…:rule_strong", HasLowIC50 -> StrongInhibitor)` — admitted if `rule_strong` was committed as a `justification:Claim` with matching `canonical_proposition` and a paired `prov:DeclarationTrace`.
+   - `IsDeclaredAs("urn:…:rule_strong", HasLowIC50 -> StrongInhibitor)` — admitted if `rule_strong` was committed as a `justification:Declaration` with matching `canonical_proposition` and a paired `prov:DeclarationTrace`.
    - `IsDeclaredAs("urn:…:plan_yields_lowic50", Asserts(s) -> HasLowIC50)` — the plan's reproducibility declaration.
    - `IsObservedAs("urn:…:m_eig0291_sampleset", Asserts(s))` — from the sample set's `prov:ObservationTrace`.
 5. If every witness admits, the certificate type-checks; verdict is Holds. Otherwise Fails, with a diagnostic naming the missing family, IRI and proposition.
@@ -401,7 +401,7 @@ The full fixture this snippet is drawn from lives at [`kernel/tests/fixtures/dru
 
 ### 9.10.5. Where the check happens
 
-**At commit, in ordinary validation — there is no QueryClass.** `justification:judgement` is an
+**At commit, in ordinary validation — there is no QueryClass.** `justification:grounds_judgement` is an
 `eigentt:Judgement`-ranged slot, and **Rule 21** owns every such slot
 ([`kernel/src/validation/rules/eigentt_value.rs`](../../../kernel/src/validation/rules/eigentt_value.rs)):
 decode the judgement, check its `type` is a type, then check its `term` against that type in check
@@ -430,7 +430,7 @@ claim about what belongs in an institution:
 - [`kernel/src/validation/rules/eigentt_value.rs`](../../../kernel/src/validation/rules/eigentt_value.rs) — Rule 21, the check itself.
 - [`kernel/src/justification/`](../../../kernel/src/justification/) — the support algebra over a retained term: `support`, `is_fully_verified`, `leaves_of`, `survives_without`, `cited_iris`.
 - [`kernel/tests/certificate_admission.rs`](../../../kernel/tests/certificate_admission.rs) — the witness machinery end to end, including where admission must fail.
-- [`ontologies/justification/justification.esl`](../../../ontologies/justification/justification.esl) — full ontology source: justification:Term, justification:Certificate, justification:Conclusion. The `witness:Is*As` predicates it references are declared in [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json), because the kernel constructs their inhabitants and a type the kernel inhabits cannot be owned by a layer above it.
+- [`ontologies/justification/justification.esl`](../../../ontologies/justification/justification.esl) — full ontology source: justification:Term, justification:Grounds, justification:Conclusion. The `witness:Is*As` predicates it references are declared in [`ontologies/core/core-ontology.json`](../../../ontologies/core/core-ontology.json), because the kernel constructs their inhabitants and a type the kernel inhabits cannot be owned by a layer above it.
 - [D39 §3-§5](../../design/d39-justification-logic.md) — design rationale, the Justification Logic foundation, and the soundness story.
 - [D49](../../design/d49-chainwitness-machinery.md) — chain-witness machinery the grounding constructors consume.
 - [`platform/justification-logic/`](../platform/justification-logic/) — operational walkthrough: how to commit conclusions and compose with the D52 statistics institution. **Written against the institution that no longer exists**, so its verdict-inspection material is stale; the vocabulary and the worked chain are not.

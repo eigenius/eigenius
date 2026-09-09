@@ -131,7 +131,7 @@ fn spearman_recomputes_wrn_mutator_load_correlation_to_holds() {
         .unwrap_or("")
         .to_string();
     let has_canonical = result
-        .get(&Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap())
+        .get(&Iri::parse("urn:eigenius:justification:proposition").unwrap())
         .is_some();
 
     assert_eq!(

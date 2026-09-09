@@ -306,7 +306,7 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
     stats:null_hypothesis = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
 
@@ -400,7 +400,7 @@ The resulting value lands in the resource's property slot just like any other pr
 
 ### Where this appears in practice
 
-- `reflection:canonical_proposition` on every resource carrying a proposition (StatisticalAnalysisPlan, justification:Claim, custom institution-emitted derived resources) — the proposition the resource asserts.
+- `justification:proposition` on every resource carrying a proposition (StatisticalAnalysisPlan, justification:Declaration, custom institution-emitted derived resources) — the proposition the resource asserts.
 - `eigentt:axiom_statement` on every `axiom` declaration ([§4.4a](04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)) — surface-compiled via the same lowering path.
 - `stats:null_hypothesis` / `stats:alternative_hypothesis` on `StatisticalAnalysisPlan` — the null and alternative the verifier reports in the verdict's audit trail.
 - `justification:proposition` on `justification:Conclusion` — the proposition the certificate type-checks against.

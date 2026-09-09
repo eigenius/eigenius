@@ -27,7 +27,7 @@
 //
 //     One bridge resource serves the whole screening campaign. The
 //     per-pair specialisation lands at certificate-author time via
-//     nested `spec_poly`, which narrows the proposition and leaves the
+//     nested `instantiate`, which narrows the proposition and leaves the
 //     justification term unchanged. The methodology + threshold (100.0 nM) ride
 //     baked into the bridge's identity — different thresholds →
 //     different bridges.
@@ -39,7 +39,7 @@
 //     bridge's antecedent consumes.
 //
 //  4. The universal literature rule, specialised at the compound IRI
-//     via `spec_poly` (same shape as before; what differs is the
+//     via `instantiate` (same shape as before; what differs is the
 //     bridge structure).
 //
 //  5. The full chain of evidence: bench data → statistics verdict →
@@ -88,12 +88,12 @@ data screen:sample_for : core:string -> core:string -> Prop {
 // relationship fact (no methodological reasoning) — cheap to commit.
 // The polymorphic bridge then serves all such pairs uniformly.
 
-resource screen:sample_for_eig0291_confirmatory : justification:Claim {
+resource screen:sample_for_eig0291_confirmatory : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_lab_bookkeeping_plate_2026_03_11_confirmatory;
     prov:rationale   = "The confirmatory SampleSet at urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset was prepared from compound EIG_0291 — recorded by the assay technician at plate-load time. Pure relationship fact; no methodological reasoning.";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         screen:sample_for(
             "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
             "urn:eigenius:demo:screen:EIG_0291"
@@ -117,12 +117,12 @@ resource screen:sample_for_eig0291_confirmatory_trace : prov:DeclarationTrace {
 // set's mean being below threshold implies that ANY compound is a
 // low-IC50 inhibitor, which is structurally wrong.
 
-resource screen:bridge_lowic50 : justification:Claim {
+resource screen:bridge_lowic50 : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_methodology_ic50_classification_convention;
     prov:rationale   = "Universal: for any sample set s drawn from compound c, if s's mean IC50 is statistically below 100 nM, classify c as HasLowIC50 at the assayed target. Methodology + threshold are baked into the bridge's identity; a different threshold needs a different bridge.";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         forall (s : core:string) =>
         forall (c : core:string) =>
             screen:sample_for(s, c)
@@ -140,12 +140,12 @@ resource screen:bridge_lowic50_trace : prov:DeclarationTrace {
 
 // ─── Universal literature rule ─────────────────────────────────────
 
-resource screen:rule_strong : justification:Claim {
+resource screen:rule_strong : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_literature_smith_et_al_2024_3_2;
     prov:rationale   = "Universal: any compound with low IC50 at this target is a strong inhibitor at the same target.";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         forall (c : core:string) =>
             screen:HasLowIC50(c) -> screen:StrongInhibitor(c)
     );
@@ -160,15 +160,15 @@ resource screen:rule_strong_trace : prov:DeclarationTrace {
 
 // ─── justification:Conclusion: derive StrongInhibitor(EIG_0291) ───────────
 //
-// Five-step composition (four `App`s + two nested `spec_poly`s). Only the
-// PROPOSITION column moves at a `spec_poly` step — the justification term stays
+// Five-step composition (four `App`s + two nested `instantiate`s). Only the
+// PROPOSITION column moves at a `instantiate` step — the justification term stays
 // `Declared(bridge)` throughout, because narrowing a universal adds no ground:
 //
 //   bridge : forall s c, sample_for(s,c) -> stats:lt(mean_of(s), 100.0) -> HasLowIC50(c)
-//        |  spec_poly at s = confirmatory_sample_set
+//        |  instantiate at s = confirmatory_sample_set
 //        v
 //   forall c, sample_for(confirmatory_s, c) -> stats:lt(mean_of(confirmatory_s), 100.0) -> HasLowIC50(c)
-//        |  spec_poly at c = EIG_0291
+//        |  instantiate at c = EIG_0291
 //        v
 //   sample_for(confirmatory_s, EIG_0291) -> stats:lt(mean_of(confirmatory_s), 100.0) -> HasLowIC50(EIG_0291)
 //        |  apply to Declared(sample_for_witness)
@@ -182,12 +182,11 @@ resource screen:rule_strong_trace : prov:DeclarationTrace {
 //   StrongInhibitor(EIG_0291)
 
 resource screen:concl_eig0291_strong : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so each is a
     // `type_expr(...)` and the `alias` bindings scope inside each one.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             EIG    = "urn:eigenius:demo:screen:EIG_0291",
@@ -214,7 +213,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
         in
         app(
                    // outer c1 : specialise the literature rule at EIG_0291.
-                   spec_poly(
+                   instantiate(
                        // T : the domain
                        core:string,
                        fun (x : core:string) =>
@@ -228,9 +227,9 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        // middle c1' : inner app composes the fully-specialised
                        // bridge with the sample_for witness.
                        app(
-                           // inner c1'' : nested spec_poly — specialise the
+                           // inner c1'' : nested instantiate — specialise the
                            // bridge at s, then at c.
-                           spec_poly(
+                           instantiate(
                                // T : the domain
                                core:string,
                                fun (c : core:string) =>
@@ -238,7 +237,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                                    -> stats:lt(stats:mean_of(SS), 100.0)
                                    -> screen:HasLowIC50(c),
                                EIG,
-                               spec_poly(
+                               instantiate(
                                    // T : the domain
                                    core:string,
                                    fun (s : core:string) =>
@@ -283,7 +282,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                           -> stats:lt(stats:mean_of(s), 100.0)
                           -> screen:HasLowIC50(c)
         in
-        justification:Certificate(
+        justification:Grounds(
                    screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") )) );
 
 

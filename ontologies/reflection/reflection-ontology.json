@@ -4,14 +4,14 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:Class"
     ],
-    "urn:eigenius:core:description": "A resource the kernel emitted as a side-effect of an AutoOnLoad institution dispatch — the result an institution computed from a gated analysis spec and its data. It records WHAT A RUN PRODUCED and grounds nothing: a computed claim rests on the plan being DECLARED to denote a function of its input, which no execution establishes, and on the input being OBSERVED, so the ground is App(Declared(plan), Observed(inputs)) and neither half comes from here. Subclassed reflection:DerivedResource until that class was deleted; it now subclasses nothing, because `the kernel produced it` is a provenance fact recorded by its prov:ProgramTrace rather than a kind of resource. Carries reflection:from_subject (the gated subject), reflection:runtime_invocation (the producing invocation) and reflection:canonical_proposition (what it computed).",
+    "urn:eigenius:core:description": "A resource the kernel emitted as a side-effect of an AutoOnLoad institution dispatch — the result an institution computed from a gated analysis spec and its data. It records WHAT A RUN PRODUCED and grounds nothing: a computed claim rests on the plan being DECLARED to denote a function of its input, which no execution establishes, and on the input being OBSERVED, so the ground is App(Declared(plan), Observed(inputs)) and neither half comes from here. Subclassed reflection:DerivedResource until that class was deleted; it now subclasses nothing, because `the kernel produced it` is a provenance fact recorded by its prov:ProgramTrace rather than a kind of resource. Carries reflection:from_subject (the gated subject), reflection:runtime_invocation (the producing invocation) and justification:proposition (what it computed).",
     "urn:eigenius:core:short_name": "InstitutionEmittedDerivation",
     "urn:eigenius:core:requires": [
       "urn:eigenius:reflection:from_subject"
     ],
     "urn:eigenius:core:recommends": [
       "urn:eigenius:reflection:runtime_invocation",
-      "urn:eigenius:reflection:canonical_proposition"
+      "urn:eigenius:justification:proposition"
     ]
   },
   {
@@ -577,7 +577,7 @@
     "urn:eigenius:core:max_value": 2
   },
   {
-    "@id": "urn:eigenius:reflection:canonical_proposition",
+    "@id": "urn:eigenius:justification:proposition",
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:Property"
     ],

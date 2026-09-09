@@ -24,7 +24,7 @@
 //
 // With the model an explicit parameter, the quantifier is where it belongs — in the rule, visible,
 // and it is what the rule actually says. `inference.esl` eliminates it with
-// `justification:Certificate.spec_poly` at the model the sentences are about, which is the ordinary way to use a
+// `justification:Grounds.instantiate` at the model the sentences are about, which is the ordinary way to use a
 // general claim on a particular case.
 //
 // ── AND WHY IT IS THE ONLY DECLARED THING HERE ────────────────────────────────────────────────
@@ -65,7 +65,7 @@ namespace justification = "urn:eigenius:justification";
 // definition, or design decision — as opposed to something observed, derived, or machine-verified.
 // The class requires `declared_by` and recommends `rationale` and `timestamp`. Nothing about a
 // Declared resource claims it is true; it claims someone stood behind it, and says who.
-resource onco2:lit_rule_exo_implies_helicase : justification:Claim {
+resource onco2:lit_rule_exo_implies_helicase : justification:Declaration {
     // WHO stands behind the rule. A citation slot: in a real chain this would identify the paper.
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = onco2:warrant_literature_illustrative_dependency_rule;
@@ -86,7 +86,7 @@ resource onco2:lit_rule_exo_implies_helicase : justification:Claim {
     // rule that says something even slightly different is a different rule. Note that the two
     // `onco2:` calls below are DEFINITIONS: decode unfolds them to the parsed sentences on both
     // sides, so the match is on the unfolded terms and holds by construction.
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         forall (m : Set) =>
             onco2:HasActivity(m, umlscui:C0388246)
               -> onco2:RequiresActivity(m, umlscui:C0388246)

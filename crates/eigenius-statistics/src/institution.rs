@@ -46,11 +46,11 @@ pub mod iris {
     // ── StatisticalAnalysisPlan property IRIs (D52 §3) ──────────────────────
     pub const PROP_SAMPLE_SET: &str = "urn:eigenius:measurements:sample_set";
     // D52 reads the predicate the SAP's analysis attests from the
-    // inherited `reflection:canonical_proposition` slot on the
+    // inherited `justification:proposition` slot on the
     // per-effect `StatisticalAnalysisResult` derivation, not from the
     // SAP itself — the verifier derives the proposition from the
     // SAP's parameters at validation time.
-    pub const PROP_CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
+    pub const PROP_CANONICAL_PROPOSITION: &str = "urn:eigenius:justification:proposition";
     pub const PROP_ALPHA: &str = "urn:eigenius:measurements:alpha";
     pub const PROP_EFFECT_SIZE: &str = "urn:eigenius:measurements:effect_size";
     pub const PROP_DIRECTIONALITY: &str = "urn:eigenius:measurements:directionality";

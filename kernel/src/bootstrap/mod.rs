@@ -337,7 +337,7 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         format: OntologyFormat::Json,
     },
     // reasoning (D39 Phase 8) — the Justification Logic institution's chain
-    // artifacts (ChainWitness predicates, justification:Certificate, justification:Conclusion,
+    // artifacts (ChainWitness predicates, justification:Grounds, justification:Conclusion,
     // the institution + QueryClasses + ExportFormat). ESL source = single source
     // of truth. Depends on core / eigentt / reflection / institution.
     BootstrapOntology {
@@ -1392,7 +1392,7 @@ class p:Cat { description = "a dog"; }"#;
 
     #[test]
     fn bootstrap_resolves_the_justification_layer_artifacts() {
-        // The indexed inductive (justification:Certificate) and the
+        // The indexed inductive (justification:Grounds) and the
         // two resource classes, plus the three witness predicates the certificate ctors
         // reference — those now resolve from CORE, which is the point of the P7 move: the
         // kernel constructs their inhabitants, so they cannot be owned by a layer above it.
@@ -1401,9 +1401,9 @@ class p:Cat { description = "a dog"; }"#;
             "urn:eigenius:witness:IsDeclaredAs",
             "urn:eigenius:witness:IsObservedAs",
             "urn:eigenius:witness:IsVerifiedAs",
-            "urn:eigenius:justification:Certificate",
+            "urn:eigenius:justification:Grounds",
             "urn:eigenius:justification:Conclusion",
-            "urn:eigenius:justification:Claim",
+            "urn:eigenius:justification:Declaration",
         ] {
             let parsed = Iri::parse(iri).unwrap();
             assert!(
@@ -1421,12 +1421,12 @@ class p:Cat { description = "a dog"; }"#;
     #[test]
     fn the_certificates_implicit_binders_reach_the_kernel_declaration() {
         let ctx = bootstrap().unwrap();
-        let iri = Iri::parse("urn:eigenius:justification:Certificate").unwrap();
+        let iri = Iri::parse("urn:eigenius:justification:Grounds").unwrap();
         let resource = ctx
             .resolve(&iri)
-            .expect("justification:Certificate is chain-resident");
+            .expect("justification:Grounds is chain-resident");
         let decl = match crate::program::ground::resolve_inductive_type(&iri, &resource, ctx.head())
-            .expect("justification:Certificate resolves as an inductive")
+            .expect("justification:Grounds resolves as an inductive")
         {
             crate::nbe::val::Val::InductiveType { decl, .. } => decl,
             other => panic!("expected an inductive type former, got {other:?}"),
@@ -1452,8 +1452,8 @@ class p:Cat { description = "a dog"; }"#;
                 "`{ground}` declares nothing implicit"
             );
         }
-        // `spec_poly`'s `T` reaches the index only under a higher-order pattern — D88 §6.
-        assert!(flags("spec_poly").is_empty());
+        // `instantiate`'s `T` reaches the index only under a higher-order pattern — D88 §6.
+        assert!(flags("instantiate").is_empty());
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //   JustifiedBy(j, P)       `j` grounds a claim to P                     NOT factive
 //
 // This file declares the second, plus the two chain-resident classes that carry them: a
-// `justification:Claim` states a proposition that a certificate may cite as a ground, and a
+// `justification:Declaration` states a proposition that a certificate may cite as a ground, and a
 // `justification:Conclusion` pairs a proposition with the certificate justifying it, as one
 // checked judgement. `eigentt:Judgement` — the first stratum — is declared in core.
 //
@@ -62,7 +62,7 @@ namespace prov       = "urn:eigenius:prov";
 // constructor exposes an inhabitant. The certificate constructors below reference them across
 // the layer boundary, which is the ordinary direction.
 
-// ── justification:Certificate ────────────────────────────────────────
+// ── justification:Grounds ────────────────────────────────────────
 //
 // The paper writes the justification stratum `JustifiedBy(j, P)`, naming the relation between a
 // term and a proposition. Here the certificate IS the term: an inhabitant of `Certificate(P)` is
@@ -74,36 +74,36 @@ namespace prov       = "urn:eigenius:prov";
 // stored and re-checkable.
 //
 // **Why `Type 2`.** A constructor argument's sort may not exceed the inductive's own, or a large
-// type is smuggled into a small one and Girard's paradox follows. `spec_poly` binds `T : Type 1`,
+// type is smuggled into a small one and Girard's paradox follows. `instantiate` binds `T : Type 1`,
 // and `Type 1` is `Sort 2`, so that argument sits at `Sort 3`; the inductive must be at `Sort 3`
 // or above, which is `Type 2`. The constraint is enforced by nanoda's `check_ctor` universe check
 // (`references/nanoda_lib/src/inductive.rs:904`). This costs nothing at use sites: a
 // certificate's TYPE sits a universe higher, its VALUES are unchanged, and nothing checks
-// `justification:Certificate(p)` against a fixed sort.
+// `justification:Grounds(p)` against a fixed sort.
 //
 // **No implication introduction.** No constructor produces `Certificate(A -> B)`: `app` yields
-// `B`, `sum_*` yield `P`, `spec_poly` yields `P(x)`. An implication therefore enters only through
+// `B`, `sum_*` yield `P`, `instantiate` yields `P(x)`. An implication therefore enters only through
 // a grounding — asserted as a resource, witnessed by a trace. There is no deduction theorem, so a
 // bridge between vocabularies cannot be derived; it must be Declared. Quantifying that bridge and
-// eliminating with `spec_poly` is what lets one bridge serve many claims.
+// eliminating with `instantiate` is what lets one bridge serve many claims.
 
-data justification:Certificate : Prop -> Type 2 {
-    description = "The grounds for P, retained whole. An inhabitant of Certificate(P) IS the justification term: a constructor tree with three categorical groundings at its leaves and composition operators above them, indexed by the proposition it grounds. It does not assert P — a certificate records grounds, and no rule turns Certificate(P) into P, which is the non-factivity the two-stratum separation requires. Seven constructors: `declared`, `observed` and `verified`, each consuming a witness:Is*As that the kernel synthesizes from the layer's witness index rather than from anything an author writes; `app` for Artemov Application; `sum_l` and `sum_r`, which require BOTH branches to be justified and differ only in which constructor was chosen, that choice being the record of the preferred branch; and `spec_poly`, which narrows a universal proposition to an instance and adds no ground, since eliminating a quantifier introduces none. It inhabits Type 2 rather than Prop so a certificate is stored and re-checkable, and Type 2 rather than Type 0 because spec_poly binds T : Type 1 and a constructor argument's sort may not exceed the inductive's own.";
+data justification:Grounds : Prop -> Type 2 {
+    description = "The grounds for P, retained whole. An inhabitant of Certificate(P) IS the justification term: a constructor tree with three categorical groundings at its leaves and composition operators above them, indexed by the proposition it grounds. It does not assert P — a certificate records grounds, and no rule turns Certificate(P) into P, which is the non-factivity the two-stratum separation requires. Seven constructors: `declared`, `observed` and `verified`, each consuming a witness:Is*As that the kernel synthesizes from the layer's witness index rather than from anything an author writes; `app` for Artemov Application; `sum_l` and `sum_r`, which require BOTH branches to be justified and differ only in which constructor was chosen, that choice being the record of the preferred branch; and `instantiate`, which narrows a universal proposition to an instance and adds no ground, since eliminating a quantifier introduces none. It inhabits Type 2 rather than Prop so a certificate is stored and re-checkable, and Type 2 rather than Type 0 because instantiate binds T : Type 1 and a constructor argument's sort may not exceed the inductive's own.";
 
     declared :
         forall (iri : core:iri, P : Prop) =>
         witness:IsDeclaredAs(iri, P) ->
-        justification:Certificate(P),
+        justification:Grounds(P),
 
     observed :
         forall (iri : core:iri, P : Prop) =>
         witness:IsObservedAs(iri, P) ->
-        justification:Certificate(P),
+        justification:Grounds(P),
 
     verified :
         forall (iri : core:iri, P : Prop) =>
         witness:IsVerifiedAs(iri, P) ->
-        justification:Certificate(P),
+        justification:Grounds(P),
 
     // Artemov Application: a justification of `A -> B` applied to one of `A` justifies `B`.
     //
@@ -113,9 +113,9 @@ data justification:Certificate : Prop -> Type 2 {
     // would restate what the arguments already say.
     app implicit(A, B) :
         forall (A : Prop, B : Prop) =>
-        justification:Certificate(A -> B) ->
-        justification:Certificate(A) ->
-        justification:Certificate(B),
+        justification:Grounds(A -> B) ->
+        justification:Grounds(A) ->
+        justification:Grounds(B),
 
     // Artemov Sum. Both branches must be justified, which departs from LP's axiom: `support`
     // reads Sum disjunctively, so an unchecked branch would answer a counterfactual with a
@@ -123,15 +123,15 @@ data justification:Certificate : Prop -> Type 2 {
     // what records which branch was preferred.
     sum_l implicit(P) :
         forall (P : Prop) =>
-        justification:Certificate(P) ->
-        justification:Certificate(P) ->
-        justification:Certificate(P),
+        justification:Grounds(P) ->
+        justification:Grounds(P) ->
+        justification:Grounds(P),
 
     sum_r implicit(P) :
         forall (P : Prop) =>
-        justification:Certificate(P) ->
-        justification:Certificate(P) ->
-        justification:Certificate(P),
+        justification:Grounds(P) ->
+        justification:Grounds(P) ->
+        justification:Grounds(P),
 
     // Narrow a universal to an instance. It carries its premise's grounds through unchanged,
     // which is what "specialisation adds no ground" means.
@@ -142,13 +142,13 @@ data justification:Certificate : Prop -> Type 2 {
     // reason: the domain of `forall (y : T) => P(y)` would fix `T`, but the codomain is `P(y)`
     // and unification of the whole argument type has to succeed for any of it to count.
     // Widening that fragment is a decision about EigenTT, tracked in D88 §6.
-    spec_poly :
+    instantiate :
         forall (T : Type 1, P : T -> Prop, x : T) =>
-        justification:Certificate(forall (y : T) => P(y)) ->
-        justification:Certificate(P(x)),
+        justification:Grounds(forall (y : T) => P(y)) ->
+        justification:Grounds(P(x)),
 }
 
-// ── justification:Claim ─────────────────────────────────────────────
+// ── justification:Declaration ─────────────────────────────────────────────
 //
 // A chain-resident resource carrying a proposition: a literature rule, a statistical-to-domain
 // bridge, a claim that an analysis plan denotes a function of its input, an instrument reading
@@ -169,9 +169,9 @@ data justification:Certificate : Prop -> Type 2 {
 // surfaces as a missing witness at certificate-check time rather than as a missing property at
 // commit — later, and further from the cause.
 
-class justification:Claim {
-    description = "A chain-resident resource carrying a proposition — a literature rule, a statistical-to-domain bridge, a claim that a plan denotes a function of its input, an instrument reading. Cited as a ground by justification:Certificate.declared or .observed. REQUIRES reflection:canonical_proposition: carrying a proposition is what makes a resource citable, and what makes warrant a question that applies to it at all. Ground-neutral — which of Declared or Observed applies is which prov trace the resource carries, not which class it is, because provenance and warrant are orthogonal axes. Who asserted it, or what activity produced it, lives on that trace.";
-    requires reflection:canonical_proposition;
+class justification:Declaration {
+    description = "An assertion, by an accountable agent, that a proposition holds — a literature rule, a statistical-to-domain bridge, a claim that a plan denotes a function of its input. Cited as a ground by justification:Grounds.declared. REQUIRES BOTH halves: the proposition, without which the resource is not citable and warrant is not a question that applies to it; and the attribution, without which it is not a declaration at all. Requiring only the first is what the predecessor class did, and the first is the half every proposition-bearing resource has anyway. NOT a container for observations: an observed ground cites the measurement resource itself — a SampleSet, an ingested file — which carries its own domain structure and needs no class here. Its proposition is its own justification:proposition or the D39 §4.1 `core:Asserts(iri)` default.";
+    requires justification:proposition, prov:was_attributed_to;
     recommends prov:had_primary_source, core:description, core:short_name;
 }
 
@@ -190,35 +190,27 @@ class justification:Claim {
 
 class justification:Conclusion {
     description = "A chain-resident reasoning step: the thing a justification concludes. Carries ONE required judgement — `holds(kernel, c, Certificate(P))`, read as `the kernel verified that certificate c grounds a claim to P`. It does NOT assert P: a certificate records grounds, and no rule turns Certificate(P) into P. The proposition and the certificate both sit inside that judgement's type, so one check establishes that this certificate grounds this proposition, rather than several checks with nothing requiring them to concern the same claim. Named Conclusion because Claim is taken by enc:EncodedClaim.";
-    requires justification:judgement;
-    recommends justification:proof,
-               justification:subject_iri,
-               justification:refutes;
+    requires justification:grounds_judgement;
+    recommends justification:proof_judgement;
 }
 
-property justification:judgement : core:inductive {
+property justification:grounds_judgement : core:inductive {
     description = "The checked judgement this conclusion rests on: `holds(kernel, c, Certificate(P))`. The proposition P appears inside the TYPE, so checking the judgement checks that the certificate inhabits the certificate type for that proposition — one obligation, discharged by the uniform check-mode rule. Also the source of the conclusion's canonical proposition for witness emission: P is projected out of the judgement's type rather than read from a separate slot.";
     class_types eigentt:Judgement;
     domain justification:Conclusion;
 }
 
-property justification:proof : core:inductive {
-    description = "An optional SECOND judgement: `holds(logic, t, P)`, a proof of the conclusion's proposition in a logic the system hosts a checker for. Distinct from justification:judgement and never merged with it — that one says `c grounds P`, this one says `t proves P`, and conflating them is the substitution the two-stratum separation exists to make inexpressible. A conclusion carrying this is the Verified configuration: the chain holds a proof of P itself, not only grounds for a claim to it. Present only where a proof term exists; its absence is the normal case and carries no penalty.";
+property justification:proof_judgement : core:inductive {
+    description = "An optional SECOND judgement: `holds(logic, t, P)`, a proof of the conclusion's proposition in a logic the system hosts a checker for. Distinct from justification:grounds_judgement and never merged with it — that one says `c grounds P`, this one says `t proves P`, and conflating them is the substitution the two-stratum separation exists to make inexpressible. A conclusion carrying this is the Verified configuration: the chain holds a proof of P itself, not only grounds for a claim to it. Present only where a proof term exists; its absence is the normal case and carries no penalty.";
     class_types eigentt:Judgement;
     domain justification:Conclusion;
 }
 
-property justification:subject_iri : core:string {
-    description = "The principal Resource this conclusion is about. Aboutness, not logic: no judgement carries it. First-class EigenQL index — agents querying 'what have I concluded about X?' hit this directly. For decision-shaped reasoning, all alternative-consideration conclusions and the final pick share the same subject_iri.";
-    format = formats:iri;
-    domain justification:Conclusion;
-}
-
-property justification:refutes : core:string {
-    description = "IRI of a prior justification:Conclusion this one supersedes. Marks a belief-revision step; full chain-merge semantics are handled by the chain-merge work, and this property fixes only the structural marker.";
-    format = formats:iri;
-    domain justification:Conclusion;
-}
+// `justification:subject_iri` and `justification:refutes` were declared here and are gone (D89 §3).
+// Neither had a reader: `subject_iri` described itself as a first-class EigenQL index and no index
+// registered it, and `refutes` had no writer either — a marker held for chain-merge work that has
+// not arrived. Aboutness is recoverable from the proposition, which mentions its subject; a
+// supersession marker is minted when the merge semantics that give it meaning are built.
 
 // ════════════════════════════════════════════════════════════════════
 // Warrant: computed, never stored

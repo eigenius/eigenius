@@ -487,7 +487,7 @@ impl Printer<'_> {
 
             // A constructor is written `<ns>:<CtorName>`, where `<ns>` maps to a URI that
             // PREFIXES the parent inductive's IRI — see `Compiler::resolve_ctor_iri`. So
-            // `CtorApp["urn:eigenius:justification:Certificate", "app"]` prints `justification:app`.
+            // `CtorApp["urn:eigenius:justification:Grounds", "app"]` prints `justification:app`.
             //
             // Qualified rather than bare on purpose: bare resolution is by short name across every
             // chain-resident inductive, and `App` alone is already ambiguous between

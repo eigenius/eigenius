@@ -160,7 +160,7 @@ ontology when authoring witnessed propositions — don't memorize the shapes.
   `prov:had_primary_source` (the declared reason). All resource-typed, so provenance
   is an EigenQL join. Distinct from `reflection`, which keeps the kernel's
   evaluation-trace family (`LetTrace` / `MapTrace` / …) plus
-  `reflection:canonical_proposition` — the proposition a resource carries, which is
+  `justification:proposition` — the proposition a resource carries, which is
   the WARRANT axis's input and the mechanical test for whether warrant applies at
   all. **There are no grade classes**: nothing stores an epistemic status.
 - **Verified reasoning** — the `justification` ontology (`ontologies/justification/`) + the
@@ -169,18 +169,18 @@ ontology when authoring witnessed propositions — don't memorize the shapes.
   guide [justification-logic/](https://github.com/eigenius/eigenius/tree/main/docs/guides/platform/justification-logic)):
   a `justification:Conclusion` carries ONE judgement — `holds(kernel, c,
   Certificate(j, P))` — and the certificate type-checks against
-  `justification:Certificate(term, proposition)` via the three grounds
+  `justification:Grounds(term, proposition)` via the three grounds
   `Declared`/`Observed`/`Verified` plus `App`/`Sum`, with the
   `declared()/observed()/verified()/app()/sum_l()/sum_r()` certificate constructors.
-  A `justification:Claim` is a resource carrying a proposition, which is what
+  A `justification:Declaration` is a resource carrying a proposition, which is what
   `declared()` and `observed()` cite.
 - **Witness index** — [D49](https://github.com/eigenius/eigenius/blob/main/docs/design/d49-chainwitness-machinery.md):
   how `IsDeclaredAs`/`IsObservedAs`/`IsVerifiedAs` witnesses are admitted per layer
   and consumed by certificates. Three families, not four: a run record grounds
   nothing, so there is no `IsDerivedAs`.
 - **Lemma citation** — a conclusion is citable as `verified(<iri>, P)` ONLY if it
-  carries a `justification:proof`, the judgement `holds(logic, t, P)`. Its
-  `justification:judgement` is `holds(kernel, c, Certificate(j, P))`, which says a
+  carries a `justification:proof_judgement`, the judgement `holds(logic, t, P)`. Its
+  `justification:grounds_judgement` is `holds(kernel, c, Certificate(j, P))`, which says a
   checker verified the certificate and does NOT say `P`; minting Verified from that
   laundered a conclusion resting on nothing but `Declared(…)` into a proof one
   citation downstream. Compose with `Certificate.app` over the cited conclusion's

@@ -22,6 +22,7 @@ namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace assay      = "urn:eigenius:demo:assay";
 namespace prov       = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
 
 // ── Provenance activities ────────────────────────────────────────────
 // `prov:was_generated_by` is resource-typed: the event that produced an
@@ -77,7 +78,7 @@ resource assay:kinase_run_trace : prov:ObservationTrace {
 resource assay:claim_drug_changes_activity : stats:StatisticalAnalysisPlan {
     stats:sample_set = assay:kinase_run_2026_03_15;
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         assay:DifferentMeanActivity("urn:eigenius:demo:assay:drug_X")
     );
 

@@ -13,8 +13,8 @@ Five chain commits accomplish this:
 1. Declare the domain predicates (`HasLowIC50`, `StrongInhibitor`) in the chain ontology, both marked `is_a stats:PopulationLevel` per [D52 §7.4](../platform/statistics-institution/README.md#7-4-opinionated-stance-technicalonly-replicates-cannot-support-populationlevel-propositions).
 2. Commit a `stats:SampleSetResource` carrying the three raw IC50 readings via `stats:SingleSampleEstimate(...)`, paired with an `ObservationTrace`.
 3. Commit a `stats:StatisticalAnalysisPlan` against the SampleSet asserting the 100 nM threshold (alpha = 0.05, TwoSided, WelchUnequal, Identity exclusion), paired with a `ProgramTrace`. The D52 institution's AutoOnLoad gate recomputes the claim and emits a `Verdict::Holds` plus a per-effect result carrying `HasLowIC50(EIG_0291)`. That result records the run and admits no witness.
-4. Commit the literature rule as a `justification:Claim` whose `canonical_proposition` is `HasLowIC50(EIG_0291) -> StrongInhibitor(EIG_0291)`, and the plan's reproducibility claim (`Asserts(s) -> HasLowIC50(EIG_0291)`), each paired with a `DeclarationTrace`. The chain-witness index admits `IsDeclaredAs(rule_iri, HasLowIC50 -> StrongInhibitor)`.
-5. Commit a `justification:Conclusion` whose judgement pairs the term `App(Declared(rule_iri), App(Declared(plan_yields_iri), Observed(sampleset_iri)))` with the matching `justification:Certificate.app` term. The D39 institution's AutoOnLoad gate type-checks the certificate against `justification:Certificate(justification, StrongInhibitor(EIG_0291))`; both grounding constructors consume the admitted witnesses; verdict is Holds; the sentence is admitted.
+4. Commit the literature rule as a `justification:Declaration` whose `canonical_proposition` is `HasLowIC50(EIG_0291) -> StrongInhibitor(EIG_0291)`, and the plan's reproducibility claim (`Asserts(s) -> HasLowIC50(EIG_0291)`), each paired with a `DeclarationTrace`. The chain-witness index admits `IsDeclaredAs(rule_iri, HasLowIC50 -> StrongInhibitor)`.
+5. Commit a `justification:Conclusion` whose judgement pairs the term `App(Declared(rule_iri), App(Declared(plan_yields_iri), Observed(sampleset_iri)))` with the matching `justification:Grounds.app` term. The D39 institution's AutoOnLoad gate type-checks the certificate against `justification:Grounds(justification, StrongInhibitor(EIG_0291))`; both grounding constructors consume the admitted witnesses; verdict is Holds; the sentence is admitted.
 
 No comorphism is declared between the two institutions. No bridge code runs to translate the statistics verdict into a reasoning input. The composition works because both institutions honour the same chain artifact shape (a resource carrying `canonical_proposition`, plus the `prov` trace attesting how it came to exist), and the witness index reads from that shape uniformly.
 
@@ -27,8 +27,8 @@ No comorphism is declared between the two institutions. No bridge code runs to t
 | `screen:m_eig0291_sampleset_trace` (`prov:ObservationTrace`) | Pairs the SampleSet with its bench provenance. Admits `IsObservedAs` for downstream auditability (D49 §6). |
 | `screen:claim_eig0291_lowic50` (`stats:StatisticalAnalysisPlan`) | The universal-claim schema: alpha, effect_size, directionality, variance_assumption, outlier_exclusion. Its `canonical_proposition` is `HasLowIC50(EIG_0291)`. AutoOnLoad-gated by D52. |
 | `screen:claim_eig0291_lowic50_trace` (`prov:ProgramTrace`) | Records that the statistics-institution validator ran. Admits NO witness — the fact that a computation ran grounds nothing. |
-| `screen:rule_strong` (`justification:Claim`) | The literature rule. `canonical_proposition` is `HasLowIC50 -> StrongInhibitor`. |
-| `screen:plan_yields_lowic50` (`justification:Claim`) + its `prov:DeclarationTrace` | The plan's reproducibility claim: `Asserts(s) -> HasLowIC50(EIG_0291)`. Admits `IsDeclaredAs`, and is the DECLARED half of the computed ground. |
+| `screen:rule_strong` (`justification:Declaration`) | The literature rule. `canonical_proposition` is `HasLowIC50 -> StrongInhibitor`. |
+| `screen:plan_yields_lowic50` (`justification:Declaration`) + its `prov:DeclarationTrace` | The plan's reproducibility claim: `Asserts(s) -> HasLowIC50(EIG_0291)`. Admits `IsDeclaredAs`, and is the DECLARED half of the computed ground. |
 | `screen:rule_strong_trace` (`prov:DeclarationTrace`) | Admits `IsDeclaredAs(rule_iri, HasLowIC50 -> StrongInhibitor)`. |
 | `screen:concl_eig0291_strong` (`justification:Conclusion`) | The reasoning step. One judgement: `holds(kernel, c, Certificate(App(Declared(rule), App(Declared(plan_yields), Observed(sampleset))), StrongInhibitor(EIG_0291)))`. AutoOnLoad-gated by D39. |
 
@@ -83,7 +83,7 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
     stats:alternative_hypothesis = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
 
@@ -120,17 +120,17 @@ WitnessKey {
 }
 ```
 
-This entry is what the D39 sentence's `justification:Certificate.derived` constructor will consume in step 5.
+This entry is what the D39 sentence's `justification:Grounds.derived` constructor will consume in step 5.
 
 ### Step 4 — Rule + DeclarationTrace land
 
 ```esl
-resource screen:rule_strong : justification:Claim {
+resource screen:rule_strong : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_smith_et_al_2024;
     prov:rationale   = "IC50 < 100 nM at a kinase target is the standard strong-inhibitor threshold.";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
         ->
         screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
@@ -144,7 +144,7 @@ resource screen:rule_strong_trace : prov:DeclarationTrace {
 }
 ```
 
-No AutoOnLoad fires — `justification:Claim` is a chain-shape class, not an institution input. The trace pairs it with the witness index, which admits:
+No AutoOnLoad fires — `justification:Declaration` is a chain-shape class, not an institution input. The trace pairs it with the witness index, which admits:
 
 ```
 WitnessKey {
@@ -164,7 +164,7 @@ Three witness keys are now in the index: `IsObservedAs` for the sample set (step
 resource screen:concl_eig0291_strong : justification:Conclusion {
     justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
-    justification:judgement = type_expr(
+    justification:grounds_judgement = type_expr(
         alias
             EIG  = "urn:eigenius:demo:screen:EIG_0291",
             SS   = "urn:eigenius:demo:screen:m_eig0291_sampleset",
@@ -183,7 +183,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                     Declared(RULE), computed,
                     declared(RULE, LOW -> screen:StrongInhibitor(EIG)),
                     cs ),
-               justification:Certificate(
+               justification:Grounds(
                    justification:App(Declared(RULE), computed),
                    screen:StrongInhibitor(EIG) ) )
     );
@@ -205,7 +205,7 @@ The commit triggers Rule 21, which owns every `eigentt:Term`-ranged slot and so 
 
 **Note what the certificate does NOT cite: the `StatisticalAnalysisResult`.** The statistics institution emitted one, and it records what the run produced — which grounds nothing. A computed claim rests on the plan being DECLARED to denote a function of its input, and on that input being OBSERVED. Neither half comes from the run.
 
-**Can a later conclusion cite this one?** Only as `Verified(iri)`, and only if it carries a `justification:proof` — the judgement `holds(logic, t, P)`, which says a checker verified `t` against `P` itself. This conclusion carries no proof term, so it admits no witness. Composing on it means taking its certificate as an antecedent through `Certificate.app`, which is what `app` is for. Citing an unproved conclusion by IRI was the laundering step the two-layer separation exists to forbid.
+**Can a later conclusion cite this one?** Only as `Verified(iri)`, and only if it carries a `justification:proof_judgement` — the judgement `holds(logic, t, P)`, which says a checker verified `t` against `P` itself. This conclusion carries no proof term, so it admits no witness. Composing on it means taking its certificate as an antecedent through `Certificate.app`, which is what `app` is for. Citing an unproved conclusion by IRI was the laundering step the two-layer separation exists to forbid.
 
 ## 7.4. The AutoOnLoad cascade in this scenario
 

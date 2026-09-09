@@ -72,12 +72,12 @@
 //      (the domain claim)
 //    - The outer `app(rule, ...)` yields `StrongInhibitor(EIG_0291)`
 //      (the conclusion).
-//    The leaves are justification:Certificate.declared (rule, bridge, plan)
-//    and .observed (sample set), composed by justification:Certificate.app.
+//    The leaves are justification:Grounds.declared (rule, bridge, plan)
+//    and .observed (sample set), composed by justification:Grounds.app.
 //
 // On commit, ValidateJustification fires AutoOnLoad on the sentence
 // and the kernel type-checks the certificate against
-// `justification:Certificate(proposition)`. The chain-witness index
+// `justification:Grounds(proposition)`. The chain-witness index
 // supplies the three witnesses the grounding constructors consume
 // (`IsDerivedAs` on the verdict, `IsDeclaredAs` on the bridge, and
 // `IsDeclaredAs` on the literature rule).
@@ -124,12 +124,12 @@ data screen:StrongInhibitor : core:string -> Prop, stats:PopulationLevel {
 // Specialised to EIG_0291. The antecedent is the domain predicate
 // that the bridge lifts the statistical claim into.
 
-resource screen:rule_strong : justification:Claim {
+resource screen:rule_strong : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_literature_smith_et_al_2024_3_2;
     prov:rationale   = "IC50 < 100 nM at a kinase target is the standard strong-inhibitor threshold.";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
         ->
         screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
@@ -219,7 +219,7 @@ resource screen_result:main_effect :
     stats:computed_p_value           = 0.064;
     stats:effect_name                = "main_effect";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         stats:lt(
             stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"),
             100.0
@@ -244,11 +244,11 @@ resource screen:warrant_plan_reproducibility : prov:Source {
     core:short_name = "warrant_plan_reproducibility";
 }
 
-resource screen:claim_eig0291_lowic50_yields_main_effect : justification:Claim {
+resource screen:claim_eig0291_lowic50_yields_main_effect : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_plan_reproducibility;
     prov:rationale    = "Applying claim_eig0291_lowic50 to the recorded sample set yields its main_effect: the one-sample t-test against the 100 nM threshold. A claim about the method, pinned at the input it is applied to.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset")
         -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"), 100.0)
     );
@@ -273,12 +273,12 @@ resource screen:claim_eig0291_lowic50_yields_main_effect_trace : prov:Declaratio
 //
 // Monomorphic — one bridge resource per (sample_set, compound) pair.
 
-resource screen:bridge_eig0291_lowic50 : justification:Claim {
+resource screen:bridge_eig0291_lowic50 : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_methodology_ic50_classification_convention;
     prov:rationale   = "The medicinal-chemistry convention that a sample's mean IC50 being statistically below 100 nM justifies classifying the underlying compound as HasLowIC50 at the assayed target. Specialised to the EIG_0291 sample-set / compound pair; the polymorphic shape would universally-quantify over (sample_set, compound) with an explicit `sample_for(s, c)` premise.";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         stats:lt(
             stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"),
             100.0
@@ -323,11 +323,10 @@ resource screen:bridge_eig0291_lowic50_trace : prov:DeclarationTrace {
 // the observed sample set.
 
 resource screen:concl_eig0291_strong : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(app(
                    // outer c1: literature rule — witness slot elided
@@ -361,7 +360,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        )
                    )
                )),
-               type_expr(justification:Certificate(
+               type_expr(justification:Grounds(
                    screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291") )) );
 
 

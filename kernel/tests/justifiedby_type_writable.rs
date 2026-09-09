@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! PROBE (eigenius#199): can `justification:Certificate(P)` be written as a type in ESL?
+//! PROBE (eigenius#199): can `justification:Grounds(P)` be written as a type in ESL?
 
 use std::sync::Arc;
 
@@ -64,7 +64,7 @@ fn chain() -> Arc<eigenius_kernel::layer::Layer> {
 fn justifiedby_can_be_written_as_a_type() {
     let base = chain();
     // The literal definition of done for eigenius#199: write
-    // `justification:Certificate(P)` as a TYPE at the ESL surface. An `axiom`
+    // `justification:Grounds(P)` as a TYPE at the ESL surface. An `axiom`
     // statement is the right slot — it holds a type, not a proposition,
     // so this exercises the index telescope without the `Prop`
     // obligation Rule 21 puts on `canonical_proposition`.
@@ -82,7 +82,7 @@ fn justifiedby_can_be_written_as_a_type() {
 
         data probe:P : Prop { }
 
-        axiom probe:cert : justification:Certificate(probe:P)
+        axiom probe:cert : justification:Grounds(probe:P)
     "#;
     let mut b = LayerBuilder::new("probe", Some(Arc::clone(&base)));
     for r in esl::compile(src, &base).expect("probe ESL compiles") {
@@ -92,7 +92,7 @@ fn justifiedby_can_be_written_as_a_type() {
     let errs = eigenius_kernel::validation::Validator::new(probe).validate();
     assert!(
         errs.is_empty(),
-        "justification:Certificate type rejected: {errs:#?}"
+        "justification:Grounds type rejected: {errs:#?}"
     );
 }
 
@@ -110,7 +110,7 @@ fn justifiedby_index_rejects_a_non_proposition() {
 
         data probe:P : Prop { }
 
-        axiom probe:bad : justification:Certificate("not-a-proposition")
+        axiom probe:bad : justification:Grounds("not-a-proposition")
     "#;
     let mut b = LayerBuilder::new("probe", Some(Arc::clone(&base)));
     for r in esl::compile(src, &base).expect("probe ESL compiles") {
@@ -120,6 +120,6 @@ fn justifiedby_index_rejects_a_non_proposition() {
     let errs = eigenius_kernel::validation::Validator::new(probe).validate();
     assert!(
         !errs.is_empty(),
-        "a string in justification:Certificate's proposition index was accepted"
+        "a string in justification:Grounds's proposition index was accepted"
     );
 }

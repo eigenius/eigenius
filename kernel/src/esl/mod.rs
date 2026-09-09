@@ -67,7 +67,7 @@ pub fn compile(
 /// the live institution index (D14 §9.5), AND cross-file references
 /// to ctors / macros declared in parent layers (like
 /// `stats:SingleSampleEstimate` smart constructors or
-/// `justification:Certificate.app` ctors) need to resolve against the
+/// `justification:Grounds.app` ctors) need to resolve against the
 /// chain. Use [`compile`] when there is no institution index.
 ///
 /// [`InstitutionIndex`]: crate::institution::registry::InstitutionIndex

@@ -145,14 +145,14 @@ pub enum Val {
     ///
     /// What the type *says* is a proposition about the **chain**, not
     /// about the world: `IsDeclaredAs(iri, P)` means "the chain contains
-    /// evidence that `iri` is declared as `P`". So a `justification:Certificate`
+    /// evidence that `iri` is declared as `P`". So a `justification:Grounds`
     /// certificate stacks three levels — `P` (about the world), the
     /// witness type (about the chain's relation to `P`), and
-    /// `justification:Certificate(j, P)` (Artemov's `t:F`), which cannot be formed
+    /// `justification:Grounds(j, P)` (Artemov's `t:F`), which cannot be formed
     /// without an inhabitant of the second. A witness therefore never
     /// asserts that `P` is true; it licenses forming the certificate.
     ///
-    /// The kernel synthesises one during `justification:Certificate.*` constructor
+    /// The kernel synthesises one during `justification:Grounds.*` constructor
     /// type-checking, via `CheckHooks::synthesize_chain_witness` →
     /// `layer::witness_admission::layer_admits_witness`, which reads
     /// `DeclarationTrace` / `ObservationTrace` / `VerificationTrace`
@@ -182,7 +182,7 @@ pub enum Val {
     ///
     /// The witness has no eliminator and no readback into surface syntax
     /// — it exists only at value time, in the `Prop`-typed predicate
-    /// position of a `justification:Certificate` grounding constructor's argument list.
+    /// position of a `justification:Grounds` grounding constructor's argument list.
     ///
     /// Per D49 §8, definitional equality on `ChainWitness` values is
     /// key-based (two witnesses with the same key are equal); D46 proof

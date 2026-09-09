@@ -208,8 +208,8 @@ pub const MACRO_DECL_JSON: &str = "urn:eigenius:core:macro_decl_json";
 /// inhabitation paths are institutional dispatch or `eigentt:Axiom`
 /// introduction (D46 §10). Used by the D49 witness emitter as the
 /// default canonical proposition when a target resource carries no
-/// explicit `reflection:canonical_proposition`. The well-known IRI is
-/// pinned here so emission and the eventual `justification:Certificate.declared`
+/// explicit `justification:proposition`. The well-known IRI is
+/// pinned here so emission and the eventual `justification:Grounds.declared`
 /// consumer share one source of truth.
 pub const ASSERTS: &str = "urn:eigenius:core:Asserts";
 pub const INDUCTIVE_ARG_TYPE: &str = "urn:eigenius:core:InductiveArgType";
@@ -534,7 +534,7 @@ pub const PROGRAM_TRACE: &str = "urn:eigenius:prov:ProgramTrace";
 /// Resource recording that a proof of a resource's proposition was checked. Two verifiers produce
 /// one, distinguished by [`PROOF_SYSTEM`] rather than by class (eigenius#200): an external prover,
 /// whose exported blob is externalized forward and compared by `def_eq` against the claim's own
-/// proposition (D74), and the kernel, whose type-checked `justification:Certificate` certificate is
+/// proposition (D74), and the kernel, whose type-checked `justification:Grounds` certificate is
 /// itself the proof term. Per D49 §6, commit emits an `IsVerifiedAs` witness.
 pub const VERIFICATION_TRACE: &str = "urn:eigenius:prov:VerificationTrace";
 
@@ -579,12 +579,12 @@ pub const CHECKER_IDENTITY_KIND: &str = "urn:eigenius:prov:checker_identity_kind
 /// `prov:checker_identity` — the checker's identity in the form [`CHECKER_IDENTITY_KIND`] names.
 pub const CHECKER_IDENTITY: &str = "urn:eigenius:prov:checker_identity";
 
-/// `reflection:canonical_proposition` — the optional `Prop`-typed
+/// `justification:proposition` — the optional `Prop`-typed
 /// proposition a resource asserts (per D49 §6). Carries a D47-encoded
 /// `eigentt:Term` payload. Absent value defaults to `Asserts(iri)`
 /// at witness-emission time. Type-checked at `Prop` at commit by
 /// its `eigentt:expected_type` (`Prop`) and Rule 21.
-pub const CANONICAL_PROPOSITION: &str = "urn:eigenius:reflection:canonical_proposition";
+pub const PROPOSITION: &str = "urn:eigenius:justification:proposition";
 
 /// `eigentt:expected_type` — the type a property's term-valued instances must
 /// check against. Rule 21 forms `Ann(value, expected_type)` and runs the
@@ -607,14 +607,14 @@ pub const IS_A_TYPE: &str = "urn:eigenius:eigentt:is_a_type";
 //
 // The three kernel-internal `ChainWitness.IsXxAs : core:iri → Prop → Prop`
 // predicate types. ESL has no constructors for their inhabitants; the
-// kernel synthesises `Val::ChainWitness` values at `justification:Certificate.*`
+// kernel synthesises `Val::ChainWitness` values at `justification:Grounds.*`
 // constructor type-check time via the per-Layer witness-index lookup.
-// The IRIs are referenced from the `justification:Certificate` indexed
+// The IRIs are referenced from the `justification:Grounds` indexed
 // inductive's constructor signatures (D39 §5) and from the witness-
 // synthesis hook in `kernel/src/nbe/check.rs` (D49 §5).
 //
 // `IsDerivedAs` was a fourth until the three-grounds change. It could only ever
-// be consumed by `justification:Certificate.derived`, which is gone with the
+// be consumed by `justification:Grounds.derived`, which is gone with the
 // `DerivedEvidence` term constructor, so no lookup can ask for it — removing the
 // constant is forced by the algebra, not a separate decision.
 

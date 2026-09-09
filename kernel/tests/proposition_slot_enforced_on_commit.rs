@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `reflection:canonical_proposition`'s propositionhood fires **through a real
+//! `justification:proposition`'s propositionhood fires **through a real
 //! commit**.
 //!
 //! Issue #175. `enc:EncodedClaim` is the artifact of record for the encoding
 //! pipeline: an LLM proposes a formalization, the kernel accepts or rejects
-//! it, and from there only `reflection:canonical_proposition` and the
+//! it, and from there only `justification:proposition` and the
 //! derivations built on it carry weight. Rule 21 called `check_infer` and
 //! discarded the type it returned, so the slot only had to be *well-typed* —
 //! an integer literal decoded, inferred `core:integer`, and committed as the
@@ -106,7 +106,7 @@ fn claim(proposition: Value) -> Resource {
         iri("urn:eigenius:prov:was_attributed_to"),
         Value::String("urn:eigenius:prov:agent:unattributed".into()),
     );
-    r.set(iri(wk::CANONICAL_PROPOSITION), proposition);
+    r.set(iri(wk::PROPOSITION), proposition);
     r
 }
 
@@ -187,7 +187,7 @@ fn integer_literal_claim_is_rejected_by_the_commit() {
     );
     assert_eq!(
         hit.property.as_ref().map(Iri::as_str),
-        Some(wk::CANONICAL_PROPOSITION)
+        Some(wk::PROPOSITION)
     );
     assert!(
         hit.message.contains("Prop = Sort(0)"),

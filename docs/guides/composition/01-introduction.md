@@ -104,7 +104,7 @@ If any are unfamiliar, the cross-link is the right entry point.
 | `Prop` universe and proof irrelevance (D46) | [ESL §7.1](../esl/07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom) |
 | `ChainWitness.Is*As` predicates and the witness index (D49) | [ESL §6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) |
 | `StatisticalAnalysisPlan` / `SampleSet` (D52) | [Statistics institution tutorial](../platform/statistics-institution/README.md) |
-| `justification:Certificate` / `justification:Term` / `justification:Conclusion` (D39) | [ESL §9.10](../esl/09-institutions.md#9-10-the-justification-vocabulary--d39-justification-logic), [justification logic tutorial](../platform/justification-logic/README.md) |
+| `justification:Grounds` / `justification:Term` / `justification:Conclusion` (D39) | [ESL §9.10](../esl/09-institutions.md#9-10-the-justification-vocabulary--d39-justification-logic), [justification logic tutorial](../platform/justification-logic/README.md) |
 | `FIBER ... AS ?var INTO "<iri>"` | [EigenQL §7.6](../eigenql/08-fiber-clauses.md#8-6-into--pinning-the-response-iri) |
 | Comorphism program-invoke (`comorphisms:foo(input)` in ESL) | [ESL §9.5](../esl/09-institutions.md#95-invoking-comorphisms-from-esl-programs) |
 | Runtime substrate (`mirror create → env build → env create → institution install`) | [Platform §11](../platform/11-runtime-substrate.md) |

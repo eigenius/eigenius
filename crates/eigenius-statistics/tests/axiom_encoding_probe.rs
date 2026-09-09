@@ -25,7 +25,7 @@
 //!   `encode_lit_float` helpers.
 //!
 //! - Consumer: an author writes the same proposition inside a
-//!   `reflection:canonical_proposition = type_expr(...)` slot on a
+//!   `justification:proposition = type_expr(...)` slot on a
 //!   `reflection:DeclaredResource` bridge. The ESL compiler walks the
 //!   `Term::Ref { name = stats:lt, args = [...] }` tree, resolves
 //!   each axiom reference against the chain layer, and emits a D47
@@ -33,7 +33,7 @@
 //!
 //! If both encoders agree on the JSON shape, the witness index keyed
 //! against the verdict's canonical_proposition will match the bridge's
-//! antecedent — and the reasoning institution's `justification:Certificate.derived`
+//! antecedent — and the reasoning institution's `justification:Grounds.derived`
 //! grounding ctor can synthesise the witness against the same hash.
 //!
 //! If they disagree, the bridge restructure cannot work without an ESL
@@ -133,10 +133,10 @@ namespace justification = "urn:eigenius:justification";
 namespace stats      = "urn:eigenius:measurements";
 namespace probe      = "urn:eigenius:probe";
 
-resource probe:bridge_proposition : justification:Claim {
+resource probe:bridge_proposition : justification:Declaration {
     prov:was_attributed_to = "probe:axiom-encoding";
 
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         stats:lt(
             stats:mean_of("urn:eigenius:probe:sample"),
             100.0
@@ -155,7 +155,7 @@ resource probe:bridge_proposition : justification:Claim {
     let bridge = layer
         .resolve(&bridge_iri)
         .expect("bridge resource committed");
-    let prop_iri = Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap();
+    let prop_iri = Iri::parse("urn:eigenius:justification:proposition").unwrap();
     match bridge.get(&prop_iri) {
         // A term is a value resource (D85 §6.1); project it back for the positional
         // assertions below.

@@ -405,7 +405,7 @@ fn notebook_demo_fixture_lands_holds() {
     );
 }
 
-/// A claim carrying no `reflection:canonical_proposition` is REFUSED, not skipped.
+/// A claim carrying no `justification:proposition` is REFUSED, not skipped.
 ///
 /// This is the fix for eigenius#159. Before it, `claim_proposition` returned `None` for such a
 /// claim and the institution fell back to the name-level check — "a theorem called `target_name`
@@ -414,7 +414,7 @@ fn notebook_demo_fixture_lands_holds() {
 /// running.
 ///
 /// **Since D87 §6 the refusal comes one step earlier, from the ONTOLOGY.** The claim is now a
-/// `justification:Claim`, which `requires reflection:canonical_proposition` — *"carrying a
+/// `justification:Declaration`, which `requires justification:proposition` — *"carrying a
 /// proposition is what makes a resource citable, and what makes warrant a question that applies
 /// to it at all"* — so stripping it fails validation before AutoOnLoad ever dispatches. That is
 /// strictly better than an institution-side refusal: it is enforced for every claim on every
@@ -429,7 +429,7 @@ fn a_claim_without_a_proposition_is_refused() {
         .into_iter()
         .map(|mut r| {
             if r.id().is_some_and(|i| i.as_str() == CLAIM_1_IRI) {
-                r.remove(&Iri::parse(wk::CANONICAL_PROPOSITION).expect("well-known IRI"));
+                r.remove(&Iri::parse(wk::PROPOSITION).expect("well-known IRI"));
             }
             r
         })
@@ -441,7 +441,7 @@ fn a_claim_without_a_proposition_is_refused() {
         .expect("a claim with no proposition must not land");
     let msg = format!("{err:?}");
     assert!(
-        msg.contains("canonical_proposition"),
+        msg.contains("justification:proposition"),
         "the refusal must name what is missing; got {msg}"
     );
     assert!(
@@ -671,8 +671,7 @@ namespace demo          = "urn:eigenius:demo:lean";
 namespace probe         = "urn:eigenius:probe";
 
 resource probe:concl_patient_1_healthy : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:lean:patient_1";
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
                    CLAIM = "urn:eigenius:demo:lean:claim_patient_1_healthy",
@@ -680,7 +679,7 @@ resource probe:concl_patient_1_healthy : justification:Conclusion {
                in verified(CLAIM, P)),
                type_expr(alias
                    P     = demo:Healthy(demo:patient_1)
-               in justification:Certificate(P)) );
+               in justification:Grounds(P)) );
 }
 "#;
     let resources = eigenius_kernel::esl::compile(source, &provenance)
@@ -693,7 +692,7 @@ resource probe:concl_patient_1_healthy : justification:Conclusion {
 
     // UNFILTERED, deliberately. This used to keep only `TermIllTyped | TermMalformed`, and the
     // narrowing hid a real defect: the judgement was authored as `type_expr(alias … in holds(…))`,
-    // which encodes a `Term-App` rather than an `eigentt:Judgement`, so `justification:judgement`
+    // which encodes a `Term-App` rather than an `eigentt:Judgement`, so `justification:grounds_judgement`
     // violated its own `class_types` and the resource could never have committed. The certificate
     // type-checked either way — that half of this test was always sound — but a test that filters
     // to the rules it is about cannot notice the resource carrying it is malformed. `holds` belongs
@@ -764,7 +763,7 @@ fn a_holds_verdict_admits_a_verified_witness() {
     let claim_proposition = resources
         .iter()
         .find(|r| r.id().is_some_and(|i| i.as_str() == CLAIM_IRI))
-        .and_then(|r| r.get(&Iri::parse(wk::CANONICAL_PROPOSITION).expect("well-known IRI")))
+        .and_then(|r| r.get(&Iri::parse(wk::PROPOSITION).expect("well-known IRI")))
         .expect("the demo claim carries a canonical_proposition (eigenius#159)")
         .clone();
 
@@ -859,7 +858,7 @@ fn a_holds_verdict_admits_a_verified_witness() {
 ///   is the D39 §4.1 default `Asserts(intake_1)`: an observation establishes that a recording
 ///   occurred, nothing wider.
 /// - `declared(RULE, H -> OBS -> E)` — the bridge from those two to eligibility, carried by a
-///   `justification:Claim` under a `prov:DeclarationTrace` with a named agent. The paper requires
+///   `justification:Declaration` under a `prov:DeclarationTrace` with a named agent. The paper requires
 ///   every bridging inference to be a declared premise attributed to an owner; this is that.
 #[test]
 fn three_grounds_compose_in_one_certificate() {
@@ -893,10 +892,10 @@ resource scen:intake_1_obs : prov:ObservationTrace {
 }
 
 // ── Declared: the bridge, and who stands behind it ───────────────────
-resource scen:eligibility_rule : justification:Claim {
+resource scen:eligibility_rule : justification:Declaration {
     prov:was_attributed_to = agent:eigenius_core_team;
     prov:rationale = "A patient proved healthy, with an intake record on file, is eligible.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         demo:Healthy(demo:patient_1)
           -> core:Asserts("urn:eigenius:scenario:a:intake_1")
           -> scen:Eligible(demo:patient_1)
@@ -912,8 +911,7 @@ resource scen:eligibility_rule_trace : prov:DeclarationTrace {
 
 // ── The conclusion: all three grounds, one certificate ───────────────
 resource scen:concl_eligible : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:lean:patient_1";
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
                    RULE   = "urn:eigenius:scenario:a:eligibility_rule",
@@ -926,7 +924,7 @@ resource scen:concl_eligible : justification:Conclusion {
                        observed(INTAKE, OBS) )),
                type_expr(alias
                    E = scen:Eligible(demo:patient_1)
-               in justification:Certificate(E)) );
+               in justification:Grounds(E)) );
 }
 "#;
 
@@ -968,7 +966,7 @@ resource scen:concl_eligible : justification:Conclusion {
         .resolve(&Iri::parse("urn:eigenius:scenario:a:concl_eligible").expect("iri"))
         .expect("the conclusion is on the committed layer");
     let stored = concl
-        .get(&Iri::parse("urn:eigenius:justification:judgement").expect("iri"))
+        .get(&Iri::parse("urn:eigenius:justification:grounds_judgement").expect("iri"))
         .expect("the conclusion carries a judgement");
     let j = eigenius_kernel::program::eigentt_type_mirror::decode_judgement(stored, &landed)
         .expect("the committed judgement decodes");
@@ -1146,10 +1144,10 @@ resource scen:intake_1_obs : prov:ObservationTrace {
 }
 
 // The step that VARIES: the same proposition, asserted by an agent rather than proved.
-resource scen:asserted_healthy : justification:Claim {
+resource scen:asserted_healthy : justification:Declaration {
     prov:was_attributed_to = agent:eigenius_core_team;
     prov:rationale = "A clinician asserts patient_1 is healthy. Nobody proved it.";
-    reflection:canonical_proposition = type_expr( demo:Healthy(demo:patient_1) );
+    justification:proposition = type_expr( demo:Healthy(demo:patient_1) );
     core:short_name = "asserted_healthy";
 }
 resource scen:asserted_healthy_trace : prov:DeclarationTrace {
@@ -1158,10 +1156,10 @@ resource scen:asserted_healthy_trace : prov:DeclarationTrace {
     prov:timestamp         = "2026-09-06T00:00:00Z";
 }
 
-resource scen:eligibility_rule : justification:Claim {
+resource scen:eligibility_rule : justification:Declaration {
     prov:was_attributed_to = agent:eigenius_core_team;
     prov:rationale = "A patient who is healthy, with an intake record on file, is eligible.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         demo:Healthy(demo:patient_1)
           -> core:Asserts("urn:eigenius:scenario:b:intake_1")
           -> scen:Eligible(demo:patient_1)
@@ -1175,8 +1173,7 @@ resource scen:eligibility_rule_trace : prov:DeclarationTrace {
 }
 
 resource scen:concl_eligible : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:lean:patient_1";
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
                    RULE   = "urn:eigenius:scenario:b:eligibility_rule",
@@ -1188,7 +1185,7 @@ resource scen:concl_eligible : justification:Conclusion {
                        observed(INTAKE, OBS) )),
                type_expr(alias
                    E = scen:Eligible(demo:patient_1)
-               in justification:Certificate(E)) );
+               in justification:Grounds(E)) );
 }
 "#;
 
@@ -1225,7 +1222,7 @@ resource scen:concl_eligible : justification:Conclusion {
             .resolve(&Iri::parse("urn:eigenius:scenario:b:concl_eligible").expect("iri"))
             .expect("the conclusion committed");
         let stored = concl
-            .get(&Iri::parse("urn:eigenius:justification:judgement").expect("iri"))
+            .get(&Iri::parse("urn:eigenius:justification:grounds_judgement").expect("iri"))
             .expect("it carries a judgement");
         let j = eigenius_kernel::program::eigentt_type_mirror::decode_judgement(stored, &landed)
             .expect("the judgement decodes");

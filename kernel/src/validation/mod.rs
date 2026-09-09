@@ -155,7 +155,7 @@ pub enum ValidationRule {
     /// (`Sort(1)` and up), an unapplied predicate, or a literal. Distinct
     /// from [`ValidationRule::TermIllTyped`]: the term is well-typed,
     /// it is simply not an assertion. Every downstream consumer of these
-    /// slots — the witness index, `justification:Certificate` certificate checking —
+    /// slots — the witness index, `justification:Grounds` certificate checking —
     /// reads them as propositions by construction, so this is the gate
     /// that makes that construction true. See eigenius#175.
     TermNotAProposition,

@@ -72,10 +72,10 @@
     "@id": "urn:eigenius:demo:lean:claim_patient_1_healthy",
     "urn:eigenius:core:description": "The claim that urn:eigenius:demo:lean:patient_1 is Healthy. Its proposition mentions its subject, which is what makes the (resource, proposition) pairing mean something: swap the subject and the proposition changes with it.",
     "urn:eigenius:core:is_a": [
-      "urn:eigenius:justification:Claim"
+      "urn:eigenius:justification:Declaration"
     ],
     "urn:eigenius:prov:was_attributed_to": "urn:eigenius:prov:agent:eigenius_core_team",
-    "urn:eigenius:reflection:canonical_proposition": {
+    "urn:eigenius:justification:proposition": {
       "urn:eigenius:core:is_a": [
         "urn:eigenius:eigentt:Term-App"
       ],
@@ -99,10 +99,10 @@
     "@id": "urn:eigenius:demo:lean:claim_patient_2_healthy",
     "urn:eigenius:core:description": "The claim that urn:eigenius:demo:lean:patient_2 is Healthy. Its proposition mentions its subject, which is what makes the (resource, proposition) pairing mean something: swap the subject and the proposition changes with it.",
     "urn:eigenius:core:is_a": [
-      "urn:eigenius:justification:Claim"
+      "urn:eigenius:justification:Declaration"
     ],
     "urn:eigenius:prov:was_attributed_to": "urn:eigenius:prov:agent:eigenius_core_team",
-    "urn:eigenius:reflection:canonical_proposition": {
+    "urn:eigenius:justification:proposition": {
       "urn:eigenius:core:is_a": [
         "urn:eigenius:eigentt:Term-App"
       ],

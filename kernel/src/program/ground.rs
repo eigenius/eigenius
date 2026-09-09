@@ -478,7 +478,7 @@ fn decode_indices(
         // Every index kind that failed to be a string got it silently, and nothing noticed because
         // nothing type-checked the telescope. `check_type`'s `Exp::Inductive` arm now does
         // (`check_inductive_decl_telescopes`), and the first thing it reported was
-        // `justification:Certificate.declared` failing `EigonPrimitive(String) ≠ EigonClass(core:Set)`.
+        // `justification:Grounds.declared` failing `EigonPrimitive(String) ≠ EigonClass(core:Set)`.
         let Some(kind_value) = pr.get(&Iri::parse(wk::PARAM_KIND).unwrap()) else {
             return Err(format!(
                 "inductive type '{class_iri}' index '{name}' missing `param_kind`"
@@ -625,7 +625,7 @@ fn decode_params(
 /// inductive named as a constructor argument decoded to an inductive reference
 /// while the *same* inductive named as an index kind decoded to
 /// `Exp::EigonClass`. That disagreement is eigenius#199 — it made
-/// `justification:Certificate`'s index #0 (`justification:Term`) an `EigonClass` that
+/// `justification:Grounds`'s index #0 (`justification:Term`) an `EigonClass` that
 /// no inhabitant could check against, so the one relation carrying the platform's
 /// guarantee was the one whose type the surface language could not express.
 fn names_an_inductive(arg_iri: &Iri, layer: &Layer) -> bool {
@@ -1566,7 +1566,7 @@ mod tests {
         // D39 §5 / D49 ChainWitness predicates need the kernel decoder
         // to recognise the Sort-literal kind strings the ESL compiler
         // emits for intermediate index positions ("Prop" / "Set" /
-        // "Type:N"). Without this mapping, justification:Certificate and similar
+        // "Type:N"). Without this mapping, justification:Grounds and similar
         // sort-indexed predicates can't round-trip through the codec.
         let layer = build_test_layer();
         assert!(
@@ -1594,7 +1594,7 @@ mod tests {
         // not: an index kind fell through to `EigonClass`, a param kind
         // all the way to `Sort(1)`. Since a value of that inductive
         // infers to `InductiveType`, the index form could never be
-        // satisfied — `justification:Certificate`'s type was unwritable.
+        // satisfied — `justification:Grounds`'s type was unwritable.
         //
         // eigenius#188 / N4: index and parameter kinds are now decoded by ONE function, so the
         // two can no longer disagree by construction. The assertions below kept their pairing

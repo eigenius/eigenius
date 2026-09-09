@@ -315,7 +315,7 @@ pub fn unify(level: usize, lhs: &Val, rhs: &Val, mctx: &mut MetaCtx) -> Result<(
 
         // Two ANONYMOUS arrows, compared componentwise so metas on either side can be solved.
         //
-        // `justification:Certificate.app` is why. Its first argument is declared
+        // `justification:Grounds.app` is why. Its first argument is declared
         // `Certificate(A -> B)`, so with `A` and `B` implicit the index to unify is a `Val::Pi`
         // carrying a meta in its domain, its codomain, or both. Readback equality cannot see
         // inside it, and `A` occurs in no result index, so this is the only place `A` can be
@@ -347,7 +347,7 @@ pub fn unify(level: usize, lhs: &Val, rhs: &Val, mctx: &mut MetaCtx) -> Result<(
         }
 
         // PROTOTYPE (D89 experiment): two NAMED binders, instantiated with a fresh generated
-        // variable and compared one level down. This is what `spec_poly`'s premise type
+        // variable and compared one level down. This is what `instantiate`'s premise type
         // `Certificate(forall (y : T) => P(y))` needs, and what the anonymous restriction above
         // deliberately excluded.
         //
@@ -761,7 +761,7 @@ mod tests {
     ///
     /// `?a -> One` against `Prop -> One`. Readback equality cannot solve this: `?a` and `Prop`
     /// read back differently, and the whole `Val::Pi` used to fall through to `eq_nf`. This is
-    /// how `justification:Certificate.app`'s `A` — which occurs in no result index — is
+    /// how `justification:Grounds.app`'s `A` — which occurs in no result index — is
     /// determined from its first argument's type.
     #[test]
     fn a_meta_in_a_function_types_domain_is_solved() {

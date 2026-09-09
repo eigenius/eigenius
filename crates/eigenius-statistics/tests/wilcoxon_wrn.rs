@@ -131,7 +131,7 @@ fn wilcoxon_recomputes_wrn_msi_vs_mss_to_holds() {
         .unwrap_or("")
         .to_string();
     let has_canonical = result
-        .get(&Iri::parse("urn:eigenius:reflection:canonical_proposition").unwrap())
+        .get(&Iri::parse("urn:eigenius:justification:proposition").unwrap())
         .is_some();
 
     // (a) Holds — MSI lines are far more WRN-dependent; Wilcoxon rejects.

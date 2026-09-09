@@ -56,11 +56,10 @@ namespace justification = "urn:eigenius:justification";
 // Justified by the bridge applied to the institution-recomputed result.
 
 resource wrn:concl_wrn_selective_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM = "urn:eigenius:pub:wrn:wrn_dep_plan_yields_main_effect",
@@ -85,14 +84,13 @@ resource wrn:concl_wrn_selective_recomputed : justification:Conclusion {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             SE     = onco:SelectivelyEssential("WRN", "MSI")
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:SelectivelyEssential("WRN", "MSI") )) );
 
 
 }
 
 resource wrn:concl_refine_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // P4 shape: the statistic is no longer a `DerivedEvidence` leaf citing the
     // institution's result by IRI. It is the APPLICATION of a declared plan to
@@ -106,7 +104,7 @@ resource wrn:concl_refine_recomputed : justification:Conclusion {
     // this exact input yields this result.
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             SS     = "urn:eigenius:pub:wrn:wrn_corr_sampleset",
@@ -131,7 +129,7 @@ resource wrn:concl_refine_recomputed : justification:Conclusion {
 
             cs     = app(declared(CLAIM, OBS -> STAT), observed(SS, OBS))
         in
-        justification:Certificate(
+        justification:Grounds(
                    DC )) );
 }
 
@@ -141,11 +139,10 @@ resource wrn:concl_refine_recomputed : justification:Conclusion {
 // restriction. Two-sample Wilcoxon (mean_diff_of, group A uncommon below
 // group B common), lifted through bridge_lineage_mutator.
 resource wrn:concl_lineage_mutator_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM = "urn:eigenius:pub:wrn:mutator_load_plan_yields_main_effect",
@@ -170,7 +167,7 @@ resource wrn:concl_lineage_mutator_recomputed : justification:Conclusion {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             EM     = onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon")
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:ElevatedMutatorLoadInCommonLineages("MSI_common", "MSI_uncommon") )) );
 
 
@@ -178,11 +175,10 @@ resource wrn:concl_lineage_mutator_recomputed : justification:Conclusion {
 
 // ─── C-LOC (recomputed, ED Fig 8d): WRN delocalized from the nucleolus in MSI.
 resource wrn:concl_coloc_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM = "urn:eigenius:pub:wrn:coloc_plan_yields_main_effect",
@@ -207,7 +203,7 @@ resource wrn:concl_coloc_recomputed : justification:Conclusion {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             RC     = onco:ReducedNucleolarColocalization("WRN", "MSI")
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:ReducedNucleolarColocalization("WRN", "MSI") )) );
 
 
@@ -215,11 +211,10 @@ resource wrn:concl_coloc_recomputed : justification:Conclusion {
 
 // ─── C-APOP-shRNA (recomputed, ED Fig 4d): apoptosis confirmed via shRNA.
 resource wrn:concl_apop_shrna_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM = "urn:eigenius:pub:wrn:apop_shrna_KM12_plan_yields_main_effect",
@@ -244,7 +239,7 @@ resource wrn:concl_apop_shrna_recomputed : justification:Conclusion {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             CA     = onco:CausesApoptosis("WRN", "MSI")
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:CausesApoptosis("WRN", "MSI") )) );
 
 
@@ -252,11 +247,10 @@ resource wrn:concl_apop_shrna_recomputed : justification:Conclusion {
 
 // ─── C-MMR-FN (recomputed, ED Fig 10a): MMR restoration restores repair.
 resource wrn:concl_hcr_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM = "urn:eigenius:pub:wrn:hcr_plan_yields_main_effect",
@@ -281,18 +275,17 @@ resource wrn:concl_hcr_recomputed : justification:Conclusion {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             MR     = onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5")
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:MMRRestorationRestoresRepair("HCT116", "Ch3plus5") )) );
 
 
 }
 
 resource wrn:concl_recq_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM = "urn:eigenius:pub:wrn:wrn_recq_plan_yields_main_effect",
@@ -317,18 +310,17 @@ resource wrn:concl_recq_recomputed : justification:Conclusion {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             OM     = onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases")
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:OnlyMSISelectiveInFamily("WRN", "RecQ_helicases") )) );
 
 
 }
 
 resource wrn:concl_biomarker_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM_0 = "urn:eigenius:pub:wrn:biomarker_plan_yields_ppv",
@@ -365,18 +357,17 @@ resource wrn:concl_biomarker_recomputed : justification:Conclusion {
             bridge_cert = declared(BRIDGE, PPVP -> SENSP -> SB),
             cert1 = app(bridge_cert, cs_0)
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:StrongBiomarker("MSI", "WRN_dependency") )) );
 
 
 }
 
 resource wrn:concl_p53_modulates : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM = "urn:eigenius:pub:wrn:p53_dep_plan_yields_main_effect",
@@ -401,17 +392,16 @@ resource wrn:concl_p53_modulates : justification:Conclusion {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             MD     = onco:ModulatesDependence("TP53", "WRN")
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:ModulatesDependence("TP53", "WRN") )) );
 
 
 }
 
 resource wrn:concl_val_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM_0 = "urn:eigenius:pub:wrn:viab_KM12_plan_yields_main_effect",
@@ -444,15 +434,14 @@ resource wrn:concl_val_recomputed : justification:Conclusion {
             SVD = onco:SelectiveViabilityDependence("WRN", "MSI"),
             cert1 = app(declared(BRIDGE, K -> O -> SVD), cs_0)
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:SelectiveViabilityDependence("WRN", "MSI") )) );
 }
 
 resource wrn:concl_cellcycle_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM_0 = "urn:eigenius:pub:wrn:cc_KM12_plan_yields_main_effect",
@@ -499,15 +488,14 @@ resource wrn:concl_cellcycle_recomputed : justification:Conclusion {
             cert1 = app(declared(BRIDGE, RULE_P), cs_0),
             cert2 = app(cert1, cs_1)
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:CausesCellCycleArrest("WRN", "MSI") )) );
 }
 
 resource wrn:concl_apoptosis_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM_0 = "urn:eigenius:pub:wrn:apop_KM12_plan_yields_main_effect",
@@ -554,15 +542,14 @@ resource wrn:concl_apoptosis_recomputed : justification:Conclusion {
             cert1 = app(declared(BRIDGE, RULE_P), cs_0),
             cert2 = app(cert1, cs_1)
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:CausesApoptosis("WRN", "MSI") )) );
 }
 
 resource wrn:concl_mmr_restoration_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM_0 = "urn:eigenius:pub:wrn:mmr_rescue_plan_yields_main_effect",
@@ -609,14 +596,13 @@ resource wrn:concl_mmr_restoration_recomputed : justification:Conclusion {
             cert1 = app(declared(BRIDGE, RULE_P), cs_0),
             cert2 = app(cert1, cs_1)
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:RestorationPartiallyRescues("dMMR", "WRN") )) );
 }
 resource wrn:concl_rescue_wt_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM = "urn:eigenius:pub:wrn:rescue_wt_plan_yields_main_effect",
@@ -639,14 +625,13 @@ resource wrn:concl_rescue_wt_recomputed : justification:Conclusion {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             RD     = onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ") )) );
 }
 resource wrn:concl_rescue_e84a_recomputed : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             CLAIM = "urn:eigenius:pub:wrn:rescue_e84a_plan_yields_main_effect",
@@ -669,6 +654,6 @@ resource wrn:concl_rescue_e84a_recomputed : justification:Conclusion {
             STAT   = stats:lt(stats:mean_diff_of(SS), 0.0),
             RD     = onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ") )) );
 }

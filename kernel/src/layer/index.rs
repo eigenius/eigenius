@@ -1605,7 +1605,7 @@ mod mentions_tests {
                 "ctor": "App",
                 "args": [
                     {"ctor": "App", "args": [
-                        {"ctor": "CtorApp", "args": ["urn:eigenius:justification:Certificate", ctor]},
+                        {"ctor": "CtorApp", "args": ["urn:eigenius:justification:Grounds", ctor]},
                         {"ctor": "LitString", "args": ["urn:eigenius:test:Topic"]},
                     ]},
                     {"ctor": "One", "args": []},
@@ -1616,7 +1616,7 @@ mod mentions_tests {
             "ctor": "App",
             "args": [
                 {"ctor": "App", "args": [
-                    {"ctor": "CtorApp", "args": ["urn:eigenius:justification:Certificate", "app"]},
+                    {"ctor": "CtorApp", "args": ["urn:eigenius:justification:Grounds", "app"]},
                     leaf("declared"),
                 ]},
                 leaf("observed"),

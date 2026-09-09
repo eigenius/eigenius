@@ -54,11 +54,11 @@ resource wrn:ds_supp1 : bench:Dataset {
 
 // ─── Declared: the motivating hypothesis (H1) ────────────────────────
 
-resource wrn:h1 : justification:Claim {
+resource wrn:h1 : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_hypothesis;
     prov:rationale   = "Hypothesis: dMMR / MSI may create genetic vulnerabilities — motivating a query of large-scale dependency datasets for genes selectively essential in MSI. (Warranted by the synthetic-lethality framing, ref [1]; the DNA-repair-defect strategy, refs [2,3].)";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         onco:SelectivelyEssential("some_gene", "MSI")
     );
 }
@@ -92,7 +92,7 @@ resource wrn:dd_achilles : bench:ToolArtifact {
     // dodge. `prov:was_generated_by` is uniform across a kernel run and a
     // transcribed one, and the trace still points back through prov:resource.
     prov:was_generated_by = wrnact:dd_recompute;
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         onco:TopDifferentialDependency("WRN", "Achilles_MSI")
     );
 }
@@ -116,7 +116,7 @@ resource wrn:dd_drive : bench:ToolArtifact {
     // dodge. `prov:was_generated_by` is uniform across a kernel run and a
     // transcribed one, and the trace still points back through prov:resource.
     prov:was_generated_by = wrnact:dd_recompute;
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         onco:TopDifferentialDependency("WRN", "DRIVE_MSI")
     );
 }
@@ -130,13 +130,13 @@ resource wrn:dd_drive_trace : prov:DeclarationTrace {
 // ─── Declared: the discovery rule ────────────────────────────────────
 // Independent CRISPR + RNAi replication of a top differential dependency
 // establishes selective essentiality. Universally quantified over genes;
-// `spec_poly` applies it at WRN in the certificate.
+// `instantiate` applies it at WRN in the certificate.
 
-resource wrn:discovery_rule : justification:Claim {
+resource wrn:discovery_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_discovery_logic;
     prov:rationale   = "A gene that is the top preferential dependency in MSI vs MSS in two INDEPENDENT large-scale screens (CRISPR/Achilles and RNAi/DRIVE) is selectively essential in MSI. Independent-platform replication is the warrant.";
-    reflection:canonical_proposition = type_expr(
+    justification:proposition = type_expr(
         forall (g : core:string) =>
             onco:TopDifferentialDependency(g, "Achilles_MSI") ->
             onco:TopDifferentialDependency(g, "DRIVE_MSI") ->
@@ -153,11 +153,10 @@ resource wrn:discovery_rule_trace : prov:DeclarationTrace {
 // ─── C-WRN: WRN is selectively essential in MSI ──────────────────────
 
 resource wrn:concl_wrn_selective : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:pub:wrn:gene_WRN";
 
     // `holds(...)` is a VALUE of `eigentt:Judgement`, which this slot declares; its
     // `term` and `type` arguments are declared `eigentt:Term`, so those are terms.
-    justification:judgement =
+    justification:grounds_judgement =
         holds( eigentt:logic_kernel,
                type_expr(alias
             G    = "WRN",
@@ -177,10 +176,10 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                 onco:TopDifferentialDependency(g, DCTX) ->
                 onco:SelectivelyEssential(g, MSI),
 
-            // `spec_poly` narrows the proposition from the universal to WRN.
+            // `instantiate` narrows the proposition from the universal to WRN.
             // Narrowing introduces no ground: the rule is declared before and
             // after, and the certificate's leaf set is unchanged.
-            rule_cert = spec_poly(
+            rule_cert = instantiate(
                 // T : the domain
                 core:string,
                 fun (g : core:string) =>
@@ -211,10 +210,10 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
                 onco:TopDifferentialDependency(g, DCTX) ->
                 onco:SelectivelyEssential(g, MSI),
 
-            // `spec_poly` narrows the proposition from the universal to WRN.
+            // `instantiate` narrows the proposition from the universal to WRN.
             // Narrowing introduces no ground: the rule is declared before and
             // after, and the certificate's leaf set is unchanged.
-            rule_cert = spec_poly(
+            rule_cert = instantiate(
                 // T : the domain
                 core:string,
                 fun (g : core:string) =>
@@ -226,7 +225,7 @@ resource wrn:concl_wrn_selective : justification:Conclusion {
             ),
             cert1 = app(rule_cert, declared(DDA, TA))
         in
-        justification:Certificate(
+        justification:Grounds(
                    onco:SelectivelyEssential("WRN", "MSI") )) );
 
 

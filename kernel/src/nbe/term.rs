@@ -562,7 +562,7 @@ pub struct InductiveCtorDecl {
     /// Which telescope binders (past the inductive's parameter prefix) the author does not write.
     ///
     /// One entry per `CtorArg` the telescope peels to; an empty vector means every argument is
-    /// explicit, which is what every constructor outside `justification:Certificate` declares.
+    /// explicit, which is what every constructor outside `justification:Grounds` declares.
     ///
     /// **Beside the type rather than inside it.** A marker in the binder's type — `A :
     /// Implicit(Prop)` — would have to survive the constructor's own well-formedness check, where
