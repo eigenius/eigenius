@@ -29,7 +29,7 @@ Ontology: [`ontologies/justification/justification.esl`](../../../../ontologies/
 
 [Lean](../lean-institution/README.md) is a *verification* institution: chain authors commit a Lean proof term and the institution re-checks the proof against an exported theorem statement. The proof is its own thing, authored in Lean, exported as bytes, re-checked by a bundled `nanoda_lib`. The chain attests that the proof checks. Lean needs an institution because the kernel cannot check a Lean proof itself.
 
-D39 needs none, and that is the difference. Chain authors commit a conclusion carrying one judgement, `holds(kernel, c, Certificate(j, P))`, where the certificate is a `justification:Grounds(justification, proposition)` term — an inhabitant of an indexed inductive family declared in the chain's own type theory. The grounding terms reference chain artifacts (an axiom, an observed measurement, a derived claim, a verified Lean proof) and the kernel admits the corresponding chain witnesses by resolving, at type-check time, the one chain resource each cited IRI names. The chain attests both that the certificate type-checks *and* that every cited chain artifact actually exists.
+D39 needs none, and that is the difference. Chain authors commit a conclusion carrying one judgement, `holds(kernel, c, Grounds(j, P))`, where the certificate is a `justification:Grounds(justification, proposition)` term — an inhabitant of an indexed inductive family declared in the chain's own type theory. The grounding terms reference chain artifacts (an axiom, an observed measurement, a derived claim, a verified Lean proof) and the kernel admits the corresponding chain witnesses by resolving, at type-check time, the one chain resource each cited IRI names. The chain attests both that the certificate type-checks *and* that every cited chain artifact actually exists.
 
 Two consequences of this difference shape the rest of the tutorial:
 
@@ -59,7 +59,7 @@ One more shape carries the reasoning step itself:
 
 | Resource | Role |
 |---|---|
-| `justification:Conclusion` | The chain-resident reasoning step. Carries ONE required judgement — `holds(kernel, c, Certificate(j, P))` — read as *the kernel verified that certificate `c` grounds a claim to `P`*. Rule 21 checks it at commit. |
+| `justification:Conclusion` | The chain-resident reasoning step. Carries ONE required judgement — `holds(kernel, c, Grounds(j, P))` — read as *the kernel verified that certificate `c` grounds a claim to `P`*. Rule 21 checks it at commit. |
 
 A `Verdict` (`ctor_name: "Holds" / "Fails"`) used to be committed alongside it as the institution's
 outcome. Nothing is emitted now: the check is validation, and validation reports errors rather than
@@ -67,7 +67,7 @@ producing resources.
 
 **How a prior conclusion becomes citable.** `layer_admits_witness` matches a resource whose `is_a` includes `justification:Conclusion` and emits a `Verified` witness keyed on its own IRI — but **only off `justification:proof_judgement`**, the judgement `holds(logic, t, P)`, which says a checker verified `t` against `P` itself.
 
-It does NOT mint from `justification:grounds_judgement`. That judgement is `holds(kernel, c, Certificate(j, P))`: it says a checker verified the certificate `c`, and a certificate records the grounds a claim rests on without asserting the claim. No rule turns `Certificate(j, P)` into `P`. Minting `Verified` from it laundered a conclusion resting on nothing but `Declared(…)` into a proof exactly one citation downstream, and `is_fully_verified` then answered true for it. A conclusion with no proof term therefore admits no witness here — a deliberate tightening: a lemma is citable as `verified` only if it was proved, not merely justified. Compose with `Certificate.app` over the cited conclusion's certificate instead.
+It does NOT mint from `justification:grounds_judgement`. That judgement is `holds(kernel, c, Grounds(j, P))`: it says a checker verified the certificate `c`, and a certificate records the grounds a claim rests on without asserting the claim. No rule turns `Grounds(j, P)` into `P`. Minting `Verified` from it laundered a conclusion resting on nothing but `Declared(…)` into a proof exactly one citation downstream, and `is_fully_verified` then answered true for it. A conclusion with no proof term therefore admits no witness here — a deliberate tightening: a lemma is citable as `verified` only if it was proved, not merely justified. Compose with `Grounds.app` over the cited conclusion's certificate instead.
 
 Soundness sits at the commit boundary: a conclusion whose judgement does not check fails validation, so every committed conclusion passed the check.
 
@@ -125,7 +125,7 @@ Witnesses are derived state, recomputed at every lookup. Voiding a layer removes
 ## What a commit checks
 
 `justification:Conclusion` requires **one** slot, `justification:grounds_judgement`, holding
-`holds(kernel, c, Certificate(j, P))`. It replaced three separate slots — `proposition`, `term` and
+`holds(kernel, c, Grounds(j, P))`. It replaced three separate slots — `proposition`, `term` and
 `certificate` — which were checked by three separate paths with nothing requiring them to be about
 the same claim: a certificate for one proposition could sit beside a different proposition and both
 checked clean. Folding them into the judgement's *type* is what makes the pairing the thing that
@@ -140,10 +140,10 @@ gets checked.
 2. **`check_type(j.typ)`.** The judgement's type must *be* a type. Supplying `Sort(Zero)` — `Prop`
    itself — where a proposition belongs fails here, as `universe stratification: Sort(0) does not
    inhabit Sort(0)`. This is the check that used to be step 2's "proposition typing", and it is
-   stronger: the proposition is an index of `Certificate(j, P)`, so `P : Prop` is checked as part of
+   stronger: the proposition is an index of `Grounds(j, P)`, so `P : Prop` is checked as part of
    checking the type is well-formed rather than as a separate pass over a separate slot.
 3. **`check(j.term, typ)`.** Run NbE `check` on the certificate against
-   `Certificate(justification, proposition)`. The check walks the certificate's constructor tree and,
+   `Grounds(justification, proposition)`. The check walks the certificate's constructor tree and,
    at every grounding constructor, synthesizes the implicit `ChainWitness` argument by the lookup
    above. **Every** failure of this step — a witness no layer admits, a constructor that does not
    match the justification's shape, an indexed-family elaboration the pattern unifier rejects —
@@ -267,11 +267,10 @@ The high-level shape, modeled on the drug-screening fixture:
    }
    ```
 
-3. **Author the conclusion.** ONE required slot — `justification:grounds_judgement`, D47-encoded via [`type_expr(...)`](../../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions). The proposition and the justification term are not separate fields; they appear inside the judgement's TYPE, where the kernel checks that the certificate actually inhabits `Certificate(j, P)`. They used to be three fields checked by three paths with nothing requiring them to be about the same claim, so a certificate for one proposition sat happily beside a different proposition.
+3. **Author the conclusion.** ONE required slot — `justification:grounds_judgement`, D47-encoded via [`type_expr(...)`](../../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions). The proposition and the justification term are not separate fields; they appear inside the judgement's TYPE, where the kernel checks that the certificate actually inhabits `Grounds(j, P)`. They used to be three fields checked by three paths with nothing requiring them to be about the same claim, so a certificate for one proposition sat happily beside a different proposition.
 
    ```esl
    resource screen:concl_eig0291_strong : justification:Conclusion {
-       justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
        justification:grounds_judgement = type_expr(
            alias
@@ -299,7 +298,7 @@ The high-level shape, modeled on the drug-screening fixture:
    }
    ```
 
-   The judgement reads: *the kernel verified that this certificate grounds a claim to this proposition*. It does **not** say the proposition is true — a certificate records grounds, and no rule turns `Certificate(j, P)` into `P`.
+   The judgement reads: *the kernel verified that this certificate grounds a claim to this proposition*. It does **not** say the proposition is true — a certificate records grounds, and no rule turns `Grounds(j, P)` into `P`.
 
    This example abbreviates: it treats the plan's statistic as already being `HasLowIC50`. When the statistic is genuinely statistical — `lt(mean_of(s), 100.0)` — a further `app` over a declared statistical-to-domain bridge is what carries it into domain vocabulary. That is the shape the drug-screening fixture uses.
 

@@ -259,7 +259,7 @@ and [10](../platform/10-wasm-institutions.md) of the platform guide are retained
 
 ## 9.10. The justification vocabulary — D39 Justification Logic
 
-Chain authors commit **conclusions**: a `justification:Conclusion` carrying one judgement, `holds(kernel, c, Certificate(j, P))`, read as *the kernel verified that certificate `c` grounds a claim to `P`*. It is the vocabulary that turns Eigenius's epistemic grounds into composable evidence inside the type theory — distinct evidence chains for the same proposition produce judgmentally-equal certificates ([§7.1 proof irrelevance](07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom)), and the audit trail from a checked conclusion to the chain artifacts that admitted its witnesses cannot be broken, because the [D49 chain-witness](../../design/d49-chainwitness-machinery.md) admission mechanism is the only path to the grounding constructors.
+Chain authors commit **conclusions**: a `justification:Conclusion` carrying one judgement, `holds(kernel, c, Grounds(j, P))`, read as *the kernel verified that certificate `c` grounds a claim to `P`*. It is the vocabulary that turns Eigenius's epistemic grounds into composable evidence inside the type theory — distinct evidence chains for the same proposition produce judgmentally-equal certificates ([§7.1 proof irrelevance](07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom)), and the audit trail from a checked conclusion to the chain artifacts that admitted its witnesses cannot be broken, because the [D49 chain-witness](../../design/d49-chainwitness-machinery.md) admission mechanism is the only path to the grounding constructors.
 
 **This is not an institution, and it stopped being one.** A Reasoning institution used to own the check and dispatch it as an AutoOnLoad QueryClass. Checking a certificate is type checking, which the kernel does not delegate, so it moved into ordinary commit-time validation and the institution — having nothing else to host — was deleted along with its ExportFormat, its four QueryClasses, and the `urn:eigenius:reasoning` namespace entirely. What remains is vocabulary the kernel checks directly, which is what §9.11 means by a logic supplying vocabulary rather than authority.
 
@@ -322,7 +322,7 @@ The three grounding constructors each consume a [`ChainWitness.Is*As`](06-resour
 
 **`sum_l` / `sum_r` depart from LP's axiom deliberately.** Artemov's `t:F -> (t+s):F` quantifies over an arbitrary `s`, so the unused summand need not be justified or even name a resource that exists. That is unsound here, because `support` reads `Sum` disjunctively and reports the unchecked branch as a genuine alternative: `Sum(real_evidence, Declared("urn:does-not-exist"))` type-checked, and `survives_without(real_evidence)` then returned **true** — the conclusion "survived" losing its only ground by way of a branch nothing ever grounded. Requiring both branches makes the term and the certificate agree about `Sum`. Asserting a fallback obliges you to show the fallback works.
 
-**`instantiate` leaves the term index at `j`.** Specialization narrows the PROPOSITION and introduces no ground, so the term that certified the universal certifies the instance. One consequence, stated rather than discovered later: `instantiate` and `declared` can both target `Certificate(Declared(rule), P(x))`, so the TERM stops determining which rule applies at that node. Checking is unaffected because a certificate names its own constructor.
+**`instantiate` leaves the term index at `j`.** Specialization narrows the PROPOSITION and introduces no ground, so the term that certified the universal certifies the instance. One consequence, stated rather than discovered later: `instantiate` and `declared` can both target `Grounds(Declared(rule), P(x))`, so the TERM stops determining which rule applies at that node. Checking is unaffected because a certificate names its own constructor.
 
 **No implication introduction.** No constructor produces `justification:Grounds(_, A -> B)` — `app` yields `B`, `sum_l` / `sum_r` yield `P`, `instantiate` yields `P` at an instance. An implication therefore enters only through a grounding: asserted as a resource, witnessed by a trace. There is no deduction theorem here, so a rule relating propositions cannot be *derived*; it must be Declared, and quantifying it and eliminating with `instantiate` is what lets one rule serve many instances.
 
@@ -333,22 +333,19 @@ The chain-resident reasoning step. It carries **one** required slot, and that is
 ```esl
 class justification:Conclusion {
     requires justification:grounds_judgement;
-    recommends justification:proof_judgement,
-               justification:subject_iri,
-               justification:refutes;
+    recommends justification:proof_judgement;
 }
 ```
 
 Property shapes:
 
-- **`justification:grounds_judgement`** — an `eigentt:Judgement`: `holds(kernel, c, Certificate(j, P))`, read as *the kernel verified that certificate `c` grounds a claim to `P`*. It does **not** assert `P`: a certificate records grounds, and no rule turns `Certificate(j, P)` into `P`.
+- **`justification:grounds_judgement`** — an `eigentt:Judgement`: `holds(kernel, c, Grounds(P))`, read as *the kernel verified that the grounds `c` ground a claim to `P`*. It does **not** assert `P`: a grounds term records grounds, and no rule turns `Grounds(P)` into `P`.
 
-  This replaces the three slots the class used to carry — `proposition`, `term`, `certificate` — which were checked by three separate paths with nothing requiring them to be about the same claim. A certificate for one proposition could sit beside a different proposition and both checked clean. Folding them into the judgement's TYPE is what makes the pairing the thing that gets checked.
+  This replaces the three slots the class used to carry — `proposition`, `term`, `certificate` — which were checked by three separate paths with nothing requiring them to be about the same claim. Grounds for one proposition could sit beside a different proposition and both checked clean. Folding them into the judgement's TYPE is what makes the pairing the thing that gets checked.
 - **`justification:proof_judgement`** (recommended) — a second judgement, `holds(logic, t, P)`: a checker verified `t` against `P` itself. This is factive, and **only this admits an `IsVerifiedAs` witness**. A conclusion carrying no proof term is not citable as `Verified(iri)`, however well justified it is.
-- **`justification:subject_iri`** (recommended) — the principal Resource this conclusion is about. A first-class EigenQL index for "what have I concluded about X?".
-- **`justification:refutes`** (recommended) — IRI of a prior conclusion this one supersedes.
+`subject_iri` and `refutes` were recommended here and are gone (D89 §3). Neither had a reader: `subject_iri` described itself as a first-class EigenQL index and no index registered it, and `refutes` had no writer either. Aboutness is recoverable from the proposition, which mentions its subject.
 
-It subclasses nothing. It used to subclass `reflection:DerivedResource`, which made a later conclusion's `DerivedEvidence(prior_iri)` citation resolve — so citing an earlier conclusion by IRI grounded the citing one. Both halves are gone: the grade classes are deleted, and citation by IRI for an unproved conclusion was the laundering step. A synthesis composes with `Certificate.app` over the cited conclusion's certificate instead, which is what `app` was for.
+It subclasses nothing. It used to subclass `reflection:DerivedResource`, which made a later conclusion's `DerivedEvidence(prior_iri)` citation resolve — so citing an earlier conclusion by IRI grounded the citing one. Both halves are gone: the grade classes are deleted, and citation by IRI for an unproved conclusion was the laundering step. A synthesis composes with `Grounds.app` over the cited conclusion's grounds instead, which is what `app` was for.
 
 ### 9.10.4. Worked example — composing two evidence chains via `App`
 
@@ -356,7 +353,6 @@ The agent claims `StrongInhibitor(EIG_0291)`. The justification applies a litera
 
 ```esl
 resource screen:concl_eig0291_strong : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
     justification:grounds_judgement = type_expr(
         alias
@@ -388,7 +384,7 @@ At commit, the `ValidateJustification` AutoOnLoad gate fires:
 
 1. Decode the judgement's three fields: the logic, the certificate term, and its type.
 2. Check the type is a type, then check the certificate against it — the contract `eigentt:Judgement` states.
-3. Checking walks `justification:Grounds.app`, which requires sub-certificates for `Certificate(j1, A -> B)` and `Certificate(j2, A)`.
+3. Checking walks `justification:Grounds.app`, which requires sub-certificates for `Grounds(j1, A -> B)` and `Grounds(j2, A)`.
 4. Each grounding constructor requires a chain witness the kernel synthesizes:
    - `IsDeclaredAs("urn:…:rule_strong", HasLowIC50 -> StrongInhibitor)` — admitted if `rule_strong` was committed as a `justification:Declaration` with matching `canonical_proposition` and a paired `prov:DeclarationTrace`.
    - `IsDeclaredAs("urn:…:plan_yields_lowic50", Asserts(s) -> HasLowIC50)` — the plan's reproducibility declaration.
@@ -405,8 +401,8 @@ The full fixture this snippet is drawn from lives at [`kernel/tests/fixtures/dru
 `eigentt:Judgement`-ranged slot, and **Rule 21** owns every such slot
 ([`kernel/src/validation/rules/eigentt_value.rs`](../../../kernel/src/validation/rules/eigentt_value.rs)):
 decode the judgement, check its `type` is a type, then check its `term` against that type in check
-mode. Checking `holds(kernel, c, Certificate(j, P))` therefore checks that `c` inhabits
-`Certificate(j, P)` — the whole obligation, discharged by the rule that already existed for
+mode. Checking `holds(kernel, c, Grounds(j, P))` therefore checks that `c` inhabits
+`Grounds(j, P)` — the whole obligation, discharged by the rule that already existed for
 annotated terms. Committing a conclusion whose certificate does not type-check fails validation and
 the commit is rejected.
 

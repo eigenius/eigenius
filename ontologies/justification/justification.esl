@@ -6,15 +6,15 @@
 //   JustifiedBy(j, P)       `j` grounds a claim to P                     NOT factive
 //
 // This file declares the second, plus the two chain-resident classes that carry them: a
-// `justification:Declaration` states a proposition that a certificate may cite as a ground, and a
-// `justification:Conclusion` pairs a proposition with the certificate justifying it, as one
+// `justification:Declaration` asserts a proposition a grounds term may cite, and a
+// `justification:Conclusion` pairs a proposition with the grounds justifying it, as one
 // checked judgement. `eigentt:Judgement` — the first stratum — is declared in core.
 //
 // The composition is one-directional, each layer a statement about the one below (paper §4):
 //
-//   Judgement(kernel, c, Certificate(P))   a checker verified the certificate c
-//   Certificate(P)                         the grounds for P
-//   P                                      the proposition
+//   Judgement(kernel, c, Grounds(P))   a checker verified the grounds term c
+//   Grounds(P)                         the grounds for P
+//   P                                    the proposition
 //
 // Nothing reduces the top to `Judgement(kernel, t, P)`. The types differ and no rule relates
 // them, which is what makes substituting grounds for a proof inexpressible rather than merely
@@ -57,18 +57,18 @@ namespace prov       = "urn:eigenius:prov";
 // inhabitants: `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the layer's
 // witness index holds a matching key, and a type the kernel inhabits cannot be owned by a layer
 // above it. They are zero-constructor inductives in `Prop`, opaque to ESL — no surface
-// constructor exposes an inhabitant. The certificate constructors below reference them across
+// constructor exposes an inhabitant. The grounding constructors below reference them across
 // the layer boundary, which is the ordinary direction.
 
 // ── justification:Grounds ────────────────────────────────────────
 //
 // The paper writes the justification stratum `JustifiedBy(j, P)`, naming the relation between a
-// term and a proposition. Here the certificate IS the term: an inhabitant of `Certificate(P)` is
+// term and a proposition. Here the grounds ARE the term: an inhabitant of `Grounds(P)` is
 // a constructor tree over the algebra, so the family is indexed by the proposition alone and the
 // derivation is the value. `support` walks that value; two derivations of one P are distinct
 // values.
 //
-// `Certificate : Prop -> Type 2`, inhabiting a Type rather than `Prop` so that a certificate is
+// `Grounds : Prop -> Type 2`, inhabiting a Type rather than `Prop` so that a grounds term is
 // stored and re-checkable.
 //
 // **Why `Type 2`.** A constructor argument's sort may not exceed the inductive's own, or a large
@@ -76,17 +76,17 @@ namespace prov       = "urn:eigenius:prov";
 // and `Type 1` is `Sort 2`, so that argument sits at `Sort 3`; the inductive must be at `Sort 3`
 // or above, which is `Type 2`. The constraint is enforced by nanoda's `check_ctor` universe check
 // (`references/nanoda_lib/src/inductive.rs:904`). This costs nothing at use sites: a
-// certificate's TYPE sits a universe higher, its VALUES are unchanged, and nothing checks
+// grounds term's TYPE sits a universe higher, its VALUES are unchanged, and nothing checks
 // `justification:Grounds(p)` against a fixed sort.
 //
-// **No implication introduction.** No constructor produces `Certificate(A -> B)`: `app` yields
+// **No implication introduction.** No constructor produces `Grounds(A -> B)`: `app` yields
 // `B`, `sum_*` yield `P`, `instantiate` yields `P(x)`. An implication therefore enters only through
 // a grounding — asserted as a resource, witnessed by a trace. There is no deduction theorem, so a
 // bridge between vocabularies cannot be derived; it must be Declared. Quantifying that bridge and
 // eliminating with `instantiate` is what lets one bridge serve many claims.
 
 data justification:Grounds : Prop -> Type 2 {
-    description = "The grounds for P, retained whole. An inhabitant of Certificate(P) IS the justification term: a constructor tree with three categorical groundings at its leaves and composition operators above them, indexed by the proposition it grounds. It does not assert P — a certificate records grounds, and no rule turns Certificate(P) into P, which is the non-factivity the two-stratum separation requires. Seven constructors: `declared`, `observed` and `verified`, each consuming a witness:Is*As that the kernel synthesizes from the layer's witness index rather than from anything an author writes; `app` for Artemov Application; `sum_l` and `sum_r`, which require BOTH branches to be justified and differ only in which constructor was chosen, that choice being the record of the preferred branch; and `instantiate`, which narrows a universal proposition to an instance and adds no ground, since eliminating a quantifier introduces none. It inhabits Type 2 rather than Prop so a certificate is stored and re-checkable, and Type 2 rather than Type 0 because instantiate binds T : Type 1 and a constructor argument's sort may not exceed the inductive's own.";
+    description = "The grounds for P, retained whole. An inhabitant of Grounds(P) IS the justification term: a constructor tree with three categorical groundings at its leaves and composition operators above them, indexed by the proposition it grounds. It does not assert P — a grounds term records grounds, and no rule turns Grounds(P) into P, which is the non-factivity the two-stratum separation requires. Seven constructors: `declared`, `observed` and `verified`, each consuming a witness:Is*As that the kernel synthesizes from the layer's witness index rather than from anything an author writes; `app` for Artemov Application; `sum_l` and `sum_r`, which require BOTH branches to be justified and differ only in which constructor was chosen, that choice being the record of the preferred branch; and `instantiate`, which narrows a universal proposition to an instance and adds no ground, since eliminating a quantifier introduces none. It inhabits Type 2 rather than Prop so a grounds term is stored and re-checkable, and Type 2 rather than Type 0 because instantiate binds T : Type 1 and a constructor argument's sort may not exceed the inductive's own.";
 
     declared :
         forall (iri : core:iri, P : Prop) =>
@@ -105,7 +105,7 @@ data justification:Grounds : Prop -> Type 2 {
 
     // Artemov Application: a justification of `A -> B` applied to one of `A` justifies `B`.
     //
-    // Both propositions are implicit. `B` is the certificate's own index, so the type the
+    // Both propositions are implicit. `B` is the term's own index, so the type the
     // application is checked against fixes it. `A` occurs in no index at all — it is determined
     // by inferring the first argument and reading the domain of its `A -> B`. Writing either
     // would restate what the arguments already say.
@@ -157,14 +157,14 @@ data justification:Grounds : Prop -> Type 2 {
 // asking it is a category error rather than an unanswered question. Requiring the proposition is
 // where that test is enforced.
 //
-// **Ground-neutral.** `Certificate.declared(iri, P)` and `Certificate.observed(iri, P)` both cite
+// **Ground-neutral.** `Grounds.declared(iri, P)` and `Grounds.observed(iri, P)` both cite
 // a resource of this kind; which ground applies is which provenance trace the resource carries,
 // not what class it is. Provenance and warrant are orthogonal axes, so a resource's origin does
 // not fix its evidential standing. `enc:EncodedClaim` is the parser-produced special case.
 //
 // The witness a citation consumes is minted from the resource's trace, and `IsDeclaredAs(iri, P)`
 // cannot exist for a resource that states no `P`. Without the requirement below, that failure
-// surfaces as a missing witness at certificate-check time rather than as a missing property at
+// surfaces as a missing witness at grounds-check time rather than as a missing property at
 // commit — later, and further from the cause.
 
 class justification:Declaration {
@@ -175,25 +175,25 @@ class justification:Declaration {
 
 // ── justification:Conclusion ────────────────────────────────────────
 //
-// The chain-resident pairing of a proposition with the certificate that justifies it, carried as
+// The chain-resident pairing of a proposition with the grounds that justify it, carried as
 // one judgement so that the pairing is the thing checked.
 //
 // It subclasses nothing. A conclusion is produced by checking rather than measured or asserted,
 // but that is a fact about how it came to exist — provenance, recorded by its trace — and
 // classifying by origin is what the two-axis separation removes.
 //
-// A synthesis that builds on an earlier conclusion composes with `Certificate.app`, taking the
+// A synthesis that builds on an earlier conclusion composes with `Grounds.app`, taking the
 // cited conclusion's CERTIFICATE as its antecedent. There is no citation of a conclusion by IRI
 // as a ground in its own right: the three grounds are the only leaves.
 
 class justification:Conclusion {
-    description = "A chain-resident reasoning step: the thing a justification concludes. Carries ONE required judgement — `holds(kernel, c, Certificate(P))`, read as `the kernel verified that certificate c grounds a claim to P`. It does NOT assert P: a certificate records grounds, and no rule turns Certificate(P) into P. The proposition and the certificate both sit inside that judgement's type, so one check establishes that this certificate grounds this proposition, rather than several checks with nothing requiring them to concern the same claim. Named Conclusion because Claim is taken by enc:EncodedClaim.";
+    description = "A chain-resident reasoning step: the thing a justification concludes. Carries ONE required judgement — `holds(kernel, c, Grounds(P))`, read as `the kernel verified that the grounds c ground a claim to P`. It does NOT assert P: a grounds term records grounds, and no rule turns Grounds(P) into P. The proposition and the grounds both sit inside that judgement's type, so one check establishes that these grounds ground this proposition, rather than several checks with nothing requiring them to concern the same claim. Named Conclusion because Claim is taken by enc:EncodedClaim.";
     requires justification:grounds_judgement;
     recommends justification:proof_judgement;
 }
 
 property justification:grounds_judgement : core:inductive {
-    description = "The checked judgement this conclusion rests on: `holds(kernel, c, Certificate(P))`. The proposition P appears inside the TYPE, so checking the judgement checks that the certificate inhabits the certificate type for that proposition — one obligation, discharged by the uniform check-mode rule. Also the source of the conclusion's canonical proposition for witness emission: P is projected out of the judgement's type rather than read from a separate slot.";
+    description = "The checked judgement this conclusion rests on: `holds(kernel, c, Grounds(P))`. The proposition P appears inside the TYPE, so checking the judgement checks that the term inhabits the Grounds type for that proposition — one obligation, discharged by the uniform check-mode rule. Also the source of the conclusion's canonical proposition for witness emission: P is projected out of the judgement's type rather than read from a separate slot.";
     class_types eigentt:Judgement;
     domain justification:Conclusion;
 }
@@ -284,7 +284,7 @@ property justification:proof_judgement : core:inductive {
 //
 // The Lean-4 verification institution is the checker that turns a committed Lean proof term into
 // a `Verified` ground: re-checking a proof yields a judgement, and that judgement discharges the
-// `witness:IsVerifiedAs` witness `Certificate.verified` consumes. That direction is live, and its
+// `witness:IsVerifiedAs` witness `Grounds.verified` consumes. That direction is live, and its
 // comorphism is a TCB element — the risk it carries is not that the Lean kernel accepts
 // falsehoods but that the translated proposition `P'` fails to denote the chain proposition `P`
 // (paper §7.2).

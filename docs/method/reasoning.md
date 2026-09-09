@@ -229,7 +229,6 @@ resource obj:plan_yields_result_trace : prov:DeclarationTrace {
 }
 
 resource obj:concl_x : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:obj:<slug>:subject";
     justification:grounds_judgement   = type_expr(
         holds( eigentt:logic_kernel,
                app( core:Asserts("urn:eigenius:obj:<slug>:input"), obj:Result("x"),
@@ -249,7 +248,7 @@ resource obj:concl_x : justification:Conclusion {
 ```
 **One slot, not three.** The proposition and the justification term are no longer
 separate fields — they appear inside the judgement's TYPE, where the kernel checks
-that the certificate actually inhabits `Certificate(j, P)`. Previously `proposition`,
+that the certificate actually inhabits `Grounds(j, P)`. Previously `proposition`,
 `term` and `certificate` were three fields checked by three paths, with nothing
 requiring them to be about the same claim; a certificate for one proposition sat
 happily beside a different `proposition`. Now the pairing is what gets checked.

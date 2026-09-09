@@ -30,7 +30,7 @@ No comorphism is declared between the two institutions. No bridge code runs to t
 | `screen:rule_strong` (`justification:Declaration`) | The literature rule. `canonical_proposition` is `HasLowIC50 -> StrongInhibitor`. |
 | `screen:plan_yields_lowic50` (`justification:Declaration`) + its `prov:DeclarationTrace` | The plan's reproducibility claim: `Asserts(s) -> HasLowIC50(EIG_0291)`. Admits `IsDeclaredAs`, and is the DECLARED half of the computed ground. |
 | `screen:rule_strong_trace` (`prov:DeclarationTrace`) | Admits `IsDeclaredAs(rule_iri, HasLowIC50 -> StrongInhibitor)`. |
-| `screen:concl_eig0291_strong` (`justification:Conclusion`) | The reasoning step. One judgement: `holds(kernel, c, Certificate(App(Declared(rule), App(Declared(plan_yields), Observed(sampleset))), StrongInhibitor(EIG_0291)))`. AutoOnLoad-gated by D39. |
+| `screen:concl_eig0291_strong` (`justification:Conclusion`) | The reasoning step. One judgement: `holds(kernel, c, Grounds(App(Declared(rule), App(Declared(plan_yields), Observed(sampleset))), StrongInhibitor(EIG_0291)))`. AutoOnLoad-gated by D39. |
 
 The fixture commits all of these in one ESL document; the AutoOnLoad cascades fire in commit order ([§4.2](04-dispatch-roles-in-concert.md#42-autoonload-cascades-single-commit-multiple-gates)).
 
@@ -162,7 +162,6 @@ Three witness keys are now in the index: `IsObservedAs` for the sample set (step
 
 ```esl
 resource screen:concl_eig0291_strong : justification:Conclusion {
-    justification:subject_iri = "urn:eigenius:demo:screen:EIG_0291";
 
     justification:grounds_judgement = type_expr(
         alias
@@ -197,15 +196,15 @@ The commit triggers Rule 21, which owns every `eigentt:Term`-ranged slot and so 
 1. **Decode** the judgement's three fields — the logic, the certificate term, and its type.
 2. **Check the type is a type**, then **check the certificate against it**. That is the contract `eigentt:Judgement` states, and it means no slot relies on inference.
 3. Checking walks the certificate's outer `app(...)`, which requires sub-certificates for:
-   - `Certificate(Declared("…rule_strong"), HasLowIC50 -> StrongInhibitor)` — matched by `declared(...)`, consuming `IsDeclaredAs("…rule_strong", …)`. The kernel hashes the proposition, looks up the witness key in the layer's index, finds the entry admitted in step 4, and returns the opaque witness value.
-   - `Certificate(App(Declared("…plan_yields_lowic50"), Observed("…m_eig0291_sampleset")), HasLowIC50)` — matched by the inner `app(...)`, which in turn consumes `IsDeclaredAs` for the plan's reproducibility declaration and `IsObservedAs` for the sample set.
+   - `Grounds(Declared("…rule_strong"), HasLowIC50 -> StrongInhibitor)` — matched by `declared(...)`, consuming `IsDeclaredAs("…rule_strong", …)`. The kernel hashes the proposition, looks up the witness key in the layer's index, finds the entry admitted in step 4, and returns the opaque witness value.
+   - `Grounds(App(Declared("…plan_yields_lowic50"), Observed("…m_eig0291_sampleset")), HasLowIC50)` — matched by the inner `app(...)`, which in turn consumes `IsDeclaredAs` for the plan's reproducibility declaration and `IsObservedAs` for the sample set.
 
    All three witnesses admit, the certificate type-checks ✓.
-4. **Nothing is emitted.** The conclusion is admitted; the chain has attested that this certificate grounds a claim to `StrongInhibitor(EIG_0291)` — not that the proposition is true. A certificate records grounds, and no rule turns `Certificate(j, P)` into `P`.
+4. **Nothing is emitted.** The conclusion is admitted; the chain has attested that this certificate grounds a claim to `StrongInhibitor(EIG_0291)` — not that the proposition is true. A certificate records grounds, and no rule turns `Grounds(j, P)` into `P`.
 
 **Note what the certificate does NOT cite: the `StatisticalAnalysisResult`.** The statistics institution emitted one, and it records what the run produced — which grounds nothing. A computed claim rests on the plan being DECLARED to denote a function of its input, and on that input being OBSERVED. Neither half comes from the run.
 
-**Can a later conclusion cite this one?** Only as `Verified(iri)`, and only if it carries a `justification:proof_judgement` — the judgement `holds(logic, t, P)`, which says a checker verified `t` against `P` itself. This conclusion carries no proof term, so it admits no witness. Composing on it means taking its certificate as an antecedent through `Certificate.app`, which is what `app` is for. Citing an unproved conclusion by IRI was the laundering step the two-layer separation exists to forbid.
+**Can a later conclusion cite this one?** Only as `Verified(iri)`, and only if it carries a `justification:proof_judgement` — the judgement `holds(logic, t, P)`, which says a checker verified `t` against `P` itself. This conclusion carries no proof term, so it admits no witness. Composing on it means taking its certificate as an antecedent through `Grounds.app`, which is what `app` is for. Citing an unproved conclusion by IRI was the laundering step the two-layer separation exists to forbid.
 
 ## 7.4. The AutoOnLoad cascade in this scenario
 

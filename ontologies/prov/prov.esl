@@ -283,7 +283,7 @@ property prov:proof_system : core:string {
 }
 
 property prov:proof_term : core:string {
-    description = "IRI of the proof term. For an external prover, the exported proof blob in blob storage; for the kernel, the chain-resident IRI of the justification:Conclusion carrying a justification:proof_judgement — the judgement holds(logic, t, P), a checker having verified t against P itself. NOT the conclusion whose CERTIFICATE type-checked: justification:grounds_judgement is holds(kernel, c, Certificate(j, P)), which says a checker verified the certificate c and does not say P. A certificate records grounds and is not factive, and minting Verified from one laundered a conclusion resting on nothing but Declared(...) into a proof exactly one citation downstream. Both are IRIs; only the former is a blob.";
+    description = "IRI of the proof term. For an external prover, the exported proof blob in blob storage; for the kernel, the chain-resident IRI of the justification:Conclusion carrying a justification:proof_judgement — the judgement holds(logic, t, P), a checker having verified t against P itself. NOT the conclusion whose CERTIFICATE type-checked: justification:grounds_judgement is holds(kernel, c, Grounds(j, P)), which says a checker verified the certificate c and does not say P. A certificate records grounds and is not factive, and minting Verified from one laundered a conclusion resting on nothing but Declared(...) into a proof exactly one citation downstream. Both are IRIs; only the former is a blob.";
     format = formats:iri;
     domain prov:VerificationTrace;
 }

@@ -168,7 +168,7 @@ ontology when authoring witnessed propositions — don't memorize the shapes.
   ([D39](https://github.com/eigenius/eigenius/blob/main/docs/design/d39-justification-logic.md),
   guide [justification-logic/](https://github.com/eigenius/eigenius/tree/main/docs/guides/platform/justification-logic)):
   a `justification:Conclusion` carries ONE judgement — `holds(kernel, c,
-  Certificate(j, P))` — and the certificate type-checks against
+  Grounds(j, P))` — and the certificate type-checks against
   `justification:Grounds(term, proposition)` via the three grounds
   `Declared`/`Observed`/`Verified` plus `App`/`Sum`, with the
   `declared()/observed()/verified()/app()/sum_l()/sum_r()` certificate constructors.
@@ -180,10 +180,10 @@ ontology when authoring witnessed propositions — don't memorize the shapes.
   nothing, so there is no `IsDerivedAs`.
 - **Lemma citation** — a conclusion is citable as `verified(<iri>, P)` ONLY if it
   carries a `justification:proof_judgement`, the judgement `holds(logic, t, P)`. Its
-  `justification:grounds_judgement` is `holds(kernel, c, Certificate(j, P))`, which says a
+  `justification:grounds_judgement` is `holds(kernel, c, Grounds(j, P))`, which says a
   checker verified the certificate and does NOT say `P`; minting Verified from that
   laundered a conclusion resting on nothing but `Declared(…)` into a proof one
-  citation downstream. Compose with `Certificate.app` over the cited conclusion's
+  citation downstream. Compose with `Grounds.app` over the cited conclusion's
   certificate instead.
 - **The commit gate (fail-closed).** AutoOnLoad **rejects** a layer that adds a
   `Fails` `justification:Conclusion`, so a later lemma citation of it can't be unsound —
