@@ -79,7 +79,15 @@ resource screen:rule_strong_trace : prov:DeclarationTrace {
 
 // ─── Step 3: bench observation + trace (unchanged in shape) ────────
 
-resource screen:m_eig0291 : justification:Declaration {
+// The resource an `observed(...)` ground cites. NOT a `justification:Declaration`: that class
+// requires an accountable agent, and nobody asserted this — an instrument recorded it, which is
+// what its `prov:ObservationTrace` says. D89 §3 puts no class on the observed side, so this is an
+// ordinary domain resource that happens to carry a proposition.
+class screen:Measurement : core:Resource {
+    description = "A bench measurement produced by an instrument run.";
+}
+
+resource screen:m_eig0291 : screen:Measurement {
     prov:was_generated_by      = screen:act_kinase_glo_plate_2026_03_04_a1;
     prov:observed_at = "2026-03-04T14:22:11Z";
 

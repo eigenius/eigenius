@@ -147,4 +147,19 @@ fn universal_rule_with_instantiate_validates_to_holds() {
         "expected Holds for the universal rule + instantiate certificate; \
          got: {diagnostic}"
     );
+
+    // The filter above reads only the conclusion's errors, so a violation on any OTHER resource in
+    // the fixture is dropped. That is not hypothetical: `screen:m_eig0291` sat as a
+    // `justification:Claim` with no attribution, and when D89 made the attribution required the
+    // fixture carried a MissingRequired this test could not see. The whole layer is the assertion.
+    let all: Vec<String> = eigenius_kernel::validation::Validator::new(ctx.head().clone())
+        .validate()
+        .into_iter()
+        .map(|e| format!("{:?}: {}", e.resource_id, e.message))
+        .collect();
+    assert!(
+        all.is_empty(),
+        "the fixture layer must validate clean, got:\n{}",
+        all.join("\n")
+    );
 }

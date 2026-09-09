@@ -50,7 +50,13 @@ resource poly:rule_trace : prov:DeclarationTrace {
     prov:timestamp   = "2026-08-18T00:00:00Z";
 }
 
-resource poly:obs : justification:Declaration {
+// Cited by `observed(...)`, so not a `justification:Declaration` — that class requires an
+// accountable agent and this was recorded, not asserted (D89 §3).
+class poly:Observation : core:Resource {
+    description = "An illustrative recorded observation.";
+}
+
+resource poly:obs : poly:Observation {
     prov:was_generated_by      = poly:act_illustrative;
     prov:observed_at = "2026-08-18T00:00:00Z";
 
