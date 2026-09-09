@@ -145,25 +145,72 @@ fn eigon_r_marshalling_round_trip() {
     // would have been refused at commit.
     assert!(has_class, "output is_a missing core:Resource: {is_a:?}");
 
-    // The canonical_proposition the script set (groups differ → p < 0.05)
-    // round-trips as the D47 App-spine term the reasoning institution
-    // consumes: App(App(ConstRef(GroupsDiffer), LitString(x)), LitString(g)).
+    // The proposition the script set (groups differ → p < 0.05) round-trips as the App-spine term
+    // the reasoning institution consumes: App(App(ConstRef(GroupsDiffer), LitString(x)),
+    // LitString(g)).
+    //
+    // It arrives in the D85 §6.1 shape — an inductive value is a RESOURCE whose `is_a` names the
+    // constructor's class and whose arguments are named properties. It was a `Value::Json` tagged
+    // dict, `{"ctor": …, "args": […]}`, until D85 replaced that encoding; the assertion here kept
+    // expecting the old form and had been failing since, on `main` as well as on any branch.
     let prop = outcome
         .output
         .get(&Iri::parse("urn:eigenius:eigentt:proposition").unwrap());
-    let term = match prop {
-        Some(Value::Json(j)) => j.clone(),
-        other => panic!("canonical_proposition not Json: {other:?}"),
+    let Some(Value::Embedded(term)) = prop else {
+        panic!("proposition is an embedded inductive value, got: {prop:?}")
     };
-    let expected = serde_json::json!({
-        "ctor": "App",
-        "args": [
-            {"ctor": "App", "args": [
-                {"ctor": "ConstRef", "args": ["urn:eigenius:test:GroupsDiffer", []]},
-                {"ctor": "LitString", "args": ["x"]}
-            ]},
-            {"ctor": "LitString", "args": ["g"]}
-        ]
-    });
-    assert_eq!(term, expected, "canonical_proposition term shape mismatch");
+
+    /// The constructor class of an inductive value, short-named.
+    fn ctor_of(r: &Resource) -> String {
+        let is_a = r
+            .get(&Iri::parse("urn:eigenius:core:is_a").unwrap())
+            .expect("an inductive value names its constructor class");
+        let Value::Array(v) = is_a else {
+            panic!("is_a is an array, got {is_a:?}")
+        };
+        match v.first().expect("is_a is non-empty") {
+            Value::String(s) => s.rsplit(':').next().expect("non-empty IRI").to_string(),
+            other => panic!("is_a entry is a string, got {other:?}"),
+        }
+    }
+    fn field<'a>(r: &'a Resource, name: &str) -> &'a Value {
+        r.get(&Iri::parse(&format!("urn:eigenius:eigentt:{name}")).unwrap())
+            .unwrap_or_else(|| panic!("inductive value carries `{name}`"))
+    }
+    fn embedded<'a>(v: &'a Value, what: &str) -> &'a Resource {
+        match v {
+            Value::Embedded(r) => r,
+            other => panic!("{what} is an embedded value, got {other:?}"),
+        }
+    }
+    fn lit_string(r: &Resource) -> &str {
+        assert_eq!(ctor_of(r), "Term-LitString");
+        match field(r, "Term-LitString-value") {
+            Value::String(s) => s,
+            other => panic!("LitString carries a string, got {other:?}"),
+        }
+    }
+
+    // outer: App(<inner>, LitString("g"))
+    assert_eq!(ctor_of(term), "Term-App", "the spine's outer node");
+    assert_eq!(
+        lit_string(embedded(field(term, "Term-App-arg"), "outer arg")),
+        "g"
+    );
+
+    // inner: App(ConstRef(GroupsDiffer), LitString("x"))
+    let inner = embedded(field(term, "Term-App-head"), "outer head");
+    assert_eq!(ctor_of(inner), "Term-App", "the spine's inner node");
+    assert_eq!(
+        lit_string(embedded(field(inner, "Term-App-arg"), "inner arg")),
+        "x"
+    );
+
+    let head = embedded(field(inner, "Term-App-head"), "inner head");
+    assert_eq!(ctor_of(head), "Term-ConstRef");
+    assert_eq!(
+        field(head, "Term-ConstRef-iri"),
+        &Value::String("urn:eigenius:test:GroupsDiffer".to_string()),
+        "the spine's head names the declared predicate"
+    );
 }
