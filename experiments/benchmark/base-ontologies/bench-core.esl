@@ -29,10 +29,7 @@
 // need it.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
 namespace bench      = "urn:eigenius:benchmark";
-namespace prov       = "urn:eigenius:prov";
-namespace justification = "urn:eigenius:justification";
 
 // ── Typed tool boundary ──────────────────────────────────────────────
 

@@ -37,7 +37,6 @@ namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";
 namespace wrnlit     = "urn:eigenius:pub:wrn:lit";
 namespace wrn        = "urn:eigenius:pub:wrn";
 namespace prov       = "urn:eigenius:prov";
-namespace justification = "urn:eigenius:justification";
 namespace eigentt       = "urn:eigenius:eigentt";
 
 // ════════════════════════════════════════════════════════════════════

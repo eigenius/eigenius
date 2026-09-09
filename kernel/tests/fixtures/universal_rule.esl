@@ -26,7 +26,6 @@
 //    of the rule's universal proposition at "urn:EIG_0291".
 
 namespace core          = "urn:eigenius:core";
-namespace formats       = "urn:eigenius:core:formats";
 namespace screen        = "urn:eigenius:demo:screen";
 namespace agent         = "urn:eigenius:prov:agent";
 namespace justification = "urn:eigenius:justification";

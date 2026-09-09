@@ -45,7 +45,6 @@
 // without updating `kernel/src/ontology/well_known.rs` in lockstep.
 
 namespace core          = "urn:eigenius:core";
-namespace formats       = "urn:eigenius:core:formats";
 namespace eigentt       = "urn:eigenius:eigentt";
 namespace witness       = "urn:eigenius:witness";
 namespace justification = "urn:eigenius:justification";

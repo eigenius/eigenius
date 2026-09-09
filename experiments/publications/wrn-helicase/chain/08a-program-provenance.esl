@@ -25,9 +25,7 @@
 
 namespace core          = "urn:eigenius:core";
 namespace agent         = "urn:eigenius:prov:agent";
-namespace ingest        = "urn:eigenius:ingest";
 namespace onco          = "urn:eigenius:benchmark:onco";
-namespace bench         = "urn:eigenius:benchmark";
 namespace wrn           = "urn:eigenius:pub:wrn";
 namespace prov       = "urn:eigenius:prov";
 namespace justification = "urn:eigenius:justification";

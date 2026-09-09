@@ -22,7 +22,6 @@ namespace core        = "urn:eigenius:core";
 namespace eigentt     = "urn:eigenius:eigentt";
 namespace reference   = "urn:eigenius:reference";
 namespace lexicon     = "urn:eigenius:lexicon";
-namespace formats     = "urn:eigenius:core:formats";
 namespace enc         = "urn:eigenius:encoding";
 namespace prov       = "urn:eigenius:prov";
 namespace justification = "urn:eigenius:justification";

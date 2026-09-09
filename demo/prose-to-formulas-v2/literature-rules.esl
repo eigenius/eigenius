@@ -45,7 +45,6 @@
 namespace core       = "urn:eigenius:core";
 namespace onco2      = "urn:eigenius:demo:onco-typed";
 namespace umlscui    = "urn:eigenius:umlscui";
-namespace wn         = "urn:eigenius:wn";
 namespace agent = "urn:eigenius:prov:agent";
 namespace prov       = "urn:eigenius:prov";
 namespace justification = "urn:eigenius:justification";

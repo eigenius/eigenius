@@ -36,11 +36,9 @@
 // stats:lt(mean_diff_of(s), 0) — MSI strictly more WRN-dependent.
 
 namespace core          = "urn:eigenius:core";
-namespace formats       = "urn:eigenius:core:formats";
 namespace stats         = "urn:eigenius:measurements";
 namespace eigentt       = "urn:eigenius:eigentt";
 namespace onco          = "urn:eigenius:benchmark:onco";
-namespace bench         = "urn:eigenius:benchmark";
 namespace wrn           = "urn:eigenius:pub:wrn";
 namespace justification = "urn:eigenius:justification";
 

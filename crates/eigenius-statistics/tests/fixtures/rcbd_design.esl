@@ -16,12 +16,10 @@
 // CrossSectional)`. Phase 4.0's new dispatch arm.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace dr         = "urn:eigenius:demo:dr";
 namespace prov       = "urn:eigenius:prov";
-namespace justification = "urn:eigenius:justification";
 
 // ── Provenance activities ────────────────────────────────────────────
 // `prov:was_generated_by` is resource-typed: the event that produced an

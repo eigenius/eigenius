@@ -22,12 +22,10 @@
 // FullFactorial(2), _, CrossSectional)`.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace kx         = "urn:eigenius:demo:kx";
 namespace prov       = "urn:eigenius:prov";
-namespace justification = "urn:eigenius:justification";
 
 // ── Provenance activities ────────────────────────────────────────────
 // `prov:was_generated_by` is resource-typed: the event that produced an

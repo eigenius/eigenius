@@ -19,9 +19,7 @@
 // Validated by crates/eigenius-reasoning/tests/wrn_phase5.rs.
 
 namespace core          = "urn:eigenius:core";
-namespace formats       = "urn:eigenius:core:formats";
 namespace eigentt       = "urn:eigenius:eigentt";
-namespace bench         = "urn:eigenius:benchmark";
 namespace onco          = "urn:eigenius:benchmark:onco";
 namespace wrn           = "urn:eigenius:pub:wrn";
 namespace justification = "urn:eigenius:justification";

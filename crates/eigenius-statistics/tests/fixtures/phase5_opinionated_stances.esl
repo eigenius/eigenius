@@ -13,14 +13,12 @@
 // paths.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace decay      = "urn:eigenius:demo:decay";
 namespace methods    = "urn:eigenius:demo:methods";
 namespace assay      = "urn:eigenius:demo:assay";
 namespace prov       = "urn:eigenius:prov";
-namespace justification = "urn:eigenius:justification";
 
 // ── Provenance activities ────────────────────────────────────────────
 // `prov:was_generated_by` is resource-typed: the event that produced an

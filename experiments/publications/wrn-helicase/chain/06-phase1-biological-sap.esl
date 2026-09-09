@@ -27,9 +27,7 @@
 // not by the in-process recompute tests.
 
 namespace core          = "urn:eigenius:core";
-namespace stats         = "urn:eigenius:measurements";
 namespace onco          = "urn:eigenius:benchmark:onco";
-namespace bench         = "urn:eigenius:benchmark";
 namespace wrn           = "urn:eigenius:pub:wrn";
 namespace justification = "urn:eigenius:justification";
 namespace eigentt       = "urn:eigenius:eigentt";

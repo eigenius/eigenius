@@ -52,7 +52,6 @@
 // this fixture compiles against the layer stack that includes it.
 
 namespace core          = "urn:eigenius:core";
-namespace formats       = "urn:eigenius:core:formats";
 namespace stats         = "urn:eigenius:measurements";
 namespace screen        = "urn:eigenius:demo:screen";
 namespace agent         = "urn:eigenius:prov:agent";

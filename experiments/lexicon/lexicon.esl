@@ -17,8 +17,6 @@
 // kernel Validator reports 0 errors; every entry is felicity-gated.
 
 namespace core         = "urn:eigenius:core";
-namespace epistemic    = "urn:eigenius:reflection:epistemic";
-namespace eigentt      = "urn:eigenius:eigentt";
 namespace lexicon      = "urn:eigenius:lexicon";
 namespace measurements = "urn:eigenius:measurements";
 

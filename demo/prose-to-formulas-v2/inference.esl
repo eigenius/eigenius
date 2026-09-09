@@ -41,7 +41,6 @@ namespace inferred      = "urn:eigenius:demo:v2:inferred";
 namespace onco_typed    = "urn:eigenius:demo:onco-typed";
 namespace ontology      = "urn:eigenius:ontology";
 namespace umlscui       = "urn:eigenius:umlscui";
-namespace wn            = "urn:eigenius:wn";
 namespace justification = "urn:eigenius:justification";
 namespace eigentt       = "urn:eigenius:eigentt";
 

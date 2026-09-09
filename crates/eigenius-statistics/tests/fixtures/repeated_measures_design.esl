@@ -24,12 +24,10 @@
 // first three axes but only RM has `Longitudinal(T)`.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace pk         = "urn:eigenius:demo:pk";
 namespace prov       = "urn:eigenius:prov";
-namespace justification = "urn:eigenius:justification";
 
 // ── Provenance activities ────────────────────────────────────────────
 // `prov:was_generated_by` is resource-typed: the event that produced an

@@ -39,7 +39,6 @@
 //     witness emitter walks.
 
 namespace core       = "urn:eigenius:core";
-namespace formats    = "urn:eigenius:core:formats";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace screen     = "urn:eigenius:demo:screen";

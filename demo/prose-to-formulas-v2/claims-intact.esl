@@ -9,7 +9,6 @@ namespace umlscui = "urn:eigenius:umlscui";
 namespace v2 = "urn:eigenius:demo:v2";
 namespace wn = "urn:eigenius:wn";
 namespace prov       = "urn:eigenius:prov";
-namespace justification = "urn:eigenius:justification";
 
 // ── Provenance activities ────────────────────────────────────────────
 // `prov:was_generated_by` is resource-typed: the event that produced an

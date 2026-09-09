@@ -50,7 +50,6 @@
 
 namespace core        = "urn:eigenius:core";
 namespace formats     = "urn:eigenius:core:formats";
-namespace eigentt     = "urn:eigenius:eigentt";
 namespace institution = "urn:eigenius:institution";
 namespace stats       = "urn:eigenius:measurements";
 namespace agent       = "urn:eigenius:prov:agent";

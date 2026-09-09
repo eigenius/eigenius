@@ -25,7 +25,6 @@
 // Validated by crates/eigenius-reasoning/tests/wrn_phase2.rs.
 
 namespace core          = "urn:eigenius:core";
-namespace formats       = "urn:eigenius:core:formats";
 namespace eigentt       = "urn:eigenius:eigentt";
 namespace bench         = "urn:eigenius:benchmark";
 namespace onco          = "urn:eigenius:benchmark:onco";

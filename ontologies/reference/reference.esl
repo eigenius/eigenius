@@ -65,7 +65,6 @@
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
 namespace reference  = "urn:eigenius:reference";
-namespace prov       = "urn:eigenius:prov";
 
 // ── The bibliographic WORK (CSL-JSON / Dublin Core aligned) ──────────────
 //
