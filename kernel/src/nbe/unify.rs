@@ -231,6 +231,18 @@ pub fn unify(level: usize, lhs: &Val, rhs: &Val, mctx: &mut MetaCtx) -> Result<(
         (Val::Nt(Neut::Meta(id, spine)), _) => solve_meta(level, *id, spine, &rhs, mctx),
         (_, Val::Nt(Neut::Meta(id, spine))) => solve_meta(level, *id, spine, &lhs, mctx),
 
+        // PROTOTYPE (D89 experiment): a meta APPLIED to arguments. Evaluation never populates
+        // `Neut::Meta`'s spine — it builds `Neut::App(Meta(id, []), arg)` chains — so this is the
+        // only form `?P y` actually takes, and without this arm it falls through to `eq_nf`.
+        (Val::Nt(ln), _) if as_meta_spine(ln).is_some() => {
+            let (id, spine) = as_meta_spine(ln).expect("guarded above");
+            solve_meta(level, id, &spine, &rhs, mctx)
+        }
+        (_, Val::Nt(rn)) if as_meta_spine(rn).is_some() => {
+            let (id, spine) = as_meta_spine(rn).expect("guarded above");
+            solve_meta(level, id, &spine, &lhs, mctx)
+        }
+
         // Both are InductiveType applications — same decl + recurse
         // on params + indices.
         (
@@ -334,6 +346,30 @@ pub fn unify(level: usize, lhs: &Val, rhs: &Val, mctx: &mut MetaCtx) -> Result<(
             unify(level, &lbody, &rbody, mctx)
         }
 
+        // PROTOTYPE (D89 experiment): two NAMED binders, instantiated with a fresh generated
+        // variable and compared one level down. This is what `spec_poly`'s premise type
+        // `Certificate(forall (y : T) => P(y))` needs, and what the anonymous restriction above
+        // deliberately excluded.
+        //
+        // **Both sides must be named.** An anonymous arrow against a named-but-unused binder reads
+        // back differently — readback preserves `Patt::Unit` for D49's witness-key byte stability —
+        // so identifying them here would make two propositions with different witness keys unify.
+        // `meta_free_function_types_are_still_compared_by_readback` pins that, and an unguarded
+        // version of this arm breaks it.
+        (Val::Pi(ld, lc), Val::Pi(rd, rc))
+            if !matches!(lc.patt, Patt::Unit) && !matches!(rc.patt, Patt::Unit) =>
+        {
+            unify(level, ld, rd, mctx)?;
+            let v = Val::Nt(Neut::Gen(level, "G#".to_string()));
+            let lbody = lc
+                .apply(v.clone())
+                .map_err(|e| UnifyError::Eval(format!("{e:?}")))?;
+            let rbody = rc
+                .apply(v)
+                .map_err(|e| UnifyError::Eval(format!("{e:?}")))?;
+            unify(level + 1, &lbody, &rbody, mctx)
+        }
+
         // Everything else: fall back to structural equality. This
         // covers Val::Sort, Val::One, Val::Unit, Val::Lam, Val::Id,
         // Val::Refl, EigonClass, EigonPrimitive, etc. — for these
@@ -383,17 +419,30 @@ fn solve_meta(
         });
     }
 
-    // For Phase C v1 we only solve the bare-rhs case (spine empty).
-    // Non-empty spines arise for higher-order metavariables that
-    // Phase C does not yet construct.
+    // PROTOTYPE (D89 experiment): a pattern spine is solved by abstracting the rhs over exactly
+    // the variables the spine names — `?P G#0 ≟ B` gives `?P := λ G#0. B`. Readback is what makes
+    // the scope question decidable here: it forces every closure, so the resulting `Exp` mentions
+    // each variable syntactically, and "does the solution mention a variable this meta does not
+    // scope over" becomes a walk over `Exp::Var` rather than over a `Val` whose closures hide
+    // their environments.
     if !bound_levels.is_empty() {
-        return Err(UnifyError::NonPatternSpine {
-            meta: id,
-            spine: format!(
-                "Phase C v1 only solves bare metavariables (empty spine); got {} bound vars",
-                bound_levels.len()
-            ),
+        let body = readback_val(level, rhs);
+        let escaping = free_gen_levels(&body)
+            .into_iter()
+            .find(|l| *l >= mctx.level_of(id) && !bound_levels.contains(l));
+        if let Some(at_level) = escaping {
+            return Err(UnifyError::EscapesBinder {
+                meta: id,
+                meta_level: mctx.level_of(id),
+                at_level,
+            });
+        }
+        let abstracted = bound_levels.iter().rev().fold(body, |acc, l| {
+            crate::nbe::term::Exp::Lam(Patt::Var(format!("G#{l}")), Box::new(acc))
         });
+        let solution = crate::nbe::eval::eval(&abstracted, &crate::nbe::env::Rho::Nil)
+            .map_err(|e| UnifyError::Eval(format!("{e:?}")))?;
+        return mctx.solve(id, solution);
     }
 
     // Scope check, for the bare metas this actually solves. `id` stands for a value writable
@@ -417,6 +466,48 @@ fn solve_meta(
     }
 
     mctx.solve(id, rhs.clone())
+}
+
+/// PROTOTYPE (D89 experiment): peel a neutral `App` chain down to a `Meta` head.
+///
+/// Evaluation builds `?P y` as `Neut::App(Meta(id, []), y)`, never as `Meta(id, [y])`, so this is
+/// what recovers the `(meta, spine)` pair the pattern rules are written against.
+fn as_meta_spine(neut: &Neut) -> Option<(MetaId, Vec<Val>)> {
+    match neut {
+        Neut::Meta(id, spine) if !spine.is_empty() => Some((*id, spine.clone())),
+        Neut::App(head, arg) => {
+            let (id, mut spine) = as_meta_spine(head).or_else(|| match head.as_ref() {
+                Neut::Meta(id, s) if s.is_empty() => Some((*id, Vec::new())),
+                _ => None,
+            })?;
+            spine.push(arg.as_ref().clone());
+            Some((id, spine))
+        }
+        _ => None,
+    }
+}
+
+/// PROTOTYPE (D89 experiment): the de Bruijn levels of `G#n` variables occurring in an `Exp`.
+///
+/// Readback names a generated variable `G#{level}` (`readback.rs`), so a solution's free variables
+/// are recoverable syntactically once the value has been read back.
+fn free_gen_levels(exp: &crate::nbe::term::Exp) -> Vec<usize> {
+    // Prefix-AGNOSTIC on purpose. `Neut::Gen(j, name)` reads back as `Var("{name}{j}")` keeping
+    // whatever tag the producer chose, and the tree uses at least `G#` (readback), `TC#`
+    // (env::gen_val) and ad-hoc tags in tests. Keying on one prefix silently misses the others,
+    // which is a scope check that passes exactly the cases it exists to refuse. Parsing the
+    // trailing digits off any name over-approximates instead: a user variable ending in digits is
+    // read as generated and the solve is refused, which fails closed.
+    crate::nbe::subst::free_vars(exp)
+        .iter()
+        .filter_map(|n| {
+            let digits = n.len() - n.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+            if digits == 0 {
+                return None;
+            }
+            n[n.len() - digits..].parse::<usize>().ok()
+        })
+        .collect()
 }
 
 /// Verify a meta's spine is a sequence of distinct bound variables
@@ -487,31 +578,44 @@ fn meta_occurs_neut(meta: MetaId, n: &Neut) -> bool {
 }
 
 /// Substitute all solved metas with their solutions throughout `val`.
-fn zonk_val(mctx: &MetaCtx, val: &Val) -> Val {
-    match val {
-        Val::Nt(Neut::Meta(id, spine)) => {
-            if let Some(sol) = mctx.solution(*id) {
-                // For Phase C v1 (bare metas), the solution is applied
-                // directly. Spine application would be needed for
-                // higher-order metas — out of scope.
-                if spine.is_empty() {
-                    zonk_val(mctx, sol)
-                } else {
-                    // Solution exists but the spine is non-empty:
-                    // shouldn't happen in Phase C v1 since solve_meta
-                    // rejects non-empty spines. Defensive: preserve.
-                    Val::Nt(Neut::Meta(
-                        *id,
-                        spine.iter().map(|v| zonk_val(mctx, v)).collect(),
-                    ))
-                }
-            } else {
-                Val::Nt(Neut::Meta(
-                    *id,
-                    spine.iter().map(|v| zonk_val(mctx, v)).collect(),
-                ))
+/// PROTOTYPE (D89 experiment): apply a zonked head to a zonked argument, beta-reducing when the
+/// head became a lambda. Substituting a solved higher-order meta is not complete without this —
+/// `?P` solved to `λ y. B` leaves `(λ y. B) x` standing where the caller expects `B`.
+fn zonk_apply(head: Val, arg: Val) -> Val {
+    match head {
+        Val::Lam(ref clos) => clos.apply(arg.clone()).unwrap_or_else(|_| {
+            Val::Nt(Neut::App(
+                Box::new(Neut::Gen(usize::MAX, "zonk#stuck".to_string())),
+                Box::new(arg),
+            ))
+        }),
+        Val::Nt(n) => Val::Nt(Neut::App(Box::new(n), Box::new(arg))),
+        other => other,
+    }
+}
+
+/// PROTOTYPE (D89 experiment): zonk a neutral, resolving `App` chains whose head is a solved meta.
+fn zonk_neut(mctx: &MetaCtx, n: &Neut) -> Val {
+    match n {
+        Neut::Meta(id, spine) => {
+            let spine: Vec<Val> = spine.iter().map(|v| zonk_val(mctx, v)).collect();
+            match mctx.solution(*id) {
+                Some(sol) => spine.into_iter().fold(zonk_val(mctx, sol), zonk_apply),
+                None => Val::Nt(Neut::Meta(*id, spine)),
             }
         }
+        Neut::App(head, arg) => {
+            let h = zonk_neut(mctx, head);
+            let a = zonk_val(mctx, arg);
+            zonk_apply(h, a)
+        }
+        other => Val::Nt(other.clone()),
+    }
+}
+
+fn zonk_val(mctx: &MetaCtx, val: &Val) -> Val {
+    match val {
+        Val::Nt(n) => zonk_neut(mctx, n),
         Val::Pair(a, b) => Val::Pair(Box::new(zonk_val(mctx, a)), Box::new(zonk_val(mctx, b))),
         Val::Con(c, v) => Val::Con(c.clone(), Box::new(zonk_val(mctx, v))),
         Val::Refl(v) => Val::Refl(Box::new(zonk_val(mctx, v))),
@@ -833,17 +937,40 @@ mod tests {
         assert!(mctx.solution(id).is_some());
     }
 
+    /// The spine names what the meta may keep; anything else still escapes.
+    ///
+    /// `?P` is created at level 0 and reached under two binders. Its spine names only the variable
+    /// at level 1, so a solution mentioning the one at level 0 would carry a variable out of the
+    /// binder that introduced it. Readback is what makes this decidable: it forces every closure,
+    /// so the free variables of the proposed solution are visible syntactically.
     #[test]
-    fn meta_with_pattern_spine_currently_unsupported() {
-        // A spine of distinct bound vars passes the pattern check but
-        // Phase C v1 still rejects non-empty spines (lambda
-        // construction is deferred).
+    fn a_pattern_spine_still_refuses_a_solution_mentioning_a_variable_it_does_not_name() {
+        let mut mctx = MetaCtx::new();
+        let id = mctx.fresh(0);
+        let m = Val::Nt(Neut::Meta(id, vec![bound_var(1)]));
+        let err = unify(2, &m, &bound_var(0), &mut mctx)
+            .expect_err("G#0 is not in the spine and not in scope where ?P stands");
+        assert!(
+            matches!(err, UnifyError::EscapesBinder { .. }),
+            "expected an escaping-binder refusal, got {err:?}"
+        );
+        assert!(mctx.solution(id).is_none(), "nothing may have been solved");
+    }
+
+    #[test]
+    fn meta_with_pattern_spine_is_solved_by_abstraction() {
+        // A spine of distinct bound vars is a Miller pattern: the solution abstracts the rhs over
+        // exactly the variables the spine names. `?id G#0 G#1 ≟ Prop` gives `λ_ _. Prop`.
         let mut mctx = MetaCtx::new();
         let id = mctx.fresh(0);
         let spine = vec![bound_var(0), bound_var(1)];
         let m = Val::Nt(Neut::Meta(id, spine));
-        let err = unify(2, &m, &Val::sort(0), &mut mctx).unwrap_err();
-        assert!(matches!(err, UnifyError::NonPatternSpine { .. }));
+        unify(2, &m, &Val::sort(0), &mut mctx).expect("a pattern spine is solvable");
+        let sol = mctx.solution(id).expect("?id is solved");
+        assert!(
+            matches!(sol, Val::Lam(_)),
+            "the solution abstracts over the spine, got {sol:?}"
+        );
     }
 
     // ---- inductive type unification (D48's main consumer) ----

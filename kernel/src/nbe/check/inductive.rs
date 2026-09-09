@@ -2660,4 +2660,188 @@ mod tests {
     // introduces `j < i` as a TSO hypothesis in the arm — the
     // hypothesis that lets recursive calls on `n` type-check as
     // strictly-decreasing.
+
+    /// `justification:Certificate.spec_poly`'s shape, at `C : Set -> Set`:
+    ///
+    /// ```text
+    /// lit  : forall (X : Set) => C(X)
+    /// spec : forall (T : Set, P : T -> Set, x : T) => C(forall (y : T) => P(y)) -> C(P(x))
+    /// ```
+    ///
+    /// Two things distinguish it from `app_decl`. The result index is `P(x)` — a meta applied to a
+    /// **concrete term**, which is not a pattern and is genuinely ambiguous, so the expected type
+    /// cannot fix `P`. And the premise argument's type binds `y` by NAME, where `app`'s
+    /// `C(A -> B)` binds anonymously.
+    fn spec_decl(implicit: bool) -> std::sync::Arc<InductiveDecl> {
+        let iri = crate::ontology::iri::Iri::parse("urn:test:S").unwrap();
+        let c_of = |idx: Exp| Exp::const_applied(iri.clone(), Vec::new(), vec![idx]);
+        let var = |n: &str| Exp::Var(n.to_string());
+        let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+        std::sync::Arc::new(InductiveDecl {
+            uparams: Vec::new(),
+            iri: iri.clone(),
+            name: "S".to_string(),
+            params: Vec::new(),
+            indices: vec![(Patt::Var("X".to_string()), Exp::sort(1))],
+            sort: Exp::sort(1),
+            ctors: vec![
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "lit".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("X".to_string()),
+                        Box::new(Exp::sort(1)),
+                        Box::new(c_of(var("X"))),
+                    ),
+                    implicit: Vec::new(),
+                },
+                crate::nbe::term::InductiveCtorDecl {
+                    name: "spec".to_string(),
+                    typ: Exp::Pi(
+                        Patt::Var("T".to_string()),
+                        Box::new(Exp::sort(1)),
+                        Box::new(Exp::Pi(
+                            Patt::Var("P".to_string()),
+                            Box::new(Exp::Pi(
+                                Patt::Unit,
+                                Box::new(var("T")),
+                                Box::new(Exp::sort(1)),
+                            )),
+                            Box::new(Exp::Pi(
+                                Patt::Var("x".to_string()),
+                                Box::new(var("T")),
+                                Box::new(Exp::Pi(
+                                    Patt::Unit,
+                                    // C(forall (y : T) => P(y)) — a NAMED binder
+                                    Box::new(c_of(Exp::Pi(
+                                        Patt::Var("y".to_string()),
+                                        Box::new(var("T")),
+                                        Box::new(app(var("P"), var("y"))),
+                                    ))),
+                                    Box::new(c_of(app(var("P"), var("x")))),
+                                )),
+                            )),
+                        )),
+                    ),
+                    implicit: if implicit {
+                        // T and P implicit; x and the premise written.
+                        vec![true, true, false, false]
+                    } else {
+                        Vec::new()
+                    },
+                },
+            ],
+        })
+    }
+
+    /// The domain `T` is instantiated at `String` and `x` at a string literal, mirroring every
+    /// real `spec_poly` call site, where `x` is an IRI. A literal infers; `Exp::Unit` does not,
+    /// and the difference decides whether `T` is reachable at all.
+    fn spec_string_domain() -> Exp {
+        Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::String)
+    }
+
+    fn spec_premise(decl: &std::sync::Arc<InductiveDecl>) -> Exp {
+        Exp::InductiveCtor(
+            decl.iri.clone(),
+            "lit".to_string(),
+            vec![Exp::Pi(
+                Patt::Var("y".to_string()),
+                Box::new(spec_string_domain()),
+                Box::new(Exp::One),
+            )],
+        )
+    }
+
+    /// Baseline: with nothing implicit, `spec` checks when all four arguments are written.
+    ///
+    /// `spec(String, fun y => One, "iri", lit(forall (y : String) => One)) : S(One)`.
+    #[test]
+    fn spec_shaped_ctor_checks_with_every_argument_written() {
+        let decl = spec_decl(false);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let expected = ctx
+            .eval(
+                &Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One]),
+                &Rho::Nil,
+            )
+            .expect("S(One) evaluates");
+        let term = Exp::InductiveCtor(
+            decl.iri.clone(),
+            "spec".to_string(),
+            vec![
+                spec_string_domain(),
+                Exp::Lam(Patt::Var("y".to_string()), Box::new(Exp::One)),
+                Exp::LitString("urn:test:x".to_string()),
+                spec_premise(&decl),
+            ],
+        );
+        check(&mut ctx, &term, &expected).expect("`spec(...)` checks with all four arguments");
+    }
+
+    /// The case every real bridge takes: `P` genuinely depends on its argument.
+    ///
+    /// `P := fun y => Id(String, y, y)`, so the pattern equation is `?P G#0 ≟ Id(String, G#0, G#0)`
+    /// — the bound variable occurs twice in the solution. The constant-`P` test above has a
+    /// solution the abstraction never has to place, so it does not exercise this.
+    #[test]
+    fn spec_shaped_implicit_binders_with_a_dependent_family() {
+        let decl = spec_decl(true);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let x = || Exp::LitString("urn:test:x".to_string());
+        let id_at = |v: Exp| {
+            Exp::Id(
+                Box::new(spec_string_domain()),
+                Box::new(v.clone()),
+                Box::new(v),
+            )
+        };
+        let expected = ctx
+            .eval(
+                &Exp::const_applied(decl.iri.clone(), Vec::new(), vec![id_at(x())]),
+                &Rho::Nil,
+            )
+            .expect("S(Id(String, x, x)) evaluates");
+        let premise = Exp::InductiveCtor(
+            decl.iri.clone(),
+            "lit".to_string(),
+            vec![Exp::Pi(
+                Patt::Var("y".to_string()),
+                Box::new(spec_string_domain()),
+                Box::new(id_at(Exp::Var("y".to_string()))),
+            )],
+        );
+        let term = Exp::InductiveCtor(decl.iri.clone(), "spec".to_string(), vec![x(), premise]);
+        let outcome = check(&mut ctx, &term, &expected);
+        println!("spec_shaped_implicit_binders_with_a_dependent_family => {outcome:?}");
+        outcome.expect("a dependent `P` is recovered from the premise");
+    }
+
+    /// The question D89 §5 leaves open: can `T` and `P` be declared implicit?
+    ///
+    /// `T` is fixed by `x`'s inferred type. `P` is fixed by the premise's, whose codomain is a meta
+    /// applied to one distinct bound variable — a Miller pattern with a unique solution. Whether
+    /// either is reachable depends on `unify`'s Pi arm accepting a named binder and on
+    /// `solve_meta` constructing a lambda for a non-empty spine.
+    #[test]
+    fn spec_shaped_implicit_binders() {
+        let decl = spec_decl(true);
+        let mut ctx = CheckCtx::new(Rho::Nil, Vec::new()).declaring(decl.clone());
+        let expected = ctx
+            .eval(
+                &Exp::const_applied(decl.iri.clone(), Vec::new(), vec![Exp::One]),
+                &Rho::Nil,
+            )
+            .expect("S(One) evaluates");
+        let term = Exp::InductiveCtor(
+            decl.iri.clone(),
+            "spec".to_string(),
+            vec![
+                Exp::LitString("urn:test:x".to_string()),
+                spec_premise(&decl),
+            ],
+        );
+        let outcome = check(&mut ctx, &term, &expected);
+        println!("spec_shaped_implicit_binders => {outcome:?}");
+        outcome.expect("`spec(\"urn:test:x\", lit(...))` checks with T and P implicit");
+    }
 }
