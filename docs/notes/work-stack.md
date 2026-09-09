@@ -37,8 +37,8 @@ any detour.
 > binder was never checked against its declared type, invisible while `app` was the only implicit
 > constructor because its `A` and `B` are both `Prop`.
 >
-> **A SECOND RESEED IS OWED, and it is the only thing standing between here and a working stack.**
-> Three commits moved the manifest after the `2026-09-08` reseed, on two layers:
+> **Second reseed done `2026-09-09`**, paying off the three manifest moves that postdated the
+> `2026-09-08` one:
 >
 > | commit | layers | what moved |
 > |---|---|---|
@@ -46,8 +46,22 @@ any detour.
 > | `8c00a53` | `justification` | `instantiate` declares `implicit(T, P)` |
 > | `f028386` | `core` | three sentences the rename missed; the drift log's own entries |
 >
-> Both `2026-09-08` snapshots and the docker volume refuse to resume until it runs. Docker was not
-> reachable from this WSL distro on `2026-09-09`; `db-snapshot` has 592 GiB free, which is ample.
+> Snapshots `wordnet-umls-2026-09-09` (3.63 GiB, 81 files) and `wordnet-umls-aligned-2026-09-09`
+> (3.7 GB). All gates pass at `e7a06d7`, release, replayed:
+>
+> | | |
+> |---|---|
+> | units | 62 |
+> | grammar-gap / missing-lexeme | 0 / 0 |
+> | expected-hits | 62/62, miss-set unchanged |
+> | total-readings / total-skeletons | 674 / 171 |
+> | reading-correct | 30/41, 0 unadjudicated |
+> | invalid-selected | 0 |
+> | runtime | 50.72s |
+>
+> **Every number is identical to the `2026-09-08` run, histogram bucket for bucket.** Both reseeds
+> now say the same thing: these were description edits and one constructor binder, and neither
+> touched what a chain means.
 
 > **entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
 > (`docs/design/judgements-and-warrants.tex`) is the design; **P0 of
