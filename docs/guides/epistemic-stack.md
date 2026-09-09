@@ -619,11 +619,14 @@ The vocabulary the four ideas bring with them. Each is introduced in the body, c
 | Lean → chain: proof checked, `Verified` witness admitted | built, end to end |
 | the DCG grammar engine and lexicon | built; measured numbers in §4 |
 | **a conclusion carrying its own `proof_judgement`** | **declared, populated nowhere** |
-| **chain → Lean (the reverse comorphism)** | **not built**; needs an EigenTT→Lean term translation that is unspecified |
+| EigenTT **proposition** → Lean `Expr` | built, load-bearing — `externalize.rs`, and step 3 of §6 depends on it |
+| EigenTT **proof term** → Lean | **not built**; the externalizer covers the `Prop` fragment, i.e. statements, not proofs |
+| **a declared comorphism resource for Lean** | **not built**; the Lean institution declares an ExportFormat and query classes, no `(ExportFormat, transformation, ImportFormat)` triple |
 | **warrant as a query** | **not built.** The projections are Rust. A justification term is opaque to the query language — no pattern binds one. "Warrant becomes a query" must not be read as "an EigenQL query" |
 | `instantiate` with implicit `T`/`P` | prototyped, not landed |
 
-The third and fourth rows are the ones most likely to be over-claimed. **Verified is reachable
+The `proof_judgement` and *warrant as a query* rows are the ones most likely to be over-claimed.
+**Verified is reachable
 today only through the Lean route** — an external checker's judgement on a trace. The configuration
 where the kernel itself proves a chain claim is designed and empty.
 
