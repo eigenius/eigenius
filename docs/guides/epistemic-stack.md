@@ -112,9 +112,12 @@ witness:IsDeclaredAs(iri, P)     -- zero constructors, in Prop
 
 To *inhabit* a type is to have a value of it — an inhabitant of `P` is a proof of `P`. These
 predicates have **zero constructors**, meaning the surface language offers no way to build one. So an
-author cannot write down that a claim is declared. The kernel supplies the inhabitant itself, from
-the layer's witness index, and if the index has no matching entry the surrounding term simply fails
-to type-check. You do not assert that the evidence exists; you fail to compile until it does.
+author cannot write down that a claim is declared.
+
+The kernel supplies the inhabitant itself. A citation names the resource it relies on, so the kernel
+goes to that resource and asks whether the layer carries a trace establishing the fact. If it does
+not, the surrounding term simply fails to type-check. You do not assert that the evidence exists; you
+fail to compile until it does.
 
 ### The universe discipline, visible at a use site
 
@@ -588,7 +591,7 @@ The vocabulary the four ideas bring with them. Each is introduced in the body, c
 | **institution** | a participating logic, in Goguen & Burstall's sense (§3). **Not** an organisation. |
 | **comorphism** | a declared translation between two institutions. |
 | **AutoOnLoad** | the hook by which a commit dispatches to an institution — how a proof gets checked when it lands. |
-| **witness index** | the per-layer index the kernel consults to synthesize a `witness:Is*As`. Keyed `(category, iri, hash(P))`. |
+| **witness admission** | the check that decides whether a layer supports a `witness:Is*As`. A **decision procedure over that layer's Trace resources, not a stored index** — the key names the resource, so the lookup goes straight to it. Keyed `(category, iri, hash(P))`. |
 | **certificate** | the older name for a `Grounds` term. Renamed because *certificate* implies factivity; you may still meet it in `docs/design/`. |
 
 ## B. Notation

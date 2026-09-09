@@ -14,21 +14,29 @@
 
 //! D49 — `ChainWitness` machinery.
 //!
-//! Soundness boundary for the D39 Reasoning institution: the four
-//! `ChainWitness.IsXxAs : core:iri → Prop → Prop` predicate families are
-//! consumed by the `justification:Grounds` indexed inductive's grounding constructors
-//! to project the chain's existing class-membership + Trace-emission facts
-//! into the type system. Witnesses are kernel-internal — ESL has no
-//! constructor for them; the kernel synthesises inhabitants at
-//! `justification:Grounds.declared` / `.observed` / `.derived` / `.verified`
-//! type-check time by looking up a per-`Layer` witness index that the
-//! Layer builds from its Trace resources.
+//! The soundness boundary of the justification layer. Three
+//! `ChainWitness.IsXxAs : core:iri → Prop → Prop` predicate families —
+//! `IsDeclaredAs`, `IsObservedAs`, `IsVerifiedAs` — are consumed by the grounding
+//! constructors of the `justification:Grounds` indexed inductive, projecting the chain's
+//! class-membership and Trace-emission facts into the type system.
 //!
-//! This module hosts the keying / hashing / category primitives. The
-//! per-Layer index lives in [`crate::layer`] (see `witness_admission.rs`); the
-//! type-checker synthesis hook lives in [`crate::nbe::check`].
+//! Witnesses are kernel-internal. ESL declares no constructor for them, so an author cannot
+//! write one down; the kernel synthesises the inhabitant while type-checking
+//! `justification:Grounds.declared` / `.observed` / `.verified`, and a citation with no
+//! corresponding trace fails to check rather than committing an unsupported claim.
 //!
-//! Specification: `docs/design/d49-chainwitness-machinery.md` §3-§6.
+//! **The lookup is a decision procedure over the layer's Trace resources, not an index.** A
+//! [`WitnessKey`] carries the IRI it grounds, so admission goes straight to that resource —
+//! see `witness_admission.rs`, which records why the materialised `BTreeMap` this once used
+//! was removed (D66 slice 0).
+//!
+//! This module hosts the keying / hashing / category primitives. Admission lives in
+//! [`crate::layer`] (`witness_admission.rs`); the type-checker synthesis hook lives in
+//! [`crate::nbe::check`].
+//!
+//! Specification: `docs/design/d49-chainwitness-machinery.md` §3-§6. The D39 reasoning
+//! institution this was originally the boundary for is gone (D81) — the check it performed
+//! moved into commit.
 
 use crate::nbe::term::Exp;
 use crate::ontology::{eigon_cbor, Iri, Value};
