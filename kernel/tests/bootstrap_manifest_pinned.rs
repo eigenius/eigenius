@@ -74,6 +74,32 @@
 //! moved NOTHING, because those edits were all `//` comments — the compiler strips them, while a
 //! `description = "…"` is a resource property and hashes.
 //!
+//! IT FIRED ON THE INDEX-LANGUAGE RESIDUE (`2026-09-09`), on ONE layer, `core`. The rename below
+//! left three sentences standing that still asserted an index: two `witness:Is*As` descriptions
+//! ending "recomputed every time and persisted nowhere, so the index is a cache" and one reading
+//! "the index over it is a cache". Each sentence's first half is true and its second half names a
+//! structure that does not exist, which is why a residue grep on "witness index" did not see them.
+//!
+//! IT FIRED ON THE `implicit(T, P)` CHANGE (`2026-09-09`), on ONE layer, `justification`.
+//! `justification:Grounds.instantiate` declares `implicit(T, P)`, so the constructor's binder list
+//! changed and the declaration hashes differently. The ten call sites that lost two arguments each
+//! are chain content and move nothing here. The D89 entry in the work stack had listed this as
+//! deliberately deferred, because it needed the unifier's scope check to stop identifying generated
+//! variables by name; that fix landed in the same commit.
+//!
+//! IT FIRED ON THE WITNESS-ADMISSION RENAME (`2026-09-09`), on TWO layers, `core` and
+//! `justification`. Description text only, and false text rather than merely imprecise: three
+//! `witness:Is*As` descriptions in `core` said the kernel synthesizes a witness "when the layer's
+//! witness index holds a matching key", and `justification:Grounds` said its grounding constructors
+//! consume a witness the kernel synthesizes "from the layer's witness index". D66 slice 0 removed
+//! that map; the lookup is a decision procedure over Trace resources. A class description is what a
+//! reader consults first, so one naming a structure that does not exist is the same defect as the
+//! `lexicon:grade` entry above.
+//!
+//! NONE OF THE THREE ABOVE WAS COVERED BY THE D89 RESEED (`2026-09-08`), which ran before all of
+//! them. That reseed's two snapshots and the docker volume it filled are stale on `core` and
+//! `justification` until the next one runs.
+//!
 //! IT FIRED ON THE `justification.esl` REWRITE (`2026-09-07`), on ONE layer, `justification`.
 //! The file's comments and `description` properties were rewritten to state the current design
 //! rather than the sequence of edits that produced it, and to frame it on
@@ -150,7 +176,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "core:64a436f5c60c99664d807514bfce2467d757c949936357004441ec58919c66b3
+const EXPECTED: &str = "core:38aa65a9c6cbacc8a8434c0e30d8048e28a7d1f5d09743fa4006af44f381bf7e
 program:429718a323b6bfcc3ff858277f73b2c15de724f9d1c1c2c2c220748295b3c726
 program-traces:89a26cb0570d90ac8e0943687cc0f175e1cd1ea78a025196a247b636d1440f7a
 prov:694b3195028f88f8043209f81f70824fb12bdee45f8e57db381a041c96687c5d
