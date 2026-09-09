@@ -12,12 +12,21 @@ conformance record is the implementation companion in `../publications/`. This i
 tour.
 
 **Who this is for.** Someone who needs to understand *why* the system is shaped this way — a new
-engineer, a reviewer, or someone building teaching material from it. It assumes comfort with types
-and functions and a rough idea of what a proof assistant does. It does **not** assume you know this
-codebase, Martin-Löf type theory, justification logic, institution theory, or categorial grammar;
-each is introduced. Appendices A–E at the end carry the glossary, notation, build status, and the
-provenance of every number quoted — read those first if you are writing from this rather than
-working in the tree.
+engineer, a reviewer, or someone building teaching material from it. It assumes you are comfortable
+with types and functions, and have a rough idea of what a proof assistant does. It does **not**
+assume you know this codebase, Martin-Löf type theory, justification logic, institution theory, or
+categorial grammar. Each is introduced from the beginning.
+
+**If a word is unfamiliar, it is in [Appendix A](#a-glossary).** That glossary has two halves: the
+theory vocabulary the four ideas bring with them (*factive*, *inhabit*, *universe*, *warrant*), and
+the system vocabulary particular to Eigenius (*resource*, *layer*, *chain*, *commit*). Symbols such
+as `t : P` and `S\NP` are in [Appendix B](#b-notation). Nothing later in the document depends on
+having read them first — but they are there the moment a term bites.
+
+**Two appendices matter especially if you are teaching from this.** [Appendix C](#c-status--built-and-not)
+separates what is built from what is only designed, so material drawn from here does not present the
+second as the first. [Appendix E](#e-terms-that-mislead-and-how-to-say-it-instead) lists the terms
+that mislead — including two this document's own authors got wrong.
 
 **What Eigenius is, in one paragraph.** A typed knowledge graph. Facts live as *resources* — records
 with an identity (an IRI), a set of classes, and typed properties — organised into immutable
@@ -31,15 +40,24 @@ hold a *proposition* or a *proof*, and the database can check them.
 ## The problem, stated once
 
 A system that records how a fact is known has to hold two different objects: a **proof** that a
-proposition holds, and a **record of the grounds** on which it is asserted. They obey different
-rules. A proof is factive — if it is well-formed, the proposition holds — and it transports: hand it
-to a stranger with a checker and they reach your verdict. A record of grounds is neither. It reports
-what materials somebody had.
+proposition holds, and a **record of the grounds** on which it is asserted.
 
-Use one representation for both, and a system that evaluates *these are the grounds* can report
-*this is proved*. So the transition from grounds to proof must be **inexpressible**, not discouraged.
+They behave differently, in two ways that matter.
 
-That single constraint selects all four ideas below.
+A proof is **factive**: if it is well formed, the thing it proves is true. It also **transports** —
+hand it to a stranger who has a checker, and they reach the same verdict you did, without having to
+trust you.
+
+A record of grounds is neither. *"Two labs measured this, and an expert says it means X"* can be a
+perfectly accurate record while the claim itself is false. And it does not transport: a reader who
+distrusts the labs, or the expert, has to evaluate the evidence again from the start.
+
+Now suppose you store both in the same slot. A query that means *these are the grounds* can be read
+as *this is proved*, and nothing in the system objects. The fix is not a warning or a naming
+convention. **Going from grounds to proof has to be impossible to express at all** — not merely
+discouraged.
+
+That one constraint is what selects all four ideas below.
 
 ---
 
@@ -60,12 +78,22 @@ that more than an assertion is that a term is sitting in the chain and a checker
 
 ### What the kernel implements
 
-`eigentt` is MLTT in the ordinary sense: Π and Σ types, inductive families, a universe hierarchy, and
-normalization-by-evaluation deciding definitional equality. `Prop` is the universe of propositions,
-with proof irrelevance.
+`eigentt` is Martin-Löf type theory in the ordinary sense. The pieces, and what each one is for:
 
-**Dependency is not decoration here — it is the mechanism.** A dependent type may mention a value,
-and every load-bearing family in this system is indexed by one:
+| piece | what it is |
+|---|---|
+| **Π types** | dependent functions: the *result* type may mention the argument's value |
+| **Σ types** | dependent records: a later field's type may mention an earlier field's value |
+| **inductive families** | data types indexed by a value — one `Grounds(P)` for each proposition `P` |
+| **universe hierarchy** | `Prop`, `Set`, `Type 1`, … Types are values too, so they need types of their own; the levels stop that from looping back on itself |
+| **normalization by evaluation** | how the kernel decides whether two types are *the same* type |
+
+`Prop` is the universe of propositions, and it carries **proof irrelevance**: any two proofs of the
+same proposition count as interchangeable. A proof in `Prop` can be checked but not inspected.
+
+**Dependency is the mechanism here, not decoration.** A *dependent* type is one that may mention a
+value — `Grounds(P)` is not one type but a whole family, one for each proposition `P`. Every
+load-bearing family in this system is indexed that way:
 
 ```esl
 data justification:Grounds : Prop -> Type 2 { … }
@@ -82,28 +110,35 @@ The witness predicates are indexed the same way:
 witness:IsDeclaredAs(iri, P)     -- zero constructors, in Prop
 ```
 
-Zero constructors means **ESL cannot inhabit it**. The kernel synthesizes an inhabitant from the
-layer's witness index, or the surrounding term fails to check. An author cannot write down that a
-claim is declared; they can only fail to compile until the chain carries the trace that admits it.
+To *inhabit* a type is to have a value of it — an inhabitant of `P` is a proof of `P`. These
+predicates have **zero constructors**, meaning the surface language offers no way to build one. So an
+author cannot write down that a claim is declared. The kernel supplies the inhabitant itself, from
+the layer's witness index, and if the index has no matching entry the surrounding term simply fails
+to type-check. You do not assert that the evidence exists; you fail to compile until it does.
 
 ### The universe discipline, visible at a use site
 
-`Grounds` sits at `Type 2` rather than `Prop`, for two stacked reasons worth following because they
-show the type theory doing real work.
+Every type lives at a level. `Prop` holds propositions, `Set` holds ordinary types, `Type 1` and
+above hold the types of *those*. Where a family is placed is a real decision, and `Grounds` is placed
+at `Type 2` for two separate reasons.
 
-It inhabits a `Type` rather than `Prop` so a grounds term is **stored and re-checkable** — proof
-irrelevance would make it uninspectable, and the whole warrant algebra reads the term.
+**Why not `Prop`.** Proof irrelevance applies inside `Prop`: two proofs of the same proposition are
+interchangeable, so nothing can look at one. But the entire warrant algebra works by *reading* a
+grounds term — walking it to find the leaves. Putting `Grounds` in a `Type` keeps it inspectable.
 
-It is `Type 2` rather than `Type 0` because `instantiate` binds `T : Type 1`. A constructor
-argument's sort may not exceed the inductive's own, or a large type is smuggled into a small one and
-Girard's paradox follows. The constraint is enforced by nanoda's `check_ctor` universe check. The
-cost at use sites is nothing: the *type* sits a universe higher, the *values* are unchanged.
+**Why level 2 and not 0.** The `instantiate` constructor takes a type argument `T : Type 1`. A rule
+of the theory says a constructor's argument may not sit at a higher level than the family itself —
+without it you could hide a large type inside a small one, and Girard's paradox lets you prove
+anything. `nanoda`'s `check_ctor` enforces it. Nothing is paid at a use site: the *type* moves up a
+level, the *values* written in ESL are unchanged.
 
 ### Σ-types are why a class is a record
 
-`resolve_class_type` on a class returns the **Σ-chain of its required and recommended properties**. A
-class is not a tag; it is a dependent record type. Hold that — it is what lets a common noun in
-English be a type in §4.
+Ask the kernel for a class's type and you get back a **Σ-chain built from its required and
+recommended properties**. So a class is not a label attached to a resource; it is a record type, and
+"this resource is a `SampleSet`" means "it has these fields, of these types".
+
+Remember this one — it is what lets an English common noun be a type in §4.
 
 ---
 
@@ -172,16 +207,24 @@ keeping them apart is the point.
 
 ### Computed and Sampled are shapes, not grounds
 
-A tempting fourth and fifth category dissolve on inspection. **Computed** is
-`app(declared(f : I → O), observed(input))` — the plan declared to denote a function, applied to the
-observed input. **Sampled** is a bare `observed` leaf. Neither is stored as a state name, and neither
-reaches `Verified`, because in `Computed` the typing `f : I → O` is *itself* declared.
+Two more categories look natural and turn out not to be grounds at all. They are **shapes** a
+justification term can have, which is a different thing.
 
-The asymmetry has a reason. If a plan denotes a function, its output is determined by its input and
-the execution record is provenance rather than evidence. For a stochastic process the output is not
-determined, so the execution record **is** the evidence — an observation, not an application.
-Determinism for an external procedure is an empirical fact about the environment, not a property of
-the code, which is why somebody has to assert it rather than the system infer it.
+**Computed** is the shape `app(declared(f : I → O), observed(input))`: somebody declared that the
+plan `f` is a function from inputs to outputs, and that function was applied to an observed input.
+**Sampled** is the simpler shape of a lone `observed` leaf.
+
+Neither is stored anywhere as a label, and neither can reach `Verified` — because in `Computed` the
+claim that `f` *is* a function is itself only declared by somebody.
+
+There is a reason the two shapes differ. If a plan really is a function, the input determines the
+output, so the record that it ran tells you nothing you did not already have — it is provenance, not
+evidence. If the process is random, the input does *not* determine the output, so the record of the
+run is the only evidence there is — an observation, not an application.
+
+Which of the two you have is not something the system can work out. Whether an external procedure is
+deterministic is a fact about the world it runs in — the machine, the library versions, the seed —
+not a property readable from the code. So somebody has to assert it, and be named as having done so.
 
 ### The regress terminates, and cannot close into a circle
 
@@ -206,20 +249,34 @@ Statistics has a satisfaction relation and no proof language. Lean has proof ter
 sample set. A reaction-network solver has neither. Any single logic rich enough for all of them is
 either so weak it says nothing or so strong nothing checks it.
 
-Goguen and Burstall's **institutions** formalize *a logic* as a structure — signatures, sentences,
-models, and a satisfaction relation coherent under signature change — precisely so that many logics
-can be treated uniformly and related to one another. That is the shape this system needs: not one
-logic, but a way to hold several and stitch them.
+Goguen and Burstall's **institutions** answer this by making *a logic* into a structure with four
+parts:
+
+| part | what it is |
+|---|---|
+| signatures | the vocabulary a theory is written in |
+| sentences | what you can say in that vocabulary |
+| models | the situations a sentence could describe |
+| satisfaction | which sentences hold in which models — *is this true here?* |
+
+plus one law tying them together: translate the vocabulary, and truth has to travel with it
+consistently. Package a logic that way and many logics become comparable, and translatable into one
+another. That is the shape this system needs — not one logic, but a way to hold several and stitch
+them together.
 
 ### The reframing that made it operational
 
-The theoretical question — *is this participating logic really an institution?* — turned out to be
-the wrong gate. Meseguer's *general logics* shows institutions and proof systems are not exclusive:
-an entailment system without models is a legitimate instantiation, and the kernel is that
-**degenerate case** — proofs are the entire content — rather than something outside the framework.
+The obvious gate — *is this participating logic really an institution?* — turned out to be the wrong
+one. It invites an argument about definitions that no amount of engineering settles.
 
-So the operative question became: **can the host hold and re-check a witness for what this logic
-establishes?** That is decidable by inspecting the system, and it determines what a logic can reach:
+Meseguer's *general logics* dissolves it. Institutions and proof systems are not rival categories: a
+system with rules of proof and no models is a legitimate member of the family, not an outsider. The
+kernel is exactly that limiting case — proofs are the whole of its content, and it has no separate
+notion of a model at all.
+
+So the question was replaced with one the system can answer about itself: **can the host hold a
+witness for what this logic establishes, and re-check it later?** That is settled by looking at the
+code, and it fixes how strong a claim each logic can support:
 
 | institution | supplies a proof term? | ceiling |
 |---|---|---|
@@ -239,11 +296,14 @@ Institutions are related by **comorphisms** — structure-preserving maps that l
 read in another. Here a comorphism is a declared triple `(ExportFormat, transformation, ImportFormat)`
 dispatched in four steps at commit.
 
-The honest example is Catalyst → DiffEq, from the five Julia institutions cooperating in
-`notebooks/examples/kinase-institutions.json`. Catalyst speaks `ReactionNetwork`, DiffEq speaks
-`OdeProblem`, and compiling one into the other is real work — so you would expect the comorphism's
-middle to do it. It doesn't: the shipped transformation is an identity `program:Lambda`, and the
-compilation lives in the ExportFormat's own procedure. Worth knowing before authoring one.
+A worked example, from the five Julia institutions cooperating in
+`notebooks/examples/kinase-institutions.json`: Catalyst speaks `ReactionNetwork`, DiffEq speaks
+`OdeProblem`, and turning one into the other is real computation.
+
+You would expect that computation to live in the middle of the comorphism. It does not. The shipped
+transformation is an identity function, and the actual compiling happens earlier, inside the
+ExportFormat's own procedure. Anyone authoring a comorphism should know that before starting: the
+middle slot is often a pass-through.
 
 For a **verification** institution the comorphism carries the risk. The danger in admitting a Lean
 proof is not that Lean's kernel accepts falsehoods; it is that the translated proposition `P'` fails
@@ -270,11 +330,19 @@ LLM in the loop** and the kernel as the arbiter.
 Bekki's Dependent Type Semantics (`lightblue`) is the working instance of the family and the closest
 prior art: a CCG parser producing Σ-types with a native type check.
 
-**The second row is the key idea.** In classical Montague semantics a common noun is a *predicate*,
-`cell line : e → t`. In MTT-semantics it is a **type**: `CellLine : Set`. That is §1's
-propositions-as-types move applied to grammar, and it is why the grammar composes with the rest of
-the system instead of sitting beside it. A noun denotes a type; a name denotes an inhabitant of it; a
-verb denotes a typed constant.
+**The second row is the key idea, and it is worth slowing down on.**
+
+The older tradition, Montague semantics, treats a common noun as a *predicate*: `cell line` becomes a
+function `e → t`, taking any entity at all and answering true or false. Everything is an entity
+first; being a cell line is a fact you then assert about it.
+
+MTT-semantics makes the noun a **type** instead: `CellLine : Set`. Now "HeLa is a cell line" is not
+an assertion to check but the *typing* `hela : CellLine` — the same propositions-as-types move from
+§1, applied to grammar. Nonsense stops being false and starts being ill-typed.
+
+That is why this grammar composes with the rest of the system rather than sitting next to it. A noun
+denotes a type, a name denotes an inhabitant of that type, a verb denotes a typed constant — all
+three are things the kernel already understands.
 
 ### The realization
 
@@ -284,7 +352,8 @@ The categorial type is a kernel inductive, carried as a `type_expr` like any oth
 data lexicon:Cat : Type 1 { cat_s ; cat_n ; cat_np(Set) ; fwd(Cat,Cat) ; bwd(Cat,Cat) }
 ```
 
-with a homomorphism `⟦·⟧ : Cat → EigenTT type`:
+A grammatical category is written `⟦·⟧` when read as a type. The translation is structure
+preserving — a category built from parts maps to a type built from the matching parts:
 
 | category | `⟦·⟧` | role |
 |---|---|---|
@@ -325,9 +394,13 @@ resource lexicon:e_depends_on : lexicon:LexicalEntry {
 
 ### Felicity is the type checker, not a heuristic
 
-An entry is admitted **iff** `⟦cat⟧ ≡ sem_type` and its `sem` inhabits `⟦cat⟧`. That is the kernel's
-own conversion check and its own type checker — the same ones that check a certificate. A lexicon
-entry whose category and meaning disagree is not a low-scoring parse; it does not exist.
+A dictionary entry is admitted only when two things hold: the type its category translates to is the
+same type its meaning claims (`⟦cat⟧ ≡ sem_type`), and its meaning really is a value of that type.
+Both checks are the kernel's own — the same equality test and the same type checker that check a
+certificate elsewhere in the system.
+
+The consequence is worth stating plainly: an entry whose category and meaning disagree is not a bad
+parse to be ranked low. It cannot be committed at all.
 
 Subtyping comes free and means something linguistically: CN-as-types subsumption honors
 `core:subclass_of`, so a predicate typed at a supertype accepts subclass-typed arguments. *Gene* is a
@@ -474,7 +547,30 @@ you are writing teaching material from it, start here.*
 
 ## A. Glossary
 
-Terms this document uses without stopping to define them.
+### Theory terms
+
+The vocabulary the four ideas bring with them. Each is introduced in the body, collected here.
+
+| term | meaning |
+|---|---|
+| **factive** | if it is well formed, what it asserts is true. A proof is factive; a record of grounds is not. |
+| **transports** | a stranger with a checker reaches the same verdict, without trusting the sender. |
+| **term** | a value of the type theory. Under propositions-as-types, a proof *is* a term. |
+| **inhabit** | to have a value of a type. An inhabitant of `P` is a proof of `P`. |
+| **dependent type** | a type that may mention a *value* — `Grounds(P)` is a different type for each `P`. |
+| **indexed family** | a collection of types generated by such a value, one per index. |
+| **universe** | a level in the tower `Prop`, `Set`, `Type 1`, … Types need types; levels stop the loop. |
+| **proof irrelevance** | inside `Prop`, any two proofs of one proposition are interchangeable, so neither can be inspected. |
+| **constructor** | one of the listed ways to build a value of an inductive type. Zero constructors means no value can be written. |
+| **judgement** | a checked triple `holds(L, t, P)`: a checker for logic `L` verified term `t` against proposition `P`. |
+| **grounds** | the record of what a claim rests on. Non-factive by construction. |
+| **warrant** | the answer to *what does this rest on?*, computed from a grounds term, never stored. |
+| **witness** | the kernel-supplied evidence that the chain carries a trace for a cited claim. |
+| **satisfaction relation** | which sentences hold in which models — a logic's *is this true here?* |
+| **Curry–Howard** | proofs correspond to programs, propositions to types; so a parse derivation *is* a term. |
+| **regress** | the chain of "and what justifies that?" A declaration or an observation ends it. |
+
+### System terms
 
 | term | meaning |
 |---|---|
