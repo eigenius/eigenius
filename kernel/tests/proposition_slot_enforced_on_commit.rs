@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `justification:proposition`'s propositionhood fires **through a real
+//! `eigentt:proposition`'s propositionhood fires **through a real
 //! commit**.
 //!
 //! Issue #175. `enc:EncodedClaim` is the artifact of record for the encoding
 //! pipeline: an LLM proposes a formalization, the kernel accepts or rejects
-//! it, and from there only `justification:proposition` and the
+//! it, and from there only `eigentt:proposition` and the
 //! derivations built on it carry weight. Rule 21 called `check_infer` and
 //! discarded the type it returned, so the slot only had to be *well-typed* —
 //! an integer literal decoded, inferred `core:integer`, and committed as the

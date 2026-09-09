@@ -31,7 +31,7 @@ resource screen:rule_class : justification:Declaration {
     prov:had_primary_source = screen:warrant_illustrative;
     prov:rationale   = "Declares a CLASS as though it were a proposition.";
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         screen:CellLine
     );
 }
@@ -67,7 +67,7 @@ resource screen:rule_prop : justification:Declaration {
     prov:had_primary_source = screen:warrant_illustrative;
     prov:rationale   = "Declares a genuine Prop-sorted proposition.";
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         screen:IsInhibitory
     );
 }

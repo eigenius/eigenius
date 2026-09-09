@@ -98,7 +98,7 @@ resource kx:cross_factorial_trace : prov:ObservationTrace {
 resource kx:claim_cell_means_differ : stats:StatisticalAnalysisPlan {
     stats:sample_set = kx:cross_factorial_2026_04_02;
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         kx:CellMeansDifferAcrossFactors("urn:eigenius:demo:kx:design_2026_04_02")
     );
 

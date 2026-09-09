@@ -42,10 +42,6 @@ fn bench_core_and_harness_round_trip() {
     for r in eigon_json::parse_document(reflection_json).unwrap() {
         reflection_builder.add_resource(r).unwrap();
     }
-    let eigentt_json = include_str!("../../ontologies/eigentt/eigentt-type-fragment.json");
-    for r in eigon_json::parse_document(eigentt_json).unwrap() {
-        reflection_builder.add_resource(r).unwrap();
-    }
     let institution_json = include_str!("../../ontologies/institution/institution-ontology.json");
     for r in eigon_json::parse_document(institution_json).unwrap() {
         reflection_builder.add_resource(r).unwrap();

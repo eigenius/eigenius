@@ -16,7 +16,7 @@
 //!
 //! `notebook_demo_fixture_lands_holds` cannot cover this: its claim
 //! (`urn:eigenius:demo:lean:patient_1`) carries only `is_a` and no
-//! `justification:proposition`, so `claim_proposition` returns `None` and the check is
+//! `eigentt:proposition`, so `claim_proposition` returns `None` and the check is
 //! skipped. A green run there says nothing about this path — which is the failure mode this
 //! whole line of work keeps finding, so it is stated rather than left to be rediscovered.
 //!

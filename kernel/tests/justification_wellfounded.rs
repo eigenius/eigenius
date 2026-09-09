@@ -135,7 +135,7 @@ fn a_shared_class_between_proposition_and_premise_is_not_a_cycle() {
 // appears in BOTH the premise's proposition and the conclusion's.
 resource probe:premise : justification:Declaration {{
     prov:was_attributed_to = agent:eigenius_core_team;
-    justification:proposition = type_expr( probe:P );
+    eigentt:proposition = type_expr( probe:P );
 }}
 
 resource probe:concl_shared : justification:Conclusion {{
@@ -187,7 +187,7 @@ fn a_cycle_in_one_sum_branch_does_not_reject_when_the_other_carries_it() {
         r#"{HEADER}
 resource probe:solid : justification:Declaration {{
     prov:was_attributed_to = agent:eigenius_core_team;
-    justification:proposition = type_expr( probe:P );
+    eigentt:proposition = type_expr( probe:P );
 }}
 
 // Grounded on `Sum(Verified(concl_cyclic), Declared(solid))`: the left branch cycles

@@ -121,7 +121,7 @@ fn bootstrap_head() -> std::sync::Arc<eigenius_kernel::layer::Layer> {
 /// The theorem this test's proof discharges.
 ///
 /// Not `patient_weight_nonneg`: D74's statement check manufactures the goal from the claim's
-/// `justification:proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
+/// `eigentt:proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
 /// (a structure-field access, and Lean's `≤` at an instance nothing maps to — D86).
 const TARGET_THEOREM: &str = "capstone_healthy_refl";
 

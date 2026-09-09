@@ -183,7 +183,6 @@ fn build_phase3_ctx() -> ExecutionContext {
         let mut b = LayerBuilder::new("reflection", Some(core));
         for src in [
             include_str!("../../ontologies/reflection/reflection-ontology.json"),
-            include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
             include_str!("../../ontologies/institution/institution-ontology.json"),
             include_str!("../../ontologies/ingest/ingest-ontology.json"),
         ] {

@@ -448,8 +448,8 @@ fn judgement_proposition_hash(layer: &Layer, trace: &Resource, stored: &Value) -
 ///
 /// Three slots can hold it, tried in order:
 ///
-/// 1. `justification:proposition` — the general slot.
-/// 2. `justification:proposition` — where a `justification:Conclusion` keeps the same thing under a different
+/// 1. `eigentt:proposition` — the general slot.
+/// 2. `eigentt:proposition` — where a `justification:Conclusion` keeps the same thing under a different
 ///    name. **Required for correctness, not convenience** (eigenius#200): the self-attesting path
 ///    [`emit_from_conclusion`] reads slot 2, so without this arm a `VerificationTrace`
 ///    targeting a sentence would fall through to slot 3 and key the witness against
@@ -637,19 +637,19 @@ pub fn synthesize_chain_witness(
         // P7 names this "the system's most-used error message", and what makes it usable is that
         // it says what to COMMIT, not merely that a lookup missed. The remedy differs by family
         // and used to be stated as one: every miss recommended a matching
-        // `justification:proposition`, which is the fix for two of the three and no help
+        // `eigentt:proposition`, which is the fix for two of the three and no help
         // at all for the third — nobody reaches `Verified` by editing a property.
         let (ctor, remedy) = match category {
             WitnessCategory::Declared => (
                 "declared",
                 format!(
-                    "commit a prov:DeclarationTrace whose prov:resource is {iri}, and give {iri}                      a justification:proposition matching the proposition above"
+                    "commit a prov:DeclarationTrace whose prov:resource is {iri}, and give {iri}                      a eigentt:proposition matching the proposition above"
                 ),
             ),
             WitnessCategory::Observed => (
                 "observed",
                 format!(
-                    "commit a prov:ObservationTrace whose prov:resource is {iri}, and give {iri} a                      justification:proposition matching the proposition above"
+                    "commit a prov:ObservationTrace whose prov:resource is {iri}, and give {iri} a                      eigentt:proposition matching the proposition above"
                 ),
             ),
             // No property an author can write reaches this one, which is the point of the grade.
@@ -1392,7 +1392,7 @@ mod tests {
     /// The remedy a miss names is the one that works for THAT family.
     ///
     /// P7 calls this the system's most-used error message, and it stated one remedy for all
-    /// three: commit a matching `justification:proposition`. That is the fix for two of
+    /// three: commit a matching `eigentt:proposition`. That is the fix for two of
     /// them and no help at all for `Verified`, where no property an author can write reaches the
     /// grade — which is the point of the grade. A diagnostic that sends someone to edit a
     /// property they can edit, for a result only a checker can produce, costs more than saying

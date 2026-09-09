@@ -150,7 +150,7 @@ fn eigon_r_marshalling_round_trip() {
     // consumes: App(App(ConstRef(GroupsDiffer), LitString(x)), LitString(g)).
     let prop = outcome
         .output
-        .get(&Iri::parse("urn:eigenius:justification:proposition").unwrap());
+        .get(&Iri::parse("urn:eigenius:eigentt:proposition").unwrap());
     let term = match prop {
         Some(Value::Json(j)) => j.clone(),
         other => panic!("canonical_proposition not Json: {other:?}"),

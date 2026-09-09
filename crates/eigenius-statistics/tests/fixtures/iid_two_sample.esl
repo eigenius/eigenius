@@ -78,7 +78,7 @@ resource assay:kinase_run_trace : prov:ObservationTrace {
 resource assay:claim_drug_changes_activity : stats:StatisticalAnalysisPlan {
     stats:sample_set = assay:kinase_run_2026_03_15;
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         assay:DifferentMeanActivity("urn:eigenius:demo:assay:drug_X")
     );
 

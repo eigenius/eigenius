@@ -111,7 +111,7 @@ resource tx:incubator_split_trace : prov:ObservationTrace {
 resource tx:claim_effect_exists : stats:StatisticalAnalysisPlan {
     stats:sample_set = tx:incubator_split_2026_05_03;
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         tx:TemperatureOrDrugEffectExists("urn:eigenius:demo:tx:experiment_2026_05_03")
     );
 

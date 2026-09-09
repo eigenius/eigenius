@@ -75,7 +75,7 @@
       "urn:eigenius:justification:Declaration"
     ],
     "urn:eigenius:prov:was_attributed_to": "urn:eigenius:prov:agent:eigenius_core_team",
-    "urn:eigenius:justification:proposition": {
+    "urn:eigenius:eigentt:proposition": {
       "urn:eigenius:core:is_a": [
         "urn:eigenius:eigentt:Term-App"
       ],
@@ -102,7 +102,7 @@
       "urn:eigenius:justification:Declaration"
     ],
     "urn:eigenius:prov:was_attributed_to": "urn:eigenius:prov:agent:eigenius_core_team",
-    "urn:eigenius:justification:proposition": {
+    "urn:eigenius:eigentt:proposition": {
       "urn:eigenius:core:is_a": [
         "urn:eigenius:eigentt:Term-App"
       ],

@@ -49,7 +49,7 @@ resource wrn:mmr_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_mmr_causal_dissection;
     prov:rationale   = "Restoring MMR (Ch3+5) partially rescues WRN dependence and suppresses DSBs; MLH1-KO re-sensitizes (isolating MMR as the responsible factor, not the chromosome transfer). Because the rescue is only partial/modest, dMMR contributes to but does not fully explain WRN dependence — accumulating MSI lesions (mutator load; cf. D-REFINE) cooperate with dMMR to create WRN-requiring genomic structures (indel/D-loops; yeast Sgs1 precedent).";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         onco:RestorationPartiallyRescues("dMMR", "WRN")
         ->
         onco:ContributesToDependence("dMMR", "WRN")
@@ -187,7 +187,7 @@ resource wrn:synthesis_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_synthetic_lethality_thesis;
     prov:rationale   = "The paper's thesis composes its findings: WRN depletion selectively impairs MSI viability (C-VAL), validated in vivo and in a patient-derived model (C-VIVO); the helicase activity is the required function (D-HELICASE); the lethality is driven by MSI-selective DSB-induced DNA-damage response (C-MECH); dMMR contributes to the dependence (C-MMR); and the MSI-selective dependence is intrinsic to MSI, not a confound of paralogue co-loss (the ED Fig 9a specificity control). Together these establish WRN — specifically its helicase activity — as a synthetic-lethal therapeutic target in MSI cancers.";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         onco:SelectiveViabilityDependence("WRN", "MSI") ->
         onco:InVivoDependence("WRN", "MSI") ->
         onco:RequiresActivity("WRN", "helicase") ->

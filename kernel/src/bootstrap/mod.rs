@@ -259,15 +259,12 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         source: include_str!("../../../ontologies/core/core-ontology.json"),
         format: OntologyFormat::Json,
     },
-    // eigentt-type-fragment (D47) — chain-mirrored EigenTT type language for
-    // axiom and theorem statements (D46 §10 axioms, future propositional
-    // institutions). Depends only on core (`string`, `integer`, `InductiveType`,
-    // `InductiveCtor`, `InductiveArgType`).
-    BootstrapOntology {
-        name: "eigentt-type-fragment",
-        source: include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
-        format: OntologyFormat::Json,
-    },
+    // D47's chain-mirrored EigenTT type language was a layer of its own here until it was merged
+    // into core. The namespaces stay separate — `core:` and `eigentt:` name different things — but
+    // the LAYERS could not: core's `param_kind`, `type_name` and `ctor_type` carry `eigentt:Term`
+    // values, so `Term`, `expected_type` and `is_a_type` had already been pulled down into core to
+    // resolve the cycle, and a boundary nothing can load one side of is not a boundary. A namespace
+    // is a naming convention, not a layer assertion (eigenius#188 / N4).
     BootstrapOntology {
         name: "program",
         source: include_str!("../../../ontologies/program/program-ontology.json"),
@@ -1006,10 +1003,9 @@ class p:Cat { description = "a dog"; }"#;
         assert!(!reflection.is_root());
         let program = reflection.parent().unwrap();
         assert!(!program.is_root());
-        let eigentt_type = program.parent().unwrap();
-        assert!(!eigentt_type.is_root());
-        // Core layer (parent of eigentt-type-fragment) should be root.
-        assert!(eigentt_type.parent().unwrap().is_root());
+        // `program`'s parent is core, and core is the root. The EigenTT type fragment sat between
+        // them until it was merged into core — the namespaces stayed separate, the layers did not.
+        assert!(program.parent().unwrap().is_root());
     }
 
     #[test]

@@ -6117,7 +6117,7 @@ mod tests {
         )
         .expect("both forms compile");
 
-        let prop_iri = iri("urn:eigenius:justification:proposition");
+        let prop_iri = iri("urn:eigenius:eigentt:proposition");
         let with_alias = resources
             .iter()
             .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:with_alias"))
@@ -6173,7 +6173,7 @@ mod tests {
         )
         .expect("scope-shadowing form compiles");
 
-        let prop_iri = iri("urn:eigenius:justification:proposition");
+        let prop_iri = iri("urn:eigenius:eigentt:proposition");
         let scope_test = resources
             .iter()
             .find(|r| r.id().map(|i| i.as_str()) == Some("urn:eigenius:example:scope_test"))
@@ -6872,13 +6872,8 @@ mod tests {
         for r in reflection_resources {
             reflection_builder.add_resource(r).unwrap();
         }
-        // eigentt:Term is referenced from justification:proposition /
+        // eigentt:Term is referenced from eigentt:proposition /
         // justification:certificate via class_types; load the fragment too.
-        let eigentt_json = include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json");
-        let eigentt_resources = eigon_json::parse_document(eigentt_json).unwrap();
-        for r in eigentt_resources {
-            reflection_builder.add_resource(r).unwrap();
-        }
         let reflection =
             Arc::new(reflection_builder.build(crate::layer::LayerStorage::in_memory()));
 

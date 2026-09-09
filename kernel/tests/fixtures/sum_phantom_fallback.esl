@@ -29,7 +29,7 @@ resource screen:review_a : justification:Declaration {
     prov:was_attributed_to  = agent:eigenius_core_team;
     prov:had_primary_source = screen:warrant_two_source_agreement;
     prov:rationale    = "First independent review designates EIG_0291 a strong inhibitor.";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
     );
 }

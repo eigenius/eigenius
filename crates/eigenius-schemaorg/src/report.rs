@@ -42,7 +42,7 @@ const SOURCE: &str = "urn:eigenius:prov:was_generated_by";
 const OUTPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:output_content_hash";
 const INPUT_CONTENT_HASH: &str = "urn:eigenius:obj:d57:input_content_hash";
 const COVERAGE: &str = "urn:eigenius:obj:d57:coverage";
-const PROPOSITION: &str = "urn:eigenius:justification:proposition";
+const PROPOSITION: &str = "urn:eigenius:eigentt:proposition";
 /// The `obj:GeneratorConforms` predicate the chain's m3 conformance leg uses.
 const GENERATOR_CONFORMS: &str = "urn:eigenius:obj:d57:GeneratorConforms";
 /// The subject the schema.org objective is about.

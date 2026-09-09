@@ -40,7 +40,7 @@
 //!
 //! ## What D87 §6 changed here, and why
 //!
-//! `patient_1` used to be a `Patient` INSTANCE carrying a `justification:proposition`, and
+//! `patient_1` used to be a `Patient` INSTANCE carrying a `eigentt:proposition`, and
 //! that proposition was `∀ (p : Patient), Healthy(p) → Healthy(p)` — closed, universally
 //! quantified, and never mentioning `patient_1`. So the witness the chain admitted paired a
 //! resource IRI with a proposition that said nothing about that resource: *any* IRI would have
@@ -81,7 +81,7 @@ use eigenius_runtime_substrate::mirror_generator::MirrorGenerator;
 /// The theorem the demo's proof discharges: `Healthy patient_1`.
 ///
 /// Not `patient_weight_nonneg`: D74's statement check manufactures the goal from the claim's
-/// `justification:proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
+/// `eigentt:proposition`, and `∀ p, 0.0 ≤ p.weight.val` is outside the §4 fragment
 /// (a structure-field access, and `Float`).
 ///
 /// Not `healthy_refl` either, since D87 §6. That one is `∀ p, Healthy p → Healthy p` — true of

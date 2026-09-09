@@ -20,7 +20,7 @@
 //!
 //! ## A parsed claim is a 2-resource cluster
 //!
-//! 1. the **`enc:EncodedClaim`** — `justification:proposition = P` plus
+//! 1. the **`enc:EncodedClaim`** — `eigentt:proposition = P` plus
 //!    `prov:was_attributed_to`, the agent taking responsibility for `P`;
 //! 2. its **`prov:DeclarationTrace`** — which mints `IsDeclaredAs(claim_iri, P)` into the
 //!    witness index at commit.
@@ -171,7 +171,7 @@ pub trait ClaimGrader {
 /// The **parsed-claim** grader (D73 §6 — the landing shape for parsed sentences): the 2-resource
 /// cluster
 ///
-/// 1. the **`enc:EncodedClaim`** — carries `justification:proposition = P` and
+/// 1. the **`enc:EncodedClaim`** — carries `eigentt:proposition = P` and
 ///    `prov:was_attributed_to`, the agent taking responsibility for `P`;
 /// 2. its **`prov:DeclarationTrace`** — `prov:resource → claim`, the same
 ///    `declared_by` and a timestamp — which mints `IsDeclaredAs(claim_iri, P)` into the witness

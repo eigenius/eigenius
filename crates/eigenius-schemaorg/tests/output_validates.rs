@@ -121,7 +121,6 @@ fn output_loads_and_validates() {
         Some(core),
         &[
             include_str!("../../../ontologies/reflection/reflection-ontology.json"),
-            include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
             include_str!("../../../ontologies/institution/institution-ontology.json"),
         ],
     );

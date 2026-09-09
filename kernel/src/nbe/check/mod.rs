@@ -737,7 +737,7 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
         //
         // The arm this replaces read `Val::Sort(_)` and so admitted
         // `SomeClass : Prop` — a class standing where a proposition is
-        // expected (`justification:Grounds(j, P)`, `justification:proposition`,
+        // expected (`justification:Grounds(j, P)`, `eigentt:proposition`,
         // anything Rule 21 checks at the commit gate) with no diagnostic
         // (eigenius#191). Same check-vs-infer disagreement eigenius#136
         // removed for `Sort`.
@@ -1702,7 +1702,7 @@ mod tests {
     }
 
     /// `data D : Set` standing where a proposition is expected. `justification:Grounds(j, P)`,
-    /// `justification:proposition` and everything else Rule 21 checks take a `Prop` in that
+    /// `eigentt:proposition` and everything else Rule 21 checks take a `Prop` in that
     /// slot, so this is the same stakes argument as eigenius#191 with a different constructor.
     #[test]
     fn a_set_level_inductive_does_not_inhabit_prop() {

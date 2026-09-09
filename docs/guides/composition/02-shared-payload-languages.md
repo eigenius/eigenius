@@ -329,7 +329,7 @@ data eigentt:Term : Type 0 {
 A chain-resident value of `eigentt:Term` IS a typed proposition (when it lives in `Prop` per [D46](../../design/d46-prop-universe-and-proof-irrelevance.md)) or a type expression. The author surface is [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) — the syntactic counterpart of `formula(...)` for the proposition language:
 
 ```esl
-justification:proposition = type_expr(
+eigentt:proposition = type_expr(
     screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
 );
 ```

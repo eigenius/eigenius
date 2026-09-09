@@ -58,10 +58,9 @@ fn chain_with_parse_vocabulary() -> Arc<Layer> {
     let core = Arc::new(core.build(LayerStorage::in_memory()));
 
     let mut refl = LayerBuilder::new("reflection", Some(core));
-    for src in [
-        include_str!("../../ontologies/reflection/reflection-ontology.json"),
-        include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
-    ] {
+    for src in [include_str!(
+        "../../ontologies/reflection/reflection-ontology.json"
+    )] {
         for r in eigon_json::parse_document(src).unwrap() {
             refl.add_resource(r).unwrap();
         }
@@ -974,7 +973,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
         namespace justification = "urn:eigenius:justification";
         resource p:claim : core:Resource {{
             prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
-            justification:proposition = type_expr(
+            eigentt:proposition = type_expr(
                 {verb_axiom}(
                     eigentt:fst(ontology:the(
                         (exists x0 : {activity} =>
@@ -1007,7 +1006,7 @@ fn definition_matches_committed_parse(verb_axiom: &str, activity: &str, def_name
 
         resource d:claim : core:Resource {{
             prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
-            justification:proposition = type_expr(
+            eigentt:proposition = type_expr(
                 onco:{def_name}({MSI}, umlscui:C0388246)
             );
         }}"#

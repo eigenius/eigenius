@@ -1225,7 +1225,7 @@ impl Validator {
         resource: &Resource,
         res_id: &Option<Iri>,
     ) -> Vec<ValidationError> {
-        let this_level = match resource.get(&iri(wk::UNIVERSE_LEVEL)) {
+        let this_level = match resource.get(&iri(wk::META_LEVEL)) {
             Some(Value::Integer(n)) => *n,
             _ => return vec![], // No universe_level → domain resource, skip
         };
@@ -1258,9 +1258,7 @@ impl Validator {
 
             for ref_iri in &ref_iris {
                 if let Some(referenced) = self.layer.resolve(ref_iri) {
-                    if let Some(Value::Integer(ref_level)) =
-                        referenced.get(&iri(wk::UNIVERSE_LEVEL))
-                    {
+                    if let Some(Value::Integer(ref_level)) = referenced.get(&iri(wk::META_LEVEL)) {
                         if *ref_level >= this_level {
                             errors.push(ValidationError {
                                 resource_id: res_id.clone(),
@@ -1736,7 +1734,7 @@ mod tests {
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:level0",
-                vec![(wk::UNIVERSE_LEVEL, Value::Integer(0))],
+                vec![(wk::META_LEVEL, Value::Integer(0))],
             ))
             .unwrap();
 
@@ -1745,7 +1743,7 @@ mod tests {
             .add_resource(make_resource(
                 "urn:eigenius:test:level1",
                 vec![
-                    (wk::UNIVERSE_LEVEL, Value::Integer(1)),
+                    (wk::META_LEVEL, Value::Integer(1)),
                     (
                         "urn:eigenius:test:ref_prop",
                         Value::String("urn:eigenius:test:level0".to_string()),
@@ -1777,7 +1775,7 @@ mod tests {
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:peer_a",
-                vec![(wk::UNIVERSE_LEVEL, Value::Integer(1))],
+                vec![(wk::META_LEVEL, Value::Integer(1))],
             ))
             .unwrap();
 
@@ -1785,7 +1783,7 @@ mod tests {
             .add_resource(make_resource(
                 "urn:eigenius:test:peer_b",
                 vec![
-                    (wk::UNIVERSE_LEVEL, Value::Integer(1)),
+                    (wk::META_LEVEL, Value::Integer(1)),
                     (
                         "urn:eigenius:test:ref_prop",
                         Value::String("urn:eigenius:test:peer_a".to_string()),
@@ -1826,7 +1824,7 @@ mod tests {
             .add_resource(make_resource(
                 "urn:eigenius:test:meta1",
                 vec![
-                    (wk::UNIVERSE_LEVEL, Value::Integer(1)),
+                    (wk::META_LEVEL, Value::Integer(1)),
                     (
                         "urn:eigenius:test:ref_prop",
                         Value::String("urn:eigenius:test:domain_thing".to_string()),
@@ -1857,7 +1855,7 @@ mod tests {
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:trace",
-                vec![(wk::UNIVERSE_LEVEL, Value::Integer(1))],
+                vec![(wk::META_LEVEL, Value::Integer(1))],
             ))
             .unwrap();
 
@@ -1865,7 +1863,7 @@ mod tests {
             .add_resource(make_resource(
                 "urn:eigenius:test:meta_trace",
                 vec![
-                    (wk::UNIVERSE_LEVEL, Value::Integer(2)),
+                    (wk::META_LEVEL, Value::Integer(2)),
                     (
                         "urn:eigenius:test:ref_prop",
                         Value::String("urn:eigenius:test:trace".to_string()),
@@ -1897,7 +1895,7 @@ mod tests {
         builder
             .add_resource(make_resource(
                 "urn:eigenius:test:too_high",
-                vec![(wk::UNIVERSE_LEVEL, Value::Integer(3))],
+                vec![(wk::META_LEVEL, Value::Integer(3))],
             ))
             .unwrap();
 

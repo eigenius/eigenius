@@ -93,7 +93,7 @@ resource screen:sample_for_eig0291_confirmatory : justification:Declaration {
     prov:had_primary_source = screen:warrant_lab_bookkeeping_plate_2026_03_11_confirmatory;
     prov:rationale   = "The confirmatory SampleSet at urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset was prepared from compound EIG_0291 — recorded by the assay technician at plate-load time. Pure relationship fact; no methodological reasoning.";
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         screen:sample_for(
             "urn:eigenius:demo:screen:m_eig0291_confirmatory_sampleset",
             "urn:eigenius:demo:screen:EIG_0291"
@@ -122,7 +122,7 @@ resource screen:bridge_lowic50 : justification:Declaration {
     prov:had_primary_source = screen:warrant_methodology_ic50_classification_convention;
     prov:rationale   = "Universal: for any sample set s drawn from compound c, if s's mean IC50 is statistically below 100 nM, classify c as HasLowIC50 at the assayed target. Methodology + threshold are baked into the bridge's identity; a different threshold needs a different bridge.";
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         forall (s : core:string) =>
         forall (c : core:string) =>
             screen:sample_for(s, c)
@@ -145,7 +145,7 @@ resource screen:rule_strong : justification:Declaration {
     prov:had_primary_source = screen:warrant_literature_smith_et_al_2024_3_2;
     prov:rationale   = "Universal: any compound with low IC50 at this target is a strong inhibitor at the same target.";
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         forall (c : core:string) =>
             screen:HasLowIC50(c) -> screen:StrongInhibitor(c)
     );

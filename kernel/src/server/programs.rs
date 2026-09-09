@@ -946,7 +946,7 @@ pub(super) fn build_run_records(i: RunRecordInputs<'_>) -> RunRecords {
     );
     // Recommended: universe_level = 0 (traces about domain resources)
     trace_resource.set(
-        Iri::parse(crate::ontology::well_known::UNIVERSE_LEVEL).unwrap(),
+        Iri::parse(crate::ontology::well_known::META_LEVEL).unwrap(),
         Value::Integer(0),
     );
 

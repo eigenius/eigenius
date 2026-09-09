@@ -80,7 +80,7 @@ fn every_prov_declaration_resolves() {
 /// `prov:resource` at the output, `prov:was_generated_by` at the run activity, and
 /// `prov:timestamp` — the three the class requires.
 ///
-/// The output carries no `justification:proposition`, so the witness keys on D39
+/// The output carries no `eigentt:proposition`, so the witness keys on D39
 /// §4.1's default `Asserts(iri)`, which is what an unannotated program output asserts.
 ///
 /// **Why `Observed` and not nothing.** A run's outcome is *sampled*: the paper's criterion

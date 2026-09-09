@@ -74,7 +74,7 @@ resource bp:trial_trace : prov:ObservationTrace {
 resource bp:claim_treatment_lowers_bp : stats:StatisticalAnalysisPlan {
     stats:sample_set = bp:trial_2026_03_20;
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         bp:TreatmentChangesBP("urn:eigenius:demo:bp:drug_Y")
     );
 

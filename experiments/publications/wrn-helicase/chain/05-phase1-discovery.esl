@@ -58,7 +58,7 @@ resource wrn:h1 : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_hypothesis;
     prov:rationale   = "Hypothesis: dMMR / MSI may create genetic vulnerabilities — motivating a query of large-scale dependency datasets for genes selectively essential in MSI. (Warranted by the synthetic-lethality framing, ref [1]; the DNA-repair-defect strategy, refs [2,3].)";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         onco:SelectivelyEssential("some_gene", "MSI")
     );
 }
@@ -92,7 +92,7 @@ resource wrn:dd_achilles : bench:ToolArtifact {
     // dodge. `prov:was_generated_by` is uniform across a kernel run and a
     // transcribed one, and the trace still points back through prov:resource.
     prov:was_generated_by = wrnact:dd_recompute;
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         onco:TopDifferentialDependency("WRN", "Achilles_MSI")
     );
 }
@@ -116,7 +116,7 @@ resource wrn:dd_drive : bench:ToolArtifact {
     // dodge. `prov:was_generated_by` is uniform across a kernel run and a
     // transcribed one, and the trace still points back through prov:resource.
     prov:was_generated_by = wrnact:dd_recompute;
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         onco:TopDifferentialDependency("WRN", "DRIVE_MSI")
     );
 }
@@ -136,7 +136,7 @@ resource wrn:discovery_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_discovery_logic;
     prov:rationale   = "A gene that is the top preferential dependency in MSI vs MSS in two INDEPENDENT large-scale screens (CRISPR/Achilles and RNAi/DRIVE) is selectively essential in MSI. Independent-platform replication is the warrant.";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         forall (g : core:string) =>
             onco:TopDifferentialDependency(g, "Achilles_MSI") ->
             onco:TopDifferentialDependency(g, "DRIVE_MSI") ->

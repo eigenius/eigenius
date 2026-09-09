@@ -50,6 +50,7 @@ namespace wn         = "urn:eigenius:wn";
 namespace agent = "urn:eigenius:prov:agent";
 namespace prov       = "urn:eigenius:prov";
 namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
 
 // The classes the rule mentions, drawn from two different lexicons the graph already held:
 //
@@ -86,7 +87,7 @@ resource onco2:lit_rule_exo_implies_helicase : justification:Declaration {
     // rule that says something even slightly different is a different rule. Note that the two
     // `onco2:` calls below are DEFINITIONS: decode unfolds them to the parsed sentences on both
     // sides, so the match is on the unfolded terms and holds by construction.
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         forall (m : Set) =>
             onco2:HasActivity(m, umlscui:C0388246)
               -> onco2:RequiresActivity(m, umlscui:C0388246)

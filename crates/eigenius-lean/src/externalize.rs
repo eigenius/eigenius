@@ -14,7 +14,7 @@
 
 //! D74 — EigenTT `Prop` → nanoda `Expr`, built in the checker's own arena.
 //!
-//! The claim carries the proposition (`justification:proposition`, a D47-encoded
+//! The claim carries the proposition (`eigentt:proposition`, a D47-encoded
 //! `eigentt:Term`). This module manufactures the Lean statement *from that*, so the proof is
 //! bound to the claim because the goal was made from the claim. Nothing is recovered from Lean;
 //! D40's inverse direction is what this replaces.

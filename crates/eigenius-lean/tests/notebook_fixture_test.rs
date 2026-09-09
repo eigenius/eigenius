@@ -405,7 +405,7 @@ fn notebook_demo_fixture_lands_holds() {
     );
 }
 
-/// A claim carrying no `justification:proposition` is REFUSED, not skipped.
+/// A claim carrying no `eigentt:proposition` is REFUSED, not skipped.
 ///
 /// This is the fix for eigenius#159. Before it, `claim_proposition` returned `None` for such a
 /// claim and the institution fell back to the name-level check — "a theorem called `target_name`
@@ -414,7 +414,7 @@ fn notebook_demo_fixture_lands_holds() {
 /// running.
 ///
 /// **Since D87 §6 the refusal comes one step earlier, from the ONTOLOGY.** The claim is now a
-/// `justification:Declaration`, which `requires justification:proposition` — *"carrying a
+/// `justification:Declaration`, which `requires eigentt:proposition` — *"carrying a
 /// proposition is what makes a resource citable, and what makes warrant a question that applies
 /// to it at all"* — so stripping it fails validation before AutoOnLoad ever dispatches. That is
 /// strictly better than an institution-side refusal: it is enforced for every claim on every
@@ -441,7 +441,7 @@ fn a_claim_without_a_proposition_is_refused() {
         .expect("a claim with no proposition must not land");
     let msg = format!("{err:?}");
     assert!(
-        msg.contains("justification:proposition"),
+        msg.contains("eigentt:proposition"),
         "the refusal must name what is missing; got {msg}"
     );
     assert!(
@@ -895,7 +895,7 @@ resource scen:intake_1_obs : prov:ObservationTrace {
 resource scen:eligibility_rule : justification:Declaration {
     prov:was_attributed_to = agent:eigenius_core_team;
     prov:rationale = "A patient proved healthy, with an intake record on file, is eligible.";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         demo:Healthy(demo:patient_1)
           -> core:Asserts("urn:eigenius:scenario:a:intake_1")
           -> scen:Eligible(demo:patient_1)
@@ -1147,7 +1147,7 @@ resource scen:intake_1_obs : prov:ObservationTrace {
 resource scen:asserted_healthy : justification:Declaration {
     prov:was_attributed_to = agent:eigenius_core_team;
     prov:rationale = "A clinician asserts patient_1 is healthy. Nobody proved it.";
-    justification:proposition = type_expr( demo:Healthy(demo:patient_1) );
+    eigentt:proposition = type_expr( demo:Healthy(demo:patient_1) );
     core:short_name = "asserted_healthy";
 }
 resource scen:asserted_healthy_trace : prov:DeclarationTrace {
@@ -1159,7 +1159,7 @@ resource scen:asserted_healthy_trace : prov:DeclarationTrace {
 resource scen:eligibility_rule : justification:Declaration {
     prov:was_attributed_to = agent:eigenius_core_team;
     prov:rationale = "A patient who is healthy, with an intake record on file, is eligible.";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         demo:Healthy(demo:patient_1)
           -> core:Asserts("urn:eigenius:scenario:b:intake_1")
           -> scen:Eligible(demo:patient_1)

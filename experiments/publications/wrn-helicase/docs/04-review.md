@@ -119,7 +119,7 @@ unknown function is rejected at commit). `chain/02-literature.esl` carries **18
 `Reference`s** (real, validated DOIs + PMIDs) and **18 CiTO-typed `Citation`s**.
 
 Eleven of those citations are **warrants**: a `Citation` carrying a
-`justification:proposition` (the imported claim, e.g.
+`eigentt:proposition` (the imported claim, e.g.
 `litclaim:WRNActivitiesSeparable("WRN")`) plus a `DeclarationTrace` that admits
 it as an `IsDeclaredAs` witness. These are wired as **genuine logical premises**,
 not provenance sidecars — the reasoning certificates discharge them with

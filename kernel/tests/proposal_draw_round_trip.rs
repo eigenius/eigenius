@@ -68,7 +68,6 @@ fn encoding_chain() -> Arc<Layer> {
         Some(core),
         &[
             include_str!("../../ontologies/reflection/reflection-ontology.json"),
-            include_str!("../../ontologies/eigentt/eigentt-type-fragment.json"),
             include_str!("../../ontologies/institution/institution-ontology.json"),
             include_str!("../../ontologies/ingest/ingest-ontology.json"),
         ],

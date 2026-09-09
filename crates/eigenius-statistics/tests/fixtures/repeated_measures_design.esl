@@ -101,7 +101,7 @@ resource pk:clearance_study_trace : prov:ObservationTrace {
 resource pk:claim_drug_clears_over_time : stats:StatisticalAnalysisPlan {
     stats:sample_set = pk:clearance_study_2026_05_15;
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         pk:DrugClearanceOverTime("urn:eigenius:demo:pk:study_2026_05_15")
     );
 

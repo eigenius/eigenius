@@ -52,7 +52,7 @@ fabricate one.
 Two kinds of result, two homes — both make the finding **retrievable next time**:
 - **Claims → anchors.** Each load-bearing external fact becomes a
   `reference:Reference` (the work) + a CiTO-typed `reference:Citation` carrying the
-  imported claim as `justification:proposition` (+ `DeclarationTrace`). See
+  imported claim as `eigentt:proposition` (+ `DeclarationTrace`). See
   the `reasoning` skill's Anchor template and `chain/02-literature.esl`. These are
   the admissible premises the reasoning builds on.
 - **Terms → vocabulary.** Recurring entities/relations that deserve typing become

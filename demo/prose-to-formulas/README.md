@@ -177,7 +177,7 @@ standalone claim against anything. What rejects is the **certificate**.
 
 | property | what it holds | encoding |
 |---|---|---|
-| `justification:proposition` | the domain claim `C` | D47 `eigentt:Term` |
+| `eigentt:proposition` | the domain claim `C` | D47 `eigentt:Term` |
 | `justification:term` | the *reason shape*: `App(SpecStr(Declared(rule), tag), DerivedEvidence(claim))` | D32 §3.7 tagged dict — a `justification:Term` **value** |
 | `justification:certificate` | the proof that the reason warrants the claim | D47 `eigentt:Term` |
 
@@ -290,7 +290,7 @@ reads rather than a D47 encoding of it:
 
 ```
 resource formulas:claim_1 : encoding:EncodedClaim {
-    justification:proposition = type_expr(wn:v02203362_t(eigentt:fst(ontology:the(
+    eigentt:proposition = type_expr(wn:v02203362_t(eigentt:fst(ontology:the(
         (exists x0 : wn:n13440063 => logic:And(ontology:compound_kind(x0, wn:n14606137),
         ontology:prep_of(x0, ontology:kind_of(umlscui:C0388246)))))), …));
 }

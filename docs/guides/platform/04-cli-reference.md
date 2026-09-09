@@ -57,7 +57,7 @@ Surface-language transformation — no validation, and nothing is committed. It 
 <a id="decompile-file---verify---pretty"></a>
 ### `decompile <FILE> [--verify] [--pretty]`
 
-Print an Eigon-JSON document back as ESL source — the inverse of `compile`. Every D47 term value (`justification:proposition`, `justification:certificate`, `eigentt:axiom_statement`, `justification:proposition`, …) is rendered in the [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) sublanguage.
+Print an Eigon-JSON document back as ESL source — the inverse of `compile`. Every D47 term value (`eigentt:proposition`, `justification:certificate`, `eigentt:axiom_statement`, `eigentt:proposition`, …) is rendered in the [`type_expr(...)`](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) sublanguage.
 
 ```bash
 eigenius decompile chain/sentence.json

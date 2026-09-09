@@ -51,7 +51,7 @@
 //! 1. **Proof validity** — nanoda type-checks every declaration in the export and refuses any
 //!    axiom outside the permitted set.
 //! 2. **Statement correspondence** — the claim named by `lean:claim_iri` carries a
-//!    `justification:proposition`; it is externalized to a Lean `Expr`
+//!    `eigentt:proposition`; it is externalized to a Lean `Expr`
 //!    ([`crate::externalize`]) and compared to the target declaration's type with nanoda's
 //!    `def_eq`. Without this, `Holds` would mean only "a theorem with this name type-checks".
 //!
@@ -258,7 +258,7 @@ const DEFAULT_LEAN_AXIOMS: &[&str] = &[
     "Lean.trustCompiler",
 ];
 
-/// The claim this proof discharges: its IRI, and its `justification:proposition`
+/// The claim this proof discharges: its IRI, and its `eigentt:proposition`
 /// decoded to an `Exp` (D74 §2).
 ///
 /// `None` only when the proof term names no claim at all. `lean:claim_iri` is `requires` on
@@ -289,13 +289,13 @@ fn claim_proposition(
     // `None` here would fall back to the name-level check — "a theorem with this name
     // type-checks" — which is the verdict the issue opened against.
     //
-    // This cannot be expressed in the ontology: `justification:proposition` is a
+    // This cannot be expressed in the ontology: `eigentt:proposition` is a
     // `reflection:` property on an arbitrary claim class, and `lean:LeanProofTerm` cannot require
     // a property of a resource it merely references. So the institution enforces it, and D74
     // §6.3's `claim_iri: requires` is necessary but not sufficient on its own.
     let Some(value) = claim.get(&Iri::parse(wk::PROPOSITION).expect("well-known IRI")) else {
         return Err(InstitutionError::ComputationFailed(format!(
-            "claim `{claim_iri}` carries no `justification:proposition`, so there is \
+            "claim `{claim_iri}` carries no `eigentt:proposition`, so there is \
              nothing to check the proof against; a Lean verdict must not rest on the target \
              name alone (D74 / eigenius#159)"
         )));

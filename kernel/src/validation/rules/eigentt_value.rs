@@ -542,7 +542,7 @@ mod tests {
     }
 
     /// A `reflection:DeclaredResource` carrying `value` in the real
-    /// `justification:proposition` slot, whose declared obligation is
+    /// `eigentt:proposition` slot, whose declared obligation is
     /// `inhabits(Prop)` — so the propositionhood check applies.
     fn claim_with_proposition(id: &str, value: Value) -> Resource {
         let mut r = Resource::new(iri(id));

@@ -67,11 +67,6 @@ fn build_ic50_chain() -> ExecutionContext {
     for r in reflection_resources {
         reflection_builder.add_resource(r).unwrap();
     }
-    let eigentt_json = include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json");
-    let eigentt_resources = eigon_json::parse_document(eigentt_json).unwrap();
-    for r in eigentt_resources {
-        reflection_builder.add_resource(r).unwrap();
-    }
     let institution_json =
         include_str!("../../../ontologies/institution/institution-ontology.json");
     let institution_resources = eigon_json::parse_document(institution_json).unwrap();
@@ -282,7 +277,7 @@ fn a_statistical_analysis_result_grounds_nothing_on_its_own() {
 
     // The SAR still carries the proposition it computed — the record is intact.
     let canonical_prop = sar_arc
-        .get(&Iri::parse("urn:eigenius:justification:proposition").unwrap())
+        .get(&Iri::parse("urn:eigenius:eigentt:proposition").unwrap())
         .expect("SAR must still carry canonical_proposition — it is the record of what ran")
         .clone();
 

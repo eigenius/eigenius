@@ -50,7 +50,6 @@ fn build_chain() -> ExecutionContext {
         let mut b = LayerBuilder::new("reflection", Some(core));
         for src in [
             include_str!("../../../ontologies/reflection/reflection-ontology.json"),
-            include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json"),
             include_str!("../../../ontologies/institution/institution-ontology.json"),
         ] {
             for r in eigon_json::parse_document(src).unwrap() {
@@ -131,7 +130,7 @@ fn spearman_recomputes_wrn_mutator_load_correlation_to_holds() {
         .unwrap_or("")
         .to_string();
     let has_canonical = result
-        .get(&Iri::parse("urn:eigenius:justification:proposition").unwrap())
+        .get(&Iri::parse("urn:eigenius:eigentt:proposition").unwrap())
         .is_some();
 
     assert_eq!(

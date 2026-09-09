@@ -170,8 +170,8 @@ data justification:Grounds : Prop -> Type 2 {
 // commit — later, and further from the cause.
 
 class justification:Declaration {
-    description = "An assertion, by an accountable agent, that a proposition holds — a literature rule, a statistical-to-domain bridge, a claim that a plan denotes a function of its input. Cited as a ground by justification:Grounds.declared. REQUIRES BOTH halves: the proposition, without which the resource is not citable and warrant is not a question that applies to it; and the attribution, without which it is not a declaration at all. Requiring only the first is what the predecessor class did, and the first is the half every proposition-bearing resource has anyway. NOT a container for observations: an observed ground cites the measurement resource itself — a SampleSet, an ingested file — which carries its own domain structure and needs no class here. Its proposition is its own justification:proposition or the D39 §4.1 `core:Asserts(iri)` default.";
-    requires justification:proposition, prov:was_attributed_to;
+    description = "An assertion, by an accountable agent, that a proposition holds — a literature rule, a statistical-to-domain bridge, a claim that a plan denotes a function of its input. Cited as a ground by justification:Grounds.declared. REQUIRES BOTH halves: the proposition, without which the resource is not citable and warrant is not a question that applies to it; and the attribution, without which it is not a declaration at all. Requiring only the first is what the predecessor class did, and the first is the half every proposition-bearing resource has anyway. NOT a container for observations: an observed ground cites the measurement resource itself — a SampleSet, an ingested file — which carries its own domain structure and needs no class here. Its proposition is its own eigentt:proposition or the D39 §4.1 `core:Asserts(iri)` default.";
+    requires eigentt:proposition, prov:was_attributed_to;
     recommends prov:had_primary_source, core:description, core:short_name;
 }
 

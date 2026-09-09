@@ -4,14 +4,14 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:Class"
     ],
-    "urn:eigenius:core:description": "A resource the kernel emitted as a side-effect of an AutoOnLoad institution dispatch — the result an institution computed from a gated analysis spec and its data. It records WHAT A RUN PRODUCED and grounds nothing: a computed claim rests on the plan being DECLARED to denote a function of its input, which no execution establishes, and on the input being OBSERVED, so the ground is App(Declared(plan), Observed(inputs)) and neither half comes from here. Subclassed reflection:DerivedResource until that class was deleted; it now subclasses nothing, because `the kernel produced it` is a provenance fact recorded by its prov:ProgramTrace rather than a kind of resource. Carries reflection:from_subject (the gated subject), reflection:runtime_invocation (the producing invocation) and justification:proposition (what it computed).",
+    "urn:eigenius:core:description": "A resource the kernel emitted as a side-effect of an AutoOnLoad institution dispatch — the result an institution computed from a gated analysis spec and its data. It records WHAT A RUN PRODUCED and grounds nothing: a computed claim rests on the plan being DECLARED to denote a function of its input, which no execution establishes, and on the input being OBSERVED, so the ground is App(Declared(plan), Observed(inputs)) and neither half comes from here. Subclassed reflection:DerivedResource until that class was deleted; it now subclasses nothing, because `the kernel produced it` is a provenance fact recorded by its prov:ProgramTrace rather than a kind of resource. Carries reflection:from_subject (the gated subject), reflection:runtime_invocation (the producing invocation) and eigentt:proposition (what it computed).",
     "urn:eigenius:core:short_name": "InstitutionEmittedDerivation",
     "urn:eigenius:core:requires": [
       "urn:eigenius:reflection:from_subject"
     ],
     "urn:eigenius:core:recommends": [
       "urn:eigenius:reflection:runtime_invocation",
-      "urn:eigenius:justification:proposition"
+      "urn:eigenius:eigentt:proposition"
     ]
   },
   {
@@ -564,34 +564,5 @@
       "urn:eigenius:reflection:ProjectTrace",
       "urn:eigenius:reflection:FieldTrace"
     ]
-  },
-  {
-    "@id": "urn:eigenius:reflection:universe_level",
-    "urn:eigenius:core:is_a": [
-      "urn:eigenius:core:Property"
-    ],
-    "urn:eigenius:core:description": "Universe stratification level. Level N traces reference level N-1 resources.",
-    "urn:eigenius:core:short_name": "universe_level",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:integer",
-    "urn:eigenius:core:min_value": 0,
-    "urn:eigenius:core:max_value": 2
-  },
-  {
-    "@id": "urn:eigenius:justification:proposition",
-    "urn:eigenius:core:is_a": [
-      "urn:eigenius:core:Property"
-    ],
-    "urn:eigenius:core:description": "The proposition this resource asserts, as an eigentt:Term. The WARRANT axis's input: warrant is what evidence exists for a proposition, so a resource carrying one can be asked the question and a resource carrying none cannot. That is the whole test, and it is mechanical. Carried no domain constraint after the grade classes were deleted — its domain had been DeclaredResource / ObservedResource / DerivedResource, which named three ways a resource came to exist and so constrained the warrant slot by a provenance fact, which is the conflation this ontology no longer makes.",
-    "urn:eigenius:core:short_name": "canonical_proposition",
-    "urn:eigenius:core:data_type": "urn:eigenius:core:inductive",
-    "urn:eigenius:core:class_types": [
-      "urn:eigenius:eigentt:Term"
-    ],
-    "urn:eigenius:eigentt:expected_type": {
-      "urn:eigenius:core:is_a": ["urn:eigenius:eigentt:Term-Sort"],
-      "urn:eigenius:eigentt:Term-Sort-level": {
-        "urn:eigenius:core:is_a": ["urn:eigenius:core:Level-Zero"]
-      }
-    }
   }
 ]

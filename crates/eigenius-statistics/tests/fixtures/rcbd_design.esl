@@ -100,7 +100,7 @@ resource dr:dose_response_trace : prov:ObservationTrace {
 resource dr:claim_dose_response_exists : stats:StatisticalAnalysisPlan {
     stats:sample_set = dr:dose_response_2026_04_15;
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         dr:DoseResponseExists("urn:eigenius:demo:dr:experiment_2026_04_15")
     );
 

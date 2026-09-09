@@ -160,7 +160,7 @@ ontology when authoring witnessed propositions — don't memorize the shapes.
   `prov:had_primary_source` (the declared reason). All resource-typed, so provenance
   is an EigenQL join. Distinct from `reflection`, which keeps the kernel's
   evaluation-trace family (`LetTrace` / `MapTrace` / …) plus
-  `justification:proposition` — the proposition a resource carries, which is
+  `eigentt:proposition` — the proposition a resource carries, which is
   the WARRANT axis's input and the mechanical test for whether warrant applies at
   all. **There are no grade classes**: nothing stores an epistemic status.
 - **Verified reasoning** — the `justification` ontology (`ontologies/justification/`) + the

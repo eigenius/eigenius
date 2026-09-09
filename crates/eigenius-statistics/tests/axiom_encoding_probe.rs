@@ -25,7 +25,7 @@
 //!   `encode_lit_float` helpers.
 //!
 //! - Consumer: an author writes the same proposition inside a
-//!   `justification:proposition = type_expr(...)` slot on a
+//!   `eigentt:proposition = type_expr(...)` slot on a
 //!   `reflection:DeclaredResource` bridge. The ESL compiler walks the
 //!   `Term::Ref { name = stats:lt, args = [...] }` tree, resolves
 //!   each axiom reference against the chain layer, and emits a D47
@@ -60,10 +60,6 @@ fn build_stats_layer() -> Arc<eigenius_kernel::layer::Layer> {
     let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for r in reflection_resources {
-        reflection_builder.add_resource(r).unwrap();
-    }
-    let eigentt_json = include_str!("../../../ontologies/eigentt/eigentt-type-fragment.json");
-    for r in eigon_json::parse_document(eigentt_json).unwrap() {
         reflection_builder.add_resource(r).unwrap();
     }
     let institution_json =
@@ -132,11 +128,12 @@ namespace prov = "urn:eigenius:prov";
 namespace justification = "urn:eigenius:justification";
 namespace stats      = "urn:eigenius:measurements";
 namespace probe      = "urn:eigenius:probe";
+namespace eigentt = "urn:eigenius:eigentt";
 
 resource probe:bridge_proposition : justification:Declaration {
     prov:was_attributed_to = "probe:axiom-encoding";
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         stats:lt(
             stats:mean_of("urn:eigenius:probe:sample"),
             100.0
@@ -155,7 +152,7 @@ resource probe:bridge_proposition : justification:Declaration {
     let bridge = layer
         .resolve(&bridge_iri)
         .expect("bridge resource committed");
-    let prop_iri = Iri::parse("urn:eigenius:justification:proposition").unwrap();
+    let prop_iri = Iri::parse("urn:eigenius:eigentt:proposition").unwrap();
     match bridge.get(&prop_iri) {
         // A term is a value resource (D85 §6.1); project it back for the positional
         // assertions below.

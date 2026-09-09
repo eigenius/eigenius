@@ -43,7 +43,7 @@ resource v2:scoped_1 : encoding:ScopedUnit {
 resource v2:claim_1 : encoding:EncodedClaim, encoding:Finding {
     core:description = "«MSI cancer models did not have the exonuclease activity of WRN.» — the reading the ranker selected: §(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §))) → False";
     encoding:from_unit = "urn:eigenius:demo:v2:scoped_1";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         wn:v02203362_t(
             eigentt:fst(ontology:the(
                             (exists x0 : umlscui:C1148824 =>
@@ -88,7 +88,7 @@ resource v2:scoped_2 : encoding:ScopedUnit {
 resource v2:claim_2 : encoding:EncodedClaim, encoding:Finding {
     core:description = "«MSI cancer models required the helicase activity of WRN.» — the reading the ranker selected: §(the(ΣG#0:§. prep_of(G#0, kind_of(§))).1, kind_of(ΣG#0:§. compound_kind(G#0, §)))";
     encoding:from_unit = "urn:eigenius:demo:v2:scoped_2";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         wn:v02627934_t(
             eigentt:fst(ontology:the(
                             (exists x0 : umlscui:C1149627 =>
@@ -132,7 +132,7 @@ resource v2:scoped_3 : encoding:ScopedUnit {
 resource v2:claim_3 : encoding:EncodedClaim, encoding:Finding {
     core:description = "«These findings show that WRN is a vulnerability of MSI cancer models.» — the reading the ranker selected: And(§(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_1), §(is_a(kind_of(§), ΣG#0:§. prep_of(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §)))), claim_2))";
     encoding:from_unit = "urn:eigenius:demo:v2:scoped_3";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         logic:And(
             wn:v01015244_c(
                 ontology:is_a(

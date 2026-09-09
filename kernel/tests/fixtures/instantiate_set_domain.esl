@@ -38,7 +38,7 @@ resource poly:rule : justification:Declaration {
     prov:had_primary_source = poly:warrant_illustrative_dependency_rule;
     prov:rationale   = "Illustrative. Quantified over the MODEL, which is a kind, so the domain of the quantifier is Set.";
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         forall (m : Set) => poly:HasActivity(m) -> poly:RequiresActivity(m)
     );
 }
@@ -60,7 +60,7 @@ resource poly:obs : poly:Observation {
     prov:was_generated_by      = poly:act_illustrative;
     prov:observed_at = "2026-08-18T00:00:00Z";
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         poly:HasActivity(poly:Model)
     );
 }

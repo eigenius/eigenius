@@ -51,7 +51,7 @@ used to, and the conflation is what this method most often gets wrong.
 Most resources have provenance and no warrant. A lexicon entry, a class
 declaration, an imported concept carries no proposition, so asking what proves it
 is a **category error**, not an unanswered question. The test is mechanical: does
-the resource carry a `justification:proposition`.
+the resource carry a `eigentt:proposition`.
 
 **There are three grounds, not four.** A ground is what a certificate cites.
 
@@ -83,7 +83,7 @@ resource-typed, so *which claims rest on this instrument* is a join.
 
 Each witness is emitted by the per-layer witness index **from a trace resource**
 whose `prov:resource` points at the target and whose target carries
-`justification:proposition` — so `declared(iri, P)` / `observed(iri, P)`
+`eigentt:proposition` — so `declared(iri, P)` / `observed(iri, P)`
 only resolve when that trace exists in an **ancestor layer** of the citing
 conclusion (load emitters before consumers — the recompute-plans-before-conclusions
 split).
@@ -173,7 +173,7 @@ resource lit:smith_2020 : reference:Reference {
 resource lit:cite_smith : reference:Citation {
     reference:cites          = lit:smith_2020;
     reference:citation_type  = reference:cites_as_authority;   // or uses_method_in / cites_as_evidence / ...
-    justification:proposition = type_expr( obj:KnownFact("x") );
+    eigentt:proposition = type_expr( obj:KnownFact("x") );
     core:description = "what this work establishes that we build on";
 }
 resource lit:cite_smith_trace : prov:DeclarationTrace {
@@ -218,7 +218,7 @@ resource obj:plan_yields_result : justification:Declaration {
     prov:was_attributed_to  = agent:<who-vouches>;
     prov:had_primary_source = obj:warrant_plan_reproducibility;
     prov:rationale = "Applying <plan> to its recorded input yields <result>. A claim about the method, pinned at the input it is applied to.";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         core:Asserts("urn:eigenius:obj:<slug>:input") -> obj:Result("x")
     );
 }
@@ -258,7 +258,7 @@ The judgement reads: *the kernel verified that this certificate grounds this
 proposition*. It does **not** say the proposition is true — that is the point of the
 separation, and no rule turns one into the other.
 - **Declared** rule/judgment — a `justification:Declaration` carrying the rule as
-  `justification:proposition`, with `prov:rationale`, a
+  `eigentt:proposition`, with `prov:rationale`, a
   `prov:DeclarationTrace`, and `prov:was_attributed_to` naming who stands behind it.
   A declaration with no agent asserts nothing anybody can be held to. If the reason
   it was asserted is itself a resource — a criterion, a convention, a citation —

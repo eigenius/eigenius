@@ -208,7 +208,7 @@ pub const MACRO_DECL_JSON: &str = "urn:eigenius:core:macro_decl_json";
 /// inhabitation paths are institutional dispatch or `eigentt:Axiom`
 /// introduction (D46 §10). Used by the D49 witness emitter as the
 /// default canonical proposition when a target resource carries no
-/// explicit `justification:proposition`. The well-known IRI is
+/// explicit `eigentt:proposition`. The well-known IRI is
 /// pinned here so emission and the eventual `justification:Grounds.declared`
 /// consumer share one source of truth.
 pub const ASSERTS: &str = "urn:eigenius:core:Asserts";
@@ -470,7 +470,7 @@ pub const ENC_BASE64: &str = "urn:eigenius:core:encodings:base64";
 
 // --- Reflection namespace (D6b, Phase 10b) ---
 
-pub const UNIVERSE_LEVEL: &str = "urn:eigenius:reflection:universe_level";
+pub const META_LEVEL: &str = "urn:eigenius:core:meta_level";
 // The four grade classes stood here. They stamped a WARRANT grade onto a
 // resource, which conflated the two axes: how a resource came to exist is
 // provenance and applies to everything, while what evidence exists for its
@@ -579,12 +579,12 @@ pub const CHECKER_IDENTITY_KIND: &str = "urn:eigenius:prov:checker_identity_kind
 /// `prov:checker_identity` — the checker's identity in the form [`CHECKER_IDENTITY_KIND`] names.
 pub const CHECKER_IDENTITY: &str = "urn:eigenius:prov:checker_identity";
 
-/// `justification:proposition` — the optional `Prop`-typed
+/// `eigentt:proposition` — the optional `Prop`-typed
 /// proposition a resource asserts (per D49 §6). Carries a D47-encoded
 /// `eigentt:Term` payload. Absent value defaults to `Asserts(iri)`
 /// at witness-emission time. Type-checked at `Prop` at commit by
 /// its `eigentt:expected_type` (`Prop`) and Rule 21.
-pub const PROPOSITION: &str = "urn:eigenius:justification:proposition";
+pub const PROPOSITION: &str = "urn:eigenius:eigentt:proposition";
 
 /// `eigentt:expected_type` — the type a property's term-valued instances must
 /// check against. Rule 21 forms `Ann(value, expected_type)` and runs the

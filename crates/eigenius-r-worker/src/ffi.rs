@@ -641,7 +641,7 @@ fn codec_names() -> &'static eigenius_kernel::program::eigentt_type_mirror::Code
 }
 
 /// `r_eigon_set_proposition(bid, pred_iri, args)` → status. Sets the
-/// inherited `justification:proposition` slot to a D47-encoded
+/// inherited `eigentt:proposition` slot to a D47-encoded
 /// predicate application `pred(arg₁, …, argₙ)` over string-literal
 /// arguments — the same term shape the statistics institution emits, so a
 /// wrapped-R `DerivedResource` composes with the reasoning institution

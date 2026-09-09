@@ -45,7 +45,7 @@ Reasoning leaves a typed audit trail. These shapes are pre-existing chain artifa
 | Resource | Role |
 |---|---|
 | `axiom` declaration → `eigentt:Axiom` | Author-asserted propositional statement ([ESL §4.4a](../../esl/04-declarations.md#4-4a-axiom-postulated-propositions-d46-10)). Paired with a `prov:DeclarationTrace` to admit `IsDeclaredAs`. |
-| `justification:Declaration` + `prov:DeclarationTrace` | Any chain-resident declared assertion (literature rule, statistical-to-domain bridge, a claim that a plan denotes a function of its input). The class REQUIRES `justification:proposition`, and the matching trace admits `IsDeclaredAs(iri, canonical_proposition)`. |
+| `justification:Declaration` + `prov:DeclarationTrace` | Any chain-resident declared assertion (literature rule, statistical-to-domain bridge, a claim that a plan denotes a function of its input). The class REQUIRES `eigentt:proposition`, and the matching trace admits `IsDeclaredAs(iri, canonical_proposition)`. |
 | `justification:Declaration` + `prov:ObservationTrace` | Bench measurement, instrument log entry. The trace names the `prov:Activity` that produced it and admits `IsObservedAs(iri, canonical_proposition)`. |
 | `prov:ProgramTrace` | A record that a program run happened. **It admits no witness and grounds nothing.** |
 
@@ -91,7 +91,7 @@ pub struct WitnessKey {
 
 1. **Skip.** `LayerHandle::has_witness_candidates` is stamped at write time over the layer's resources. A layer holding no Trace, no `InstitutionEmittedDerivation` and no `justification:Conclusion` answers `false` with no probe at all — a lexicon layer stops here.
 2. **Self-attesting.** `Layer::get_resource` on the key's IRI, which is layer-local. If that resource is a `justification:Conclusion` and the key's category is `Verified`, or an `InstitutionEmittedDerivation` and the category is `Derived`, build the key it would emit and compare it to the key asked for.
-3. **Trace-attested.** Find a Trace resource *defined in this layer* whose `prov:resource` points at the key's IRI — through the triple index when the layer is already stored, by iterating the layer when it is still in flight, which is the case during `autoonload_dispatch`. Resolve the target (a chain walk, since a trace here may attest a resource in an ancestor), read its `justification:proposition` — or fall back to the D39 §4.1 default `Asserts(target_iri)` when it carries none — hash it, and compare.
+3. **Trace-attested.** Find a Trace resource *defined in this layer* whose `prov:resource` points at the key's IRI — through the triple index when the layer is already stored, by iterating the layer when it is still in flight, which is the case during `autoonload_dispatch`. Resolve the target (a chain walk, since a trace here may attest a resource in an ancestor), read its `eigentt:proposition` — or fall back to the D39 §4.1 default `Asserts(target_iri)` when it carries none — hash it, and compare.
 
 An earlier implementation did materialize an index: `build_witness_index` walked the layer at construction and cached a `BTreeMap<WitnessKey, ()>` in a `OnceLock` on the `Layer`, and lookup was a membership test. **D66 slice 0 removed all of it.** The map cost memory proportional to the layer's trace count for the layer's whole lifetime and reduced every miss to a bare `false` carrying no reason; direct lookup is O(1) in memory and holds the specific resource at the point of the decision. There is no `Layer::chain_witness_admission` method and nothing is cached.
 
@@ -237,7 +237,7 @@ The high-level shape, modeled on the drug-screening fixture:
        prov:was_attributed_to  = agent:eigenius_core_team;
        prov:had_primary_source = screen:warrant_smith_et_al_2024;
        prov:rationale = "IC50 < 100 nM is the standard threshold.";
-       justification:proposition = type_expr(
+       eigentt:proposition = type_expr(
            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
            ->
            screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")
@@ -251,7 +251,7 @@ The high-level shape, modeled on the drug-screening fixture:
    }
    ```
 
-   `justification:Declaration` REQUIRES `justification:proposition`, and that is the proposition the witness key hashes — so what your `declared(...)` constructor writes has to be that one, not a restatement of it. `prov:was_attributed_to` is required by the trace: a declaration with no agent behind it asserts nothing anybody can be held to.
+   `justification:Declaration` REQUIRES `eigentt:proposition`, and that is the proposition the witness key hashes — so what your `declared(...)` constructor writes has to be that one, not a restatement of it. `prov:was_attributed_to` is required by the trace: a declaration with no agent behind it asserts nothing anybody can be held to.
 
    **For a computed ground you commit two artifacts, not one.** A [D52 StatisticalAnalysisPlan](../statistics-institution/README.md) carries no proposition, and its per-effect `StatisticalAnalysisResult` RECORDS what ran and admits no witness — the fact that a computation happened grounds nothing. What a citation needs is a `justification:Declaration` asserting that the plan denotes a function of its input, under a `prov:DeclarationTrace`, plus the sample set's `prov:ObservationTrace`:
 
@@ -260,7 +260,7 @@ The high-level shape, modeled on the drug-screening fixture:
        prov:was_attributed_to  = agent:eigenius_core_team;
        prov:had_primary_source = screen:warrant_plan_reproducibility;
        prov:rationale = "Applying claim_eig0291_lowic50 to its recorded sample set yields that set's main effect. A claim about the method, pinned at the input it is applied to.";
-       justification:proposition = type_expr(
+       eigentt:proposition = type_expr(
            core:Asserts("urn:eigenius:demo:screen:m_eig0291_sampleset")
            -> stats:lt(stats:mean_of("urn:eigenius:demo:screen:m_eig0291_sampleset"), 100.0)
        );

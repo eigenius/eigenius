@@ -210,7 +210,7 @@ The high-level shape, modeled on the IC50 fixture:
        stats:alternative_hypothesis = type_expr(
            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
        );
-       justification:proposition = type_expr(
+       eigentt:proposition = type_expr(
            screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
        );
 

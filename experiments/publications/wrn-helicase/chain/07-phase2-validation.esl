@@ -82,7 +82,7 @@ resource wrn:va_fail_k577m : bench:ToolArtifact {
     // dodge. `prov:was_generated_by` is uniform across a kernel run and a
     // transcribed one, and the trace still points back through prov:resource.
     prov:was_generated_by = wrnact:fig_2b_2c_rescue;
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ")
     );
 }
@@ -107,7 +107,7 @@ resource wrn:ontarget_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_on_target_rescue_logic;
     prov:rationale   = "sgWRN-EIJ silences endogenous WRN but not exogenous WRN cDNA. If re-expressing WRN cDNA rescues the viability loss from sgWRN-EIJ — while a reagent targeting both endogenous and exogenous WRN (sgWRN2) is not rescued — the phenotype is attributable to loss of WRN, not to an off-target effect of the silencing reagent. Hence the depletion phenotype is on-target.";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         onco:RescuesDepletion("WRN_cDNA_WT", "sgWRN_EIJ")
         ->
         onco:OnTarget("WRN", "MSI_viability")
@@ -127,7 +127,7 @@ resource wrn:helicase_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_structure_function_dissection;
     prov:rationale   = "WRN is both a 3'-5' exonuclease and a 3'-5' helicase, and these activities are SEPARABLE — the E84A and K577M point mutants each ablate one without the other (Swanson 2004 [14], a litclaim premise). Given that separability, rescuing sgWRN-EIJ with catalytic-dead constructs localises the essential activity: a helicase-dead (K577M) cDNA that FAILS to rescue (while WT does) shows the helicase activity is required for the MSI viability phenotype.";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         litclaim:WRNActivitiesSeparable("WRN")
         ->
         onco:FailsToRescue("WRN_cDNA_K577M", "sgWRN_EIJ")
@@ -149,7 +149,7 @@ resource wrn:exo_rule : justification:Declaration {
     prov:was_attributed_to  = wrn:authors;
     prov:had_primary_source = wrn:warrant_structure_function_dissection;
     prov:rationale   = "Given that WRN's exonuclease and helicase activities are SEPARABLE (E84A ablates only the exonuclease; Swanson 2004 [14], a litclaim premise), an exonuclease-dead (E84A) WRN cDNA that still rescues sgWRN-EIJ (rescue not attenuated) shows the exonuclease activity is dispensable for the MSI viability phenotype.";
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         litclaim:WRNActivitiesSeparable("WRN")
         ->
         onco:RescuesDepletion("WRN_cDNA_E84A", "sgWRN_EIJ")

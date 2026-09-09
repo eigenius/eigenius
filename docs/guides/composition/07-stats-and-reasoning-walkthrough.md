@@ -83,7 +83,7 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
     stats:alternative_hypothesis = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
     );
 
@@ -130,7 +130,7 @@ resource screen:rule_strong : justification:Declaration {
     prov:had_primary_source = screen:warrant_smith_et_al_2024;
     prov:rationale   = "IC50 < 100 nM at a kinase target is the standard strong-inhibitor threshold.";
 
-    justification:proposition = type_expr(
+    eigentt:proposition = type_expr(
         screen:HasLowIC50("urn:eigenius:demo:screen:EIG_0291")
         ->
         screen:StrongInhibitor("urn:eigenius:demo:screen:EIG_0291")

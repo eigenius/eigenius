@@ -25,7 +25,7 @@
 // - `StatisticalAnalysisPlan` (D52 §3): universal-schema fields the author
 //   asserts (hypothesis, alpha, effect-size, directionality, variance
 //   assumption, outlier exclusion). Subclass of
-//   `reflection:DerivedResource` — its `justification:proposition`
+//   `reflection:DerivedResource` — its `eigentt:proposition`
 //   carries the predicate the claim establishes when Holds. The
 //   institution's `validate_analysis_plan` query class recomputes
 //   the claim from raw replicates and admits the commit on Holds.
@@ -996,7 +996,7 @@ property stats:sample_set : core:string {
 }
 
 // The "predicate the claim establishes when the test holds" rides on
-// the inherited `justification:proposition` slot (one source
+// the inherited `eigentt:proposition` slot (one source
 // of truth across all four reflection-ontology resource subclasses;
 // see D52 §3 / D49 §6). Statistics-domain authoring still describes
 // it as "what the claim derives" — the meta-naming is just unified
@@ -1093,7 +1093,7 @@ class stats:ImpossibilityWitness {
 // StatisticalAnalysisResult IS the chain-resident DerivedResource carrying
 // the proposition the chain attests:
 //
-//   - justification:proposition — the derived alternative
+//   - eigentt:proposition — the derived alternative
 //     hypothesis as a chain-resident D47 type-fragment value
 //     (e.g. `¬(stats:mean_of(s) = T)` for the TwoSided one-sample case)
 //   - stats:computed_statistic / stats:computed_p_value — the
