@@ -148,18 +148,46 @@ draw is a draw, not a measurement — replay is the comparison.
 
 ## C. Decisions
 
-### C1 — widen the unification fragment past first-order patterns · **not needed**
+### C1 — make `instantiate`'s `T` and `P` implicit · **scoped, prototyped, not landed**
 
-**Nothing is broken without it.** `spec_poly` works today and every certificate using it
+*Retitled `2026-09-08`. The constructor is now `instantiate` (D89 §3). This entry said "widen the
+unification fragment past first-order patterns · not needed", and both halves were wrong about
+what the work is.*
+
+**The fragment is not the obstacle.** The equation that determines `P` is
+`?P y ≟ B` against the premise's type — a meta applied to one distinct bound variable, the
+canonical Miller pattern, with a unique solution. `solve_meta` already checks that condition and
+then declines, because λ-construction was "deferred until a real consumer with non-empty spines
+arrives". The consumer could not have arrived: evaluation never populates `Neut::Meta`'s spine at
+all, building `Neut::App(Meta(id, []), arg)` chains instead. What is genuinely unsolvable is the
+OTHER equation — `?P x` against the expected index, with `x` a concrete term — which is not a
+pattern and is ambiguous. That is why `x` stays explicit, which is right anyway.
+
+**Nothing is broken without it.** `instantiate` works today and every certificate using it
 type-checks, because the author writes `T`, `P` and `x` out. No test is skipped and nothing is
-unsound. Earlier phrasing here — *"what `spec_poly`'s `P` needs"* — read as though `P` were
-defective; what needs C1 is making `P` **implicit**, which is ergonomics.
+unsound. What C1 buys is ergonomics.
+
+**Prototyped in `a28077e`**, with the full kernel suite green: spine recognition over `Neut::App`
+chains, λ-abstraction in `solve_meta`, and `zonk` resolving applied metas. Both a constant and a
+dependent `P` resolve. Two findings from it: extending `unify`'s Pi arm to named binders does not
+reopen capture — readback forces closures, so the scope check is decidable — but an unguarded arm
+identifies an anonymous arrow with a named-but-unused binder, which D49 witness-key byte stability
+depends on distinguishing.
+
+**One thing blocks landing.** The scope check recognises generated variables by name, and
+`Neut::Gen(j, name)` reads back keeping the producer's tag — `G#`, `TC#`, ad-hoc ones in tests.
+Keyed on one prefix it silently admits exactly what it exists to refuse; the version in the branch
+over-approximates instead, which fails closed but misreads a user variable ending in digits. It
+needs canonical naming at readback, or a readback that carries levels rather than reconstructing
+them from names.
+
+**It moves the bootstrap manifest**, so deferring it past D89's reseed costs a second one.
 
 What it would buy, measured `2026-09-05` across every authored certificate in the tree:
 
 | | |
 |---|---|
-| `spec_poly` call sites | 7 |
+| `instantiate` call sites | 10 |
 | characters written for `T` | 321 |
 | characters written for `P` | 1,622 |
 | total an author could stop writing | **1,943** |

@@ -9,7 +9,30 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **ACTIVE: entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
+> **ACTIVE: entry −1 (`2026-09-08`). D89 — the justification vocabulary.**
+> [`docs/design/d89-the-justification-vocabulary-refactoring.md`](../design/d89-the-justification-vocabulary-refactoring.md)
+> decides what changes; [`d89-rename-execution-plan.md`](d89-rename-execution-plan.md) decides how.
+>
+> **Landed.** The renames (`Certificate`→`Grounds`, `Claim`→`Declaration`,
+> `judgement`→`grounds_judgement`, `proof`→`proof_judgement`,
+> `reflection:canonical_proposition`→`eigentt:proposition`, `spec_poly`→`instantiate`);
+> `subject_iri` and `refutes` deleted; `Declaration` requires an attribution; `EncodedClaim`
+> subclasses it; the two observed-side resources reclassified. Then three things the plan did not
+> foresee: the EigenTT fragment merged into core (the namespaces stay, the layers could not),
+> `reflection:` dissolved into `program:traces:` and `institution:`, and `universe_level` became
+> `core:meta_level`. `every_esl_declares_its_prefixes` was added because a cross-namespace rename
+> introduces prefixes a residue grep cannot see.
+>
+> **Next: the reseed.** Four manifest moves are batched into it. `CARGO_FEATURES=use-llm
+> scripts/reseed-lexicon-db.sh --umls-all`, then `build-alignment-snapshot.sh`, then
+> `measure-parse-rate.sh` against the committed baselines — `next-steps-after-d88.md` §B4 has the
+> protocol and the gates. Nothing persisted is resumable until it runs.
+>
+> **Open, and deliberately not done here.** `instantiate` keeps all four arguments;
+> `implicit(T, P)` needs the unifier work in `a28077e`, whose scope check identifies generated
+> variables by name and cannot do so reliably. Enabling it later costs a second reseed.
+
+> **entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
 > (`docs/design/judgements-and-warrants.tex`) is the design; **P0 of
 > `docs/notes/judgements-warrants-build-plan.md` is the next task** — measurement only, no code.
 > The paper supersedes the D83 markdown draft (removed) and two of D82's conclusions: the
