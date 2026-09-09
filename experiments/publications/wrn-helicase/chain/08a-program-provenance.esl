@@ -24,7 +24,6 @@
 // reproducibility means for immutable data.
 
 namespace core          = "urn:eigenius:core";
-namespace reflection    = "urn:eigenius:reflection";
 namespace agent         = "urn:eigenius:prov:agent";
 namespace ingest        = "urn:eigenius:ingest";
 namespace onco          = "urn:eigenius:benchmark:onco";

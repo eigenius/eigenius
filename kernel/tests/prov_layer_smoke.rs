@@ -17,14 +17,14 @@
 //! `prov` carries the provenance axis — Agent, Activity, the four provenance
 //! Traces, and the relations between them — split out of `reflection` because
 //! that ontology had come to hold two unrelated families under one word:
-//! `reflection:Trace` with `LetTrace` / `MapTrace` / `CaseTrace` records how a
+//! `program:traces:Trace` with `LetTrace` / `MapTrace` / `CaseTrace` records how a
 //! PROGRAM EVALUATED, while the parentless `DeclarationTrace` /
 //! `ObservationTrace` / `ProductionTrace` / `VerificationTrace` record HOW A
 //! RESOURCE CAME TO EXIST.
 //!
 //! The layer sits ABOVE `reflection` and that direction is forced:
 //! `prov:ProgramTrace` points into the evaluation family through
-//! `prov:trace_tree` and `reflection:output`, and nothing in `reflection` points
+//! `prov:trace_tree` and `program:traces:output`, and nothing in `reflection` points
 //! back.
 
 use eigenius_kernel::ontology::iri::Iri;

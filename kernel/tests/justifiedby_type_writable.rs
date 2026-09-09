@@ -31,7 +31,7 @@ fn chain() -> Arc<eigenius_kernel::layer::Layer> {
 
     let mut refl = LayerBuilder::new("reflection", Some(core));
     for src in [
-        include_str!("../../ontologies/reflection/reflection-ontology.json"),
+        include_str!("../../ontologies/program/program-traces.json"),
         include_str!("../../ontologies/institution/institution-ontology.json"),
     ] {
         for r in eigon_json::parse_document(src).unwrap() {

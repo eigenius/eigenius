@@ -22,7 +22,7 @@
 //
 // WHY IT IS ITS OWN LAYER. This vocabulary sat inside `reflection` and was
 // interleaved with the kernel's evaluation machinery, which put two unrelated
-// families under one word: `reflection:Trace` with LetTrace / MapTrace /
+// families under one word: `program:traces:Trace` with LetTrace / MapTrace /
 // CaseTrace / ... records how a PROGRAM EVALUATED, while DeclarationTrace /
 // ObservationTrace / ProductionTrace / VerificationTrace record HOW A RESOURCE
 // CAME TO EXIST. The second family was parentless and shared nothing with the
@@ -63,11 +63,11 @@
 
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace prov       = "urn:eigenius:prov";
 namespace agent      = "urn:eigenius:prov:agent";
 namespace activity   = "urn:eigenius:prov:activity";
+namespace traces     = "urn:eigenius:program:traces";
 
 // ── Agents ───────────────────────────────────────────────────────────
 //
@@ -191,7 +191,7 @@ property prov:rationale : core:string {
 }
 
 property prov:timestamp : core:string {
-    description = "When the recorded event occurred, ISO-8601. On a Trace this is when the declaration, observation, production or verification took place. reflection:ComponentTrace used to recommend this property as well, which was its only non-provenance user and only ever a recommendation; that recommendation was dropped rather than duplicating a `when` property on both sides of the split, since a component evaluation's timing is what prov:started_at and prov:completed_at record.";
+    description = "When the recorded event occurred, ISO-8601. On a Trace this is when the declaration, observation, production or verification took place. program:traces:ComponentTrace used to recommend this property as well, which was its only non-provenance user and only ever a recommendation; that recommendation was dropped rather than duplicating a `when` property on both sides of the split, since a component evaluation's timing is what prov:started_at and prov:completed_at record.";
 }
 
 property prov:observed_at : core:string {
@@ -208,13 +208,13 @@ property prov:observed_at : core:string {
 // chain-resident and committed by whoever loaded the data, while the Activity it
 // points at through `prov:was_generated_by` is the event in the world.
 //
-// They are also NOT `reflection:Trace`. That name belongs to the kernel's
+// They are also NOT `program:traces:Trace`. That name belongs to the kernel's
 // program-evaluation machinery — LetTrace, MapTrace, CaseTrace and the rest,
 // which record how an expression reduced. The two families shared a word and
 // nothing else, which is why this one now lives here.
 
 class prov:Trace {
-    description = "A chain-resident record that some event brought a resource into existence, or established something about it. The abstract parent of the four provenance traces. Unrelated to reflection:Trace, which records how a program EVALUATED — these record how a resource CAME TO EXIST.";
+    description = "A chain-resident record that some event brought a resource into existence, or established something about it. The abstract parent of the four provenance traces. Unrelated to program:traces:Trace, which records how a program EVALUATED — these record how a resource CAME TO EXIST.";
     requires prov:resource;
     recommends prov:timestamp;
 }
@@ -246,7 +246,7 @@ class prov:ProgramTrace : prov:ProductionTrace {
     requires prov:resource, prov:was_generated_by, prov:timestamp;
     recommends prov:was_attributed_to, prov:rationale,
                prov:program, prov:started_at, prov:completed_at,
-               prov:trace_tree, prov:input, reflection:output,
+               prov:trace_tree, prov:input, traces:output,
                prov:total_tokens, prov:total_latency_ms,
                prov:cached_steps, prov:executed_steps;
 }
@@ -343,8 +343,8 @@ property prov:input : core:resource {
 }
 
 property prov:trace_tree : core:resource {
-    description = "The root of the kernel's step-by-step evaluation trace for this run — a reflection:Trace. One of two links from the provenance axis into the kernel's self-description (the other is reflection:output on ProgramTrace, which ComponentTrace and PureTrace REQUIRE, so it stays there): this says WHAT produced the resource, that says HOW the expression reduced. Both point downward, from prov into reflection; nothing in reflection points back, which is what fixes the layer order.";
-    class_types reflection:Trace;
+    description = "The root of the kernel's step-by-step evaluation trace for this run — a program:traces:Trace. One of two links from the provenance axis into the kernel's self-description (the other is program:traces:output on ProgramTrace, which ComponentTrace and PureTrace REQUIRE, so it stays there): this says WHAT produced the resource, that says HOW the expression reduced. Both point downward, from prov into reflection; nothing in reflection points back, which is what fixes the layer order.";
+    class_types traces:Trace;
     domain prov:ProgramTrace;
 }
 

@@ -43,7 +43,7 @@
 //      directly without dispatching the statistics institution
 //      (institution dispatch is exercised in the eigenius-statistics
 //      crate's own e2e tests). The is_a marker
-//      `reflection:InstitutionEmittedDerivation` is what the D49
+//      `institution:EmittedDerivation` is what the D49
 //      witness emitter walks to admit
 //      `IsDerivedAs(result_iri, stats:lt(...))` directly off the
 //      derivation, without needing a separate ProgramTrace.
@@ -84,21 +84,14 @@
 
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace screen     = "urn:eigenius:demo:screen";
-
-// The per-effect `StatisticalAnalysisResult` IRI scheme is
-// `{plan_iri}:result:{effect_name}` (kernel-emitted; see
-// `crates/eigenius-statistics/src/validate.rs::measurement_result_resource`).
-// `screen_result` is the namespace prefix for the result *of*
-// `claim_eig0291_lowic50`, so `screen_result:main_effect` lands at
-// `urn:eigenius:demo:screen:claim_eig0291_lowic50:result:main_effect`.
 namespace screen_result = "urn:eigenius:demo:screen:claim_eig0291_lowic50:result";
 namespace agent         = "urn:eigenius:prov:agent";
 namespace justification = "urn:eigenius:justification";
 namespace prov       = "urn:eigenius:prov";
+namespace institution = "urn:eigenius:institution";
 
 // ── Provenance activities ────────────────────────────────────────────
 // `prov:was_generated_by` is resource-typed: the event that produced an
@@ -196,7 +189,7 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
 // Pre-authored `StatisticalAnalysisResult` carrying the
 // `canonical_proposition` the verifier would emit if dispatched. The
 // multi-class header puts both `stats:StatisticalAnalysisResult` and
-// `reflection:InstitutionEmittedDerivation` on the resource's `is_a`
+// `institution:EmittedDerivation` on the resource's `is_a`
 // list — the second marker is what the D49 witness emitter walks to
 // admit `IsDerivedAs(result_iri, stats:lt(mean_of(s), 100.0))` against
 // the derivation's own IRI.
@@ -211,9 +204,9 @@ resource screen:claim_eig0291_lowic50 : stats:StatisticalAnalysisPlan {
 
 resource screen_result:main_effect :
     stats:StatisticalAnalysisResult,
-    reflection:InstitutionEmittedDerivation
+    institution:EmittedDerivation
 {
-    reflection:from_subject          = screen:claim_eig0291_lowic50;
+    institution:from_subject          = screen:claim_eig0291_lowic50;
     stats:verdict_ctor               = "Holds";
     stats:computed_statistic         = -2.49;
     stats:computed_p_value           = 0.064;

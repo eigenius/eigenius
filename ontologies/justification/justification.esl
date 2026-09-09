@@ -47,7 +47,6 @@
 namespace core          = "urn:eigenius:core";
 namespace formats       = "urn:eigenius:core:formats";
 namespace eigentt       = "urn:eigenius:eigentt";
-namespace reflection    = "urn:eigenius:reflection";
 namespace witness       = "urn:eigenius:witness";
 namespace justification = "urn:eigenius:justification";
 namespace prov       = "urn:eigenius:prov";

@@ -120,7 +120,7 @@ pub struct RunOutcome {
     /// Side-effect resources the language runtime emitted as artefacts
     /// of the dispatch (per D52 §6 / institution-emitted derivations).
     /// Each becomes a chain-resident
-    /// `reflection:InstitutionEmittedDerivation` carrying its own
+    /// `institution:EmittedDerivation` carrying its own
     /// `canonical_proposition`. Empty for substrate-hosted institutions
     /// whose only job is the pass/fail gate.
     pub derivations: Vec<eigenius_kernel::ontology::resource::Resource>,

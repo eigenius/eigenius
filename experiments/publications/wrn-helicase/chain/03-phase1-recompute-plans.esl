@@ -40,7 +40,6 @@
 
 namespace core       = "urn:eigenius:core";
 namespace formats    = "urn:eigenius:core:formats";
-namespace reflection = "urn:eigenius:reflection";
 namespace stats      = "urn:eigenius:measurements";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace onco       = "urn:eigenius:benchmark:onco";

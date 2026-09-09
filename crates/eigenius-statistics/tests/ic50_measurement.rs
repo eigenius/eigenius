@@ -61,7 +61,7 @@ fn build_ic50_chain() -> ExecutionContext {
     }
     let core = Arc::new(core_builder.build(LayerStorage::in_memory()));
 
-    let reflection_json = include_str!("../../../ontologies/reflection/reflection-ontology.json");
+    let reflection_json = include_str!("../../../ontologies/program/program-traces.json");
     let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for r in reflection_resources {
@@ -254,7 +254,7 @@ fn confirmatory_claim_recomputes_to_holds() {
 #[test]
 fn a_statistical_analysis_result_grounds_nothing_on_its_own() {
     // A `StatisticalAnalysisResult` used to admit an `IsDerivedAs` witness on its own IRI, off its
-    // `reflection:InstitutionEmittedDerivation` marker, so `DerivedEvidence(<plan>:result)` was a
+    // `institution:EmittedDerivation` marker, so `DerivedEvidence(<plan>:result)` was a
     // ground: the fact that a computation ran carried the claim.
     //
     // It does not. A computed claim rests on the assertion that the plan denotes a function

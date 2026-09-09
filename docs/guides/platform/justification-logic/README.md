@@ -307,7 +307,7 @@ The high-level shape, modeled on the drug-screening fixture:
 
 ## Composition with the statistics institution
 
-The computed ground in the worked example rests on a [D52 StatisticalAnalysisPlan](../statistics-institution/README.md). The statistics institution's `validate_analysis_plan` AutoOnLoad gate has already fired on the plan at commit, recomputed it from raw replicates, and emitted two things: a `Verdict`, and one `StatisticalAnalysisResult` per effect carrying the derived `canonical_proposition`. The kernel stamps that result `reflection:InstitutionEmittedDerivation` and sets `reflection:from_subject` to the plan.
+The computed ground in the worked example rests on a [D52 StatisticalAnalysisPlan](../statistics-institution/README.md). The statistics institution's `validate_analysis_plan` AutoOnLoad gate has already fired on the plan at commit, recomputed it from raw replicates, and emitted two things: a `Verdict`, and one `StatisticalAnalysisResult` per effect carrying the derived `canonical_proposition`. The kernel stamps that result `institution:EmittedDerivation` and sets `institution:from_subject` to the plan.
 
 **That result admits no witness.** It records what the run produced, which grounds nothing on its own. Its `canonical_proposition` is still load-bearing, but as the proposition an author's plan-reproducibility `justification:Declaration` is written AGAINST — the two must hash to the same key, which is what ties the declaration to what actually ran.
 

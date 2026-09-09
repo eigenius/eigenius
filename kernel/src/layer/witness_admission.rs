@@ -102,7 +102,7 @@ const CONCLUSION_PROOF_JUDGEMENT: &str = "urn:eigenius:justification:proof_judge
 ///
 /// - **self-attesting** — the key's IRI *is* the resource. A committed `justification:Conclusion`
 ///   whose judgement carries a proof is `Verified` on its own IRI. Reached by
-///   [`Layer::get_resource`], which is layer-local. A `reflection:InstitutionEmittedDerivation`
+///   [`Layer::get_resource`], which is layer-local. A `institution:EmittedDerivation`
 ///   used to be `Derived` on its own IRI (D52); it now attests nothing, because a program's
 ///   output is not a ground — see `trace_category`.
 /// - **trace-attested** — a Trace resource *defined in this layer* points at the target through
@@ -190,7 +190,7 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
 /// Could `resource` ever admit a `ChainWitness`?
 ///
 /// True for the seven classes [`layer_admits_witness`] can emit from: the five Trace classes, a
-/// `reflection:InstitutionEmittedDerivation`, and a `justification:Conclusion`. Stamped over a
+/// `institution:EmittedDerivation`, and a `justification:Conclusion`. Stamped over a
 /// layer's resources at write time into [`LayerHandle::has_witness_candidates`], so a chain walk can
 /// skip a layer that holds none without probing it — the job the materialised index used to do by
 /// caching an empty map.

@@ -85,7 +85,7 @@ pub struct AutoOnLoadDispatch {
     /// Side-effect resources the institution emitted as artefacts of
     /// validation — committed alongside the Verdict when it Holds,
     /// dropped when it Fails. Each derivation is marked
-    /// `reflection:InstitutionEmittedDerivation` and carries a
+    /// `institution:EmittedDerivation` and carries a
     /// `canonical_proposition` recording what the run produced. It grounds
     /// nothing on its own: the witness emitter used to walk these to admit
     /// `IsDerivedAs(derivation_iri, P)`, but a computed claim rests on the plan
@@ -582,14 +582,14 @@ pub fn allocate_invocation_iri() -> Iri {
 }
 
 /// Stamp the kernel-set linkage properties on each resource an institution
-/// emitted alongside its verdict: `reflection:from_subject` to the gated
-/// subject IRI, and `reflection:runtime_invocation` to the producing
+/// emitted alongside its verdict: `institution:from_subject` to the gated
+/// subject IRI, and `institution:runtime_invocation` to the producing
 /// RuntimeInvocation IRI (when one was allocated for this dispatch).
 ///
 /// The institution sets the resource's `@id` (typically a suffix off the gated
 /// subject, e.g. `{analysis_iri}:result:{effect_name}`) and the domain-specific
 /// properties. The kernel adds only the linkage, plus — for a derivation — the
-/// `reflection:InstitutionEmittedDerivation` marker class.
+/// `institution:EmittedDerivation` marker class.
 ///
 /// **The marker is not stamped on a `prov:Trace`.** Two kinds come through this
 /// channel. A derivation records WHAT A RUN PRODUCED and grounds nothing, which
@@ -610,7 +610,7 @@ pub fn finalize_emitted_resource(
     runtime_invocation_iri: Option<&Iri>,
     // The in-process `prov:Activity` this emission came out of, when there was no
     // `RuntimeInvocation` (G5). Stamped as `prov:was_generated_by`, which is the property that
-    // actually means "the Activity that produced this" — `reflection:runtime_invocation` is typed
+    // actually means "the Activity that produced this" — `institution:runtime_invocation` is typed
     // at `RuntimeInvocation` and cannot name a plain Activity.
     activity_iri: Option<&Iri>,
     mut emitted: Resource,

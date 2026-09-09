@@ -52,11 +52,11 @@
 //! IT FIRED FOR THE PROVENANCE SPLIT (`2026-08-30`), on ONE new layer, `prov`. The provenance
 //! axis — Agent, Activity, the four provenance Traces and the relations between them — moves out
 //! of `reflection` into its own namespace, because `reflection` had come to hold two unrelated
-//! families under one word: `reflection:Trace` with LetTrace / MapTrace / CaseTrace records how a
+//! families under one word: `program:traces:Trace` with LetTrace / MapTrace / CaseTrace records how a
 //! PROGRAM EVALUATED, while the parentless DeclarationTrace / ObservationTrace / ProductionTrace /
 //! VerificationTrace record HOW A RESOURCE CAME TO EXIST. `prov` sits ABOVE `reflection` and that
 //! direction is forced: `prov:ProgramTrace` reaches into the evaluation family through
-//! `prov:trace_tree` and `reflection:output`, and nothing in `reflection` reaches back. This entry
+//! `prov:trace_tree` and `program:traces:output`, and nothing in `reflection` reaches back. This entry
 //! records only the layer's ADDITION; the migration that empties the moved declarations out of
 //! `reflection` moves that layer too and is recorded separately.
 //!
@@ -152,24 +152,24 @@ use eigenius_kernel::bootstrap::current_manifest;
 /// panic message for the rest of the follow-through.
 const EXPECTED: &str = "core:9c0040b24f794fb3fe95a4ab9befd60178e8405ae727acfda38ab01ca175abb3
 program:429718a323b6bfcc3ff858277f73b2c15de724f9d1c1c2c2c220748295b3c726
-reflection:4557f9c8dcc755cb1a5d5b999b85a2631ad30b369849c9c526b9355fd1b4afc0
-prov:b5cd6d1f438dbf1272db60db232ecf0d1852f9f13da769ab460eb2fa6aa0d388
+program-traces:89a26cb0570d90ac8e0943687cc0f175e1cd1ea78a025196a247b636d1440f7a
+prov:20542e13c86885ca8d52fe5fde90e2f2b76baab83b8ed1e0c167362aa717d72f
 obo:b515192765257daf466b28bb4154d6155461c8c2d1302f945ec785f8a00bb959
-institution:94d7ba70bdb49cde8febceb2cef67d1421076b8c336e05cfe15f6e4c6aae263b
+institution:149ab16a9b3d48e3839a1881d1a72230d7c88d1281f109c58eb8b5f944e68379
 runtime:ada851931aeff9eed036621b306ca3eb25c0044d600c84dcad77c67973c1a22e
 formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:3a4cd1b1a75a5032fda484dea529bcf79678ec4d4fd060e13c6ef00d782e5fc2
-justification:99687bc66f191797bf462e09c1cdc56419f6b6b094d6529119597381e5998e53
-statistics:c0fa9ce038ad7b3a61a884c32432686eaa0a50fbc6c437cff8fbdbf6ce2dda6d
+justification:59e9c0aed15d07335223e080b1c3751619d6929f694861368001c7efc4fe65ac
+statistics:59a671a0c9e61f803bff3f9b0ce9b7fc00bb24a086b1256618b568a662ea8ee9
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
-reference:68ba154782d45cb0f2c943c8e9779370d5d95b894f41498703291bcd6c328844
+reference:d9a932b45f1455e4cf4212049b91f8d91bb48e7af21a6d3771c747b4030a9e51
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
-lexicon:520cf5997238198cfa1cae985f77c359c76f95f0d81562f84bd585c6c49a7061
+lexicon:7abaf0ae0953121d6b4e436b1a17fc3e7e25704d5d334c5e01828de978a05a0f
 ontology:7fb72a75946ca50e84df1aa1ae9207dc57676b96ef3c53879e82e4421f1aef43
 closed-class:33288e5e89e02bdf5ae493742599a9da95d9fd949eb665831be8353a93f7eaf4
-encoding:b0b6685952359c94e763a84305fe16b4e30c4bb4fd40970256138b48d2e7be57
+encoding:49432e5cce0e06c203e780b8f86653752262ba7739baafe4f60dee6a50df6441
 ";
 
 /// Per-layer diff, so the failure says WHICH ontology moved rather than only that something did. On

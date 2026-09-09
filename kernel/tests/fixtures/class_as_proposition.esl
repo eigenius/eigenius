@@ -10,7 +10,6 @@
 // same slot, which must keep validating.
 
 namespace core          = "urn:eigenius:core";
-namespace reflection    = "urn:eigenius:reflection";
 namespace screen        = "urn:eigenius:demo:screen";
 namespace agent         = "urn:eigenius:prov:agent";
 namespace justification = "urn:eigenius:justification";

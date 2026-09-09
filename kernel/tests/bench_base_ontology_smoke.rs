@@ -37,7 +37,7 @@ fn bench_core_and_harness_round_trip() {
     let core = Arc::new(core_builder.build(LayerStorage::in_memory()));
 
     // reflection (+ eigentt + institution), as in drug_screening.rs
-    let reflection_json = include_str!("../../ontologies/reflection/reflection-ontology.json");
+    let reflection_json = include_str!("../../ontologies/program/program-traces.json");
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for r in eigon_json::parse_document(reflection_json).unwrap() {
         reflection_builder.add_resource(r).unwrap();

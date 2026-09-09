@@ -58,9 +58,7 @@ fn chain_with_parse_vocabulary() -> Arc<Layer> {
     let core = Arc::new(core.build(LayerStorage::in_memory()));
 
     let mut refl = LayerBuilder::new("reflection", Some(core));
-    for src in [include_str!(
-        "../../ontologies/reflection/reflection-ontology.json"
-    )] {
+    for src in [include_str!("../../ontologies/program/program-traces.json")] {
         for r in eigon_json::parse_document(src).unwrap() {
             refl.add_resource(r).unwrap();
         }
@@ -722,6 +720,7 @@ fn nested_definitions_unfold_all_the_way_at_decode() {
     let src = r#"
         namespace ont = "urn:eigenius:ontology";
         namespace d   = "urn:eigenius:demo:esl";
+        namespace lexicon = "urn:eigenius:lexicon";
         def d:Inner(x : Set) : lexicon:Entity = ont:kind_of(x);
         def d:Outer(g : Set, a : Set) : Prop  = ont:prep_of(d:Inner(g), d:Inner(a));
     "#;

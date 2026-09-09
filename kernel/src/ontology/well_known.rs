@@ -479,7 +479,7 @@ pub const META_LEVEL: &str = "urn:eigenius:core:meta_level";
 // for a class to name. `VerifiedResource subclass_of DerivedResource` went with
 // them — it asserted an ordering between two grades the design holds to be
 // independent.
-/// `reflection:InstitutionEmittedDerivation` — marker subclass of
+/// `institution:EmittedDerivation` — marker subclass of
 /// `DerivedResource` for resources the kernel commits as side-effects of
 /// AutoOnLoad institution dispatches. It records what the run produced and
 /// grounds nothing on its own: the witness emitter used to walk these directly
@@ -487,15 +487,14 @@ pub const META_LEVEL: &str = "urn:eigenius:core:meta_level";
 /// `IsDerivedAs(derivation_iri, canonical_proposition)` per D49 §6, but a
 /// computed claim rests on the plan being DECLARED to denote a function of its
 /// input and on the input being OBSERVED, and no execution establishes either.
-pub const INSTITUTION_EMITTED_DERIVATION: &str =
-    "urn:eigenius:reflection:InstitutionEmittedDerivation";
-/// `reflection:from_subject` — the analysis/claim IRI that triggered
+pub const INSTITUTION_EMITTED_DERIVATION: &str = "urn:eigenius:institution:EmittedDerivation";
+/// `institution:from_subject` — the analysis/claim IRI that triggered
 /// the emission of an `InstitutionEmittedDerivation`. Bidirectional
 /// navigability between an analysis and its derivations.
-pub const FROM_SUBJECT: &str = "urn:eigenius:reflection:from_subject";
-/// `reflection:runtime_invocation` — back-pointer to the producing
+pub const FROM_SUBJECT: &str = "urn:eigenius:institution:from_subject";
+/// `institution:runtime_invocation` — back-pointer to the producing
 /// `RuntimeInvocation` on an `InstitutionEmittedDerivation`.
-pub const RUNTIME_INVOCATION: &str = "urn:eigenius:reflection:runtime_invocation";
+pub const RUNTIME_INVOCATION: &str = "urn:eigenius:institution:runtime_invocation";
 pub const DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
 pub const DERIVATION: &str = "urn:eigenius:prov:derivation";
 // `epistemic_status` and the four `epistemic:*` individuals went with the grade

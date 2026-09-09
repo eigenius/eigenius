@@ -6865,8 +6865,7 @@ mod tests {
         // declare `subclass_of reflection:DerivedResource`, so
         // reflection-ontology has to be in the layer chain before
         // justification.esl loads.
-        let reflection_json =
-            include_str!("../../../ontologies/reflection/reflection-ontology.json");
+        let reflection_json = include_str!("../../../ontologies/program/program-traces.json");
         let reflection_resources = eigon_json::parse_document(reflection_json).unwrap();
         let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
         for r in reflection_resources {

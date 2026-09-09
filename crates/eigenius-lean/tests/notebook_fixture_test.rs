@@ -747,7 +747,7 @@ resource probe:concl_patient_1_healthy : justification:Conclusion {
 /// them failing alone would leave the other two looking correct:
 ///
 /// 1. the institution emits a `prov:VerificationTrace` pointing at the claim;
-/// 2. the kernel does **not** stamp `reflection:InstitutionEmittedDerivation` on it — that class
+/// 2. the kernel does **not** stamp `institution:EmittedDerivation` on it — that class
 ///    says "grounds nothing", which is the opposite of what a trace is for;
 /// 3. `lookup_chain_witness` answers `true` for `Verified` on the claim's own proposition. This
 ///    is the one that matters: (1) and (2) are how it is reached, not what it delivers.

@@ -4024,6 +4024,7 @@ mod tests {
         let file = parse_str(
             r#"
             namespace ex = "urn:eigenius:example";
+            namespace core = "urn:eigenius:core";
 
             data ex:Void : Set {
             }
@@ -4439,6 +4440,7 @@ mod tests {
         let result = parse_str(
             r#"
             namespace ex = "urn:ex";
+            namespace core = "urn:eigenius:core";
             text_index { core:text_analyzer = "en-stem-v1"; }
             "#,
         );
@@ -4451,6 +4453,7 @@ mod tests {
         let result = parse_str(
             r#"
             namespace ex = "urn:ex";
+            namespace core = "urn:eigenius:core";
             vector_index { core:vec_dim = 1536; }
             "#,
         );

@@ -73,7 +73,7 @@ pub struct QueryOutcome {
     ///   Statistics emits one `StatisticalAnalysisResult` per ANOVA effect,
     ///   carrying a `canonical_proposition` recording the result (see
     ///   `DispatchOutcome::derivations`). The kernel stamps
-    ///   `reflection:InstitutionEmittedDerivation` on it.
+    ///   `institution:EmittedDerivation` on it.
     /// - a **`prov:Trace`** — what the check ESTABLISHED, which grounds a
     ///   witness. Lean emits a `prov:VerificationTrace` naming the claim on
     ///   `Verdict::Holds` (eigenius#160). The marker class is *not* stamped on
@@ -86,7 +86,7 @@ pub struct QueryOutcome {
     /// (typically suffixed off the gated subject — e.g.
     /// `{analysis_iri}:result:main_A`), and sets the domain-specific
     /// properties. The kernel stamps the cross-resource linkage properties
-    /// (`reflection:from_subject`, `reflection:runtime_invocation`) so every
+    /// (`institution:from_subject`, `institution:runtime_invocation`) so every
     /// emitted resource can navigate back to its producer.
     pub derivations: Vec<Resource>,
     /// Substrate-captured provenance fields, ready to be folded into a

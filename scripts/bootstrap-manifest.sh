@@ -35,7 +35,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SPECS=(
   "core:ontologies/core/core-ontology.json"
   "program:ontologies/program/program-ontology.json"
-  "reflection:ontologies/reflection/reflection-ontology.json"
+  "program-traces:ontologies/program/program-traces.json"
   "obo:ontologies/obo/obo-meta-ontology.json"
   "institution:ontologies/institution/institution-ontology.json"
   "runtime:ontologies/runtime/runtime-substrate-ontology.json"

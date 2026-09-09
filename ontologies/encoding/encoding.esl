@@ -19,7 +19,6 @@
 // pipeline-state shapes that have no existing equivalent.
 
 namespace core        = "urn:eigenius:core";
-namespace reflection  = "urn:eigenius:reflection";
 namespace eigentt     = "urn:eigenius:eigentt";
 namespace reference   = "urn:eigenius:reference";
 namespace lexicon     = "urn:eigenius:lexicon";

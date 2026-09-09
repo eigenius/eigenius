@@ -56,7 +56,7 @@ fn build_chain(fixture_source: &str, label: &str) -> ExecutionContext {
 
     let mut reflection_builder = LayerBuilder::new("reflection", Some(core));
     for source in [
-        include_str!("../../ontologies/reflection/reflection-ontology.json"),
+        include_str!("../../ontologies/program/program-traces.json"),
         include_str!("../../ontologies/institution/institution-ontology.json"),
     ] {
         for r in eigon_json::parse_document(source).unwrap() {

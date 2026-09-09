@@ -387,5 +387,38 @@
       "urn:eigenius:institution:runtimes:in_process"
     ],
     "urn:eigenius:core:domain": ["urn:eigenius:institution:Institution"]
+  },
+  {
+    "@id": "urn:eigenius:institution:EmittedDerivation",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:description": "A resource the kernel emitted as a side-effect of an AutoOnLoad institution dispatch — the result an institution computed from a gated analysis spec and its data. It records WHAT A RUN PRODUCED and grounds nothing: a computed claim rests on the plan being DECLARED to denote a function of its input, which no execution establishes, and on the input being OBSERVED, so the ground is App(Declared(plan), Observed(inputs)) and neither half comes from here. Subclassed reflection:DerivedResource until that class was deleted; it now subclasses nothing, because `the kernel produced it` is a provenance fact recorded by its prov:ProgramTrace rather than a kind of resource. Carries institution:from_subject (the gated subject), institution:runtime_invocation (the producing invocation) and eigentt:proposition (what it computed).",
+    "urn:eigenius:core:short_name": "InstitutionEmittedDerivation",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:institution:from_subject"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:institution:runtime_invocation",
+      "urn:eigenius:eigentt:proposition"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:institution:from_subject",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "The gated subject (analysis spec, claim, etc.) the institution ran against to produce this derivation. Lets the per-derivation resource be navigated back to the resource that triggered its emission.",
+    "urn:eigenius:core:short_name": "from_subject",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
+  },
+  {
+    "@id": "urn:eigenius:institution:runtime_invocation",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "Back-pointer to the producing `runtime:RuntimeInvocation` on an InstitutionEmittedDerivation. The RuntimeInvocation in turn carries `runtime:output` pointing at this derivation, completing the bidirectional provenance link.",
+    "urn:eigenius:core:short_name": "runtime_invocation",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource"
   }
 ]

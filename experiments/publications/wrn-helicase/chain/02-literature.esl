@@ -31,7 +31,6 @@
 // provenance citations — are authored and cite-able; not yet composed.)
 
 namespace core       = "urn:eigenius:core";
-namespace reflection = "urn:eigenius:reflection";
 namespace reference  = "urn:eigenius:reference";
 namespace lit        = "urn:eigenius:reference:lit";
 namespace litclaim   = "urn:eigenius:pub:wrn:litclaim";

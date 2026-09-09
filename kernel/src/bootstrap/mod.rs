@@ -270,9 +270,15 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
         source: include_str!("../../../ontologies/program/program-ontology.json"),
         format: OntologyFormat::Json,
     },
+    // program:traces — the per-step evaluation record of a `program:` program: LetTrace, MapTrace,
+    // ReduceTrace, CaseTrace, ConstructTrace, ProjectTrace, ComponentTrace, one for nearly every
+    // construct the layer below declares. Was `reflection`, which named why the vocabulary existed
+    // (the kernel describing itself) rather than what is in it, and so accumulated three unrelated
+    // families. NOT `prov:Trace`: these record how a program EVALUATED, those record how a resource
+    // CAME TO EXIST.
     BootstrapOntology {
-        name: "reflection",
-        source: include_str!("../../../ontologies/reflection/reflection-ontology.json"),
+        name: "program-traces",
+        source: include_str!("../../../ontologies/program/program-traces.json"),
         format: OntologyFormat::Json,
     },
     // prov — the provenance axis (Agent / Activity / the four provenance Traces
@@ -1297,7 +1303,7 @@ class p:Cat { description = "a dog"; }"#;
     }
 
     #[test]
-    fn can_resolve_reflection_classes() {
+    fn can_resolve_program_trace_classes() {
         let ctx = bootstrap().unwrap();
         // Only the EVALUATION family is left here. The provenance traces
         // (ProgramTrace / DeclarationTrace / ObservationTrace / VerificationTrace)
@@ -1312,10 +1318,10 @@ class p:Cat { description = "a dog"; }"#;
             "CaseTrace",
             "ConstructTrace",
         ] {
-            let iri = Iri::parse(&format!("urn:eigenius:reflection:{class}")).unwrap();
+            let iri = Iri::parse(&format!("urn:eigenius:program:traces:{class}")).unwrap();
             assert!(
                 ctx.resolve(&iri).is_some(),
-                "should resolve reflection class {class}"
+                "should resolve program:traces class {class}"
             );
         }
     }

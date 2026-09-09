@@ -274,7 +274,7 @@ fn every_shipped_inductive_round_trips_through_esl() {
     for file in [
         "../ontologies/core/core-ontology.json",
         "../ontologies/formulas/formulas-ontology.json",
-        "../ontologies/reflection/reflection-ontology.json",
+        "../ontologies/program/program-traces.json",
     ] {
         let Ok(text) = std::fs::read_to_string(file) else {
             continue;

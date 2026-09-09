@@ -51,7 +51,6 @@
 namespace core        = "urn:eigenius:core";
 namespace formats     = "urn:eigenius:core:formats";
 namespace eigentt     = "urn:eigenius:eigentt";
-namespace reflection  = "urn:eigenius:reflection";
 namespace institution = "urn:eigenius:institution";
 namespace stats       = "urn:eigenius:measurements";
 namespace agent       = "urn:eigenius:prov:agent";
@@ -1101,17 +1100,17 @@ class stats:ImpossibilityWitness {
 //   - stats:verdict_ctor — the per-effect Holds/Fails decision
 //     (independent of the institutional gate Verdict, which attests
 //     "the SAP was well-formed and runnable")
-//   - reflection:from_subject — back-pointer to the StatisticalAnalysisPlan
-//     (stamped by the kernel via `reflection:InstitutionEmittedDerivation`)
-//   - reflection:runtime_invocation — back-pointer to the producing
+//   - institution:from_subject — back-pointer to the StatisticalAnalysisPlan
+//     (stamped by the kernel via `institution:EmittedDerivation`)
+//   - institution:runtime_invocation — back-pointer to the producing
 //     RuntimeInvocation (also kernel-stamped)
 //
 // Per-effect IRI scheme: `{analysis_iri}:result:{effect_name}`. For
 // single-effect dispatches that's `:result:main_effect`; for
 // factorial it's `:result:main_A`, `:result:interaction_AB`, etc.
 
-class stats:StatisticalAnalysisResult : reflection:InstitutionEmittedDerivation {
-    description = "Per-effect derived resource the statistics institution emits as an artefact of validating a StatisticalAnalysisPlan. Carries the canonical_proposition the chain attests (the derived alternative hypothesis), the recomputed numerics, and the per-effect Holds/Fails decision. Linked back to the analysis spec via reflection:from_subject and to its RuntimeInvocation via reflection:runtime_invocation (both stamped by the kernel). It is the record of a run, not a ground: a computed claim rests on the assertion that the PLAN denotes a function of its input — which no execution establishes, determinism being a fact about the environment rather than something recoverable from having run once — and on the INPUT. So downstream D39 reasoning grounds it as App(Declared(plan_yields_effect), Observed(sample_set)), and this resource admits no witness of its own.";
+class stats:StatisticalAnalysisResult : institution:EmittedDerivation {
+    description = "Per-effect derived resource the statistics institution emits as an artefact of validating a StatisticalAnalysisPlan. Carries the canonical_proposition the chain attests (the derived alternative hypothesis), the recomputed numerics, and the per-effect Holds/Fails decision. Linked back to the analysis spec via institution:from_subject and to its RuntimeInvocation via institution:runtime_invocation (both stamped by the kernel). It is the record of a run, not a ground: a computed claim rests on the assertion that the PLAN denotes a function of its input — which no execution establishes, determinism being a fact about the environment rather than something recoverable from having run once — and on the INPUT. So downstream D39 reasoning grounds it as App(Declared(plan_yields_effect), Observed(sample_set)), and this resource admits no witness of its own.";
     requires stats:verdict_ctor,
              stats:computed_statistic,
              stats:computed_p_value;

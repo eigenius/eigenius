@@ -6,7 +6,6 @@ namespace encoding = "urn:eigenius:encoding";
 namespace logic = "urn:eigenius:logic";
 namespace ontology = "urn:eigenius:ontology";
 namespace reference = "urn:eigenius:reference";
-namespace reflection = "urn:eigenius:reflection";
 namespace umlscui = "urn:eigenius:umlscui";
 namespace v2 = "urn:eigenius:demo:v2";
 namespace wn = "urn:eigenius:wn";

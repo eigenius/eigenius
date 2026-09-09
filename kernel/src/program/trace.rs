@@ -265,12 +265,12 @@ impl TraceStore for InMemoryTraceStore {
 
 /// Typed placeholder for a positional trace slot with no computation
 /// (a pure Map element, Reduce step, or Construct field). Class-typed
-/// as `reflection:EmptyTrace` so trace-child properties can be
-/// constrained to `reflection:Trace` without admitting untyped
+/// as `program:traces:EmptyTrace` so trace-child properties can be
+/// constrained to `program:traces:Trace` without admitting untyped
 /// embedded resources.
 fn empty_trace_resource() -> Resource {
     let mut r = Resource::new_embedded();
-    set_is_a(&mut r, "urn:eigenius:reflection:EmptyTrace");
+    set_is_a(&mut r, "urn:eigenius:program:traces:EmptyTrace");
     r
 }
 
@@ -283,20 +283,20 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
             body_trace,
         } => {
             let mut r = Resource::new_embedded();
-            set_is_a(&mut r, "urn:eigenius:reflection:LetTrace");
+            set_is_a(&mut r, "urn:eigenius:program:traces:LetTrace");
             r.set(
-                Iri::parse("urn:eigenius:reflection:name").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:name").unwrap(),
                 Value::String(name.clone()),
             );
             if let Some(vt) = value_trace {
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:value_trace").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:value_trace").unwrap(),
                     Value::Embedded(Box::new(trace_to_resource(vt))),
                 );
             }
             if let Some(bt) = body_trace {
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:body_trace").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:body_trace").unwrap(),
                     Value::Embedded(Box::new(trace_to_resource(bt))),
                 );
             }
@@ -304,48 +304,48 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
         }
         Trace::Component(ct) => {
             let mut r = Resource::new_embedded();
-            set_is_a(&mut r, "urn:eigenius:reflection:ComponentTrace");
+            set_is_a(&mut r, "urn:eigenius:program:traces:ComponentTrace");
             r.set(
-                Iri::parse("urn:eigenius:reflection:component").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:component").unwrap(),
                 Value::String(ct.component.clone()),
             );
             r.set(
-                Iri::parse("urn:eigenius:reflection:input_hash").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:input_hash").unwrap(),
                 Value::String(hex::encode(ct.input_hash)),
             );
             if let Some(ah) = &ct.argument_hash {
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:argument_hash").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:argument_hash").unwrap(),
                     Value::String(hex::encode(ah)),
                 );
             }
             r.set(
-                Iri::parse("urn:eigenius:reflection:output").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:output").unwrap(),
                 Value::Embedded(Box::new(ct.output.clone())),
             );
             r.set(
-                Iri::parse("urn:eigenius:reflection:cached").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:cached").unwrap(),
                 Value::Boolean(ct.cached),
             );
             if let Some(m) = &ct.metrics {
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:provider").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:provider").unwrap(),
                     Value::String(m.provider.clone()),
                 );
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:model").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:model").unwrap(),
                     Value::String(m.model.clone()),
                 );
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:prompt_tokens").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:prompt_tokens").unwrap(),
                     Value::Integer(m.prompt_tokens),
                 );
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:completion_tokens").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:completion_tokens").unwrap(),
                     Value::Integer(m.completion_tokens),
                 );
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:latency_ms").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:latency_ms").unwrap(),
                     Value::Integer(m.latency_ms),
                 );
             }
@@ -353,13 +353,13 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
         }
         Trace::Pure { component, output } => {
             let mut r = Resource::new_embedded();
-            set_is_a(&mut r, "urn:eigenius:reflection:PureTrace");
+            set_is_a(&mut r, "urn:eigenius:program:traces:PureTrace");
             r.set(
-                Iri::parse("urn:eigenius:reflection:component").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:component").unwrap(),
                 Value::String(component.clone()),
             );
             r.set(
-                Iri::parse("urn:eigenius:reflection:output").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:output").unwrap(),
                 Value::Embedded(Box::new(output.clone())),
             );
             r
@@ -371,22 +371,22 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
             target_class,
         } => {
             let mut r = Resource::new_embedded();
-            set_is_a(&mut r, "urn:eigenius:reflection:ComorphismTrace");
+            set_is_a(&mut r, "urn:eigenius:program:traces:ComorphismTrace");
             r.set(
-                Iri::parse("urn:eigenius:reflection:comorphism").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:comorphism").unwrap(),
                 Value::String(comorphism_iri.clone()),
             );
             r.set(
-                Iri::parse("urn:eigenius:reflection:target_iri").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:target_iri").unwrap(),
                 Value::String(target_iri.clone()),
             );
             r.set(
-                Iri::parse("urn:eigenius:reflection:target_class").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:target_class").unwrap(),
                 Value::String(target_class.clone()),
             );
             if let Some(st) = source_trace {
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:source_trace").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:source_trace").unwrap(),
                     Value::Embedded(Box::new(trace_to_resource(st))),
                 );
             }
@@ -394,7 +394,7 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
         }
         Trace::Map { element_traces } => {
             let mut r = Resource::new_embedded();
-            set_is_a(&mut r, "urn:eigenius:reflection:MapTrace");
+            set_is_a(&mut r, "urn:eigenius:program:traces:MapTrace");
             let traces: Vec<Value> = element_traces
                 .iter()
                 .map(|t| match t {
@@ -403,14 +403,14 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
                 })
                 .collect();
             r.set(
-                Iri::parse("urn:eigenius:reflection:element_traces").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:element_traces").unwrap(),
                 Value::Array(traces),
             );
             r
         }
         Trace::Reduce { step_traces } => {
             let mut r = Resource::new_embedded();
-            set_is_a(&mut r, "urn:eigenius:reflection:ReduceTrace");
+            set_is_a(&mut r, "urn:eigenius:program:traces:ReduceTrace");
             let traces: Vec<Value> = step_traces
                 .iter()
                 .map(|t| match t {
@@ -419,7 +419,7 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
                 })
                 .collect();
             r.set(
-                Iri::parse("urn:eigenius:reflection:step_traces").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:step_traces").unwrap(),
                 Value::Array(traces),
             );
             r
@@ -430,20 +430,20 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
             branch_trace,
         } => {
             let mut r = Resource::new_embedded();
-            set_is_a(&mut r, "urn:eigenius:reflection:CaseTrace");
+            set_is_a(&mut r, "urn:eigenius:program:traces:CaseTrace");
             if let Some(st) = scrutinee_trace {
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:scrutinee_trace").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:scrutinee_trace").unwrap(),
                     Value::Embedded(Box::new(trace_to_resource(st))),
                 );
             }
             r.set(
-                Iri::parse("urn:eigenius:reflection:branch_taken").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:branch_taken").unwrap(),
                 Value::String(branch_taken.clone()),
             );
             if let Some(bt) = branch_trace {
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:branch_trace").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:branch_trace").unwrap(),
                     Value::Embedded(Box::new(trace_to_resource(bt))),
                 );
             }
@@ -451,7 +451,7 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
         }
         Trace::Construct { field_traces } => {
             let mut r = Resource::new_embedded();
-            set_is_a(&mut r, "urn:eigenius:reflection:ConstructTrace");
+            set_is_a(&mut r, "urn:eigenius:program:traces:ConstructTrace");
             // One typed FieldTrace entry per constructed property. (An
             // earlier encoding abused an untyped embedded resource as an
             // IRI-keyed map, which recursive validation rightly rejects:
@@ -460,9 +460,9 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
                 .iter()
                 .map(|(iri, t)| {
                     let mut entry = Resource::new_embedded();
-                    set_is_a(&mut entry, "urn:eigenius:reflection:FieldTrace");
+                    set_is_a(&mut entry, "urn:eigenius:program:traces:FieldTrace");
                     entry.set(
-                        Iri::parse("urn:eigenius:reflection:property").unwrap(),
+                        Iri::parse("urn:eigenius:program:traces:property").unwrap(),
                         Value::iri(iri),
                     );
                     let trace_node = match t {
@@ -470,14 +470,14 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
                         None => empty_trace_resource(),
                     };
                     entry.set(
-                        Iri::parse("urn:eigenius:reflection:trace").unwrap(),
+                        Iri::parse("urn:eigenius:program:traces:trace").unwrap(),
                         Value::Embedded(Box::new(trace_node)),
                     );
                     Value::Embedded(Box::new(entry))
                 })
                 .collect();
             r.set(
-                Iri::parse("urn:eigenius:reflection:field_traces").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:field_traces").unwrap(),
                 Value::Array(entries),
             );
             r
@@ -487,28 +487,28 @@ pub fn trace_to_resource(trace: &Trace) -> Resource {
             property,
         } => {
             let mut r = Resource::new_embedded();
-            set_is_a(&mut r, "urn:eigenius:reflection:ProjectTrace");
+            set_is_a(&mut r, "urn:eigenius:program:traces:ProjectTrace");
             if let Some(st) = source_trace {
                 r.set(
-                    Iri::parse("urn:eigenius:reflection:source_trace").unwrap(),
+                    Iri::parse("urn:eigenius:program:traces:source_trace").unwrap(),
                     Value::Embedded(Box::new(trace_to_resource(st))),
                 );
             }
             r.set(
-                Iri::parse("urn:eigenius:reflection:property").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:property").unwrap(),
                 Value::iri(property),
             );
             r
         }
         Trace::Seq(children) => {
             let mut r = Resource::new_embedded();
-            set_is_a(&mut r, "urn:eigenius:reflection:SeqTrace");
+            set_is_a(&mut r, "urn:eigenius:program:traces:SeqTrace");
             let traces: Vec<Value> = children
                 .iter()
                 .map(|t| Value::Embedded(Box::new(trace_to_resource(t))))
                 .collect();
             r.set(
-                Iri::parse("urn:eigenius:reflection:child_traces").unwrap(),
+                Iri::parse("urn:eigenius:program:traces:child_traces").unwrap(),
                 Value::Array(traces),
             );
             r
@@ -629,9 +629,9 @@ mod tests {
         };
         let r = trace_to_resource(&trace);
         let is_a = r.is_a();
-        assert_eq!(is_a[0].as_str(), "urn:eigenius:reflection:LetTrace");
+        assert_eq!(is_a[0].as_str(), "urn:eigenius:program:traces:LetTrace");
         let name = r
-            .get(&Iri::parse("urn:eigenius:reflection:name").unwrap())
+            .get(&Iri::parse("urn:eigenius:program:traces:name").unwrap())
             .unwrap();
         assert_eq!(name.as_str(), Some("x"));
     }
@@ -648,7 +648,10 @@ mod tests {
         });
         let r = trace_to_resource(&trace);
         let is_a = r.is_a();
-        assert_eq!(is_a[0].as_str(), "urn:eigenius:reflection:ComponentTrace");
+        assert_eq!(
+            is_a[0].as_str(),
+            "urn:eigenius:program:traces:ComponentTrace"
+        );
     }
 
     #[test]

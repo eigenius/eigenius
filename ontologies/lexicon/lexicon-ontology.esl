@@ -18,7 +18,6 @@
 
 namespace core       = "urn:eigenius:core";
 namespace normalizers = "urn:eigenius:core:normalizers";
-namespace reflection = "urn:eigenius:reflection";
 namespace epistemic  = "urn:eigenius:reflection:epistemic";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace lexicon    = "urn:eigenius:lexicon";

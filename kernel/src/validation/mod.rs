@@ -1977,7 +1977,7 @@ mod tests {
         );
     }
 
-    /// `trace_tree` is class-typed to the `reflection:Trace` base class:
+    /// `trace_tree` is class-typed to the `program:traces:Trace` base class:
     /// a well-typed node (any concrete trace class, via `subclass_of`)
     /// passes Rule 8; an untyped embedded resource — the shape the old
     /// placeholder encoding produced — is rejected at the tree root.
@@ -2015,7 +2015,7 @@ mod tests {
         };
 
         // Well-typed root: a concrete trace node class matches the
-        // `reflection:Trace` constraint via subclass_of.
+        // `program:traces:Trace` constraint via subclass_of.
         let typed_tree = crate::program::trace::trace_to_resource(
             &crate::program::trace::Trace::Seq(Vec::new()),
         );
@@ -2076,13 +2076,13 @@ mod tests {
         set_is_a(&mut deep, "urn:eigenius:reflection:NoSuchTrace");
         // Wrap it in a valid LetTrace body_trace.
         let mut let_trace = Resource::new_embedded();
-        set_is_a(&mut let_trace, "urn:eigenius:reflection:LetTrace");
+        set_is_a(&mut let_trace, "urn:eigenius:program:traces:LetTrace");
         let_trace.set(
-            iri("urn:eigenius:reflection:name"),
+            iri("urn:eigenius:program:traces:name"),
             Value::String("x".to_string()),
         );
         let_trace.set(
-            iri("urn:eigenius:reflection:body_trace"),
+            iri("urn:eigenius:program:traces:body_trace"),
             Value::Embedded(Box::new(deep)),
         );
 
