@@ -29,9 +29,25 @@ any detour.
 > units, grammar-gap 0, 674 readings, 30/41 reading-correct, histogram matching bucket for bucket.
 > The rename was a rename.
 >
-> **Open, and deliberately not done here.** `instantiate` keeps all four arguments;
-> `implicit(T, P)` needs the unifier work in `a28077e`, whose scope check identifies generated
-> variables by name and cannot do so reliably. Enabling it later costs a second reseed.
+> **Closed `2026-09-09` (`8c00a53`), the one thing D89 left open.** `instantiate` now declares
+> `implicit(T, P)` and ten call sites lost two arguments each. It waited on the unifier's scope
+> check, which identified generated variables by reading names back and so admitted exactly what it
+> exists to refuse; that check now walks levels and refuses shapes it cannot see inside
+> (`UnifyError::Undecidable`). Enabling it exposed a gap the deferral had hidden: a solved implicit
+> binder was never checked against its declared type, invisible while `app` was the only implicit
+> constructor because its `A` and `B` are both `Prop`.
+>
+> **A SECOND RESEED IS OWED, and it is the only thing standing between here and a working stack.**
+> Three commits moved the manifest after the `2026-09-08` reseed, on two layers:
+>
+> | commit | layers | what moved |
+> |---|---|---|
+> | `5713210` | `core`, `justification` | the witness-admission rename, description text |
+> | `8c00a53` | `justification` | `instantiate` declares `implicit(T, P)` |
+> | `f028386` | `core` | three sentences the rename missed; the drift log's own entries |
+>
+> Both `2026-09-08` snapshots and the docker volume refuse to resume until it runs. Docker was not
+> reachable from this WSL distro on `2026-09-09`; `db-snapshot` has 592 GiB free, which is ample.
 
 > **entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
 > (`docs/design/judgements-and-warrants.tex`) is the design; **P0 of
