@@ -55,7 +55,11 @@ counted the notebook and missed the WRN publication chain. See D88 §2. The 32 r
 `x = Declared(IRI)` aliases it left were removed by hand in `ce670ba`, along with the comments that
 still described `justification:Term` as current.
 
-### B3 — declare the leaf IRI-valued (D88 §3) — **NEXT**
+### B3 — declare the leaf IRI-valued (D88 §3) — **DONE `2026-09-06`** (`f629c31`)
+
+Landed as scoped: `core:iri` is a sixth `PrimitiveType`, a refinement of `String` rather than a
+separate carrier, reachable only in CHECK mode because a bare literal cannot know which it is meant
+to be.
 
 **The sub-choice is resolved, and B2 moved the ground under it.** The note offered a `core:iri`
 DataType *or* a format slot on `InductiveArgType`. The second reaches one of the seven slots. It was
@@ -86,7 +90,14 @@ the consumer as one step and they are not: `json_mentions_of_value` walks an ENC
 string's role is invisible without the constructor schema, so declaring the leaf does not by itself
 retire `s.starts_with("urn:")`.
 
-### B6 — make `core:mentions` read the declaration (D88 §3, second half)
+### B6 — make `core:mentions` read the declaration (D88 §3, second half) — **DONE `2026-09-06`** (`67be827`)
+
+The walker dispatches on declared types and the `urn:` test is gone from it. Two more constructor
+arguments had to be retyped to hold it — `ConstRef.iri` and `CtorApp.decl_iri` — which B3 had missed
+precisely because the heuristic recovered them anyway. `CtorApp.ctor_name` stays `core:string`: a
+constructor has no chain-resolvable identity, so it names no declaration.
+
+**Its last paragraph is the one thing in this note still open.** See the OPEN marker below.
 
 The mechanism, found while doing B3 so it is not rediscovered: each argument of an encoded value is
 carried under a property named `<ctor-class>-<arg-name>`, and **those are real chain resources
@@ -106,6 +117,16 @@ Two reasons it is its own change rather than a rider on B3:
 
 The same heuristic also sits at `program/expr.rs:903` and `nbe/eval/marshal.rs:35`; whether those
 are the same question is B6's to answer.
+
+**OPEN (`2026-09-09`). B6 did not answer it, and both sites still match `urn:`.** `parse_literal`
+turns a program literal into `Exp::Var` when the string parses as an IRI and starts with `urn:` or
+`http`; `resource_value_to_val` turns a property value into `Val::EigonClass` on the same test.
+Neither is the mentions walk, so B6's fix does not reach them, and neither reads a declared type
+even though `core:iri` now exists to be read. `resource_value_to_val` is half of eigenius#195, whose
+other half — the `RVal::String` wrapper — is the same function. `parse_literal` is tracked nowhere.
+The two differ in what they have to consult: `parse_literal` has the program resource and can reach
+`core:data_type` off the property, while `resource_value_to_val` takes only a `Value` and would need
+the slot threaded in, which is what its own doc comment defers to "Phase 11+".
 
 ### B4 — one reseed, then both baselines — **DONE `2026-09-07`** (`5114c99`)
 
@@ -148,7 +169,25 @@ draw is a draw, not a measurement — replay is the comparison.
 
 ## C. Decisions
 
-### C1 — make `instantiate`'s `T` and `P` implicit · **scoped, prototyped, not landed**
+### C1 — make `instantiate`'s `T` and `P` implicit · **DONE `2026-09-09`** (`8c00a53`)
+
+**Landed as scoped.** `x` stayed explicit for the reason given below; `T` and `P` are implicit. The
+blocker in the last paragraph was resolved the second way it names: the scope check now walks
+LEVELS rather than reconstructing them from names, entering binders the way readback does and
+recording each level it introduces. Shapes it cannot see inside — those carrying a `Rho` or an
+uninterpreted payload — return no answer at all, and the caller refuses with `UnifyError::Undecidable`
+rather than guessing. Two regressions pin it: the same escape refused under five different name
+tags, and an opaque shape refused rather than solved.
+
+**It cost a gap that had been invisible.** A solved implicit binder was never checked against its
+declared type. `app` hid this, its `A` and `B` both being `Prop` and both solved by unifying a
+well-typed `Grounds(A -> B)`. `instantiate`'s `T : Type 1` is the first implicit binder whose
+declared type constrains anything, and without the check a binder rewritten to `T : Set` admitted
+`T := Set`. Every implicit binder is now checked after the argument loop, which is where it has to
+happen: `instantiate`'s `T` is solved two slots later, by the premise.
+
+*What follows is the entry as written before the work, kept for the analysis.*
+
 
 *Retitled `2026-09-08`. The constructor is now `instantiate` (D89 §3). This entry said "widen the
 unification fragment past first-order patterns · not needed", and both halves were wrong about
