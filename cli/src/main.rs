@@ -962,6 +962,18 @@ enum DbCommands {
         #[arg(value_name = "PATH")]
         path: String,
     },
+    /// Print this build's bootstrap seed manifest — `name:content-hash` per layer.
+    ///
+    /// The same bytes `bootstrap::current_manifest()` computes, because it calls it. A store
+    /// records this at seed time and refuses to boot against a binary whose manifest differs
+    /// ("seed manifest drift"), so this is what you diff against a kernel's `stored:` list.
+    ///
+    /// The hash is NOT over raw source bytes (eigenius#213): JSON is parsed and canonicalised
+    /// per resource, ESL is reduced to its token kinds. Reindenting a file or rewording a
+    /// comment therefore does not move it — which is the whole point, since raw bytes made
+    /// every reflow a forced reseed. That is also why this cannot be reproduced with
+    /// `sha256sum`, and why it lives here rather than in a shell script.
+    Manifest,
     /// Trigger manual compaction
     Compact {
         /// RocksDB path
@@ -2544,6 +2556,16 @@ fn cmd_db(command: DbCommands) {
     use eigenius_kernel::storage::ResourceBackend;
 
     match command {
+        DbCommands::Manifest => {
+            // Straight through to the authority. Anything that recomputes this rather than
+            // calling it goes stale the next time the hash basis changes, which is what
+            // happened to `scripts/bootstrap-manifest.sh` after eigenius#213.
+            print!(
+                "{}",
+                String::from_utf8(eigenius_kernel::bootstrap::current_manifest())
+                    .expect("the manifest is utf-8")
+            );
+        }
         DbCommands::Stats { path } => {
             let store = eigenius_storage_rocksdb::RocksStore::open(std::path::Path::new(&path))
                 .unwrap_or_else(|e| {

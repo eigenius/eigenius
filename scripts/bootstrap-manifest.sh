@@ -31,38 +31,29 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Order and paths mirror BOOTSTRAP_SPECS in kernel/src/bootstrap/mod.rs.
-SPECS=(
-  "core:ontologies/core/core-ontology.json"
-  "program:ontologies/program/program-ontology.json"
-  "program-traces:ontologies/program/program-traces.json"
-  "obo:ontologies/obo/obo-meta-ontology.json"
-  "institution:ontologies/institution/institution-ontology.json"
-  "runtime:ontologies/runtime/runtime-substrate-ontology.json"
-  "formulas:ontologies/formulas/formulas-ontology.json"
-  "lean-expressions:ontologies/lean/lean-expressions.eigon.json"
-  "lean-runtime-classes:ontologies/lean/lean-runtime-classes.eigon.json"
-  "lean-institution:ontologies/lean/lean-institution.eigon.json"
-  "reasoning:ontologies/justification/justification.esl"
-  "statistics:ontologies/statistics/statistics.esl"
-  "notebook:ontologies/notebook/notebook-ontology.json"
-  "ingest:ontologies/ingest/ingest-ontology.json"
-  "reference:ontologies/reference/reference.esl"
-  "logic:ontologies/logic/logic.esl"
-  "lexicon:ontologies/lexicon/lexicon-ontology.esl"
-  "ontology:ontologies/ontology/ontology.esl"
-  "closed-class:ontologies/lexicon/closed-class.esl"
-)
-
+# The manifest comes from the kernel, not from this script.
+#
+# This file used to keep its own copy of the layer list and hash each file with `sha256sum`.
+# Both halves rotted. The list drifted — it lost `prov` and `encoding`, kept a
+# `lean-expressions` the chain does not load, and still called `justification` by its old name
+# `reasoning`. And the hashing was left behind by eigenius#213, which replaced raw-byte hashing
+# with a presentation-insensitive form: JSON is parsed and canonicalised per resource, ESL is
+# reduced to its token kinds, so that reindenting a file or rewording a comment no longer forces
+# a ~40-minute reseed. `sha256sum` cannot produce that, so every line this script printed was
+# wrong for every layer — silently, in the one diagnostic it exists to serve.
+#
+# Reproducing either half here would only re-rot. `eigenius db manifest` calls
+# `bootstrap::current_manifest()` directly; this script now runs it and keeps the `--diff` view.
+# BUILD, do not reuse. This tool answers "what is THIS tree's manifest", so a stale binary
+# gives a stale answer — and once the subcommand exists everywhere, it gives it silently, which
+# is the failure this rewrite exists to remove. `cargo run` is the correct default even though
+# it is slower; set EIGENIUS_BIN to skip it when you know the binary is current.
 manifest() {
-  for spec in "${SPECS[@]}"; do
-    name="${spec%%:*}"; path="${spec#*:}"
-    if [[ ! -f "$ROOT/$path" ]]; then
-      echo "$name:<MISSING $path>"
-    else
-      echo "$name:$(sha256sum "$ROOT/$path" | cut -d' ' -f1)"
-    fi
-  done
+  if [[ -n "${EIGENIUS_BIN:-}" ]]; then
+    "$EIGENIUS_BIN" db manifest
+  else
+    cargo run -q --manifest-path "$ROOT/Cargo.toml" -p eigenius-cli -- db manifest
+  fi
 }
 
 if [[ "${1:-}" == "--diff" ]]; then
