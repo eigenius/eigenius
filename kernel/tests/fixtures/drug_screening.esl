@@ -39,7 +39,7 @@
 //      `{plan_iri}:result:main_effect` carrying the
 //      `canonical_proposition` the verifier would emit:
 //      `stats:lt(stats:mean_of("urn:...:m_eig0291_sampleset"), 100.0)`.
-//      Pre-authored because this test loads the chain witness index
+//      Pre-authored because this test loads the traces admission reads
 //      directly without dispatching the statistics institution
 //      (institution dispatch is exercised in the eigenius-statistics
 //      crate's own e2e tests). The is_a marker
@@ -77,7 +77,7 @@
 //
 // On commit, ValidateJustification fires AutoOnLoad on the sentence
 // and the kernel type-checks the certificate against
-// `justification:Grounds(proposition)`. The chain-witness index
+// `justification:Grounds(proposition)`. The chain-witness admission
 // supplies the three witnesses the grounding constructors consume
 // (`IsDerivedAs` on the verdict, `IsDeclaredAs` on the bridge, and
 // `IsDeclaredAs` on the literature rule).
@@ -372,7 +372,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
     //
     // The grounding ctors `declared`/`observed` each take a trailing
     // `IsXxAs(iri, P)` slot the kernel's synthesize hook fills in
-    // from the chain witness index. ESL admits eliding that slot —
+    // from the chain-witness admission. ESL admits eliding that slot —
     // the calls below stop after the (iri, P) pair.
 }
 

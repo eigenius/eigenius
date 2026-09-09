@@ -335,7 +335,7 @@ The `type_expr(HasLowIC50(...))` expression compiles to the value resources thos
 }
 ```
 
-…which the chain validator type-checks against `eigentt:Term`'s ctor schema. Downstream consumers — the [D49 witness index](../../design/d49-chainwitness-machinery.md) computing the witness key for `IsDeclaredAs` / `IsObservedAs`, the [D39 reasoning institution](../../design/d39-justification-logic.md) reading the predicate to decide the certificate's grounding shape, the [D52 statistics institution](../../design/d52-measurement-statistics-institution.md) checking the predicate's `is_a` scope marker against the SampleSet's replication kind — all decode this same value with the [D47 decoder](../../../kernel/src/program/eigentt_type_mirror.rs) and read out the same kernel `Exp`.
+…which the chain validator type-checks against `eigentt:Term`'s ctor schema. Downstream consumers — the [D49 witness admission](../../design/d49-chainwitness-machinery.md) computing the witness key for `IsDeclaredAs` / `IsObservedAs`, the [D39 reasoning institution](../../design/d39-justification-logic.md) reading the predicate to decide the certificate's grounding shape, the [D52 statistics institution](../../design/d52-measurement-statistics-institution.md) checking the predicate's `is_a` scope marker against the SampleSet's replication kind — all decode this same value with the [D47 decoder](../../../kernel/src/program/eigentt_type_mirror.rs) and read out the same kernel `Exp`.
 
 ### What grammar the inner expression accepts
 

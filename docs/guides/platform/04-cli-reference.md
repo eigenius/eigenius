@@ -64,7 +64,7 @@ eigenius decompile chain/sentence.json
 eigenius decompile chain/sentence.json --verify --pretty
 ```
 
-- `--verify` re-compiles the printed source and checks that every term is alpha-equal to the one in the input, under the same canonicalisation the witness index uses. A mismatch prints the offending `@id :: property` pairs and exits non-zero, rather than emitting source that would commit a different object. Like `compile`, verification runs against a bootstrapped layer so ctor short names resolve.
+- `--verify` re-compiles the printed source and checks that every term is alpha-equal to the one in the input, under the same canonicalisation admission uses. A mismatch prints the offending `@id :: property` pairs and exits non-zero, rather than emitting source that would commit a different object. Like `compile`, verification runs against a bootstrapped layer so ctor short names resolve.
 - `--pretty` indents expression trees across lines; the default emits each term on one line. Layout is the only difference — the terms are identical either way.
 
 This is what keeps chain content inside the reach of the source language: a resource the kernel or an institution *generated* can be read back as ESL, and machine-minted IRIs must therefore have local names that are legal ESL identifiers (`…:assertion_trace`, not `…:assertion-trace`). A ctor with no ESL surface is refused rather than printed approximately.

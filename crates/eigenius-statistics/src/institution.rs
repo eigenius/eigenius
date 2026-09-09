@@ -110,7 +110,7 @@ pub mod iris {
     // Used by the canonical-proposition derivation: the institution
     // builds a chain-resident D47 type-fragment value whose ConstRef
     // leaves point at these declared resources. The hash of that value
-    // is what the D49 witness index keys on; the consumer side
+    // is what the D49 witness key is built from; the consumer side
     // (D39 reasoning) constructs the matching Exp from a proof term
     // and arrives at the same hash via `encode_type → hash_proposition_value`.
     pub const STATS_FALSE: &str = "urn:eigenius:measurements:False";

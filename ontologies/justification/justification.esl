@@ -54,8 +54,8 @@ namespace prov       = "urn:eigenius:prov";
 //
 // `witness:IsDeclaredAs`, `witness:IsObservedAs` and `witness:IsVerifiedAs` are declared in CORE
 // (`ontologies/core/core-ontology.json`), not here, because the kernel constructs their
-// inhabitants: `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the layer's
-// witness index holds a matching key, and a type the kernel inhabits cannot be owned by a layer
+// inhabitants: `layer::synthesize_chain_witness` returns a `Val::ChainWitness` when the layer
+// admits a matching witness, and a type the kernel inhabits cannot be owned by a layer
 // above it. They are zero-constructor inductives in `Prop`, opaque to ESL — no surface
 // constructor exposes an inhabitant. The grounding constructors below reference them across
 // the layer boundary, which is the ordinary direction.
@@ -86,7 +86,7 @@ namespace prov       = "urn:eigenius:prov";
 // eliminating with `instantiate` is what lets one bridge serve many claims.
 
 data justification:Grounds : Prop -> Type 2 {
-    description = "The grounds for P, retained whole. An inhabitant of Grounds(P) IS the justification term: a constructor tree with three categorical groundings at its leaves and composition operators above them, indexed by the proposition it grounds. It does not assert P — a grounds term records grounds, and no rule turns Grounds(P) into P, which is the non-factivity the two-stratum separation requires. Seven constructors: `declared`, `observed` and `verified`, each consuming a witness:Is*As that the kernel synthesizes from the layer's witness index rather than from anything an author writes; `app` for Artemov Application; `sum_l` and `sum_r`, which require BOTH branches to be justified and differ only in which constructor was chosen, that choice being the record of the preferred branch; and `instantiate`, which narrows a universal proposition to an instance and adds no ground, since eliminating a quantifier introduces none. It inhabits Type 2 rather than Prop so a grounds term is stored and re-checkable, and Type 2 rather than Type 0 because instantiate binds T : Type 1 and a constructor argument's sort may not exceed the inductive's own.";
+    description = "The grounds for P, retained whole. An inhabitant of Grounds(P) IS the justification term: a constructor tree with three categorical groundings at its leaves and composition operators above them, indexed by the proposition it grounds. It does not assert P — a grounds term records grounds, and no rule turns Grounds(P) into P, which is the non-factivity the two-stratum separation requires. Seven constructors: `declared`, `observed` and `verified`, each consuming a witness:Is*As that the kernel synthesizes from the layer's traces rather than from anything an author writes; `app` for Artemov Application; `sum_l` and `sum_r`, which require BOTH branches to be justified and differ only in which constructor was chosen, that choice being the record of the preferred branch; and `instantiate`, which narrows a universal proposition to an instance and adds no ground, since eliminating a quantifier introduces none. It inhabits Type 2 rather than Prop so a grounds term is stored and re-checkable, and Type 2 rather than Type 0 because instantiate binds T : Type 1 and a constructor argument's sort may not exceed the inductive's own.";
 
     declared :
         forall (iri : core:iri, P : Prop) =>

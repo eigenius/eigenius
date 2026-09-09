@@ -81,7 +81,7 @@ not an EigenQL one. Provenance IS an EigenQL query — `prov:was_attributed_to`,
 `prov:was_generated_by`, `prov:used`, `prov:had_primary_source` are all
 resource-typed, so *which claims rest on this instrument* is a join.
 
-Each witness is emitted by the per-layer witness index **from a trace resource**
+Each witness is emitted by the per-layer witness admission **from a trace resource**
 whose `prov:resource` points at the target and whose target carries
 `eigentt:proposition` — so `declared(iri, P)` / `observed(iri, P)`
 only resolve when that trace exists in an **ancestor layer** of the citing
@@ -198,7 +198,7 @@ cites it. Three shapes:
 - **Observed** — commit the observed resource (a pinned source, a content-hashed
   `ingest:PinnedExternalFile`) **plus a `prov:ObservationTrace`** pointing at it
   (`prov:resource = <iri>`) and naming the `prov:Activity` that produced it
-  (`prov:was_generated_by`). The trace is what makes the witness index emit
+  (`prov:was_generated_by`). The trace is what makes admission emit
   `IsObservedAs`, so `observed(iri, P)` resolves. Without it the resource loads but
   cannot be cited. `was_generated_by` is resource-typed: name the instrument run or
   data release as an Activity resource, never as a string.
@@ -338,5 +338,5 @@ you'd be embarrassed to be wrong about it, it gets a witness.
   (chain/ = the warrant graph; docs/03-recompute-findings.md = fail-closed
   findings; docs/02-dependency-graph.md = the four-grade graph; chain/02-literature.esl
   = CiTO anchors).
-- Specs: D39 (justification logic / certificates), D49 (chain-witness index),
+- Specs: D39 (justification logic / certificates), D49 (chain-witness admission),
   D52 (statistics recompute), D54 (lemma citation), the `reference` ontology.

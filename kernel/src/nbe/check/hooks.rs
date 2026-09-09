@@ -15,7 +15,7 @@
 //! Check-time resolver hooks — the seam between the bidirectional type
 //! checker and the chain-resident data it needs: resolving an
 //! `EigonClass` IRI to its Sigma type, and synthesising a D49
-//! `ChainWitness` inhabitant from the per-layer witness index.
+//! `ChainWitness` inhabitant from the per-layer witness admission.
 //!
 //! The checker core knows only this trait; the default implementation
 //! (`crate::program::check_hooks`) supplies the `program::ground` /

@@ -318,7 +318,7 @@ data justification:Grounds : justification:Term -> Prop -> Type 2 {
 }
 ```
 
-The three grounding constructors each consume a [`ChainWitness.Is*As`](06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) — a witness the kernel admits at type-check time from the layer's witness index. The author never writes it; the kernel synthesizes it from the cited IRI and proposition. If no admitted witness matches the (category, iri, proposition) triple, type-checking fails with a diagnostic naming the missing trace shape.
+The three grounding constructors each consume a [`ChainWitness.Is*As`](06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) — a witness the kernel admits at type-check time from the the layer's traces. The author never writes it; the kernel synthesizes it from the cited IRI and proposition. If no admitted witness matches the (category, iri, proposition) triple, type-checking fails with a diagnostic naming the missing trace shape.
 
 **`sum_l` / `sum_r` depart from LP's axiom deliberately.** Artemov's `t:F -> (t+s):F` quantifies over an arbitrary `s`, so the unused summand need not be justified or even name a resource that exists. That is unsound here, because `support` reads `Sum` disjunctively and reports the unchecked branch as a genuine alternative: `Sum(real_evidence, Declared("urn:does-not-exist"))` type-checked, and `survives_without(real_evidence)` then returned **true** — the conclusion "survived" losing its only ground by way of a branch nothing ever grounded. Requiring both branches makes the term and the certificate agree about `Sum`. Asserting a fallback obliges you to show the fallback works.
 
@@ -407,10 +407,10 @@ annotated terms. Committing a conclusion whose certificate does not type-check f
 the commit is rejected.
 
 Checking `c` drives the kernel's `synthesize_chain_witness`, which admits a grounding constructor's
-witness argument only when the layer's witness index holds a matching `(category, iri, proposition)`
+witness argument only when the layer admits a matching `(category, iri, proposition)`
 key. That is the soundness boundary: a conclusion cannot cite a resource for a proposition the chain
 never admitted. [`kernel/tests/certificate_admission.rs`](../../../kernel/tests/certificate_admission.rs)
-exercises chain → witness index → synthesis → admission, and the three cases where admission must fail.
+exercises chain → witness admission → synthesis → admission, and the three cases where admission must fail.
 
 Three routes were deleted rather than rehomed, and the reasons are worth stating because each is a
 claim about what belongs in an institution:

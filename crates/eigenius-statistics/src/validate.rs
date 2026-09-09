@@ -2871,7 +2871,7 @@ fn check_epistemic_scope(
 // hypothesis from the claim's statistical parameters. One canonical
 // proposition per (dispatch, effect_size, directionality) triple.
 // Each value is a D47 chain-mirrored type-fragment JSON tree whose
-// hash the D49 witness index keys on; consumer-side reasoning
+// hash the D49 witness key is built from; consumer-side reasoning
 // (D39 reasoning institution, through the plan's reproducibility
 // declaration) reconstructs the same Exp from a proof term, encodes via the same `encode_type`
 // path, and arrives at the same hash. The hash equality is the

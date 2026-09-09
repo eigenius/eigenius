@@ -698,7 +698,7 @@ pub fn current_manifest() -> Vec<u8> {
 /// Each format is reduced to a form that discards presentation and keeps meaning:
 ///
 /// - **JSON** — parsed to resources and canonicalised (`eigon_json::canonicalize`, the same
-///   byte form the witness index hashes). Indentation, key order within a resource and inline-vs-
+///   byte form admission hashes). Indentation, key order within a resource and inline-vs-
 ///   expanded arrays all vanish; resource ORDER is preserved, because core's declaration order is
 ///   load-bearing (D47 §211).
 /// - **ESL** — the TOKEN KINDS, in order. The lexer discards comments and whitespace by

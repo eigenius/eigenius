@@ -531,7 +531,7 @@ fn the_near_miss_is_refused_and_the_whole_commit_with_it() {
 /// to find the one that matched, and the target name was reachable only by string surgery on the
 /// trace's own IRI. `prov:checked_declaration` is that input, now required.
 ///
-/// This is also what makes the witness index a cache rather than a soundness boundary. `Verified`
+/// This is also what makes admission a cache rather than a soundness boundary. `Verified`
 /// used to be admitted on the strength of a committed note that a check had run; it is now
 /// admitted from a recorded result, and the result is re-decidable — which is the condition
 /// `judgements-warrants-build-plan.md` §"Open after P7" set for exactly this conclusion.

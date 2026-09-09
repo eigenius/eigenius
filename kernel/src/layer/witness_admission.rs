@@ -559,7 +559,7 @@ fn resolve_target_iri(trace: &Resource) -> Option<Iri> {
 }
 
 /// Walk the parent chain top-down, returning true on the first Layer
-/// whose witness index contains `key`. Implements the §5 synthesis
+/// that admits `key`. Implements the §5 synthesis
 /// algorithm's lookup step.
 ///
 /// **No coercion between categories.** A `check_layer_with_coercion` helper sat

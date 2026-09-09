@@ -31,7 +31,7 @@
 //!   each axiom reference against the chain layer, and emits a D47
 //!   JSON tree via the kernel's shared D47 codec.
 //!
-//! If both encoders agree on the JSON shape, the witness index keyed
+//! If both encoders agree on the JSON shape, the witness key keyed
 //! against the verdict's canonical_proposition will match the bridge's
 //! antecedent — and the reasoning institution's `justification:Grounds.derived`
 //! grounding ctor can synthesise the witness against the same hash.

@@ -134,7 +134,7 @@ resource screen:concl_eig0291_strong : justification:Conclusion {
                        //
                        // Deliberately uses a different binder name (`x`) than
                        // the rule's `canonical_proposition` (which uses `c`)
-                       // to exercise the witness index's alpha-canonical
+                       // to exercise admission's alpha-canonical
                        // hashing: alpha-equivalent propositions must hash to
                        // the same key.
                        fun (x : core:string) =>

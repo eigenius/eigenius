@@ -501,7 +501,7 @@ pub fn autoonload_dispatch(state: &mut CommitState<'_>) -> Result<PhaseControl, 
         // the gated subject's commit). On Fails, the per-effect
         // derivations are dropped — a failed analysis attests nothing
         // statistically, so its would-be StatisticalAnalysisResults must not
-        // pollute the witness index.
+        // pollute witness admission.
         //
         // A `prov:Trace` in the same list is held to the stricter rule:
         // `finalize_emitted_resource` drops it unless the verdict Holds,

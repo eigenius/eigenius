@@ -51,7 +51,7 @@
 //!
 //! This test compiles the fixture, builds the layer chain (core →
 //! reflection → reasoning → statistics → fixture), walks the D49
-//! witness index, runs the D39 ValidateJustification handler, and
+//! witness admission, runs the D39 ValidateJustification handler, and
 //! asserts `Verdict::Holds`. The statistics institution itself is not
 //! registered in the test runtime — D49 §6 admits `IsDeclaredAs` from
 //! the StatisticalAnalysisPlan's ProgramTrace + canonical_proposition pair,
@@ -162,7 +162,7 @@ fn build_drug_screening_chain() -> ExecutionContext {
     }
     let fixture_layer = Arc::new(fixture_builder.build(LayerStorage::in_memory()));
 
-    // Force the witness index to populate from the three trace
+    // Force admission to see the three trace
     // resources the fixture committed: the rule's DeclarationTrace
     // admits `IsDeclaredAs(rule_iri, rule_prop)`; the SampleSet's
     // ObservationTrace admits `IsObservedAs(sampleset_iri, …)`; and

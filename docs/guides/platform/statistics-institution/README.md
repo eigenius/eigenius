@@ -27,7 +27,7 @@ Every `stats:StatisticalAnalysisPlan` resource carries the same seven slots, plu
 | `sample_set` | IRI of a `SampleSetResource` | The raw replicates the verifier recomputes against. |
 | `null_hypothesis` | EigenTT proposition | The null the test is rejecting against — propagated to the verdict for audit. |
 | `alternative_hypothesis` | EigenTT proposition | The alternative the test is asserting — used for diagnostic shape. |
-| `canonical_proposition` (`reflection:` inherited) | EigenTT proposition | The predicate the claim establishes when the test holds. This is the proposition a downstream plan-reproducibility `justification:Declaration` is written against; the witness index hashes it, and the two must match. |
+| `canonical_proposition` (`reflection:` inherited) | EigenTT proposition | The predicate the claim establishes when the test holds. This is the proposition a downstream plan-reproducibility `justification:Declaration` is written against; admission hashes it, and the two must match. |
 | `alpha` | Float | Type-I error threshold, unadjusted. Multiple-testing correction is a higher-level institution. |
 | `effect_size` | `Absolute(magnitude, units)` / `Relative(ratio)` / `StandardizedCohensD` / `StandardizedHedgesG` | The asserted effect — for `SingleSampleEstimate`, the threshold the mean must cross. |
 | `directionality` | `TwoSided()` / `OneSidedWitnessed(witness_iri)` | Whether the test is two-sided (the safe default) or one-sided with a chain-resident impossibility witness ([§7.1](#7-1-opinionated-stance-onesidedwitnessed-requires-an-impossibility-witness)). |
@@ -164,7 +164,7 @@ claim_eig0291_lowic50                      [StatisticalAnalysisPlan]
 Verdict("Fails", AlphaNotCrossed: computed p = 0.218..., threshold alpha = 0.05)
 ```
 
-The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness index](../justification-logic/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) hashes it, so an author's plan-reproducibility `justification:Declaration` can be written against exactly it; downstream [D39 conclusions](../justification-logic/README.md) then ground on `App(Declared(plan_yields), Observed(sample_set))`, consuming the `IsDeclaredAs` and `IsObservedAs` witnesses.
+The IC50 from three replicate readings doesn't cross the threshold at α = 0.05 — the standard deviation across (72, 85, 100) is too large for the n = 3 sample to reject the null. The same fixture commits a *confirmatory* SampleSet with n = 6 tightly clustered around 85 nM and a corresponding claim; that one produces Holds with p ≪ 0.05. The cycle closes through the `canonical_proposition` slot: the verdict's resource carries the predicate `HasLowIC50("urn:...:EIG_0291")`; the [D49 witness admission](../justification-logic/README.md#the-d49-witness-index-how-the-kernel-admits-grounding-witnesses) hashes it, so an author's plan-reproducibility `justification:Declaration` can be written against exactly it; downstream [D39 conclusions](../justification-logic/README.md) then ground on `App(Declared(plan_yields), Observed(sample_set))`, consuming the `IsDeclaredAs` and `IsObservedAs` witnesses.
 
 Every byte that went into the verification — the three raw IC50 readings, the asserted parameters, the recomputation procedure, the resulting verdict — sits on the chain as a typed, queryable, content-addressed resource. The verdict is reproducible: you can re-run `validate_analysis_plan` against the same chain state and get bit-identical numerics, because the institution uses deterministic IEEE-754 arithmetic.
 
@@ -260,7 +260,7 @@ Wired cells run on the [`crates/eigenius-statistics/`](../../../../crates/eigeni
 The statistics institution's per-effect result carries the proposition a D39 conclusion is ultimately grounded in — though not by citing the result, which records a run and grounds nothing. The composition pattern:
 
 ```text
-raw IC50 readings + prov:ObservationTrace   → witness index admits IsObservedAs(sample_set, Asserts(s))
+raw IC50 readings + prov:ObservationTrace   → admission admits IsObservedAs(sample_set, Asserts(s))
   → D52 validate_analysis_plan AutoOnLoad fires
   → Verdict::Holds; a per-effect StatisticalAnalysisResult carries the derived proposition
   → that result RECORDS the run and admits NO witness
@@ -278,7 +278,7 @@ establishes, since determinism is a fact about the environment rather than somet
 recoverable from a run record — and on the input being observed. The run record
 supplies neither.
 
-The two institutions don't call each other — they share the chain artifact shape (a resource carrying `canonical_proposition`, plus the `prov` trace attesting how it came to exist) that the witness index reads from. D52 emits the artifact; D39 reads the witness; the composition works because both honour the shared chain shape independently.
+The two institutions don't call each other — they share the chain artifact shape (a resource carrying `canonical_proposition`, plus the `prov` trace attesting how it came to exist) that admission reads from. D52 emits the artifact; D39 reads the witness; the composition works because both honour the shared chain shape independently.
 
 Full walkthrough: [composition guide §7 stats+reasoning](../../composition/07-stats-and-reasoning-walkthrough.md).
 

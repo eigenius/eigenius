@@ -83,9 +83,9 @@ The kinase notebook covers cross-numerical-institution composition: five Julia i
 | Composition shape | Bridge mechanism | Worked example |
 |---|---|---|
 | **Numerical → numerical** | Declared comorphisms over `formulas:FormulaTerm` (extract → transformation → reify pipeline). | Kinase notebook — Symbolics → JuMP, Catalyst → DiffEq, Symbolics → IntervalArithmetic. |
-| **Statistics → reasoning** | Per-layer chain-witness index over `eigentt:Term` propositions. | D52 `StatisticalAnalysisPlan` validation emits a result with `canonical_proposition`; a D39 `justification:Conclusion` grounds on `App(Declared(plan_yields), Observed(sample_set))`, whose halves the witness index admits. See [chapter 7](07-stats-and-reasoning-walkthrough.md). |
+| **Statistics → reasoning** | Per-layer chain-witness admission over `eigentt:Term` propositions. | D52 `StatisticalAnalysisPlan` validation emits a result with `canonical_proposition`; a D39 `justification:Conclusion` grounds on `App(Declared(plan_yields), Observed(sample_set))`, whose halves admission admits. See [chapter 7](07-stats-and-reasoning-walkthrough.md). |
 
-The two shapes are structurally different: comorphisms are *active* translations (one institution's runtime is invoked, output is reified back into the chain), while the witness-index path is *passive* — D39 doesn't call D52, it just reads the chain artifact D52 emitted. Both are first-class composition mechanisms; which one applies depends on whether the downstream institution needs the input *value translated* (comorphism) or just *cited as evidence* (witness index).
+The two shapes are structurally different: comorphisms are *active* translations (one institution's runtime is invoked, output is reified back into the chain), while the witness-index path is *passive* — D39 doesn't call D52, it just reads the chain artifact D52 emitted. Both are first-class composition mechanisms; which one applies depends on whether the downstream institution needs the input *value translated* (comorphism) or just *cited as evidence* (witness admission).
 
 Chapter 2 covers both shared payload languages — `formulas:FormulaTerm` for the comorphism shape, `eigentt:Term` for the witness-index shape. Chapter 4 covers how AutoOnLoad gates from the two institutions cascade through a single commit. Chapter 7 walks the full statistics + reasoning pipeline end-to-end.
 
@@ -102,7 +102,7 @@ If any are unfamiliar, the cross-link is the right entry point.
 | `formula(...)` ESL sublanguage and `formulas:FormulaTerm` | [Formula language guide](../formula/README.md) |
 | `type_expr(...)` ESL sublanguage and `eigentt:Term` (D47) | [ESL §5.14a](../esl/05-expressions.md#5-14a-type_expr-eigentt-type-expressions) |
 | `Prop` universe and proof irrelevance (D46) | [ESL §7.1](../esl/07-type-theory-primer.md#7-1-universes-the-unified-sortn-ladder-with-prop-at-the-bottom) |
-| `ChainWitness.Is*As` predicates and the witness index (D49) | [ESL §6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) |
+| `ChainWitness.Is*As` predicates and witness admission (D49) | [ESL §6.4a](../esl/06-resources-types-and-the-layer.md#6-4a-witness-predicates-admitting-propositions-from-layer-state) |
 | `StatisticalAnalysisPlan` / `SampleSet` (D52) | [Statistics institution tutorial](../platform/statistics-institution/README.md) |
 | `justification:Grounds` / `justification:Term` / `justification:Conclusion` (D39) | [ESL §9.10](../esl/09-institutions.md#9-10-the-justification-vocabulary--d39-justification-logic), [justification logic tutorial](../platform/justification-logic/README.md) |
 | `FIBER ... AS ?var INTO "<iri>"` | [EigenQL §7.6](../eigenql/08-fiber-clauses.md#8-6-into--pinning-the-response-iri) |

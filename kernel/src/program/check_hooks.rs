@@ -15,7 +15,7 @@
 //! Default [`CheckHooks`] implementation — the chain-resident resolution
 //! the type checker delegates out of its pure core: `EigonClass` →
 //! Sigma type (via `program::ground`) and D49 `ChainWitness` synthesis
-//! (via the per-layer witness index in `layer` / `witness`). §3.3 of
+//! (via the witness admission in `layer` / `witness`). §3.3 of
 //! `docs/notes/nbe-reorganization-analysis.md`.
 
 use crate::layer::Layer;
@@ -26,7 +26,7 @@ use crate::ontology::iri::Iri;
 use crate::ontology::well_known as wk;
 use std::sync::Arc;
 
-/// Stateless resolver wiring `program::ground` + the witness index into
+/// Stateless resolver wiring `program::ground` + witness admission into
 /// the type checker. A single shared instance serves every `CheckCtx`.
 pub struct DefaultCheckHooks;
 

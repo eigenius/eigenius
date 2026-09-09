@@ -1470,7 +1470,7 @@ pub fn decode_judgement(value: &Value, layer: &Layer) -> Result<Judgement, Decod
 /// caller that wants the proposition reads this.
 ///
 /// This is what lets a conclusion's proposition be recovered from its judgement rather than stored
-/// in a second slot. The emit and check sides must agree on the result: the witness index hashes
+/// in a second slot. The emit and check sides must agree on the result: admission hashes
 /// `P` projected out here, while a citing certificate's `verified(iri, P)` supplies `P` directly,
 /// and a mismatch does not error — it silently fails to admit the witness.
 pub fn certificate_indices(typ: &Exp) -> Option<&Exp> {

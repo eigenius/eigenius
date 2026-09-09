@@ -33,7 +33,7 @@ use crate::nbe::val::Val;
 /// for non-parametric constructors.
 /// D49 Phase 6 hook — detect a ChainWitness-predicate expected type
 /// at a constructor-arg position and synthesize the witness via the
-/// layer's witness index. Returns `Some(witness_val)` on a successful
+/// the layer's traces. Returns `Some(witness_val)` on a successful
 /// hit, `None` when the expected type isn't a ChainWitness predicate
 /// (callers fall through to the standard type-check), and `Err` when
 /// the expected type *is* a ChainWitness predicate but synthesis

@@ -1794,7 +1794,7 @@ fn cmd_compile(file: &str, json_output: bool) {
 /// Print an Eigon-JSON document back as ESL source — the inverse of [`cmd_compile`].
 ///
 /// `--verify` closes the loop: re-compile the printed source and check every D47 term is
-/// alpha-equal to the one in the input, under the same normalisation the witness index uses. A
+/// alpha-equal to the one in the input, under the same normalisation admission uses. A
 /// mismatch exits non-zero rather than emitting source that would commit a different object.
 fn cmd_decompile(file: &str, verify: bool, pretty: bool) {
     let text = std::fs::read_to_string(file).unwrap_or_else(|e| {

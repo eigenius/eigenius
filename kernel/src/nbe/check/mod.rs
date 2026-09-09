@@ -4117,7 +4117,7 @@ mod tests {
 
     #[test]
     fn synthesis_hook_errors_without_layer() {
-        // CheckCtx without a layer can't reach the witness index;
+        // CheckCtx without a layer can't reach witness admission;
         // the hook surfaces this with a clear error rather than
         // silently passing (which would let the type-check succeed
         // for the wrong reason).
@@ -4142,7 +4142,7 @@ mod tests {
         // The iri index must be a Val::LitString. A bogus shape (e.g.,
         // Val::Sort) means the chain author or codec produced a
         // malformed ChainWitness application; the hook surfaces this
-        // before reaching the witness index.
+        // before reaching witness admission.
         let c = ctx();
         let expected = chain_witness_typed_at(
             wk::CHAIN_WITNESS_IS_DECLARED_AS,
@@ -4162,7 +4162,7 @@ mod tests {
     #[test]
     fn synthesis_hook_routes_through_layer_witness_admission_for_admitted_witness() {
         // End-to-end: build a layer carrying a DeclarationTrace, which
-        // populates the witness index with the corresponding Declared
+        // commits the trace that admits the corresponding Declared
         // witness. Calling the hook with the matching expected type
         // returns Some(Val::ChainWitness).
         use crate::layer::{LayerBuilder, LayerStorage};
@@ -4206,7 +4206,7 @@ mod tests {
         let c = CheckCtx::with_layer(Rho::Nil, vec![], layer);
 
         // Expected type is `IsDeclaredAs(target_iri_str, Sort(0))`.
-        // The eval'd index must match what the witness index was
+        // The eval'd index must match what admission was
         // populated with — prop_exp evaluates to Val::sort(0).
         let expected = chain_witness_typed_at(
             wk::CHAIN_WITNESS_IS_DECLARED_AS,
@@ -4224,7 +4224,7 @@ mod tests {
 
     #[test]
     fn synthesis_hook_errors_when_no_witness_admitted() {
-        // Layer with no witness index populated → synthesize_chain_witness
+        // Layer carrying no admitting trace → synthesize_chain_witness
         // returns a "no admitted witness" diagnostic. The hook surfaces it
         // as Err so the caller (the ctor type-check loop) reports it and the commit fails.
         use crate::layer::{LayerBuilder, LayerStorage};

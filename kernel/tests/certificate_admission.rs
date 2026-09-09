@@ -16,8 +16,8 @@
 //!
 //! A conclusion's judgement carries `holds(logic, c, Certificate(j, P))`. Rule 21 decodes it,
 //! checks `Certificate(j, P)` is a type, and checks `c` against it. Checking `c` drives the
-//! kernel's `synthesize_chain_witness`, which admits a ctor argument only if the witness index
-//! holds a matching key — so these tests exercise chain → witness index → synthesis →
+//! kernel's `synthesize_chain_witness`, which admits a ctor argument only if witness admission
+//! holds a matching key — so these tests exercise chain → admission → synthesis →
 //! admission, and the soundness boundary where admission must FAIL.
 //!
 //! Rehomed from `crates/eigenius-reasoning/tests/validate_handler.rs` at P7, which dispatched
@@ -193,7 +193,7 @@ fn judgement(proposition: Value, _justification: serde_json::Value, cert: Value)
 /// DeclaredResource at `target_iri` (no explicit
 /// `canonical_proposition` — the default `Asserts(target_iri)` from
 /// D49 §6 applies) and a DeclarationTrace pointing at it. The trace
-/// populates the user layer's witness index with a `Declared`
+/// commits, on the user layer, the trace that admits a `Declared`
 /// witness for `(target_iri, Asserts(target_iri))`.
 ///
 /// This helper uses the *default* `Asserts(target_iri)` witness
@@ -568,7 +568,7 @@ fn a_certificate_citing_the_wrong_proposition_is_rejected() {
 #[test]
 fn a_certificate_citing_an_untraced_iri_is_rejected() {
     // Contrast: target IRI is named in the certificate but no
-    // DeclarationTrace was committed for it. The witness index has
+    // DeclarationTrace was committed for it. Admission has
     // no key matching the certificate's claim, so synthesis fails.
     // Demonstrates the soundness boundary against forged citations.
     let ctx = build_full_chain(); // no axiom chain layer added

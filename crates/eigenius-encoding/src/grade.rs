@@ -23,7 +23,7 @@
 //! 1. the **`enc:EncodedClaim`** — `eigentt:proposition = P` plus
 //!    `prov:was_attributed_to`, the agent taking responsibility for `P`;
 //! 2. its **`prov:DeclarationTrace`** — which mints `IsDeclaredAs(claim_iri, P)` into the
-//!    witness index at commit.
+//!    admission at commit.
 //!
 //! Parsed sentences land **Declared**, by the agent or the source document's authors (D73 §6): the
 //! parser is a formulation instrument, so it establishes that the text parses to this well-typed

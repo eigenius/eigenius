@@ -93,14 +93,14 @@ reasoning stack is the **statistics → reasoning** pipeline:
    `App(Declared(plan_yields), Observed(sample_set))`, Rule 21 checks its
    judgement as part of validating the layer — no institution and no gate,
    since P7. The kernel's NbE checker walks the inner `justification:Grounds.app`, consults the
-   witness index for the `IsDeclaredAs` entry (the plan's reproducibility
+   witness admission for the `IsDeclaredAs` entry (the plan's reproducibility
    claim) and the `IsObservedAs` entry (the sample set's observation trace),
    and the certificate type-checks.
 
 The cascade is **mechanical, not coordinated**. D52 doesn't know D39 is
 about to fire; D39 doesn't know D52 ran. They share the chain artifact
 shape — a resource carrying `canonical_proposition`, plus the `prov` trace
-attesting how it came to exist — that the witness index reads from. The
+attesting how it came to exist — that admission reads from. The
 composition emerges from each institution honouring the shared chain shape
 independently.
 

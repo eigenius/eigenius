@@ -38,7 +38,7 @@
 //! deliverable cites the four recomputed conclusions.
 //!
 //! The two institutions never call each other — they compose through the
-//! shared chain witness index. This turns the institution-recomputable
+//! shared chain-witness admission. This turns the institution-recomputable
 //! tier from agent-attested (recorded ToolArtifacts) into kernel-recomputed.
 
 use std::sync::Arc;
