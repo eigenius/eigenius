@@ -90,6 +90,10 @@ struct MemoryState {
     /// the redirect *source* layer id. One entry per consolidation
     /// where `to` was below the branch head.
     redirects: BTreeMap<LayerId, RedirectEntry>,
+    /// D25 §6 / eigenius#48 — what each consolidation did, keyed by the
+    /// consolidated layer. Kept out of the layer because it carries a wall-clock
+    /// timestamp and a layer's content decides its id.
+    consolidations: BTreeMap<LayerId, crate::layer::ConsolidationRecord>,
     /// Anchored-commit cache (D33 §6 / Phase 20c). Keyed by
     /// `(content_hash, supporting_content_hash)` → cached layer id.
     /// Memoizes `commit(content, supporting_layer) → LayerId`, so
@@ -119,6 +123,7 @@ impl MemoryPersistentBackend {
                 tags: BTreeMap::new(),
                 content_index: BTreeMap::new(),
                 redirects: BTreeMap::new(),
+                consolidations: BTreeMap::new(),
                 anchored_commits: BTreeMap::new(),
             }),
             traces: InMemoryTraceStore::new(),
@@ -217,7 +222,11 @@ impl PersistentBackend for MemoryPersistentBackend {
         }))
     }
 
-    fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
+    fn store_identity(&self) -> usize {
+        self as *const Self as *const () as usize
+    }
+
+    fn store_layer_assigned(&self, layer: &Layer) -> Result<LayerId, StorageError> {
         // D65 index lifecycle: materialise the layer's derived indexes into this
         // backend's indexes at the persist step (mirrors `RocksStore::store_layer`),
         // so index population happens post-validation and seeded/committed layers
@@ -490,6 +499,9 @@ impl PersistentBackend for MemoryPersistentBackend {
         state.topology.remove(layer);
         state.chain.remove(layer);
         state.blooms.remove(layer);
+        // Shares the layer's lifecycle (eigenius#48): the record says what this
+        // layer collapsed, so it describes nothing once the layer is gone.
+        state.consolidations.remove(layer);
         state.resources.retain(|(lid, _), _| lid != layer);
         if let Some(ch) = content_hash {
             if let Some(set) = state.content_index.get_mut(&ch) {
@@ -540,6 +552,30 @@ impl PersistentBackend for MemoryPersistentBackend {
     fn list_redirects(&self) -> Result<Vec<RedirectEntry>, StorageError> {
         let state = self.inner.read().expect("poisoned");
         Ok(state.redirects.values().cloned().collect())
+    }
+
+    fn put_consolidation_record(
+        &self,
+        layer: &LayerId,
+        record: &crate::layer::ConsolidationRecord,
+    ) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state.consolidations.insert(layer.clone(), record.clone());
+        Ok(())
+    }
+
+    fn list_consolidations(
+        &self,
+    ) -> Result<Vec<(LayerId, crate::layer::ConsolidationRecord)>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        let mut out: Vec<(LayerId, crate::layer::ConsolidationRecord)> = state
+            .consolidations
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        // Newest first, matching the RocksDB backend and how the CLI shows them.
+        out.sort_by_key(|(_, r)| std::cmp::Reverse(r.consolidated_at));
+        Ok(out)
     }
 
     fn lookup_anchored_commit(
@@ -621,9 +657,9 @@ mod tests {
     /// `MemoryPersistentBackend`. Smoke test that round-trip works.
     #[test]
     fn store_layer_round_trip() {
-        let backend = MemoryPersistentBackend::new();
-
-        let storage = crate::layer::LayerStorage::in_memory();
+        let backend: std::sync::Arc<dyn crate::storage::PersistentBackend> =
+            std::sync::Arc::new(MemoryPersistentBackend::new());
+        let storage = crate::layer::LayerStorage::with_persistent(std::sync::Arc::clone(&backend));
 
         let mut builder = LayerBuilder::new("test", None);
         builder
@@ -657,8 +693,9 @@ mod tests {
     /// must return both positions; deleting one cleans only its entry.
     #[test]
     fn content_hash_index_dedup_and_cleanup() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = crate::layer::LayerStorage::in_memory();
+        let backend: std::sync::Arc<dyn crate::storage::PersistentBackend> =
+            std::sync::Arc::new(MemoryPersistentBackend::new());
+        let storage = crate::layer::LayerStorage::with_persistent(std::sync::Arc::clone(&backend));
 
         // Two distinct root layers (different content) so each presents
         // a different parent to the child layers below.
@@ -743,11 +780,12 @@ mod tests {
     /// whose source has been reclaimed from the topology.
     #[test]
     fn redirect_round_trip_and_synthetic_tombstone() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: std::sync::Arc<dyn crate::storage::PersistentBackend> =
+            std::sync::Arc::new(MemoryPersistentBackend::new());
 
         // Build a root + child layer; the child will become the
         // "source" of a redirect (the to-be-consolidated layer).
-        let storage = crate::layer::LayerStorage::in_memory();
+        let storage = crate::layer::LayerStorage::with_persistent(std::sync::Arc::clone(&backend));
         let mut rb = LayerBuilder::new("root", None);
         rb.add_resource(make_resource("urn:eigenius:core:R", vec![]))
             .unwrap();
@@ -1012,8 +1050,9 @@ mod tests {
 
     #[test]
     fn load_chain_from_walks_parents() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = crate::layer::LayerStorage::in_memory();
+        let backend: std::sync::Arc<dyn crate::storage::PersistentBackend> =
+            std::sync::Arc::new(MemoryPersistentBackend::new());
+        let storage = crate::layer::LayerStorage::with_persistent(std::sync::Arc::clone(&backend));
 
         let mut root_b = LayerBuilder::new("root", None);
         root_b

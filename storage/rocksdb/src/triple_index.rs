@@ -27,11 +27,11 @@
 //! a caller-supplied batch so the caller can commit layer + index in a
 //! single atomic write per D23 §6.3.
 //!
-//! Only the drop side actually does that. `RocksStore::delete_layer`
-//! passes its batch to `drop_into_batch`; `RocksStore::store_layer`
-//! never calls `extend_into_batch` — it calls `populate_layer_indexes`
-//! before opening its batch, so index writes land in a separate,
-//! earlier, non-sync batch. See GAP-05-14.
+//! Both sides do that (eigenius#131). `RocksStore::delete_layer` passes its batch
+//! to `drop_into_batch` and `RocksStore::store_layer` passes its batch to
+//! `extend_into_batch`. Until `2026-09-09` only the drop side did: insertion
+//! populated the indexes before opening its batch, so index writes landed in a
+//! separate, earlier, non-sync batch.
 
 use crate::run_blocking;
 use eigenius_kernel::layer::index_keys;
@@ -90,12 +90,11 @@ impl RocksTripleIndex {
         }
     }
 
-    /// Append every triple to a caller-owned `WriteBatch`, leaving the
-    /// commit responsibility with the caller. Intended for
-    /// `RocksStore::store_layer`, so layer content + index entries would
-    /// land in one atomic write — but `store_layer` does not call it. Its
-    /// only caller is this type's own `extend_layer`, which supplies a
-    /// fresh batch of its own. See GAP-05-14.
+    /// Append every triple to a caller-owned `WriteBatch`, leaving the commit
+    /// responsibility with the caller. Called by `RocksStore::store_layer` with its
+    /// own batch, so layer content and index entries land in one atomic write
+    /// (eigenius#131); also by this type's `extend_layer`, which supplies a fresh
+    /// batch of its own for the standalone case.
     pub fn extend_into_batch(
         &self,
         batch: &mut rocksdb::WriteBatch,

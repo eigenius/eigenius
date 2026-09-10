@@ -764,14 +764,14 @@ fn seed_backend(
     }
     chain.reverse(); // root (core) first
 
-    // `store_layer` persists each layer's resources *and* materialises its
-    // derived indexes (into the backend, since the layer was built on it). Root
-    // first so each layer's text/value index discovery sees its ancestors'
-    // already-persisted triple entries.
+    // `persist` writes each layer's resources *and* its derived indexes to the
+    // store the layer is bound to, which is this `backend` — the layers were
+    // built on its `LayerStorage`. Root first so each layer's text/value index
+    // discovery sees its ancestors' already-persisted triple entries.
     for layer in &chain {
-        backend
-            .store_layer(layer)
-            .map_err(|e| BootstrapError::Storage(format!("store_layer {}: {e}", layer.name())))?;
+        layer
+            .persist()
+            .map_err(|e| BootstrapError::Storage(format!("persist {}: {e}", layer.name())))?;
     }
 
     // Phase 14g: create the `main` branch pointing at the notebook layer.

@@ -1339,7 +1339,10 @@ pub fn commit_resolutions_as_merge_layer(
     }
 
     let layer = Arc::new(builder.build(storage));
-    backend.store_layer(&layer).map_err(MergeError::Storage)?;
+    // Written to the store the layer was built on, which is the same `backend`
+    // the caller passed: `merge_with_resolutions` takes both and they have to
+    // agree, since the layer's indexes go wherever its storage points.
+    layer.persist().map_err(MergeError::Storage)?;
     Ok(layer)
 }
 
@@ -1640,8 +1643,10 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Vec::new(),
-            crate::layer::LayerStorage::in_memory(),
-            &backend,
+            crate::layer::LayerStorage::with_persistent(
+                backend.clone() as std::sync::Arc<dyn PersistentBackend>
+            ),
+            &*backend,
         );
         match result {
             Ok(MergeOutcome::Merged { .. }) => {}
@@ -2035,8 +2040,11 @@ mod tests {
 
     /// Build a span with a `PropertyDataType` conflict on
     /// `urn:test:weight`. Branch A = integer, branch B = string.
-    fn span_with_property_data_type_conflict() -> (MergeSpan, MemoryPersistentBackend, TypedConflict)
-    {
+    fn span_with_property_data_type_conflict() -> (
+        MergeSpan,
+        std::sync::Arc<MemoryPersistentBackend>,
+        TypedConflict,
+    ) {
         let prop_a = make_resource(
             "urn:test:weight",
             &[wk::PROPERTY],
@@ -2048,16 +2056,20 @@ mod tests {
             &[(wk::DATA_TYPE, Value::iri(&iri(wk::STRING)))],
         );
         let (span, backend) = build_span(Vec::new(), vec![prop_a], vec![prop_b]);
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         (span, backend, conflicts.into_iter().next().unwrap())
     }
 
     /// Build a span with a `KindMismatch` conflict on `urn:test:X`.
-    fn span_with_kind_mismatch_conflict() -> (MergeSpan, MemoryPersistentBackend, TypedConflict) {
+    fn span_with_kind_mismatch_conflict() -> (
+        MergeSpan,
+        std::sync::Arc<MemoryPersistentBackend>,
+        TypedConflict,
+    ) {
         let class_x = make_resource("urn:test:X", &[wk::CLASS], &[]);
         let prop_x = make_resource("urn:test:X", &[wk::PROPERTY], &[]);
         let (span, backend) = build_span(Vec::new(), vec![class_x], vec![prop_x]);
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         (span, backend, conflicts.into_iter().next().unwrap())
     }
 
@@ -2178,8 +2190,10 @@ mod tests {
             resolutions,
             Vec::new(),
             Vec::new(),
-            crate::layer::LayerStorage::in_memory(),
-            &backend,
+            crate::layer::LayerStorage::with_persistent(
+                backend.clone() as std::sync::Arc<dyn PersistentBackend>
+            ),
+            &*backend,
         );
         match result {
             Err(MergeError::ConflictNotFound(id)) => {
@@ -2204,8 +2218,10 @@ mod tests {
             resolutions,
             Vec::new(),
             Vec::new(),
-            crate::layer::LayerStorage::in_memory(),
-            &backend,
+            crate::layer::LayerStorage::with_persistent(
+                backend.clone() as std::sync::Arc<dyn PersistentBackend>
+            ),
+            &*backend,
         );
         match result {
             Ok(MergeOutcome::Merged { merge_layer }) => {
@@ -2231,8 +2247,10 @@ mod tests {
             resolutions,
             Vec::new(),
             Vec::new(),
-            crate::layer::LayerStorage::in_memory(),
-            &backend,
+            crate::layer::LayerStorage::with_persistent(
+                backend.clone() as std::sync::Arc<dyn PersistentBackend>
+            ),
+            &*backend,
         );
         assert!(
             matches!(result, Err(MergeError::QuotientNotApplicable { .. })),
@@ -2249,7 +2267,7 @@ mod tests {
     /// this as a conflict (the union is monotonically combined), so
     /// tests synthesize a ConflictId off `Dog`'s IRI when exercising
     /// merge-dispatch end-to-end.
-    fn span_for_restructure() -> (MergeSpan, MemoryPersistentBackend) {
+    fn span_for_restructure() -> (MergeSpan, std::sync::Arc<MemoryPersistentBackend>) {
         let mammal = make_resource("urn:test:Mammal", &[wk::CLASS], &[]);
         let reptile = make_resource("urn:test:Reptile", &[wk::CLASS], &[]);
         let dog_a = make_resource(
@@ -2297,7 +2315,7 @@ mod tests {
             affected_class_under_new: true,
         };
         let id = restructure_conflict_id();
-        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &*backend);
         match result {
             Err(MergeError::RestructureSynthesizedParent { new_parent }) => {
                 assert_eq!(new_parent.as_str(), "urn:eigenius:auto:CommonParent_42");
@@ -2320,7 +2338,7 @@ mod tests {
             affected_class_under_new: false,
         };
         let id = restructure_conflict_id();
-        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &*backend);
         match result {
             Err(MergeError::RestructureParentRedeclaration { new_parent }) => {
                 assert_eq!(new_parent.as_str(), "urn:test:Mammal");
@@ -2342,7 +2360,7 @@ mod tests {
             affected_class_under_new: false,
         };
         let id = restructure_conflict_id();
-        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &*backend);
         match result {
             Err(MergeError::RestructureParentMissingDefinition { new_parent }) => {
                 assert_eq!(new_parent.as_str(), "urn:test:Animal");
@@ -2366,7 +2384,7 @@ mod tests {
             affected_class_under_new: false,
         };
         let id = restructure_conflict_id();
-        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &*backend);
         match result {
             Err(MergeError::RestructureParentDefMismatch {
                 new_parent,
@@ -2394,7 +2412,7 @@ mod tests {
             affected_class_under_new: false,
         };
         let id = restructure_conflict_id();
-        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &*backend);
         match result {
             Err(MergeError::RestructureParentDefNotAClass { new_parent }) => {
                 assert_eq!(new_parent.as_str(), "urn:test:Animal");
@@ -2415,7 +2433,7 @@ mod tests {
             affected_class_under_new: false,
         };
         let id = restructure_conflict_id();
-        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &*backend);
         match result {
             Err(MergeError::RestructureClassNotInSpan { iri, role }) => {
                 assert_eq!(iri.as_str(), "urn:test:Unicorn");
@@ -2437,7 +2455,7 @@ mod tests {
             affected_class_under_new: true,
         };
         let id = restructure_conflict_id();
-        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &backend);
+        let result = apply_restructure_resolution(&id, &spec, &span, &topology, &*backend);
         match result {
             Err(MergeError::RestructureClassNotInSpan { iri, role }) => {
                 assert_eq!(iri.as_str(), "urn:test:Phoenix");
@@ -2462,7 +2480,7 @@ mod tests {
             affected_class_under_new: true,
         };
         let id = restructure_conflict_id();
-        let application = apply_restructure_resolution(&id, &spec, &span, &topology, &backend)
+        let application = apply_restructure_resolution(&id, &spec, &span, &topology, &*backend)
             .expect("canonical Animal/Mammal/Reptile/Dog restructure should succeed");
 
         assert_eq!(application.conflict_id, id);
@@ -2495,7 +2513,7 @@ mod tests {
             affected_class_under_new: false,
         };
         let id = restructure_conflict_id();
-        let application = apply_restructure_resolution(&id, &spec, &span, &topology, &backend)
+        let application = apply_restructure_resolution(&id, &spec, &span, &topology, &*backend)
             .expect("Animal-as-sibling restructure should also succeed");
         let names: Vec<&str> = application
             .classes_to_reparent
@@ -2524,7 +2542,7 @@ mod tests {
             affected_class_under_new: false,
         };
         let id = restructure_conflict_id();
-        let application = apply_restructure_resolution(&id, &spec, &span, &topology, &backend)
+        let application = apply_restructure_resolution(&id, &spec, &span, &topology, &*backend)
             .expect("attach-to-existing restructure should succeed");
         assert!(application.new_parent_resource.is_none());
         let names: Vec<&str> = application
@@ -2554,8 +2572,10 @@ mod tests {
             resolutions,
             Vec::new(),
             Vec::new(),
-            crate::layer::LayerStorage::in_memory(),
-            &backend,
+            crate::layer::LayerStorage::with_persistent(
+                backend.clone() as std::sync::Arc<dyn PersistentBackend>
+            ),
+            &*backend,
         );
         match result {
             Err(MergeError::ConflictNotFound(id)) => assert_eq!(id, bogus),

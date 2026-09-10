@@ -503,18 +503,18 @@ mod tests {
         // exercises, but through `estimate` instead of `collect` —
         // the layers must NOT be deleted. This is the structural
         // invariant the GC panel's preview step relies on.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let _root = commit_root(&backend, &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let _root = commit_root(&*backend, &storage);
         let _orphan = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&_root),
             "orphan",
             "urn:eigenius:test:o",
         );
 
-        let stats = estimate(GcRoots::default(), &no_age_config(), &backend).unwrap();
+        let stats = estimate(GcRoots::default(), &no_age_config(), &*backend).unwrap();
         assert_eq!(stats.layers_marked, 0);
         assert_eq!(stats.layers_unreachable, 2);
         assert_eq!(
@@ -532,11 +532,11 @@ mod tests {
         // `min_age`. Layers reachable from any root or protected by
         // age must NOT contribute, otherwise the operator's reclaim
         // estimate overpromises.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let _root = commit_root(&backend, &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let _root = commit_root(&*backend, &storage);
         let _orphan = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&_root),
             "orphan",
@@ -552,7 +552,7 @@ mod tests {
 
         // No roots: both layers are unreachable and (with no-age
         // config) eligible. Expected reclaim == sum of every handle.
-        let stats = estimate(GcRoots::default(), &no_age_config(), &backend).unwrap();
+        let stats = estimate(GcRoots::default(), &no_age_config(), &*backend).unwrap();
         assert_eq!(stats.layers_unreachable, 2);
         assert_eq!(stats.layers_protected_by_age, 0);
         assert_eq!(
@@ -563,7 +563,7 @@ mod tests {
         // Same chain, default config (60s min_age): both layers are
         // unreachable but freshly-committed, so the protection window
         // shields them. Bytes reclaimable must be 0.
-        let stats = estimate(GcRoots::default(), &GcConfig::default(), &backend).unwrap();
+        let stats = estimate(GcRoots::default(), &GcConfig::default(), &*backend).unwrap();
         assert_eq!(stats.layers_protected_by_age, 2);
         assert_eq!(
             stats.bytes_reclaimable, 0,
@@ -578,11 +578,11 @@ mod tests {
         // matching what `collect` would skip. The GC panel surfaces
         // this so the operator sees why the eligible count isn't
         // higher.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let _orphan = commit_root(&backend, &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let _orphan = commit_root(&*backend, &storage);
 
-        let stats = estimate(GcRoots::default(), &GcConfig::default(), &backend).unwrap();
+        let stats = estimate(GcRoots::default(), &GcConfig::default(), &*backend).unwrap();
         assert_eq!(stats.layers_unreachable, 1);
         assert_eq!(stats.layers_protected_by_age, 1);
         assert_eq!(stats.layers_swept, 0);
@@ -592,11 +592,11 @@ mod tests {
 
     #[test]
     fn unreachable_layer_swept_when_no_root_references_it() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, &storage);
         let _orphan = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "orphan",
@@ -611,7 +611,7 @@ mod tests {
             &no_age_config(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(stats.layers_marked, 0);
@@ -625,18 +625,18 @@ mod tests {
 
     #[test]
     fn reachable_chain_survives_via_branch_root() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, &storage);
         let middle = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "middle",
             "urn:eigenius:test:m",
         );
         let tip = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&middle),
             "tip",
@@ -650,26 +650,26 @@ mod tests {
             tip.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
         // Also commit an unreferenced sibling that should be swept.
         let _orphan = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "orphan",
             "urn:eigenius:test:o",
         );
 
-        let roots = GcRoots::from_branches(&backend).unwrap();
+        let roots = GcRoots::from_branches(&*backend).unwrap();
         let stats = collect(
             roots,
             &no_age_config(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -688,10 +688,10 @@ mod tests {
     fn task_pin_keeps_layer_alive() {
         // A layer not on any branch but held in a `task_pin` must
         // survive GC.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, &storage);
-        let pinned = commit_child(&backend, &storage, root, "pinned", "urn:eigenius:test:p");
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, &storage);
+        let pinned = commit_child(&*backend, &storage, root, "pinned", "urn:eigenius:test:p");
 
         // Empty branches; task pin holds it.
         let roots = GcRoots {
@@ -704,7 +704,7 @@ mod tests {
             &no_age_config(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(stats.layers_marked, 2, "pinned + its parent root");
@@ -722,15 +722,15 @@ mod tests {
         // target's transitive ancestors* from GC for as long as the
         // tag exists. Verifies the `from_branches` constructor pulls
         // tag refs into the root set so the mark phase sees them.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, &storage);
-        let tagged = commit_child(&backend, &storage, root, "tagged", "urn:eigenius:test:t");
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, &storage);
+        let tagged = commit_child(&*backend, &storage, root, "tagged", "urn:eigenius:test:t");
 
         // No branches; only a tag holds the chain.
         backend.create_tag("release-v1", tagged.id()).unwrap();
 
-        let roots = GcRoots::from_branches(&backend).unwrap();
+        let roots = GcRoots::from_branches(&*backend).unwrap();
         assert!(roots.branch_heads.is_empty(), "no branches in this test");
         assert_eq!(roots.tag_targets.len(), 1);
 
@@ -739,7 +739,7 @@ mod tests {
             &no_age_config(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(
@@ -760,20 +760,20 @@ mod tests {
         // sweep-eligible (no other root reaches it). Pairs with the
         // "tag protects" test to confirm the protection is precisely
         // the tag, not an incidental side effect.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, &storage);
-        let orphan = commit_child(&backend, &storage, root, "orphan", "urn:eigenius:test:o");
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, &storage);
+        let orphan = commit_child(&*backend, &storage, root, "orphan", "urn:eigenius:test:o");
 
         backend.create_tag("temp", orphan.id()).unwrap();
         // While the tag exists the layer is protected — same shape as
         // the previous test.
         let stats_with_tag = collect(
-            GcRoots::from_branches(&backend).unwrap(),
+            GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(stats_with_tag.layers_swept, 0);
@@ -783,11 +783,11 @@ mod tests {
         let deleted = backend.delete_tag("temp").unwrap();
         assert!(deleted, "delete_tag returns true when the tag existed");
         let stats_after = collect(
-            GcRoots::from_branches(&backend).unwrap(),
+            GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(stats_after.layers_swept, 2, "both layers reclaimed");
@@ -797,16 +797,16 @@ mod tests {
     fn min_age_protects_recent_commits() {
         // Default config has min_age=60s. Just-committed layer is
         // unreachable but protected; sweep skips it.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let _orphan = commit_root(&backend, &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let _orphan = commit_root(&*backend, &storage);
 
         let stats = collect(
             GcRoots::default(),
             &GcConfig::default(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(stats.layers_unreachable, 1);
@@ -821,18 +821,18 @@ mod tests {
         // Trivial merge: branch points at merge layer; both merged
         // heads must survive (reachable as merge.parents).
         use crate::lattice::merge_independent_heads;
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, &storage);
         let a = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "a",
             "urn:eigenius:test:a",
         );
         let b = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "b",
@@ -842,7 +842,7 @@ mod tests {
         let merge = match merge_independent_heads(
             vec![a.id().clone(), b.id().clone()],
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap()
         {
@@ -856,16 +856,16 @@ mod tests {
             merge.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
         let stats = collect(
-            GcRoots::from_branches(&backend).unwrap(),
+            GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(stats.layers_marked, 4, "root + a + b + merge");
@@ -880,11 +880,11 @@ mod tests {
     fn idempotent_repeat_runs() {
         // Running collect twice in a row leaves the same state.
         // Second call has nothing to sweep.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, &storage);
         let _orphan = commit_child(
-            &backend,
+            &*backend,
             &storage,
             root.clone(),
             "orphan",
@@ -896,26 +896,26 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
         let stats1 = collect(
-            GcRoots::from_branches(&backend).unwrap(),
+            GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(stats1.layers_swept, 1);
 
         let stats2 = collect(
-            GcRoots::from_branches(&backend).unwrap(),
+            GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(stats2.layers_swept, 0);
@@ -986,9 +986,9 @@ mod tests {
     /// includes exactly the expected layers.
     #[test]
     fn reclaim_mode_marks_target_chain_skips_source_parents() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let (root, mid, tip, target) = build_redirect_scaffold(&backend, &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let (root, mid, tip, target) = build_redirect_scaffold(&*backend, &storage);
 
         // Install a redirect mid → target (reclaim mode).
         let mid_handle = backend
@@ -1035,34 +1035,34 @@ mod tests {
     /// layer on the source side.
     #[test]
     fn preserve_history_marks_source_chain_too() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
         // Build a longer source chain so we can distinguish:
         // root → mid_below → mid → tip,  and target → root.
-        let root = commit_root(&backend, &storage);
+        let root = commit_root(&*backend, &storage);
         let mid_below = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "mid_below",
             "urn:eigenius:test:mid_below",
         );
         let mid = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&mid_below),
             "mid",
             "urn:eigenius:test:mid",
         );
         let tip = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&mid),
             "tip",
             "urn:eigenius:test:tip",
         );
         let target = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "target",
@@ -1112,32 +1112,32 @@ mod tests {
     /// sweeps it.
     #[test]
     fn reclaim_mode_sweeps_source_side_intermediate() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, &storage);
         let mid_below = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "mid_below",
             "urn:eigenius:test:mid_below",
         );
         let mid = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&mid_below),
             "mid",
             "urn:eigenius:test:mid",
         );
         let tip = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&mid),
             "tip",
             "urn:eigenius:test:tip",
         );
         let target = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "target",
@@ -1150,7 +1150,7 @@ mod tests {
             tip.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -1169,11 +1169,11 @@ mod tests {
             .unwrap();
 
         let stats = collect(
-            GcRoots::from_branches(&backend).unwrap(),
+            GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 

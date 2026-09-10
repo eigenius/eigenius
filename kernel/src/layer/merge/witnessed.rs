@@ -473,7 +473,7 @@ mod tests {
     /// resource on the ancestor side so the chain walk can find it.
     fn build_span_with_iri_collision_and_optional_witness(
         witness: Option<Resource>,
-    ) -> (MergeSpan, MemoryPersistentBackend) {
+    ) -> (MergeSpan, std::sync::Arc<MemoryPersistentBackend>) {
         let ancestor_resources = witness.into_iter().collect();
         build_span(
             ancestor_resources,
@@ -530,7 +530,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
-            &backend,
+            &*backend,
         );
         match result {
             Err(MergeError::ConflictNotFound(id)) => {
@@ -547,7 +547,7 @@ mod tests {
         // before the merge attempt. Surfaces as
         // `MergeComorphismNotFound`.
         let (span, backend) = build_span_with_iri_collision_and_optional_witness(None);
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         let conflict_id = conflicts[0].id.clone();
 
         let result = merge_with_resolutions(
@@ -559,7 +559,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
-            &backend,
+            &*backend,
         );
         match result {
             Err(MergeError::MergeComorphismNotFound(i)) => {
@@ -579,7 +579,7 @@ mod tests {
         let bogus_witness = make_resource("urn:test:not_a_witness", &[wk::CLASS], &[]);
         let (span, backend) =
             build_span_with_iri_collision_and_optional_witness(Some(bogus_witness));
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         let conflict_id = conflicts[0].id.clone();
 
         let result = merge_with_resolutions(
@@ -591,7 +591,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
-            &backend,
+            &*backend,
         );
         match result {
             Err(MergeError::NotAMergeComorphism {
@@ -638,7 +638,7 @@ mod tests {
         );
         let (span, backend) =
             build_span_with_iri_collision_and_optional_witness(Some(wrong_class_witness));
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         let conflict_id = conflicts[0].id.clone();
 
         let result = merge_with_resolutions(
@@ -650,7 +650,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
-            &backend,
+            &*backend,
         );
         match result {
             Err(MergeError::MergeComorphismWrongClass {
@@ -688,7 +688,7 @@ mod tests {
         );
         let (span, backend) =
             build_span_with_iri_collision_and_optional_witness(Some(no_class_witness));
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         let conflict_id = conflicts[0].id.clone();
 
         let result = merge_with_resolutions(
@@ -700,7 +700,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
-            &backend,
+            &*backend,
         );
         match result {
             Err(MergeError::MalformedMergeComorphism { iri: i, reason }) => {
@@ -726,7 +726,7 @@ mod tests {
         let (span, backend) = build_span_with_iri_collision_and_optional_witness(Some(
             make_merge_comorphism("urn:test:witness", "urn:test:term_placeholder"),
         ));
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         let conflict_id = conflicts[0].id.clone();
 
         let result = merge_with_resolutions(
@@ -738,7 +738,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
-            &backend,
+            &*backend,
         );
         match result {
             Err(MergeError::TransformationNotFound {
@@ -771,7 +771,7 @@ mod tests {
             )],
         );
         let (span, backend) = build_span_with_iri_collision_and_optional_witness(Some(malformed));
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         let conflict_id = conflicts[0].id.clone();
 
         let result = merge_with_resolutions(
@@ -783,7 +783,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             crate::layer::LayerStorage::in_memory(),
-            &backend,
+            &*backend,
         );
         match result {
             Err(MergeError::MalformedMergeComorphism { iri: i, reason }) => {

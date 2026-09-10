@@ -58,9 +58,13 @@ pub(crate) fn build_span(
     ancestor_resources: Vec<Resource>,
     branch_a_resources: Vec<Resource>,
     branch_b_resources: Vec<Resource>,
-) -> (MergeSpan, MemoryPersistentBackend) {
-    let backend = MemoryPersistentBackend::new();
-    let storage = LayerStorage::in_memory();
+) -> (MergeSpan, Arc<MemoryPersistentBackend>) {
+    // Storage bound to `backend`: the layers below are persisted to it, so their
+    // derived indexes have to go there too. This was `in_memory()`, which sent
+    // content to the backend and indexes to a throwaway.
+    let backend: Arc<MemoryPersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+    let backend_dyn: Arc<dyn crate::storage::PersistentBackend> = backend.clone();
+    let storage = LayerStorage::with_persistent(Arc::clone(&backend_dyn));
 
     let mut ab = LayerBuilder::new("ancestor", None);
     for r in ancestor_resources {
@@ -85,9 +89,11 @@ pub(crate) fn build_span(
 
     let topology = backend.load_topology().unwrap();
     let sources_a =
-        crate::lattice::iri_sources_since(head_a.id(), ancestor.id(), &topology, &backend).unwrap();
+        crate::lattice::iri_sources_since(head_a.id(), ancestor.id(), &topology, &*backend)
+            .unwrap();
     let sources_b =
-        crate::lattice::iri_sources_since(head_b.id(), ancestor.id(), &topology, &backend).unwrap();
+        crate::lattice::iri_sources_since(head_b.id(), ancestor.id(), &topology, &*backend)
+            .unwrap();
 
     let span = MergeSpan {
         ancestor: ancestor.id().clone(),

@@ -440,7 +440,7 @@ mod tests {
         let preview = preview_cascade(
             &clean_span,
             std::slice::from_ref(&resolution),
-            &clean_backend,
+            &*clean_backend,
         )
         .expect("preview_cascade should succeed");
         assert!(
@@ -581,7 +581,7 @@ mod tests {
         // classified conflict to attach the quotient to.
         let animal_as_property = make_resource(animal_iri, &[wk::PROPERTY], &[]);
         let (span, backend) = build_span(vec![pet], vec![animal], vec![animal_as_property]);
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         let conflict_id = conflicts[0].id.clone();
 
         // KeepOne winner=B drops `Animal` from branch A.
@@ -589,7 +589,7 @@ mod tests {
             conflict: conflict_id,
             quotient: SchemaQuotient::KeepOne { winner: Side::B },
         };
-        let preview = preview_cascade(&span, std::slice::from_ref(&resolution), &backend)
+        let preview = preview_cascade(&span, std::slice::from_ref(&resolution), &*backend)
             .expect("preview_cascade should succeed");
         let typings: Vec<&CascadeItem> = preview
             .items

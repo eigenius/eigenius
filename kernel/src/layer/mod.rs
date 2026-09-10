@@ -57,7 +57,7 @@ pub use cache::{
 };
 pub use consolidate::{
     consolidate_chain, estimate_consolidation, ConsolidateError, ConsolidateOpts,
-    ConsolidationEstimate, ConsolidationOutcome, TracePinPolicy,
+    ConsolidationEstimate, ConsolidationOutcome, ConsolidationRecord, TracePinPolicy,
 };
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
 pub use index::{
@@ -165,7 +165,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// `Layer.created_at` field — backends copy this value onto their
 /// `LayerHandle` rather than calling `now_millis()` themselves, so
 /// the build-time and persist-time timestamps stay consistent.
-fn now_millis() -> i64 {
+pub(crate) fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -599,6 +599,30 @@ impl Layer {
     /// should share the same handles.
     pub fn storage(&self) -> &LayerStorage {
         &self.storage
+    }
+
+    /// Persist this layer to the store it is bound to.
+    ///
+    /// **The sanctioned write path.** It takes no destination, because the layer
+    /// already has one: `LayerStorage::with_persistent(backend)` records the
+    /// backend, and `populate_layer_indexes` and witness admission already treat
+    /// that record as the authority on whether the layer has a durable home. This
+    /// makes it the authority on the write as well, so there is no second opinion
+    /// to disagree with.
+    ///
+    /// Refuses a layer built on `LayerStorage::in_memory()`, which has no binding.
+    /// For the deliberate cross-store case use
+    /// [`PersistentBackend::store_layer_assigned`], which names its destination
+    /// and is the exception rather than the default.
+    pub fn persist(&self) -> Result<LayerId, crate::storage::StorageError> {
+        match self.storage.persistent_backend.as_ref() {
+            Some(pb) => pb.store_layer_assigned(self),
+            None => Err(crate::storage::StorageError::Internal(format!(
+                "layer {} was built on non-persistent storage, so it has no store to \
+                 persist to. Build it on LayerStorage::with_persistent(backend).",
+                self.name
+            ))),
+        }
     }
 
     /// Returns the shared resource cache this layer was built/loaded with.

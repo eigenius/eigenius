@@ -31,7 +31,10 @@
 //! caller-supplied batch. `RocksStore::delete_layer` passes its batch to
 //! `drop_into_batch`; `RocksStore::store_layer` does not call
 //! `extend_into_batch`, so the D43 §2.5 single-atomic-write property
-//! holds on the drop path only (see GAP-05-14). Vector segments are in
+//! holds on the drop path only. Unlike the other three index families this is
+//! not eigenius#131's asymmetry: vector segments are written by the async
+//! embedding sweep, not by `store_layer`, so there is no commit batch to join.
+//! Vector segments are in
 //! any case also backfilled by the M5 post-Load sweep (D43 §5.6).
 
 use crate::{run_blocking, CF_VEC};

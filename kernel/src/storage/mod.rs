@@ -27,7 +27,6 @@ use crate::layer::{Layer, LayerId, LayerTopology};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Resource;
 use std::fmt;
-#[allow(unused_imports)]
 use std::sync::Arc;
 
 pub mod content_array;
@@ -155,15 +154,63 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// `None` if the target layer is absent from the store.
     fn load_chain_from(&self, head_id: &LayerId) -> Result<Option<ChainInfo>, StorageError>;
 
-    /// Store a layer (metadata + resources + chain pointer + topology
-    /// handle). Idempotent by layer id (content-addressed).
+    /// Identity of the store behind this handle. Two handles to the same store
+    /// return the same value; two stores never do.
     ///
-    /// Phase 14a-ii adds a `topo:<id>` entry per stored layer alongside the
-    /// existing `layer:` and `chain:` entries; `load_topology` (below) reads
-    /// those back. The topology entry is purely metadata — small fixed-size
-    /// `LayerHandle` carrying id, parents, name, resource_count, and creation
-    /// time.
-    fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError>;
+    /// Exists so a layer's binding can be checked against the store it is being
+    /// written to — see [`store_layer`](Self::store_layer). Implemented as the
+    /// receiver's data address, which is why it cannot be a provided method: a
+    /// default body would take the address of the trait object rather than of
+    /// the store.
+    fn store_identity(&self) -> usize;
+
+    /// Store a layer INTO THIS STORE, whatever the layer says its home is.
+    ///
+    /// **This is the assignment form and it is the exception.** It exists for
+    /// the one caller that means it: a harness writing a single built layer to
+    /// two backends to compare them, which cannot build a layer per backend
+    /// because `created_at` is stamped once at build and two builds would drift.
+    /// Everything else wants [`Layer::persist`], or [`store_layer`](Self::store_layer)
+    /// when a backend handle is what is in hand.
+    ///
+    /// Idempotent by layer id (content-addressed). Writes the `layer:` entry, the
+    /// `topo:<id>` handle (Phase 14a-ii, read back by `load_topology`), the chain
+    /// pointer and the resources.
+    fn store_layer_assigned(&self, layer: &Layer) -> Result<LayerId, StorageError>;
+
+    /// Store a layer that is bound to this store, refusing one that is not.
+    ///
+    /// The binding is `LayerStorage::persistent_backend`, set by
+    /// `LayerStorage::with_persistent` and consulted already by
+    /// `populate_layer_indexes` and by witness admission to decide whether a
+    /// layer has a durable home. This method makes it decide the write too, so
+    /// content and derived indexes cannot land in different stores.
+    ///
+    /// A layer built on `LayerStorage::in_memory()` has no binding and is
+    /// refused: it was never given a durable home, and picking one for it is the
+    /// silent divergence this exists to end. Build it on the storage it will be
+    /// persisted to, or say `store_layer_assigned` and mean it.
+    fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
+        match layer.storage().persistent_backend.as_ref() {
+            Some(bound) if Arc::as_ptr(bound) as *const () as usize == self.store_identity() => {
+                self.store_layer_assigned(layer)
+            }
+            Some(_) => Err(StorageError::Internal(format!(
+                "layer {} is bound to a different store than the one it is being written to. \
+                 Content would go here and its derived indexes to the layer's own store. \
+                 Build the layer on this backend's LayerStorage, or call \
+                 store_layer_assigned if writing to a second store is the intent.",
+                layer.name()
+            ))),
+            None => Err(StorageError::Internal(format!(
+                "layer {} was built on non-persistent storage and has no durable home, so \
+                 its derived indexes have nowhere to go. Build it on \
+                 LayerStorage::with_persistent(backend), or call store_layer_assigned \
+                 if writing an unbound layer to this store is the intent.",
+                layer.name()
+            ))),
+        }
+    }
 
     /// Load the in-memory layer topology — every known layer's `LayerHandle`,
     /// keyed by `LayerId`, ready for in-memory walks via `walk_chain` etc.
@@ -396,6 +443,27 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// diagnostic surfaces (future `db consolidate-summary`). Result
     /// order is unspecified; callers that care should sort.
     fn list_redirects(&self) -> Result<Vec<crate::layer::RedirectEntry>, StorageError>;
+
+    /// Record what one consolidation did, keyed by the consolidated layer's id
+    /// (D25 §6 / eigenius#48).
+    ///
+    /// Separate from the layer because [`crate::layer::ConsolidationRecord`]
+    /// carries a wall-clock timestamp, and anything inside a layer feeds its
+    /// content hash — see that type for why the id has to stay a pure function of
+    /// what was collapsed. Idempotent by layer id: re-recording the same
+    /// consolidation replaces the entry.
+    fn put_consolidation_record(
+        &self,
+        layer: &LayerId,
+        record: &crate::layer::ConsolidationRecord,
+    ) -> Result<(), StorageError>;
+
+    /// Enumerate every recorded consolidation, newest first. Backs
+    /// `eigenius db consolidate-summary`. A consolidation whose layer has since
+    /// been swept is not listed: `delete_layer` drops the record with the layer.
+    fn list_consolidations(
+        &self,
+    ) -> Result<Vec<(LayerId, crate::layer::ConsolidationRecord)>, StorageError>;
 
     // --- Anchored-commit cache (D33 §6 / Phase 20c) ---
     //

@@ -812,7 +812,7 @@ mod tests {
             span.shared_iris()
         );
 
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         assert!(
             conflicts.is_empty(),
             "current behaviour: zero conflicts, though R was checked against the LCA's C and \
@@ -828,7 +828,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             LayerStorage::in_memory(),
-            &backend,
+            &*backend,
         )
         .expect("merge must succeed — nothing objects");
         assert!(
@@ -848,7 +848,7 @@ mod tests {
             vec![make_resource("urn:test:X", &[wk::CLASS], &[])],
             vec![make_resource("urn:test:Y", &[wk::CLASS], &[])],
         );
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         assert!(
             conflicts.is_empty(),
             "disjoint contributions must produce no conflicts; got {conflicts:?}"
@@ -862,7 +862,7 @@ mod tests {
         // monotonically safe "merge to either" — no conflict needed.
         let class_x = make_resource("urn:test:X", &[wk::CLASS], &[]);
         let (span, backend) = build_span(Vec::new(), vec![class_x.clone()], vec![class_x.clone()]);
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         assert!(
             conflicts.is_empty(),
             "equal bodies on both sides must NOT surface as IriCollision; got {conflicts:?}"
@@ -885,7 +885,7 @@ mod tests {
             &[(wk::DATA_TYPE, Value::iri(&iri(wk::STRING)))],
         );
         let (span, backend) = build_span(Vec::new(), vec![prop_a], vec![prop_b]);
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         assert_eq!(
             conflicts.len(),
             1,
@@ -917,7 +917,7 @@ mod tests {
         let class_x = make_resource("urn:test:X", &[wk::CLASS], &[]);
         let prop_x = make_resource("urn:test:X", &[wk::PROPERTY], &[]);
         let (span, backend) = build_span(Vec::new(), vec![class_x], vec![prop_x]);
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         assert_eq!(conflicts.len(), 1);
         match &conflicts[0].kind {
             ConflictKind::KindMismatch {
@@ -949,7 +949,7 @@ mod tests {
             &[("urn:test:weight", Value::Integer(76))],
         );
         let (span, backend) = build_span(Vec::new(), vec![body_a], vec![body_b]);
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         assert_eq!(conflicts.len(), 1);
         match &conflicts[0].kind {
             ConflictKind::IriCollision {
@@ -1000,7 +1000,7 @@ mod tests {
             )],
         );
         let (span, backend) = build_span(Vec::new(), vec![dog_a], vec![dog_b]);
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         // We expect ONE conflict (the IriCollision on the Dog body) —
         // 15d will resolve it via SchemaQuotient::KeepBoth.
         assert_eq!(
@@ -1049,7 +1049,7 @@ mod tests {
         let (span, backend) =
             build_span(vec![ancestor_dog, ancestor_mammal], vec![dog], vec![mammal]);
         let topology = backend.load_topology().unwrap();
-        let cycles = detect_inheritance_cycles(&span, &topology, &backend).unwrap();
+        let cycles = detect_inheritance_cycles(&span, &topology, &*backend).unwrap();
         assert_eq!(
             cycles.len(),
             1,
@@ -1134,8 +1134,8 @@ mod tests {
         // value — a flat `try_load_resource(mid, X)` would miss it
         // and report `ancestor: None`, which is the gap this test
         // pins.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
 
         // root layer: declares Property X with data_type: integer.
         let mut root_b = LayerBuilder::new("root", None);
@@ -1181,9 +1181,9 @@ mod tests {
 
         let topology = backend.load_topology().unwrap();
         let sources_a =
-            crate::lattice::iri_sources_since(head_a.id(), mid.id(), &topology, &backend).unwrap();
+            crate::lattice::iri_sources_since(head_a.id(), mid.id(), &topology, &*backend).unwrap();
         let sources_b =
-            crate::lattice::iri_sources_since(head_b.id(), mid.id(), &topology, &backend).unwrap();
+            crate::lattice::iri_sources_since(head_b.id(), mid.id(), &topology, &*backend).unwrap();
 
         let span = MergeSpan {
             ancestor: mid.id().clone(),
@@ -1193,7 +1193,7 @@ mod tests {
             sources_b,
         };
 
-        let conflicts = classify_conflicts(&span, &backend).unwrap();
+        let conflicts = classify_conflicts(&span, &*backend).unwrap();
         assert_eq!(
             conflicts.len(),
             1,
@@ -1231,7 +1231,7 @@ mod tests {
         );
         let topology = backend.load_topology().unwrap();
 
-        let span = build_merge_span(&hand_span.head_a, &hand_span.head_b, &topology, &backend)
+        let span = build_merge_span(&hand_span.head_a, &hand_span.head_b, &topology, &*backend)
             .expect("build_merge_span should succeed on a connected DAG");
         assert_eq!(span.ancestor, hand_span.ancestor);
         assert_eq!(span.head_a, hand_span.head_a);
@@ -1251,7 +1251,7 @@ mod tests {
         );
         let topology = backend.load_topology().unwrap();
 
-        let span = build_merge_span(&hand_span.head_a, &hand_span.head_a, &topology, &backend)
+        let span = build_merge_span(&hand_span.head_a, &hand_span.head_a, &topology, &*backend)
             .expect("same-head merge should succeed");
         assert_eq!(span.ancestor, hand_span.head_a);
         assert!(span.sources_a.is_empty());
@@ -1262,8 +1262,9 @@ mod tests {
     fn build_merge_span_unrelated_roots_surface_no_common_ancestor() {
         // Two independently-rooted DAGs share no ancestor. v1's LCA
         // walker returns None, surfacing as `NoCommonAncestor`.
-        let backend = MemoryPersistentBackend::new();
-        let storage = crate::layer::LayerStorage::in_memory();
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(&backend));
 
         let mut ab = LayerBuilder::new("root_a", None);
         ab.add_resource(make_resource("urn:test:RootA", &[wk::CLASS], &[]))
@@ -1278,7 +1279,7 @@ mod tests {
         backend.store_layer(&root_b).unwrap();
 
         let topology = backend.load_topology().unwrap();
-        let result = build_merge_span(root_a.id(), root_b.id(), &topology, &backend);
+        let result = build_merge_span(root_a.id(), root_b.id(), &topology, &*backend);
         match result {
             Err(MergeError::NoCommonAncestor { head_a, head_b }) => {
                 assert_eq!(&head_a, root_a.id());
@@ -1299,7 +1300,7 @@ mod tests {
         );
         let topology = backend.load_topology().unwrap();
         let bogus = LayerId([0xCC; 32]);
-        let result = build_merge_span(&hand_span.head_a, &bogus, &topology, &backend);
+        let result = build_merge_span(&hand_span.head_a, &bogus, &topology, &*backend);
         match result {
             Err(MergeError::NoCommonAncestor { head_b, .. }) => {
                 assert_eq!(head_b, bogus);

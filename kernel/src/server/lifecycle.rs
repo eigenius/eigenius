@@ -726,8 +726,8 @@ fn commit_resumed_result(
         ));
     }
 
-    backend
-        .store_layer(&layer)
+    layer
+        .persist()
         .map_err(|e| format!("persist result layer: {e}"))
 }
 
@@ -779,9 +779,7 @@ mod resume_tests {
         let layer = b.build(crate::layer::LayerStorage::with_persistent(Arc::clone(
             backend,
         )));
-        let id = backend
-            .store_layer(&layer)
-            .expect("persist the pinned layer");
+        let id = layer.persist().expect("persist the pinned layer");
         (
             id,
             "urn:eigenius:test:resume:prog".to_string(),

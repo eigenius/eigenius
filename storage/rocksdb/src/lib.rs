@@ -148,6 +148,19 @@ const REDIRECT_PREFIX: &str = "redirect:";
 /// chain commit).
 const ANCHORED_COMMIT_PREFIX: &str = "anchored:";
 
+/// `consolidation:<consolidated_layer_hex>` → CBOR `ConsolidationRecord`
+/// (D25 §6 / eigenius#48).
+///
+/// A prefix on the default CF rather than its own column family, which is what the
+/// ticket sketched. A CF buys compaction isolation, which is why `cf_text` and
+/// `cf_vec` have one: their blobs churn on a different profile from layer and
+/// topology keys. A consolidation record is a few dozen bytes written once per
+/// consolidation and read by a diagnostic command, with the same lifecycle as the
+/// topology entry it sits beside — the profile `redirect:` and `anchored:` already
+/// have. Adding a CF would also make every existing store need one opened that is
+/// not there.
+const CONSOLIDATION_PREFIX: &str = "consolidation:";
+
 /// Column family for D43's custom layer-aware text inverted index
 /// (D43 §2.3). Holds `text_term:<index_iri>:<term>:<layer>`,
 /// `text_docs:<index_iri>:<layer>`, `text_stats:<index_iri>:<layer>`,
@@ -187,30 +200,31 @@ pub struct RocksStore {
     /// same `Arc<rocksdb::DB>` as `db` so commit + index-update writes
     /// land in the same physical store.
     ///
-    /// **Atomicity is one-sided.** `drop_into_batch` is passed
-    /// `delete_layer`'s `WriteBatch`, so a layer drop and its index
-    /// cleanup are one atomic write. `extend_into_batch` exists but is
-    /// **never** passed `store_layer`'s batch: `store_layer` calls
-    /// `populate_layer_indexes` before it opens the batch, and each index
-    /// writes its own non-sync batch. So on the commit path the index
-    /// entries land *before*, and separately from, the sync layer batch —
-    /// D23 §6.3's atomicity does not hold for writes. Tracked as
-    /// GAP-05-14 in `books/tutorial`.
+    /// **Atomicity holds in both directions** (eigenius#131, `2026-09-09`).
+    /// `drop_into_batch` joins `delete_layer`'s `WriteBatch` and
+    /// `extend_into_batch` joins `store_layer`'s, so a layer and its index entries
+    /// are written together and dropped together. Insertion used to populate the
+    /// indexes BEFORE the batch was opened, each index issuing its own non-sync
+    /// write, so a kill in between left index rows describing a layer with no
+    /// topology entry, no bloom, no resources and no chain pointer — and nothing
+    /// cleaned them up, because cleanup runs off `delete_layer`, keyed on a layer
+    /// the topology does not contain.
     triple_index: Arc<RocksTripleIndex>,
     /// D43 §2.3 text index (M2.4). RocksDB-backed; shares the same
     /// `Arc<rocksdb::DB>` as `db` and `triple_index` so writes land in
-    /// the same physical store. Same one-sided atomicity as
-    /// `triple_index`: `drop_into_batch` joins `delete_layer`'s batch;
-    /// `extend_into_batch` is not called from `store_layer`.
+    /// the same physical store. Same two-sided atomicity as `triple_index`:
+    /// `drop_into_batch` joins `delete_layer`'s batch and `extend_into_batch`
+    /// joins `store_layer`'s.
     text_index: Arc<RocksTextIndex>,
     /// D43 §2.4 vector index (M2.5). RocksDB-backed; shares the same
     /// `Arc<rocksdb::DB>` as `db`. Segments are stored as CBOR blobs
     /// in `cf_vec` with the §2.4 layout (concatenated `vectors`
-    /// bstr). Same one-sided atomicity as `triple_index`.
+    /// bstr). Vector segments are written by the async sweep rather than by
+    /// `store_layer`, so only the drop half joins a batch — the asymmetry
+    /// eigenius#131 fixed for the other three does not arise here.
     vector_index: Arc<RocksVectorIndex>,
     /// D65 exact value index. RocksDB-backed; shares the same
-    /// `Arc<rocksdb::DB>` as `db`. Same one-sided atomicity as
-    /// `triple_index`.
+    /// `Arc<rocksdb::DB>` as `db`. Same two-sided atomicity as `triple_index`.
     value_index: Arc<RocksValueIndex>,
 }
 
@@ -571,15 +585,20 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         self.build_chain_info(head_id)
     }
 
-    fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
-        // D65 index lifecycle: materialise the layer's derived indexes
-        // (triple → text → value) into this backend's index keyspace. `store_layer`
-        // is the post-validation persist point every commit path funnels through,
-        // so population happens here rather than eagerly at build — a rejected
-        // commit never reaches `store_layer`, and a seeded/committed layer's
-        // indexes are durable. Writes through `layer.storage()`, which is this
-        // backend (the layer was built on it). Idempotent.
-        eigenius_kernel::layer::populate_layer_indexes(layer);
+    fn store_identity(&self) -> usize {
+        self as *const Self as *const () as usize
+    }
+
+    fn store_layer_assigned(&self, layer: &Layer) -> Result<LayerId, StorageError> {
+        // D65 index lifecycle: the layer's derived indexes are materialised at
+        // this persist point, which every commit path funnels through after
+        // validation — a rejected commit never reaches here. EXTRACTED before the
+        // batch, WRITTEN into it below, so the index entries are covered by the
+        // same atomic sync write as the layer's content (eigenius#131). Extraction
+        // touches no storage.
+        let triples_owned = eigenius_kernel::layer::extract_indexable_triples(layer);
+        let values_owned = eigenius_kernel::layer::extract_value_entries(layer);
+        let texts = eigenius_kernel::query::text::indexing::extract_text_contributions(layer);
         run_blocking(|| {
             // Per D23 §6.3, a layer commit must atomically write the topology
             // entry, the per-layer bloom (Phase 14b), every `layer:<id>:res:`
@@ -677,14 +696,51 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             );
             batch.put(content_key.as_bytes(), []);
 
-            // Index entries are NOT in this batch. `populate_layer_indexes`
-            // ran at the top of `store_layer`, before the batch was opened,
-            // and each index wrote its own non-sync batch — so index writes
-            // precede this one and are not atomic with it. (An earlier
-            // comment here claimed population happened in
-            // `LayerBuilder::build`; it does not, and has not since the
-            // D65 index lifecycle moved it to this function.) Passing
-            // `extend_into_batch` this batch is the fix — see GAP-05-14.
+            // Derived index entries, in THIS batch (eigenius#131). They used to be
+            // written before it, each index opening its own non-sync batch, so a
+            // kill between those writes and this one left index rows describing a
+            // layer with no topology entry, no bloom, no resources and no chain
+            // pointer — and nothing cleaned them up, because cleanup runs off
+            // `delete_layer`, which is keyed on a layer the topology does not
+            // contain. Insertion now mirrors deletion, which has passed
+            // `drop_into_batch` this same batch since it was written.
+            //
+            // Order is the one `populate_layer_indexes` documents: triple first,
+            // because text and value discover their active index declarations by
+            // scanning it. Within one batch the order is presentational — the write
+            // is atomic either way — but it keeps the two paths readable as the
+            // same sequence.
+            let triples: Vec<eigenius_kernel::layer::Triple<'_>> =
+                triples_owned.iter().map(|t| t.as_borrowed()).collect();
+            self.triple_index
+                .extend_into_batch(&mut batch, &id, &triples);
+
+            for c in &texts {
+                let docs: Vec<eigenius_kernel::layer::TextDoc<'_>> = c
+                    .docs
+                    .iter()
+                    .map(|d| eigenius_kernel::layer::TextDoc {
+                        subject: &d.subject,
+                        tokens: &d.tokens,
+                    })
+                    .collect();
+                // The only fallible one of the three. `populate_layer_indexes`
+                // swallowed this error because it had already written the other
+                // indexes and could not take them back; inside the batch there is
+                // nothing to take back, so it propagates and the whole commit fails
+                // rather than landing content with a half-built text index.
+                self.text_index.extend_into_batch(
+                    &mut batch,
+                    &c.index,
+                    &id,
+                    &c.analyzer_id,
+                    &docs,
+                )?;
+            }
+
+            let values: Vec<eigenius_kernel::layer::ValueEntry<'_>> =
+                values_owned.iter().map(|e| e.as_borrowed()).collect();
+            self.value_index.extend_into_batch(&mut batch, &id, &values);
 
             // Sync write: layer commits are durability-critical. The kernel
             // writes the layer + branch CAS sequentially, and a verdict
@@ -942,6 +998,12 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             let topo_key = format!("{TOPO_PREFIX}{id_hex}");
             batch.delete(topo_key.as_bytes());
 
+            // The consolidation record shares the layer's lifecycle (eigenius#48):
+            // it says what this layer collapsed, so once the layer is gone it
+            // describes nothing. In this batch, like every other key here.
+            let consolidation_key = format!("{CONSOLIDATION_PREFIX}{id_hex}");
+            batch.delete(consolidation_key.as_bytes());
+
             if let Some(ch_hex) = content_hash_hex {
                 let content_key = format!("{CONTENT_INDEX_PREFIX}{ch_hex}:{id_hex}");
                 batch.delete(content_key.as_bytes());
@@ -1190,6 +1252,55 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         })
     }
 
+    fn put_consolidation_record(
+        &self,
+        layer: &LayerId,
+        record: &eigenius_kernel::layer::ConsolidationRecord,
+    ) -> Result<(), StorageError> {
+        run_blocking(|| {
+            let key = format!("{CONSOLIDATION_PREFIX}{}", hex::encode(layer.0));
+            let mut bytes = Vec::new();
+            ciborium::into_writer(record, &mut bytes)
+                .map_err(|e| StorageError::Internal(format!("encode ConsolidationRecord: {e}")))?;
+            self.db
+                .put(key.as_bytes(), bytes)
+                .map_err(|e| StorageError::Internal(format!("put consolidation record: {e}")))
+        })
+    }
+
+    fn list_consolidations(
+        &self,
+    ) -> Result<Vec<(LayerId, eigenius_kernel::layer::ConsolidationRecord)>, StorageError> {
+        run_blocking(|| {
+            let mut out: Vec<(LayerId, eigenius_kernel::layer::ConsolidationRecord)> = Vec::new();
+            let iter = self.db.prefix_iterator(CONSOLIDATION_PREFIX.as_bytes());
+            for item in iter {
+                let (k, v) = item.map_err(|e| {
+                    StorageError::Internal(format!("list_consolidations iter: {e}"))
+                })?;
+                // Prefix iterator may overshoot — trim.
+                if !k.starts_with(CONSOLIDATION_PREFIX.as_bytes()) {
+                    break;
+                }
+                let hex_id = std::str::from_utf8(&k[CONSOLIDATION_PREFIX.len()..])
+                    .map_err(|e| StorageError::Internal(format!("consolidation key utf8: {e}")))?;
+                let raw = hex::decode(hex_id)
+                    .map_err(|e| StorageError::Internal(format!("consolidation key hex: {e}")))?;
+                let id = LayerId(raw.try_into().map_err(|_| {
+                    StorageError::Internal("consolidation key is not a 32-byte id".to_string())
+                })?);
+                let record = ciborium::from_reader(v.as_ref()).map_err(|e| {
+                    StorageError::Internal(format!("decode ConsolidationRecord: {e}"))
+                })?;
+                out.push((id, record));
+            }
+            // Newest first, as the CLI presents them. The key is a content hash, so
+            // scan order carries no chronology.
+            out.sort_by_key(|(_, r)| std::cmp::Reverse(r.consolidated_at));
+            Ok(out)
+        })
+    }
+
     fn lookup_anchored_commit(
         &self,
         content_hash: &ContentHash,
@@ -1335,10 +1446,27 @@ mod tests {
         r
     }
 
-    fn open_temp_store() -> (RocksStore, TempDir) {
+    fn open_temp_store() -> (Arc<RocksStore>, TempDir) {
         let dir = TempDir::new().unwrap();
-        let store = RocksStore::open(dir.path()).unwrap();
+        let store = Arc::new(RocksStore::open(dir.path()).unwrap());
         (store, dir)
+    }
+
+    /// A temp store plus a `LayerStorage` **bound to it**. Layers built on this
+    /// storage are written to this store, which is the binding `store_layer`
+    /// checks — and, since eigenius#131, the store their derived index entries go
+    /// to as well. Tests that build on `LayerStorage::in_memory()` and then persist
+    /// were writing content here and indexes to a throwaway.
+    fn open_temp_store_bound() -> (
+        Arc<RocksStore>,
+        eigenius_kernel::layer::LayerStorage,
+        TempDir,
+    ) {
+        let (store, dir) = open_temp_store();
+        let backend: Arc<dyn eigenius_kernel::storage::PersistentBackend> =
+            Arc::clone(&store) as Arc<dyn eigenius_kernel::storage::PersistentBackend>;
+        let storage = eigenius_kernel::layer::LayerStorage::with_persistent(backend);
+        (store, storage, dir)
     }
 
     // Phase-0 async `LayerStore` / `ResourceStore` smoke tests were
@@ -1361,15 +1489,15 @@ mod tests {
     #[test]
     fn pr0_two_hash_and_supporting_layer_round_trip() {
         use eigenius_kernel::storage::PersistentBackend;
-        let (store, _dir) = open_temp_store();
+        let (store, storage, _dir) = open_temp_store_bound();
 
         // Root layer defines a class the child will reference.
         let mut root_b = LayerBuilder::new("root", None);
         root_b
             .add_resource(make_resource("urn:eigenius:core:ClassA", vec![]))
             .unwrap();
-        let root = Arc::new(root_b.build(eigenius_kernel::layer::LayerStorage::in_memory()));
-        PersistentBackend::store_layer(&store, &root).unwrap();
+        let root = Arc::new(root_b.build(storage.clone()));
+        PersistentBackend::store_layer(&*store, &root).unwrap();
 
         // Child layer references the root class so its supporting
         // layer resolves to a concrete ancestor (not `None`).
@@ -1382,12 +1510,12 @@ mod tests {
             )]),
         );
         child_b.add_resource(r).unwrap();
-        let child = child_b.build(eigenius_kernel::layer::LayerStorage::in_memory());
+        let child = child_b.build(storage.clone());
         let expected_position = child.id().clone();
         let expected_content = child.content_hash().clone();
         let expected_supporting = child.supporting_layer().cloned();
         assert_eq!(expected_supporting.as_ref(), Some(root.id()));
-        PersistentBackend::store_layer(&store, &child).unwrap();
+        PersistentBackend::store_layer(&*store, &child).unwrap();
 
         // Reload the topology entry directly — this is the on-disk
         // shape the resume path consults.
@@ -1398,13 +1526,10 @@ mod tests {
 
         // Reload the full chain via the production path and confirm
         // the reconstructed `Layer` carries the same hashes.
-        let info = PersistentBackend::load_chain_from(&store, &expected_position)
+        let info = PersistentBackend::load_chain_from(&*store, &expected_position)
             .unwrap()
             .expect("chain present");
-        let rebuilt = eigenius_kernel::layer::build_chain(
-            info,
-            eigenius_kernel::layer::LayerStorage::in_memory(),
-        );
+        let rebuilt = eigenius_kernel::layer::build_chain(info, storage.clone());
         assert_eq!(rebuilt.id(), &expected_position);
         assert_eq!(rebuilt.content_hash(), &expected_content);
         assert_eq!(rebuilt.supporting_layer(), expected_supporting.as_ref());
@@ -1499,16 +1624,16 @@ mod tests {
         // Write: store a layer, install a redirect against it, reclaim
         // the original topology entry.
         {
-            let store = RocksStore::open(dir.path()).unwrap();
+            let store: Arc<dyn PersistentBackend> = Arc::new(RocksStore::open(dir.path()).unwrap());
+            let storage = eigenius_kernel::layer::LayerStorage::with_persistent(Arc::clone(&store));
             let mut sb = LayerBuilder::new("redirect-source", None);
             sb.add_resource(make_resource("urn:eigenius:core:r", vec![]))
                 .unwrap();
-            let source =
-                std::sync::Arc::new(sb.build(eigenius_kernel::layer::LayerStorage::in_memory()));
-            PersistentBackend::store_layer(&store, &source).unwrap();
+            let source = std::sync::Arc::new(sb.build(storage.clone()));
+            source.persist().unwrap();
             source_id = source.id().clone();
 
-            let topo = PersistentBackend::load_topology(&store).unwrap();
+            let topo = PersistentBackend::load_topology(&*store).unwrap();
             source_name = topo.get_layer(&source_id).unwrap().name.clone();
             let source_handle = topo.get_layer(&source_id).unwrap().clone();
             let entry = eigenius_kernel::layer::RedirectEntry {
@@ -1516,8 +1641,8 @@ mod tests {
                 source_handle,
                 preserve_history: false,
             };
-            PersistentBackend::put_redirect(&store, &entry).unwrap();
-            PersistentBackend::delete_layer(&store, &source_id).unwrap();
+            PersistentBackend::put_redirect(&*store, &entry).unwrap();
+            PersistentBackend::delete_layer(&*store, &source_id).unwrap();
         }
 
         // Reopen: redirect persists; load_topology manufactures the
@@ -1560,7 +1685,8 @@ mod tests {
         let store_arc: Arc<dyn PersistentBackend> = Arc::new(RocksStore::open(dir.path()).unwrap());
 
         // Root holds the property declarations the chain references.
-        let storage_for_build = eigenius_kernel::layer::LayerStorage::in_memory();
+        let storage_for_build =
+            eigenius_kernel::layer::LayerStorage::with_persistent(Arc::clone(&store_arc));
         let mut rb = LayerBuilder::new("root", None);
         rb.add_resource(make_resource("urn:eigenius:core:Class", vec![]))
             .unwrap();
@@ -1664,7 +1790,7 @@ mod tests {
     #[test]
     fn content_hash_index_dedup_and_cleanup_rocksdb() {
         use eigenius_kernel::storage::PersistentBackend;
-        let (store, _dir) = open_temp_store();
+        let (store, storage, _dir) = open_temp_store_bound();
 
         let mut a = LayerBuilder::new("root_a", None);
         a.add_resource(make_resource(
@@ -1672,8 +1798,8 @@ mod tests {
             vec![("urn:eigenius:core:description", Value::String("a".into()))],
         ))
         .unwrap();
-        let root_a = Arc::new(a.build(eigenius_kernel::layer::LayerStorage::in_memory()));
-        PersistentBackend::store_layer(&store, &root_a).unwrap();
+        let root_a = Arc::new(a.build(storage.clone()));
+        PersistentBackend::store_layer(&*store, &root_a).unwrap();
 
         let mut b = LayerBuilder::new("root_b", None);
         b.add_resource(make_resource(
@@ -1681,8 +1807,8 @@ mod tests {
             vec![("urn:eigenius:core:description", Value::String("b".into()))],
         ))
         .unwrap();
-        let root_b = Arc::new(b.build(eigenius_kernel::layer::LayerStorage::in_memory()));
-        PersistentBackend::store_layer(&store, &root_b).unwrap();
+        let root_b = Arc::new(b.build(storage.clone()));
+        PersistentBackend::store_layer(&*store, &root_b).unwrap();
 
         let build_child = |parent: Arc<Layer>| -> Layer {
             let mut cb = LayerBuilder::new("child", Some(parent));
@@ -1694,31 +1820,31 @@ mod tests {
                 )],
             ))
             .unwrap();
-            cb.build(eigenius_kernel::layer::LayerStorage::in_memory())
+            cb.build(storage.clone())
         };
         let child_a = build_child(Arc::clone(&root_a));
         let child_b = build_child(Arc::clone(&root_b));
         assert_eq!(child_a.content_hash(), child_b.content_hash());
         assert_ne!(child_a.id(), child_b.id());
 
-        PersistentBackend::store_layer(&store, &child_a).unwrap();
-        PersistentBackend::store_layer(&store, &child_b).unwrap();
+        PersistentBackend::store_layer(&*store, &child_a).unwrap();
+        PersistentBackend::store_layer(&*store, &child_b).unwrap();
 
         let mut hits =
-            PersistentBackend::lookup_by_content_hash(&store, child_a.content_hash()).unwrap();
+            PersistentBackend::lookup_by_content_hash(&*store, child_a.content_hash()).unwrap();
         hits.sort();
         let mut expected = vec![child_a.id().clone(), child_b.id().clone()];
         expected.sort();
         assert_eq!(hits, expected);
 
-        PersistentBackend::delete_layer(&store, child_a.id()).unwrap();
+        PersistentBackend::delete_layer(&*store, child_a.id()).unwrap();
         let remaining =
-            PersistentBackend::lookup_by_content_hash(&store, child_a.content_hash()).unwrap();
+            PersistentBackend::lookup_by_content_hash(&*store, child_a.content_hash()).unwrap();
         assert_eq!(remaining, vec![child_b.id().clone()]);
 
-        PersistentBackend::delete_layer(&store, child_b.id()).unwrap();
+        PersistentBackend::delete_layer(&*store, child_b.id()).unwrap();
         let empty =
-            PersistentBackend::lookup_by_content_hash(&store, child_a.content_hash()).unwrap();
+            PersistentBackend::lookup_by_content_hash(&*store, child_a.content_hash()).unwrap();
         assert!(empty.is_empty());
     }
 
@@ -1828,13 +1954,18 @@ mod tests {
             vector_index: store.vector_index_arc(),
             value_index: store.value_index_arc(),
             redirect_map: Arc::new(NoRedirects),
-            persistent_backend: None,
+            // The index handles above are this store's, so the binding is this
+            // store too. It said `None`, which claimed the layer had no durable
+            // home while wiring its indexes straight into one.
+            persistent_backend: Some(
+                Arc::clone(&store) as Arc<dyn eigenius_kernel::storage::PersistentBackend>
+            ),
             pending: eigenius_kernel::layer::PendingStage::default(),
         };
         let builder = LayerBuilder::new("test", None);
         let layer = builder.build(storage);
         let layer_id = layer.id().clone();
-        store.store_layer(&layer).unwrap();
+        layer.persist().unwrap();
 
         // Populate text + vector indexes against this layer.
         let index_iri = Iri::parse("urn:eigenius:test:idx").unwrap();
@@ -2012,7 +2143,9 @@ mod tests {
 
         // Write data
         {
-            let store = RocksStore::open(dir.path()).unwrap();
+            let store: Arc<dyn eigenius_kernel::storage::PersistentBackend> =
+                Arc::new(RocksStore::open(dir.path()).unwrap());
+            let storage = eigenius_kernel::layer::LayerStorage::with_persistent(Arc::clone(&store));
             let mut builder = LayerBuilder::new("persisted", None);
             builder
                 .add_resource(make_resource(
@@ -2023,12 +2156,12 @@ mod tests {
                     )],
                 ))
                 .unwrap();
-            let layer = builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
+            let layer = builder.build(storage.clone());
             let id = layer.id().clone();
-            eigenius_kernel::storage::PersistentBackend::store_layer(&store, &layer).unwrap();
+            eigenius_kernel::storage::PersistentBackend::store_layer(&*store, &layer).unwrap();
             // Phase 14g: track the head via `branch:main` instead of
             // the removed `set_head`.
-            eigenius_kernel::storage::PersistentBackend::put_branch(&store, "main", &id).unwrap();
+            eigenius_kernel::storage::PersistentBackend::put_branch(&*store, "main", &id).unwrap();
         }
 
         // Reopen and verify
@@ -2058,15 +2191,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn chain_reconstruction() {
-        let (store, _dir) = open_temp_store();
+        let (store, storage, _dir) = open_temp_store_bound();
 
         // Build and store root layer
         let mut root_builder = LayerBuilder::new("core", None);
         root_builder
             .add_resource(make_resource("urn:eigenius:core:Class", vec![]))
             .unwrap();
-        let root = Arc::new(root_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
-        eigenius_kernel::storage::PersistentBackend::store_layer(&store, &root).unwrap();
+        let root = Arc::new(root_builder.build(storage.clone()));
+        eigenius_kernel::storage::PersistentBackend::store_layer(&*store, &root).unwrap();
 
         // Build and store child layer
         let mut child_builder = LayerBuilder::new("domain", Some(Arc::clone(&root)));
@@ -2079,26 +2212,28 @@ mod tests {
                 )],
             ))
             .unwrap();
-        let child = child_builder.build(eigenius_kernel::layer::LayerStorage::in_memory());
+        let child = child_builder.build(storage.clone());
         let child_id = child.id().clone();
-        eigenius_kernel::storage::PersistentBackend::store_layer(&store, &child).unwrap();
+        eigenius_kernel::storage::PersistentBackend::store_layer(&*store, &child).unwrap();
         // Phase 14g: track head via `branch:main`; load chain via
         // `load_chain_from(branch_head)` rather than the removed
         // no-arg `load_chain()`.
-        eigenius_kernel::storage::PersistentBackend::put_branch(&store, "main", &child_id).unwrap();
+        eigenius_kernel::storage::PersistentBackend::put_branch(&*store, "main", &child_id)
+            .unwrap();
 
-        let main_head = eigenius_kernel::storage::PersistentBackend::get_branch(&store, "main")
+        let main_head = eigenius_kernel::storage::PersistentBackend::get_branch(&*store, "main")
             .unwrap()
             .expect("branch:main present");
-        let info = eigenius_kernel::storage::PersistentBackend::load_chain_from(&store, &main_head)
-            .unwrap()
-            .expect("chain present");
-        let storage = eigenius_kernel::layer::LayerStorage::in_memory();
+        let info =
+            eigenius_kernel::storage::PersistentBackend::load_chain_from(&*store, &main_head)
+                .unwrap()
+                .expect("chain present");
+        let storage = storage.clone();
         // Pre-warm the caches from the persistent store so resolve hits succeed.
         for handle in &info.handles {
             if let Some(iris) = info.defined_iris_per_layer.get(&handle.id) {
                 for iri_h in iris {
-                    if let Some(r) = ResourceBackend::load_resource(&store, &handle.id, iri_h) {
+                    if let Some(r) = ResourceBackend::load_resource(&*store, &handle.id, iri_h) {
                         storage.cache.put(
                             eigenius_kernel::layer::ResourceKey::new(
                                 handle.id.clone(),
@@ -2111,7 +2246,7 @@ mod tests {
                 }
             }
             if let Ok(Some(bloom)) =
-                eigenius_kernel::storage::PersistentBackend::load_bloom(&store, &handle.id)
+                eigenius_kernel::storage::PersistentBackend::load_bloom(&*store, &handle.id)
             {
                 storage.bloom_cache.put(handle.id.clone(), Arc::new(bloom));
             }
@@ -2129,7 +2264,7 @@ mod tests {
 
     #[tokio::test]
     async fn trace_store_round_trip() {
-        let (store, _dir) = open_temp_store();
+        let (store, _storage, _dir) = open_temp_store_bound();
 
         let key = [42u8; 32];
         assert!(store.get_component_trace(&key).is_none());
@@ -2193,18 +2328,18 @@ mod tests {
         fn topology_round_trip_via_store_layer() {
             // PB::store_layer must populate `topo:<id>` so load_topology returns
             // the layer's handle.
-            let (store, _dir) = open_temp_store();
+            let (store, storage, _dir) = open_temp_store_bound();
 
             let mut builder = LayerBuilder::new("root", None);
             builder
                 .add_resource(make_resource("urn:eigenius:core:A", vec![]))
                 .unwrap();
-            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let layer = Arc::new(builder.build(storage.clone()));
             let id = layer.id().clone();
 
-            PB::store_layer(&store, &layer).unwrap();
+            PB::store_layer(&*store, &layer).unwrap();
 
-            let topology = PB::load_topology(&store).unwrap();
+            let topology = PB::load_topology(&*store).unwrap();
             assert_eq!(topology.layer_count(), 1);
             let handle = topology.get_layer(&id).expect("handle present");
             assert_eq!(handle.name, "root");
@@ -2216,28 +2351,26 @@ mod tests {
 
         #[test]
         fn topology_walk_chain_after_multiple_commits() {
-            let (store, _dir) = open_temp_store();
+            let (store, storage, _dir) = open_temp_store_bound();
 
             let mut root_builder = LayerBuilder::new("root", None);
             root_builder
                 .add_resource(make_resource("urn:eigenius:core:A", vec![]))
                 .unwrap();
-            let root =
-                Arc::new(root_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let root = Arc::new(root_builder.build(storage.clone()));
             let root_id = root.id().clone();
 
             let mut child_builder = LayerBuilder::new("child", Some(Arc::clone(&root)));
             child_builder
                 .add_resource(make_resource("urn:eigenius:example:B", vec![]))
                 .unwrap();
-            let child =
-                Arc::new(child_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let child = Arc::new(child_builder.build(storage.clone()));
             let child_id = child.id().clone();
 
-            PB::store_layer(&store, &root).unwrap();
-            PB::store_layer(&store, &child).unwrap();
+            PB::store_layer(&*store, &root).unwrap();
+            PB::store_layer(&*store, &child).unwrap();
 
-            let topology = PB::load_topology(&store).unwrap();
+            let topology = PB::load_topology(&*store).unwrap();
             assert_eq!(topology.layer_count(), 2);
 
             // Walk from child should yield [child, root].
@@ -2262,15 +2395,17 @@ mod tests {
 
             // Write via PersistentBackend; close.
             {
-                let store = RocksStore::open(dir.path()).unwrap();
+                let store: Arc<dyn eigenius_kernel::storage::PersistentBackend> =
+                    Arc::new(RocksStore::open(dir.path()).unwrap());
+                let storage =
+                    eigenius_kernel::layer::LayerStorage::with_persistent(Arc::clone(&store));
                 let mut builder = LayerBuilder::new("persisted", None);
                 builder
                     .add_resource(make_resource("urn:eigenius:core:X", vec![]))
                     .unwrap();
-                let layer =
-                    Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+                let layer = Arc::new(builder.build(storage.clone()));
                 layer_id = layer.id().clone();
-                PB::store_layer(&store, &layer).unwrap();
+                PB::store_layer(&*store, &layer).unwrap();
             }
 
             // Reopen; topology entry must be there without re-storing.
@@ -2284,8 +2419,8 @@ mod tests {
 
         #[test]
         fn topology_load_from_empty_db_is_empty() {
-            let (store, _dir) = open_temp_store();
-            let topology = PB::load_topology(&store).unwrap();
+            let (store, _storage, _dir) = open_temp_store_bound();
+            let topology = PB::load_topology(&*store).unwrap();
             assert_eq!(topology.layer_count(), 0);
         }
     } // mod topology_tests
@@ -2305,7 +2440,7 @@ mod tests {
         /// pinned by `value_variants_round_trip_normalizations` below.
         #[test]
         fn value_variants_round_trip() {
-            let (store, _dir) = open_temp_store();
+            let (store, storage, _dir) = open_temp_store_bound();
 
             let mut inner = Resource::new_embedded();
             inner.set(
@@ -2338,15 +2473,15 @@ mod tests {
             let original = r.clone();
             let mut builder = LayerBuilder::new("variants", None);
             builder.add_resource(r).unwrap();
-            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let layer = Arc::new(builder.build(storage.clone()));
             let layer_id = layer.id().clone();
 
-            PB::store_layer(&store, &layer).unwrap();
+            PB::store_layer(&*store, &layer).unwrap();
 
             // Read directly via the ResourceBackend surface (not load_layer,
             // which warms a cache — we want the on-disk CBOR decode path).
             let loaded = ResourceBackend::load_resource(
-                &store,
+                &*store,
                 &layer_id,
                 &iri("urn:eigenius:test:variants"),
             )
@@ -2368,7 +2503,7 @@ mod tests {
         /// the argument that retired the variant (D85 §6.2).
         #[test]
         fn value_variants_round_trip_normalizations() {
-            let (store, _dir) = open_temp_store();
+            let (store, storage, _dir) = open_temp_store_bound();
 
             let mut r = Resource::new(iri("urn:eigenius:test:lossy"));
             r.set(
@@ -2386,12 +2521,12 @@ mod tests {
 
             let mut builder = LayerBuilder::new("lossy", None);
             builder.add_resource(r).unwrap();
-            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let layer = Arc::new(builder.build(storage.clone()));
             let layer_id = layer.id().clone();
-            PB::store_layer(&store, &layer).unwrap();
+            PB::store_layer(&*store, &layer).unwrap();
 
             let loaded =
-                ResourceBackend::load_resource(&store, &layer_id, &iri("urn:eigenius:test:lossy"))
+                ResourceBackend::load_resource(&*store, &layer_id, &iri("urn:eigenius:test:lossy"))
                     .expect("resource present");
 
             // A reference survives as the IRI string it is; whether a string IS a reference
@@ -2422,7 +2557,7 @@ mod tests {
         /// drifted away from "tag only objects/arrays."
         #[test]
         fn value_json_object_and_array_round_trip_as_json() {
-            let (store, _dir) = open_temp_store();
+            let (store, storage, _dir) = open_temp_store_bound();
 
             let mut obj = serde_json::Map::new();
             obj.insert(
@@ -2446,12 +2581,12 @@ mod tests {
 
             let mut builder = LayerBuilder::new("json-shapes", None);
             builder.add_resource(r).unwrap();
-            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let layer = Arc::new(builder.build(storage.clone()));
             let layer_id = layer.id().clone();
-            PB::store_layer(&store, &layer).unwrap();
+            PB::store_layer(&*store, &layer).unwrap();
 
             let loaded = ResourceBackend::load_resource(
-                &store,
+                &*store,
                 &layer_id,
                 &iri("urn:eigenius:test:json_shapes"),
             )
@@ -2472,7 +2607,7 @@ mod tests {
         /// encoder/decoder regression that drops or mangles fields.
         #[test]
         fn core_ontology_field_level_equality() {
-            let (store, _dir) = open_temp_store();
+            let (store, storage, _dir) = open_temp_store_bound();
             let core_json = include_str!("../../../ontologies/core/core-ontology.json");
             let resources = eigon_json::parse_document(core_json).unwrap();
 
@@ -2486,14 +2621,14 @@ mod tests {
             for r in resources {
                 builder.add_resource(r).unwrap();
             }
-            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let layer = Arc::new(builder.build(storage.clone()));
             let id = layer.id().clone();
 
-            PB::store_layer(&store, &layer).unwrap();
+            PB::store_layer(&*store, &layer).unwrap();
 
             // Read each one back through the backend and compare.
             for (iri, original) in &originals {
-                let loaded = ResourceBackend::load_resource(&store, &id, iri)
+                let loaded = ResourceBackend::load_resource(&*store, &id, iri)
                     .unwrap_or_else(|| panic!("missing core resource {iri}"));
                 assert_eq!(&loaded, original, "round-trip mismatch for {iri}");
             }
@@ -2506,14 +2641,14 @@ mod tests {
             // build-time shape that storage normalised away is the mistake
             // `canonicalise_resource_refs` made. So they are expected here; what must hold is
             // that every AUTHORED resource is still present and unchanged, asserted above.
-            let loaded_iris = ResourceBackend::list_layer_iris(&store, &id).unwrap();
+            let loaded_iris = ResourceBackend::list_layer_iris(&*store, &id).unwrap();
             let authored: std::collections::BTreeSet<_> = originals.keys().cloned().collect();
             assert!(
                 authored.is_subset(&loaded_iris),
                 "every authored core resource must be stored"
             );
             for extra in loaded_iris.difference(&authored) {
-                let r = ResourceBackend::load_resource(&store, &id, extra)
+                let r = ResourceBackend::load_resource(&*store, &id, extra)
                     .unwrap_or_else(|| panic!("listed but not loadable: {extra}"));
                 let derived = r
                     .get(&Iri::parse("urn:eigenius:core:subclass_of").unwrap())
@@ -2534,8 +2669,8 @@ mod tests {
         /// uses but no existing test exercises end-to-end.
         #[test]
         fn chain_resolve_with_cold_cache() {
-            let (store, _dir) = open_temp_store();
-            let store_arc: Arc<RocksStore> = Arc::new(store);
+            let (store, storage, _dir) = open_temp_store_bound();
+            let store_arc: Arc<RocksStore> = Arc::clone(&store);
 
             // Build root with one resource.
             let mut root_builder = LayerBuilder::new("root", None);
@@ -2548,8 +2683,7 @@ mod tests {
                     )],
                 ))
                 .unwrap();
-            let root =
-                Arc::new(root_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let root = Arc::new(root_builder.build(storage.clone()));
 
             // Build child with another resource.
             let mut child_builder = LayerBuilder::new("domain", Some(Arc::clone(&root)));
@@ -2559,8 +2693,7 @@ mod tests {
                     vec![("urn:eigenius:core:description", Value::String("dog".into()))],
                 ))
                 .unwrap();
-            let child =
-                Arc::new(child_builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let child = Arc::new(child_builder.build(storage.clone()));
             let child_id = child.id().clone();
 
             PB::store_layer(&*store_arc, &root).unwrap();
@@ -2617,39 +2750,39 @@ mod tests {
         /// previously untested at the `PersistentBackend` level.
         #[test]
         fn meta_kv_round_trip() {
-            let (store, _dir) = open_temp_store();
+            let (store, _storage, _dir) = open_temp_store_bound();
 
-            assert!(PB::get_meta(&store, "absent").unwrap().is_none());
+            assert!(PB::get_meta(&*store, "absent").unwrap().is_none());
 
-            PB::put_meta(&store, "session:abc", b"value-abc").unwrap();
-            PB::put_meta(&store, "session:def", b"value-def").unwrap();
-            PB::put_meta(&store, "other:xyz", b"value-xyz").unwrap();
+            PB::put_meta(&*store, "session:abc", b"value-abc").unwrap();
+            PB::put_meta(&*store, "session:def", b"value-def").unwrap();
+            PB::put_meta(&*store, "other:xyz", b"value-xyz").unwrap();
 
             assert_eq!(
-                PB::get_meta(&store, "session:abc").unwrap().as_deref(),
+                PB::get_meta(&*store, "session:abc").unwrap().as_deref(),
                 Some(b"value-abc".as_ref())
             );
             assert_eq!(
-                PB::get_meta(&store, "session:def").unwrap().as_deref(),
+                PB::get_meta(&*store, "session:def").unwrap().as_deref(),
                 Some(b"value-def".as_ref())
             );
 
             // list_meta_prefix scopes correctly.
-            let session_keys = PB::list_meta_prefix(&store, "session:").unwrap();
+            let session_keys = PB::list_meta_prefix(&*store, "session:").unwrap();
             let mut session_sorted = session_keys.clone();
             session_sorted.sort();
             assert_eq!(session_sorted, vec!["session:abc", "session:def"]);
 
             // delete_meta on present key removes it.
-            PB::delete_meta(&store, "session:abc").unwrap();
-            assert!(PB::get_meta(&store, "session:abc").unwrap().is_none());
+            PB::delete_meta(&*store, "session:abc").unwrap();
+            assert!(PB::get_meta(&*store, "session:abc").unwrap().is_none());
 
             // delete_meta on absent key is a no-op (per trait contract).
-            PB::delete_meta(&store, "session:never_existed").unwrap();
+            PB::delete_meta(&*store, "session:never_existed").unwrap();
 
             // Other prefix unaffected.
             assert_eq!(
-                PB::get_meta(&store, "other:xyz").unwrap().as_deref(),
+                PB::get_meta(&*store, "other:xyz").unwrap().as_deref(),
                 Some(b"value-xyz".as_ref())
             );
         }
@@ -2659,10 +2792,10 @@ mod tests {
         /// correctness here is structural.
         #[test]
         fn write_batch_applies_all_ops() {
-            let (store, _dir) = open_temp_store();
+            let (store, _storage, _dir) = open_temp_store_bound();
 
             // Pre-populate one key so we can verify a delete inside the batch.
-            PB::put_meta(&store, "to_delete", b"old").unwrap();
+            PB::put_meta(&*store, "to_delete", b"old").unwrap();
 
             let ops = vec![
                 BatchOp::PutMeta {
@@ -2681,21 +2814,21 @@ mod tests {
                     value: b"v3".to_vec(),
                 },
             ];
-            PB::write_batch(&store, &ops).unwrap();
+            PB::write_batch(&*store, &ops).unwrap();
 
             assert_eq!(
-                PB::get_meta(&store, "k1").unwrap().as_deref(),
+                PB::get_meta(&*store, "k1").unwrap().as_deref(),
                 Some(b"v1".as_ref())
             );
             assert_eq!(
-                PB::get_meta(&store, "k2").unwrap().as_deref(),
+                PB::get_meta(&*store, "k2").unwrap().as_deref(),
                 Some(b"v2".as_ref())
             );
             assert_eq!(
-                PB::get_meta(&store, "k3").unwrap().as_deref(),
+                PB::get_meta(&*store, "k3").unwrap().as_deref(),
                 Some(b"v3".as_ref())
             );
-            assert!(PB::get_meta(&store, "to_delete").unwrap().is_none());
+            assert!(PB::get_meta(&*store, "to_delete").unwrap().is_none());
         }
 
         /// `load_chain_from(head_id)` walks from an arbitrary layer, not
@@ -2704,13 +2837,13 @@ mod tests {
         /// off one parent must each rebuild the correct chain.
         #[test]
         fn load_chain_from_specific_head() {
-            let (store, _dir) = open_temp_store();
+            let (store, storage, _dir) = open_temp_store_bound();
 
             let mut root_b = LayerBuilder::new("root", None);
             root_b
                 .add_resource(make_resource("urn:eigenius:core:R", vec![]))
                 .unwrap();
-            let root = Arc::new(root_b.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let root = Arc::new(root_b.build(storage.clone()));
             let root_id = root.id().clone();
 
             // Two distinct children off the same root — distinct because
@@ -2718,21 +2851,21 @@ mod tests {
             let mut a_b = LayerBuilder::new("child_a", Some(Arc::clone(&root)));
             a_b.add_resource(make_resource("urn:eigenius:example:A", vec![]))
                 .unwrap();
-            let child_a = Arc::new(a_b.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let child_a = Arc::new(a_b.build(storage.clone()));
             let a_id = child_a.id().clone();
 
             let mut b_b = LayerBuilder::new("child_b", Some(Arc::clone(&root)));
             b_b.add_resource(make_resource("urn:eigenius:example:B", vec![]))
                 .unwrap();
-            let child_b = Arc::new(b_b.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let child_b = Arc::new(b_b.build(storage.clone()));
             let b_id = child_b.id().clone();
 
-            PB::store_layer(&store, &root).unwrap();
-            PB::store_layer(&store, &child_a).unwrap();
-            PB::store_layer(&store, &child_b).unwrap();
+            PB::store_layer(&*store, &root).unwrap();
+            PB::store_layer(&*store, &child_a).unwrap();
+            PB::store_layer(&*store, &child_b).unwrap();
             // Note: no `set_head` — load_chain_from must not depend on it.
 
-            let info_a: ChainInfo = PB::load_chain_from(&store, &a_id)
+            let info_a: ChainInfo = PB::load_chain_from(&*store, &a_id)
                 .unwrap()
                 .expect("chain for a");
             assert_eq!(info_a.head, a_id);
@@ -2741,7 +2874,7 @@ mod tests {
             assert!(info_a.defined_iris_per_layer.contains_key(&root_id));
             assert!(info_a.defined_iris_per_layer.contains_key(&a_id));
 
-            let info_b: ChainInfo = PB::load_chain_from(&store, &b_id)
+            let info_b: ChainInfo = PB::load_chain_from(&*store, &b_id)
                 .unwrap()
                 .expect("chain for b");
             assert_eq!(info_b.head, b_id);
@@ -2750,7 +2883,7 @@ mod tests {
             assert!(info_b.defined_iris_per_layer.contains_key(&b_id));
 
             // Asking for the root alone yields a one-element chain.
-            let info_root: ChainInfo = PB::load_chain_from(&store, &root_id)
+            let info_root: ChainInfo = PB::load_chain_from(&*store, &root_id)
                 .unwrap()
                 .expect("chain for root");
             assert_eq!(info_root.head, root_id);
@@ -2767,7 +2900,7 @@ mod tests {
         fn bloom_round_trip_via_store_layer() {
             use eigenius_kernel::layer::BloomFilter;
 
-            let (store, _dir) = open_temp_store();
+            let (store, storage, _dir) = open_temp_store_bound();
 
             let mut builder = LayerBuilder::new("bloom_layer", None);
             for i in 0..200 {
@@ -2775,13 +2908,15 @@ mod tests {
                     .add_resource(make_resource(&format!("urn:eigenius:test:r{i}"), vec![]))
                     .unwrap();
             }
-            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let layer = Arc::new(builder.build(storage.clone()));
             let id = layer.id().clone();
             let original_iris = layer.defined_iris().clone();
 
-            PB::store_layer(&store, &layer).unwrap();
+            PB::store_layer(&*store, &layer).unwrap();
 
-            let loaded = PB::load_bloom(&store, &id).unwrap().expect("bloom present");
+            let loaded = PB::load_bloom(&*store, &id)
+                .unwrap()
+                .expect("bloom present");
             let expected = BloomFilter::for_iris(&original_iris);
             assert_eq!(
                 loaded, expected,
@@ -2798,28 +2933,28 @@ mod tests {
         /// commit; nothing should land partially.
         #[test]
         fn store_layer_writes_all_keys_atomically() {
-            let (store, _dir) = open_temp_store();
+            let (store, storage, _dir) = open_temp_store_bound();
 
             let mut builder = LayerBuilder::new("atomic", None);
             builder
                 .add_resource(make_resource("urn:eigenius:test:a", vec![]))
                 .unwrap();
-            let layer = Arc::new(builder.build(eigenius_kernel::layer::LayerStorage::in_memory()));
+            let layer = Arc::new(builder.build(storage.clone()));
             let id = layer.id().clone();
 
-            PB::store_layer(&store, &layer).unwrap();
+            PB::store_layer(&*store, &layer).unwrap();
 
             // Topology entry present.
-            let topology = PB::load_topology(&store).unwrap();
+            let topology = PB::load_topology(&*store).unwrap();
             assert!(topology.get_layer(&id).is_some());
             // Bloom present.
-            assert!(PB::load_bloom(&store, &id).unwrap().is_some());
+            assert!(PB::load_bloom(&*store, &id).unwrap().is_some());
             // Resource present.
             assert!(
-                ResourceBackend::load_resource(&store, &id, &iri("urn:eigenius:test:a")).is_some()
+                ResourceBackend::load_resource(&*store, &id, &iri("urn:eigenius:test:a")).is_some()
             );
             // Chain entry present (root layer — empty parent).
-            let info = PB::load_chain_from(&store, &id).unwrap().expect("chain");
+            let info = PB::load_chain_from(&*store, &id).unwrap().expect("chain");
             assert_eq!(info.handles.len(), 1);
             assert!(info.handles[0].is_root());
         }
@@ -2831,19 +2966,21 @@ mod tests {
             use eigenius_kernel::layer::BloomFilter;
             use std::collections::BTreeSet;
 
-            let (store, _dir) = open_temp_store();
+            let (store, _storage, _dir) = open_temp_store_bound();
             let layer_id = LayerId([13u8; 32]);
 
             // No bloom yet.
-            assert!(PB::load_bloom(&store, &layer_id).unwrap().is_none());
+            assert!(PB::load_bloom(&*store, &layer_id).unwrap().is_none());
 
             let iris: BTreeSet<_> = (0..50)
                 .map(|i| iri(&format!("urn:eigenius:test:s{i}")))
                 .collect();
             let bloom = BloomFilter::for_iris(&iris);
-            PB::store_bloom(&store, &layer_id, &bloom).unwrap();
+            PB::store_bloom(&*store, &layer_id, &bloom).unwrap();
 
-            let loaded = PB::load_bloom(&store, &layer_id).unwrap().expect("present");
+            let loaded = PB::load_bloom(&*store, &layer_id)
+                .unwrap()
+                .expect("present");
             assert_eq!(loaded, bloom);
         }
 
