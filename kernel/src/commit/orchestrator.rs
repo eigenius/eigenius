@@ -380,7 +380,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn test_storage() -> LayerStorage {
-        LayerStorage::in_memory()
+        // Bound to a backend: these fixtures are persisted, and a persisted
+        // layer's derived indexes must land in the same store as its content.
+        LayerStorage::with_persistent(std::sync::Arc::new(
+            crate::storage::memory::MemoryPersistentBackend::new(),
+        ))
     }
 
     fn build_core_layer(storage: LayerStorage) -> Arc<Layer> {
@@ -451,8 +455,13 @@ mod tests {
             layer: &Arc<Layer>,
         ) -> Result<PersistedLayerInfo, ValidationError> {
             use crate::storage::PersistentBackend;
+            // `store_layer_assigned`, not `store_layer`: this stub's store is
+            // deliberately NOT the layer's home. It is a recorder the test
+            // inspects, so it writes into itself on purpose — the one shape the
+            // assignment form exists for. A real persister writes a layer to the
+            // store it is bound to; see `BackendStorePersister`.
             self.backend
-                .store_layer(layer)
+                .store_layer_assigned(layer)
                 .map_err(|e| ValidationError {
                     resource_id: None,
                     property: None,

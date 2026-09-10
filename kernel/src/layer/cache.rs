@@ -678,19 +678,24 @@ mod tests {
     fn small_layer(
         name: &str,
         parent: Option<Arc<crate::layer::Layer>>,
+        storage: LayerStorage,
     ) -> Arc<crate::layer::Layer> {
         let mut builder = LayerBuilder::new(name, parent);
         let mut r = Resource::new(iri("urn:eigenius:test:r"));
         r.set(iri("urn:eigenius:test:p"), Value::String("v".into()));
         builder.add_resource(r).unwrap();
-        Arc::new(builder.build(LayerStorage::in_memory()))
+        Arc::new(builder.build(storage))
     }
 
     #[test]
     fn bloom_cache_get_or_load_hits_and_misses() {
         let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
-        let layer = small_layer("test", None);
-        backend.store_layer(&layer).unwrap();
+        let layer = small_layer(
+            "test",
+            None,
+            LayerStorage::with_persistent(Arc::clone(&backend)),
+        );
+        layer.persist().unwrap();
 
         let cache = MemoryBloomCache::new(Arc::clone(&backend));
 
@@ -724,8 +729,12 @@ mod tests {
     #[test]
     fn bloom_cache_evict_drops_entry() {
         let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
-        let layer = small_layer("test", None);
-        backend.store_layer(&layer).unwrap();
+        let layer = small_layer(
+            "test",
+            None,
+            LayerStorage::with_persistent(Arc::clone(&backend)),
+        );
+        layer.persist().unwrap();
 
         let cache = MemoryBloomCache::new(Arc::clone(&backend));
         let _ = cache.get_or_load(layer.id()).unwrap();

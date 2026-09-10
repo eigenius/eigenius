@@ -217,7 +217,11 @@ impl PersistentBackend for MemoryPersistentBackend {
         }))
     }
 
-    fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
+    fn store_identity(&self) -> usize {
+        self as *const Self as *const () as usize
+    }
+
+    fn store_layer_assigned(&self, layer: &Layer) -> Result<LayerId, StorageError> {
         // D65 index lifecycle: materialise the layer's derived indexes into this
         // backend's indexes at the persist step (mirrors `RocksStore::store_layer`),
         // so index population happens post-validation and seeded/committed layers
@@ -621,9 +625,9 @@ mod tests {
     /// `MemoryPersistentBackend`. Smoke test that round-trip works.
     #[test]
     fn store_layer_round_trip() {
-        let backend = MemoryPersistentBackend::new();
-
-        let storage = crate::layer::LayerStorage::in_memory();
+        let backend: std::sync::Arc<dyn crate::storage::PersistentBackend> =
+            std::sync::Arc::new(MemoryPersistentBackend::new());
+        let storage = crate::layer::LayerStorage::with_persistent(std::sync::Arc::clone(&backend));
 
         let mut builder = LayerBuilder::new("test", None);
         builder
@@ -657,8 +661,9 @@ mod tests {
     /// must return both positions; deleting one cleans only its entry.
     #[test]
     fn content_hash_index_dedup_and_cleanup() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = crate::layer::LayerStorage::in_memory();
+        let backend: std::sync::Arc<dyn crate::storage::PersistentBackend> =
+            std::sync::Arc::new(MemoryPersistentBackend::new());
+        let storage = crate::layer::LayerStorage::with_persistent(std::sync::Arc::clone(&backend));
 
         // Two distinct root layers (different content) so each presents
         // a different parent to the child layers below.
@@ -1012,8 +1017,9 @@ mod tests {
 
     #[test]
     fn load_chain_from_walks_parents() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = crate::layer::LayerStorage::in_memory();
+        let backend: std::sync::Arc<dyn crate::storage::PersistentBackend> =
+            std::sync::Arc::new(MemoryPersistentBackend::new());
+        let storage = crate::layer::LayerStorage::with_persistent(std::sync::Arc::clone(&backend));
 
         let mut root_b = LayerBuilder::new("root", None);
         root_b

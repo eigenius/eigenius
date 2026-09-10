@@ -571,7 +571,11 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
         self.build_chain_info(head_id)
     }
 
-    fn store_layer(&self, layer: &Layer) -> Result<LayerId, StorageError> {
+    fn store_identity(&self) -> usize {
+        self as *const Self as *const () as usize
+    }
+
+    fn store_layer_assigned(&self, layer: &Layer) -> Result<LayerId, StorageError> {
         // D65 index lifecycle: materialise the layer's derived indexes
         // (triple → text → value) into this backend's index keyspace. `store_layer`
         // is the post-validation persist point every commit path funnels through,

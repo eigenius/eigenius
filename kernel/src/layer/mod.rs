@@ -601,6 +601,30 @@ impl Layer {
         &self.storage
     }
 
+    /// Persist this layer to the store it is bound to.
+    ///
+    /// **The sanctioned write path.** It takes no destination, because the layer
+    /// already has one: `LayerStorage::with_persistent(backend)` records the
+    /// backend, and `populate_layer_indexes` and witness admission already treat
+    /// that record as the authority on whether the layer has a durable home. This
+    /// makes it the authority on the write as well, so there is no second opinion
+    /// to disagree with.
+    ///
+    /// Refuses a layer built on `LayerStorage::in_memory()`, which has no binding.
+    /// For the deliberate cross-store case use
+    /// [`PersistentBackend::store_layer_assigned`], which names its destination
+    /// and is the exception rather than the default.
+    pub fn persist(&self) -> Result<LayerId, crate::storage::StorageError> {
+        match self.storage.persistent_backend.as_ref() {
+            Some(pb) => pb.store_layer_assigned(self),
+            None => Err(crate::storage::StorageError::Internal(format!(
+                "layer {} was built on non-persistent storage, so it has no store to \
+                 persist to. Build it on LayerStorage::with_persistent(backend).",
+                self.name
+            ))),
+        }
+    }
+
     /// Returns the shared resource cache this layer was built/loaded with.
     pub fn cache(&self) -> &Arc<dyn ResourceCache> {
         &self.storage.cache

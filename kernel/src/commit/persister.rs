@@ -259,7 +259,13 @@ mod tests {
         ) -> Result<Option<ChainInfo>, StorageError> {
             self.inner.load_chain_from(head_id)
         }
-        fn store_layer(&self, _layer: &Layer) -> Result<crate::layer::LayerId, StorageError> {
+        fn store_identity(&self) -> usize {
+            self as *const Self as *const () as usize
+        }
+        fn store_layer_assigned(
+            &self,
+            _layer: &Layer,
+        ) -> Result<crate::layer::LayerId, StorageError> {
             Err(StorageError::Internal(
                 "synthetic store_layer failure".into(),
             ))
@@ -394,11 +400,13 @@ mod tests {
         }
     }
 
-    /// Build a trivial root layer to hand to the persister. The
-    /// layer's content is irrelevant — the persister only invokes
-    /// `backend.store_layer(&layer)` and inspects the result.
-    fn build_trivial_layer() -> Arc<Layer> {
-        let storage = LayerStorage::in_memory();
+    /// Build a trivial root layer to hand to the persister, bound to the backend
+    /// it will be persisted to. The layer's content is irrelevant — the persister
+    /// only stores it and inspects the result — but the binding is not: a layer is
+    /// written to the store it was built on, so the fixture has to name the same one
+    /// the test hands the persister.
+    fn build_trivial_layer(backend: &std::sync::Arc<dyn PersistentBackend>) -> Arc<Layer> {
+        let storage = LayerStorage::with_persistent(std::sync::Arc::clone(backend));
         let builder = LayerBuilder::new("trivial", None);
         Arc::new(builder.build(storage))
     }
@@ -409,9 +417,10 @@ mod tests {
     /// stand-in).
     #[test]
     fn backend_store_persister_returns_validation_error_on_store_failure() {
-        let backend = FailingStoreBackend::new();
-        let persister = BackendStorePersister { backend: &backend };
-        let layer = build_trivial_layer();
+        let backend: std::sync::Arc<dyn PersistentBackend> =
+            std::sync::Arc::new(FailingStoreBackend::new());
+        let persister = BackendStorePersister { backend: &*backend };
+        let layer = build_trivial_layer(&backend);
 
         let result = persister.persist("main", &layer);
         let err = result.expect_err("store_layer Err must surface");
@@ -435,9 +444,10 @@ mod tests {
     /// the no-CAS lattice path.
     #[test]
     fn backend_store_persister_returns_no_branch_advanced() {
-        let backend = MemoryPersistentBackend::new();
-        let persister = BackendStorePersister { backend: &backend };
-        let layer = build_trivial_layer();
+        let backend: std::sync::Arc<dyn PersistentBackend> =
+            std::sync::Arc::new(MemoryPersistentBackend::new());
+        let persister = BackendStorePersister { backend: &*backend };
+        let layer = build_trivial_layer(&backend);
 
         let info = persister
             .persist("main", &layer)

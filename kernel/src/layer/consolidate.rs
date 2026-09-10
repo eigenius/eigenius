@@ -339,8 +339,8 @@ fn consolidate_chain_locked(
     // in one atomic WriteBatch per D23 §6.3. The fresh bloom for
     // `consolidated_layer` is pre-populated in the cache by
     // `LayerBuilder::build` — no separate insert needed.
-    backend
-        .store_layer(&consolidated_layer)
+    consolidated_layer
+        .persist()
         .map_err(ConsolidateError::WriteFailed)?;
 
     // D43 §2.8 / M8.2 — vector consolidation. Re-embedding is not
@@ -809,13 +809,12 @@ mod tests {
     /// persistent for `consolidate_chain` to find.
     fn build_chain_of(
         n: usize,
-        backend: &dyn PersistentBackend,
+        backend: &Arc<dyn PersistentBackend>,
     ) -> (Arc<Layer>, Vec<Arc<Layer>>, LayerStorage) {
-        // In-memory storage for the per-layer build pipeline; the
-        // resources also land in the persistent backend below via
-        // `store_layer`, which is what `consolidate_chain` reads
-        // through during the top-of-stack walk.
-        let storage = LayerStorage::in_memory();
+        // Storage bound to `backend`, so each layer's content AND its derived
+        // indexes go to the store `consolidate_chain` will read through. This
+        // was `in_memory()`, which sent the indexes to a throwaway.
+        let storage = LayerStorage::with_persistent(Arc::clone(backend));
 
         // Root layer defines a couple of core resources the chain
         // references.
@@ -825,7 +824,7 @@ mod tests {
         rb.add_resource(make_resource("urn:eigenius:core:description", vec![]))
             .unwrap();
         let root = Arc::new(rb.build(storage.clone()));
-        backend.store_layer(&root).unwrap();
+        root.persist().unwrap();
 
         let mut all = vec![Arc::clone(&root)];
         let mut current = Arc::clone(&root);
@@ -840,7 +839,7 @@ mod tests {
             ))
             .unwrap();
             let layer = Arc::new(b.build(storage.clone()));
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             all.push(Arc::clone(&layer));
             current = layer;
         }
@@ -883,8 +882,8 @@ mod tests {
     /// - After: head.resolve(X) must still be None.
     #[test]
     fn consolidation_propagates_tombstones() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
 
         // Root defines demo:X.
         let mut root_b = LayerBuilder::new("root", None);
@@ -898,7 +897,7 @@ mod tests {
             ))
             .unwrap();
         let root = Arc::new(root_b.build(storage.clone()));
-        backend.store_layer(&root).unwrap();
+        root.persist().unwrap();
 
         // L1 tombstones demo:X.
         let mut l1_b = LayerBuilder::new("L1", Some(Arc::clone(&root)));
@@ -931,7 +930,7 @@ mod tests {
             l2.id().clone(),
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("consolidation succeeds");
 
@@ -959,7 +958,7 @@ mod tests {
 
     #[test]
     fn consolidates_ten_layer_chain_preserving_resolves() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, layers, storage) = build_chain_of(9, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -977,7 +976,7 @@ mod tests {
             to.clone(),
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("consolidation succeeds");
 
@@ -1010,7 +1009,7 @@ mod tests {
     #[test]
     fn at_head_consolidation_evicts_anchored_commit_cache_in_range() {
         use crate::layer::ContentHash;
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, layers, storage) = build_chain_of(9, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1057,7 +1056,7 @@ mod tests {
             to,
             ConsolidateOpts::default(),
             storage,
-            &backend,
+            &*backend,
         )
         .expect("consolidation succeeds");
 
@@ -1087,7 +1086,7 @@ mod tests {
     /// pathology and the resolve-equivalence invariant still holds.
     #[test]
     fn consolidates_hundred_layer_chain_preserving_resolves() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, layers, storage) = build_chain_of(99, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1103,7 +1102,7 @@ mod tests {
             to,
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("consolidation succeeds");
         assert_eq!(outcome.collapsed_layer_count, 99);
@@ -1124,7 +1123,7 @@ mod tests {
     /// canonical consolidated layer.
     #[test]
     fn consolidated_layer_id_is_deterministic_across_runs() {
-        let backend_a = MemoryPersistentBackend::new();
+        let backend_a: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head_a, layers_a, storage_a) = build_chain_of(20, &backend_a);
         backend_a.put_branch("main", head_a.id()).unwrap();
         let from = layers_a[5].id().clone();
@@ -1135,7 +1134,7 @@ mod tests {
             to.clone(),
             ConsolidateOpts::default(),
             storage_a,
-            &backend_a,
+            &*backend_a,
         )
         .unwrap();
 
@@ -1143,7 +1142,7 @@ mod tests {
         // same shape. Because each layer is content-addressed and
         // the resources are byte-identical between runs, every
         // LayerId in the second chain matches the first.
-        let backend_b = MemoryPersistentBackend::new();
+        let backend_b: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head_b, layers_b, storage_b) = build_chain_of(20, &backend_b);
         assert_eq!(head_a.id(), head_b.id());
         backend_b.put_branch("main", head_b.id()).unwrap();
@@ -1153,7 +1152,7 @@ mod tests {
             head_b.id().clone(),
             ConsolidateOpts::default(),
             storage_b,
-            &backend_b,
+            &*backend_b,
         )
         .unwrap();
 
@@ -1172,7 +1171,7 @@ mod tests {
     /// are a first-class flow.
     #[test]
     fn below_head_consolidation_installs_redirect_and_leaves_branch_unchanged() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, layers, storage) = build_chain_of(5, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1185,7 +1184,7 @@ mod tests {
             to_interior.clone(),
             ConsolidateOpts::default(),
             storage,
-            &backend,
+            &*backend,
         )
         .expect("below-head consolidation succeeds");
         // Below-head: branch ref does NOT move.
@@ -1211,7 +1210,7 @@ mod tests {
     /// (issue #49); the refusal protects the redirect's invariants.
     #[test]
     fn refuses_consolidation_that_crosses_existing_redirect() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, layers, storage) = build_chain_of(6, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1223,7 +1222,7 @@ mod tests {
             layers[3].id().clone(),
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("first below-head consolidation succeeds");
         assert!(!first.head_advanced);
@@ -1236,7 +1235,7 @@ mod tests {
             head.id().clone(),
             ConsolidateOpts::default(),
             storage,
-            &backend,
+            &*backend,
         )
         .unwrap_err();
         match err {
@@ -1252,7 +1251,7 @@ mod tests {
     /// be unreachable, so the operation is rejected.
     #[test]
     fn refuses_below_head_when_to_is_not_on_the_branch_chain() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, _layers, storage) = build_chain_of(5, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1264,7 +1263,7 @@ mod tests {
             stray_to.clone(),
             ConsolidateOpts::default(),
             storage,
-            &backend,
+            &*backend,
         )
         .unwrap_err();
         match err {
@@ -1287,7 +1286,7 @@ mod tests {
     /// wrong hex) should produce a clear error, not corruption.
     #[test]
     fn refuses_consolidation_when_from_is_not_an_ancestor() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, _layers, storage) = build_chain_of(5, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1298,7 +1297,7 @@ mod tests {
             head.id().clone(),
             ConsolidateOpts::default(),
             storage,
-            &backend,
+            &*backend,
         )
         .unwrap_err();
         match err {
@@ -1320,8 +1319,8 @@ mod tests {
     /// resolution decisions M encodes can't survive collapse in v1.
     #[test]
     fn refuses_consolidation_when_range_crosses_merge_node() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
 
         // Root carries the core declarations every descendant references.
         let mut rb = LayerBuilder::new("root", None);
@@ -1330,7 +1329,7 @@ mod tests {
         rb.add_resource(make_resource("urn:eigenius:core:description", vec![]))
             .unwrap();
         let root = Arc::new(rb.build(storage.clone()));
-        backend.store_layer(&root).unwrap();
+        root.persist().unwrap();
 
         // A — single shared ancestor of the fork.
         let mut ab = LayerBuilder::new("A", Some(Arc::clone(&root)));
@@ -1376,7 +1375,7 @@ mod tests {
             c.id().clone(),
             ConsolidateOpts::default(),
             storage,
-            &backend,
+            &*backend,
         )
         .unwrap_err();
         match err {
@@ -1393,7 +1392,7 @@ mod tests {
     /// blocking or whether the layer is genuinely busy.
     #[test]
     fn refuses_consolidation_when_range_layer_is_pinned() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, layers, storage) = build_chain_of(5, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1408,7 +1407,7 @@ mod tests {
             head.id().clone(),
             opts,
             storage,
-            &backend,
+            &*backend,
         )
         .unwrap_err();
         match err {
@@ -1429,7 +1428,7 @@ mod tests {
     /// path immediately, without probing dead bloom entries.
     #[test]
     fn bloom_cache_drops_collapsed_layers_and_caches_consolidated_layer() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, layers, storage) = build_chain_of(5, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1453,7 +1452,7 @@ mod tests {
             head.id().clone(),
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("consolidation succeeds");
 
@@ -1488,7 +1487,7 @@ mod tests {
     /// (a stale entry) should both be ignored.
     #[test]
     fn pins_outside_range_do_not_block_consolidation() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, layers, storage) = build_chain_of(5, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1503,7 +1502,7 @@ mod tests {
         // (the entry exists but the pin's been drained).
         opts.pinned_layers.insert(from.clone(), 0);
 
-        let outcome = consolidate_chain("main", from, head.id().clone(), opts, storage, &backend)
+        let outcome = consolidate_chain("main", from, head.id().clone(), opts, storage, &*backend)
             .expect("consolidation succeeds when no pins inside the range have nonzero counts");
         assert!(outcome.head_advanced);
     }
@@ -1517,7 +1516,7 @@ mod tests {
     /// with the predicted count surfaced for the operator.
     #[test]
     fn cost_cap_rejects_oversized_range() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, layers, storage) = build_chain_of(10, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1531,7 +1530,7 @@ mod tests {
             head.id().clone(),
             opts,
             storage,
-            &backend,
+            &*backend,
         )
         .unwrap_err();
         match err {
@@ -1553,7 +1552,7 @@ mod tests {
     /// dry-run flow.
     #[test]
     fn estimate_predicts_actual_consolidated_layer_id() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, layers, storage) = build_chain_of(8, &backend);
         backend.put_branch("main", head.id()).unwrap();
         let head_before_estimate = backend.get_branch("main").unwrap();
@@ -1565,7 +1564,7 @@ mod tests {
             head.id().clone(),
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("estimate succeeds");
 
@@ -1598,7 +1597,7 @@ mod tests {
             head.id().clone(),
             ConsolidateOpts::default(),
             storage,
-            &backend,
+            &*backend,
         )
         .expect("real consolidation succeeds");
         assert_eq!(
@@ -1612,7 +1611,7 @@ mod tests {
     /// stage, no need to wait for the real operation.
     #[test]
     fn estimate_surfaces_validation_errors() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
         let (head, _layers, storage) = build_chain_of(5, &backend);
         backend.put_branch("main", head.id()).unwrap();
 
@@ -1623,7 +1622,7 @@ mod tests {
             head.id().clone(),
             ConsolidateOpts::default(),
             storage,
-            &backend,
+            &*backend,
         )
         .unwrap_err();
         match err {
@@ -1640,8 +1639,8 @@ mod tests {
     /// notebook-cell-edit pattern.
     #[test]
     fn estimate_reports_dedup_savings_for_rewrite_ranges() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
 
         let mut rb = LayerBuilder::new("root", None);
         rb.add_resource(make_resource("urn:eigenius:core:Class", vec![]))
@@ -1649,7 +1648,7 @@ mod tests {
         rb.add_resource(make_resource("urn:eigenius:core:description", vec![]))
             .unwrap();
         let root = Arc::new(rb.build(storage.clone()));
-        backend.store_layer(&root).unwrap();
+        root.persist().unwrap();
 
         // Three layers, each redefining the *same* demo:X resource.
         // Predicted walk = 3 (one per handle); actual = 1 (one distinct
@@ -1667,7 +1666,7 @@ mod tests {
             ))
             .unwrap();
             let layer = Arc::new(b.build(storage.clone()));
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             layers.push(Arc::clone(&layer));
             current = layer;
         }
@@ -1680,7 +1679,7 @@ mod tests {
             head.id().clone(),
             ConsolidateOpts::default(),
             storage,
-            &backend,
+            &*backend,
         )
         .expect("estimate succeeds");
 
@@ -1710,7 +1709,7 @@ mod tests {
         rb.add_resource(make_resource("urn:eigenius:core:description", vec![]))
             .unwrap();
         let root = Arc::new(rb.build(storage.clone()));
-        backend.store_layer(&root).unwrap();
+        root.persist().unwrap();
 
         let mut all = vec![Arc::clone(&root)];
         let mut current = Arc::clone(&root);
@@ -1725,7 +1724,7 @@ mod tests {
             ))
             .unwrap();
             let layer = Arc::new(b.build(storage.clone()));
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             all.push(Arc::clone(&layer));
             current = layer;
         }
@@ -1954,8 +1953,8 @@ mod tests {
         use crate::query::text::analyzer::EnStemV1;
         use crate::query::text::search::run_text_search;
 
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
         let target_prop = "urn:eigenius:test:body";
 
         // Bootstrap the core ontology so `is_a` resolves at the
@@ -2017,7 +2016,7 @@ mod tests {
             r.set(iri(target_prop), Value::String(body.to_string()));
             lb.add_resource(r).unwrap();
             let layer = Arc::new(lb.build(storage.clone()));
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             content_layers.push(Arc::clone(&layer));
             prev = layer;
         }
@@ -2058,7 +2057,7 @@ mod tests {
             to,
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("consolidation succeeds");
         assert!(outcome.head_advanced);
@@ -2103,8 +2102,8 @@ mod tests {
         use crate::query::text::analyzer::EnStemV1;
         use crate::query::text::search::run_text_search;
 
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
         let target_prop = "urn:eigenius:test:body";
 
         let bootstrap_ctx = bootstrap().expect("bootstrap");
@@ -2158,7 +2157,7 @@ mod tests {
             r.set(iri(target_prop), Value::String(body.to_string()));
             lb.add_resource(r).unwrap();
             let layer = Arc::new(lb.build(storage.clone()));
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             middle.push(Arc::clone(&layer));
             prev = layer;
         }
@@ -2207,7 +2206,7 @@ mod tests {
             to,
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("below-head consolidation succeeds");
 
@@ -2263,8 +2262,8 @@ mod tests {
         use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
         use crate::query::vector::indexing::sweep_layer_vectors;
 
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
         let target_prop = "urn:eigenius:test:body";
         let model_iri = "urn:eigenius:embed:dummy:v1";
 
@@ -2272,7 +2271,7 @@ mod tests {
         let bootstrap_head = Arc::clone(bootstrap_ctx.head());
         let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
         while let Some(layer) = cursor {
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             cursor = layer.parent().cloned();
         }
 
@@ -2312,7 +2311,7 @@ mod tests {
             r.set(iri(target_prop), Value::String(body.to_string()));
             lb.add_resource(r).unwrap();
             let layer = Arc::new(lb.build(storage.clone()));
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             sweep_layer_vectors(&layer, &reg, None).expect("sweep");
             range_layers.push(Arc::clone(&layer));
             prev = layer;
@@ -2348,7 +2347,7 @@ mod tests {
             to,
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("consolidation succeeds");
         assert!(outcome.head_advanced);
@@ -2390,8 +2389,8 @@ mod tests {
         use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
         use crate::query::vector::indexing::sweep_layer_vectors;
 
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
         let target_prop = "urn:eigenius:test:body";
         let model_iri = "urn:eigenius:embed:dummy:v1";
 
@@ -2399,7 +2398,7 @@ mod tests {
         let bootstrap_head = Arc::clone(bootstrap_ctx.head());
         let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
         while let Some(layer) = cursor {
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             cursor = layer.parent().cloned();
         }
 
@@ -2464,7 +2463,7 @@ mod tests {
             l2.id().clone(),
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("consolidation succeeds");
 
@@ -2497,8 +2496,8 @@ mod tests {
         use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
         use crate::query::vector::indexing::sweep_layer_vectors;
 
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
         let target_prop = "urn:eigenius:test:body";
         let model_iri = "urn:eigenius:embed:dummy:v1";
 
@@ -2506,7 +2505,7 @@ mod tests {
         let bootstrap_head = Arc::clone(bootstrap_ctx.head());
         let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
         while let Some(layer) = cursor {
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             cursor = layer.parent().cloned();
         }
 
@@ -2552,7 +2551,7 @@ mod tests {
             r.set(iri(target_prop), Value::String(format!("body {i}")));
             lb.add_resource(r).unwrap();
             let layer = Arc::new(lb.build(storage.clone()));
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             sweep_layer_vectors(&layer, &reg, None).expect("sweep");
             range.push(Arc::clone(&layer));
             prev = layer;
@@ -2565,7 +2564,7 @@ mod tests {
             prev.id().clone(),
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("consolidation succeeds");
 
@@ -2612,8 +2611,8 @@ mod tests {
         use crate::query::vector::indexing::sweep_layer_vectors;
         use crate::query::vector::search::top_k_subjects;
 
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
         let target_prop = "urn:eigenius:test:body";
         let model_iri = "urn:eigenius:embed:dummy:v1";
 
@@ -2668,7 +2667,7 @@ mod tests {
             r.set(iri(target_prop), Value::String(body.to_string()));
             lb.add_resource(r).unwrap();
             let layer = Arc::new(lb.build(storage.clone()));
-            backend.store_layer(&layer).unwrap();
+            layer.persist().unwrap();
             sweep_layer_vectors(&layer, &reg, None).expect("sweep");
             content_layers.push(Arc::clone(&layer));
             prev = layer;
@@ -2717,7 +2716,7 @@ mod tests {
             to,
             ConsolidateOpts::default(),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .expect("consolidation succeeds");
         assert!(outcome.head_advanced);

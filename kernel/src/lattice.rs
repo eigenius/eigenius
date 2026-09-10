@@ -1636,7 +1636,6 @@ mod tests {
     use crate::layer::LayerStorage;
     use crate::ontology::resource::{Resource, Value};
     use crate::storage::memory::MemoryPersistentBackend;
-    use crate::storage::ResourceBackend;
     use std::sync::Arc;
 
     fn iri(s: &str) -> Iri {
@@ -1738,9 +1737,9 @@ mod tests {
 
     #[test]
     fn commit_layer_persists_via_store_layer() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let layer = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let layer = commit_root(&*backend, "root", &storage);
 
         // Layer is in the topology + bloom + resources.
         let topo = backend.load_topology().unwrap();
@@ -1753,9 +1752,9 @@ mod tests {
 
     #[test]
     fn commit_layer_does_not_touch_branches() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let _layer = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let _layer = commit_root(&*backend, "root", &storage);
 
         // No branch was advanced by `commit_layer`. Branches are an
         // orthogonal surface.
@@ -1764,9 +1763,9 @@ mod tests {
 
     #[test]
     fn update_branch_creates_new_branch() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let layer = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let layer = commit_root(&*backend, "root", &storage);
 
         // Creating a new branch: expected_old_head = None.
         let outcome = update_branch(
@@ -1775,7 +1774,7 @@ mod tests {
             layer.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(outcome, UpdateOutcome::FastForward);
@@ -1788,9 +1787,9 @@ mod tests {
 
     #[test]
     fn update_branch_fast_forward() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         // Initial branch creation.
         update_branch(
@@ -1799,7 +1798,7 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -1808,7 +1807,7 @@ mod tests {
         child_b
             .add_resource(make_resource("urn:eigenius:example:c"))
             .unwrap();
-        let child = commit_layer_default(child_b, storage.clone(), &backend).unwrap();
+        let child = commit_layer_default(child_b, storage.clone(), &*backend).unwrap();
 
         let outcome = update_branch(
             "main",
@@ -1816,7 +1815,7 @@ mod tests {
             child.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(outcome, UpdateOutcome::FastForward);
@@ -1831,9 +1830,9 @@ mod tests {
     /// `NeedsWitnessedMerge` with `conflicting_iris` populated.
     #[test]
     fn update_branch_conflict_returns_needs_witnessed_merge() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         // Branch starts at root.
         update_branch(
@@ -1842,7 +1841,7 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -1857,7 +1856,7 @@ mod tests {
             Value::String("from a".into()),
         );
         a_b.add_resource(r_a).unwrap();
-        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &*backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri(conflict_iri));
@@ -1867,7 +1866,7 @@ mod tests {
             Value::String("from b".into()),
         );
         b_b.add_resource(r_b).unwrap();
-        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &*backend).unwrap();
 
         // Advance branch to `a`.
         update_branch(
@@ -1876,7 +1875,7 @@ mod tests {
             a.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -1888,7 +1887,7 @@ mod tests {
             b.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         match outcome {
@@ -1913,9 +1912,9 @@ mod tests {
     /// the merge layer's id; the branch advances to the merge.
     #[test]
     fn update_branch_disjoint_divergence_trivial_merges() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         update_branch(
             "main",
@@ -1923,7 +1922,7 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -1931,12 +1930,12 @@ mod tests {
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &*backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &*backend).unwrap();
 
         update_branch(
             "main",
@@ -1944,7 +1943,7 @@ mod tests {
             a.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -1954,7 +1953,7 @@ mod tests {
             b.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         let merge_id = match outcome {
@@ -1981,11 +1980,11 @@ mod tests {
     /// Symmetric to the "one-sided definition" trivial-merge case.
     #[test]
     fn trivial_merge_propagates_one_sided_tombstone() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
 
         // Root defines demo:X — the IRI A will tombstone.
-        let core = core_base(&storage, &backend);
+        let core = core_base(&storage, &*backend);
         let mut root_b = root_layer("root", &core);
         let mut root_resource = Resource::new(iri("urn:eigenius:demo:X"));
         // Validator requires non-empty `is_a`; the trivial-merge tests
@@ -2004,7 +2003,7 @@ mod tests {
             Value::String("x".into()),
         );
         root_b.add_resource(root_resource).unwrap();
-        let root = commit_layer_default(root_b, storage.clone(), &backend).unwrap();
+        let root = commit_layer_default(root_b, storage.clone(), &*backend).unwrap();
 
         update_branch(
             "main",
@@ -2012,20 +2011,20 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
         // Branch A: tombstones demo:X.
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.tombstone(iri("urn:eigenius:demo:X")).unwrap();
-        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &*backend).unwrap();
 
         // Branch B: adds an unrelated IRI, leaves demo:X alone.
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:demo:Y"))
             .unwrap();
-        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &*backend).unwrap();
 
         // Advance branch to A.
         update_branch(
@@ -2034,7 +2033,7 @@ mod tests {
             a.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -2046,7 +2045,7 @@ mod tests {
             b.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         let merge_id = match outcome {
@@ -2074,11 +2073,11 @@ mod tests {
     /// caller picks a witness or rebases.
     #[test]
     fn trivial_merge_define_vs_tombstone_is_conflict() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
 
         // Root defines demo:X.
-        let core = core_base(&storage, &backend);
+        let core = core_base(&storage, &*backend);
         let mut root_b = root_layer("root", &core);
         let mut root_resource = Resource::new(iri("urn:eigenius:demo:X"));
         // Validator requires non-empty `is_a`; the trivial-merge tests
@@ -2097,7 +2096,7 @@ mod tests {
             Value::String("x".into()),
         );
         root_b.add_resource(root_resource).unwrap();
-        let root = commit_layer_default(root_b, storage.clone(), &backend).unwrap();
+        let root = commit_layer_default(root_b, storage.clone(), &*backend).unwrap();
 
         update_branch(
             "main",
@@ -2105,14 +2104,14 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
         // Branch A: tombstones demo:X.
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.tombstone(iri("urn:eigenius:demo:X")).unwrap();
-        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &*backend).unwrap();
 
         // Branch B: redefines demo:X with a different body.
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
@@ -2130,7 +2129,7 @@ mod tests {
             Value::String("x".into()),
         );
         b_b.add_resource(x_b).unwrap();
-        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &*backend).unwrap();
 
         update_branch(
             "main",
@@ -2138,7 +2137,7 @@ mod tests {
             a.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -2148,7 +2147,7 @@ mod tests {
             b.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         match outcome {
@@ -2172,9 +2171,9 @@ mod tests {
     /// matched. That destroyed the target's history.
     #[test]
     fn merge_branch_tips_conflict_returns_needs_witnessed_merge() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         update_branch(
             "main",
@@ -2182,7 +2181,7 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -2195,7 +2194,7 @@ mod tests {
             Value::String("from a".into()),
         );
         a_b.add_resource(r_a).unwrap();
-        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &*backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri(conflict_iri));
@@ -2205,13 +2204,14 @@ mod tests {
             Value::String("from b".into()),
         );
         b_b.add_resource(r_b).unwrap();
-        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &*backend).unwrap();
 
         // Advance `main` to `a`. Both `a` and `b` are siblings off `root`,
         // both touching `conflict_iri` with different values.
         backend.put_branch("main", a.id()).unwrap();
 
-        let outcome = merge_branch_tips("main", b.id().clone(), storage.clone(), &backend).unwrap();
+        let outcome =
+            merge_branch_tips("main", b.id().clone(), storage.clone(), &*backend).unwrap();
         match outcome {
             UpdateOutcome::NeedsWitnessedMerge {
                 current_head,
@@ -2234,20 +2234,20 @@ mod tests {
     /// fast-forwards the target.
     #[test]
     fn merge_branch_tips_fast_forwards_when_source_descends_from_target() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let mut child_b = LayerBuilder::new("child", Some(Arc::clone(&root)));
         child_b
             .add_resource(make_resource("urn:eigenius:example:c"))
             .unwrap();
-        let child = commit_layer_default(child_b, storage.clone(), &backend).unwrap();
+        let child = commit_layer_default(child_b, storage.clone(), &*backend).unwrap();
 
         backend.put_branch("main", root.id()).unwrap();
 
         let outcome =
-            merge_branch_tips("main", child.id().clone(), storage.clone(), &backend).unwrap();
+            merge_branch_tips("main", child.id().clone(), storage.clone(), &*backend).unwrap();
         assert_eq!(outcome, UpdateOutcome::FastForward);
         assert_eq!(
             backend.get_branch("main").unwrap(),
@@ -2259,20 +2259,20 @@ mod tests {
     /// fast-forward, branch ref unchanged.
     #[test]
     fn merge_branch_tips_noop_when_target_already_includes_source() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let mut child_b = LayerBuilder::new("child", Some(Arc::clone(&root)));
         child_b
             .add_resource(make_resource("urn:eigenius:example:c"))
             .unwrap();
-        let child = commit_layer_default(child_b, storage.clone(), &backend).unwrap();
+        let child = commit_layer_default(child_b, storage.clone(), &*backend).unwrap();
 
         backend.put_branch("main", child.id()).unwrap();
 
         let outcome =
-            merge_branch_tips("main", root.id().clone(), storage.clone(), &backend).unwrap();
+            merge_branch_tips("main", root.id().clone(), storage.clone(), &*backend).unwrap();
         assert_eq!(outcome, UpdateOutcome::FastForward);
         // Branch unchanged — target was already ahead of source.
         assert_eq!(
@@ -2286,23 +2286,24 @@ mod tests {
     /// the target branch points at it.
     #[test]
     fn merge_branch_tips_disjoint_produces_trivial_merge() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &*backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &*backend).unwrap();
 
         backend.put_branch("main", a.id()).unwrap();
 
-        let outcome = merge_branch_tips("main", b.id().clone(), storage.clone(), &backend).unwrap();
+        let outcome =
+            merge_branch_tips("main", b.id().clone(), storage.clone(), &*backend).unwrap();
         let merge_id = match outcome {
             UpdateOutcome::TrivialMerge { merge_layer } => merge_layer,
             other => panic!("expected TrivialMerge, got {other:?}"),
@@ -2320,24 +2321,24 @@ mod tests {
     #[test]
     fn find_lca_single_parent_chain() {
         // root → a → b → c. LCA(b, c) = b. LCA(a, c) = a. LCA(c, c) = c.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let mut ab = LayerBuilder::new("a", Some(Arc::clone(&root)));
         ab.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer_default(ab, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(ab, storage.clone(), &*backend).unwrap();
 
         let mut bb = LayerBuilder::new("b", Some(Arc::clone(&a)));
         bb.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer_default(bb, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(bb, storage.clone(), &*backend).unwrap();
 
         let mut cb = LayerBuilder::new("c", Some(Arc::clone(&b)));
         cb.add_resource(make_resource("urn:eigenius:example:c"))
             .unwrap();
-        let c = commit_layer_default(cb, storage.clone(), &backend).unwrap();
+        let c = commit_layer_default(cb, storage.clone(), &*backend).unwrap();
 
         let topo = backend.load_topology().unwrap();
         assert_eq!(
@@ -2354,19 +2355,19 @@ mod tests {
     #[test]
     fn find_lca_diverging_branches() {
         // root → a, root → b. LCA(a, b) = root.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let mut ab = LayerBuilder::new("a", Some(Arc::clone(&root)));
         ab.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer_default(ab, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(ab, storage.clone(), &*backend).unwrap();
 
         let mut bb = LayerBuilder::new("b", Some(Arc::clone(&root)));
         bb.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer_default(bb, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(bb, storage.clone(), &*backend).unwrap();
 
         let topo = backend.load_topology().unwrap();
         assert_eq!(
@@ -2378,21 +2379,21 @@ mod tests {
     #[test]
     fn find_lca_n_way_returns_deepest_common() {
         // root → a → x; root → a → y; root → a → z. LCA = a.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let mut ab = LayerBuilder::new("a", Some(Arc::clone(&root)));
         ab.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer_default(ab, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(ab, storage.clone(), &*backend).unwrap();
 
         let mut leaves = Vec::new();
         for tag in ["x", "y", "z"] {
             let mut lb = LayerBuilder::new(tag, Some(Arc::clone(&a)));
             lb.add_resource(make_resource(&format!("urn:eigenius:example:{tag}")))
                 .unwrap();
-            leaves.push(commit_layer_default(lb, storage.clone(), &backend).unwrap());
+            leaves.push(commit_layer_default(lb, storage.clone(), &*backend).unwrap());
         }
 
         let heads: Vec<LayerId> = leaves.iter().map(|l| l.id().clone()).collect();
@@ -2404,24 +2405,24 @@ mod tests {
     fn iri_sources_since_walks_diverged_chain() {
         // root → mid (defines :m) → tip (defines :t). LCA = root, head = tip.
         // Sources should map :m → mid and :t → tip.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let mut mid_b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
         mid_b
             .add_resource(make_resource("urn:eigenius:example:m"))
             .unwrap();
-        let mid = commit_layer_default(mid_b, storage.clone(), &backend).unwrap();
+        let mid = commit_layer_default(mid_b, storage.clone(), &*backend).unwrap();
 
         let mut tip_b = LayerBuilder::new("tip", Some(Arc::clone(&mid)));
         tip_b
             .add_resource(make_resource("urn:eigenius:example:t"))
             .unwrap();
-        let tip = commit_layer_default(tip_b, storage.clone(), &backend).unwrap();
+        let tip = commit_layer_default(tip_b, storage.clone(), &*backend).unwrap();
 
         let topo = backend.load_topology().unwrap();
-        let sources = iri_sources_since(tip.id(), root.id(), &topo, &backend).unwrap();
+        let sources = iri_sources_since(tip.id(), root.id(), &topo, &*backend).unwrap();
         assert_eq!(sources.len(), 2);
         assert_eq!(sources.get(&iri("urn:eigenius:example:m")), Some(mid.id()));
         assert_eq!(sources.get(&iri("urn:eigenius:example:t")), Some(tip.id()));
@@ -2430,9 +2431,9 @@ mod tests {
     #[test]
     fn iri_sources_since_topmost_wins_on_redefinition() {
         // mid defines :x. tip redefines :x. Source for :x = tip.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let mut mid_b = LayerBuilder::new("mid", Some(Arc::clone(&root)));
         let mut r = Resource::new(iri("urn:eigenius:example:x"));
@@ -2442,7 +2443,7 @@ mod tests {
             Value::String("v1".into()),
         );
         mid_b.add_resource(r).unwrap();
-        let mid = commit_layer_default(mid_b, storage.clone(), &backend).unwrap();
+        let mid = commit_layer_default(mid_b, storage.clone(), &*backend).unwrap();
 
         let mut tip_b = LayerBuilder::new("tip", Some(Arc::clone(&mid)));
         let mut r2 = Resource::new(iri("urn:eigenius:example:x"));
@@ -2452,10 +2453,10 @@ mod tests {
             Value::String("v2".into()),
         );
         tip_b.add_resource(r2).unwrap();
-        let tip = commit_layer_default(tip_b, storage.clone(), &backend).unwrap();
+        let tip = commit_layer_default(tip_b, storage.clone(), &*backend).unwrap();
 
         let topo = backend.load_topology().unwrap();
-        let sources = iri_sources_since(tip.id(), root.id(), &topo, &backend).unwrap();
+        let sources = iri_sources_since(tip.id(), root.id(), &topo, &*backend).unwrap();
         assert_eq!(sources.get(&iri("urn:eigenius:example:x")), Some(tip.id()));
     }
 
@@ -2465,20 +2466,21 @@ mod tests {
     fn merge_independent_heads_three_way_disjoint() {
         // The user's case: three task results, each touching a distinct
         // IRI, consolidated into a single layer with three parents.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let mut heads = Vec::new();
         for tag in ["task1", "task2", "task3"] {
             let mut b = LayerBuilder::new(tag, Some(Arc::clone(&root)));
             b.add_resource(make_resource(&format!("urn:eigenius:result:{tag}")))
                 .unwrap();
-            heads.push(commit_layer_default(b, storage.clone(), &backend).unwrap());
+            heads.push(commit_layer_default(b, storage.clone(), &*backend).unwrap());
         }
         let head_ids: Vec<LayerId> = heads.iter().map(|h| h.id().clone()).collect();
 
-        let outcome = merge_independent_heads(head_ids.clone(), storage.clone(), &backend).unwrap();
+        let outcome =
+            merge_independent_heads(head_ids.clone(), storage.clone(), &*backend).unwrap();
         let merge = match outcome {
             MergeOutcome::Merged { merge_layer } => merge_layer,
             MergeOutcome::Conflict { conflicting_iris } => {
@@ -2508,9 +2510,9 @@ mod tests {
     fn merge_independent_heads_conflict_reports_iris() {
         // Two heads both touching the same IRI with different values →
         // Conflict, not Merged.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let conflict_iri = "urn:eigenius:example:contested";
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
@@ -2521,7 +2523,7 @@ mod tests {
             Value::String("a".into()),
         );
         a_b.add_resource(r_a).unwrap();
-        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &*backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri(conflict_iri));
@@ -2531,12 +2533,12 @@ mod tests {
             Value::String("b".into()),
         );
         b_b.add_resource(r_b).unwrap();
-        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &*backend).unwrap();
 
         let outcome = merge_independent_heads(
             vec![a.id().clone(), b.id().clone()],
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         match outcome {
@@ -2551,12 +2553,12 @@ mod tests {
     fn merge_independent_heads_single_head_is_noop() {
         // Single head should return Merged wrapping that head — no
         // new commit.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let outcome =
-            merge_independent_heads(vec![root.id().clone()], storage.clone(), &backend).unwrap();
+            merge_independent_heads(vec![root.id().clone()], storage.clone(), &*backend).unwrap();
         match outcome {
             MergeOutcome::Merged { merge_layer } => {
                 assert_eq!(merge_layer.id(), root.id());
@@ -2569,9 +2571,9 @@ mod tests {
     fn merge_independent_heads_resolves_through_merge() {
         // After the merge, resolve() at the merge layer returns the
         // values each head contributed. End-to-end correctness check.
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         let mut r_a = Resource::new(iri("urn:eigenius:example:a"));
@@ -2581,7 +2583,7 @@ mod tests {
             Value::String("from a".into()),
         );
         a_b.add_resource(r_a).unwrap();
-        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &*backend).unwrap();
 
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         let mut r_b = Resource::new(iri("urn:eigenius:example:b"));
@@ -2591,12 +2593,12 @@ mod tests {
             Value::String("from b".into()),
         );
         b_b.add_resource(r_b).unwrap();
-        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &*backend).unwrap();
 
         let outcome = merge_independent_heads(
             vec![a.id().clone(), b.id().clone()],
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         let merge = match outcome {
@@ -2622,9 +2624,9 @@ mod tests {
 
     #[test]
     fn update_branch_strict_fast_forward_rejects_divergence() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         update_branch(
             "main",
@@ -2632,21 +2634,21 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
         let mut a_b = LayerBuilder::new("a", Some(Arc::clone(&root)));
         a_b.add_resource(make_resource("urn:eigenius:example:a"))
             .unwrap();
-        let a = commit_layer_default(a_b, storage.clone(), &backend).unwrap();
+        let a = commit_layer_default(a_b, storage.clone(), &*backend).unwrap();
         update_branch(
             "main",
             Some(root.id().clone()),
             a.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
@@ -2654,14 +2656,14 @@ mod tests {
         let mut b_b = LayerBuilder::new("b", Some(Arc::clone(&root)));
         b_b.add_resource(make_resource("urn:eigenius:example:b"))
             .unwrap();
-        let b = commit_layer_default(b_b, storage.clone(), &backend).unwrap();
+        let b = commit_layer_default(b_b, storage.clone(), &*backend).unwrap();
         let err = update_branch(
             "main",
             Some(root.id().clone()),
             b.id().clone(),
             ConflictPolicy::StrictFastForward,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap_err();
         match err {
@@ -2680,14 +2682,14 @@ mod tests {
 
     #[test]
     fn update_branch_rejects_invalid_names() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
         // Use a real layer id so the trivial-merge path inside
         // update_branch (when the branch already exists) doesn't trip
         // on an unknown-id lookup. For these tests we mostly care about
         // the name-validation gate, which fires before any storage
         // touch, so a synthetic id is fine for the bad-name cases.
-        let layer = commit_root(&backend, "root", &storage);
+        let layer = commit_root(&*backend, "root", &storage);
         let id = layer.id().clone();
 
         for bad in ["", "has space", "has/slash", "has.dot", &"x".repeat(257)] {
@@ -2697,7 +2699,7 @@ mod tests {
                 id.clone(),
                 ConflictPolicy::AllowTrivial,
                 storage.clone(),
-                &backend,
+                &*backend,
             )
             .unwrap_err();
             assert!(
@@ -2714,7 +2716,7 @@ mod tests {
                 id.clone(),
                 ConflictPolicy::AllowTrivial,
                 storage.clone(),
-                &backend,
+                &*backend,
             );
             assert!(outcome.is_ok(), "name {ok:?} should be accepted");
         }
@@ -2728,8 +2730,8 @@ mod tests {
         // exactly one CAS succeeds.
         use std::thread;
 
-        let backend = Arc::new(MemoryPersistentBackend::new());
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
         let root = commit_root(backend.as_ref(), "root", &storage);
 
         update_branch(
@@ -2938,9 +2940,9 @@ mod tests {
 
     #[test]
     fn prune_branch_removes_existing_branch() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         update_branch(
             "main",
@@ -2948,11 +2950,11 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
-        let outcome = prune_branch("main", PruneSafety::Force, &backend).unwrap();
+        let outcome = prune_branch("main", PruneSafety::Force, &*backend).unwrap();
         match outcome {
             PruneOutcome::Pruned { previous_head } => {
                 assert_eq!(previous_head, *root.id());
@@ -2973,9 +2975,9 @@ mod tests {
 
     #[test]
     fn prune_branch_check_pins_rejects_in_use() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         update_branch(
             "main",
@@ -2983,13 +2985,13 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
         // Pretend a task is pinned at root (the branch's current head).
         let pins = vec![root.id().clone()];
-        let err = prune_branch("main", PruneSafety::CheckPins(&pins), &backend).unwrap_err();
+        let err = prune_branch("main", PruneSafety::CheckPins(&pins), &*backend).unwrap_err();
         match err {
             PruneError::InUse { branch, head } => {
                 assert_eq!(branch, "main");
@@ -3004,11 +3006,11 @@ mod tests {
 
     #[test]
     fn prune_branch_check_pins_allows_when_pin_doesnt_match() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
         let other = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "other",
@@ -3021,21 +3023,21 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
         // Task pinned at `other`, branch points at `root` — no conflict.
         let pins = vec![other.id().clone()];
-        let outcome = prune_branch("main", PruneSafety::CheckPins(&pins), &backend).unwrap();
+        let outcome = prune_branch("main", PruneSafety::CheckPins(&pins), &*backend).unwrap();
         assert!(matches!(outcome, PruneOutcome::Pruned { .. }));
     }
 
     #[test]
     fn prune_branch_force_overrides_pin_check() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
 
         update_branch(
             "main",
@@ -3043,12 +3045,12 @@ mod tests {
             root.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
         // Force ignores task pins.
-        let outcome = prune_branch("main", PruneSafety::Force, &backend).unwrap();
+        let outcome = prune_branch("main", PruneSafety::Force, &*backend).unwrap();
         assert!(matches!(outcome, PruneOutcome::Pruned { .. }));
     }
 
@@ -3058,11 +3060,11 @@ mod tests {
         // a subsequent gc::collect reclaims those layers.
         use crate::gc::{collect, GcConfig, GcRoots};
 
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, "root", &storage);
         let tip = commit_child(
-            &backend,
+            &*backend,
             &storage,
             Arc::clone(&root),
             "tip",
@@ -3075,24 +3077,24 @@ mod tests {
             tip.id().clone(),
             ConflictPolicy::AllowTrivial,
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
 
         // Verify reachable before prune (core base + root + tip).
         assert_eq!(backend.load_topology().unwrap().layer_count(), 3);
 
-        prune_branch("main", PruneSafety::Force, &backend).unwrap();
+        prune_branch("main", PruneSafety::Force, &*backend).unwrap();
 
         // GC with min_age = 0 to skip the recent-commit protection.
         let stats = collect(
-            GcRoots::from_branches(&backend).unwrap(),
+            GcRoots::from_branches(&*backend).unwrap(),
             &GcConfig {
                 min_age: std::time::Duration::from_secs(0),
             },
             storage.cache.as_ref(),
             storage.bloom_cache.as_ref(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         assert_eq!(
@@ -3161,15 +3163,15 @@ mod tests {
     /// holds exactly one entry.
     #[test]
     fn anchored_commit_hit_on_identical_run() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root_with_description(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root_with_description(&*backend, "root", &storage);
 
         // First commit: cache miss. A new layer is stored.
         let first = commit_layer_with_cache(
             build_test_child_layer(Arc::clone(&root), "urn:eigenius:demo:cell", "v1"),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         let first_id = match first {
@@ -3183,7 +3185,7 @@ mod tests {
         let second = commit_layer_with_cache(
             build_test_child_layer(Arc::clone(&root), "urn:eigenius:demo:cell", "v1"),
             storage,
-            &backend,
+            &*backend,
         )
         .unwrap();
         match second {
@@ -3202,20 +3204,20 @@ mod tests {
     /// one entry.
     #[test]
     fn anchored_commit_miss_on_content_change() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
-        let root = commit_root_with_description(&backend, "root", &storage);
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root_with_description(&*backend, "root", &storage);
 
         commit_layer_with_cache(
             build_test_child_layer(Arc::clone(&root), "urn:eigenius:demo:cell", "v1"),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         let second = commit_layer_with_cache(
             build_test_child_layer(Arc::clone(&root), "urn:eigenius:demo:cell", "v2"),
             storage,
-            &backend,
+            &*backend,
         )
         .unwrap();
         match second {
@@ -3234,8 +3236,8 @@ mod tests {
     /// from the second chain's head and the cache hits.
     #[test]
     fn anchored_commit_hit_on_supporting_equivalent_context() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
 
         // Build two structurally-equivalent supporting layers `s1`
         // and `s2`. They share content (the same resource declaring
@@ -3245,27 +3247,27 @@ mod tests {
         // (otherwise they'd collapse to one layer per content
         // addressing), so we give each a unique marker resource in
         // addition to `core:description`.
-        let core = core_base(&storage, &backend);
+        let core = core_base(&storage, &*backend);
         let mut rb_a = root_layer("root_a", &core);
         rb_a.add_resource(make_resource("urn:eigenius:demo:a_marker"))
             .unwrap();
-        let root_a = commit_layer_default(rb_a, storage.clone(), &backend).unwrap();
+        let root_a = commit_layer_default(rb_a, storage.clone(), &*backend).unwrap();
 
         let mut rb_b = root_layer("root_b", &core);
         rb_b.add_resource(make_resource("urn:eigenius:demo:b_marker"))
             .unwrap();
-        let root_b = commit_layer_default(rb_b, storage.clone(), &backend).unwrap();
+        let root_b = commit_layer_default(rb_b, storage.clone(), &*backend).unwrap();
         assert_ne!(root_a.id(), root_b.id());
 
         let mut sb_a = LayerBuilder::new("support", Some(Arc::clone(&root_a)));
         sb_a.add_resource(make_property("urn:eigenius:demo:Marker"))
             .unwrap();
-        let support_a = commit_layer_default(sb_a, storage.clone(), &backend).unwrap();
+        let support_a = commit_layer_default(sb_a, storage.clone(), &*backend).unwrap();
 
         let mut sb_b = LayerBuilder::new("support", Some(Arc::clone(&root_b)));
         sb_b.add_resource(make_property("urn:eigenius:demo:Marker"))
             .unwrap();
-        let support_b = commit_layer_default(sb_b, storage.clone(), &backend).unwrap();
+        let support_b = commit_layer_default(sb_b, storage.clone(), &*backend).unwrap();
 
         // Pre-condition: same content_hash, different position
         // (different parent chains).
@@ -3297,7 +3299,7 @@ mod tests {
         let first = commit_layer_with_cache(
             build_marker_cell(Arc::clone(&support_a)),
             storage.clone(),
-            &backend,
+            &*backend,
         )
         .unwrap();
         let first_id = match first {
@@ -3310,9 +3312,12 @@ mod tests {
             AnchoredCommitOutcome::Hit { .. } => panic!("first commit must miss"),
         };
 
-        let second =
-            commit_layer_with_cache(build_marker_cell(Arc::clone(&support_b)), storage, &backend)
-                .unwrap();
+        let second = commit_layer_with_cache(
+            build_marker_cell(Arc::clone(&support_b)),
+            storage,
+            &*backend,
+        )
+        .unwrap();
         match second {
             AnchoredCommitOutcome::Hit { cached_layer_id } => {
                 assert_eq!(
@@ -3334,8 +3339,8 @@ mod tests {
     /// produced.
     #[test]
     fn anchored_commit_bypassed_when_no_supporting_layer() {
-        let backend = MemoryPersistentBackend::new();
-        let storage = LayerStorage::in_memory();
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
 
         // A root layer is self-contained — it declares its own vocabulary (the core
         // ontology IS the root, parent=None) so its references resolve within itself,
@@ -3349,7 +3354,7 @@ mod tests {
         }
         rb.add_resource(make_resource("urn:eigenius:test:r"))
             .unwrap();
-        let outcome = commit_layer_with_cache(rb, storage, &backend).unwrap();
+        let outcome = commit_layer_with_cache(rb, storage, &*backend).unwrap();
         match outcome {
             AnchoredCommitOutcome::Miss { layer } => {
                 assert!(layer.supporting_layer().is_none());
