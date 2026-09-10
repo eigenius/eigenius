@@ -974,6 +974,23 @@ enum DbCommands {
     /// every reflow a forced reseed. That is also why this cannot be reproduced with
     /// `sha256sum`, and why it lives here rather than in a shell script.
     Manifest,
+    /// List what each consolidation collapsed, newest first (D25 §5.3).
+    ///
+    /// Reads the records `consolidate` writes beside each consolidated layer.
+    /// They are not ON the layer: a record carries a wall-clock timestamp, and a
+    /// layer's content decides its id, so storing one inside would make the same
+    /// consolidation produce a different layer on every run.
+    ///
+    /// A consolidation whose layer has since been swept by GC is not listed —
+    /// the record is deleted with the layer it describes.
+    ConsolidateSummary {
+        /// RocksDB path
+        #[arg(value_name = "PATH")]
+        path: String,
+        /// Show at most this many, newest first.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
     /// Trigger manual compaction
     Compact {
         /// RocksDB path
@@ -2565,6 +2582,34 @@ fn cmd_db(command: DbCommands) {
                 String::from_utf8(eigenius_kernel::bootstrap::current_manifest())
                     .expect("the manifest is utf-8")
             );
+        }
+        DbCommands::ConsolidateSummary { path, limit } => {
+            let store = eigenius_storage_rocksdb::RocksStore::open(std::path::Path::new(&path))
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to open database: {e}");
+                    std::process::exit(1);
+                });
+            let rows = PersistentBackend::list_consolidations(&store).unwrap_or_else(|e| {
+                eprintln!("Failed to read consolidation records: {e}");
+                std::process::exit(1);
+            });
+            if rows.is_empty() {
+                println!("No consolidations recorded in {path}.");
+                return;
+            }
+            println!("{} consolidation(s), newest first:", rows.len());
+            for (layer, rec) in rows.iter().take(limit) {
+                println!();
+                println!("  layer     {}", layer);
+                println!("  from      {}", rec.from);
+                println!("  to        {}", rec.to);
+                println!("  collapsed {} layer(s)", rec.collapsed_count);
+                println!("  at        {} (ms since epoch)", rec.consolidated_at);
+            }
+            if rows.len() > limit {
+                println!();
+                println!("({} more; raise --limit to see them)", rows.len() - limit);
+            }
         }
         DbCommands::Stats { path } => {
             let store = eigenius_storage_rocksdb::RocksStore::open(std::path::Path::new(&path))

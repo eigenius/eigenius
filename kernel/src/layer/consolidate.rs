@@ -134,6 +134,35 @@ pub enum TracePinPolicy {
     Invalidate,
 }
 
+/// What one consolidation did, kept OUTSIDE the layer's content (D25 §6 /
+/// eigenius#48).
+///
+/// **Why it is not a property on the consolidated layer.** `consolidated_at` is
+/// wall-clock. Anything inside a layer's content feeds its content hash, so
+/// embedding a timestamp would make the `LayerId` differ between two runs of the
+/// same consolidation — breaking the determinism
+/// `consolidated_layer_id_is_deterministic_across_runs` pins, and the estimate
+/// round-trip in `estimate_predicts_actual_consolidated_layer_id`, which predicts
+/// the id without persisting anything. So the record lives in the backend, keyed
+/// by the consolidated layer's id, and the layer's content stays a pure function
+/// of what it collapsed.
+///
+/// Lifecycle follows the layer: `delete_layer` drops the record with the topology
+/// entry, in the same batch.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ConsolidationRecord {
+    /// Oldest layer of the collapsed range.
+    pub from: LayerId,
+    /// Newest layer of the collapsed range.
+    pub to: LayerId,
+    /// How many layers the range held. The chain shortens by this minus one,
+    /// since the consolidated layer replaces them.
+    pub collapsed_count: u64,
+    /// Wall-clock milliseconds when the consolidation committed. The reason this
+    /// record exists separately from the layer.
+    pub consolidated_at: u64,
+}
+
 /// Successful outcome of `consolidate_chain`.
 #[derive(Debug, Clone)]
 pub struct ConsolidationOutcome {
@@ -280,15 +309,12 @@ impl std::error::Error for ConsolidateError {}
 /// documentation above, where each is marked done. An earlier version of
 /// this comment listed all three as deferred; they are not.
 ///
-/// The one genuine omission is the audit `consolidation_record` property
-/// on the consolidated layer (D25 §6, last paragraph). It is deliberately
-/// not written: the record carries a timestamp, which would enter the
-/// content hash and break the estimate/actual determinism the RPC test
-/// pins. A consolidated chain therefore cannot say when it was
-/// consolidated. Resolving this needs a storage shape outside the layer's
-/// own content — a dedicated column family keyed by consolidated layer id
-/// is the natural candidate — and that is an open decision, not a
-/// scheduled milestone.
+/// D25 §6's audit record is written, as [`ConsolidationRecord`], to the
+/// BACKEND rather than onto the consolidated layer (eigenius#48). It carries
+/// a timestamp, which inside the layer would enter the content hash and break
+/// the estimate/actual determinism the RPC test pins. Keyed by the consolidated
+/// layer's id, dropped with it by `delete_layer`, and read by
+/// `eigenius db consolidate-summary`.
 pub fn consolidate_chain(
     branch: &str,
     from: LayerId,
@@ -324,7 +350,7 @@ fn consolidate_chain_locked(
     let bloom_cache = Arc::clone(&storage.bloom_cache);
     let redirect_map = Arc::clone(&storage.redirect_map);
 
-    let prep = prepare_consolidation(branch, from, to.clone(), &opts, storage, backend)?;
+    let prep = prepare_consolidation(branch, from.clone(), to.clone(), &opts, storage, backend)?;
     let Prepared {
         consolidated_layer,
         range_layers,
@@ -442,6 +468,26 @@ fn consolidate_chain_locked(
                 "failed to list anchored-commit cache for invalidation"
             );
         }
+    }
+
+    // D25 §6 / eigenius#48 — what this consolidation did, recorded beside the
+    // layer rather than inside it. Best-effort: the consolidation has committed
+    // by here (the layer is stored and the branch CAS or redirect is installed),
+    // so failing the whole operation over a missing audit line would undo work
+    // that is already correct and already visible. A lost record costs the
+    // summary command one row.
+    let record = ConsolidationRecord {
+        from,
+        to: to.clone(),
+        collapsed_count: collapsed_layer_count,
+        consolidated_at: crate::layer::now_millis().max(0) as u64,
+    };
+    if let Err(e) = backend.put_consolidation_record(consolidated_layer.id(), &record) {
+        tracing::warn!(
+            layer = %hex::encode(consolidated_layer.id().0),
+            error = %e,
+            "failed to record the consolidation; the consolidation itself stands"
+        );
     }
 
     Ok(ConsolidationOutcome {
@@ -954,6 +1000,71 @@ mod tests {
                 .is_some(),
             "consolidated layer must preserve demo:Y from the range"
         );
+    }
+
+    /// **eigenius#48.** A consolidation records what it collapsed, beside the
+    /// layer rather than inside it.
+    ///
+    /// The record has to live outside the layer's content because it carries a
+    /// wall-clock timestamp, and a layer's content decides its id — which is what
+    /// `consolidated_layer_id_is_deterministic_across_runs` pins. The second half
+    /// of this test is that determinism, re-checked with recording switched on:
+    /// two runs of the same consolidation still produce the same layer id, and
+    /// they carry different timestamps.
+    #[test]
+    fn a_consolidation_records_what_it_collapsed_without_moving_the_layer_id() {
+        let run = || {
+            let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+            let (head, layers, storage) = build_chain_of(9, &backend);
+            backend.put_branch("main", head.id()).unwrap();
+            let from = layers[3].id().clone();
+            let to = head.id().clone();
+            let outcome = consolidate_chain(
+                "main",
+                from.clone(),
+                to.clone(),
+                ConsolidateOpts::default(),
+                storage.clone(),
+                &*backend,
+            )
+            .expect("consolidation succeeds");
+            let recorded = backend.list_consolidations().unwrap();
+            (backend, outcome, from, to, recorded)
+        };
+
+        let (backend, outcome, from, to, recorded) = run();
+
+        assert_eq!(recorded.len(), 1, "one consolidation, one record");
+        let (layer, rec) = &recorded[0];
+        assert_eq!(
+            layer, &outcome.consolidated_layer,
+            "keyed by the layer it made"
+        );
+        assert_eq!(rec.from, from);
+        assert_eq!(rec.to, to);
+        assert_eq!(rec.collapsed_count, outcome.collapsed_layer_count);
+        assert!(
+            rec.consolidated_at > 0,
+            "the timestamp is the point of the record"
+        );
+
+        // Sweeping the layer takes the record with it: it describes what that
+        // layer collapsed, so it describes nothing once the layer is gone.
+        backend.delete_layer(&outcome.consolidated_layer).unwrap();
+        assert!(
+            backend.list_consolidations().unwrap().is_empty(),
+            "the record shares the layer's lifecycle"
+        );
+
+        // Determinism, unchanged by recording. A second independent run of the
+        // same consolidation lands the same id — which it could not, if the
+        // timestamp were part of the layer.
+        let (_, outcome_b, _, _, recorded_b) = run();
+        assert_eq!(
+            outcome.consolidated_layer, outcome_b.consolidated_layer,
+            "the layer id must not depend on when the consolidation ran"
+        );
+        assert_eq!(recorded_b.len(), 1);
     }
 
     #[test]

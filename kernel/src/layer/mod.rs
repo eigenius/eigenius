@@ -57,7 +57,7 @@ pub use cache::{
 };
 pub use consolidate::{
     consolidate_chain, estimate_consolidation, ConsolidateError, ConsolidateOpts,
-    ConsolidationEstimate, ConsolidationOutcome, TracePinPolicy,
+    ConsolidationEstimate, ConsolidationOutcome, ConsolidationRecord, TracePinPolicy,
 };
 pub use handle::{ChainIter, LayerHandle, LayerTopology};
 pub use index::{
@@ -165,7 +165,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// `Layer.created_at` field — backends copy this value onto their
 /// `LayerHandle` rather than calling `now_millis()` themselves, so
 /// the build-time and persist-time timestamps stay consistent.
-fn now_millis() -> i64 {
+pub(crate) fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)

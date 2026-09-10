@@ -262,6 +262,19 @@ mod tests {
         fn store_identity(&self) -> usize {
             self as *const Self as *const () as usize
         }
+        fn put_consolidation_record(
+            &self,
+            layer: &crate::layer::LayerId,
+            record: &crate::layer::ConsolidationRecord,
+        ) -> Result<(), StorageError> {
+            self.inner.put_consolidation_record(layer, record)
+        }
+        fn list_consolidations(
+            &self,
+        ) -> Result<Vec<(crate::layer::LayerId, crate::layer::ConsolidationRecord)>, StorageError>
+        {
+            self.inner.list_consolidations()
+        }
         fn store_layer_assigned(
             &self,
             _layer: &Layer,

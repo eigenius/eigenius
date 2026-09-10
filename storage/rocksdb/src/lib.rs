@@ -148,6 +148,19 @@ const REDIRECT_PREFIX: &str = "redirect:";
 /// chain commit).
 const ANCHORED_COMMIT_PREFIX: &str = "anchored:";
 
+/// `consolidation:<consolidated_layer_hex>` → CBOR `ConsolidationRecord`
+/// (D25 §6 / eigenius#48).
+///
+/// A prefix on the default CF rather than its own column family, which is what the
+/// ticket sketched. A CF buys compaction isolation, which is why `cf_text` and
+/// `cf_vec` have one: their blobs churn on a different profile from layer and
+/// topology keys. A consolidation record is a few dozen bytes written once per
+/// consolidation and read by a diagnostic command, with the same lifecycle as the
+/// topology entry it sits beside — the profile `redirect:` and `anchored:` already
+/// have. Adding a CF would also make every existing store need one opened that is
+/// not there.
+const CONSOLIDATION_PREFIX: &str = "consolidation:";
+
 /// Column family for D43's custom layer-aware text inverted index
 /// (D43 §2.3). Holds `text_term:<index_iri>:<term>:<layer>`,
 /// `text_docs:<index_iri>:<layer>`, `text_stats:<index_iri>:<layer>`,
@@ -985,6 +998,12 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             let topo_key = format!("{TOPO_PREFIX}{id_hex}");
             batch.delete(topo_key.as_bytes());
 
+            // The consolidation record shares the layer's lifecycle (eigenius#48):
+            // it says what this layer collapsed, so once the layer is gone it
+            // describes nothing. In this batch, like every other key here.
+            let consolidation_key = format!("{CONSOLIDATION_PREFIX}{id_hex}");
+            batch.delete(consolidation_key.as_bytes());
+
             if let Some(ch_hex) = content_hash_hex {
                 let content_key = format!("{CONTENT_INDEX_PREFIX}{ch_hex}:{id_hex}");
                 batch.delete(content_key.as_bytes());
@@ -1229,6 +1248,55 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
                     .map_err(|e| StorageError::Internal(format!("decode RedirectEntry: {e}")))?;
                 out.push(entry);
             }
+            Ok(out)
+        })
+    }
+
+    fn put_consolidation_record(
+        &self,
+        layer: &LayerId,
+        record: &eigenius_kernel::layer::ConsolidationRecord,
+    ) -> Result<(), StorageError> {
+        run_blocking(|| {
+            let key = format!("{CONSOLIDATION_PREFIX}{}", hex::encode(layer.0));
+            let mut bytes = Vec::new();
+            ciborium::into_writer(record, &mut bytes)
+                .map_err(|e| StorageError::Internal(format!("encode ConsolidationRecord: {e}")))?;
+            self.db
+                .put(key.as_bytes(), bytes)
+                .map_err(|e| StorageError::Internal(format!("put consolidation record: {e}")))
+        })
+    }
+
+    fn list_consolidations(
+        &self,
+    ) -> Result<Vec<(LayerId, eigenius_kernel::layer::ConsolidationRecord)>, StorageError> {
+        run_blocking(|| {
+            let mut out: Vec<(LayerId, eigenius_kernel::layer::ConsolidationRecord)> = Vec::new();
+            let iter = self.db.prefix_iterator(CONSOLIDATION_PREFIX.as_bytes());
+            for item in iter {
+                let (k, v) = item.map_err(|e| {
+                    StorageError::Internal(format!("list_consolidations iter: {e}"))
+                })?;
+                // Prefix iterator may overshoot — trim.
+                if !k.starts_with(CONSOLIDATION_PREFIX.as_bytes()) {
+                    break;
+                }
+                let hex_id = std::str::from_utf8(&k[CONSOLIDATION_PREFIX.len()..])
+                    .map_err(|e| StorageError::Internal(format!("consolidation key utf8: {e}")))?;
+                let raw = hex::decode(hex_id)
+                    .map_err(|e| StorageError::Internal(format!("consolidation key hex: {e}")))?;
+                let id = LayerId(raw.try_into().map_err(|_| {
+                    StorageError::Internal("consolidation key is not a 32-byte id".to_string())
+                })?);
+                let record = ciborium::from_reader(v.as_ref()).map_err(|e| {
+                    StorageError::Internal(format!("decode ConsolidationRecord: {e}"))
+                })?;
+                out.push((id, record));
+            }
+            // Newest first, as the CLI presents them. The key is a content hash, so
+            // scan order carries no chronology.
+            out.sort_by_key(|(_, r)| std::cmp::Reverse(r.consolidated_at));
             Ok(out)
         })
     }

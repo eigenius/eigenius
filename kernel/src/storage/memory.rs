@@ -90,6 +90,10 @@ struct MemoryState {
     /// the redirect *source* layer id. One entry per consolidation
     /// where `to` was below the branch head.
     redirects: BTreeMap<LayerId, RedirectEntry>,
+    /// D25 §6 / eigenius#48 — what each consolidation did, keyed by the
+    /// consolidated layer. Kept out of the layer because it carries a wall-clock
+    /// timestamp and a layer's content decides its id.
+    consolidations: BTreeMap<LayerId, crate::layer::ConsolidationRecord>,
     /// Anchored-commit cache (D33 §6 / Phase 20c). Keyed by
     /// `(content_hash, supporting_content_hash)` → cached layer id.
     /// Memoizes `commit(content, supporting_layer) → LayerId`, so
@@ -119,6 +123,7 @@ impl MemoryPersistentBackend {
                 tags: BTreeMap::new(),
                 content_index: BTreeMap::new(),
                 redirects: BTreeMap::new(),
+                consolidations: BTreeMap::new(),
                 anchored_commits: BTreeMap::new(),
             }),
             traces: InMemoryTraceStore::new(),
@@ -494,6 +499,9 @@ impl PersistentBackend for MemoryPersistentBackend {
         state.topology.remove(layer);
         state.chain.remove(layer);
         state.blooms.remove(layer);
+        // Shares the layer's lifecycle (eigenius#48): the record says what this
+        // layer collapsed, so it describes nothing once the layer is gone.
+        state.consolidations.remove(layer);
         state.resources.retain(|(lid, _), _| lid != layer);
         if let Some(ch) = content_hash {
             if let Some(set) = state.content_index.get_mut(&ch) {
@@ -544,6 +552,30 @@ impl PersistentBackend for MemoryPersistentBackend {
     fn list_redirects(&self) -> Result<Vec<RedirectEntry>, StorageError> {
         let state = self.inner.read().expect("poisoned");
         Ok(state.redirects.values().cloned().collect())
+    }
+
+    fn put_consolidation_record(
+        &self,
+        layer: &LayerId,
+        record: &crate::layer::ConsolidationRecord,
+    ) -> Result<(), StorageError> {
+        let mut state = self.inner.write().expect("poisoned");
+        state.consolidations.insert(layer.clone(), record.clone());
+        Ok(())
+    }
+
+    fn list_consolidations(
+        &self,
+    ) -> Result<Vec<(LayerId, crate::layer::ConsolidationRecord)>, StorageError> {
+        let state = self.inner.read().expect("poisoned");
+        let mut out: Vec<(LayerId, crate::layer::ConsolidationRecord)> = state
+            .consolidations
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        // Newest first, matching the RocksDB backend and how the CLI shows them.
+        out.sort_by_key(|(_, r)| std::cmp::Reverse(r.consolidated_at));
+        Ok(out)
     }
 
     fn lookup_anchored_commit(

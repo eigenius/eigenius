@@ -444,6 +444,27 @@ pub trait PersistentBackend: ResourceBackend + Send + Sync + 'static {
     /// order is unspecified; callers that care should sort.
     fn list_redirects(&self) -> Result<Vec<crate::layer::RedirectEntry>, StorageError>;
 
+    /// Record what one consolidation did, keyed by the consolidated layer's id
+    /// (D25 §6 / eigenius#48).
+    ///
+    /// Separate from the layer because [`crate::layer::ConsolidationRecord`]
+    /// carries a wall-clock timestamp, and anything inside a layer feeds its
+    /// content hash — see that type for why the id has to stay a pure function of
+    /// what was collapsed. Idempotent by layer id: re-recording the same
+    /// consolidation replaces the entry.
+    fn put_consolidation_record(
+        &self,
+        layer: &LayerId,
+        record: &crate::layer::ConsolidationRecord,
+    ) -> Result<(), StorageError>;
+
+    /// Enumerate every recorded consolidation, newest first. Backs
+    /// `eigenius db consolidate-summary`. A consolidation whose layer has since
+    /// been swept is not listed: `delete_layer` drops the record with the layer.
+    fn list_consolidations(
+        &self,
+    ) -> Result<Vec<(LayerId, crate::layer::ConsolidationRecord)>, StorageError>;
+
     // --- Anchored-commit cache (D33 §6 / Phase 20c) ---
     //
     // Memoizes `commit(content, supporting_layer) → LayerId`, keyed on
