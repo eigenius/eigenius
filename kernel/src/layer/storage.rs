@@ -100,21 +100,20 @@ pub struct LayerStorage {
     /// to its own `PersistentBackend` Arc (set when the cache was built);
     /// `Layer::resolve` consults it before probing the resource cache.
     pub bloom_cache: Arc<dyn BloomCache>,
-    /// Per-layer triple index (D23 §5.9 / Phase 14h). Populated at
-    /// commit time by `populate_layer_indexes`, which `store_layer`
-    /// calls *before* opening its `WriteBatch` — so the index entries
-    /// are a separate, earlier, non-sync write, **not** part of the
-    /// layer's atomic batch (GAP-05-14). Consulted by the EigenQL
+    /// Per-layer triple index (D23 §5.9 / Phase 14h). On the persistent path the
+    /// entries are extracted at commit time and written INSIDE `store_layer`'s
+    /// `WriteBatch`, so they are covered by the layer's atomic sync write
+    /// (eigenius#131). They were a separate, earlier, non-sync write until
+    /// `2026-09-09`. Consulted by the EigenQL
     /// evaluator's `scan_chain` helper. In-memory layers share a fresh
     /// `MemoryTripleIndex`; persistent layers share the backend's
     /// `as_triple_index()` view.
     pub triple_index: Arc<dyn TripleIndex>,
     /// Per-`(TextIndex Resource, layer)` inverted index (D43 §2.3).
-    /// Populated by `populate_layer_indexes` — discovers active
-    /// `core:TextIndex` Resources at the commit head and indexes each
-    /// indexed property's tokens. On the persistent path that call
-    /// happens at the top of `store_layer`, not in `LayerBuilder::build`,
-    /// and its writes are not in the layer's atomic batch (GAP-05-14).
+    /// Discovers active `core:TextIndex` Resources at the commit head and indexes
+    /// each indexed property's tokens. On the persistent path the entries join
+    /// `store_layer`'s atomic batch (eigenius#131); the ephemeral in-memory path
+    /// writes them at build through `populate_text_indexes`.
     /// Consulted by the EigenQL text retrieval path (M3).
     pub text_index: Arc<dyn TextIndex>,
     /// Per-`(VectorIndex Resource, layer)` vector segment store
@@ -123,12 +122,10 @@ pub struct LayerStorage {
     /// flat path; M6 for HNSW).
     pub vector_index: Arc<dyn VectorIndex>,
     /// Per-`(ValueIndex Resource, layer)` exact value index (D65).
-    /// Populated by `populate_layer_indexes` (like the triple index) —
-    /// discovers active `core:ValueIndex` Resources at the head and keys
-    /// each target property's normalized value to its subjects. On the
-    /// persistent path that runs at the top of `store_layer`, not in
-    /// `LayerBuilder::build`, and outside the layer's atomic batch
-    /// (GAP-05-14). Consulted by the lazy lexicon lookup (and exact
+    /// Discovers active `core:ValueIndex` Resources at the head and keys each
+    /// target property's normalized value to its subjects. Like the triple index,
+    /// its entries join `store_layer`'s atomic batch on the persistent path
+    /// (eigenius#131). Consulted by the lazy lexicon lookup (and exact
     /// literal-property queries).
     pub value_index: Arc<dyn ValueIndex>,
     /// In-memory cache of installed resolve redirects (D25 §12.8 /

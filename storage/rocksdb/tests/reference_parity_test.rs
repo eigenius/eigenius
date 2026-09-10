@@ -90,8 +90,12 @@ async fn rocks_matches_memory_reference() {
     };
 
     // Store and verify observable parity.
-    mem.store_layer(&root).unwrap();
-    rocks.store_layer(&root).unwrap();
+    // `store_layer_assigned`, not `store_layer`: writing ONE layer into TWO stores
+    // is the whole point of this harness, so neither store is the layer's home and
+    // the binding check would refuse both. This is the case the assignment form
+    // exists for — see the comment above on why a layer per backend will not do.
+    mem.store_layer_assigned(&root).unwrap();
+    rocks.store_layer_assigned(&root).unwrap();
     assert_observable_eq(mem.as_ref(), rocks.as_ref(), root.id());
 
     // Child layer (built once): tombstones demo:A.
@@ -106,8 +110,8 @@ async fn rocks_matches_memory_reference() {
         Arc::new(b.build(LayerStorage::in_memory()))
     };
 
-    mem.store_layer(&child).unwrap();
-    rocks.store_layer(&child).unwrap();
+    mem.store_layer_assigned(&child).unwrap();
+    rocks.store_layer_assigned(&child).unwrap();
     assert_observable_eq(mem.as_ref(), rocks.as_ref(), child.id());
 
     // Branch refs.

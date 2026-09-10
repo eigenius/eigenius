@@ -1429,7 +1429,18 @@ mod tests {
     #[test]
     fn bloom_cache_drops_collapsed_layers_and_caches_consolidated_layer() {
         let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
-        let (head, layers, storage) = build_chain_of(5, &backend);
+        let (head, layers, mut storage) = build_chain_of(5, &backend);
+        // This test reads eviction off `get_or_load` returning `None`, which only
+        // distinguishes evicted from not-loaded when the cache cannot fall through
+        // to a backend. The layers must stay bound to `backend` for the write path,
+        // so swap in a fall-through-free bloom cache rather than unbinding them.
+        storage.bloom_cache = Arc::new(crate::layer::cache::MemoryBloomCache::cache_only());
+        for l in &layers {
+            storage.bloom_cache.put(
+                l.id().clone(),
+                Arc::new(crate::layer::bloom::BloomFilter::for_iris(l.defined_iris())),
+            );
+        }
         backend.put_branch("main", head.id()).unwrap();
 
         // Pre-condition: every range layer's bloom is in the cache
@@ -1971,7 +1982,7 @@ mod tests {
             let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
             while let Some(layer) = cursor {
                 backend
-                    .store_layer(&layer)
+                    .store_layer_assigned(&layer)
                     .expect("persist bootstrap layer");
                 cursor = layer.parent().cloned();
             }
@@ -2115,7 +2126,7 @@ mod tests {
             let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
             while let Some(layer) = cursor {
                 backend
-                    .store_layer(&layer)
+                    .store_layer_assigned(&layer)
                     .expect("persist bootstrap layer");
                 cursor = layer.parent().cloned();
             }
@@ -2271,7 +2282,8 @@ mod tests {
         let bootstrap_head = Arc::clone(bootstrap_ctx.head());
         let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
         while let Some(layer) = cursor {
-            layer.persist().unwrap();
+            // Unbound bootstrap layer, deliberately given a home in this backend.
+            backend.store_layer_assigned(&layer).unwrap();
             cursor = layer.parent().cloned();
         }
 
@@ -2398,7 +2410,8 @@ mod tests {
         let bootstrap_head = Arc::clone(bootstrap_ctx.head());
         let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
         while let Some(layer) = cursor {
-            layer.persist().unwrap();
+            // Unbound bootstrap layer, deliberately given a home in this backend.
+            backend.store_layer_assigned(&layer).unwrap();
             cursor = layer.parent().cloned();
         }
 
@@ -2505,7 +2518,8 @@ mod tests {
         let bootstrap_head = Arc::clone(bootstrap_ctx.head());
         let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
         while let Some(layer) = cursor {
-            layer.persist().unwrap();
+            // Unbound bootstrap layer, deliberately given a home in this backend.
+            backend.store_layer_assigned(&layer).unwrap();
             cursor = layer.parent().cloned();
         }
 
@@ -2621,7 +2635,7 @@ mod tests {
         let mut cursor: Option<Arc<Layer>> = Some(Arc::clone(&bootstrap_head));
         while let Some(layer) = cursor {
             backend
-                .store_layer(&layer)
+                .store_layer_assigned(&layer)
                 .expect("persist bootstrap layer");
             cursor = layer.parent().cloned();
         }

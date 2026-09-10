@@ -1339,7 +1339,10 @@ pub fn commit_resolutions_as_merge_layer(
     }
 
     let layer = Arc::new(builder.build(storage));
-    backend.store_layer(&layer).map_err(MergeError::Storage)?;
+    // Written to the store the layer was built on, which is the same `backend`
+    // the caller passed: `merge_with_resolutions` takes both and they have to
+    // agree, since the layer's indexes go wherever its storage points.
+    layer.persist().map_err(MergeError::Storage)?;
     Ok(layer)
 }
 
@@ -1640,7 +1643,9 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Vec::new(),
-            crate::layer::LayerStorage::in_memory(),
+            crate::layer::LayerStorage::with_persistent(
+                backend.clone() as std::sync::Arc<dyn PersistentBackend>
+            ),
             &*backend,
         );
         match result {
@@ -2185,7 +2190,9 @@ mod tests {
             resolutions,
             Vec::new(),
             Vec::new(),
-            crate::layer::LayerStorage::in_memory(),
+            crate::layer::LayerStorage::with_persistent(
+                backend.clone() as std::sync::Arc<dyn PersistentBackend>
+            ),
             &*backend,
         );
         match result {
@@ -2211,7 +2218,9 @@ mod tests {
             resolutions,
             Vec::new(),
             Vec::new(),
-            crate::layer::LayerStorage::in_memory(),
+            crate::layer::LayerStorage::with_persistent(
+                backend.clone() as std::sync::Arc<dyn PersistentBackend>
+            ),
             &*backend,
         );
         match result {
@@ -2238,7 +2247,9 @@ mod tests {
             resolutions,
             Vec::new(),
             Vec::new(),
-            crate::layer::LayerStorage::in_memory(),
+            crate::layer::LayerStorage::with_persistent(
+                backend.clone() as std::sync::Arc<dyn PersistentBackend>
+            ),
             &*backend,
         );
         assert!(
@@ -2561,7 +2572,9 @@ mod tests {
             resolutions,
             Vec::new(),
             Vec::new(),
-            crate::layer::LayerStorage::in_memory(),
+            crate::layer::LayerStorage::with_persistent(
+                backend.clone() as std::sync::Arc<dyn PersistentBackend>
+            ),
             &*backend,
         );
         match result {

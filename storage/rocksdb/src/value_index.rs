@@ -27,9 +27,9 @@
 //! the triple index's `idx_*`. Standalone `extend_layer` / `drop_layer` own
 //! their `WriteBatch`; `extend_into_batch` / `drop_into_batch` append to a
 //! caller's batch. `RocksStore::delete_layer` passes its batch to
-//! `drop_into_batch`; `RocksStore::store_layer` does not call
-//! `extend_into_batch`, so layer content + index entries are one atomic
-//! write on the drop path only. See GAP-05-14.
+//! `drop_into_batch` and `RocksStore::store_layer` passes its batch to
+//! `extend_into_batch`, so layer content + index entries are one atomic write in
+//! both directions (eigenius#131; the drop path only, until `2026-09-09`).
 
 use crate::run_blocking;
 use eigenius_kernel::layer::index_keys;
@@ -85,11 +85,11 @@ impl RocksValueIndex {
         }
     }
 
-    /// Append every entry to a caller-owned `WriteBatch`. Intended for
-    /// `RocksStore::store_layer`, so layer content + index entries would land
-    /// in one atomic write; `store_layer` does not call it. Its only caller is
-    /// this type's own `extend_layer`, which supplies a fresh batch of its
-    /// own. See GAP-05-14.
+    /// Append every entry to a caller-owned `WriteBatch`. Called by
+    /// `RocksStore::store_layer` with its own batch, so layer content and index
+    /// entries land in one atomic write (eigenius#131); also by this type's
+    /// `extend_layer`, which supplies a fresh batch of its own for the standalone
+    /// case.
     pub fn extend_into_batch(
         &self,
         batch: &mut rocksdb::WriteBatch,

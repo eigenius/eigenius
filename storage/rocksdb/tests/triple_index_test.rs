@@ -394,3 +394,56 @@ fn literal_typed_properties_skip_indexing() {
     // We have exactly one entry, and it's the is_a one, not short_name.
     assert_eq!(all.len(), 1);
 }
+
+/// **eigenius#131.** The index entries a commit writes go to the store that
+/// receives the layer's CONTENT, and they go there in the same write.
+///
+/// This is what the fix changed, and it is observable without crash injection.
+/// `store_layer` used to call `populate_layer_indexes`, which writes through
+/// `layer.storage()` — the layer's OWN index handles. For a layer bound to the
+/// receiving store those are the same object and the difference is invisible; for
+/// an unbound layer they are a throwaway in-memory index, so the content landed in
+/// RocksDB and the entries went nowhere. Now extraction happens in the kernel and
+/// the write happens through `self`, into `store_layer`'s own `WriteBatch`.
+///
+/// The remaining half of the fix — that a kill between the two writes can no
+/// longer leave index rows describing a layer that does not exist — is a property
+/// of there being one `db.write_opt` instead of several, and is not reachable from
+/// a unit test without fault injection.
+#[test]
+fn a_stored_layers_index_entries_land_in_the_store_that_took_its_content() {
+    let tmp = TempDir::new().unwrap();
+    let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+    let backend: Arc<dyn PersistentBackend> = Arc::clone(&store) as Arc<dyn PersistentBackend>;
+
+    // Parent carries the `is_a` property declaration that makes the predicate
+    // indexable; bound, because it is stored the ordinary way.
+    let bound = LayerStorage::with_persistent(Arc::clone(&backend));
+    let parent = parent_layer_with_is_a(bound.clone());
+    parent.persist().unwrap();
+
+    // The child is built on UNBOUND storage, so its own index handles are a
+    // throwaway. Assigning it to this store must still put its entries here.
+    let mut builder = LayerBuilder::new("instances", Some(Arc::clone(&parent)));
+    builder
+        .add_resource(class_instance(
+            "urn:eigenius:test:rex",
+            &["urn:eigenius:test:Dog"],
+        ))
+        .unwrap();
+    let unbound = builder.build(LayerStorage::in_memory());
+    backend.store_layer_assigned(&unbound).unwrap();
+
+    // The store's index answers for the layer. Before the fix this was empty:
+    // the entries had gone to the layer's throwaway index.
+    let index = backend.triple_index_arc();
+    let dogs: Vec<_> = index
+        .scan_predicate_object(&iri(wk::IS_A), &iri("urn:eigenius:test:Dog"))
+        .map(|r| r.unwrap())
+        .collect();
+    assert!(
+        dogs.iter()
+            .any(|(s, l)| s == &iri("urn:eigenius:test:rex") && l == unbound.id()),
+        "the receiving store must hold the index entries for the content it took; got {dogs:?}"
+    );
+}

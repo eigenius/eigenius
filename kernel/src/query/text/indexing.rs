@@ -51,15 +51,29 @@ use std::sync::Arc;
 /// One owned (subject, tokens) pair pre-tokenisation. The borrowed
 /// [`TextDoc`] form that the trait takes points into these
 /// allocations.
-struct OwnedTextDoc {
-    subject: Iri,
-    tokens: Vec<String>,
+pub struct OwnedTextDoc {
+    pub subject: Iri,
+    pub tokens: Vec<String>,
 }
 
 /// Per-Index batched contributions before the trait call.
 struct IndexBatch {
     analyzer_id: String,
     docs: Vec<OwnedTextDoc>,
+}
+
+/// One TextIndex's whole contribution from a layer: which index, which analyzer
+/// tokenised it, and the per-subject token lists.
+///
+/// Extraction is separated from writing so a backend can put the entries in the
+/// SAME `WriteBatch` as the layer's content instead of issuing its own write
+/// beforehand (GAP-05-14 / eigenius#131). [`populate_text_indexes`] is the
+/// write-through-the-layer's-own-index form, used by the ephemeral in-memory
+/// path where there is no batch to join.
+pub struct TextContribution {
+    pub index: Iri,
+    pub analyzer_id: String,
+    pub docs: Vec<OwnedTextDoc>,
 }
 
 /// Walk `layer`'s defined Resources, tokenise every indexed
@@ -70,10 +84,33 @@ struct IndexBatch {
 /// pre-population. Returns nothing — failures are silently ignored
 /// per the best-effort contract.
 pub fn populate_text_indexes(layer: &Layer) {
+    for c in extract_text_contributions(layer) {
+        let docs: Vec<TextDoc<'_>> = c
+            .docs
+            .iter()
+            .map(|d| TextDoc {
+                subject: &d.subject,
+                tokens: &d.tokens,
+            })
+            .collect();
+        // Errors are non-fatal — see best-effort note above.
+        let _ =
+            layer
+                .storage()
+                .text_index
+                .extend_layer(&c.index, layer.id(), &c.analyzer_id, &docs);
+    }
+}
+
+/// The text contributions a layer makes, extracted without writing anything.
+///
+/// Same discovery, same analyzers, same tokenisation as
+/// [`populate_text_indexes`] — it is this function plus a write.
+pub fn extract_text_contributions(layer: &Layer) -> Vec<TextContribution> {
     // 1. Discover active TextIndex Resources visible at this layer.
     let active = resolve_active_text_indexes(layer);
     if active.is_empty() {
-        return;
+        return Vec::new();
     }
 
     // 2. Resolve analyzer implementations from the registry.
@@ -89,7 +126,7 @@ pub fn populate_text_indexes(layer: &Layer) {
         .collect();
 
     if with_analyzers.is_empty() {
-        return;
+        return Vec::new();
     }
 
     // 3. Walk the layer's defined Resources, extracting indexable
@@ -134,26 +171,15 @@ pub fn populate_text_indexes(layer: &Layer) {
         }
     }
 
-    // 4. Issue one `extend_layer` call per Index whose contribution
-    // is non-empty.
-    for (index_iri, batch) in &batches {
-        let docs: Vec<TextDoc<'_>> = batch
-            .docs
-            .iter()
-            .map(|d| TextDoc {
-                subject: &d.subject,
-                tokens: &d.tokens,
-            })
-            .collect();
-
-        // Errors are non-fatal — see best-effort note above.
-        let _ = layer.storage().text_index.extend_layer(
-            index_iri,
-            layer.id(),
-            &batch.analyzer_id,
-            &docs,
-        );
-    }
+    // 4. One contribution per Index whose token set is non-empty.
+    batches
+        .into_iter()
+        .map(|(index, batch)| TextContribution {
+            index,
+            analyzer_id: batch.analyzer_id,
+            docs: batch.docs,
+        })
+        .collect()
 }
 
 #[cfg(test)]

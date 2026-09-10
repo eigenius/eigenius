@@ -1262,8 +1262,9 @@ mod tests {
     fn build_merge_span_unrelated_roots_surface_no_common_ancestor() {
         // Two independently-rooted DAGs share no ancestor. v1's LCA
         // walker returns None, surfacing as `NoCommonAncestor`.
-        let backend = MemoryPersistentBackend::new();
-        let storage = crate::layer::LayerStorage::in_memory();
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(&backend));
 
         let mut ab = LayerBuilder::new("root_a", None);
         ab.add_resource(make_resource("urn:test:RootA", &[wk::CLASS], &[]))
@@ -1278,7 +1279,7 @@ mod tests {
         backend.store_layer(&root_b).unwrap();
 
         let topology = backend.load_topology().unwrap();
-        let result = build_merge_span(root_a.id(), root_b.id(), &topology, &backend);
+        let result = build_merge_span(root_a.id(), root_b.id(), &topology, &*backend);
         match result {
             Err(MergeError::NoCommonAncestor { head_a, head_b }) => {
                 assert_eq!(&head_a, root_a.id());

@@ -748,11 +748,12 @@ mod tests {
     /// whose source has been reclaimed from the topology.
     #[test]
     fn redirect_round_trip_and_synthetic_tombstone() {
-        let backend = MemoryPersistentBackend::new();
+        let backend: std::sync::Arc<dyn crate::storage::PersistentBackend> =
+            std::sync::Arc::new(MemoryPersistentBackend::new());
 
         // Build a root + child layer; the child will become the
         // "source" of a redirect (the to-be-consolidated layer).
-        let storage = crate::layer::LayerStorage::in_memory();
+        let storage = crate::layer::LayerStorage::with_persistent(std::sync::Arc::clone(&backend));
         let mut rb = LayerBuilder::new("root", None);
         rb.add_resource(make_resource("urn:eigenius:core:R", vec![]))
             .unwrap();

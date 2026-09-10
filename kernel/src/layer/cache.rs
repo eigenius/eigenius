@@ -760,8 +760,8 @@ mod tests {
             r.set(iri("urn:eigenius:test:p"), Value::Integer(i));
             builder.add_resource(r).unwrap();
         }
-        let layer = Arc::new(builder.build(LayerStorage::in_memory()));
-        backend.store_layer(&layer).unwrap();
+        let layer = Arc::new(builder.build(LayerStorage::with_persistent(Arc::clone(&backend))));
+        layer.persist().unwrap();
 
         let cache = MemoryBloomCache::new(Arc::clone(&backend));
         let bloom = cache.get_or_load(layer.id()).unwrap().expect("present");
