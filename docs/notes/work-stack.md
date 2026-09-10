@@ -9,6 +9,38 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **entry −2 (`2026-09-09`). Storage write atomicity. DONE, merged as `8615672` (#243).**
+>
+> Closed **#131** (layer insertion was not atomic across the indexes) and **#48** (no
+> consolidation record). Both needed one decision first: which store receives a layer's index
+> entries. `store_layer`'s batch belongs to the receiver, `populate_layer_indexes` wrote through
+> `layer.storage()`, and the two could differ.
+>
+> **The binding settles it.** A layer is written to the store it was built on. `Layer::persist()`
+> takes no destination, `store_layer` refuses a mismatch, `store_layer_assigned` is the named
+> exception. Shape follows CoreData: a context is bound to its coordinator at construction and
+> `save()` takes no destination, with `assign(_:to:)` for the multi-store case.
+>
+> **Measure the blast radius in every backend, not one.** A probe inside `RocksStore` reported 19
+> affected sites; in the trait it covers the memory backend too, which most kernel tests use, and
+> the real figure was 148. Zero were the split-brain case (bound to A, written to B) — that never
+> occurred. 142 were a layer built on `in_memory()` and persisted to a real backend, sending
+> content to the backend and indexes to a throwaway.
+>
+> **Three sites genuinely mean the assignment form** and say so: the stub persister that records
+> what landed, the loops copying the in-memory bootstrap chain into a test backend, and the
+> cross-backend parity harness (one layer, two stores, because `created_at` is stamped once at
+> build).
+>
+> **A green suite is not evidence a test ran.** Clippy caught that a test insertion had orphaned a
+> neighbouring `#[test]` attribute, so `consolidates_ten_layer_chain_preserving_resolves` stopped
+> running while the suite stayed green.
+>
+> Manifest unmoved, so neither fix cost a reseed. Still open in the same area: `delete_layer`'s
+> batch is atomic but not `sync`, and `consolidate_chain` is itself three or four unbatched writes
+> (`store_layer`, vector consolidation, then the redirect install or branch advance) — a separate
+> transaction boundary, tracked nowhere.
+
 > **ACTIVE: entry −1 (`2026-09-08`). D89 — the justification vocabulary.**
 > [`docs/design/d89-the-justification-vocabulary-refactoring.md`](../design/d89-the-justification-vocabulary-refactoring.md)
 > decides what changes; [`d89-rename-execution-plan.md`](d89-rename-execution-plan.md) decides how.
