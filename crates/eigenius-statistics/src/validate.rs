@@ -913,11 +913,10 @@ pub fn do_validate_analysis_plan(
     // the test rejects H0 in the direction the claim asserts). For a
     // "< 100 nM" IC50 claim, the asserted side is mean < threshold.
     //
-    // Phase 1 simplification: we only check p < alpha, not the
-    // direction. The directional refinement lands when richer claim
-    // shapes carry explicit signed effect-size assertions; two-sided
-    // rejection of "mean = threshold" doesn't tell us *which* side, and
-    // the author's derived_proposition implicitly fixes the direction.
+    // Two-sided rejection of "mean = threshold" does not tell us WHICH side, and a
+    // TwoSided plan's derived proposition is the not-equal claim, which either side
+    // supports. So no direction term applies there. A ONE-SIDED plan is the case that
+    // needs one -- see `direction_ok` below.
     //
     // §7.1 Phase 5 hardening: when directionality = OneSidedWitnessed
     // (and the dispatch is t-based and the witness validated above),
@@ -935,10 +934,16 @@ pub fn do_validate_analysis_plan(
     // OneSidedWitnessed is in force, the raw two-sided value otherwise.
     // Per-dispatch diagnostic notes and the one-sided derivation note
     // are concatenated for the human-readable diagnostic field.
+    let direction_ok = !one_sided_witnessed || t_statistic < 0.0;
     let one_sided_note = if one_sided_witnessed {
+        // The observed direction is in the note because it decides the verdict
+        // (eigenius#154). Before it was checked at all, nothing in the diagnostic
+        // recorded the sign, so a reader of a verdict could not see that the effect
+        // ran against the asserted direction.
         Some(format!(
             "OneSidedWitnessed: alpha comparison used p_one_sided = {p_value_for_alpha:.6} \
-             (= p_two_sided / 2; raw two-sided p = {p_value_two_sided:.6})"
+             (= p_two_sided / 2; raw two-sided p = {p_value_two_sided:.6}); observed t = \
+             {t_statistic:.4}, so direction_ok = {direction_ok} (the asserted direction is lt)"
         ))
     } else {
         None
@@ -958,7 +963,35 @@ pub fn do_validate_analysis_plan(
     // statistical claim) — a per-effect Fails carries no
     // canonical_proposition, matching the D49 witness emitter's
     // structural filter.
-    let test_rejected = p_value_for_alpha < alpha;
+    // eigenius#154 -- a one-sided plan checks the SIGN of the observed effect, not
+    // just the halved p-value.
+    //
+    // `Directionality.OneSidedWitnessed(witness_iri)` carries a witness and no
+    // direction, so all three derivations on this path hardcode the `lt` form:
+    // `lt(mean_of(s), T)`, `lt(mean_diff_of(s), 0)`, `lt(spearman_rho(s), 0)`. The
+    // decision was `p_value_for_alpha < alpha` alone, so a significant effect in the
+    // OPPOSITE direction committed a proposition asserting the direction that was not
+    // observed -- and the D49 emitter reads that proposition to admit an IsDerivedAs
+    // witness, so a `derived(...)` citation could discharge against something the data
+    // contradicts. The halving compounded it: one-sidedness made rejection easier while
+    // the committed direction it is supposed to buy went unchecked.
+    //
+    // `t_statistic < 0` is the `lt` direction for every arm that reaches here, and the
+    // sign convention is the same in each: the one-sample t is `(mean - null) / se`,
+    // the two-sample t is `(mean_a - mean_b) / se`, the paired t is a one-sample t over
+    // `before - after`, and the Spearman t is `rho * sqrt(df / (1 - rho^2))`, which
+    // carries rho's sign. The plain Paired arm derives no proposition at all, so the
+    // exposed set is SingleSampleEstimate, IID and Paired+RankBased -- exactly the
+    // three `supports_one_sided_directionality` admits.
+    //
+    // This is the guard the nested and crossed two-way ANOVA arms already apply as
+    // `p_for_alpha < alpha && direction_ok`; those two were never exposed.
+    //
+    // A one-sided plan wanting the `gt` direction is not expressible today, because the
+    // constructor cannot say so. Such a plan now FAILS rather than committing an `lt`
+    // claim it did not observe. Giving `OneSidedWitnessed` a direction parameter is the
+    // fuller fix and moves the manifest; this closes the unsoundness without it.
+    let test_rejected = p_value_for_alpha < alpha && direction_ok;
     let result_ctor = if test_rejected {
         wk::VERDICT_HOLDS
     } else {

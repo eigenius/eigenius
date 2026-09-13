@@ -104,6 +104,52 @@ resource decay:claim_short_half_life_onesided : stats:StatisticalAnalysisPlan {
     stats:outlier_exclusion = Identity();
 }
 
+// eigenius#154 — the SAME one-sided claim against a sample set whose effect runs
+// the OTHER way. Readings cluster around 16 minutes against a "< 12 minutes"
+// threshold, so the two-sided p is small and the halved p clears alpha easily,
+// while the observed mean is ABOVE the threshold the claim asserts it is below.
+//
+// Before the sign was checked, this committed `stats:lt(mean_of(s), 12.0)` — a
+// positive statistical claim in the direction that was not observed — and the D49
+// emitter would admit an IsDerivedAs witness against it.
+resource decay:long_half_life_sampleset : stats:SampleSetResource {
+    prov:was_generated_by      = decay:act_lab_2026_04_01;
+    prov:observed_at = "2026-04-01T10:00:00Z";
+
+    stats:sample_set_value = stats:SingleSampleEstimate(
+        [15.5, 16.2, 15.8, 16.5, 16.0, 16.1],
+        BiologicalReplication(),
+    );
+}
+
+resource decay:long_half_life_sampleset_trace : prov:ObservationTrace {
+    prov:resource  = decay:long_half_life_sampleset;
+    prov:was_generated_by    = decay:act_lab_2026_04_01;
+    prov:timestamp = "2026-04-01T10:00:00Z";
+}
+
+resource decay:claim_short_half_life_wrong_direction : stats:StatisticalAnalysisPlan {
+    stats:sample_set = decay:long_half_life_sampleset;
+
+    eigentt:proposition = type_expr(
+        decay:HasShortHalfLife("urn:eigenius:demo:decay:compound_A")
+    );
+
+    stats:alpha = 0.05;
+    stats:effect_size = Absolute(12.0, "minutes");
+    stats:directionality = OneSidedWitnessed(
+        "urn:eigenius:demo:decay:half_life_positivity_witness"
+    );
+    stats:variance_assumption = WelchUnequal();
+    stats:outlier_exclusion = Identity();
+}
+
+resource decay:claim_short_half_life_wrong_direction_trace : prov:ProgramTrace {
+    prov:resource  = decay:claim_short_half_life_wrong_direction;
+    prov:was_generated_by    = stats:activity_validate_analysis_plan;
+    prov:timestamp = "2026-04-01T10:00:00Z";
+}
+
 resource decay:claim_short_half_life_onesided_trace : prov:ProgramTrace {
     prov:resource  = decay:claim_short_half_life_onesided;
     prov:was_generated_by    = stats:activity_validate_analysis_plan;

@@ -162,6 +162,40 @@ fn one_sided_witnessed_with_valid_witness_holds_with_halved_p() {
     );
 }
 
+/// **eigenius#154.** A one-sided plan whose observed effect runs the OTHER way must
+/// not reject.
+///
+/// `OneSidedWitnessed(witness_iri)` carries no direction, so the derivation hardcodes
+/// `stats:lt(mean_of(s), T)`. The decision used to be `p_one_sided < alpha` alone, so a
+/// significant effect ABOVE the threshold committed a proposition asserting it was
+/// below — and the D49 emitter reads that proposition to admit an `IsDerivedAs`
+/// witness, so a `derived(...)` citation could discharge against something the data
+/// contradicts.
+///
+/// The fixture is deliberately significant in the wrong direction: readings around 16
+/// minutes against a "< 12 minutes" threshold. Only the sign distinguishes it from
+/// `one_sided_witnessed_with_valid_witness_holds_with_halved_p`, which still Holds.
+#[test]
+fn one_sided_witnessed_does_not_hold_when_the_effect_runs_the_other_way() {
+    let ctx = build_phase5_chain();
+    let (ctor, diagnostic) = validate_claim(
+        &ctx,
+        "urn:eigenius:demo:decay:claim_short_half_life_wrong_direction",
+    );
+    assert_eq!(
+        ctor,
+        wk::VERDICT_FAILS,
+        "a significant effect in the direction NOT asserted must not reject; got {ctor}, \
+         diagnostic: {diagnostic:?}"
+    );
+    let diag = diagnostic.expect("the verdict should say why");
+    assert!(
+        diag.contains("direction_ok = false"),
+        "the diagnostic must record the observed direction, so a reader of the verdict can \
+         see the effect ran against the asserted one; got: {diag}"
+    );
+}
+
 #[test]
 fn one_sided_witnessed_with_missing_witness_fails() {
     let ctx = build_phase5_chain();
