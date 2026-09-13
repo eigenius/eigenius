@@ -1012,6 +1012,7 @@ dependencies = [
  "eigenius-embedder-candle",
  "eigenius-encoding",
  "eigenius-julia",
+ "eigenius-kappatau",
  "eigenius-kernel",
  "eigenius-lean",
  "eigenius-oci",
@@ -1082,6 +1083,14 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "eigenius-kappatau"
+version = "0.1.0"
+dependencies = [
+ "eigenius-kernel",
  "thiserror 2.0.18",
 ]
 

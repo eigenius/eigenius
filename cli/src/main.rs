@@ -2795,6 +2795,12 @@ async fn cmd_serve(
     > = vec![
         eigenius_lean::LeanInstitution::arc(),
         eigenius_statistics::StatisticsInstitution::arc(),
+        // D91. Its ontology is out of the bootstrap chain, so on a chain that has not
+        // loaded `kappatau.esl` this registration is inert — the chain-scan pass finds
+        // no matching Institution declaration and nothing dispatches. Loading that
+        // ontology as a layer activates it, which is what lets a pilot run without
+        // rebuilding the kernel.
+        eigenius_kappatau::KappaTauInstitution::arc(),
     ];
 
     // D43 §5.2 — load eigenius.toml's `[embedder]` section and

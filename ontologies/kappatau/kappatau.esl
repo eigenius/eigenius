@@ -1,0 +1,346 @@
+// The κ–τ institution — governed abduction as a result-contract consumer (D91).
+//
+// The κ–τ logic (arXiv:2608.08192, R. Pareschi) decouples epistemic likelihood
+// from operational commitment. A conclusion commits only if its score clears a
+// threshold τ AND its separation from every active, negatively interacting rival
+// clears a margin δ(τ, −κ*). Below that, the conclusion is SUSPENDED — a stable
+// inferential state, not a failure.
+//
+// Two things this vocabulary is built to keep apart, because keeping them apart
+// is the framework's own contribution:
+//
+//   1. **Governed from estimable.** The paper's provenance boundary is explicit:
+//      ⟨τ, ε, δ⟩ are institutionally governed and never learned; ⟨H, w, κ⟩ are
+//      open to estimation. So the governed parameters live on one attributed
+//      resource (CommitmentPolicy) and every estimate is its own resource with
+//      its own provenance trace. An application forms over the scoring and the
+//      comparison, which are reproducible; none forms over the estimates, so
+//      nothing is entailed about the next one.
+//
+//   2. **Commits(φ) from φ.** The institution establishes Commits(policy, φ),
+//      never φ. Crossing that gap needs a DECLARED bridge attributed to an
+//      owner, exhibited as its own leaf in the justification term. Nothing here
+//      enforces it — a slot is checked for holding a well-formed proposition,
+//      never for which predicate it names — so this is discipline backed by
+//      attribution, and saying so is part of the vocabulary.
+//
+// This is FORM ONE of the D90 result contract: the institution computes and
+// asserts a proposition. It does not prove anything, so it emits no judgement
+// and mints no logic constant. Its trace is a ProgramTrace, it earns no witness,
+// and its claims ground as App(Declared(plan), Observed(estimates)) — the same
+// shape the statistics institution already has, for the same reason.
+//
+// Out of the bootstrap chain: editing this costs no reseed.
+
+namespace core        = "urn:eigenius:core";
+namespace eigentt     = "urn:eigenius:eigentt";
+namespace formats     = "urn:eigenius:core:formats";
+namespace institution = "urn:eigenius:institution";
+namespace dispatch    = "urn:eigenius:institution:dispatch_roles";
+namespace runtimes    = "urn:eigenius:institution:runtimes";
+namespace prov        = "urn:eigenius:prov";
+namespace justification = "urn:eigenius:justification";
+namespace kt          = "urn:eigenius:kappatau";
+namespace proc        = "urn:eigenius:kappatau:proc";
+
+// ════════════════════════════════════════════════════════════════════
+// The term vocabulary
+// ════════════════════════════════════════════════════════════════════
+//
+// Mirrors the statistics axioms exactly: a functional over an identified
+// subject, and a predicate over it. The kernel does not evaluate these — it
+// matches them syntactically — which is the same standing `stats:lt` has and
+// the reason neither institution claims to have PROVED its comparison.
+
+axiom kt:score_of : core:string -> core:string -> core:float
+  desc: "sc_S(φ) — the commitment score of the hypothesis at the second IRI, under the assessment at the first. A functional, not a decision: the kernel does not compute it, and the institution's ProgramTrace is what records that a run did. Two arguments rather than one because the score is relative to an evidence state, and two assessments over the same hypothesis with different estimates are different scores."
+
+axiom kt:margin_to : core:string -> core:string -> core:string -> core:float
+  desc: "sc_S(φ) − sc_S(ψ) for the subject at the second IRI against the rival at the third, under the assessment at the first. The quantity the margin condition compares against δ(τ, −κ*)."
+
+axiom kt:Commits : core:iri -> Prop -> Prop
+  desc: "Commits(policy, φ) — the framework's commitment judgement, as a proposition ABOUT φ rather than φ itself. Takes the POLICY IRI, not a bare τ: the audit trail then runs to an attributed resource carrying τ, ε, δ and λ together, instead of to a float that says nothing about who chose it. Recording the threshold against φ directly is the collapse the framework exists to prevent, so the two are different propositions here and no rule turns one into the other. Signature mirrors witness:IsDeclaredAs."
+
+axiom kt:SuspendedAt : core:iri -> Prop -> Prop
+  desc: "SuspendedAt(policy, φ) — the governance state in which φ is held open: scored, rivalled, and not committed. A POSITIVE claim about the state, not an annotation on a refusal, because a verdict that is not Holds carries no proposition and suspension is a first-class inferential output in κ–τ rather than a failure to produce one. Which rivals, at which margins, rides on the CommitmentDecision as ordinary properties; the proposition states what is claimed and the resource records what the run saw."
+
+// ════════════════════════════════════════════════════════════════════
+// The governed side: ⟨τ, ε, δ, λ⟩
+// ════════════════════════════════════════════════════════════════════
+
+class kt:CommitmentPolicy {
+    description = "The normative parameters governing when a commitment may collapse — the half of the framework that is never learned. One resource, because they are chosen together and answerable together: a τ without the δ it was chosen against is not a policy. Attribution is REQUIRED, not recommended: a governance parameter with no owner is exactly what the framework exists to prevent, and justification:Declaration sets the precedent that an assertion without an accountable agent is not an assertion.";
+    requires kt:threshold,
+             kt:activation,
+             kt:margin_form,
+             kt:margin_coefficient,
+             prov:was_attributed_to;
+    recommends core:description, core:short_name;
+}
+
+property kt:threshold : core:float {
+    description = "τ — the commitment threshold. S ⊩ C_τ φ iff sc_S(φ) ≥ τ. Normative, not epistemic: it encodes how much evidence strength the deployment domain demands before an irreversible decision, which is a question for governance rather than for training data. Bounded because the paper's δ has domain (0,1] × (0,1] and its scores are [0,1]-valued: a τ outside that is not a stricter policy but a meaningless one, and at τ ≤ 0 every conclusion is trivially commit-worthy while δ evaluates to 0, which is byte-identical to a legitimate first-past-τ policy in the audit record.";
+    min_value = 0.0;
+    max_value = 1.0;
+    domain kt:CommitmentPolicy;
+}
+
+property kt:activation : core:float {
+    description = "ε — the activation floor. S ⊩ P φ iff sc_S(φ) ≥ ε, and a rival counts as ACTIVE only above it. Below ε a hypothesis is not in play and imposes no margin, so ε is what bounds the rival set the institution has to clear. The paper also requires ε < τ, so that the suspension interval [ε, τ) is non-empty; that is a relation between two slots rather than a bound on one, so the institution checks it and refuses a policy that inverts them. At ε ≥ τ no rival is ever active, the decision records NO margins at all, and that is indistinguishable from the genuine finding that a conclusion faced no live opposition.";
+    min_value = 0.0;
+    max_value = 1.0;
+    domain kt:CommitmentPolicy;
+}
+
+property kt:margin_form : core:resource {
+    description = "δ — which margin function this policy applies. A NAMED FORM plus a coefficient rather than an arbitrary term, because the program AST has no arithmetic: it has Apply, Lambda, Var, Literal, Case, Map, Reduce and Component, and every number that gets multiplied is multiplied inside a Component dispatched to a runtime. So `λ τ x. c·τ·x` is not expressible on the chain today, and the lambda-valued slot institution:transformation carries bottoms out at a Component for exactly that reason. D86's numeric primitive core is what would change this; nothing here waits on it, because the whole scoring semantics is computed in Rust already and computing δ there too is the same decision rather than a concession. The forms below are also MORE inspectable than a lambda would be, which is what a governed parameter needs: a reviewer reads which family and one number.";
+    class_types kt:MarginForm;
+    allows_only kt:margin_forms:zero,
+                kt:margin_forms:by_rivalry,
+                kt:margin_forms:by_stakes_and_rivalry;
+    domain kt:CommitmentPolicy;
+}
+
+property kt:margin_coefficient : core:float {
+    description = "The scale factor c in the margin form. The pilot's margin sweep varies this and holds the form fixed, so a grid point is one policy resource. At c = 0 every form is the degenerate δ ≡ 0 whatever the form says, which is why the reproduction gate names the zero FORM instead: a policy should announce that it is first-past-τ rather than leave a reader to notice a zero. Bounded to [0,1] so that δ lands in the paper's codomain by CONSTRUCTION rather than by clamping the result: since τ and the interaction strength are both in [0,1], c ≤ 1 gives δ ≤ 1. Clamping instead would record a margin the policy never named, and the record of what was demanded is half of what auditable suspension is for. A negative c would make δ DECREASE with rivalry, inverting the condition.";
+    min_value = 0.0;
+    max_value = 1.0;
+    domain kt:CommitmentPolicy;
+}
+
+class kt:MarginForm {
+    description = "Marker class for the margin families this institution implements. Each satisfies the paper's constraints on δ by construction — (0,1] × (0,1] → [0,1), non-decreasing in each argument, and → 0 as the interaction strength → 0 — so a policy cannot declare a δ that breaks them. Same shape institution:DispatchRole and institution:RuntimeKind use: a marker class, named instances, and allows_only on the slot.";
+}
+
+resource kt:margin_forms:zero : kt:MarginForm {
+    core:short_name = "zero";
+    core:description = "δ ≡ 0. The degenerate policy: first-past-τ, commit to the first conclusion whose score reaches the threshold. Appropriate only in low-rivalry regimes, and named rather than expressed as a zero coefficient so a policy using it says so. This is the reproduction gate — under it the institution must reproduce the chain's published adjudication exactly.";
+}
+
+resource kt:margin_forms:by_rivalry : kt:MarginForm {
+    core:short_name = "by_rivalry";
+    core:description = "δ(τ, x) = c·x. The demanded separation grows with the strength of the incompatibility and ignores the stakes. For a deployment whose τ already encodes its risk posture and does not want it counted twice.";
+}
+
+resource kt:margin_forms:by_stakes_and_rivalry : kt:MarginForm {
+    core:short_name = "by_stakes_and_rivalry";
+    core:description = "δ(τ, x) = c·τ·x. The demanded separation grows with BOTH the stakes and the strength of the incompatibility, which is the reading the paper's own prose gives: the more severe the rivalry, the wider the separation demanded before collapse, and the higher the stakes the wider again.";
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The estimable side: ⟨H, w, κ⟩
+// ════════════════════════════════════════════════════════════════════
+
+class kt:Hypothesis {
+    description = "An explanatory token the framework scores — an atomic hypothesis in H. NOT a justification:Declaration: a Declaration is an assertion by an accountable agent that a proposition holds, and a rival hypothesis is ENTERTAINED rather than asserted. Reusing Declaration would have a rival reconstruction asserting every rival it recovers, which is the opposite of what reconstructing rivals is for. Attribution records who put it in play, which is what makes the reconstruction auditable.";
+    requires eigentt:proposition, prov:was_attributed_to;
+    recommends core:description, core:short_name;
+}
+
+class kt:PlausibilityEstimate {
+    description = "w(h) for one hypothesis, as its own chain resource. Separate from the hypothesis so the estimate carries its own provenance trace: a DeclarationTrace where expert-elicited, an ObservationTrace where read off an embedding. That separation is what keeps the composite warrant honest — the scoring and the comparison are reproducible and an application forms over them, while the estimates are recordings under a declared protocol and no application forms over those, so the chain entails nothing about the next estimate.";
+    requires kt:estimate_of, kt:weight, kt:estimation_protocol;
+    recommends core:description;
+}
+
+property kt:estimate_of : core:resource {
+    description = "What this estimate scores — a reconstructed rival hypothesis, or the chain conclusion under adjudication. Both, because the commitment condition compares the subject's score against each rival's and treats them uniformly; the subject differs only in already being on the chain with its own justification term. Narrowing this to kt:Hypothesis would force a second slot for the subject's weight and let the two drift.";
+    class_types kt:Hypothesis, justification:Conclusion;
+    domain kt:PlausibilityEstimate;
+}
+
+property kt:weight : core:float {
+    description = "w(h) ∈ [0,1] — the plausibility weight. For an atomic hypothesis this IS its score. Bounded, because the paper's range-preservation lemma fixes sc_S ∈ [0,1] and every comparison in the commitment condition is against a threshold in the same interval; an out-of-range weight does not make a hypothesis more plausible, it makes the score it publishes meaningless.";
+    min_value = 0.0;
+    max_value = 1.0;
+    domain kt:PlausibilityEstimate;
+}
+
+property kt:estimation_protocol : core:resource {
+    description = "The declared protocol this estimate was produced under — the resource an author points at to say HOW the number was arrived at, whether by expert elicitation, embedding geometry, or heuristic computation. Required on every estimate, because an estimate whose protocol is unrecorded cannot be re-run and cannot be argued with.";
+    class_types justification:Declaration;
+}
+
+class kt:InteractionEstimate {
+    description = "κ(hᵢ, hⱼ) ∈ [−1,1] for one ordered pair — how far two hypotheses support (> 0) or undercut (< 0) each other. Its own resource for the same provenance reason as a plausibility estimate, and because the pilot's κ values are deliberately mixed in origin: embedding-based where the rivalry is semantic, declared where it is operational (two mutually exclusive readings of the same assay). The paper's own boundary runs between estimable epistemic structure, however mixed, and governed normative structure — not between neural and symbolic.";
+    requires kt:between, kt:kappa, kt:estimation_protocol;
+    recommends core:description;
+}
+
+property kt:between : core:resource_array {
+    description = "The pair this interaction holds between — two reconstructed hypotheses, or the chain conclusion under adjudication and one of its rivals. Exactly two entries. Both kinds, for the same reason kt:estimate_of admits both: the margin condition compares the subject against each rival, so the subject participates in interactions like any other explanatory token. The diagonal convention is κ(h, h) = 0, and the lifted κ* is 0 between structurally equivalent terms: repetition of the same explanatory content carries no interaction.";
+    class_types kt:Hypothesis, justification:Conclusion;
+    min_length = 2;
+    max_length = 2;
+    domain kt:InteractionEstimate;
+}
+
+property kt:kappa : core:float {
+    description = "The interaction value, in [−1,1]. Only a NEGATIVE value makes the pair rivals: compatible or mildly interacting alternatives impose no margin, because coexisting constructive explanations are candidates for synthesis rather than rivals to be outrun. Bounded to the paper's own range, because −κ* is the second argument of δ and a value outside it puts δ outside its domain.";
+    min_value = -1.0;
+    max_value = 1.0;
+    domain kt:InteractionEstimate;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The rival set
+// ════════════════════════════════════════════════════════════════════
+
+class kt:RivalSet {
+    description = "The hypotheses standing against one subject conclusion. Reconstructed rather than read off, and attributed for that reason: in the WRN pilot the 33 chain conclusions are largely cumulative and are not each other's rivals, so rivals come from elsewhere — every negative control, rescue experiment and mutant construct is the recorded trace of an excluded rival; each surfaced discrepancy induces a rival reading of the same evidence; and mechanism-level alternatives contemporaneous with the study supply the rest. None of those three sources is mechanical, so the pilot's findings are conditional on this reconstruction and the chain records whose it was.";
+    requires kt:rival_of, kt:rivals, prov:was_attributed_to;
+    recommends core:description;
+}
+
+property kt:rival_of : core:resource {
+    description = "The conclusion whose rivals these are.";
+    class_types justification:Conclusion;
+    domain kt:RivalSet;
+}
+
+property kt:rivals : core:resource_array {
+    description = "The candidate rival hypotheses. Which of them are ACTIVE is computed, not declared: a rival is active when its score clears ε and its interaction with the subject is negative.";
+    class_types kt:Hypothesis;
+    domain kt:RivalSet;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// The dispatch: input, output, institution
+// ════════════════════════════════════════════════════════════════════
+
+class kt:CommitmentAssessment {
+    description = "The gated subject: one conclusion, one policy, one rival set, and the estimates to score them with. Committing one fires the institution, which computes the scores and the margins and emits a CommitmentDecision. Everything it names is already on the chain with its own provenance, so the assessment itself asserts nothing new — it says which governed policy is being applied to which reconstruction, which is the question the margin sweep varies.";
+    requires kt:subject,
+             kt:policy,
+             kt:rival_set,
+             kt:plausibility_estimates,
+             kt:interaction_estimates;
+    recommends core:description;
+}
+
+property kt:subject : core:resource {
+    description = "The conclusion under adjudication. Its proposition is the φ in Commits(policy, φ) — read out of the conclusion's grounds judgement rather than restated here, so the two cannot drift apart.";
+    class_types justification:Conclusion;
+    domain kt:CommitmentAssessment;
+}
+
+property kt:policy : core:resource {
+    description = "The governed parameters this assessment runs under. A margin sweep is one assessment per grid point, each citing its own policy, so the sweep's output is a table the chain can be queried for rather than a report generated beside it.";
+    class_types kt:CommitmentPolicy;
+    domain kt:CommitmentAssessment;
+}
+
+property kt:rival_set : core:resource {
+    description = "The reconstructed rivals for the subject.";
+    class_types kt:RivalSet;
+    domain kt:CommitmentAssessment;
+}
+
+property kt:plausibility_estimates : core:resource_array {
+    description = "The w estimates covering the subject and every rival. An estimate missing for an active rival is a structural failure, not a zero: scoring a rival at zero because nobody estimated it would let an unexamined rival silently clear the margin.";
+    class_types kt:PlausibilityEstimate;
+    domain kt:CommitmentAssessment;
+}
+
+property kt:interaction_estimates : core:resource_array {
+    description = "The κ estimates covering the subject-rival pairs. An absent pair is treated as κ = 0 — not rivals, so no margin — which is the paper's own reading of a non-negative interaction and is why the absence is safe here while a missing weight is not.";
+    class_types kt:InteractionEstimate;
+    domain kt:CommitmentAssessment;
+}
+
+class kt:CommitmentDecision {
+    description = "What one assessment produced: the proposition it asserts, the score behind it, and the rivalry it cleared or failed to. Emitted as an institution derivation, so it records what a run produced and grounds nothing on its own — the claim rests on the policy and the scoring plan being DECLARED to denote a function of their input, which no execution establishes, plus the estimates being OBSERVED. Its proposition is Commits(policy, φ) where the conclusion committed and SuspendedAt(policy, φ) where it did not; the two are different claims about the same φ, and neither is φ.";
+    requires kt:from_assessment, eigentt:proposition, kt:computed_score;
+    recommends kt:rival_margins, kt:binding_rival;
+}
+
+property kt:from_assessment : core:resource {
+    description = "The assessment this decision came from.";
+    class_types kt:CommitmentAssessment;
+    domain kt:CommitmentDecision;
+}
+
+property kt:computed_score : core:float {
+    description = "sc_S(φ) for the subject, as the run computed it. The audit number behind the proposition, in the same relation to it as a p-value is to a statistical claim: the proposition says what is claimed, this says what the run measured.";
+    domain kt:CommitmentDecision;
+}
+
+property kt:rival_margins : core:resource_array {
+    description = "One record per ACTIVE rival — score above ε and interaction below zero — carrying what the margin condition demanded and what the separation achieved. Chain-resident rather than reported alongside, because which hypotheses stayed open against which rivals failing which margins is half of what the framework is for: auditable suspension, symmetric with auditable commitment. Empty means the conclusion faced no live opposition, which is a finding rather than an absence — under δ ≡ 0 no rival is ever binding, by construction.";
+    class_types kt:RivalMargin;
+    domain kt:CommitmentDecision;
+}
+
+property kt:binding_rival : core:resource {
+    description = "On a suspension, the active rival whose margin failed by the most — the one to resolve first, by the leader pulling away or by the rival dropping below activation. Absent on a commitment.";
+    class_types kt:Hypothesis;
+    domain kt:CommitmentDecision;
+}
+
+class kt:RivalMargin {
+    description = "The margin computation against one active rival, as its own record so the audit is navigable rather than a parallel array of floats. Everything the framework's own question needs: which rival, how plausible it was, how strongly it interacts, what separation the policy demanded, and what the run achieved.";
+    requires kt:against,
+             kt:rival_score,
+             kt:lifted_interaction,
+             kt:required_margin,
+             kt:achieved_separation,
+             kt:cleared;
+}
+
+property kt:against : core:resource {
+    description = "The rival this record is about.";
+    class_types kt:Hypothesis;
+    domain kt:RivalMargin;
+}
+
+property kt:rival_score : core:float {
+    description = "sc_S(ψ) — the rival's score. Above the policy's ε, or the rival would not be active and this record would not exist.";
+    domain kt:RivalMargin;
+}
+
+property kt:lifted_interaction : core:float {
+    description = "κ*(t_φ, t_ψ) — the lifted interaction between subject and rival, the mean of the pairwise κ over their atom sets. Negative, or the two are not rivals: a non-negative interaction imposes no margin, because coexisting constructive explanations are candidates for synthesis rather than rivals to be outrun.";
+    domain kt:RivalMargin;
+}
+
+property kt:required_margin : core:float {
+    description = "δ(τ, −κ*) — what the policy's margin function demanded for this rivalry. Grows with both the stakes and the strength of the incompatibility.";
+    domain kt:RivalMargin;
+}
+
+property kt:achieved_separation : core:float {
+    description = "sc_S(φ) − sc_S(ψ) — what the evidence delivered.";
+    domain kt:RivalMargin;
+}
+
+property kt:cleared : core:boolean {
+    description = "Whether the achieved separation met the required margin. A commitment needs every record to clear; one failure suspends.";
+    domain kt:RivalMargin;
+}
+
+resource kt:kappa_tau_institution : institution:Institution {
+    institution:institution_iri = "urn:eigenius:kappatau:kappa_tau_institution";
+    institution:institution_name = "GovernedAbduction";
+    institution:runtime = runtimes:in_process;
+    core:description = "The κ–τ institution: risk-sensitive commitment over chain conclusions (D91). Computes the commitment score, finds the active rivals, and checks the separation condition against the policy's margin function. It PROVES nothing — the threshold comparison is computed and asserted, exactly as the statistics institution computes and asserts a p-value comparison — so it emits a proposition rather than a judgement, mints no logic constant, and earns no witness.";
+}
+
+resource kt:qc_assess_commitment : institution:QueryClass {
+    core:description = "AutoOnLoad gate on every CommitmentAssessment commit. Scores the subject and its rivals from the cited estimates, determines which rivals are active, evaluates the policy's margin function against each, and emits one CommitmentDecision. Holds where the conclusion commits, Undecidable where it is suspended.";
+    institution:query_class = kt:CommitmentAssessment;
+    institution:result_class = institution:Verdict;
+    institution:dispatch_role = [dispatch:auto_on_load];
+    institution:query_handler = proc:assess_commitment;
+    institution:institution_ref = kt:kappa_tau_institution;
+    // D90 step 5 — and κ–τ is why the property exists. The framework holds veto power
+    // and must not exercise it: below threshold means DO NOT COMMIT to φ, not THIS
+    // CHAIN IS INVALID. Fails would reject the commit, which would make a governance
+    // refusal indistinguishable from a malformed chain.
+    // The quoted-segment form is how ESL names a D85-materialised constructor
+    // class: the hyphen in `Verdict-Holds` is not an identifier character, and
+    // `ns:'...'` admits the `[A-Za-z0-9_-]` charset for exactly this.
+    institution:permitted_verdicts = [
+        institution:'Verdict-Holds',
+        institution:'Verdict-Undecidable'
+    ];
+}

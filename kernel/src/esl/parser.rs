@@ -547,7 +547,18 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// A numeric literal, with an optional leading `-`.
+    ///
+    /// The lexer emits `Minus` as its own token, so a negative literal reaches the
+    /// parser as two. Without this, a legitimate declaration was inexpressible: a
+    /// `min_value = -1.0` on a property whose range is genuinely `[-1, 1]` — an
+    /// interaction strength, a correlation, a signed difference — could be written in
+    /// Eigon-JSON and not in ESL, which is the grammar being wrong rather than the input.
     fn parse_number_f64(&mut self) -> Result<f64, EslError> {
+        if matches!(self.peek(), TokenKind::Minus) {
+            self.advance();
+            return self.parse_number_f64().map(|v| -v);
+        }
         match self.peek().clone() {
             TokenKind::IntLit(n) => {
                 self.advance();
@@ -564,7 +575,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// An integer literal, with an optional leading `-`. See `parse_number_f64`.
     fn parse_number_i64(&mut self) -> Result<i64, EslError> {
+        if matches!(self.peek(), TokenKind::Minus) {
+            self.advance();
+            return self.parse_number_i64().map(|v| -v);
+        }
         match self.peek().clone() {
             TokenKind::IntLit(n) => {
                 self.advance();

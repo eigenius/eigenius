@@ -21,6 +21,7 @@ members = [
     "crates/eigenius-r-worker",
     "crates/eigenius-r",
     "crates/eigenius-statistics",
+    "crates/eigenius-kappatau",
     "storage/tikv",
     "storage/rocksdb",
     "cli",

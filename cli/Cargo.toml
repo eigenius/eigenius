@@ -49,6 +49,7 @@ eigenius-encoding = { path = "../crates/eigenius-encoding" }
 # the IsDerivedAs witness any downstream justification:Conclusion's
 # DerivedEvidence ctor consumes.
 eigenius-statistics = { path = "../crates/eigenius-statistics" }
+eigenius-kappatau = { path = "../crates/eigenius-kappatau" }
 eigenius-runtime-substrate = { path = "../crates/runtime-substrate" }
 eigenius-config = { path = "../crates/eigenius-config" }
 # D43: BGE-small Candle embedder. Pulled in by the `serve` path so

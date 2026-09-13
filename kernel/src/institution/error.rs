@@ -31,6 +31,16 @@ pub enum InstitutionError {
     /// impl for institutions whose QueryClasses are all
     /// Component-implemented (D14 §6.2 / §8).
     NotImplemented(String),
+    /// The input is not one this institution can adjudicate — a reference that
+    /// resolves to the wrong kind of thing, a parameter naming a form the institution
+    /// does not implement, a value nobody supplied that has no safe default.
+    ///
+    /// Distinct from a negative VERDICT, and the distinction is the point. A verdict
+    /// is what the institution decided after running; this is the institution
+    /// declining to run at all. Collapsing the two publishes a verdict a reader cannot
+    /// tell apart from a real one — which matters most for an institution whose
+    /// `Undecidable` is itself a meaningful epistemic state rather than a shrug.
+    InvalidInput(String),
 }
 
 impl fmt::Display for InstitutionError {
@@ -40,6 +50,7 @@ impl fmt::Display for InstitutionError {
             InstitutionError::ComputationFailed(msg) => write!(f, "computation failed: {msg}"),
             InstitutionError::MissingDependency(msg) => write!(f, "missing dependency: {msg}"),
             InstitutionError::NotImplemented(msg) => write!(f, "not implemented: {msg}"),
+            InstitutionError::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
         }
     }
 }

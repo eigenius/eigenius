@@ -1,0 +1,14 @@
+[package]
+name = "eigenius-kappatau"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The kappa-tau institution for Eigenius (D91): governed abduction over chain conclusions. Scores a conclusion against its reconstructed rivals under a declared commitment policy, and emits Commits or SuspendedAt as a proposition — never the conclusion's own proposition."
+
+[dependencies]
+# The whole institution is in-process and reads its inputs from the chain
+# through the kernel's resource machinery. No prover, no worker, no numerics
+# crate: the scoring semantics is min, max, a mean and a clamp.
+eigenius-kernel = { path = "../../kernel" }
+thiserror.workspace = true

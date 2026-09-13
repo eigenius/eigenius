@@ -1,0 +1,247 @@
+// One conclusion, two rivals, and three policies — the κ–τ pilot's shape in miniature.
+//
+// Stands in for the WRN re-adjudication: a chain conclusion that was published as
+// committed, a rivalry structure reconstructed around it, and the same evidence read
+// under a degenerate margin and under two non-degenerate ones. The numbers are chosen
+// so the three policies disagree, which is the whole point of the pilot's Step 3 —
+// under δ ≡ 0 the conclusion commits, and as the margin rises it suspends.
+//
+// **Not WRN data.** The WRN chain carries no plausibility scores, so weights for real
+// conclusions have to be elicited and attributed before the pilot can run. These are
+// fixture numbers with a fixture owner, and they say so.
+
+namespace core          = "urn:eigenius:core";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace prov          = "urn:eigenius:prov";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace kt            = "urn:eigenius:kappatau";
+namespace forms         = "urn:eigenius:kappatau:margin_forms";
+namespace pilot         = "urn:eigenius:test:ktpilot";
+
+// ── The domain predicates ────────────────────────────────────────────
+
+data pilot:SelectivelyEssential : Prop {
+    description = "The conclusion under adjudication: the target is selectively essential in the marker-positive background.";
+}
+
+data pilot:ReflectsReplicateStructure : Prop {
+    description = "The pseudoreplication rival: the observed difference reflects replicate structure rather than a biological effect. Incompatible with the conclusion — both cannot be the explanation of the same difference.";
+}
+
+data pilot:ReflectsOffTargetActivity : Prop {
+    description = "The off-target rival: the observed dependency reflects an off-target activity of the reagent. Also incompatible, and more weakly so.";
+}
+
+data pilot:HoldsInASecondLineage : Prop {
+    description = "A COMPATIBLE alternative, not a rival: the effect also holds in a second lineage. Coexisting constructive explanations are candidates for synthesis rather than rivals to outrun, so this one must impose no margin however plausible it is.";
+}
+
+// ── The subject: a chain conclusion ──────────────────────────────────
+
+resource pilot:source : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Illustrative warrant for this fixture's declarations. A test fixture, not a real literature warrant.";
+    core:short_name = "pilot_source";
+}
+
+resource pilot:rule_selective : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = pilot:source;
+    prov:rationale = "Declares the domain conclusion the assessment adjudicates.";
+    eigentt:proposition = type_expr( pilot:SelectivelyEssential );
+}
+
+resource pilot:rule_selective_trace : prov:DeclarationTrace {
+    prov:resource = pilot:rule_selective;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = pilot:source;
+    prov:timestamp = "2026-09-13T09:00:00Z";
+}
+
+resource pilot:concl_selective : justification:Conclusion {
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(declared(
+                   "urn:eigenius:test:ktpilot:rule_selective",
+                   pilot:SelectivelyEssential,
+                   Prop
+               )),
+               type_expr(justification:Grounds( pilot:SelectivelyEssential )) );
+}
+
+// ── The reconstructed rivals ─────────────────────────────────────────
+
+resource pilot:h_pseudoreplication : kt:Hypothesis {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Reconstructed from the discrepancy the replication surfaced: the difference reflects replicate structure.";
+    eigentt:proposition = type_expr( pilot:ReflectsReplicateStructure );
+}
+
+resource pilot:h_offtarget : kt:Hypothesis {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "Reconstructed from the study's own excluded alternatives: every rescue experiment is the recorded trace of this rival.";
+    eigentt:proposition = type_expr( pilot:ReflectsOffTargetActivity );
+}
+
+resource pilot:h_second_lineage : kt:Hypothesis {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "A compatible alternative carried in the same set, so the fixture shows that a non-negative interaction imposes no margin.";
+    eigentt:proposition = type_expr( pilot:HoldsInASecondLineage );
+}
+
+resource pilot:rivals : kt:RivalSet {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "The rivalry structure reconstructed around the conclusion. Attributed, because none of the three sources the pilot draws on is mechanical.";
+    kt:rival_of = pilot:concl_selective;
+    kt:rivals = [ pilot:h_pseudoreplication, pilot:h_offtarget, pilot:h_second_lineage ];
+}
+
+// ── The estimates ────────────────────────────────────────────────────
+
+resource pilot:protocol : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = pilot:source;
+    prov:rationale = "The declared protocol these estimates were produced under: expert elicitation over a fixture, recorded so the numbers can be argued with.";
+    eigentt:proposition = type_expr( pilot:SelectivelyEssential );
+}
+
+resource pilot:protocol_trace : prov:DeclarationTrace {
+    prov:resource = pilot:protocol;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = pilot:source;
+    prov:timestamp = "2026-09-13T09:00:00Z";
+}
+
+resource pilot:w_subject : kt:PlausibilityEstimate {
+    kt:estimate_of = pilot:concl_selective;
+    kt:weight = 0.86;
+    kt:estimation_protocol = pilot:protocol;
+}
+
+resource pilot:w_pseudoreplication : kt:PlausibilityEstimate {
+    kt:estimate_of = pilot:h_pseudoreplication;
+    kt:weight = 0.81;
+    kt:estimation_protocol = pilot:protocol;
+}
+
+resource pilot:w_offtarget : kt:PlausibilityEstimate {
+    kt:estimate_of = pilot:h_offtarget;
+    kt:weight = 0.44;
+    kt:estimation_protocol = pilot:protocol;
+}
+
+resource pilot:w_second_lineage : kt:PlausibilityEstimate {
+    kt:estimate_of = pilot:h_second_lineage;
+    kt:weight = 0.79;
+    kt:estimation_protocol = pilot:protocol;
+}
+
+resource pilot:k_pseudoreplication : kt:InteractionEstimate {
+    core:description = "Strongly incompatible: both cannot explain the same difference.";
+    kt:between = [ pilot:concl_selective, pilot:h_pseudoreplication ];
+    kt:kappa = -0.80;
+    kt:estimation_protocol = pilot:protocol;
+}
+
+resource pilot:k_offtarget : kt:InteractionEstimate {
+    core:description = "Incompatible, and weakly so.";
+    kt:between = [ pilot:concl_selective, pilot:h_offtarget ];
+    kt:kappa = -0.30;
+    kt:estimation_protocol = pilot:protocol;
+}
+
+resource pilot:k_second_lineage : kt:InteractionEstimate {
+    core:description = "Positive: a candidate for synthesis, not a rival.";
+    kt:between = [ pilot:concl_selective, pilot:h_second_lineage ];
+    kt:kappa = 0.55;
+    kt:estimation_protocol = pilot:protocol;
+}
+
+// ── Three policies ───────────────────────────────────────────────────
+//
+// The subject scores 0.86 against a pseudoreplication rival at 0.81, so the achieved
+// separation is 0.05 and the interaction strength is 0.80.
+//
+//   degenerate  δ = 0                        → 0.00 demanded, commits
+//   light       δ = 0.05·τ·0.80 = 0.032      → commits, and the audit says by how little
+//   governed    δ = 0.50·τ·0.80 = 0.32       → suspends, binding on pseudoreplication
+
+resource pilot:policy_degenerate : kt:CommitmentPolicy {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "The reproduction gate: first-past-τ. Under this policy the institution must reproduce the chain's published adjudication, which is what makes any later suspension a finding about the margin rather than about the implementation.";
+    kt:threshold = 0.80;
+    kt:activation = 0.20;
+    kt:margin_form = forms:zero;
+    kt:margin_coefficient = 0.0;
+}
+
+resource pilot:policy_light : kt:CommitmentPolicy {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "A non-degenerate margin the conclusion still clears.";
+    kt:threshold = 0.80;
+    kt:activation = 0.20;
+    kt:margin_form = forms:by_stakes_and_rivalry;
+    kt:margin_coefficient = 0.05;
+}
+
+resource pilot:policy_governed : kt:CommitmentPolicy {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "A risk-sensitive margin the conclusion does not clear: the rivalry is not resolved, only outpaced.";
+    kt:threshold = 0.80;
+    kt:activation = 0.20;
+    kt:margin_form = forms:by_stakes_and_rivalry;
+    kt:margin_coefficient = 0.50;
+}
+
+// ── The assessments ──────────────────────────────────────────────────
+
+resource pilot:assess_degenerate : kt:CommitmentAssessment {
+    core:description = "The conclusion under the degenerate policy.";
+    kt:subject = pilot:concl_selective;
+    kt:policy = pilot:policy_degenerate;
+    kt:rival_set = pilot:rivals;
+    kt:plausibility_estimates = [ pilot:w_subject, pilot:w_pseudoreplication,
+                                  pilot:w_offtarget, pilot:w_second_lineage ];
+    kt:interaction_estimates = [ pilot:k_pseudoreplication, pilot:k_offtarget,
+                                 pilot:k_second_lineage ];
+}
+
+resource pilot:assess_light : kt:CommitmentAssessment {
+    core:description = "The same conclusion, same evidence, under a light margin.";
+    kt:subject = pilot:concl_selective;
+    kt:policy = pilot:policy_light;
+    kt:rival_set = pilot:rivals;
+    kt:plausibility_estimates = [ pilot:w_subject, pilot:w_pseudoreplication,
+                                  pilot:w_offtarget, pilot:w_second_lineage ];
+    kt:interaction_estimates = [ pilot:k_pseudoreplication, pilot:k_offtarget,
+                                 pilot:k_second_lineage ];
+}
+
+resource pilot:assess_governed : kt:CommitmentAssessment {
+    core:description = "The same conclusion, same evidence, under a governed margin.";
+    kt:subject = pilot:concl_selective;
+    kt:policy = pilot:policy_governed;
+    kt:rival_set = pilot:rivals;
+    kt:plausibility_estimates = [ pilot:w_subject, pilot:w_pseudoreplication,
+                                  pilot:w_offtarget, pilot:w_second_lineage ];
+    kt:interaction_estimates = [ pilot:k_pseudoreplication, pilot:k_offtarget,
+                                 pilot:k_second_lineage ];
+}
+
+// ── An assessment that cannot be adjudicated ─────────────────────────
+//
+// Every slot Rule 1 requires is present, and the pseudoreplication rival still has no
+// weight: it is in the rival set and hostile, and no estimate covers it. Scoring it at
+// zero would let an unexamined rival clear every margin and silently license the
+// commitment, so the institution declines to run instead of publishing a verdict.
+
+resource pilot:assess_unweighted : kt:CommitmentAssessment {
+    core:description = "An active rival nobody weighed. The institution must refuse to run rather than return a verdict.";
+    kt:subject = pilot:concl_selective;
+    kt:policy = pilot:policy_governed;
+    kt:rival_set = pilot:rivals;
+    kt:plausibility_estimates = [ pilot:w_subject, pilot:w_offtarget, pilot:w_second_lineage ];
+    kt:interaction_estimates = [ pilot:k_pseudoreplication, pilot:k_offtarget,
+                                 pilot:k_second_lineage ];
+}
