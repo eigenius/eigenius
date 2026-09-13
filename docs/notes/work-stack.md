@@ -12,8 +12,9 @@ any detour.
 > **ACTIVE: entry −4b (`2026-09-13`). The κ–τ institution.** On `kappa-tau-institution`, stacked
 > on `d90-institution-result-contract`. D91, implemented through the reproduction gate.
 >
-> **Exit gate: D90 merges, then rebase this onto main and open its own merge request.**
-> `git rebase --onto main d90-institution-result-contract kappa-tau-institution`.
+> **Exit gate: its own merge request lands.** D90 merged as `9de9fa2` (#245) and this rebased onto
+> main cleanly, no conflicts — one commit on top. Code complete, workspace suite green, clippy
+> clean, manifest unmoved so it owes no reseed of its own.
 >
 > **The commitment condition of arXiv:2608.08192, as the second live institution and the first
 > built against D90's contract.** A new out-of-chain ontology and `crates/eigenius-kappatau`, split
@@ -67,11 +68,9 @@ any detour.
 > derived from one object instead of reconstructed by pattern-matching IRIs.
 
 
-> **entry −4a (`2026-09-13`). The institution result contract (#226).** On
-> `d90-institution-result-contract`. D90, implemented.
->
-> **Exit gate: the merge request lands and #226 closes.** Code complete, workspace suite green,
-> clippy clean, reseed paid off.
+> **entry −4a (`2026-09-13`). The institution result contract (#226). DONE, merged as `9de9fa2`
+> (#245).** #226 closed automatically. Kept for the record of what the contract does, what closing
+> it cost, and what the review round caught.
 >
 > **What an institution sends back is now checked against what it declared.** The declared contract
 > was an INPUT class: `marshal.rs` checked arity and property shape inbound, and nothing checked
