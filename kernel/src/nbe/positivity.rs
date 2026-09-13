@@ -1245,7 +1245,7 @@ data t:B { description = "the other half"; mkB(t:A) }
         .expect("compiles");
         assert_eq!(rs.len(), 2, "two inductive declarations");
 
-        let core = crate::bootstrap::bootstrap().expect("bootstrap");
+        let core = crate::testing::bootstrap_context();
         let mut b = crate::layer::LayerBuilder::new(
             "mutual-pair",
             Some(std::sync::Arc::clone(core.head())),

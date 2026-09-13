@@ -30,13 +30,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use eigenius_kernel::dcg::{Identity, Item, Parser};
+use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::eval::eval;
 use eigenius_kernel::nbe::readback::readback_val;
 use eigenius_kernel::nbe::term::Exp;
-use eigenius_kernel::{bootstrap, esl};
 use eigenius_wordnet::convert::{render_document, MassNouns};
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
@@ -81,7 +81,7 @@ fn stand_up(spec: &SeedSpec) -> (Arc<Layer>, std::time::Duration) {
     );
 
     let t0 = Instant::now();
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     let resources = esl::compile(&doc, ctx.head()).expect("wn compiles over bootstrap");
     let mut b = LayerBuilder::new("wn", Some(Arc::clone(ctx.head())));
     for r in resources {

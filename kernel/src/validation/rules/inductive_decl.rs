@@ -330,7 +330,7 @@ mod ctor_type_tests {
 
     /// An inductive `test:Box` with one ctor whose `ctor_type` is `ctor_type`.
     fn errors_for_ctor_type(ctor_type: serde_json::Value) -> Vec<String> {
-        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
         let mut top = LayerBuilder::new("ctor_type_test", Some(head));
 
         let mut c = Resource::new_embedded();

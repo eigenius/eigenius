@@ -37,12 +37,12 @@ use std::sync::Arc;
 use eigenius_kernel::dcg::{
     is_nonprose, pretty_term, segment_sentences, tokenize, Item, Lemmatizer, Parser, Pos,
 };
+use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
 use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::readback::readback_val;
 use eigenius_kernel::nbe::term::Exp;
-use eigenius_kernel::{bootstrap, esl};
 use eigenius_wordnet::convert::{render_document, MassNouns};
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
@@ -67,7 +67,7 @@ fn stand_up(spec: &SeedSpec) -> Arc<Layer> {
     let chosen = select_synsets(std::path::Path::new(DICT), spec).expect("read WordNet dict");
     let ranks = read_sense_ranks(std::path::Path::new(DICT), &spec.pos).expect("read index ranks");
     let (doc, _rep) = render_document(&chosen, &ranks, &MassNouns::new());
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     let resources = esl::compile(&doc, ctx.head()).expect("wn compiles");
     let mut b = LayerBuilder::new("wn", Some(Arc::clone(ctx.head())));
     for r in resources {

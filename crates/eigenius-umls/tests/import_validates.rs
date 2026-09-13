@@ -24,7 +24,6 @@
 
 use std::sync::Arc;
 
-use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{gate_entry, is_ctor, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -82,7 +81,7 @@ fn mirror_and_lexicon_validate_and_felicity_gate() {
     assert_eq!(rep.concepts, 2);
     assert_eq!(rep.semantic_types, 2);
 
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     let umls = esl_layer("umls", &doc, Arc::clone(ctx.head()));
 
     // Structural validation clean. Concept classes root at lexicon:Entity transitively
@@ -106,7 +105,7 @@ fn mirror_and_lexicon_validate_and_felicity_gate() {
 
 #[test]
 fn scoped_parse_of_every_werner_syndrome_affects_hela() {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     // bootstrap → demo (the `affects` verb + HeLa) → umls (Werner syndrome kind).
     let demo = esl_layer("demo", DEMO, Arc::clone(ctx.head()));
     let subset = build_subset(MRSAB, MRRANK, MRSTY, MRCONSO, MRDEF, None, "ENG", None);

@@ -1629,7 +1629,7 @@ mod tests {
     /// for the FIBER / qualified-call type-check tests.
     fn build_demo_layer() -> Arc<Layer> {
         let demo_ontology = include_str!("../../../ontologies/examples/dock-assay/dock-assay.json");
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         let parent = Arc::clone(ctx.head());
         let mut builder = LayerBuilder::new("type-check-demo", Some(parent));
         for r in eigon_json::parse_document(demo_ontology).expect("parse demo") {

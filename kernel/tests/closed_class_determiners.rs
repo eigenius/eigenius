@@ -20,7 +20,6 @@
 
 use std::sync::Arc;
 
-use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{
     abbreviation_resources, apply, coordinate_np, coordinate_prop, entry_to_item,
     extract_abbreviations, glossary_resources, ground_long_form, is_ctor, pretty_term, type_raise,
@@ -36,6 +35,7 @@ use eigenius_kernel::nbe::eval::eval;
 use eigenius_kernel::nbe::readback::readback_val;
 use eigenius_kernel::nbe::term::Exp;
 use eigenius_kernel::ontology::Iri;
+use eigenius_kernel::testing;
 
 const DEMO: &str = include_str!("../../experiments/lexicon/lexicon.esl");
 
@@ -43,7 +43,7 @@ const DEMO: &str = include_str!("../../experiments/lexicon/lexicon.esl");
 /// then layer the demo domain (Gene/CellLine, `affects`, `primary`, HeLa, …) on
 /// top — so the index sees the committed determiners *and* the demo content.
 fn index_over_bootstrap() -> (Arc<Layer>, Parser) {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let resources = esl::compile(DEMO, ctx.head()).expect("demo compiles on bootstrap");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in resources {
@@ -73,7 +73,7 @@ resource lexicon:remained_e : lexicon:LexicalEntry {
     lexicon:sense    = "remain";
 }
 "#;
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
@@ -129,7 +129,7 @@ resource lexicon:zob_sg : lexicon:LexicalEntry {
 
 /// Bootstrap + demo + the two-sense `zob` fixture, with an index carrying `sense_cap`.
 fn zob_layer() -> Arc<Layer> {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
@@ -173,7 +173,7 @@ resource lexicon:zworp_pl : lexicon:LexicalEntry {
 "#;
 
 fn zworp_layer() -> Arc<Layer> {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
@@ -271,7 +271,7 @@ impl SenseRanker for BurySense {
 /// pushes it to position 16 — **beyond** the sense-cap widen ceiling (`SENSE_CAP_WIDEN_MAX = 16`, whose
 /// top-16 is positions 0–15) — so cap-widening WITHIN the reranked order can never re-admit it.
 fn zib_layer() -> Arc<Layer> {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
@@ -367,7 +367,7 @@ resource lexicon:zarg_cell : lexicon:LexicalEntry {
 
 /// Bootstrap + demo + the two-sense `zarg` fixture committed as a layer chain.
 fn zarg_layer() -> Arc<Layer> {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
@@ -585,7 +585,7 @@ resource lexicon:e_like : lexicon:LexicalEntry {
 "#;
 
 fn denominal_index() -> Parser {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
@@ -936,7 +936,7 @@ resource lexicon:e_bit : lexicon:LexicalEntry {
 "#;
 
 fn widget_index() -> Parser {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
@@ -3411,7 +3411,7 @@ fn lexicon_backed_augmentation_grounds_oov_via_the_form_text_index() {
     // surface `recq` to a seeded multiword atom → grounds it to that concept, in-process. The exact
     // `ValueIndex` misses it (`recq` ≠ `recq family of dna helicases`); the BM25 `TextIndex` closes it.
     use eigenius_kernel::dcg::{augment_lexicon_backed, NominalCategoryProposer, ResolutionMethod};
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     // One shared storage across the chain so the bootstrap's `form_text_index` (discovered via the
     // per-storage triple index) is visible to the recq layer — as in production's single backend.
     let storage = ctx.head().storage().clone();
@@ -3467,7 +3467,7 @@ fn probe_recq_form_index_active_and_populated() {
     use eigenius_kernel::layer::resolve_active_text_indexes;
     use eigenius_kernel::query::text::analyzer::registry::analyzer_for;
     use eigenius_kernel::query::text::search::run_text_search;
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     // Build the whole chain on ONE storage (the bootstrap's) — index discovery scans the
     // per-storage triple index, so the bootstrap's form_text_index is only visible to a child
     // layer built on the same storage. This mirrors production, where a chain lives on a single
@@ -3543,7 +3543,7 @@ resource demo:e_supercoil : lexicon:LexicalEntry {
 /// Build `bootstrap → demo → fixture` on one shared storage (so the core `description_text_index` is
 /// discovered over `base`), returning the fixture head.
 fn description_grounding_base() -> Arc<eigenius_kernel::layer::Layer> {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let storage = ctx.head().storage().clone();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
@@ -3766,7 +3766,7 @@ resource lexicon:e_contributes : lexicon:LexicalEntry {
 "#;
 
 fn contrib_layer() -> Arc<Layer> {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in demo {
@@ -5385,7 +5385,7 @@ fn nary_coordination_has_a_single_left_branching_parse() {
 /// The bootstrap+demo chain on SHARED storage, and the lexicon over it — for tests that assert on the
 /// index itself (its laziness / coverage) rather than on a parse.
 fn shared_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let resources = esl::compile(DEMO, ctx.head()).expect("demo compiles on bootstrap");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in resources {
@@ -5398,7 +5398,7 @@ fn shared_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
 
 /// Same, on ISOLATED storage (so no `ValueIndex` is active and the index takes the eager path).
 fn eager_lexicon() -> (Arc<Layer>, Arc<LexicalIndex>) {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let resources = esl::compile(DEMO, ctx.head()).expect("demo compiles on bootstrap");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
     for r in resources {
@@ -5503,7 +5503,7 @@ fn demo_with_alias(demo: &Arc<Layer>, long: &str, concept: &str) -> Parser {
 /// just the chained doc-scoped alias layer over the reshaped grammar.
 #[test]
 fn abbreviation_injection_recovers_bare_argument() {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let demo = layer_on(ctx.head(), "demo", DEMO);
     let base = Parser::build(Arc::clone(&demo));
     let injected = demo_with_alias(&demo, "instability", "urn:eigenius:lexicon:Instability");
@@ -5544,7 +5544,7 @@ fn abbreviation_injection_recovers_bare_argument() {
 ///     subject is a closed entity reference, a prenominal modifier is `compound(x, instance)`.
 #[test]
 fn abbreviation_emission_keys_on_ontological_kind() {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = testing::bootstrap_context();
     let demo = layer_on(ctx.head(), "demo", DEMO);
 
     // Mass phenomenon: bare subject → CLOSED kind-predication (reshape Phase A); modifier → compound_kind.

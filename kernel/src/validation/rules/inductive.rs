@@ -1050,7 +1050,7 @@ mod tests {
     fn build_level_layer() -> Arc<Layer> {
         // `eigentt:Term` is declared in `core`, so the head resolves it — no anchoring at a
         // particular layer is needed, unlike the `lean-expressions` chain this replaced.
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         let head = Arc::clone(ctx.head());
         let mut builder = LayerBuilder::new("test_level", Some(head));
         let prop = make_resource(
@@ -1292,7 +1292,7 @@ mod tests {
     /// `class_types` resolves to an `InductiveType`.
     #[test]
     fn option_a_resource_array_with_class_class_types_rejects_json() {
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         let head = Arc::clone(ctx.head());
 
         let mut builder = LayerBuilder::new("test_class_array", Some(head));
@@ -1391,7 +1391,7 @@ mod tests {
     /// — used by the wrong-class test as a `ConstRef` target whose primary
     /// class isn't one of the type-former classes.
     fn build_eigentt_test_chain() -> Arc<Layer> {
-        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
         let mut builder = LayerBuilder::new("test_eigentt_top", Some(head));
 
         // Property `eigentt_value : core:inductive` typed at eigentt:Term.

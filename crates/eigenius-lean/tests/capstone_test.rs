@@ -113,7 +113,7 @@ fn bootstrap_head() -> std::sync::Arc<eigenius_kernel::layer::Layer> {
     use std::sync::OnceLock;
     static H: OnceLock<std::sync::Arc<eigenius_kernel::layer::Layer>> = OnceLock::new();
     std::sync::Arc::clone(H.get_or_init(|| {
-        let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = eigenius_kernel::testing::bootstrap_context();
         std::sync::Arc::clone(ctx.head())
     }))
 }
@@ -239,7 +239,7 @@ fn base64_encode(bytes: &[u8]) -> String {
 fn build_capstone_layer() -> (LayerStorage, Arc<Layer>) {
     // Anchor on the bootstrap chain head so the institution index
     // sees the ontology declaring LeanProofTerm + LeanPackageMirror.
-    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     let parent = Arc::clone(ctx.head());
     let storage = LayerStorage::in_memory();
     let parent_layer_id = parent.id().to_string();
