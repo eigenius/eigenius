@@ -122,7 +122,16 @@
     "@id": "urn:eigenius:institution:Verdict",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class", "urn:eigenius:core:InductiveType"],
     "urn:eigenius:core:short_name": "Verdict",
-    "urn:eigenius:core:description": "Tri-state outcome of an institution-bound predicate query (D14 §6.1). `Holds` reduces a NativeDecide to `Refl(v)` or accepts a Load; `Fails` produces a failing neutral or rejects a Load; `Undecidable` leaves the constraint as a passthrough or accepts on Load with no domain commitment.",
+    "urn:eigenius:core:description": "Tri-state outcome of an institution-bound predicate query (D14 §6.1). `Holds` reduces a NativeDecide to `Refl(v)` or accepts a Load; `Fails` produces a failing neutral or rejects a Load; `Undecidable` leaves the constraint as a passthrough or accepts on Load with no domain commitment. Requires the two halves every committed Verdict already carries — which constructor it is, and what it was rendered for — because a Verdict missing either is not readable as a verdict at all. Recommends the audit slots. This is also the base of the D90 result contract: a QueryClass's `result_class` is checked at the boundary against what the institution returned, so what THIS class and its subclasses declare is the whole of what an institution may send back.",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:ctor_name",
+      "urn:eigenius:institution:verdict_subject"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:institution:verdict_query_class",
+      "urn:eigenius:institution:runtime_invocation",
+      "urn:eigenius:institution:diagnostic"
+    ],
     "urn:eigenius:core:ctors": [
       {
         "urn:eigenius:core:is_a": ["urn:eigenius:core:InductiveCtor"],
@@ -259,7 +268,7 @@
   {
     "@id": "urn:eigenius:institution:QueryClass",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Class"],
-    "urn:eigenius:core:description": "A typed function in the institution's fibre — input class to output class — with one or more dispatch roles (D14 §4.4, §6). Subsumes the former validate_morphism / decide / discover_morphisms primitives; the difference between them is the dispatch_role, not the primitive.",
+    "urn:eigenius:core:description": "A typed function in the institution's fibre — input class to output class — with one or more dispatch roles (D14 §4.4, §6). Subsumes the former validate_morphism / decide / discover_morphisms primitives; the difference between them is the dispatch_role, not the primitive. INBOUND, the kernel guarantees that a subject reaching the handler has already been through the validation rules and the retroactive cascade: dispatch runs after both in the commit pipeline, and a test pins that order rather than leaving it to be discovered when someone moves a phase. An institution therefore never has to re-check that its input is well formed against its declared query_class. OUTBOUND, the institution states what it returns — `result_class` plus `result_properties` for the properties, `permitted_verdicts` for the constructors — and the kernel checks the output against that declaration at the boundary (D90).",
     "urn:eigenius:core:short_name": "QueryClass",
     "urn:eigenius:core:requires": [
       "urn:eigenius:institution:query_class",
@@ -267,6 +276,10 @@
       "urn:eigenius:institution:dispatch_role",
       "urn:eigenius:institution:query_handler",
       "urn:eigenius:institution:institution_ref"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:institution:result_properties",
+      "urn:eigenius:institution:permitted_verdicts"
     ]
   },
   {
@@ -298,6 +311,29 @@
       "urn:eigenius:institution:dispatch_roles:on_demand",
       "urn:eigenius:institution:dispatch_roles:auto_on_load",
       "urn:eigenius:institution:dispatch_roles:decidable"
+    ],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:QueryClass"]
+  },
+  {
+    "@id": "urn:eigenius:institution:result_properties",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The properties this QueryClass's verdict may carry BEYOND what its result_class declares. This is where an institution says what it sends back (D90). The contract is closed by default: at the dispatch boundary, a property the institution set on its verdict must be declared by the result class or listed here, or the dispatch is refused. It lives on the QueryClass rather than on a Verdict subclass because Rule 25 closes an inductive — `institution:Verdict` is one, so no later layer may subclass it — and because two QueryClasses of one institution legitimately return different property sets. Each entry must resolve to a declared core:Property, so the range that property declares is what Rule 21 then checks the value against at commit.",
+    "urn:eigenius:core:short_name": "result_properties",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:domain": ["urn:eigenius:institution:QueryClass"]
+  },
+  {
+    "@id": "urn:eigenius:institution:permitted_verdicts",
+    "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The verdict constructors this QueryClass may return. Absent means all three, which is what every QueryClass meant before D90. Declared because a governance institution's refusal is not a rejection: below a commitment threshold means DO NOT COMMIT to the proposition, not THIS CHAIN IS INVALID, so such a QueryClass must return Holds or Undecidable and never Fails. Checked at the dispatch boundary against what the institution actually returned. The entries are the constructor classes D85 §6.1 materialises per `core:ctors` entry, which is what `allows_only` can range over.",
+    "urn:eigenius:core:short_name": "permitted_verdicts",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": ["urn:eigenius:core:Class"],
+    "urn:eigenius:core:allows_only": [
+      "urn:eigenius:institution:Verdict-Holds",
+      "urn:eigenius:institution:Verdict-Fails",
+      "urn:eigenius:institution:Verdict-Undecidable"
     ],
     "urn:eigenius:core:domain": ["urn:eigenius:institution:QueryClass"]
   },

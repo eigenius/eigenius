@@ -499,6 +499,36 @@ mod tests {
         );
     }
 
+    /// D90 step 4 — the inbound obligation, stated where it cannot rot.
+    ///
+    /// An institution receives a subject that has already been through the rules, and
+    /// nothing says so: the coverage holds because `structural_validate` runs before
+    /// `autoonload_dispatch` in the phase slice. Coverage that holds because of phase
+    /// ordering is the same defect class as coverage that holds because of how someone
+    /// declared a slot — invisible until it moves. The count assertion above would not
+    /// catch a reorder, so this pins the order itself.
+    #[test]
+    fn an_institution_never_sees_an_unvalidated_subject() {
+        let p = CommitPipeline::for_kind(PipelineKind::WithInstitutions);
+        let position = |target: Phase| {
+            p.phases
+                .iter()
+                .position(|ph| std::ptr::fn_addr_eq(*ph, target))
+                .unwrap_or_else(|| panic!("phase missing from the WithInstitutions slice"))
+        };
+        assert!(
+            position(structural_validate) < position(autoonload_dispatch),
+            "validation must precede institution dispatch: a subject reaching an \
+             institution has been through the rules, and that is the whole of the \
+             inbound guarantee"
+        );
+        assert!(
+            position(retroactive_with_cascade) < position(autoonload_dispatch),
+            "the retroactive cascade must also precede dispatch, so a subject whose \
+             validity depends on a redefinition is settled before an institution reads it"
+        );
+    }
+
     /// Hole 8 — `partition_siblings` carries Sibling entries out and
     /// leaves Child entries in the input vector, preserving order.
     ///

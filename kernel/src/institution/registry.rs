@@ -117,6 +117,13 @@ pub struct QueryClassEntry {
     pub dispatch_roles: Vec<DispatchRole>,
     pub query_handler: Iri,
     pub institution_ref: Iri,
+    /// The verdict constructor classes this QueryClass may return (D90 §The work,
+    /// step 5). Empty where none is declared, which permits all three.
+    pub permitted_verdicts: Vec<Iri>,
+    /// Properties this QueryClass's verdict may carry beyond what `result_class`
+    /// declares — where the institution says what it sends back (D90 §The work,
+    /// step 2).
+    pub result_properties: Vec<Iri>,
 }
 
 /// One declared `Comorphism` — the triadic translation across an
@@ -611,6 +618,26 @@ fn parse_query_class(resource: &Resource) -> Result<QueryClassEntry, String> {
         }
     }
 
+    // Optional: a QueryClass that returns only some of the three verdict
+    // constructors says so here. `allows_only` on the property restricts the entries
+    // to the three materialised constructor classes, so an unparseable entry is a
+    // declaration defect Rule 8 reports where the QueryClass commits.
+    let result_properties = resource
+        .get(
+            &Iri::parse(crate::institution::result_contract::RESULT_PROPERTIES_PROP)
+                .expect("static IRI"),
+        )
+        .map(|v| v.as_iri_array())
+        .unwrap_or_default();
+
+    let permitted_verdicts = resource
+        .get(
+            &Iri::parse(crate::institution::result_contract::PERMITTED_VERDICTS_PROP)
+                .expect("static IRI"),
+        )
+        .map(|v| v.as_iri_array())
+        .unwrap_or_default();
+
     Ok(QueryClassEntry {
         iri,
         query_class,
@@ -618,6 +645,8 @@ fn parse_query_class(resource: &Resource) -> Result<QueryClassEntry, String> {
         dispatch_roles,
         query_handler,
         institution_ref,
+        permitted_verdicts,
+        result_properties,
     })
 }
 

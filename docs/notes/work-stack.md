@@ -9,12 +9,68 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **ACTIVE: entry −3 (`2026-09-12`). Correctness and consistency issues.** Seven of the eight
+> **ACTIVE: entry −4a (`2026-09-13`). The institution result contract (#226).** On
+> `d90-institution-result-contract`. D90, implemented.
+>
+> **Exit gate: the merge request lands and #226 closes.** Code complete, workspace suite green,
+> clippy clean, reseed paid off.
+>
+> **What an institution sends back is now checked against what it declared.** The declared contract
+> was an INPUT class: `marshal.rs` checked arity and property shape inbound, and nothing checked
+> outbound. `result_class` was required on every QueryClass and read by nothing. Three checks now
+> run at the dispatch boundary before the dispatch is recorded — the output contract is closed, a
+> term-bearing slot is declared as a proposition or a judgement, and the verdict constructor is one
+> the QueryClass permits.
+>
+> **The closed contract lives on the QueryClass, not on a `Verdict` subclass per institution.**
+> Rule 25 closes an inductive — a class may name one in `subclass_of` only from that inductive's own
+> layer — and `institution:Verdict` is an inductive, so the subclass reading D90 predicted is
+> refused at commit. `institution:result_properties` says it directly, and better: two QueryClasses
+> of one institution legitimately return different property sets.
+>
+> **It cost zero declarations.** With `Verdict` declaring `ctor_name`, `verdict_subject` and three
+> audit slots, every live institution passes on that alone. Statistics needed no edit: its gate
+> verdict carries only the diagnostic, while the proposition and the numerics ride on the
+> derivations, which is not what the draft assumed. The institution the contract actually bites on
+> is the external one, which returns whatever its substrate hands back.
+>
+> **A code review found four soundness defects, one of them reopening #226.** The exemption list
+> treated three properties as kernel-stamped at positions where the kernel does not stamp them, and
+> all three are `core:resource` with no range — the one shape that admits a term. A term rode out on
+> `institution:from_subject` with zero violations. The check also stopped at depth one, refused two
+> of the four forms Rule 21 checks strictly, and still did not perform the `result_class` check
+> whose comment step 6 had corrected. And the test fixture did not validate: it named an institution
+> and a gated class nothing declared, and passed because dispatch resolves neither.
+>
+> **Lessons worth keeping.** An exemption list is a hole, and a hand-kept one drifts wider than the
+> thing it mirrors — derive it from the code that does the stamping. And a boundary check has to
+> descend, stopping where the nesting stops being the resource's and starts being the term's.
+>
+> **Reseed `2026-09-13` done.** Snapshots `wordnet-umls-2026-09-13` (3.45 GiB) and
+> `wordnet-umls-aligned-2026-09-13` (3.6 GB). All gates pass, and **every parse number is identical
+> to the `2026-09-12` run** — 62 units, grammar-gap 0, missing-lexeme 0, 1 encoded, 41 ambiguous,
+> 20 open, 674 readings, 171 skeletons, expected-hits 62/62 with the miss-set unchanged,
+> reading-correct 30/41, 0 invalid-selected, histogram bucket for bucket. One layer moved,
+> `institution`, so the reseed was the cheapest kind.
+>
+> **The first attempt measured the wrong configuration, and it looked like a regression.** It ran
+> LIVE against the RAW snapshot; the tracked runs REPLAY `ranks/2026-08-22-productiontrace.json`
+> and `selections/2026-08-22-productiontrace-live.json` against the ALIGNED snapshot. That run
+> reported expected-hits 62 → 61 and readings 613 → 1149 over the ceiling, all of it the LLM drawing
+> differently. **The run directory name carries the configuration**: a tracked comparison ends
+> `-replay-selreplay` and a live one does not.
+>
+> **Still open, deliberately.** Derivations get the term check and no closed-property check, so the
+> channel carrying the epistemic payload stays open-world — which is why closing the gate's contract
+> cost nothing. And the structural-followup pipeline has no `structural_validate` phase, so Rule 21
+> never runs on an emitted term at commit.
+
+
+> **entry −3 (`2026-09-12`). Correctness and consistency issues. DONE, merged as `c78c7d8` (#244).** Seven of the eight
 > picked off the open-issue sweep, on `consistency-fixes`.
 >
-> **Exit gate: PR #244 merges.** Work is complete and verified; nothing here is in progress. Pop
-> this entry on merge and the top becomes entry 0, whose next task is P0 of
-> `judgements-warrants-build-plan.md` — measurement only, no code.
+> Merged, and all seven issues closed. Kept for the record of what was fixed and what the two
+> review rounds caught.
 >
 > | issue | what it was |
 > |---|---|
