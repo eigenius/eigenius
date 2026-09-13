@@ -68,22 +68,22 @@ pub fn resource_value_to_val(v: &crate::ontology::resource::Value, role: StringR
                     return Val::EigonClass(iri);
                 }
             }
-            Val::ResourceVal(Box::new({
-                let mut r = crate::ontology::resource::Resource::new_embedded();
-                let str_iri = Iri::parse("urn:eigenius:core:string").unwrap();
-                r.set(str_iri, RVal::String(s.clone()));
-                r
-            }))
+            Val::LitString(s.clone())
         }
         // eigenius#142 — the inbound mirror of the `val_to_resource_value`
         // literal arms. These three used to collapse to an EMPTY embedded
         // resource, so `Construct { p = 42 }` followed by `.p` read back
-        // `Embedded({})`. `RVal::String` deliberately keeps its
-        // one-property-wrapper shape: `val_to_resource_value` unwraps a
-        // single-string-prop `ResourceVal` back to `RVal::String` (the
-        // `CompleteText` output path) and `decide_structural`'s `as_str`
-        // reads the payload out of it, so switching it to `Val::LitString`
-        // is a separate change with its own blast radius.
+        // `Embedded({})`.
+        //
+        // eigenius#195 — `RVal::String` was the one left behind, wrapped in a
+        // one-property resource, so the four kinds of literal did not agree with
+        // each other and the two directions did not agree about strings. The
+        // deferral named two consumers of the wrapper and both had since grown a
+        // `Val::LitString` arm: `val_to_resource_value` marshals it back to
+        // `RVal::String`, and `decide_structural`'s `as_str` reads it directly. The
+        // single-string-prop unwrap in `val_to_resource_value` stays for what it was
+        // actually for — a component returning a Resource with one string property,
+        // which is a different source from this arm.
         RVal::Integer(n) => Val::LitInt(*n),
         RVal::Float(f) => Val::LitFloat(*f),
         RVal::Boolean(b) => Val::LitBool(*b),
@@ -222,8 +222,34 @@ mod tests {
         );
         assert!(matches!(
             resource_value_to_val(&text, StringRole::Text),
-            Val::ResourceVal(_)
+            Val::LitString(ref got) if got == "urn:eigenius:pub:wrn:dd_achilles"
         ));
+    }
+
+    /// **eigenius#195.** Every literal kind survives the round trip, and the two
+    /// directions agree about all four.
+    ///
+    /// The issue asks for a caller-level check, and says why: an API-level test on
+    /// one direction is what let #142's two defects hide each other. This goes
+    /// value → Val → value, which is the path a `Construct` field followed by a
+    /// `PropAccess` takes.
+    ///
+    /// The string was the one left behind. It marshalled IN to a one-property
+    /// wrapper resource while the other three carried their payload, so the four
+    /// kinds disagreed with each other and inbound disagreed with outbound.
+    #[test]
+    fn every_literal_kind_survives_the_round_trip() {
+        use crate::ontology::resource::Value as RVal;
+        for original in [
+            RVal::String("hello".to_string()),
+            RVal::String(String::new()),
+            RVal::Integer(42),
+            RVal::Float(1.5),
+            RVal::Boolean(true),
+        ] {
+            let back = val_to_resource_value(&resource_value_to_val(&original, StringRole::Text));
+            assert_eq!(back, original, "{original:?} did not survive");
+        }
     }
 
     /// An array passes its own role down: the elements of a `core:resource_array` are references,
@@ -237,7 +263,7 @@ mod tests {
             other => panic!("expected List, got {other:?}"),
         }
         match resource_value_to_val(&arr, StringRole::Text) {
-            Val::List(items) => assert!(matches!(items[0], Val::ResourceVal(_))),
+            Val::List(items) => assert!(matches!(items[0], Val::LitString(_))),
             other => panic!("expected List, got {other:?}"),
         }
     }

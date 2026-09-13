@@ -1160,8 +1160,13 @@ mod tests {
 
         let (val, trace) = eval_traced(&exp, &rho, &ctx)?;
 
-        // Value should be the extracted property
-        assert!(matches!(val, Val::ResourceVal(_)));
+        // Value should be the extracted property. A string property extracts as
+        // `Val::LitString`; it was a one-property wrapper resource until
+        // eigenius#195 made the four literal kinds agree with each other.
+        assert!(
+            matches!(val, Val::LitString(ref s) if s == "Alice"),
+            "got {val:?}"
+        );
 
         // Trace should be Let with a Project in value_trace
         let trace = trace.expect("Let with PropAccess should produce a trace");
