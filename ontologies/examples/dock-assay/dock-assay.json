@@ -49,6 +49,7 @@
   {
     "@id": "urn:eigenius:demo:institutions:predicted_ic50",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The IC50 the Arrhenius approximation predicted, in nM. Compared against target_ic50 within tolerance by the within-tolerance QueryClass.",
     "urn:eigenius:core:short_name": "predicted_ic50",
     "urn:eigenius:core:data_type": "urn:eigenius:core:float",
     "urn:eigenius:core:domain": ["urn:eigenius:demo:institutions:WithinToleranceInput"]
@@ -56,6 +57,7 @@
   {
     "@id": "urn:eigenius:demo:institutions:target_ic50",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "The IC50 the prediction is checked against, in nM.",
     "urn:eigenius:core:short_name": "target_ic50",
     "urn:eigenius:core:data_type": "urn:eigenius:core:float",
     "urn:eigenius:core:domain": ["urn:eigenius:demo:institutions:WithinToleranceInput"]
@@ -63,6 +65,7 @@
   {
     "@id": "urn:eigenius:demo:institutions:tolerance",
     "urn:eigenius:core:is_a": ["urn:eigenius:core:Property"],
+    "urn:eigenius:core:description": "Allowed absolute difference between predicted_ic50 and target_ic50, in nM, for the prediction to count as within tolerance.",
     "urn:eigenius:core:short_name": "tolerance",
     "urn:eigenius:core:data_type": "urn:eigenius:core:float",
     "urn:eigenius:core:domain": ["urn:eigenius:demo:institutions:WithinToleranceInput"]
@@ -104,7 +107,10 @@
     "@id": "urn:eigenius:demo:institutions:cm_arrhenius",
     "urn:eigenius:core:is_a": ["urn:eigenius:program:Component"],
     "urn:eigenius:core:short_name": "cm_arrhenius",
-    "urn:eigenius:core:description": "Approximation: IC50 (nM) = exp(-deltaG / (R*T)) * 1e9. Pure scalar transformation Float -> Float."
+    "urn:eigenius:core:description": "Approximation: IC50 (nM) = exp(-deltaG / (R*T)) * 1e9. Pure scalar transformation Float -> Float.",
+    "urn:eigenius:program:component:implementation": "builtin",
+    "urn:eigenius:program:component:input_type": "urn:eigenius:core:float",
+    "urn:eigenius:program:component:output_type": "urn:eigenius:core:float"
   },
 
   {
