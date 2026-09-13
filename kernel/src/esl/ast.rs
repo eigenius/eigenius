@@ -920,8 +920,15 @@ pub enum Expr {
         component_argument: Option<Box<Expr>>,
         pos: Position,
     },
-    /// `x`
-    Var { name: String, pos: Position },
+    /// `x`, `ns:x`, or `[ns:]Type:ctor`.
+    ///
+    /// Carries the PARSED name, not a flattened string. The parser used to render
+    /// `ns:x` as `Var { name: "ns:x" }` with the namespace discarded, which cost
+    /// two things: `compile_expr` could not call `resolve_ctor_iri`, so the
+    /// `Type:ctor` qualifier resolved in `def` bodies and not in `program` bodies
+    /// (eigenius#231); and two downstream sites had to re-split the string to get
+    /// back what the parser already had.
+    Var(QualifiedName),
     /// `\x -> e` (untyped, embedded in `program` bodies) or
     /// `lambda x : T => body` (typed, D37 §3.1). The `param_type` slot
     /// is `None` for the untyped form (the type is inferred from the

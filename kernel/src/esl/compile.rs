@@ -587,6 +587,10 @@ fn resolve_apply_function(
         }
         return None;
     }
+    // A name that still carries its prefix inside the `name` field. The parser no
+    // longer produces that shape for a `Var` (eigenius#231 un-flattened it), but a
+    // `Project`'s property name reaches here by a different route, so the branch
+    // stays until that one is shown to be qualified too.
     let (ns_alias, local) = name.split_once(':')?;
     let uri = namespaces.get(ns_alias)?;
     Some(format!("{uri}:{local}"))
@@ -3195,10 +3199,10 @@ impl Compiler {
                 // emit a specialized program resource. Otherwise fall
                 // through to ordinary component-dispatch.
                 //
-                // The parser collapses `ns:local` function names
-                // into a bare `Expr::Var { name: "ns:local" }` with
-                // `QualifiedName.namespace = None`, so we split on
-                // the first `:` and look up the namespace ourselves.
+                // `function` carries its namespace, so `resolve_apply_function`
+                // reads it directly. The parser used to flatten `ns:local` into a
+                // bare name with `namespace = None`, which is why that helper still
+                // has a split-the-string branch — see its own note.
                 if let Some(index) = &self.institutions {
                     use crate::institution::registry::DispatchRole;
                     let resolved_func_iri = resolve_apply_function(
@@ -3351,31 +3355,28 @@ impl Compiler {
                 Ok(r)
             }
 
-            ast::Expr::Var { name, pos } => {
+            ast::Expr::Var(qn) => {
                 let mut r = Resource::new_embedded();
                 set_is_a(&mut r, "urn:eigenius:program:Var");
-                // Bare name matching a declared ctor → ctor IRI as the
-                // var name (Phase 11b step 9). The expression builder
-                // recognises the IRI shape and produces an
-                // `Exp::InductiveCtor` with no arguments.
+                // A name matching a declared ctor → ctor IRI as the var name (Phase
+                // 11b step 9). The expression builder recognises the IRI shape and
+                // produces an `Exp::InductiveCtor` with no arguments.
                 //
-                // Bare-name lookup is ambiguity-aware: one match → use
-                // it, multiple → ambiguous error, none → leave the
-                // name as-is for normal variable binding.
-                let resolved = match self.ctors_by_short_name.get(name) {
-                    Some(iris) if iris.len() == 1 => iris[0].clone(),
-                    Some(iris) => {
-                        return Err(EslError::compiler(
-                            Some(pos.clone()),
-                            format!(
-                                "bare reference `{}` is ambiguous between multiple chain-resident \
-                                 constructors: [{}]. Qualify with a namespace prefix to pick one.",
-                                name,
-                                iris.join(", "),
-                            ),
-                        ));
-                    }
-                    None => name.clone(),
+                // `resolve_ctor_iri` is the SAME resolver the `def` path uses, so
+                // `[ns:]Type:ctor` reaches a program body (eigenius#231). It could
+                // not before: the parser flattened `ns:x` into a string, so all this
+                // arm had was a bare-name lookup and the qualifier survived verbatim
+                // as a variable name that resolves to nothing. Ambiguity diagnostics
+                // come from the resolver too, so both paths word them the same way.
+                //
+                // `None` means "not a constructor" — fall through to ordinary
+                // variable binding under the name as written.
+                let resolved = match self.resolve_ctor_iri(qn)? {
+                    Some(ctor_iri) => ctor_iri,
+                    None => match &qn.namespace {
+                        Some(ns) => format!("{ns}:{}", qn.name),
+                        None => qn.name.clone(),
+                    },
                 };
                 r.set(iri("urn:eigenius:program:name"), Value::String(resolved));
                 Ok(r)
@@ -3767,23 +3768,12 @@ impl Compiler {
                 ast::LiteralValue::Float(f) => Ok(Value::Float(*f)),
                 ast::LiteralValue::Bool(b) => Ok(Value::Boolean(*b)),
             },
-            ast::Expr::Var { name, pos } => {
-                // Resolve qualified name to IRI string
-                let qn = ast::QualifiedName {
-                    namespace: if name.contains(':') {
-                        Some(name.split(':').next().unwrap().to_string())
-                    } else {
-                        None
-                    },
-                    name: if name.contains(':') {
-                        name.split(':').nth(1).unwrap().to_string()
-                    } else {
-                        name.clone()
-                    },
-                    pos: pos.clone(),
-                };
-                let iri_str = self.resolve(&qn)?;
-                Ok(Value::String(iri_str))
+            ast::Expr::Var(qn) => {
+                // The node carries the parsed name, so there is nothing to take
+                // apart. This used to rebuild a `QualifiedName` by splitting the
+                // flattened string on `:` and taking `nth(1)`, which silently
+                // truncated `ns:Type:ctor` to `ns:Type`.
+                Ok(Value::String(self.resolve(qn)?))
             }
             ast::Expr::ConstructExpr { class, fields, .. } if class.name.is_empty() => {
                 // Nested block — recurse
@@ -7311,7 +7301,7 @@ data ex:Shape  { square, mk }
     /// spelled-out qualifier instead of a constructor. Pinned here so the gap is a fact in
     /// the suite rather than a note; flip both assertions when the program path learns it.
     #[test]
-    fn the_inductive_qualifier_reaches_def_bodies_but_not_program_bodies() {
+    fn the_inductive_qualifier_reaches_program_bodies_as_it_does_def_bodies() {
         const DECL: &str = r#"
 namespace core = "urn:eigenius:core";
 namespace ex = "urn:eigenius:example";
@@ -7323,11 +7313,15 @@ data ex:Pair { mk, nil }
         let rs = compile(&format!(
             "{DECL}\nprogram ex:p : core:string -> ex:Pair {{ ex:Pair:nil }}\n"
         ))
-        .expect("program body compiles (it just compiles it WRONG)");
+        .expect("program body compiles");
         let body = format!("{rs:?}");
         assert!(
-            body.contains("ex:Pair:nil"),
-            "the qualifier survives verbatim as a name instead of resolving to the ctor"
+            body.contains("urn:eigenius:example:Pair:nil"),
+            "the qualifier must resolve to the ctor IRI, as it does in a def body; got {body}"
+        );
+        assert!(
+            !body.contains("\"ex:Pair:nil\""),
+            "and must not survive verbatim as a variable name that resolves to nothing"
         );
     }
 
