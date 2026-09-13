@@ -34,6 +34,7 @@
 use crate::context::ExecutionContext;
 use crate::institution::marshal::embed_typed_resource_refs_recursively;
 use crate::institution::registry::{DispatchRole, InstitutionIndex};
+use crate::institution::result_contract;
 use crate::institution::runtime::InstitutionRuntime;
 use crate::layer::Layer;
 use crate::ontology::iri::Iri;
@@ -179,10 +180,8 @@ pub fn dispatch_auto_on_load_for_resource(
             let Some(query_class) = index.query_class(query_class_iri) else {
                 continue;
             };
-            // Sanity: AutoOnLoad QueryClasses must declare Verdict as
-            // their result_class — D14 §4.4. If a malformed
-            // declaration slipped past structural validation, surface
-            // it here rather than silently mis-dispatching.
+            // Only the AutoOnLoad role fires here. The other two roles reach their
+            // own entry points, and a QueryClass may carry several.
             if !query_class
                 .dispatch_roles
                 .contains(&DispatchRole::AutoOnLoad)
@@ -264,6 +263,36 @@ pub fn dispatch_auto_on_load_for_resource(
                         });
                         continue;
                     }
+
+                    // D90 — the institution DECLARED what it sends back, so check the
+                    // output against that declaration before the dispatch is recorded.
+                    // A violation is a defect in the institution or in its declaration,
+                    // not a domain refusal, so it lands as a handler-side error rather
+                    // than as a Fails verdict: the run produced no result the contract
+                    // admits, which is a different thing from producing a negative one.
+                    let violations = result_contract::check_output(
+                        &out.output,
+                        &out.derivations,
+                        &query_class.result_class,
+                        &query_class.result_properties,
+                        &query_class.permitted_verdicts,
+                        verdict.ctor_name(),
+                        ctx.head(),
+                    );
+                    if !violations.is_empty() {
+                        for v in violations {
+                            outcome.errors.push(ValidationError {
+                                resource_id: res_id.clone(),
+                                property: None,
+                                rule: ValidationRule::InstitutionValidation,
+                                message: format!(
+                                    "AutoOnLoad QueryClass `{query_class_iri}` broke its result contract: {v}"
+                                ),
+                            });
+                        }
+                        continue;
+                    }
+
                     outcome.dispatches.push(AutoOnLoadDispatch {
                         subject_iri: res_id.clone(),
                         query_class_iri: query_class_iri.clone(),
@@ -383,17 +412,16 @@ pub fn build_verdict_resource(
     // copied through so the Verdict carries the full audit-anchor
     // shape the institution computed.
     //
-    // **Copied, not type-checked** (eigenius#226). There is no declared OUTPUT
-    // contract to check against: an institution's declared contract is an input
-    // class, and `marshal.rs` checks arity and property shape on the way in only.
-    // What covers the way out is incidental — the Verdict is committed, so layer
-    // validation runs Rule 21 over it, and Rule 21 fires where a property's
-    // `class_types` names `eigentt:Term` or `eigentt:Judgement`. That holds for
-    // `eigentt:proposition`, which is how the live statistics path is covered. A
-    // property declared with any other range carries a term-shaped value past every
-    // type-level check. The fix is not a special case here: D75 §5 makes an
-    // institution's signature a type in Γ_env, so a proposition is checked because
-    // crossing IS an application.
+    // **Already checked against the declared contract** (D90, eigenius#226). Every
+    // property reaching this merge was admitted by
+    // `result_contract::check_output`: it is declared by the QueryClass's
+    // `result_class` or listed in its `result_properties`, and a term-shaped value
+    // sits only on a slot declared `class_types [eigentt:Term]` with an
+    // `eigentt:expected_type` or `class_types [eigentt:Judgement]`. Rule 21 then
+    // checks the value itself when the Verdict commits. Before D90 this merge copied
+    // whatever the institution returned, and the only cover was incidental — Rule 21
+    // fires on the two term ranges, so `eigentt:proposition` was checked and a
+    // property declared with any other range was not.
     let protected = protected_verdict_properties();
     for (prop_iri, value) in dispatch.output.properties() {
         if protected.contains(prop_iri.as_str()) {
@@ -424,7 +452,7 @@ pub fn build_verdict_resource(
 /// kernel grows its own diagnostic-set callers we can reintroduce
 /// the guard with a "kernel preempts" merge semantic instead of an
 /// "everything-or-nothing" filter.
-fn protected_verdict_properties() -> std::collections::HashSet<&'static str> {
+pub(crate) fn protected_verdict_properties() -> std::collections::HashSet<&'static str> {
     use crate::ontology::well_known as wk;
     [
         wk::IS_A,
@@ -788,27 +816,28 @@ mod tests {
         Iri::parse(s).unwrap()
     }
 
-    /// D75 §3.6 — the institution boundary types resource *shapes*, not
-    /// propositions.
+    /// `build_verdict_resource` is a MERGE, not a check — and since D90 that is a
+    /// division of labour rather than a gap.
     ///
-    /// `build_verdict_resource` copies every non-protected property the
-    /// institution returned onto the chain-committed Verdict verbatim
-    /// (`r.set(prop_iri.clone(), value.clone())`). The kernel performs no
-    /// type-level check on the way through: an institution can put a
-    /// proposition-shaped value on a property it invented and the value lands
-    /// on the chain unexamined.
+    /// This test witnessed eigenius#226: it showed an institution-invented property
+    /// carrying a proposition-shaped value landing on the committed Verdict verbatim,
+    /// because nothing at the boundary looked at it. Something does now. Every property
+    /// reaching this merge has been through `result_contract::check_output`, which
+    /// refuses one the QueryClass did not declare and refuses a term-shaped value on a
+    /// slot declared as neither of the two forms. Called directly, as here, the merge
+    /// still copies whatever it is handed — that is what makes it testable in isolation,
+    /// and the check lives one level up where the dispatch can reject the run.
     ///
-    /// Rule 16 (`validation/rules/eigentt_value.rs`) does decode, `check_infer`
-    /// and require `Sort(0)` — but it keys off the property's declared **range**
-    /// (`class_types ∋ eigentt:Term`) and runs at layer-validation time, not
-    /// at the boundary. So the coverage is incidental: it holds where the
-    /// ontology happens to declare that range, and a declared property with any
-    /// other range carries a proposition past every type-level check.
+    /// The check itself is tested in `kernel/tests/the_institution_result_contract.rs`,
+    /// where each refusal has a matched control that differs only in the declaration.
+    ///
+    /// The value below is a `Value::Json` blob, which D90 deliberately does not treat as
+    /// a term: a JSON blob is data, and nothing reads one as a term unless a declaration
+    /// says to. What stops an institution calling such a blob its epistemic output is the
+    /// closed contract, not a shape test on the value.
     #[test]
-    fn institution_output_properties_cross_the_boundary_unchecked() {
+    fn building_a_verdict_merges_what_the_contract_already_admitted() {
         let smuggled = iri("urn:eigenius:test:institution_invented");
-        // A D47-encoded application — the same shape a `canonical_proposition`
-        // carries. Nothing at the boundary looks at it.
         let proposition_shaped = Value::Json(serde_json::json!({
             "ctor": "App",
             "args": [
@@ -845,9 +874,8 @@ mod tests {
         assert_eq!(
             verdict.get(&smuggled),
             Some(&proposition_shaped),
-            "current behaviour: an institution-invented property carrying a proposition-shaped \
-             value is copied onto the committed Verdict verbatim, with no kernel type check at \
-             the boundary. See D75 §3.6."
+            "the merge copies what it is handed; the contract check is one level up, in \
+             `dispatch_auto_on_load_for_resource`"
         );
 
         // The protected set is about kernel authority, not validation: the
@@ -913,7 +941,14 @@ mod tests {
         Arc<InstitutionRuntime>,
         ExecutionContext,
     ) {
-        let mut b = LayerBuilder::new("test", None);
+        // On the real bootstrap, not a bare layer: the QueryClass declares
+        // `result_class = institution:Verdict`, and since D90 the boundary checks the
+        // output against that declaration. A chain where it does not resolve is one
+        // Rule 14 would have refused the QueryClass on, so a fixture without it is
+        // testing a state that cannot commit.
+        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let storage = ctx.storage().clone();
+        let mut b = LayerBuilder::new("test", Some(Arc::clone(ctx.head())));
 
         let inst_iri = "urn:eigenius:test:auto:inst";
         let qc_iri = "urn:eigenius:test:auto:check";
@@ -940,7 +975,6 @@ mod tests {
         );
         b.add_resource(qc).unwrap();
 
-        let storage = crate::layer::LayerStorage::in_memory();
         let layer = Arc::new(b.build(storage.clone()));
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
         assert!(errors.is_empty(), "{errors:?}");
@@ -1072,7 +1106,10 @@ mod tests {
             }
         }
 
-        let mut b = LayerBuilder::new("test", None);
+        // On the real bootstrap, for the reason `build_dispatch_setup` gives.
+        let boot = crate::bootstrap::bootstrap().expect("bootstrap");
+        let storage = boot.storage().clone();
+        let mut b = LayerBuilder::new("test", Some(Arc::clone(boot.head())));
 
         let inst_iri = "urn:eigenius:test:deref:inst";
         let qc_iri = "urn:eigenius:test:deref:check";
@@ -1130,7 +1167,6 @@ mod tests {
         );
         b.add_resource(qc).unwrap();
 
-        let storage = crate::layer::LayerStorage::in_memory();
         let layer = Arc::new(b.build(storage.clone()));
         let (idx, errors) = InstitutionIndex::from_layer(&layer);
         assert!(errors.is_empty(), "{errors:?}");

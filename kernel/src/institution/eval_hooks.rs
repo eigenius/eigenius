@@ -567,11 +567,32 @@ impl InstitutionEngine {
                 ))
             })?;
 
-        Ok(Some(parse_verdict(&outcome.output).map_err(|e| {
+        let verdict = parse_verdict(&outcome.output).map_err(|e| {
             EvalError::InvalidCaseTarget(format!(
                 "QueryClass `{iri}` Decidable handler returned a non-Verdict result: {e}"
             ))
-        })?))
+        })?;
+
+        // D90 — the permitted set holds here too. The rest of the result contract has
+        // nothing to protect on this path: the output never reaches the chain, since
+        // only the constructor is read and the derivations are discarded. But a
+        // QueryClass that declared it returns Holds or Undecidable and never Fails
+        // must be held to that during type-check reduction as well, or one declaration
+        // would mean two things.
+        if let Some(violation) = crate::institution::result_contract::check_permitted_verdict(
+            &query_class.permitted_verdicts,
+            match verdict {
+                Decision::Holds => "Holds",
+                Decision::Fails => "Fails",
+                Decision::Undecidable => "Undecidable",
+            },
+        ) {
+            return Err(EvalError::InvalidCaseTarget(format!(
+                "QueryClass `{iri}` broke its result contract: {violation}"
+            )));
+        }
+
+        Ok(Some(verdict))
     }
 }
 
@@ -1329,6 +1350,15 @@ mod tests {
     }
 
     fn build_decide_ctx(verdict_class: &'static str, arg_count: usize) -> EvalCtx {
+        build_decide_ctx_permitting(verdict_class, arg_count, &[])
+    }
+
+    /// As above, with the QueryClass declaring `permitted_verdicts`.
+    fn build_decide_ctx_permitting(
+        verdict_class: &'static str,
+        arg_count: usize,
+        permitted: &[&str],
+    ) -> EvalCtx {
         use crate::ontology::well_known as wk;
         let mut b = crate::layer::LayerBuilder::new("test", None);
 
@@ -1397,6 +1427,17 @@ mod tests {
             Iri::parse("urn:eigenius:institution:institution_ref").unwrap(),
             crate::ontology::resource::Value::String(inst_iri.into()),
         );
+        if !permitted.is_empty() {
+            qc.set(
+                Iri::parse(crate::institution::result_contract::PERMITTED_VERDICTS_PROP).unwrap(),
+                crate::ontology::resource::Value::Array(
+                    permitted
+                        .iter()
+                        .map(|p| crate::ontology::resource::Value::String((*p).to_string()))
+                        .collect(),
+                ),
+            );
+        }
         b.add_resource(qc).unwrap();
 
         let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
@@ -1427,6 +1468,49 @@ mod tests {
                 )),
             )
         }
+    }
+
+    /// D90 — the permitted set holds on the Decidable path too.
+    ///
+    /// The rest of the result contract has nothing to protect here, because the
+    /// institution's output never reaches the chain: only the constructor is read and
+    /// the derivations are discarded. But a QueryClass that declared it returns Holds
+    /// or Undecidable and never Fails must be held to that during type-check reduction
+    /// as well, or one declaration would mean two things.
+    #[test]
+    fn a_decidable_query_class_is_held_to_its_permitted_verdicts() {
+        let ctx = build_decide_ctx_permitting(
+            "urn:eigenius:institution:verdicts:fails",
+            0,
+            &[
+                "urn:eigenius:institution:Verdict-Holds",
+                "urn:eigenius:institution:Verdict-Undecidable",
+            ],
+        );
+        let constraint = crate::nbe::term::Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:decide:has_property").unwrap(),
+            args: vec![],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(Exp::Unit));
+        let err = eval_ctx(&exp, &Rho::Nil, &ctx).expect_err("Fails is outside the declared set");
+        let message = format!("{err:?}");
+        assert!(
+            message.contains("result contract") && message.contains("Fails"),
+            "expected a contract violation naming the verdict: {message}"
+        );
+    }
+
+    /// The control: the same verdict, on a QueryClass that declares no restriction,
+    /// still produces the failing neutral it always did.
+    #[test]
+    fn a_decidable_query_class_with_no_permitted_set_is_unrestricted() {
+        let ctx = build_decide_ctx("urn:eigenius:institution:verdicts:fails", 0);
+        let constraint = crate::nbe::term::Constraint::Institution {
+            iri: Iri::parse("urn:eigenius:test:decide:has_property").unwrap(),
+            args: vec![],
+        };
+        let exp = Exp::NativeDecide(constraint, Box::new(Exp::Unit));
+        eval_ctx(&exp, &Rho::Nil, &ctx).expect("an unrestricted QueryClass may return Fails");
     }
 
     #[test]

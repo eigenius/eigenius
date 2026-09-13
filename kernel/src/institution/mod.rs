@@ -24,6 +24,8 @@
 //!   implementations keyed by institution IRI.
 //! - [`dispatch`] — D14 §9 dispatch helpers: AutoOnLoad QueryClass
 //!   firing on commit and the post-translation validation invariant.
+//! - [`result_contract`] — D90: what an institution declared it sends back, checked
+//!   at the boundary rather than trusted.
 //!
 //! See design document D14 for the canonical specification.
 
@@ -33,6 +35,7 @@ pub mod eval_hooks;
 pub mod in_process_registry;
 pub mod marshal;
 pub mod registry;
+pub mod result_contract;
 pub mod runtime;
 
 /// Three-valued result of a `Decidable` QueryClass dispatch (D14 §9.2).
