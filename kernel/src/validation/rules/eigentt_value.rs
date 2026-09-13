@@ -393,7 +393,7 @@ mod tests {
     /// Bootstrap chain (has `eigentt:Term` + the core type-formers) plus a
     /// property `test:tx : core:resource` ranged at `eigentt:Term`.
     fn chain_with_eigentt_prop() -> Arc<Layer> {
-        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
         let mut top = LayerBuilder::new("eigentt_value_test", Some(head));
         let mut prop = Resource::new(iri("urn:eigenius:test:tx"));
         prop.set(
@@ -420,7 +420,7 @@ mod tests {
     /// obligation is the CHECK-mode rule: decode both fields, check `type` is a type, check
     /// `term` against it.
     fn chain_with_judgement_slot() -> Arc<Layer> {
-        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
         let mut top = LayerBuilder::new("judgement_slot_test", Some(head));
         let mut prop = Resource::new(iri("urn:eigenius:test:jx"));
         prop.set(

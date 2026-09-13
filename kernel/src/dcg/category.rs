@@ -1079,7 +1079,7 @@ mod tests {
     /// including for a connective added later.
     #[test]
     fn every_connective_the_parser_builds_is_declared_in_the_ontology() {
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         // The test needs the DECLARATION, not just the name — it enumerates the
         // constructors — so it resolves through the environment (D76 Phase B).
         let decl = match crate::nbe::env_global::Env::of(ctx.head().clone())
@@ -1113,7 +1113,7 @@ mod tests {
     /// rather than the measurement it produced (`invalid` 11 → 6, 2026-08-02).
     #[test]
     fn the_forward_adverb_modifier_binds_the_clause_feature_it_consumes() {
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         let cats = adverb_modifier_cats(ctx.head()).expect("adverb modifier cats resolve");
 
         /// `bwd(m, cat_s(mood, FEAT), cat_np(…))` → `FEAT`.

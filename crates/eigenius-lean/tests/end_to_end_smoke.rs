@@ -58,7 +58,7 @@ fn build_proof_term_layer(
     // Anchor at the bootstrap chain head — that's where
     // `lean-institution` lives (the ontology declaring
     // `LeanProofTerm`, `LeanProofPayload`, and `qc_proof_check`).
-    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     let parent = Arc::clone(ctx.head());
     let storage = LayerStorage::in_memory();
 

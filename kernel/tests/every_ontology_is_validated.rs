@@ -134,7 +134,7 @@ fn every_json_ontology_outside_the_bootstrap_chain_still_validates() {
         "no ontology sits outside the bootstrap chain — if that is now true, delete this test"
     );
 
-    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     let mut builder =
         eigenius_kernel::layer::LayerBuilder::new("out-of-chain", Some(Arc::clone(ctx.head())));
     for f in &out_of_chain {

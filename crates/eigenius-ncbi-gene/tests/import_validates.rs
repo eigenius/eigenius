@@ -20,7 +20,6 @@
 
 use std::sync::Arc;
 
-use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{gate_entry, is_ctor, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -54,7 +53,7 @@ fn mirror_and_lexicon_validate_and_felicity_gate() {
     let (doc, rep) = render_document(&genes, "9606", false);
     assert_eq!(rep.genes, 2);
 
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     let ncbi = esl_layer("ncbi-gene", &doc, Arc::clone(ctx.head()));
 
     // Structural validation clean. We render with the WordNet anchor OFF here, so
@@ -78,7 +77,7 @@ fn mirror_and_lexicon_validate_and_felicity_gate() {
 
 #[test]
 fn scoped_parse_of_wrn_affects_tp53() {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     // bootstrap → demo (the `affects` verb) → ncbi-gene (WRN / TP53 witnesses).
     let demo = esl_layer("demo", DEMO, Arc::clone(ctx.head()));
     let genes = parse_document(GENES, "9606");

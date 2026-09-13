@@ -49,7 +49,7 @@ fn declare_prop(id: &str, data_type: &str, class_types: Option<&str>) -> Resourc
 
 #[test]
 fn which_declared_ranges_admit_a_proposition() {
-    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     let head = Arc::clone(ctx.head());
 
     // A real proposition in the current (D85) encoding: an embedded resource whose

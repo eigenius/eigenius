@@ -23,13 +23,49 @@ use crate::layer::Layer;
 /// minimal chain refused those with "`OpRef` is not a constructor". The full chain is what any
 /// real compile runs against anyway.
 pub fn term_chain() -> &'static Arc<Layer> {
-    static CHAIN: OnceLock<Arc<Layer>> = OnceLock::new();
-    CHAIN.get_or_init(|| {
-        Arc::clone(
-            crate::bootstrap::bootstrap()
-                .expect("the bootstrap chain builds")
-                .head(),
-        )
+    &bootstrap_parts().0
+}
+
+/// A fresh `ExecutionContext` over the bootstrap chain, whose LAYERS are built once per
+/// test binary.
+///
+/// `bootstrap()` parses, validates and builds every ontology layer in `BOOTSTRAP_CHAIN`,
+/// and it was being called once per TEST. In the slowest test binary that is 140 calls
+/// across 157 tests, and it dominated the whole workspace suite: 796 seconds in CI for
+/// that one file, with the kernel's own unit tests a further 571, against 7 seconds for
+/// the 123 binaries that finish in under a second. Caching the layers took one file from
+/// 66.6 to 7.5 seconds run serially.
+///
+/// **Each caller still gets its own `ExecutionContext`**, and that is the part that makes
+/// sharing safe rather than lucky. A context owns a `working: LayerBuilder` that tests
+/// add resources to, so one shared context would let tests write into each other's
+/// working layer. What is shared is the finished chain and the storage behind it — layers
+/// are content-addressed, so two tests building the same layer agree and two building
+/// different ones do not collide.
+///
+/// Use this wherever a test called `bootstrap()` for a chain to build on. A test that
+/// needs its OWN storage — one that persists, or that asserts on what a backend received —
+/// should keep calling `bootstrap_with_storage` directly.
+pub fn bootstrap_context() -> crate::context::ExecutionContext {
+    let (head, storage) = bootstrap_parts();
+    crate::context::ExecutionContext::new(
+        Arc::clone(head),
+        "working",
+        crate::context::ExecutionMode::ReadWrite,
+        storage.clone(),
+    )
+}
+
+/// The bootstrap chain's head and its storage, built once per test binary.
+///
+/// Separate from [`term_chain`] only in also handing back the storage: a test that builds
+/// a layer on this head must persist it to the same storage the head lives on, or the
+/// layer is bound to one store and written to another.
+fn bootstrap_parts() -> &'static (Arc<Layer>, crate::layer::LayerStorage) {
+    static PARTS: OnceLock<(Arc<Layer>, crate::layer::LayerStorage)> = OnceLock::new();
+    PARTS.get_or_init(|| {
+        let ctx = crate::bootstrap::bootstrap().expect("the bootstrap chain builds");
+        (Arc::clone(ctx.head()), ctx.storage().clone())
     })
 }
 

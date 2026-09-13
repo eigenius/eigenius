@@ -224,7 +224,7 @@ fn run_case_returning(
     permitted_verdicts: Vec<&str>,
     result_class: &str,
 ) -> Vec<String> {
-    let boot = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let boot = eigenius_kernel::testing::bootstrap_context();
     let storage = boot.storage().clone();
     let mut b = LayerBuilder::new("contract-probe", Some(Arc::clone(boot.head())));
 
@@ -463,7 +463,7 @@ fn the_same_verdict_is_admitted_where_no_permitted_set_is_declared() {
 fn a_term_on_an_undeclared_slot_of_a_derivation_is_refused() {
     // The gate output is not the only way out. A derivation carries the same risk, and
     // the term-slot check covers it for that reason.
-    let boot = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let boot = eigenius_kernel::testing::bootstrap_context();
     let storage = boot.storage().clone();
     let mut b = LayerBuilder::new("contract-probe", Some(Arc::clone(boot.head())));
     b.add_resource(declare_prop(SMUGGLING_SLOT, false)).unwrap();
@@ -707,7 +707,7 @@ fn an_auto_on_load_query_class_must_return_a_verdict() {
 fn an_unresolvable_result_class_refuses_the_dispatch() {
     use eigenius_kernel::institution::result_contract::check_output;
 
-    let boot = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let boot = eigenius_kernel::testing::bootstrap_context();
     let head = Arc::clone(boot.head());
 
     let mut output = Resource::new_embedded();

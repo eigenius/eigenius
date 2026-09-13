@@ -23,8 +23,8 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::{Identity, Parser};
+use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
-use eigenius_kernel::{bootstrap, esl};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 use eigenius_wordnet::morphy::{ExcLists, LemmaSet};
 use eigenius_wordnet::wndb::Pos;
@@ -90,7 +90,7 @@ fn morphy() -> MorphyLemmatizer {
 
 #[test]
 fn morphy_bridge_parses_inflected_sentence() {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     // The lexicon schema is part of the bootstrap chain now (D62/D63); build the
     // demo domain directly over the bootstrapped head.
     let domain = layer_over("lexicon-domain", Arc::clone(ctx.head()), DOMAIN);
@@ -114,7 +114,7 @@ fn identity_lemmatizer_cannot_reach_the_base_entry() {
     // Control isolating Morphy's contribution: the trivial lemmatizer does not
     // reduce, so the inflected surface "affects" never matches the base form
     // "affect" — no parse. (With the base surface "affect" it would.)
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     // The lexicon schema is part of the bootstrap chain now (D62/D63); build the
     // demo domain directly over the bootstrapped head.
     let domain = layer_over("lexicon-domain", Arc::clone(ctx.head()), DOMAIN);

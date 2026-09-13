@@ -222,7 +222,7 @@ mod tests {
     /// `eigentt:Axiom` declared after Phase H) plus a top layer carrying
     /// one or more `eigentt:Axiom` resources.
     fn chain_with_axioms(axioms: Vec<(&str, Exp, Option<&str>)>) -> Arc<Layer> {
-        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
         let mut top = LayerBuilder::new("test_axioms_top", Some(head));
         for (axiom_iri, statement_exp, justification) in axioms {
             let mut r = Resource::new(iri(axiom_iri));
@@ -259,7 +259,7 @@ mod tests {
         // - the D62 §2e / D64 referent-hole placeholder `lexicon:anaphor : Entity` (a pronoun
         //   stores it; the parser freshens it into an open-parse hole — `closed-class.esl`).
         // Every bootstrap axiom should be in one of those families.
-        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
         let env = build_axiom_env(&head).unwrap();
         let modal = [
             "urn:eigenius:logic:Possible",
@@ -352,7 +352,7 @@ mod tests {
         // An eigentt:Axiom resource with no axiom_statement should be
         // rejected by build_axiom_env (it'd also fail the validator's
         // required-property check, but build_axiom_env defends in depth).
-        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
         let mut top = LayerBuilder::new("missing_stmt", Some(head));
         let mut r = Resource::new(iri("urn:eigenius:test:no_stmt_axiom"));
         r.set(

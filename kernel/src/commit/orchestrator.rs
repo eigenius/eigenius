@@ -723,7 +723,7 @@ mod tests {
         Arc<crate::institution::runtime::InstitutionRuntime>,
         LayerStorage,
     ) {
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         let storage = ctx.storage().clone();
         let bootstrap_head = Arc::clone(ctx.head());
         let mut b = LayerBuilder::new("test", Some(bootstrap_head));

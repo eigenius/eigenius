@@ -395,7 +395,7 @@ fn a_constructor_class_naming_no_declared_ctor_is_refused() {
 /// The derived classes themselves satisfy Rule 25 — which is the point of deriving them.
 #[test]
 fn the_derived_constructor_classes_satisfy_rule_25() {
-    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     let errs: Vec<String> = eigenius_kernel::validation::Validator::new(ctx.head().clone())
         .validate()
         .into_iter()

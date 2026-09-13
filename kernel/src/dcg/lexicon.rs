@@ -628,7 +628,7 @@ mod referential_definite_tests {
     fn definites_reference_ontology_the_and_existentials_do_not() {
         const THE: &str = "Iri(\"urn:eigenius:ontology:the\")";
         const ANAPHOR_OF: &str = "Iri(\"urn:eigenius:lexicon:anaphor_of\")";
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         let lex = LexicalIndex::build(Arc::clone(ctx.head()));
         let mentions = |form: &str, needle: &str| -> Vec<bool> {
             let es = lex.entries_for(form);
@@ -695,7 +695,7 @@ mod scope_bearing_tests {
     /// `crates/eigenius-wordnet/tests/db_backed_encoding.rs`).
     #[test]
     fn scope_bearing_covers_the_modal_category_sniff() {
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         let lex = LexicalIndex::build(Arc::clone(ctx.head()));
 
         // (1) COMPLETENESS: every entry with the auxiliary category shape declares the flag. Since

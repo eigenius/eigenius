@@ -1154,7 +1154,7 @@ mod tests {
             certificate_type, encode_judgement, encode_type,
         };
 
-        let head = std::sync::Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = std::sync::Arc::clone(crate::testing::bootstrap_context().head());
         let conclusion_iri = "urn:eigenius:test:p3:concl";
         let prop = Exp::sort(0);
 
@@ -1274,7 +1274,7 @@ mod tests {
             certificate_indices, certificate_type, decode_judgement, encode_judgement, encode_type,
         };
 
-        let head = std::sync::Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = std::sync::Arc::clone(crate::testing::bootstrap_context().head());
         let layer = LayerBuilder::new("projection", Some(head)).build(LayerStorage::in_memory());
 
         // Shapes with structure worth losing: binders, arrows, a literal.
@@ -1598,7 +1598,7 @@ mod tests {
         // and the emitter resolves both through the chain. A parent-less layer
         // could carry the old flat proposition (a bare `Sort`, resolving
         // nothing) but cannot carry a judgement.
-        let head = std::sync::Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = std::sync::Arc::clone(crate::testing::bootstrap_context().head());
         let mut b = LayerBuilder::new("test", Some(head));
         b.add_resource(reasoning_sentence(target, &prop)).unwrap();
         let layer = b.build(LayerStorage::in_memory());

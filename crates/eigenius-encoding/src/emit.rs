@@ -753,7 +753,7 @@ mod tests {
     fn the_emitted_artifact_validates_against_the_bootstrap_chain() {
         use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
 
-        let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = eigenius_kernel::testing::bootstrap_context();
         let names =
             eigenius_kernel::program::eigentt_type_mirror::CodecNames::from_layer(ctx.head());
         // NO sentences and no cuts. A document that encoded nothing still emits its

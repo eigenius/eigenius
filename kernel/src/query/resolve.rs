@@ -122,7 +122,7 @@ mod tests {
     /// A layer on the bootstrap core with two same-short-name `Widget` classes in
     /// two distinct namespaces plus one `Gadget` in `urn:a:` only.
     fn layer_with_classes() -> Arc<Layer> {
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         let head = Arc::clone(ctx.head());
         let storage = head.storage().clone();
         let mut b = LayerBuilder::new("vocab", Some(head));

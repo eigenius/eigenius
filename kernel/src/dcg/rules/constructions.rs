@@ -1858,7 +1858,7 @@ mod tests {
         // The prop-side list-with-operator model: comma builds a neutral `conn_list` list, the trailing
         // `or` rebinds the whole list, and `complete_coord` folds it left-branching all-`∨`. Needs the
         // real `logic:And/Or` + `lexicon:Conn` inductives ⇒ bootstrap.
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         let layer = Arc::clone(ctx.head());
         // A prop-ending base category — a declarative clause `S[dcl,fin]` (⟦·⟧ = Prop).
         let s = ctor("cat_s", vec![ctor("dcl", vec![]), ctor("fin", vec![])]);

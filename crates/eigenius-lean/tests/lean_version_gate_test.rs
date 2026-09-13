@@ -37,7 +37,7 @@ const FIXTURE: &[u8] = include_bytes!("../test_resources/toy_proof_holds.json");
 /// A layer is consulted only to resolve chain IRIs' `short_name`; `Exp::One` names none, so the
 /// bootstrap head serves.
 fn head() -> Arc<Layer> {
-    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     Arc::clone(ctx.head())
 }
 

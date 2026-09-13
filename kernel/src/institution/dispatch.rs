@@ -946,7 +946,7 @@ mod tests {
         // output against that declaration. A chain where it does not resolve is one
         // Rule 14 would have refused the QueryClass on, so a fixture without it is
         // testing a state that cannot commit.
-        let ctx = crate::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = crate::testing::bootstrap_context();
         let storage = ctx.storage().clone();
         let mut b = LayerBuilder::new("test", Some(Arc::clone(ctx.head())));
 
@@ -1107,7 +1107,7 @@ mod tests {
         }
 
         // On the real bootstrap, for the reason `build_dispatch_setup` gives.
-        let boot = crate::bootstrap::bootstrap().expect("bootstrap");
+        let boot = crate::testing::bootstrap_context();
         let storage = boot.storage().clone();
         let mut b = LayerBuilder::new("test", Some(Arc::clone(boot.head())));
 

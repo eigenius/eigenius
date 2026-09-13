@@ -588,7 +588,7 @@ fn chain() -> &'static Arc<eigenius_kernel::layer::Layer> {
     use std::sync::OnceLock;
     static CHAIN: OnceLock<Arc<eigenius_kernel::layer::Layer>> = OnceLock::new();
     CHAIN.get_or_init(|| {
-        let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+        let ctx = eigenius_kernel::testing::bootstrap_context();
         Arc::clone(ctx.head())
     })
 }

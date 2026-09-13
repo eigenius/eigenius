@@ -1798,7 +1798,7 @@ mod tests {
     }
 
     fn bootstrap_head() -> std::sync::Arc<Layer> {
-        std::sync::Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head())
+        std::sync::Arc::clone(crate::testing::bootstrap_context().head())
     }
 
     #[test]

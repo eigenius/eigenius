@@ -36,7 +36,7 @@ const TOY_HOLDS: &[u8] = include_bytes!("../test_resources/toy_proof_holds.json"
 /// A layer is only consulted to resolve a chain IRI's `short_name`; these propositions name no
 /// chain resources, so the bootstrap head serves.
 fn head() -> Arc<Layer> {
-    let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     Arc::clone(ctx.head())
 }
 

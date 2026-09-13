@@ -28,7 +28,6 @@
 
 use std::sync::Arc;
 
-use eigenius_kernel::bootstrap;
 use eigenius_kernel::dcg::{pretty_term, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -134,7 +133,7 @@ resource lexicon:counterparts_np : lexicon:LexicalEntry {
 "#;
 
 fn parser() -> Parser {
-    let ctx = bootstrap::bootstrap().expect("bootstrap");
+    let ctx = eigenius_kernel::testing::bootstrap_context();
     let resources = esl::compile(FIXTURE, ctx.head()).expect("fixture compiles");
     let mut b = LayerBuilder::new("cmp-than", Some(Arc::clone(ctx.head())));
     for r in resources {

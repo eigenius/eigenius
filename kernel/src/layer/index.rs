@@ -1519,7 +1519,7 @@ mod mentions_tests {
     /// `test:tx : core:inductive`, plus an inductive `test:Colour` (**sealed**) and a
     /// plain class `test:Topic` (**not** sealed) for the objects to point at.
     fn base() -> Arc<Layer> {
-        let head = Arc::clone(crate::bootstrap::bootstrap().expect("bootstrap").head());
+        let head = Arc::clone(crate::testing::bootstrap_context().head());
         let mut b = LayerBuilder::new("mentions_base", Some(head));
 
         let mut prop = Resource::new(iri("urn:eigenius:test:tx"));
