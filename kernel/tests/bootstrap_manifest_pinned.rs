@@ -74,6 +74,12 @@
 //! moved NOTHING, because those edits were all `//` comments — the compiler strips them, while a
 //! `description = "…"` is a resource property and hashes.
 //!
+//! IT FIRED ON THE MEMO-KEY FIX (`2026-09-12`), on ONE layer, `program-traces`. Description
+//! text only. `input_hash` was declared "Content hash of the component input" and the trace put
+//! the whole composite memo key there; `argument_hash` was declared and never written. Both now
+//! say what the slot holds and what the key covers (eigenius#146). The behavioural half of that
+//! fix is Rust and moves nothing.
+//!
 //! IT FIRED ON THE INDEX-LANGUAGE RESIDUE (`2026-09-09`), on ONE layer, `core`. The rename below
 //! left three sentences standing that still asserted an index: two `witness:Is*As` descriptions
 //! ending "recomputed every time and persisted nowhere, so the index is a cache" and one reading
@@ -178,7 +184,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 /// panic message for the rest of the follow-through.
 const EXPECTED: &str = "core:38aa65a9c6cbacc8a8434c0e30d8048e28a7d1f5d09743fa4006af44f381bf7e
 program:429718a323b6bfcc3ff858277f73b2c15de724f9d1c1c2c2c220748295b3c726
-program-traces:89a26cb0570d90ac8e0943687cc0f175e1cd1ea78a025196a247b636d1440f7a
+program-traces:b6ad0b141167e2020fd5f5ce993cde229e28c8519cd6a728256e301fcdd4da44
 prov:694b3195028f88f8043209f81f70824fb12bdee45f8e57db381a041c96687c5d
 obo:b515192765257daf466b28bb4154d6155461c8c2d1302f945ec785f8a00bb959
 institution:149ab16a9b3d48e3839a1881d1a72230d7c88d1281f109c58eb8b5f944e68379
