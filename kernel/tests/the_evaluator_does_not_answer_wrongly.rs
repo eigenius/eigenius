@@ -198,13 +198,6 @@ fn a_dot_path_on_a_non_resource_is_reported() {
 /// satisfied, that row drops, and the query succeeds. A heterogeneous chain produces this
 /// constantly, so making it an error would fail most real queries. Only this case stays
 /// silent; every fault above is now reported.
-///
-/// **A known limit this pins rather than fixes.** Absence is decided from the resource's
-/// own properties, so a MISTYPED property name — one no resource carries — is
-/// indistinguishable from one that legitimately no resource has, and both drop the row
-/// silently. Telling them apart means checking the name against the declared vocabulary,
-/// which needs the query's namespaces and so belongs at type-check time, not in per-row
-/// evaluation where a chain-wide scan is the only alternative.
 #[test]
 fn a_resource_missing_the_property_drops_its_row_without_failing() {
     let boot = eigenius_kernel::testing::bootstrap_context();
@@ -234,6 +227,41 @@ fn a_resource_missing_the_property_drops_its_row_without_failing() {
         3,
         "the three with a size match; the one without drops, silently and correctly"
     );
+}
+
+/// **A dot-path segment is resolved against the RESOURCE, not against a namespace.**
+///
+/// This pins the semantics, because getting it wrong is tempting in a specific way. A
+/// MATCH brace key is a `Name`: it may be a short name resolved through `USING NAMESPACE`
+/// or a full IRI, which is the general rule that a short name means something only where
+/// the class is known or a namespace makes it derivable. A dot-path segment is none of
+/// those — it is a bare identifier matched against the LOCAL NAMES of the properties the
+/// resource actually carries, with no namespace and no class consulted.
+///
+/// So a dot-path works with no `USING NAMESPACE` at all, as below. A type-check rule that
+/// resolved segments the way brace keys are resolved would reject this query, which
+/// evaluates perfectly well — one was written and reverted for exactly that reason.
+///
+/// The consequence, and it is a real limit rather than an oversight: a MISTYPED segment
+/// cannot be told from one no resource happens to carry. Both are absence, both drop the
+/// row. Telling them apart needs a scope the syntax does not carry, so it would take
+/// giving dot-path segments the same `Name` shape brace keys have — a language change,
+/// not a check.
+#[test]
+fn a_dot_path_needs_no_namespace_declaration() {
+    let layer = corpus();
+    let rows = execute_with(
+        r#"
+        USING "urn:ex:Widget"
+        MATCH "urn:ex:Widget"(?w) { "urn:ex:weight": ?wt }
+        WHERE ?w.size > 1
+        RETURN [] { w: ?w }
+        "#,
+        &layer,
+        FiberRuntime::default(),
+    )
+    .expect("a dot-path resolves against the resource, so no namespace is needed");
+    assert_eq!(column(&rows, "w").len(), 2, "sizes 2 and 3 exceed 1");
 }
 
 // ── eigenius#123 ─────────────────────────────────────────────────────
