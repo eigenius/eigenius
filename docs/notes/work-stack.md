@@ -9,6 +9,45 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **ACTIVE: entry −3 (`2026-09-12`). Correctness and consistency issues.** Seven of the eight
+> picked off the open-issue sweep, on `consistency-fixes`.
+>
+> | issue | what it was |
+> |---|---|
+> | #146 | the memo key omitted the component ARGUMENT, so a second call with the same input and a different argument was served the first call's output and never ran |
+> | #231 | the parser flattened a qualified name and discarded the namespace, so `Type:ctor` resolved in a `def` body and not a `program` body |
+> | #195 | a string marshalled inbound to a one-property wrapper while the other three literal kinds carried their payload |
+> | #234 | 24 of 44 ontology documents sat outside `BOOTSTRAP_CHAIN` and no test put them through a validator |
+> | #227 | witness credit survived a rebinding of a class the proposition quantifies over — unsound on WIDENING |
+> | #154 | a one-sided plan halved its p-value and never checked the sign, committing the direction it did not observe |
+> | #104 | the reported panics were already gone; two callers still used the asserting readback on un-vetted terms |
+>
+> **#226 deferred, deliberately.** The issue rules out a special-case check and points at D75 §5,
+> where an institution's signature becomes a type in Γ_env so crossing the boundary IS an
+> application. Architectural, needs its own design note. The stale comment at the site is corrected
+> and what is and is not covered today is recorded there.
+>
+> **Two review rounds, and both paid.** The first found a regression in #195 — two `val_to_resource`
+> functions send every non-`ResourceVal` to an EMPTY resource, so a program reading a string
+> property returned `{}` in release and panicked in debug outside the `catch_unwind`. The second
+> found a regression in that fix (a bare literal then got elevated into a committed chain resource
+> whose key is a `core:DataType`, which Rule 22 rejects), two holes in #227 (the `Verified` family
+> is keyed off the TRACE's judgement, and a tombstone is not in `defined_iris`), and a verdict
+> labelled `AlphaNotCrossed` when the p HAD crossed and the direction was what refused.
+>
+> **Lessons worth keeping.** A green suite is not evidence a test ran — clippy caught an orphaned
+> `#[test]` attribute. A new test is not evidence either until it has been run against the bug:
+> two of these passed against deliberately broken code on the first attempt. And measure the blast
+> radius in every backend, not one — a probe placed in `RocksStore` alone reported 19 affected
+> sites where the real figure was 148.
+>
+> **Reseed `2026-09-12`** (#146 moved `program-traces`). Snapshots `wordnet-umls-2026-09-12`
+> (3.45 GiB) and `wordnet-umls-aligned-2026-09-12` (3.5 GB). All gates pass at `909abdc`, and
+> **every parse number is identical to the `2026-09-09` run** — 62 units, grammar-gap 0, 674
+> readings, 171 skeletons, 30/41 reading-correct, histogram bucket for bucket. None of the seven
+> touches the grammar, the lexicon or the ranker, and the measurement says so.
+
+
 > **entry −2 (`2026-09-09`). Storage write atomicity. DONE, merged as `8615672` (#243).**
 >
 > Closed **#131** (layer insertion was not atomic across the indexes) and **#48** (no
