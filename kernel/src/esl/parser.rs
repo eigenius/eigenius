@@ -2634,8 +2634,6 @@ impl<'a> Parser<'a> {
 
             // Identifier (variable) or qualified name `ns:name` (one atomic token)
             TokenKind::Ident(_) | TokenKind::QualName(..) => {
-                let pos = self.current_pos();
-                let _ = pos;
                 Ok(Expr::Var(self.parse_qualified_name()?))
             }
 
@@ -2740,8 +2738,6 @@ impl<'a> Parser<'a> {
             TokenKind::LBrace => self.parse_block_expr(),
             _ => {
                 // Qualified name as string reference
-                let pos = self.current_pos();
-                let _ = pos;
                 Ok(Expr::Var(self.parse_qualified_name()?))
             }
         }

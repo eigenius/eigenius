@@ -22,6 +22,12 @@
 //! ontology files in the tree are outside the bootstrap chain, and nothing put them
 //! through a validating path — so the rules never saw them.
 //!
+//! **This covers 23 of those 24.** The glob is `ontologies/*.json`. The one out-of-chain
+//! ESL document, `encoding/claim-kind-alignment.esl`, is excluded because it cannot be
+//! validated this way: it redeclares kind classes with `wn:` / `umlscui:` parents that
+//! exist only after a lexicon import, so it is snapshot-coupled and reaches a validator
+//! through `build-alignment-snapshot.sh` and the encoding tests instead.
+//!
 //! The issue was filed from a `requires` clause naming a property that P5 had deleted.
 //! It survived because the one test that ran the `Validator` over that ontology
 //! validated an INSTANCE, and validating an instance does not re-validate the class
@@ -43,8 +49,11 @@
 //! instantiates what its sibling `ontology.json` declares, a `registration.json` names
 //! those classes, and `comorphisms.json` reaches across two institution directories.
 //! Loading each alone reports its dependencies as unresolved, which says nothing about
-//! the file. Declarations are loaded first, then registrations, then examples.
+//! the file. Insertion ORDER within the combined layer does not matter: `add_resource`
+//! is a map insert and the validator resolves against the finished layer, so order could
+//! only matter for a duplicate `@id`, and the 23 documents share none.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 fn repo_root() -> std::path::PathBuf {
@@ -70,19 +79,34 @@ fn ontology_files(root: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
-/// Load order within the combined layer: a declaration before whatever names it.
-fn load_rank(path: &str) -> u8 {
-    if path.ends_with("ontology.json") || path.contains("animals") || path.contains("schema-org") {
-        0
-    } else if path.ends_with("registration.json") || path.contains("comorphisms") {
-        1
-    } else {
-        2
-    }
+/// The ontology documents `BOOTSTRAP_CHAIN` is built from, as repo-relative paths.
+///
+/// Read from the `const BOOTSTRAP_CHAIN` block alone, and only from its `include_str!`
+/// arguments. A substring search over the whole module would also match a path named in
+/// a comment or a `#[cfg(test)]` fixture — and this module has a comment whose entire
+/// purpose is to say a file is NOT in the chain. Matching that would have silently
+/// removed a file from coverage with no signal.
+fn bootstrap_chain_sources(bootstrap_src: &str) -> BTreeSet<String> {
+    let start = bootstrap_src
+        .find("const BOOTSTRAP_CHAIN")
+        .expect("bootstrap/mod.rs declares BOOTSTRAP_CHAIN");
+    let block = &bootstrap_src[start..];
+    let end = block
+        .find("\n];")
+        .expect("the BOOTSTRAP_CHAIN array is terminated");
+    block[..end]
+        .match_indices("include_str!(\"")
+        .filter_map(|(i, m)| {
+            let rest = &block[i + m.len()..];
+            rest.find('"').map(|q| rest[..q].to_string())
+        })
+        // `include_str!` paths are relative to kernel/src/bootstrap/.
+        .map(|p| p.trim_start_matches("../../../").to_string())
+        .collect()
 }
 
 #[test]
-fn every_ontology_outside_the_bootstrap_chain_still_validates() {
+fn every_json_ontology_outside_the_bootstrap_chain_still_validates() {
     let root = repo_root();
     // `BOOTSTRAP_CHAIN` names its layers with `include_str!`, so the module source is
     // the list. Reading it keeps this test honest when a layer joins or leaves the
@@ -90,16 +114,25 @@ fn every_ontology_outside_the_bootstrap_chain_still_validates() {
     // the bootstrap itself.
     let bootstrap_src = std::fs::read_to_string(root.join("kernel/src/bootstrap/mod.rs"))
         .expect("bootstrap module is readable");
+    // `BOOTSTRAP_CHAIN` is private, so its membership is read from the source. That keeps
+    // this test honest when a layer joins or leaves: a file that moves in stops being
+    // checked here and starts being checked by the bootstrap itself.
 
-    let mut out_of_chain: Vec<String> = ontology_files(&root)
+    let in_chain = bootstrap_chain_sources(&bootstrap_src);
+    assert!(
+        in_chain.len() > 10,
+        "the BOOTSTRAP_CHAIN scrape found only {} sources, which means it stopped working \
+         rather than that the chain shrank",
+        in_chain.len()
+    );
+    let out_of_chain: Vec<String> = ontology_files(&root)
         .into_iter()
-        .filter(|f| !bootstrap_src.contains(f.as_str()))
+        .filter(|f| !in_chain.contains(f))
         .collect();
     assert!(
         !out_of_chain.is_empty(),
         "no ontology sits outside the bootstrap chain — if that is now true, delete this test"
     );
-    out_of_chain.sort_by_key(|f| (load_rank(f), f.clone()));
 
     let ctx = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
     let mut builder =

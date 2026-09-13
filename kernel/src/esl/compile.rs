@@ -571,11 +571,13 @@ struct Compiler {
 /// name has no namespace and contains no `:` (i.e. a truly bare
 /// reference that can't be an IRI).
 ///
-/// The ESL parser collapses `ns:local` function references in
-/// expression position back into `QualifiedName { namespace: None,
-/// name: "ns:local" }`, so this helper splits on the first `:` when
-/// the explicit namespace field is absent — symmetric with
-/// `compile_ctor_arg_type`'s treatment of bare names.
+/// Resolve an application head to a component IRI.
+///
+/// The namespace field is read directly when present. The split-the-string branch is
+/// for a name that still carries its prefix inside `name`: the parser produced that
+/// shape for every `Var` until eigenius#231 un-flattened it, and a `Project`'s property
+/// name reaches here by a different route that has not been shown to arrive qualified —
+/// symmetric with `compile_ctor_arg_type`'s treatment of bare names.
 fn resolve_apply_function(
     namespace: Option<&str>,
     name: &str,
@@ -3328,6 +3330,16 @@ impl Compiler {
                 let mut r = Resource::new_embedded();
                 set_is_a(&mut r, "urn:eigenius:program:Apply");
 
+                // A QUALIFIED head resolves through its namespace; a bare one takes the
+                // component-registry prefix.
+                //
+                // The qualified branch was unreachable from a `Var` head until
+                // eigenius#231: the parser flattened `ns:f` into `name = "ns:f"` with
+                // `namespace = None`, so `comorphisms:f(input)` compiled to
+                // `urn:eigenius:program:components:comorphisms:f` — an alias buried inside
+                // the component namespace, which resolves to nothing and which neither
+                // `parse_apply` nor `is_component` could ever look up. It now compiles to
+                // `urn:eigenius:comorphisms:f`. Bare heads are unchanged.
                 let func_iri = if function.namespace.is_some() {
                     self.resolve(function)?
                 } else {
@@ -4670,10 +4682,14 @@ mod tests {
     fn references_comorphism(r: &crate::ontology::resource::Resource) -> bool {
         use crate::ontology::resource::Value;
         const FUNCTION: &str = "urn:eigenius:program:function";
-        // The compiler lowers a bare application head to a component
-        // IRI, so `comorphisms:symbolics_to_jump(input)` becomes
-        // `urn:eigenius:program:components:comorphisms:symbolics_to_jump`
-        // — match the `comorphisms:` segment wherever it lands.
+        // The compiler lowers an application head to a component IRI. A
+        // QUALIFIED head resolves through its namespace since
+        // eigenius#231, so `comorphisms:symbolics_to_jump(input)` becomes
+        // `urn:eigenius:comorphisms:symbolics_to_jump`; it used to keep
+        // the alias inside the component prefix, as
+        // `urn:eigenius:program:components:comorphisms:symbolics_to_jump`.
+        // The `comorphisms:` segment is present either way — match that
+        // wherever it lands.
         const COMORPHISM_SEG: &str = "comorphisms:";
         fn value_hits(v: &Value) -> bool {
             match v {
@@ -7296,10 +7312,13 @@ data ex:Colour { red, mk }
 data ex:Shape  { square, mk }
 "#;
 
-    /// **Gap probe.** `ex:Type:ctor` (eigenius#24) resolves in a `def` body but not in a
-    /// `program` body: the program path turns the reference into a `Var` named after the
-    /// spelled-out qualifier instead of a constructor. Pinned here so the gap is a fact in
-    /// the suite rather than a note; flip both assertions when the program path learns it.
+    /// `ex:Type:ctor` (eigenius#24) resolves the same way in a `program` body as in a
+    /// `def` body, because both call `resolve_ctor_iri`.
+    ///
+    /// It did not until eigenius#231. The parser flattened `ns:x` into a string and
+    /// discarded the namespace, so this arm had only a bare-name lookup and the qualifier
+    /// survived verbatim as a variable name that resolves to nothing. This test was the
+    /// gap probe that pinned that; both assertions are now the requirement.
     #[test]
     fn the_inductive_qualifier_reaches_program_bodies_as_it_does_def_bodies() {
         const DECL: &str = r#"

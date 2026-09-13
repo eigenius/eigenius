@@ -220,8 +220,9 @@ impl ProgramMetrics {
 /// replay slot and only deterministic components to this store (D21
 /// §3.3). Nothing else is memoized here.
 ///
-/// The key is SHA-256(component_iri ‖ CBOR(input) ‖ CBOR(argument)) —
-/// all three factors, as specified. It implemented only the first two
+/// The key is SHA-256 over all three factors — component IRI, input and argument, each
+/// length-prefixed, with a presence tag on the argument; see [`compute_trace_key`] for
+/// why the framing rather than bare concatenation. It implemented only the first two
 /// until `2026-09-12`, and both construction sites set
 /// `argument_hash: None`, so two calls to one component with the same
 /// input and different arguments collided; since the cache is consulted

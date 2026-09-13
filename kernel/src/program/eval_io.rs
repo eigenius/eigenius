@@ -209,6 +209,14 @@ fn val_to_resource(val: &Val) -> Result<Resource, ProgramError> {
             }
             Ok(r)
         }
+        // A literal carries its payload across as the one-property wrapper keyed on its
+        // type IRI (eigenius#195). Without this arm `input.some_string_property` as a
+        // program body returned an empty resource in release and panicked in debug —
+        // outside the `catch_unwind` above, so it escaped as a panic rather than a
+        // `ProgramError`.
+        _ if crate::nbe::eval::literal_as_resource(val).is_some() => {
+            Ok(crate::nbe::eval::literal_as_resource(val).expect("just checked"))
+        }
         _ => {
             // Lossy conversion — fire in debug builds so tests surface
             // unexpected Val types reaching the execution boundary

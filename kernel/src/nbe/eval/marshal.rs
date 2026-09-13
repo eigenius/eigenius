@@ -98,6 +98,37 @@ pub fn resource_value_to_val(v: &crate::ontology::resource::Value, role: StringR
     }
 }
 
+/// The one-property Resource shape a bare literal takes at a Resource boundary.
+///
+/// The IO boundary (`program::eval_io::val_to_resource`) and the component boundary
+/// (`institution::eval_hooks::val_to_resource`) both need a `Resource`, and a literal
+/// has no property name of its own, so it is keyed on its own type IRI — the shape
+/// [`crate::nbe::eval::resource_payload`] reads back out and the one
+/// `val_to_resource_value` unwraps.
+///
+/// Both boundaries used to send every non-`ResourceVal` to an EMPTY resource behind a
+/// `debug_assert!`. A string survived only because the inbound direction happened to
+/// wrap it; the other three kinds have fallen through since eigenius#142 gave them
+/// payload-carrying `Val`s, and eigenius#195 made the string join them. So a program
+/// whose body is `input.some_string_property` returned `{}` in release and panicked in
+/// debug, outside the `catch_unwind` that would have turned it into an error.
+///
+/// Returns `None` for anything that is not a literal, so the caller keeps its own
+/// lossy-conversion diagnostic for the cases that really are unexpected.
+pub fn literal_as_resource(val: &Val) -> Option<crate::ontology::resource::Resource> {
+    use crate::ontology::resource::Value as RVal;
+    let (type_iri, value) = match val {
+        Val::LitString(s) => ("urn:eigenius:core:string", RVal::String(s.clone())),
+        Val::LitInt(n) => ("urn:eigenius:core:integer", RVal::Integer(*n)),
+        Val::LitFloat(f) => ("urn:eigenius:core:float", RVal::Float(*f)),
+        Val::LitBool(b) => ("urn:eigenius:core:boolean", RVal::Boolean(*b)),
+        _ => return None,
+    };
+    let mut r = crate::ontology::resource::Resource::new_embedded();
+    r.set(Iri::parse(type_iri).expect("static IRI"), value);
+    Some(r)
+}
+
 /// Convert a EigenTT Val to an Eigon resource Value (for Construct).
 pub fn val_to_resource_value(val: &Val) -> crate::ontology::resource::Value {
     use crate::ontology::resource::Value as RVal;
@@ -250,6 +281,64 @@ mod tests {
             let back = val_to_resource_value(&resource_value_to_val(&original, StringRole::Text));
             assert_eq!(back, original, "{original:?} did not survive");
         }
+    }
+
+    /// **eigenius#195, found in review.** A literal reaching a Resource boundary
+    /// carries its payload across.
+    ///
+    /// Both `val_to_resource` functions — the IO boundary and the component boundary —
+    /// matched `ResourceVal` and `Unit` and sent everything else to an empty resource
+    /// behind a `debug_assert!`. A string survived only because the INBOUND direction
+    /// wrapped it; making the string a literal joined it to the other three, which had
+    /// fallen through since eigenius#142. The shape is the one-property wrapper keyed on
+    /// the type IRI, which is what `resource_payload` reads back and what
+    /// `val_to_resource_value` unwraps — so the boundary sees exactly what it saw before.
+    #[test]
+    fn a_literal_reaching_a_resource_boundary_keeps_its_payload() {
+        use crate::ontology::resource::Value as RVal;
+        let cases = [
+            (
+                Val::LitString("hi".into()),
+                "urn:eigenius:core:string",
+                RVal::String("hi".into()),
+            ),
+            (
+                Val::LitInt(42),
+                "urn:eigenius:core:integer",
+                RVal::Integer(42),
+            ),
+            (
+                Val::LitFloat(1.5),
+                "urn:eigenius:core:float",
+                RVal::Float(1.5),
+            ),
+            (
+                Val::LitBool(true),
+                "urn:eigenius:core:boolean",
+                RVal::Boolean(true),
+            ),
+        ];
+        for (val, type_iri, expected) in cases {
+            let r = literal_as_resource(&val)
+                .unwrap_or_else(|| panic!("{val:?} must marshal to a resource"));
+            assert_eq!(
+                r.get(&Iri::parse(type_iri).unwrap()),
+                Some(&expected),
+                "{val:?} lost its payload"
+            );
+        }
+        // The STRING wrapper also unwraps back, which is the `CompleteText` output path
+        // `val_to_resource_value` keeps its single-string-prop branch for. The other three
+        // have no such branch and are read through `resource_payload` instead, so this is
+        // asserted only where it holds.
+        let wrapped = literal_as_resource(&Val::LitString("hi".into())).unwrap();
+        assert_eq!(
+            val_to_resource_value(&Val::ResourceVal(Box::new(wrapped))),
+            crate::ontology::resource::Value::String("hi".into())
+        );
+        // Not a literal: the caller keeps its own diagnostic for the genuinely
+        // unexpected cases.
+        assert!(literal_as_resource(&Val::Unit).is_none());
     }
 
     /// An array passes its own role down: the elements of a `core:resource_array` are references,
