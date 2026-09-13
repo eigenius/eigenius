@@ -12,6 +12,10 @@ any detour.
 > **ACTIVE: entry −3 (`2026-09-12`). Correctness and consistency issues.** Seven of the eight
 > picked off the open-issue sweep, on `consistency-fixes`.
 >
+> **Exit gate: PR #244 merges.** Work is complete and verified; nothing here is in progress. Pop
+> this entry on merge and the top becomes entry 0, whose next task is P0 of
+> `judgements-warrants-build-plan.md` — measurement only, no code.
+>
 > | issue | what it was |
 > |---|---|
 > | #146 | the memo key omitted the component ARGUMENT, so a second call with the same input and a different argument was served the first call's output and never ran |
@@ -80,7 +84,11 @@ any detour.
 > (`store_layer`, vector consolidation, then the redirect install or branch advance) — a separate
 > transaction boundary, tracked nowhere.
 
-> **ACTIVE: entry −1 (`2026-09-08`). D89 — the justification vocabulary.**
+> **entry −1 (`2026-09-08`). D89 — the justification vocabulary. DONE `2026-09-09`.**
+> Merged as `c4a4eb7` (#239); the one item it left open — `instantiate` taking `T` and `P`
+> implicitly — closed in `8c00a53`, and both reseeds it obliged have run. Kept for the record of
+> what the rename did and did not change.
+>
 > [`docs/design/d89-the-justification-vocabulary-refactoring.md`](../design/d89-the-justification-vocabulary-refactoring.md)
 > decides what changes; [`d89-rename-execution-plan.md`](d89-rename-execution-plan.md) decides how.
 >
