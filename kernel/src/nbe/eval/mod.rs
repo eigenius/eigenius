@@ -28,7 +28,9 @@ mod tracer;
 pub use hooks::{Decision, EffectHooks};
 use iota::iota_reduce_impl;
 use mapreduce::{eval_map_impl, eval_reduce_impl};
-pub use marshal::{resource_value_to_val, string_role_of, val_to_resource_value, StringRole};
+pub use marshal::{
+    literal_as_resource, resource_value_to_val, string_role_of, val_to_resource_value, StringRole,
+};
 pub(crate) use tracer::{NoTrace, Tracer, TreeTracer};
 
 /// Evaluation error — replaces panics in the NbE evaluator (issue #19).
@@ -910,9 +912,13 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
 }
 
 /// Extract the payload value from a single-property wrapper resource.
-/// `resource_value_to_val` wraps primitives in a one-property Resource
-/// keyed on the type IRI; this reads that value back out. Multi-property
-/// resources fall back to the first value.
+///
+/// The wrapper is keyed on the type IRI and is built by
+/// [`crate::nbe::eval::literal_as_resource`] at the IO and component boundaries, and by
+/// components that return a single-value Resource (Lean's `extract_typed`). It is NOT
+/// built by `resource_value_to_val` any more: that direction produced one for strings
+/// until eigenius#195 and for the other three literal kinds until eigenius#142.
+/// Multi-property resources fall back to the first value.
 fn resource_payload(
     r: &crate::ontology::resource::Resource,
 ) -> Option<&crate::ontology::resource::Value> {
@@ -1160,8 +1166,13 @@ mod tests {
 
         let (val, trace) = eval_traced(&exp, &rho, &ctx)?;
 
-        // Value should be the extracted property
-        assert!(matches!(val, Val::ResourceVal(_)));
+        // Value should be the extracted property. A string property extracts as
+        // `Val::LitString`; it was a one-property wrapper resource until
+        // eigenius#195 made the four literal kinds agree with each other.
+        assert!(
+            matches!(val, Val::LitString(ref s) if s == "Alice"),
+            "got {val:?}"
+        );
 
         // Trace should be Let with a Project in value_trace
         let trace = trace.expect("Let with PropAccess should produce a trace");
@@ -1533,7 +1544,8 @@ mod tests {
 
         let ctx = io_ctx();
 
-        // Build a string wrapper resource (matching resource_value_to_val convention)
+        // Build a string wrapper resource — the shape `literal_as_resource` produces
+        // and `resource_payload` reads back out.
         let mut r = Resource::new_embedded();
         r.set(
             Iri::parse("urn:eigenius:core:string").unwrap(),

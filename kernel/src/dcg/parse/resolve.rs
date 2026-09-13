@@ -155,10 +155,15 @@ impl Parser {
             };
             term = Exp::App(Box::new(term), Box::new(arg.clone()));
         }
-        Some(readback_val(
-            0,
-            &eval_env(&term, &Rho::Nil, &self.grammar.env()).ok()?,
-        ))
+        // `try_readback_val`, not `readback_val` (eigenius#104). The antecedents come
+        // from an untrusted Proposer, so applying them can leave a stuck application —
+        // a resource in function position is the witnessed shape. `eval` already
+        // reports that as `None` through `.ok()?`; readback has to match, or the same
+        // candidate that eval would have rejected panics instead. This is the fix the
+        // felicity gate already carries, on the other path that evaluates un-vetted
+        // terms.
+        let val = eval_env(&term, &Rho::Nil, &self.grammar.env()).ok()?;
+        try_readback_val(0, &val).ok()
     }
 
     /// Resolve **every** hole of an [`OpenParse`] via an (untrusted) [`Proposer`], substituting

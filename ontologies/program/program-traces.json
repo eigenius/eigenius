@@ -218,7 +218,7 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:Property"
     ],
-    "urn:eigenius:core:description": "Content hash of the component input (CBOR deterministic encoding).",
+    "urn:eigenius:core:description": "Content hash of the component input (CBOR deterministic encoding). NOT the memo key: the key covers the component IRI, the input and the argument together (eigenius#146), and this slot held that composite value until 2026-09-12 under a name that said otherwise.",
     "urn:eigenius:core:short_name": "input_hash",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string"
   },
@@ -227,7 +227,7 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:Property"
     ],
-    "urn:eigenius:core:description": "Content hash of the component argument.",
+    "urn:eigenius:core:description": "Content hash of the component argument, when the call carried one. Absent means the component was called with no argument \u2014 a distinction the memo key also draws, so the two cases cannot collide (eigenius#146).",
     "urn:eigenius:core:short_name": "argument_hash",
     "urn:eigenius:core:data_type": "urn:eigenius:core:string"
   },

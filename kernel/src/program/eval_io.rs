@@ -170,7 +170,17 @@ pub fn execute_program_nbe_with_institutions(
     // reify (already in `produced`) or is a passthrough of a chain
     // resource — in either case the run-boundary should not re-id
     // or re-push it.
-    if output.id().is_none() && !output.properties().is_empty() {
+    //
+    // A bare LITERAL is not domain content, which is this gate's own criterion. Its
+    // wrapper exists so the payload reaches the caller (eigenius#195); it is a scalar
+    // under a synthetic key, not a resource the chain should hold. Elevating one also
+    // fails at commit: the key is `core:string` / `core:integer` / `core:float` /
+    // `core:boolean`, which are `core:DataType`s and not declared properties, so Rule 22
+    // rejects the layer. Before eigenius#195 the wrapper was empty and the
+    // `!is_empty()` arm of this condition kept it out; the payload arriving is what
+    // made the difference.
+    let output_is_bare_literal = crate::nbe::eval::literal_as_resource(&result).is_some();
+    if !output_is_bare_literal && output.id().is_none() && !output.properties().is_empty() {
         if let Some(prog_iri) = program.id() {
             let iri = crate::institution::eval_hooks::deterministic_run_output_iri(
                 "program-output",
@@ -208,6 +218,14 @@ fn val_to_resource(val: &Val) -> Result<Resource, ProgramError> {
                 }
             }
             Ok(r)
+        }
+        // A literal carries its payload across as the one-property wrapper keyed on its
+        // type IRI (eigenius#195). Without this arm `input.some_string_property` as a
+        // program body returned an empty resource in release and panicked in debug —
+        // outside the `catch_unwind` above, so it escaped as a panic rather than a
+        // `ProgramError`.
+        _ if crate::nbe::eval::literal_as_resource(val).is_some() => {
+            Ok(crate::nbe::eval::literal_as_resource(val).expect("just checked"))
         }
         _ => {
             // Lossy conversion — fire in debug builds so tests surface

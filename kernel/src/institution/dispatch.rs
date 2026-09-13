@@ -379,9 +379,21 @@ pub fn build_verdict_resource(
     // verdict_query_class, runtime_invocation, dispatched_to,
     // diagnostic; any other property the institution returned on its
     // output Resource (e.g. statistics-institution's
-    // canonical_proposition, computed_statistic, computed_p_value) is
+    // `eigentt:proposition`, computed_statistic, computed_p_value) is
     // copied through so the Verdict carries the full audit-anchor
     // shape the institution computed.
+    //
+    // **Copied, not type-checked** (eigenius#226). There is no declared OUTPUT
+    // contract to check against: an institution's declared contract is an input
+    // class, and `marshal.rs` checks arity and property shape on the way in only.
+    // What covers the way out is incidental — the Verdict is committed, so layer
+    // validation runs Rule 21 over it, and Rule 21 fires where a property's
+    // `class_types` names `eigentt:Term` or `eigentt:Judgement`. That holds for
+    // `eigentt:proposition`, which is how the live statistics path is covered. A
+    // property declared with any other range carries a term-shaped value past every
+    // type-level check. The fix is not a special case here: D75 §5 makes an
+    // institution's signature a type in Γ_env, so a proposition is checked because
+    // crossing IS an application.
     let protected = protected_verdict_properties();
     for (prop_iri, value) in dispatch.output.properties() {
         if protected.contains(prop_iri.as_str()) {

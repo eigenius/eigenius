@@ -2494,25 +2494,27 @@ impl<'a> Parser<'a> {
 
             // Determine what kind of application this is
             expr = match &expr {
-                Expr::Var { name, .. } if name == "map" && args.len() == 2 => Expr::MapExpr {
-                    function: Box::new(args.remove(0)),
-                    collection: Box::new(args.remove(0)),
-                    pos,
-                },
-                Expr::Var { name, .. } if name == "reduce" && args.len() == 3 => Expr::ReduceExpr {
-                    function: Box::new(args.remove(0)),
-                    initial: Box::new(args.remove(0)),
-                    collection: Box::new(args.remove(0)),
-                    pos,
-                },
+                Expr::Var(qn) if qn.namespace.is_none() && qn.name == "map" && args.len() == 2 => {
+                    Expr::MapExpr {
+                        function: Box::new(args.remove(0)),
+                        collection: Box::new(args.remove(0)),
+                        pos,
+                    }
+                }
+                Expr::Var(qn)
+                    if qn.namespace.is_none() && qn.name == "reduce" && args.len() == 3 =>
+                {
+                    Expr::ReduceExpr {
+                        function: Box::new(args.remove(0)),
+                        initial: Box::new(args.remove(0)),
+                        collection: Box::new(args.remove(0)),
+                        pos,
+                    }
+                }
                 _ => {
                     // Regular function application
                     let function = match expr {
-                        Expr::Var { name, pos } => QualifiedName {
-                            namespace: None,
-                            name,
-                            pos,
-                        },
+                        Expr::Var(qn) => qn,
                         Expr::Project { property, .. } => property,
                         _ => {
                             return Err(EslError::parser(
@@ -2623,21 +2625,16 @@ impl<'a> Parser<'a> {
             TokenKind::Map | TokenKind::Reduce => {
                 let pos = self.current_pos();
                 let name = self.expect_ident()?;
-                Ok(Expr::Var { name, pos })
+                Ok(Expr::Var(QualifiedName {
+                    namespace: None,
+                    name,
+                    pos,
+                }))
             }
 
             // Identifier (variable) or qualified name `ns:name` (one atomic token)
             TokenKind::Ident(_) | TokenKind::QualName(..) => {
-                let pos = self.current_pos();
-                let qn = self.parse_qualified_name()?;
-                if let Some(ns) = qn.namespace {
-                    Ok(Expr::Var {
-                        name: format!("{ns}:{}", qn.name),
-                        pos,
-                    })
-                } else {
-                    Ok(Expr::Var { name: qn.name, pos })
-                }
+                Ok(Expr::Var(self.parse_qualified_name()?))
             }
 
             _ => Err(EslError::parser(
@@ -2741,16 +2738,7 @@ impl<'a> Parser<'a> {
             TokenKind::LBrace => self.parse_block_expr(),
             _ => {
                 // Qualified name as string reference
-                let pos = self.current_pos();
-                let qn = self.parse_qualified_name()?;
-                if let Some(ns) = qn.namespace {
-                    Ok(Expr::Var {
-                        name: format!("{ns}:{}", qn.name),
-                        pos,
-                    })
-                } else {
-                    Ok(Expr::Var { name: qn.name, pos })
-                }
+                Ok(Expr::Var(self.parse_qualified_name()?))
             }
         }
     }
@@ -3412,7 +3400,7 @@ mod tests {
                 assert_eq!(p.name.name, "identity");
                 assert_eq!(p.input_type.name, "Document");
                 assert_eq!(p.output_type.name, "Document");
-                assert!(matches!(&p.body, Expr::Var { name, .. } if name == "input"));
+                assert!(matches!(&p.body, Expr::Var(qn) if qn.name == "input"));
             }
             _ => panic!("expected program"),
         }
@@ -4206,7 +4194,7 @@ mod tests {
                             assert_eq!(inner_param, "b");
                             assert!(matches!(
                                 inner_body.as_ref(),
-                                Expr::Var { name, .. } if name == "a"
+                                Expr::Var(qn) if qn.name == "a"
                             ));
                         }
                         other => panic!("expected inner Lambda, got {other:?}"),
@@ -4276,7 +4264,7 @@ mod tests {
                             params,
                             &["a".to_string(), "b".to_string(), "opt".to_string()]
                         );
-                        assert!(matches!(body, Expr::Var { name, .. } if name == "b"));
+                        assert!(matches!(body, Expr::Var(qn) if qn.name == "b"));
                     }
                     other => panic!("expected inline body, got {other:?}"),
                 }

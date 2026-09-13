@@ -220,13 +220,14 @@ impl ProgramMetrics {
 /// replay slot and only deterministic components to this store (D21
 /// §3.3). Nothing else is memoized here.
 ///
-/// The key is specified as SHA-256(component_iri || CBOR(input) ||
-/// CBOR(argument)). `compute_trace_key` implements only the first two
-/// factors, and both construction sites set `argument_hash: None`, so
-/// two calls to one component with the same input and different
-/// arguments collide. That divergence is a defect against this
-/// specification, not a stale specification; the spec is left as
-/// written.
+/// The key is SHA-256 over all three factors — component IRI, input and argument, each
+/// length-prefixed, with a presence tag on the argument; see [`compute_trace_key`] for
+/// why the framing rather than bare concatenation. It implemented only the first two
+/// until `2026-09-12`, and both construction sites set
+/// `argument_hash: None`, so two calls to one component with the same
+/// input and different arguments collided; since the cache is consulted
+/// before execution, the second call was served the first one's output
+/// and never ran (eigenius#146).
 pub trait TraceStore: Send + Sync {
     /// Look up a cached ComponentTrace by content-addressed key.
     fn get_component_trace(&self, key: &[u8; 32]) -> Option<ComponentTrace>;
@@ -523,15 +524,55 @@ fn set_is_a(resource: &mut Resource, class_iri: &str) {
     );
 }
 
+/// Content hash of one resource under CBOR canonicalisation.
+///
+/// This is what `program:traces:input_hash` and `program:traces:argument_hash`
+/// are declared to carry: *"Content hash of the component input"*, and the same
+/// for the argument. The trace used to put the whole composite cache key in the
+/// `input_hash` slot, which is a different value under a name that says otherwise.
+pub fn hash_resource(r: &Resource) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(crate::ontology::eigon_cbor::canonicalize(r));
+    hasher.finalize().into()
+}
+
 /// Compute the content-addressed key for a ComponentTrace cache lookup.
 ///
-/// Key = SHA-256(component_iri || CBOR(input)).
-pub fn compute_trace_key(component: &str, input: &Resource) -> [u8; 32] {
+/// Key = SHA-256(component_iri ‖ CBOR(input) ‖ CBOR(argument)), the three factors
+/// [`TraceStore`] specifies. The argument used to be missing, and because the
+/// cache is consulted BEFORE execution, a second call with the same input and a
+/// different argument was served the first call's output and never ran
+/// (eigenius#146).
+///
+/// Every field is length-prefixed and the argument carries a presence tag, so no
+/// two distinct triples can produce the same byte sequence. Without the tag a
+/// component called with no argument and one called with an argument that
+/// canonicalises to nothing would key alike; without the lengths, a longer IRI
+/// against a shorter input could.
+pub fn compute_trace_key(
+    component: &str,
+    input: &Resource,
+    argument: Option<&Resource>,
+) -> [u8; 32] {
     use sha2::{Digest, Sha256};
-    let cbor = crate::ontology::eigon_cbor::canonicalize(input);
     let mut hasher = Sha256::new();
-    hasher.update(component.as_bytes());
-    hasher.update(&cbor);
+    let field = |bytes: &[u8], h: &mut Sha256| {
+        h.update((bytes.len() as u64).to_le_bytes());
+        h.update(bytes);
+    };
+    field(component.as_bytes(), &mut hasher);
+    field(
+        &crate::ontology::eigon_cbor::canonicalize(input),
+        &mut hasher,
+    );
+    match argument {
+        None => hasher.update([0u8]),
+        Some(a) => {
+            hasher.update([1u8]);
+            field(&crate::ontology::eigon_cbor::canonicalize(a), &mut hasher);
+        }
+    }
     hasher.finalize().into()
 }
 
@@ -657,12 +698,57 @@ mod tests {
     #[test]
     fn compute_trace_key_deterministic() {
         let input = Resource::new_embedded();
-        let k1 = compute_trace_key("urn:test:comp", &input);
-        let k2 = compute_trace_key("urn:test:comp", &input);
+        let k1 = compute_trace_key("urn:test:comp", &input, None);
+        let k2 = compute_trace_key("urn:test:comp", &input, None);
         assert_eq!(k1, k2);
 
         // Different component → different key
-        let k3 = compute_trace_key("urn:test:other", &input);
+        let k3 = compute_trace_key("urn:test:other", &input, None);
         assert_ne!(k1, k3);
+    }
+
+    /// **eigenius#146.** The argument is part of the key.
+    ///
+    /// It was not, and the cache is consulted before execution, so one component
+    /// called twice with the same input and different arguments was served the
+    /// first call's output and never ran. The three cases below are the ones that
+    /// collided: two arguments, and an argument against none.
+    #[test]
+    fn the_argument_is_part_of_the_memo_key() {
+        fn arg(v: i64) -> Resource {
+            let mut r = Resource::new_embedded();
+            r.set(Iri::parse("urn:test:n").unwrap(), Value::Integer(v));
+            r
+        }
+        let input = Resource::new_embedded();
+        let none = compute_trace_key("urn:test:comp", &input, None);
+        let a = compute_trace_key("urn:test:comp", &input, Some(&arg(1)));
+        let b = compute_trace_key("urn:test:comp", &input, Some(&arg(2)));
+
+        assert_ne!(a, b, "same input, different argument, must not share a key");
+        assert_ne!(none, a, "an argument must not key like no argument");
+        assert_eq!(
+            a,
+            compute_trace_key("urn:test:comp", &input, Some(&arg(1))),
+            "and the key is still deterministic"
+        );
+    }
+
+    /// The two hash slots carry what the ontology says they carry.
+    ///
+    /// `program:traces:input_hash` is declared "Content hash of the component
+    /// input"; the trace used to put the whole composite cache key there, which is
+    /// a different value under a name that says otherwise.
+    #[test]
+    fn the_trace_hash_slots_hold_the_hashes_they_are_named_for() {
+        let mut input = Resource::new_embedded();
+        input.set(Iri::parse("urn:test:x").unwrap(), Value::Integer(7));
+
+        assert_eq!(hash_resource(&input), hash_resource(&input.clone()));
+        assert_ne!(
+            hash_resource(&input),
+            compute_trace_key("urn:test:comp", &input, None),
+            "the input hash is not the cache key"
+        );
     }
 }

@@ -363,11 +363,10 @@ impl InstitutionEngine {
                     let output = result.output.clone();
                     let ct = ComponentTrace {
                         component: component_iri.to_string(),
-                        input_hash: crate::program::trace::compute_trace_key(
-                            component_iri,
-                            &input_resource,
-                        ),
-                        argument_hash: None,
+                        input_hash: crate::program::trace::hash_resource(&input_resource),
+                        argument_hash: arg_resource
+                            .as_ref()
+                            .map(crate::program::trace::hash_resource),
                         output: output.clone(),
                         cached: false,
                         metrics: result.metrics,
@@ -440,8 +439,11 @@ impl InstitutionEngine {
         } else {
             // Deterministic component — content-address memo is sound
             // and reused cross-task (D21 §3.3).
-            let cache_key =
-                crate::program::trace::compute_trace_key(component_iri, &input_resource);
+            let cache_key = crate::program::trace::compute_trace_key(
+                component_iri,
+                &input_resource,
+                arg_resource.as_ref(),
+            );
             if let Some(store) = trace_store {
                 if let Some(cached) = store.get_component_trace(&cache_key) {
                     return Ok((Val::ResourceVal(Box::new(cached.output)), None));
@@ -453,8 +455,10 @@ impl InstitutionEngine {
                     let output = result.output.clone();
                     let ct = ComponentTrace {
                         component: component_iri.to_string(),
-                        input_hash: cache_key,
-                        argument_hash: None,
+                        input_hash: crate::program::trace::hash_resource(&input_resource),
+                        argument_hash: arg_resource
+                            .as_ref()
+                            .map(crate::program::trace::hash_resource),
                         output: output.clone(),
                         cached: false,
                         metrics: result.metrics,
@@ -652,6 +656,13 @@ fn val_to_resource(val: &Val) -> Resource {
     match val {
         Val::ResourceVal(r) => r.as_ref().clone(),
         Val::Unit => Resource::new_embedded(),
+        // A literal argument carries its payload across as the one-property wrapper
+        // keyed on its type IRI (eigenius#195). Without this arm `CompleteText(input.text)`
+        // dispatched the component with an EMPTY input resource — and since the memo key
+        // is computed over that resource, every such call shared one cache entry.
+        _ if crate::nbe::eval::literal_as_resource(val).is_some() => {
+            crate::nbe::eval::literal_as_resource(val).expect("just checked")
+        }
         _ => {
             debug_assert!(
                 false,
