@@ -12,7 +12,7 @@ use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
 
 #[test]
 fn the_kappa_tau_ontology_compiles_and_validates() {
-    let boot = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let boot = eigenius_kernel::testing::bootstrap_context();
     let head = Arc::clone(boot.head());
     let source = include_str!("../../../ontologies/kappatau/kappatau.esl");
     let resources = match esl::compile(source, &head) {

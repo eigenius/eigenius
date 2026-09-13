@@ -74,7 +74,7 @@ fn pilot_chain_from(
     Arc<InstitutionIndex>,
     Arc<InstitutionRuntime>,
 ) {
-    let boot = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let boot = eigenius_kernel::testing::bootstrap_context();
     let storage = boot.storage().clone();
     let head = Arc::clone(boot.head());
 
@@ -359,7 +359,7 @@ fn an_unadjudicable_assessment_refuses_to_run_rather_than_suspending() {
 /// commit, and the handler refuses it too rather than dropping it.
 #[test]
 fn an_interaction_estimate_that_is_not_a_pair_does_not_commit() {
-    let boot = eigenius_kernel::bootstrap::bootstrap().expect("bootstrap");
+    let boot = eigenius_kernel::testing::bootstrap_context();
     let storage = boot.storage().clone();
     let head = Arc::clone(boot.head());
     let kt_source = include_str!("../../../ontologies/kappatau/kappatau.esl");
