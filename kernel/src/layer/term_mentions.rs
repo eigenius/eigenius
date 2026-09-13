@@ -46,15 +46,20 @@
 //! could not tell a term from a blob and no caller could make this distinction
 //! safely.
 //!
-//! **Within a term, structural and deliberately over-approximate.** Any string that
-//! parses as a `urn:` IRI counts, rather than only `ConstRef`'s and `CtorApp`'s first
-//! argument. Two reasons: it costs no decode, and it cannot go stale when the encoder
-//! gains an IRI-bearing form — a walker enumerating the forms it knew would silently
-//! stop seeing the new one, which is the failure mode this module exists to end. The
-//! residual price is a `LitString` inside a term holding something IRI-shaped, which
-//! is counted as a mention. Sound for a consumer asking "what might this depend on",
-//! where a false positive costs an extra check and a false negative is a missed
-//! invalidation.
+//! **Within a term, declaration-driven.** This header described the opposite until B6:
+//! any string parsing as a `urn:` IRI counted, deliberately over-approximating on the
+//! reasoning that a false positive costs an extra check while a false negative is a
+//! missed invalidation. B6 replaced that with the declaration — `spine_mentions` reads
+//! the constructor's argument types and `mentions_under_property` reads the property's
+//! `core:data_type` — so a bare `LitString` holding something IRI-shaped is now data,
+//! not a mention.
+//!
+//! That direction matters to more than the index. `layer::witness_admission` asks this
+//! walk what a proposition depends on, in order to drop a witness credit when a layer
+//! between the query point and the admitting layer rebinds one of those names
+//! (eigenius#227). A false negative there is the unsoundness that check exists to close,
+//! so a form that carries a reference must be reachable through a declaration rather
+//! than through its spelling.
 
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};

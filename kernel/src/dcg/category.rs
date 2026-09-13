@@ -180,11 +180,12 @@ fn denote_mood(mood: &Exp) -> Result<Exp, String> {
 /// is the equality this function is for. Genuine δ-equality (two names that unfold
 /// alike) is `conv`'s job and arrives with Phase D.
 pub fn type_eq(a: &Exp, b: &Exp) -> bool {
-    // Fallible on BOTH halves (eigenius#104). The felicity gate calls this as
-    // `type_eq(denote_cat(cat), sem_type)`, where `sem_type` comes off a chart candidate
-    // rather than from the checker, so normalising it can get stuck. Eval failure already
-    // meant "not equal" here; readback failure has to mean the same, or a comparison
-    // panics where the identical value would have compared false one line earlier.
+    // Fallible on BOTH halves (eigenius#104). The one caller is `lexicon::gate_entry`,
+    // which compares `denote_cat(cat)` against the entry's declared `lexicon:sem_type`
+    // read off the layer — an imported or drafted entry can carry one that gets stuck,
+    // which is what that gate exists to filter. Eval failure already meant "not equal"
+    // here; readback failure has to mean the same, or a comparison panics where the
+    // identical value would have compared false one line earlier.
     let norm = |e: &Exp| {
         eval(e, &Rho::Nil)
             .ok()

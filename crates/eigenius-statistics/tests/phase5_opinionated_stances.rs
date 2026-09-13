@@ -194,6 +194,14 @@ fn one_sided_witnessed_does_not_hold_when_the_effect_runs_the_other_way() {
         "the diagnostic must record the observed direction, so a reader of the verdict can \
          see the effect ran against the asserted one; got: {diag}"
     );
+    // And it must name the reason that actually refused. `direction_ok = false` appears
+    // whenever the plan is one-sided and t >= 0, including when the ALPHA term was what
+    // failed -- so without this the test passes on a verdict labelled `AlphaNotCrossed`,
+    // which here would be false: p = 5e-7 against alpha = 0.05.
+    assert!(
+        diag.contains("DirectionNotObserved") && !diag.contains("AlphaNotCrossed"),
+        "a directional refusal must not be reported as the alpha comparison failing; got: {diag}"
+    );
 }
 
 #[test]

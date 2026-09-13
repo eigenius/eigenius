@@ -38,8 +38,10 @@
 //!   institution doesn't compute the axiom list yet).
 //! - `extract_typed(ef_lean_proof_payload, LeanProofTerm)` — returns
 //!   the payload bytes wrapped as `Val::ResourceVal({core:string →
-//!   bytes})`, matching the convention `kernel::nbe::eval::
-//!   resource_value_to_val` uses for string-typed values.
+//!   bytes})` — the one-property wrapper `kernel::nbe::eval::
+//!   literal_as_resource` builds and `resource_payload` reads back.
+//!   (`resource_value_to_val` produced it until eigenius#195 for
+//!   strings, eigenius#142 for the other kinds; it no longer does.)
 //! - `reify` — `NotImplemented`. Lean has no `ImportFormat`s yet;
 //!   construction is authoring-side via the chain-mirror translator,
 //!   not via a kernel `reify` call.
@@ -187,8 +189,9 @@ impl Institution for LeanInstitution {
         if procedure_iri.as_str() == iris::PROC_EXTRACT_PROOF_PAYLOAD {
             let payload = resolve_payload(resource, ctx)?;
             let bytes = payload_bytes(&payload)?;
-            // Match `kernel::nbe::eval::resource_value_to_val`'s
-            // string convention: a `Val::ResourceVal` wrapping an
+            // Match the kernel's scalar-at-a-Resource-boundary shape — the
+            // one-property wrapper `literal_as_resource` builds and
+            // `resource_payload` reads back. A `Val::ResourceVal` wrapping an
             // embedded Resource that carries the string under the
             // `core:string` property. The ExportFormat's
             // `payload_type` is `core:string`, so the consumer reads

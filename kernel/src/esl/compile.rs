@@ -571,8 +571,6 @@ struct Compiler {
 /// name has no namespace and contains no `:` (i.e. a truly bare
 /// reference that can't be an IRI).
 ///
-/// Resolve an application head to a component IRI.
-///
 /// The namespace field is read directly when present. The split-the-string branch is
 /// for a name that still carries its prefix inside `name`: the parser produced that
 /// shape for every `Var` until eigenius#231 un-flattened it, and a `Project`'s property

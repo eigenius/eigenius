@@ -1000,15 +1000,23 @@ pub fn do_validate_analysis_plan(
     let result_diag = if test_rejected {
         combined_diag.clone()
     } else {
+        // Name the reason that actually refused. A one-sided plan can clear alpha and
+        // still fail on the sign (eigenius#154), and labelling that `AlphaNotCrossed`
+        // puts a false statement in the audit record — the p DID cross. The whole point
+        // of checking the direction is that a reader of the verdict can see it.
+        let reason = if p_value_for_alpha < alpha {
+            format!(
+                "DirectionNotObserved: p = {p_value_for_alpha:.6} crossed alpha = {alpha}, \
+                 but the observed effect runs against the asserted direction"
+            )
+        } else {
+            format!(
+                "AlphaNotCrossed: computed p = {p_value_for_alpha:.6}, threshold alpha = {alpha}"
+            )
+        };
         Some(match combined_diag.as_deref() {
-            Some(note) => format!(
-                "AlphaNotCrossed: computed p = {p_value_for_alpha:.6}, \
-                 threshold alpha = {alpha}. {note}"
-            ),
-            None => format!(
-                "AlphaNotCrossed: computed p = {p_value_for_alpha:.6}, \
-                 threshold alpha = {alpha}"
-            ),
+            Some(note) => format!("{reason}. {note}"),
+            None => reason,
         })
     };
     let canonical_for_result = if test_rejected {
@@ -2969,9 +2977,9 @@ fn derive_canonical_proposition_singlesample(
 ///
 /// Authoring convention: place the hypothesised-lower group first
 /// (`group_a`) so the one-sided `lt` reads in the asserted direction.
-/// (As with the one-sample case, v1's verdict checks p < alpha but not
-/// the sign of the observed difference — the directional refinement is a
-/// shared follow-on; the WRN MSI<MSS direction holds regardless.)
+/// The verdict checks the SIGN as well as the p-value since eigenius#154, so this
+/// `lt` is asserted only where it was observed: a significant difference with
+/// `mean_a > mean_b` no longer rejects. (The WRN MSI<MSS direction holds either way.)
 fn derive_canonical_proposition_twosample(
     sample_set_iri: &str,
     directionality: &serde_json::Value,
@@ -3004,8 +3012,9 @@ fn derive_canonical_proposition_twosample(
 ///
 /// Authoring convention: the one-sided form asserts *anti*-correlation
 /// (rho < 0); the WRN dependency ~ #MS-deletions claim is of this form.
-/// (As elsewhere, v1's verdict checks p < alpha but not the sign of the
-/// observed rho — a shared directional follow-on; the WRN rho < 0 holds.)
+/// The verdict checks the SIGN as well as the p-value since eigenius#154, so this
+/// `lt` is asserted only where it was observed: a significant positive rho no longer
+/// rejects. (The WRN rho < 0 holds either way.)
 fn derive_canonical_proposition_correlation(
     sample_set_iri: &str,
     directionality: &serde_json::Value,

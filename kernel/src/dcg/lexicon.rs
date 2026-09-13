@@ -122,8 +122,12 @@ pub fn gate_entry(layer: &Arc<Layer>, entry: &Resource) -> Result<Exp, String> {
     let denoted = denote_cat(&cat)?;
     let sem_type = decode_type(st_v, layer).map_err(|e| format!("sem_type decode: {e:?}"))?;
     if !type_eq(&denoted, &sem_type) {
+        // `type_eq` is false for "different" AND for "could not normalise" (eigenius#104),
+        // so say both. Printing two terms side by side that may be identical, under a
+        // message asserting they differ, is how a stuck `sem_type` reads otherwise.
         return Err(format!(
-            "⟦cat⟧ ≠ sem_type: ⟦cat⟧ = {denoted:?}, sem_type = {sem_type:?}"
+            "⟦cat⟧ ≠ sem_type, or one of them does not normalise: ⟦cat⟧ = {denoted:?}, \
+             sem_type = {sem_type:?}"
         ));
     }
 

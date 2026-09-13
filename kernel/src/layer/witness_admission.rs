@@ -608,19 +608,43 @@ pub fn lookup_chain_witness(layer: &Layer, key: &WitnessKey) -> bool {
 /// [`crate::layer::term_mentions::json_mentions_of_value`], the same declaration-driven
 /// walk the `core:mentions` indexer uses, so "what this proposition depends on" has one
 /// answer rather than two.
-fn proposition_dependencies(admitting: &Layer, target_iri: &Iri) -> BTreeSet<Iri> {
+fn proposition_dependencies(admitting: &Layer, key: &WitnessKey) -> BTreeSet<Iri> {
     let mut out = BTreeSet::new();
-    let Some(target) = admitting.resolve(target_iri) else {
-        return out;
-    };
-    // The two slots a proposition can live in, matching `target_proposition_hash`. The
-    // third case there is the `Asserts(iri)` default, which names only the target and so
-    // depends on no declaration a descendant could rebind.
-    let slots = [wk::PROPOSITION, CONCLUSION_GROUNDS_JUDGEMENT];
-    for slot in slots {
-        if let Some(encoded) = Iri::parse(slot).ok().and_then(|i| target.get(&i)) {
-            crate::layer::term_mentions::json_mentions_of_value(encoded, admitting, &mut out);
+
+    // The TARGET ITSELF, always. A witness says "the resource at `iri` states P", so a
+    // descendant that redefines that resource changes what the credit was earned for.
+    // It is also the whole dependency of the `Asserts(iri)` default, which is the
+    // proposition for every target carrying no stored one — the common shape. Leaving it
+    // out made the check a no-op for exactly those.
+    out.insert(key.iri.clone());
+
+    if let Some(target) = admitting.resolve(&key.iri) {
+        // Every slot `target_proposition_hash` and `emit_from_conclusion` read.
+        // `proof_judgement` is the one that establishes `Verified` from a conclusion.
+        for slot in [
+            wk::PROPOSITION,
+            CONCLUSION_GROUNDS_JUDGEMENT,
+            CONCLUSION_PROOF_JUDGEMENT,
+        ] {
+            if let Some(encoded) = Iri::parse(slot).ok().and_then(|i| target.get(&i)) {
+                crate::layer::term_mentions::json_mentions_of_value(encoded, admitting, &mut out);
+            }
         }
+    }
+
+    // A `Verified` witness can be keyed off the `prov:judgement` carried by the TRACE
+    // rather than by anything on the target (D87 §5) — `emit_from_trace` hashes that
+    // judgement's type and never reads the target on that branch. Reading only the
+    // target left the grade `justification:Grounds.verified` consumes uncovered, which is
+    // the one this check matters most for. Mirrors the admission scan; the closure
+    // returns false throughout so every targeting trace is visited.
+    if let Ok(judgement_prop) = Iri::parse(wk::PROV_JUDGEMENT) {
+        any_trace_targeting(admitting, &key.iri, |trace| {
+            if let Some(encoded) = trace.get(&judgement_prop) {
+                crate::layer::term_mentions::json_mentions_of_value(encoded, admitting, &mut out);
+            }
+            false
+        });
     }
     out
 }
@@ -647,21 +671,32 @@ fn proposition_dependencies(admitting: &Layer, target_iri: &Iri) -> BTreeSet<Iri
 /// irrelevant vocabulary edits. This asks the finer question the issue asks for — did a
 /// layer we walked past rebind something this proposition actually names?
 ///
-/// Conservative in the safe direction. A rebinding that happens not to change the
-/// proposition's meaning still drops the credit, and the witness has to be re-earned
-/// against the new binding. Refusing a still-good witness costs a recheck; granting a
-/// stale one is the soundness bug.
+/// **Coarser than D80 W1 specifies, and deliberately so for now.** That design refuses a
+/// hit only where the binding is WIDER, by `conjunction_entails`; narrowing is sound to
+/// keep. This tests only whether a dependency was rebound at all, so a narrowing
+/// redefinition drops the credit too.
+///
+/// Re-earning is not a recheck. `synthesize_chain_witness` is a lookup over traces
+/// already committed, so a dropped credit is regained by committing a NEW trace at or
+/// above the rebinding layer — an authoring action. A `justification:Grounds` citation
+/// that type-checked before the rebinding stops type-checking after it. That is the
+/// intended direction: granting a stale witness is the soundness bug, refusing a
+/// still-good one is a commit the author has to make.
 fn rebinding_invalidates_credit(
     query: &Layer,
     walked_past: &[Arc<Layer>],
     admitting: &Layer,
     key: &WitnessKey,
 ) -> bool {
-    let deps = proposition_dependencies(admitting, &key.iri);
-    if deps.is_empty() {
-        return false;
-    }
-    let rebinds = |l: &Layer| deps.iter().any(|d| l.defined_iris().contains(d));
+    let deps = proposition_dependencies(admitting, key);
+    // A TOMBSTONE is a rebinding, and the most complete one: the name resolves to
+    // nothing above it. `defined_iris` and `tombstoned_iris` are disjoint, so a layer
+    // that deletes a dependency is invisible to the first set alone — and deleting the
+    // class a proposition quantifies over is the one case that must not keep credit.
+    let rebinds = |l: &Layer| {
+        deps.iter()
+            .any(|d| l.defined_iris().contains(d) || l.tombstoned_iris().contains(d))
+    };
     if rebinds(query) || walked_past.iter().any(|l| rebinds(l)) {
         tracing::debug!(
             { field::OPERATION } = operation::WITNESS_DECODE,
@@ -1678,11 +1713,11 @@ mod tests {
 
     #[test]
     fn witness_credit_does_not_survive_a_rebinding_the_proposition_depends_on() {
-        // The module doc argues first-hit-wins is sound "because Layer
+        // The module doc USED TO argue first-hit-wins is sound "because Layer
         // immutability means a once-admitted witness stays admitted in all
         // descendants". Immutability makes the *record* stable; it does not
         // make the *meaning* of what was recorded stable, because a descendant
-        // can rebind a name the proposition mentions.
+        // can rebind a name the proposition mentions. The doc now says so.
         //
         // The direction of the rebinding is what makes this unsound rather than
         // merely stale. `Dog` here is *widened* — a required property is
@@ -1745,6 +1780,113 @@ mod tests {
         assert!(
             lookup_chain_witness(&l3, &key),
             "a rebinding of something the proposition does not name must not drop the credit"
+        );
+    }
+
+    /// The rebinding is found however many layers up it sits (eigenius#227).
+    ///
+    /// The widening test above has the admitting layer as the DIRECT parent, so the walk
+    /// only ever checks the query layer itself. A defect confined to the accumulation —
+    /// cleared each iteration, or only the immediate parent tracked — passes that test and
+    /// this one catches it: the rebinding is two layers below the query point.
+    #[test]
+    fn a_rebinding_is_found_however_far_up_the_walk_it_sits() {
+        let prop = quantified_over_subject_class();
+        let target = "urn:eigenius:example:every-dog-multihop";
+
+        let mut b1 = LayerBuilder::new(
+            "multihop-v1",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
+        b1.add_resource(class_requiring(SUBJECT_CLASS, NARROW))
+            .unwrap();
+        b1.add_resource(target_resource_with_canonical_prop(target, &prop))
+            .unwrap();
+        b1.add_resource(declaration_trace(
+            target,
+            "urn:eigenius:example:every-dog-multihop-decl-trace",
+        ))
+        .unwrap();
+        let l1 = Arc::new(b1.build(LayerStorage::in_memory()));
+
+        let key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        assert!(
+            layer_admits_witness(&l1, &key),
+            "setup: admitted against Dog-v1"
+        );
+
+        // L2 touches nothing. L3 widens. L4 is the query point and touches nothing.
+        //
+        // The widening is deliberately NOT in the layer nearest the admitting one: a walk
+        // that keeps only the most recently visited layer still sees a rebinding there, so
+        // placing it at L3 with a neutral L2 beneath is what distinguishes accumulating
+        // from remembering one.
+        let b2 = LayerBuilder::new("multihop-v2", Some(Arc::clone(&l1)));
+        let l2 = Arc::new(b2.build(LayerStorage::in_memory()));
+        let mut b3 = LayerBuilder::new("multihop-v3", Some(Arc::clone(&l2)));
+        b3.add_resource(class_requiring(SUBJECT_CLASS, WIDE))
+            .unwrap();
+        let l3 = Arc::new(b3.build(LayerStorage::in_memory()));
+        let b4 = LayerBuilder::new("multihop-v4", Some(Arc::clone(&l3)));
+        let l4 = Arc::new(b4.build(LayerStorage::in_memory()));
+
+        assert!(
+            !lookup_chain_witness(&l4, &key),
+            "the widening sits mid-walk, with a neutral layer on either side, and must still \
+             be seen"
+        );
+    }
+
+    /// Deleting the class is a rebinding too, and the most complete one (eigenius#227).
+    ///
+    /// `defined_iris` and `tombstoned_iris` are disjoint sets, so a check that reads only
+    /// the first is blind to a layer that removes a dependency — the one case where the
+    /// proposition does not even resolve at the query point.
+    #[test]
+    fn tombstoning_a_dependency_drops_the_credit() {
+        let prop = quantified_over_subject_class();
+        let target = "urn:eigenius:example:every-dog-tombstone";
+
+        let mut b1 = LayerBuilder::new(
+            "tombstone-v1",
+            Some(std::sync::Arc::clone(crate::testing::term_chain())),
+        );
+        b1.add_resource(class_requiring(SUBJECT_CLASS, NARROW))
+            .unwrap();
+        b1.add_resource(target_resource_with_canonical_prop(target, &prop))
+            .unwrap();
+        b1.add_resource(declaration_trace(
+            target,
+            "urn:eigenius:example:every-dog-tombstone-decl-trace",
+        ))
+        .unwrap();
+        let l1 = Arc::new(b1.build(LayerStorage::in_memory()));
+
+        let key = WitnessKey::from_exp(
+            WitnessCategory::Declared,
+            iri(target),
+            &prop,
+            crate::testing::codec_names(),
+        )
+        .unwrap();
+        assert!(
+            layer_admits_witness(&l1, &key),
+            "setup: admitted against Dog-v1"
+        );
+
+        let mut b2 = LayerBuilder::new("tombstone-v2", Some(Arc::clone(&l1)));
+        b2.tombstone(iri(SUBJECT_CLASS)).unwrap();
+        let l2 = Arc::new(b2.build(LayerStorage::in_memory()));
+
+        assert!(
+            !lookup_chain_witness(&l2, &key),
+            "the class the proposition quantifies over was deleted; the credit cannot carry"
         );
     }
 }
