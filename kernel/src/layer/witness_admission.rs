@@ -69,8 +69,15 @@
 //! which is what "droppable" means concretely: delete either and the answers do not change.
 //!
 //! Lookup is the parent-chain walk: `lookup_chain_witness(&Layer, &key)` tries each Layer top-down,
-//! returning true on first hit. First-hit-wins is sound because Layer immutability means a
-//! once-admitted witness stays admitted in all descendants.
+//! returning true on the first hit whose credit still stands.
+//!
+//! **First-hit-wins is not sound on its own, and used to be claimed here as if it were**
+//! (eigenius#227). The old argument was that "Layer immutability means a once-admitted witness stays
+//! admitted in all descendants". Immutability makes the RECORD stable; it does not make the MEANING
+//! of what was recorded stable, because a descendant can rebind a name the proposition mentions, and
+//! proposition identity has no environment in it. Widening a class a proposition quantifies over
+//! makes the claim strictly stronger than the one that earned the credit. So a hit below a rebinding
+//! of something the proposition depends on is refused — see `rebinding_invalidates_credit`.
 
 use crate::layer::Layer;
 use crate::observability::{field, operation};
@@ -79,6 +86,8 @@ use crate::ontology::well_known as wk;
 use crate::ontology::{Iri, Value};
 use crate::program::eigentt_type_mirror::CodecNames;
 use crate::witness::{hash_proposition_exp, WitnessCategory, WitnessKey};
+use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// D54: the `justification:Conclusion` class IRI and its `proposition`
 /// property. Named here (rather than in `well_known`) because the D49
@@ -577,12 +586,90 @@ pub fn lookup_chain_witness(layer: &Layer, key: &WitnessKey) -> bool {
     if layer_admits_witness(layer, key) {
         return true;
     }
+    // Layers walked PAST on the way down, nearest first. A hit below them only counts
+    // if none of them rebinds a name the proposition depends on — see
+    // [`rebinding_invalidates_credit`].
+    let mut walked_past: Vec<Arc<Layer>> = Vec::new();
     let mut cursor = layer.parent().cloned();
     while let Some(parent) = cursor {
         if layer_admits_witness(&parent, key) {
-            return true;
+            return !rebinding_invalidates_credit(layer, &walked_past, &parent, key);
         }
         cursor = parent.parent().cloned();
+        walked_past.push(parent);
+    }
+    false
+}
+
+/// The declarations a target's proposition names, resolved at the layer that admitted
+/// the witness.
+///
+/// This is the dependency set eigenius#227 turns on. It reuses
+/// [`crate::layer::term_mentions::json_mentions_of_value`], the same declaration-driven
+/// walk the `core:mentions` indexer uses, so "what this proposition depends on" has one
+/// answer rather than two.
+fn proposition_dependencies(admitting: &Layer, target_iri: &Iri) -> BTreeSet<Iri> {
+    let mut out = BTreeSet::new();
+    let Some(target) = admitting.resolve(target_iri) else {
+        return out;
+    };
+    // The two slots a proposition can live in, matching `target_proposition_hash`. The
+    // third case there is the `Asserts(iri)` default, which names only the target and so
+    // depends on no declaration a descendant could rebind.
+    let slots = [wk::PROPOSITION, CONCLUSION_GROUNDS_JUDGEMENT];
+    for slot in slots {
+        if let Some(encoded) = Iri::parse(slot).ok().and_then(|i| target.get(&i)) {
+            crate::layer::term_mentions::json_mentions_of_value(encoded, admitting, &mut out);
+        }
+    }
+    out
+}
+
+/// Does a rebinding between the query point and the admitting layer invalidate the
+/// credit? (eigenius#227)
+///
+/// **The soundness argument this repairs.** This module used to say first-hit-wins is
+/// sound "because Layer immutability means a once-admitted witness stays admitted in all
+/// descendants". Immutability makes the RECORD stable. It does not make the MEANING of
+/// what was recorded stable, because a descendant can rebind a name the proposition
+/// mentions. Proposition identity has no environment in it: a class reference encodes as
+/// a bare `ConstRef(iri)` and classes do not unfold during decode, so the hash cannot
+/// tell "C as defined here" from "C as defined there".
+///
+/// Direction is what made it unsound rather than merely stale. WIDENING a class the
+/// proposition quantifies over makes `Π(x : C). P` a strictly stronger claim than the one
+/// that earned the credit. Narrowing shrinks the domain and leaves stale credit sound by
+/// accident, which is why the test that witnesses this widens.
+///
+/// **Why a dependency test rather than a structural hash.** Hashing propositions over
+/// class structure over-invalidates: any field added to `C` moves the hash, including
+/// fields the proposition never mentions, which destroys identity stability under
+/// irrelevant vocabulary edits. This asks the finer question the issue asks for — did a
+/// layer we walked past rebind something this proposition actually names?
+///
+/// Conservative in the safe direction. A rebinding that happens not to change the
+/// proposition's meaning still drops the credit, and the witness has to be re-earned
+/// against the new binding. Refusing a still-good witness costs a recheck; granting a
+/// stale one is the soundness bug.
+fn rebinding_invalidates_credit(
+    query: &Layer,
+    walked_past: &[Arc<Layer>],
+    admitting: &Layer,
+    key: &WitnessKey,
+) -> bool {
+    let deps = proposition_dependencies(admitting, &key.iri);
+    if deps.is_empty() {
+        return false;
+    }
+    let rebinds = |l: &Layer| deps.iter().any(|d| l.defined_iris().contains(d));
+    if rebinds(query) || walked_past.iter().any(|l| rebinds(l)) {
+        tracing::debug!(
+            { field::OPERATION } = operation::WITNESS_DECODE,
+            resource_iri = %key.iri,
+            "a layer between the query point and the admitting layer rebinds a declaration \
+             this proposition depends on; the credit does not carry"
+        );
+        return true;
     }
     false
 }
@@ -1590,7 +1677,7 @@ mod tests {
     }
 
     #[test]
-    fn witness_credit_survives_redefinition_of_a_class_the_proposition_quantifies_over() {
+    fn witness_credit_does_not_survive_a_rebinding_the_proposition_depends_on() {
         // The module doc argues first-hit-wins is sound "because Layer
         // immutability means a once-admitted witness stays admitted in all
         // descendants". Immutability makes the *record* stable; it does not
@@ -1641,11 +1728,23 @@ mod tests {
         let l2 = Arc::new(b2.build(LayerStorage::in_memory()));
 
         assert!(
-            lookup_chain_witness(&l2, &key),
-            "current behaviour: credit granted under the narrower Dog is still found from a \
-             layer where Dog is wider, so `Π(x : Dog). P` is now a stronger claim than the one \
-             that earned the credit. Nothing rechecks the proposition against the rebinding. \
-             See docs/design/d75-fusing-eigentt-and-the-knowledge-graph.md §3.4."
+            !lookup_chain_witness(&l2, &key),
+            "credit earned under the narrower Dog must NOT be found from a layer where Dog \
+             is wider: the quantified claim is strictly stronger there than the one that \
+             earned it (eigenius#227). The witness has to be re-earned against the new \
+             binding."
+        );
+
+        // And the credit still carries where nothing it depends on moved. A descendant
+        // rebinding an UNRELATED class leaves the proposition's meaning alone, so refusing
+        // there would be over-invalidation rather than soundness.
+        let mut b3 = LayerBuilder::new("credit-v3", Some(Arc::clone(&l1)));
+        b3.add_resource(class_requiring("urn:eigenius:example:Cat", WIDE))
+            .unwrap();
+        let l3 = Arc::new(b3.build(LayerStorage::in_memory()));
+        assert!(
+            lookup_chain_witness(&l3, &key),
+            "a rebinding of something the proposition does not name must not drop the credit"
         );
     }
 }
