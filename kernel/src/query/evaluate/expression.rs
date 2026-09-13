@@ -115,15 +115,18 @@ pub(super) fn eval_expression(
                             current_iri
                         ))
                     })?;
+                // Both of these are the RESOURCE not carrying the property, which is
+                // data absence rather than a fault: a condition over it is not satisfied.
+                // Every other failure in this function is the query being wrong.
                 let prop_iri = find_property_by_shortname(segment, resource.properties())
                     .ok_or_else(|| {
-                        QueryError::evaluation(format!(
+                        QueryError::absent_property(format!(
                             "property '{}' not found on resource '{}'",
                             segment, current_iri
                         ))
                     })?;
                 let value = resource.get(&prop_iri).ok_or_else(|| {
-                    QueryError::evaluation(format!(
+                    QueryError::absent_property(format!(
                         "property '{}' has no value on resource '{}'",
                         segment, current_iri
                     ))
@@ -501,6 +504,15 @@ fn try_dispatch_decidable(
 }
 
 /// Apply GROUP BY and aggregation.
+/// The binding key one aggregate column's value is held under.
+///
+/// Position in the `RETURN` list, so two aggregates of the same operator over different
+/// arguments are different columns. One spelling, because the writer and the reader live
+/// in different modules and a second copy is how they drift apart.
+pub(super) fn aggregate_key(position: usize) -> String {
+    format!("AGG#{position}")
+}
+
 pub(super) fn apply_group_by(
     group_by: &[Expression],
     result: &[ReturnItem],
@@ -527,12 +539,16 @@ pub(super) fn apply_group_by(
     for group in groups.values() {
         let mut binding = group[0].clone(); // Start with first binding for non-aggregate values
 
-        // Compute aggregates
-        for item in result {
-            if let Some((agg_name, agg_val)) =
-                eval_aggregate(&item.expression, group, layer, runtime)?
-            {
-                binding.insert(agg_name, agg_val);
+        // Compute aggregates, keyed by the RETURN item's POSITION.
+        //
+        // The key was the operator alone, so `RETURN SUM(?a), SUM(?b)` wrote both sums
+        // to `AGG#Sum` and the second won for both reads — two columns, one number, no
+        // diagnostic (eigenius#123). Position is exact rather than a hash of the
+        // expression's structure, and it cannot collide: `shape_result` walks this same
+        // `result` slice, in this same order, and reads item `i` back at key `i`.
+        for (i, item) in result.iter().enumerate() {
+            if let Some((_, agg_val)) = eval_aggregate(&item.expression, group, layer, runtime)? {
+                binding.insert(aggregate_key(i), agg_val);
             }
         }
 
@@ -585,9 +601,9 @@ fn eval_aggregate(
                 .unwrap_or(Value::Integer(0)),
         };
 
-        // Use a synthetic name for the aggregate in the binding
-        let name = format!("AGG#{op:?}");
-        Ok(Some((name, result)))
+        // The name is the operator's, for diagnostics only — `apply_group_by` binds the
+        // value under `aggregate_key(position)`, which is what `shape_result` reads.
+        Ok(Some((format!("AGG#{op:?}"), result)))
     } else {
         Ok(None)
     }

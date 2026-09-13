@@ -1278,6 +1278,26 @@ impl Parser {
     }
 
     fn parse_usize(&mut self) -> Result<usize, QueryError> {
+        // The lexer no longer folds a sign into a literal (eigenius#172), so a negative
+        // count arrives as `Minus` then the number. Consume it here to keep rejecting it
+        // with "expected non-negative integer" rather than with a token complaint that
+        // says nothing about what is wrong.
+        if matches!(self.peek(), TokenKind::Minus) {
+            self.advance();
+            return match self.peek() {
+                TokenKind::NumberInt(_) | TokenKind::NumberFloat(_) => {
+                    self.advance();
+                    Err(QueryError::parser(
+                        self.position(),
+                        "expected non-negative integer",
+                    ))
+                }
+                other => Err(QueryError::parser(
+                    self.position(),
+                    format!("expected integer, got {other:?}"),
+                )),
+            };
+        }
         match self.peek() {
             TokenKind::NumberInt(n) => {
                 let n = *n;

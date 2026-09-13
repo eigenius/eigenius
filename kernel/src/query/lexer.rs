@@ -420,13 +420,17 @@ impl<'a> Lexer<'a> {
         }
 
         if ch == b'-' {
-            // Could be a negative number or minus operator
-            // If followed by a digit, lex as number
-            if let Some(next) = self.peek_at(1) {
-                if next.is_ascii_digit() {
-                    return self.lex_number(pos);
-                }
-            }
+            // `-` is ALWAYS the operator; the parser folds the sign (eigenius#172).
+            //
+            // It used to look at the next byte and consume the minus into the number
+            // when a digit followed, without consulting whitespace — so `?a - 1` lexed
+            // as a subtraction and `?a -1` lexed as a variable next to a literal with no
+            // operator between them. The additive loop stopped after `?a`, the leftover
+            // number was carried past every subsequent clause, and the query died at
+            // end-of-input with "unexpected token after query body".
+            //
+            // ESL retired exactly this at Phase 19f.3 for exactly this reason. The
+            // parser already has a `Neg` unary arm, so nothing else is needed here.
             self.advance();
             return Ok(Token {
                 kind: TokenKind::Minus,
@@ -726,14 +730,38 @@ mod tests {
     #[test]
     fn numbers() {
         assert_eq!(
-            kinds("42 2.72 -7 1e10"),
+            kinds("42 2.72 1e10"),
             vec![
                 TokenKind::NumberInt(42),
                 TokenKind::NumberFloat(2.72),
-                TokenKind::NumberInt(-7),
                 TokenKind::NumberFloat(1e10),
             ]
         );
+    }
+
+    /// `-` is always the operator, whatever follows it and whatever precedes it
+    /// (eigenius#172). The lexer used to fold it into a following digit without
+    /// consulting whitespace, so these two spellings produced different token streams and
+    /// only one of them parsed.
+    #[test]
+    fn a_minus_is_an_operator_whether_or_not_a_space_follows_it() {
+        let spaced = kinds("?a - 1");
+        let tight = kinds("?a -1");
+        assert_eq!(spaced, tight, "spacing must not change the token stream");
+        assert_eq!(
+            tight,
+            vec![
+                TokenKind::Variable("a".to_string()),
+                TokenKind::Minus,
+                TokenKind::NumberInt(1),
+            ]
+        );
+    }
+
+    /// A leading minus is the operator too — the parser has a `Neg` arm that folds it.
+    #[test]
+    fn a_leading_minus_lexes_as_an_operator() {
+        assert_eq!(kinds("-7"), vec![TokenKind::Minus, TokenKind::NumberInt(7)]);
     }
 
     #[test]

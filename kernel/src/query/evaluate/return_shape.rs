@@ -58,7 +58,7 @@ pub(super) fn shape_result(
         }
     }
 
-    for item in items {
+    for (position, item) in items.iter().enumerate() {
         let prop_iri = match &item.name {
             Name::FullIri(iri) => iri.clone(),
             Name::ShortName(s) => fp.row_property_iri(s),
@@ -66,10 +66,10 @@ pub(super) fn shape_result(
 
         // Handle aggregate expressions specially
         let value = match &item.expression {
-            Expression::Aggregate { op, .. } => {
-                let agg_key = format!("AGG#{op:?}");
-                binding.get(&agg_key).cloned().unwrap_or(Value::Integer(0))
-            }
+            Expression::Aggregate { .. } => binding
+                .get(&super::expression::aggregate_key(position))
+                .cloned()
+                .unwrap_or(Value::Integer(0)),
             _ => eval_expression(&item.expression, binding, layer, runtime)
                 .map_err(|e| QueryError::evaluation(format!("in RETURN: {e}")))?,
         };
@@ -106,15 +106,26 @@ pub(super) fn deduplicate(resources: Vec<Resource>) -> Vec<Resource> {
 }
 
 /// Sort results by ORDER BY expressions.
+///
+/// Sorting happens over the SHAPED resources, so an `ORDER BY` expression can only be
+/// read if the `RETURN` list projected it as a column. Matching the expression against
+/// that list is what makes `ORDER BY COUNT(?d) DESC` work: the count lives under whatever
+/// name the `RETURN` item gave it, not under anything derivable from the expression.
+///
+/// It previously matched only a bare `Expression::Variable` and returned `None` for
+/// everything else, so both operands were `None`, the comparison was skipped, and the
+/// order was left untouched — D2 §8.8's own worked example returned an unordered result
+/// with no error.
 pub(super) fn sort_results(
     resources: &mut [Resource],
     order_by: &[OrderItem],
+    items: &[ReturnItem],
     fp: &QueryFingerprint,
 ) {
     resources.sort_by(|a, b| {
         for item in order_by {
-            let val_a = extract_sort_value(a, &item.expression, fp);
-            let val_b = extract_sort_value(b, &item.expression, fp);
+            let val_a = extract_sort_value(a, &item.expression, items, fp);
+            let val_b = extract_sort_value(b, &item.expression, items, fp);
 
             if let (Some(va), Some(vb)) = (&val_a, &val_b) {
                 if let Some(ord) = values_compare(va, vb) {
@@ -135,13 +146,23 @@ pub(super) fn sort_results(
 fn extract_sort_value(
     resource: &Resource,
     expr: &Expression,
+    items: &[ReturnItem],
     fp: &QueryFingerprint,
 ) -> Option<Value> {
+    // The column the RETURN list projected this expression as. Covers every expression
+    // form, aggregates included, and it is also more correct than the name-based read
+    // below when a RETURN item renames a variable.
+    if let Some(item) = items.iter().find(|i| i.expression == *expr) {
+        let iri = match &item.name {
+            Name::FullIri(iri) => iri.clone(),
+            Name::ShortName(s) => fp.row_property_iri(s),
+        };
+        return resource.get(&iri).cloned();
+    }
+    // A bare variable that the RETURN list did not name explicitly still projects under
+    // its own name, so it sorts without appearing in the list above.
     match expr {
-        Expression::Variable(var) => {
-            let iri = fp.row_property_iri(&var.name);
-            resource.get(&iri).cloned()
-        }
+        Expression::Variable(var) => resource.get(&fp.row_property_iri(&var.name)).cloned(),
         _ => None,
     }
 }
