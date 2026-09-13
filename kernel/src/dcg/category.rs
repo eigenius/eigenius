@@ -21,7 +21,7 @@ use std::sync::Arc;
 use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::eval::eval;
-use crate::nbe::readback::readback_val;
+use crate::nbe::readback::try_readback_val;
 use crate::nbe::term::{list_decl, Exp, Name};
 use crate::ontology::iri::Iri;
 
@@ -180,8 +180,17 @@ fn denote_mood(mood: &Exp) -> Result<Exp, String> {
 /// is the equality this function is for. Genuine δ-equality (two names that unfold
 /// alike) is `conv`'s job and arrives with Phase D.
 pub fn type_eq(a: &Exp, b: &Exp) -> bool {
-    let norm = |e: &Exp| eval(e, &Rho::Nil).map(|v| readback_val(0, &v));
-    matches!((norm(a), norm(b)), (Ok(x), Ok(y)) if x == y)
+    // Fallible on BOTH halves (eigenius#104). The felicity gate calls this as
+    // `type_eq(denote_cat(cat), sem_type)`, where `sem_type` comes off a chart candidate
+    // rather than from the checker, so normalising it can get stuck. Eval failure already
+    // meant "not equal" here; readback failure has to mean the same, or a comparison
+    // panics where the identical value would have compared false one line earlier.
+    let norm = |e: &Exp| {
+        eval(e, &Rho::Nil)
+            .ok()
+            .and_then(|v| try_readback_val(0, &v).ok())
+    };
+    matches!((norm(a), norm(b)), (Some(x), Some(y)) if x == y)
 }
 
 /// If `cat` is the named `lexicon:Cat` constructor, return its arguments.
