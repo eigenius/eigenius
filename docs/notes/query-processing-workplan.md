@@ -63,21 +63,49 @@ debug. This is the cheap thing that unblocks the others.
 
 Two to three days. No design note. No manifest move.
 
-### B. `MATCH` optionality — needs its own design note
+### B. An absence predicate — **rescoped `2026-09-13`, after A landed**
 
-Resolves the contradiction between D2 §6.2/§8.7 and a strictly conjunctive `MATCH`. Closes #33;
-closes or redefines #124.
+**Originally scoped as "`MATCH` optionality, needs its own design note".** It is not, and item A
+is why. Measured against the merged code rather than argued:
 
-The item **is** the decision, and there are three shapes: brace variables bind optionally, which is
-what D2 already says and would silently widen every existing query's results; an explicit optional
-block per #33, leaving §6.2 to be rewritten; or drop `NOT EXISTS` and keep only pattern negation.
+| query shape | rows returned |
+|---|---|
+| `MATCH Notebook(?n) { owner: ?o, title: ?t, modified: ?m }` | **1** — the untitled notebook is invisible |
+| `MATCH Notebook(?n) { }` + `RETURN { t: ?n.title, m: ?n.modified }` | **2** — untitled row present, columns absent |
 
-The hard sub-problem is the result document. D2 states there is no null literal and Eigon-JSON has
-none, so an unbound column has nowhere to land. Decide that before touching the parser, and do not
-emit a sentinel for it.
+That first line is #33's motivating case verbatim: a search dialog wanting `title | description |
+modified`, where the optional columns made every untitled notebook vanish, worked around with an
+N+1 client-side join. The second line is what the code does today. **A dot-path is the optional
+accessor** — it does not restrict matching, absence composes as false at a test, and an absent
+column is omitted from its row. An empty brace parses, so nothing requires an always-present
+property and the route is fully general.
 
-Start the note in parallel with the items below — it is the long pole — but land it after A,
-because it rewrites the same two functions A touches.
+**A also settled what this note called the hard sub-problem and said to decide first.** "An unbound
+column has nowhere to land, because there is no null literal" — it lands by being OMITTED. That is
+not a workaround for the missing null: open-world carrying already means a resource may simply lack
+a property, so a row that lacks a column is saying exactly what it should.
+
+**The design that fell out is better than the three shapes this note offered**, and it arrived from
+building rather than deliberating. The brace is the REQUIRE form; the dot-path is the OPTIONAL
+form. Making brace variables bind optionally as well — shape (i), which is what D2 §6.2 describes —
+would now be redundant AND would silently widen every existing query's results.
+
+**What actually remains is one predicate.** There is no way to ask for *notebooks with no title*.
+`NOT (?n.title == "x")` is also true when the title is "y". `NOT EXISTS` was meant to be that, and
+today it tests whether a VARIABLE is bound, which under a conjunctive `MATCH` is always true — so
+it returns false for every row and matches nothing. Measured: `WHERE NOT EXISTS(?t)` over the
+fixture above returns **0 rows**. That is #124, and it is dead code rather than a wrong answer.
+
+Retarget it at properties: `NOT EXISTS(?n.title)`, answered by the `is_absent_property` machinery
+item A already built. Closes #124. Closes #33, whose motivating case is delivered — verify against
+the search dialog before closing, then retitle or close.
+
+**Also a documentation change.** D2 §6.2 and §8.7 describe brace variables binding optionally and
+`NOT EXISTS` detecting the unbound state. Neither is what the code does or should do. §6.2 should
+describe the dot-path route, and §8.7's worked example should be rewritten against it.
+
+**Size: hours, not a design note.** No parser change, no null, no new AST node beyond retargeting
+one that exists. **Depends on A**, which has landed. **No manifest move.**
 
 ### C. Bound the probes, and seed candidates from them
 
