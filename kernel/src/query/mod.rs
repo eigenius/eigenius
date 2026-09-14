@@ -16,6 +16,23 @@
 //!
 //! Implements the EigenQL specification from design doc D2.
 
+/// D43 §6.2 — **the over-fetch factor**: how many candidates a retrieval probe returns
+/// per `TOP K`, before structural filters and fusion cut the set down.
+///
+/// > Over-fetch covers structural filters that may reduce the survivor count below K.
+/// > … **Over-fetch factor.** Configurable per-query; default `4×`.
+///
+/// It governs both places D43 derives a probe bound from `K`: the per-source candidate
+/// pool ahead of fusion (§6.4) and the HNSW exploration depth, `ef = max(K * 4, 64)`
+/// (§6.2). Those were two separate literal `4`s, and the pool was not using one at all —
+/// it took `max(K, 200)`, which over-fetches a `TOP 10` and under-fetches a `TOP 1000` to
+/// exactly `K`, leaving nothing for a structural filter to eat into. eigenius#62 asked for
+/// the factor to be named; naming it meant making the pool the thing it is named after.
+///
+/// Per-query configurability is the `limit:` hint (§3.4), which overrides the derived
+/// bound outright. A config knob for the factor itself can land when a workload asks.
+pub(crate) const OVER_FETCH_FACTOR: usize = 4;
+
 pub mod ast;
 pub mod document;
 pub mod error;

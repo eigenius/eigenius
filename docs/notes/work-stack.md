@@ -9,11 +9,9 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **ACTIVE: entry −4b (`2026-09-13`). Query processing, items A–C plus the name rule.** On
-> `query-optionality-and-probes`, five commits, pushed. Workspace suite green, clippy and fmt clean.
->
-> **Exit gate: the merge request lands.** Item A merged separately as `1a7f2b3` (#247), closing
-> #126, #123 and #172.
+> **entry −4b (`2026-09-13`). Query processing, items A–C plus the name rule. DONE, merged as
+> `1d75afb` (#249) on `2026-09-14`.** Closed #124, #33 and #125. Item A merged separately as
+> `1a7f2b3` (#247), closing #126, #123 and #172.
 >
 > **B — `NOT EXISTS` asks whether a property has a value (#124, #33).** There was no way to ask for
 > the resources that LACK a property. `NOT EXISTS` tested whether a VARIABLE was bound, which a
@@ -57,10 +55,29 @@ any detour.
 > the notebooks, the TS clients and the notebook runtime. One test failed: the one that pinned the
 > old dot-path semantics. Nothing outside Rust needed a change.
 >
+> **A code review found five defects, four of them introduced by the rule.** A FIBER param value
+> skipped resolution entirely, so a dot-path there type-checked with zero errors and failed at
+> evaluation with a message naming the compiler pass — one missed traversal arm putting a live
+> query into the state both evaluation sites called unreachable. The implicit core prelude
+> collided with explicit imports, making five shipped ontologies unnameable by short name with an
+> error whose stated remedy ("import fewer namespaces") cannot be taken. `unreachable_path` was
+> wired into one of five absence sites. The two evaluation guards disagreed, one silent. And a
+> second namespace-only resolver survived, reporting the same bad key twice.
+>
+> **#125 closed too, after the claim was checked and found false.** Item C's commit message said
+> it closed #125 and it had not: `rank.rs`'s tested RRF still had zero callers while
+> `similarity.rs` reimplemented the formula. Adopting it surfaced something nothing had
+> documented — the two probes tie-break in OPPOSITE directions, so a tied pair fused to equal
+> scores by accident of the disagreement. One key now orders both.
+>
+> **#62 is not closed and should not stay as titled.** Its asks 2 and 4 are delivered, ask 1 (a
+> planner logical-plan node) is abandoned on purpose, and ask 3 — name the 4× over-fetch factor —
+> is all that survives. Recorded on the issue.
+>
 > **Lessons worth keeping.** The spec said the rule all along; the implementation applied half of
-> it, and half a rule is unsound rather than merely incomplete. And: save a patch before
-> `git checkout --` — reverting ten files to split a commit, with copies of only two, cost an hour
-> of replay.
+> it, and half a rule is unsound rather than merely incomplete. A claim to close an issue is a
+> claim to check, not to carry forward from a plan. And: save a patch before `git checkout --` —
+> reverting ten files to split a commit, with copies of only two, cost an hour of replay.
 
 
 > **entry −4a (`2026-09-13`). The institution result contract (#226). DONE, merged as `9de9fa2`
