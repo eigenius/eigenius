@@ -109,7 +109,7 @@ Blast radius is 12 files, all under `kernel/src/query/` except `program/embedder
 
 1. **Split the label meaning out of `Name`.** `ReturnItem.name` becomes `ColumnLabel`. `Expression::Object`'s keys go with it — and the variant should be deleted rather than converted: the parser has no construction site for it and the evaluator errors on it, so it is unreachable today.
 2. **Parameterise** `Program`, `Query`, `MatchPart`, `Clause`, `Pattern`, `PropertyPattern`, `Expression`, `FiberClause`, `ParamBinding`, `RuleDefinition` over `N`.
-3. **Make `resolve` a pass**, `ParsedProgram -> Result<ResolvedProgram, Vec<QueryError>>`, absorbing all eight positions. The pipeline becomes lex → parse → stratify → **resolve** → type-check → evaluate.
+3. **Make `resolve` a pass**, `ParsedProgram -> Result<ResolvedProgram, Vec<QueryError>>`, absorbing all eight positions and taking stratification's relation table so `RelationId` needs no second classification. The `ResolvedProgram` carries the strata forward, which removes the second `stratify` call at `evaluate/mod.rs:127`.
    - **`Query.result_classes` resolves like a pattern class.** It is stamped as `is_a` on every result row, so it is a chain reference and a query naming a class that does not exist should be told so. Nothing checks it today, so this is the one position in the note that can reject a query which currently runs: it needs the blast-radius measurement #249 used — the full workspace suite plus every EigenQL string in the notebooks, the TS clients and the notebook runtime — run *before* the tests are written, because the rule can only fail queries that previously passed.
 4. **Type-check stops resolving.** It takes `&ResolvedProgram` and only checks. This also reverts the `&mut Program` signature #249 introduced, which was resolution wearing a checking pass's name.
 5. **Evaluation takes `&ResolvedProgram`.** Delete `resolve_name` from `evaluate/pattern.rs`, the alias re-resolution in `evaluate/fiber.rs:529`, and the `short_to_iri` rebuild at `evaluate/fiber.rs:328`. Both guards from #248 go with them, having nothing left to guard.
@@ -126,11 +126,35 @@ That is a real cost and the note takes it deliberately. A name that does not res
 
 **D2 needs a section.** The specification describes short-name resolution per construct (§5.4, §5.6.1, §5.8) and does not say that resolution is a pipeline stage with a before and an after. That is now a language-level fact, not an implementation detail.
 
+## Stratification runs first, and its answer is carried
+
+`stratify` reads rule names and dependency edges. Both are syntactic — it needs nothing from the chain — so either order compiles. It goes **first**, for two reasons.
+
+**A chain-independent failure should not pay a chain-dependent cost.** Resolution is where the expensive lookups live: `resolve_scoped_name` enumerates the typed-resource IRIs for a metaclass and resolves each candidate. A program with a negation cycle is malformed regardless of what any layer declares, and putting resolution first would make it pay for that before finding out.
+
+**`ClassRef::Relation(RelationId)` needs the definition set fixed and indexed**, which is precisely what stratification already derives.
+
+### The answer has to be carried, not recomputed
+
+Stratification currently runs **twice per query**, and the first run's answer is thrown away:
+
+```rust
+// query/mod.rs:119 — computes Vec<Stratum>, keeps only the error
+stratify::stratify(&program.definitions).map_err(|e| vec![e])?;
+
+// evaluate/mod.rs:127 — computes it again
+let strata = crate::query::stratify::stratify(&program.definitions)?;
+```
+
+Both calls are the same function, so unlike the `Name` positions they cannot disagree; this is waste rather than a correctness hazard. The set of relation names is separately rebuilt three times — `stratify.rs:40`, `type_check.rs:55`, and threaded into `resolve.rs:250` as a parameter.
+
+This is the same shape as the rest of the note: a pass computes an answer, discards it, and a later pass computes it again. The staged pipeline is where that stops. Stratification's output — the strata order and the relation table `resolve` needs for `RelationId` — rides in the `ResolvedProgram` rather than being recomputed at evaluation.
+
+That makes the pipeline lex → parse → **stratify** → **resolve** → type-check → evaluate, with each stage handing the next what it worked out rather than the next stage working it out again.
+
 ## Open questions
 
-1. **Is `stratify` before or after resolution?** It reads rule names and dependency edges, which are syntactic, so either works. Before is cheaper — a program that fails stratification never pays for resolution — and it is also what `ClassRef::Relation` wants, since an index into `Program.definitions` is only meaningful once the definition set is fixed and checked.
-
-Two questions this note opened were decided on review and folded in above: `Query.result_classes` resolves as a chain reference, and `ClassRef::Relation` carries an index rather than a name or an embedded definition.
+None outstanding. Three were opened by the first draft and all are decided above: `Query.result_classes` resolves as a chain reference; `ClassRef::Relation` carries an index rather than a name or an embedded definition; and stratification runs before resolution, with its result carried forward.
 
 ## Scope
 
