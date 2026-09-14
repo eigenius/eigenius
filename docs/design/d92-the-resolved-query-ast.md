@@ -86,12 +86,14 @@ MATCH ancestor(?x, ?y)
 
 ```rust
 pub enum ClassRef {
-    Chain(Iri),        // a core:Class on the chain
-    Relation(String),  // a DEFINE relation in this program
+    Chain(Iri),           // a core:Class on the chain
+    Relation(RelationId), // an index into Program.definitions
 }
 ```
 
 The exemption becomes a variant, and every consumer of a resolved class has to say which it handles. This is the kind of thing the parameterisation is for: the special case existed, undocumented in the types, in one checking function.
+
+**`Relation` carries an index, not the definition and not the name.** Carrying the name leaves a string lookup at every use, which is the second-resolution pattern this note exists to remove. Carrying the `RuleDefinition` itself is impossible: `stratify` rejects only *negation* cycles, so ordinary positive recursion is legal Datalog — `ancestor(?a,?b) :- parent(?a,?c), ancestor(?c,?b)` — and a `ClassRef` embedding its own definition would be an infinite value for exactly the rules the feature exists for. An index into `Program.definitions` resolves the reference to a definite target, survives recursion, and costs one slice index where the name cost a hash lookup.
 
 ## Why not the alternatives
 
@@ -108,6 +110,7 @@ Blast radius is 12 files, all under `kernel/src/query/` except `program/embedder
 1. **Split the label meaning out of `Name`.** `ReturnItem.name` becomes `ColumnLabel`. `Expression::Object`'s keys go with it — and the variant should be deleted rather than converted: the parser has no construction site for it and the evaluator errors on it, so it is unreachable today.
 2. **Parameterise** `Program`, `Query`, `MatchPart`, `Clause`, `Pattern`, `PropertyPattern`, `Expression`, `FiberClause`, `ParamBinding`, `RuleDefinition` over `N`.
 3. **Make `resolve` a pass**, `ParsedProgram -> Result<ResolvedProgram, Vec<QueryError>>`, absorbing all eight positions. The pipeline becomes lex → parse → stratify → **resolve** → type-check → evaluate.
+   - **`Query.result_classes` resolves like a pattern class.** It is stamped as `is_a` on every result row, so it is a chain reference and a query naming a class that does not exist should be told so. Nothing checks it today, so this is the one position in the note that can reject a query which currently runs: it needs the blast-radius measurement #249 used — the full workspace suite plus every EigenQL string in the notebooks, the TS clients and the notebook runtime — run *before* the tests are written, because the rule can only fail queries that previously passed.
 4. **Type-check stops resolving.** It takes `&ResolvedProgram` and only checks. This also reverts the `&mut Program` signature #249 introduced, which was resolution wearing a checking pass's name.
 5. **Evaluation takes `&ResolvedProgram`.** Delete `resolve_name` from `evaluate/pattern.rs`, the alias re-resolution in `evaluate/fiber.rs:529`, and the `short_to_iri` rebuild at `evaluate/fiber.rs:328`. Both guards from #248 go with them, having nothing left to guard.
 
@@ -125,12 +128,12 @@ That is a real cost and the note takes it deliberately. A name that does not res
 
 ## Open questions
 
-1. **Does `Query.result_classes` resolve like a pattern class, or is it also a label?** It is stamped as `is_a` on result rows, which is a chain reference and should resolve. But nothing checks it today, so adding resolution may reject queries that currently run. This needs the same blast-radius measurement #249 did before the rule lands, not after.
-2. **Should `ClassRef::Relation` carry the resolved `RuleDefinition` rather than its name?** It would remove a second lookup at evaluation, at the cost of a lifetime or an index in the AST.
-3. **Is `stratify` before or after resolution?** It reads rule names and dependency edges, which are syntactic, so either works. Before is cheaper — a program that fails stratification never pays for resolution.
+1. **Is `stratify` before or after resolution?** It reads rule names and dependency edges, which are syntactic, so either works. Before is cheaper — a program that fails stratification never pays for resolution — and it is also what `ClassRef::Relation` wants, since an index into `Program.definitions` is only meaningful once the definition set is fixed and checked.
+
+Two questions this note opened were decided on review and folded in above: `Query.result_classes` resolves as a chain reference, and `ClassRef::Relation` carries an index rather than a name or an embedded definition.
 
 ## Scope
 
-This changes no query semantics. Every query that resolves today resolves to the same IRIs afterwards; what changes is how many times, and whether a position that was never resolved starts being checked — which open question 1 covers.
+This changes no query semantics for seven of the eight positions: every query that resolves today resolves to the same IRIs afterwards, and what changes is how many times. The exception is `Query.result_classes`, which nothing checks today and which will start rejecting a `RETURN` naming a class the chain does not declare. That is the one place this note can break a working query, and it is called out in the work above so the measurement happens first.
 
 No ontology edit, so no manifest move and no reseed.
