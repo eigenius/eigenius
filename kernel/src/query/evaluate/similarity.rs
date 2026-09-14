@@ -44,9 +44,10 @@ use std::collections::BTreeMap;
 
 /// D43 §3.5 default RRF smoothing constant.
 const DEFAULT_RRF_K: usize = 60;
-/// D43 §3.4 default per-source candidate cap. The platform
-/// over-fetches before fusion / ranking; this number is the
-/// pre-truncation candidate pool size.
+/// D43 §6.4 floor under the per-source candidate pool. The pool is
+/// `max(TOP K * OVER_FETCH_FACTOR, DEFAULT_LIMIT)`; this is what it takes when the
+/// derived bound is smaller, and what an unranked vector probe takes when nothing
+/// derives a bound at all.
 const DEFAULT_LIMIT: usize = 200;
 
 /// One similarity operator's resolved probe state. Built once per
@@ -367,13 +368,7 @@ fn build_probe(
         .iter()
         .find(|i| i.target_property == binding.property_iri);
 
-    // **How many candidates each probe must return, and the two are not the same.**
-    //
-    // An explicit `{ limit: N }` is the author saying what they want, and `TOP N` means the
-    // query ranks, so the pool needs at least N. This is what makes `TOP` reach the probes
-    // at all: it was read in exactly one place, as a truncation applied to the bindings
-    // AFTER evaluation, so a probe never saw it.
-    let ranked_pool = hints.limit.or_else(|| top.map(|n| n.max(DEFAULT_LIMIT)));
+    let ranked_pool = candidate_pool(hints.limit, top);
 
     // **Text, unranked, is a FILTER and must not truncate.** Matching is a predicate —
     // the document contains the terms or it does not — so a bound drops rows that match.
@@ -491,6 +486,28 @@ fn build_probe(
     Ok(SimilarityProbe {
         subject_var: binding.subject_var.clone(),
         scores,
+    })
+}
+
+/// D43 §6.2 / §6.4 — how many candidates a probe must return, for a query that ranks.
+/// `None` where nothing derives a bound, which leaves each probe to its own default.
+///
+/// An explicit `{ limit: N }` is the author saying what they want, so it wins outright
+/// (§3.4). Otherwise `TOP N` derives the bound, and it is `N * OVER_FETCH_FACTOR` rather
+/// than `N`: over-fetch exists so that structural filters applied AFTER the probe can eat
+/// into the candidate set without the survivor count falling below N. Fetching exactly N
+/// leaves nothing for them to eat.
+///
+/// `DEFAULT_LIMIT` is a floor under that, not the policy. An earlier version had it the
+/// other way around — `max(N, DEFAULT_LIMIT)` — which over-fetches a `TOP 10` to 200 and
+/// under-fetches a `TOP 1000` to exactly 1000. That was reasoning about a floor where the
+/// spec asks for a factor (eigenius#62).
+fn candidate_pool(explicit_limit: Option<usize>, top: Option<usize>) -> Option<usize> {
+    explicit_limit.or_else(|| {
+        top.map(|n| {
+            n.saturating_mul(crate::query::OVER_FETCH_FACTOR)
+                .max(DEFAULT_LIMIT)
+        })
     })
 }
 
@@ -615,6 +632,26 @@ mod tests {
         assert!((c - 1.0 / 62.0).abs() < 1e-9);
         // b appears in both → highest fused score.
         assert!(b > a && b > c);
+    }
+
+    /// **The candidate pool is a FACTOR over `TOP K`, with a floor — not a floor alone.**
+    ///
+    /// D43 §6.2 exists because structural filters run after the probe: fetching exactly K
+    /// leaves nothing for them to eat, so the survivor count can fall below K. An earlier
+    /// version took `max(K, DEFAULT_LIMIT)`, which is the floor doing all the work — fine
+    /// at `TOP 10`, and at `TOP 1000` it fetches exactly 1000 (eigenius#62).
+    #[test]
+    fn the_candidate_pool_over_fetches_by_the_factor() {
+        // Below the floor, the floor wins: 10 * 4 = 40 < 200.
+        assert_eq!(candidate_pool(None, Some(10)), Some(DEFAULT_LIMIT));
+        // Above it, the factor does: this is the case `max(K, DEFAULT_LIMIT)` got wrong.
+        assert_eq!(candidate_pool(None, Some(100)), Some(400));
+        assert_eq!(candidate_pool(None, Some(1000)), Some(4000));
+        // An explicit hint is the author overriding the derivation, in either direction.
+        assert_eq!(candidate_pool(Some(5), Some(1000)), Some(5));
+        assert_eq!(candidate_pool(Some(9_000), None), Some(9_000));
+        // Nothing to derive from: each probe keeps its own default.
+        assert_eq!(candidate_pool(None, None), None);
     }
 
     /// **A tie fuses the same way whichever order a probe emitted it in.**

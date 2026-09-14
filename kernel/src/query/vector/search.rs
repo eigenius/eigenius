@@ -47,6 +47,15 @@ use crate::query::vector::segment::SegmentView;
 use crate::storage::StorageError;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+
+/// D43 §6.2 — the floor under `ef = max(K * OVER_FETCH_FACTOR, 64)`. A small `K` would
+/// otherwise explore too narrow a neighbourhood for the heuristic recall to mean anything.
+const MIN_HNSW_EF: usize = 64;
+
+/// D43 §2.4 — each HNSW segment returns this multiple of `k` so the cross-segment merge
+/// has something to reorder. Distinct from [`crate::query::OVER_FETCH_FACTOR`], which is
+/// about candidates surviving *filters*; this is about candidates surviving a *merge*.
+const PER_SEGMENT_OVERSAMPLE: usize = 2;
 use std::sync::Arc;
 
 /// One scored hit emitted by [`top_k_subjects`]. The shape mirrors
@@ -122,7 +131,7 @@ pub enum VectorSearchError {
 ///
 /// `ef` controls the HNSW search exploration depth for segments
 /// whose strategy built an HNSW graph; `None` defaults to
-/// `max(k * 4, 64)` per D43 §3.4. Segments without an HNSW graph
+/// `max(k * OVER_FETCH_FACTOR, MIN_HNSW_EF)` per D43 §6.2. Segments without an HNSW graph
 /// ignore `ef` and use the brute-force path.
 #[allow(clippy::too_many_arguments)]
 pub fn top_k_subjects(
@@ -175,7 +184,7 @@ pub fn top_k_subjects_with_recall(
             min_recall: None,
         });
     }
-    let effective_ef = ef.unwrap_or_else(|| (k * 4).max(64));
+    let effective_ef = ef.unwrap_or_else(|| (k * crate::query::OVER_FETCH_FACTOR).max(MIN_HNSW_EF));
     let chain = collect_ancestors(head);
     let mut heap: BinaryHeap<Reverse<HeapEntry>> = BinaryHeap::with_capacity(k + 1);
     // One SegmentRecall entry per *touched* segment (segment exists
@@ -202,7 +211,7 @@ pub fn top_k_subjects_with_recall(
         // segments report the §3.4 heuristic; flat segments are
         // exact.
         if let Some(graph) = segment.hnsw() {
-            let per_segment_k = (k * 2).max(k);
+            let per_segment_k = (k * PER_SEGMENT_OVERSAMPLE).max(k);
             let hits = graph.search(query_vec, per_segment_k, effective_ef);
             per_segment_recalls.push(SegmentRecall::Approx {
                 recall: heuristic_recall(k, effective_ef),
