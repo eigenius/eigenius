@@ -83,7 +83,12 @@ pub(super) fn apply_pattern(
 
     for binding in &existing {
         for (resource_iri, resource) in &candidates {
-            result.extend(try_match_resource(pattern, resource, resource_iri, binding));
+            result.extend(try_match_resource(
+                pattern,
+                resource,
+                resource_iri,
+                binding,
+            )?);
         }
     }
 
@@ -102,9 +107,13 @@ pub(super) fn apply_negated_pattern(
     let mut result = Vec::new();
 
     for binding in &existing {
-        let has_match = candidates
-            .iter()
-            .any(|(iri, resource)| !try_match_resource(pattern, resource, iri, binding).is_empty());
+        let mut has_match = false;
+        for (iri, resource) in &candidates {
+            if !try_match_resource(pattern, resource, iri, binding)?.is_empty() {
+                has_match = true;
+                break;
+            }
+        }
         if !has_match {
             result.push(binding.clone());
         }
@@ -396,7 +405,7 @@ fn try_match_resource(
     resource_props: &BTreeMap<Iri, Value>,
     resource_iri: &Option<Iri>,
     existing: &Binding,
-) -> Vec<Binding> {
+) -> Result<Vec<Binding>, QueryError> {
     let mut base = existing.clone();
 
     // Bind the subject variable.
@@ -405,7 +414,7 @@ fn try_match_resource(
         let iri_val = Value::iri(iri);
         if let Some(existing_val) = base.get(subject_name) {
             if !values_equal(existing_val, &iri_val) {
-                return Vec::new(); // conflict with existing binding
+                return Ok(Vec::new()); // conflict with existing binding
             }
         }
         base.insert(subject_name.clone(), iri_val);
@@ -415,10 +424,21 @@ fn try_match_resource(
     let mut frontier = vec![base];
     for prop_pat in &pattern.properties {
         // Resolved by `type_check` to the property IRI the key names — see
-        // `query::resolve::resolve_property_names`. A short name here means the
-        // program reached evaluation without that pass.
+        // `query::resolve::resolve_property_names`. A short name here means the program
+        // reached evaluation without that pass.
+        //
+        // **It says so rather than matching nothing.** Returning no rows made an
+        // unresolved key indistinguishable from a resource that does not carry the
+        // property, which is the silent-empty-set failure this whole rule exists to
+        // remove — and it disagreed with the dot-path site, which errors on the same
+        // state. The state is unreachable now that every name position is resolved
+        // (eigenius#248 tracks making it unrepresentable), so this is a diagnostic for a
+        // pass that did not run, not a branch on user input.
         let Name::FullIri(prop_iri) = &prop_pat.property else {
-            return Vec::new();
+            return Err(QueryError::evaluation(format!(
+                "property key '{}' was never resolved to a property IRI",
+                prop_pat.property
+            )));
         };
         let value = resource_props.get(prop_iri);
 
@@ -457,11 +477,11 @@ fn try_match_resource(
         }
         frontier = next;
         if frontier.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
     }
 
-    frontier
+    Ok(frontier)
 }
 
 /// Match an array pattern (D59) against a property's elements, pushing every

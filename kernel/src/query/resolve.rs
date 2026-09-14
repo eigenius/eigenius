@@ -27,17 +27,15 @@ use crate::layer::{typed_resource_iris, Layer};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
 use crate::ontology::well_known as wk;
-use crate::query::ast::{Clause, Expression, MatchPart, Name, Program};
+use crate::query::ast::{Clause, Expression, MatchPart, Name, ParamValue, Program};
 use crate::query::error::QueryError;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Is `iri` inside the implicit core namespace or one of the imported namespace
-/// prefixes? A namespace is matched by simple IRI-string prefix (e.g. prefix
-/// `urn:eigenius:core:` matches `urn:eigenius:core:Class`). The core namespace is
-/// always in scope (the prelude); other prefixes come verbatim from `USING NAMESPACE`.
-fn in_namespace(iri: &Iri, namespaces: &[String]) -> bool {
+/// Is `iri` inside one of the explicitly imported namespace prefixes? A namespace is
+/// matched by simple IRI-string prefix, verbatim from `USING NAMESPACE`.
+fn in_imported_namespace(iri: &Iri, namespaces: &[String]) -> bool {
     let s = iri.as_str();
-    s.starts_with(wk::CORE_NAMESPACE) || namespaces.iter().any(|ns| s.starts_with(ns.as_str()))
+    namespaces.iter().any(|ns| s.starts_with(ns.as_str()))
 }
 
 /// Resolve a bare short name to a unique IRI within the imported `namespaces`.
@@ -62,9 +60,23 @@ pub(crate) fn resolve_scoped_name(
         return Ok(None);
     };
 
-    let mut matches: Vec<Iri> = Vec::new();
+    // **An explicit import shadows the implicit prelude.** Core and the `USING NAMESPACE`
+    // prefixes used to be one flat candidate pool, so a name declared in both was an
+    // ambiguity the query could not resolve: the error told the reader to import fewer
+    // namespaces, and core cannot be un-imported. Five shipped ontologies collide with
+    // core this way — `schema_org:description`, `notebook:description`,
+    // `ingest:data_type`, `ingest:content_encoding` and `julia:intervals:domain` — so
+    // `USING NAMESPACE "urn:schema_org:"` plus a `description` key was unanswerable.
+    //
+    // Naming a namespace is a statement about which vocabulary the query means, so it
+    // wins over the prelude, the way an inner scope wins over an outer one. Ambiguity
+    // WITHIN the imported set is still an error: those the reader can act on, by
+    // importing fewer or writing the IRI.
+    let mut imported: Vec<Iri> = Vec::new();
+    let mut prelude: Vec<Iri> = Vec::new();
     for iri in typed_resource_iris(layer, metaclasses) {
-        if !in_namespace(&iri, namespaces) {
+        let is_imported = in_imported_namespace(&iri, namespaces);
+        if !is_imported && !iri.as_str().starts_with(wk::CORE_NAMESPACE) {
             continue;
         }
         // Resolve through the head: merged top view + filters to this chain.
@@ -73,10 +85,20 @@ pub(crate) fn resolve_scoped_name(
         };
         if let Some(Value::String(sn)) = res.get(&short_prop) {
             if sn == short {
-                matches.push(iri);
+                if is_imported {
+                    imported.push(iri);
+                } else {
+                    prelude.push(iri);
+                }
             }
         }
     }
+
+    let mut matches = if imported.is_empty() {
+        prelude
+    } else {
+        imported
+    };
 
     match matches.len() {
         0 => Ok(None),
@@ -187,6 +209,20 @@ mod tests {
 }
 
 // ─── Property-name resolution ────────────────────────────────────────
+
+/// The IRI a resolved property [`Name`] carries.
+///
+/// [`resolve_property_names`] rewrites every brace key to a `FullIri` before any other
+/// pass reads one, so a surviving `ShortName` is a name that failed to resolve — and
+/// failed with an error already reported, under the full scope rule. Two callers used to
+/// re-resolve it here through namespaces alone: the narrower rule, reaching a different
+/// answer, and reporting the same bad name a second time. `None` skips it instead.
+pub(crate) fn resolved_property_iri(name: &Name) -> Option<Iri> {
+    match name {
+        Name::FullIri(iri) => Some(iri.clone()),
+        Name::ShortName(_) => None,
+    }
+}
 
 /// Resolve every property name the program writes — `MATCH` brace keys and
 /// dot-path segments — to the property IRI it names, rewriting the AST in place.
@@ -339,11 +375,38 @@ fn resolve_part(
 ) {
     let namespaces = part.using_namespaces.clone();
     for clause in &mut part.clauses {
-        let Clause::Pattern(p) = clause else { continue };
-        let vocab = scope.get(&p.subject.name).cloned().unwrap_or_default();
-        for pp in &mut p.properties {
-            if let Err(e) = resolve_name_in_place(&mut pp.property, &vocab, layer, &namespaces) {
-                errors.push(e);
+        match clause {
+            Clause::Pattern(p) => {
+                let vocab = scope.get(&p.subject.name).cloned().unwrap_or_default();
+                for pp in &mut p.properties {
+                    if let Err(e) =
+                        resolve_name_in_place(&mut pp.property, &vocab, layer, &namespaces)
+                    {
+                        errors.push(e);
+                    }
+                }
+            }
+            // **A FIBER param value is an expression** (D2 §3.5 `param_value ::= expression`),
+            // so it can hold a dot-path over a variable an earlier pattern bound. Skipping
+            // this clause left those segments unresolved, and an unresolved segment reaches
+            // the evaluator, which reports that the resolution pass never ran — a message
+            // about the compiler, handed to someone who wrote a valid query.
+            //
+            // The param NAME is not resolved here. It is the QueryClass input class's
+            // vocabulary, which `type_check` resolves against `short_to_iri` where it
+            // checks arity and required params, and it is not a property of any subject
+            // in scope.
+            Clause::Fiber(fc) => {
+                for param in &mut fc.params {
+                    match &mut param.value {
+                        ParamValue::Expression(e) => {
+                            resolve_in_expression(e, scope, layer, &namespaces, errors);
+                        }
+                        ParamValue::Comorphism { source, .. } => {
+                            resolve_in_expression(source, scope, layer, &namespaces, errors);
+                        }
+                    }
+                }
             }
         }
     }

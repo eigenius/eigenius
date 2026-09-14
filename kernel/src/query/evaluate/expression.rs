@@ -71,12 +71,12 @@ pub(super) fn eval_expression(
                 op if is_test(*op) => {
                     let l = match eval_expression(left, binding, layer, runtime) {
                         Ok(v) => v,
-                        Err(e) if e.is_absent_property() => return Ok(Value::Boolean(false)),
+                        Err(e) if e.is_absence() => return Ok(Value::Boolean(false)),
                         Err(e) => return Err(e),
                     };
                     let r = match eval_expression(right, binding, layer, runtime) {
                         Ok(v) => v,
-                        Err(e) if e.is_absent_property() => return Ok(Value::Boolean(false)),
+                        Err(e) if e.is_absence() => return Ok(Value::Boolean(false)),
                         Err(e) => return Err(e),
                     };
                     eval_binary(*op, &l, &r)
@@ -113,14 +113,17 @@ pub(super) fn eval_expression(
             Expression::Variable(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
             other => match eval_expression(other, binding, layer, runtime) {
                 Ok(_) => Ok(Value::Boolean(false)),
-                // Every way a dot-path can fail to REACH a value answers this question
-                // the same way: there is none. Absence is one of them; a segment whose
-                // value does not resolve, or is not a resource to walk into, are the
-                // others. Propagating those aborted the whole query over one dangling
-                // reference among the matched resources.
-                Err(e) if e.is_absent_property() || e.is_unreachable_path() => {
-                    Ok(Value::Boolean(true))
-                }
+                // Both ways a dot-path can have NO VALUE answer this question the same
+                // way — see `QueryError::is_absence`. Propagating the second aborted the
+                // whole query over one dangling reference among the matched resources.
+                //
+                // A segment that is not a resource to WALK INTO is not one of them, and
+                // an earlier version of this comment claimed it was: dot-pathing through
+                // a string is the query being wrong, and it still aborts with a
+                // diagnostic. D2 §5.6 says an intermediate segment must resolve to a
+                // `core:resource`-typed property; nothing checks that at type-check yet,
+                // so the diagnostic is where a reader finds out.
+                Err(e) if e.is_absence() => Ok(Value::Boolean(true)),
                 Err(e) => Err(e),
             },
         },
@@ -185,7 +188,9 @@ pub(super) fn eval_expression(
                     })?;
                 // `type_check` resolved every segment to the property IRI it names, so
                 // this is a lookup and not a search. A short name here means the program
-                // reached evaluation without that pass.
+                // reached evaluation without that pass — unreachable now that every name
+                // position is resolved, and still representable, which eigenius#248
+                // tracks.
                 let prop_iri = match segment {
                     Name::FullIri(iri) => iri,
                     Name::ShortName(s) => {
@@ -616,7 +621,7 @@ fn eval_operand_absent_as_false(
 ) -> Result<Value, QueryError> {
     match eval_expression(expr, binding, layer, runtime) {
         Ok(v) => Ok(v),
-        Err(e) if e.is_absent_property() => Ok(Value::Boolean(false)),
+        Err(e) if e.is_absence() => Ok(Value::Boolean(false)),
         Err(e) => Err(e),
     }
 }
@@ -644,7 +649,7 @@ pub(super) fn apply_group_by(
         for expr in group_by {
             match eval_expression(expr, binding, layer, runtime) {
                 Ok(v) => key.push(format!("{v:?}")),
-                Err(e) if e.is_absent_property() => key.push(String::new()),
+                Err(e) if e.is_absence() => key.push(String::new()),
                 Err(e) => return Err(e),
             }
         }

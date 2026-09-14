@@ -30,11 +30,9 @@ use crate::layer::{
 };
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
-use crate::ontology::well_known as wk;
 use crate::program::embedder::EmbedderRegistry;
 use crate::query::ast::{
-    BinaryOp, Expression, HintSet, Literal, MatchPart, Name, Program, ValueOrVariable, Variable,
-    Via,
+    BinaryOp, Expression, HintSet, Literal, MatchPart, Program, ValueOrVariable, Variable, Via,
 };
 use crate::query::error::QueryError;
 use crate::query::text::analyzer::registry as analyzer_registry;
@@ -95,7 +93,7 @@ impl SimilarityContext {
         embedders: Option<&EmbedderRegistry>,
         vector_segment_cache: Option<&SegmentCache>,
     ) -> Result<Self, QueryError> {
-        let prop_var_index = build_property_variable_index(program, layer)?;
+        let prop_var_index = build_property_variable_index(program);
         let text_indexes = resolve_active_text_indexes(layer);
         let vector_indexes = resolve_active_vector_indexes(layer);
 
@@ -238,17 +236,18 @@ struct PropertyVarBinding {
     subject_var: String,
 }
 
-fn build_property_variable_index(
-    program: &Program,
-    layer: &Layer,
-) -> Result<BTreeMap<String, PropertyVarBinding>, QueryError> {
+/// The `variable → property_iri` map over every `MATCH` brace key that binds a variable.
+///
+/// Infallible, and takes no layer: `resolve_property_names` already resolved every key
+/// against the full scope rule and reported what it could not. This reads the answer.
+fn build_property_variable_index(program: &Program) -> BTreeMap<String, PropertyVarBinding> {
     let mut out: BTreeMap<String, PropertyVarBinding> = BTreeMap::new();
-    let mut visit = |part: &MatchPart| -> Result<(), QueryError> {
+    let mut visit = |part: &MatchPart| {
         for pat in part.patterns() {
             for pp in &pat.properties {
                 if let ValueOrVariable::Variable(var) = &pp.object {
                     if let Some(property_iri) =
-                        resolve_property_name(&pp.property, layer, &part.using_namespaces)?
+                        crate::query::resolve::resolved_property_iri(&pp.property)
                     {
                         out.entry(var.name.clone()).or_insert(PropertyVarBinding {
                             property_iri,
@@ -258,26 +257,12 @@ fn build_property_variable_index(
                 }
             }
         }
-        Ok(())
     };
-    visit(&program.query.body)?;
+    visit(&program.query.body);
     for def in &program.definitions {
-        visit(&def.body)?;
+        visit(&def.body);
     }
-    Ok(out)
-}
-
-fn resolve_property_name(
-    name: &Name,
-    layer: &Layer,
-    namespaces: &[String],
-) -> Result<Option<Iri>, QueryError> {
-    match name {
-        Name::FullIri(iri) => Ok(Some(iri.clone())),
-        Name::ShortName(s) => {
-            crate::query::resolve::resolve_scoped_name(layer, namespaces, &[wk::PROPERTY], s)
-        }
-    }
+    out
 }
 
 fn collect_similarity_nodes<'a>(part: &'a MatchPart, out: &mut Vec<&'a Expression>) {

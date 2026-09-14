@@ -207,3 +207,77 @@ fn a_dot_path_projects_an_optional_column_without_excluding_the_row() {
         "and only the one that has a title carries the column"
     );
 }
+
+/// **A dangling reference is no value, at every site that decides "unsatisfied rather
+/// than failed".**
+///
+/// `unreachable_path` was split from generic evaluation faults so `NOT EXISTS` could
+/// answer over a dot-path whose middle segment names a resource the chain does not hold.
+/// It was wired into `NOT EXISTS` and nowhere else, so the same row answered one way
+/// under `NOT EXISTS(?n.owner.title)` and aborted the whole query under
+/// `?n.owner.title == "x"`. Five sites make that decision; `QueryError::is_absence` is
+/// now the one predicate all five ask.
+#[test]
+fn a_dangling_reference_is_absence_in_a_comparison_too() {
+    let boot = eigenius_kernel::testing::bootstrap_context();
+    let mut b = LayerBuilder::new("dangling", Some(Arc::clone(boot.head())));
+
+    for (prop, short, dt) in [
+        ("urn:ex:owner", "owner", wk::RESOURCE),
+        ("urn:ex:title", "title", "urn:eigenius:core:string"),
+    ] {
+        let mut p = Resource::new(iri(prop));
+        p.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(wk::PROPERTY.to_string())]),
+        );
+        p.set(iri(wk::DESCRIPTION), Value::String("probe property".into()));
+        p.set(iri(wk::SHORT_NAME), Value::String(short.into()));
+        p.set(iri(wk::DATA_TYPE_PROP), Value::String(dt.into()));
+        b.add_resource(p).unwrap();
+    }
+
+    // `owner` names a resource that is not on the chain. The property is there; what it
+    // names is not.
+    let mut d = Resource::new(iri("urn:ex:d1"));
+    d.set(
+        iri(wk::IS_A),
+        Value::Array(vec![Value::String(wk::CLASS.to_string())]),
+    );
+    d.set(iri(wk::SHORT_NAME), Value::String("D1".into()));
+    d.set(iri(wk::DESCRIPTION), Value::String("a doc".into()));
+    d.set(iri("urn:ex:owner"), Value::String("urn:ex:missing".into()));
+    b.add_resource(d).unwrap();
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    // The comparison is unsatisfied; it does not abort the query.
+    let rows = run(
+        &layer,
+        r#"
+        USING NAMESPACE "urn:ex:"
+        MATCH ?n { owner: ?o }
+        WHERE ?n.owner.title = "anything"
+        RETURN [] { n: ?n }
+        "#,
+    );
+    assert!(
+        column(&rows, "n").is_empty(),
+        "the row does not satisfy the comparison, and the query still answers"
+    );
+
+    // And the same row is found by asking for its absence.
+    let rows = run(
+        &layer,
+        r#"
+        USING NAMESPACE "urn:ex:"
+        MATCH ?n { owner: ?o }
+        WHERE NOT EXISTS(?n.owner.title)
+        RETURN [] { n: ?n }
+        "#,
+    );
+    assert_eq!(
+        column(&rows, "n"),
+        vec!["urn:ex:d1".to_string()],
+        "the two questions must agree about the same dangling reference"
+    );
+}

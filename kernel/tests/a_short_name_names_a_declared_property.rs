@@ -435,3 +435,109 @@ fn a_full_iri_reaches_past_the_output_contract() {
         "a full IRI needs no scope: {errs:?}"
     );
 }
+
+// ─── What a code review found ────────────────────────────────────────
+
+/// **A FIBER param value is an expression, and its names need resolving too.**
+///
+/// `resolve_part` matched only `Clause::Pattern`, so `Clause::Fiber` was skipped entirely
+/// and a dot-path in a param kept its `ShortName` segments. The query then type-checked
+/// with zero errors and failed at EVALUATION with "was never resolved to a property IRI"
+/// — a message about the compiler pass, shown to someone who wrote a valid query. D2 §3.5
+/// makes `param_value ::= expression`, and this shape worked before the rule.
+#[test]
+fn a_dot_path_inside_a_fiber_param_is_resolved() {
+    let layer = with_a_query_class();
+    let q = format!(
+        r#"
+USING INSTITUTION "{INST}" AS cap
+USING NAMESPACE "urn:ex:"
+MATCH ?n {{ }}
+FIBER cap:"{QC}" {{ "urn:ex:expr": ?n.lower }} AS ?b
+RETURN [] {{ v: ?b.lower }}
+"#
+    );
+    let errs = type_errors(&layer, &q);
+    assert!(
+        !errs.iter().any(|e| e.rule == "property_name_unresolved"),
+        "`lower` is in the imported namespace: {errs:?}"
+    );
+    // The segment must actually be rewritten — a clean type-check that leaves a ShortName
+    // behind is the defect, not the absence of an error.
+    let tokens = eigenius_kernel::query::lexer::tokenize(&q).expect("lexes");
+    let mut program = eigenius_kernel::query::parser::parse(tokens).expect("parses");
+    let _ = eigenius_kernel::query::type_check::type_check(&mut program, &layer);
+    let clause = program
+        .query
+        .body
+        .clauses
+        .iter()
+        .find_map(|c| match c {
+            eigenius_kernel::query::ast::Clause::Fiber(f) => Some(f),
+            _ => None,
+        })
+        .expect("a FIBER clause");
+    let param = &clause.params[0];
+    let eigenius_kernel::query::ast::ParamValue::Expression(
+        eigenius_kernel::query::ast::Expression::DotPath { segments, .. },
+    ) = &param.value
+    else {
+        panic!("expected a dot-path param value, got {:?}", param.value);
+    };
+    assert!(
+        matches!(segments[0], eigenius_kernel::query::ast::Name::FullIri(_)),
+        "the param's segment reaches the evaluator unresolved: {:?}",
+        segments[0]
+    );
+}
+
+/// **An explicit `USING NAMESPACE` shadows the implicit core prelude.**
+///
+/// Core and the imported prefixes were one flat candidate pool, so a short name declared
+/// in both was `ambiguous_short_name` — and the error's remedy, "import fewer namespaces",
+/// cannot be taken, because core is never imported in the first place. Five shipped
+/// ontologies collide with core exactly this way, `schema_org:description` among them.
+///
+/// Naming a namespace says which vocabulary the query means, so it wins, the way an inner
+/// scope wins over an outer one.
+#[test]
+fn an_imported_namespace_wins_over_the_core_prelude() {
+    let boot = eigenius_kernel::testing::bootstrap_context();
+    let mut b = LayerBuilder::new("shadowing", Some(Arc::clone(boot.head())));
+
+    // Same short name as `core:description`, which every chain carries.
+    let mut p = Resource::new(iri("urn:ex:description"));
+    p.set(iri(wk::IS_A), strings(&[wk::PROPERTY]));
+    p.set(iri(wk::DESCRIPTION), Value::String("a rival".into()));
+    p.set(iri(wk::SHORT_NAME), Value::String("description".into()));
+    p.set(
+        iri(wk::DATA_TYPE_PROP),
+        Value::String("urn:eigenius:core:string".into()),
+    );
+    b.add_resource(p).unwrap();
+
+    let mut r = Resource::new(iri("urn:ex:thing"));
+    r.set(iri(wk::IS_A), strings(&[wk::CLASS]));
+    r.set(iri(wk::SHORT_NAME), Value::String("Thing".into()));
+    r.set(iri(wk::DESCRIPTION), Value::String("core's slot".into()));
+    r.set(
+        iri("urn:ex:description"),
+        Value::String("the import's".into()),
+    );
+    b.add_resource(r).unwrap();
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let rows = run(
+        &layer,
+        r#"
+        USING NAMESPACE "urn:ex:"
+        MATCH ?t { description: ?d }
+        RETURN [] { d: ?d }
+        "#,
+    );
+    assert_eq!(
+        column(&rows, "d"),
+        vec!["the import's".to_string()],
+        "the imported namespace names the property, not the prelude"
+    );
+}

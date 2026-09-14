@@ -134,6 +134,25 @@ impl QueryError {
         self.rule == RULE_UNREACHABLE_PATH
     }
 
+    /// **No value, for a reason that is data rather than a fault.** A dot-path that
+    /// reaches no value does so in two ways — the resource does not carry the property
+    /// ([`Self::absent_property`]), or the property's value names something the chain does
+    /// not hold ([`Self::unreachable_path`]) — and every site that decides "unsatisfied
+    /// rather than failed" answers both the same way.
+    ///
+    /// It exists because that decision is made at five sites, and the two rules were wired
+    /// into one of them: `NOT EXISTS(?d.owner.name)` answered over a dangling reference
+    /// while `?d.owner.name = "Ada"` aborted the whole query on the same row. One
+    /// predicate, named for the question it answers, so the next site cannot get half of
+    /// it.
+    ///
+    /// A path that cannot be WALKED — an intermediate segment whose value is not a
+    /// resource reference — is deliberately not here. That is the query dot-pathing
+    /// through a string, which is the query being wrong.
+    pub fn is_absence(&self) -> bool {
+        self.is_absent_property() || self.is_unreachable_path()
+    }
+
     pub fn evaluation(message: impl Into<String>) -> Self {
         Self {
             position: None,
