@@ -18,7 +18,7 @@
 //!
 //! - [`pattern`] — positive / negated pattern matching and candidate
 //!   collection (plus the shared [`Binding`] alias and the small
-//!   `literal_to_value` / `find_property_by_shortname` helpers).
+//!   `literal_to_value` helper).
 //! - [`expression`] — `eval_expression`, binary / unary / verdict
 //!   evaluators, GROUP BY + aggregation, Decidable QueryClass dispatch.
 //! - [`fiber`] — FIBER clause dispatch, [`FiberRuntime`] surface,

@@ -843,14 +843,9 @@ impl Parser {
                     self.expect(&TokenKind::LParen)?;
                     let var = self.parse_variable()?;
                     let operand = if self.at(&TokenKind::Dot) {
-                        let mut segments = Vec::new();
-                        while self.at(&TokenKind::Dot) {
-                            self.advance();
-                            segments.push(self.parse_identifier()?);
-                        }
                         Expression::DotPath {
                             root: var,
-                            segments,
+                            segments: self.parse_dot_segments()?,
                         }
                     } else {
                         Expression::Variable(var)
@@ -975,14 +970,9 @@ impl Parser {
             TokenKind::Variable(_) => {
                 let var = self.parse_variable()?;
                 if self.at(&TokenKind::Dot) {
-                    let mut segments = Vec::new();
-                    while self.at(&TokenKind::Dot) {
-                        self.advance();
-                        segments.push(self.parse_identifier()?);
-                    }
                     Ok(Expression::DotPath {
                         root: var,
-                        segments,
+                        segments: self.parse_dot_segments()?,
                     })
                 } else {
                     Ok(Expression::Variable(var))
@@ -1152,6 +1142,20 @@ impl Parser {
     }
 
     // --- Helpers ---
+
+    /// The `.seg.seg` tail of a dot-path. Each segment is a [`Name`], so a
+    /// property outside the root class's declared vocabulary and outside every
+    /// imported namespace is still reachable — written as a quoted full IRI,
+    /// exactly as a `MATCH` brace key would be. Called with the cursor on the
+    /// first `.`; returns at least one segment.
+    fn parse_dot_segments(&mut self) -> Result<Vec<Name>, QueryError> {
+        let mut segments = Vec::new();
+        while self.at(&TokenKind::Dot) {
+            self.advance();
+            segments.push(self.parse_name()?);
+        }
+        Ok(segments)
+    }
 
     fn parse_name(&mut self) -> Result<Name, QueryError> {
         match self.peek().clone() {
@@ -1600,7 +1604,12 @@ mod tests {
         .unwrap();
         assert!(matches!(
             &prog.query.result[0].expression,
-            Expression::DotPath { segments, .. } if segments == &["address", "city"]
+            Expression::DotPath { segments, .. }
+                if segments
+                    == &[
+                        Name::ShortName("address".into()),
+                        Name::ShortName("city".into())
+                    ]
         ));
     }
 

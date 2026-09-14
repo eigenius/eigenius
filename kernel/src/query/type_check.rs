@@ -28,10 +28,17 @@ use crate::query::ast::*;
 use crate::query::error::QueryError;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Type-check a parsed EigenQL program against a layer.
+/// Type-check a parsed EigenQL program against a layer, and resolve the names it writes
+/// against that layer's vocabulary.
+///
+/// **It rewrites the program.** The pass already resolved every short name it checked and
+/// then discarded the answer, leaving the evaluator to resolve each one a second time by a
+/// different mechanism. Property names — `MATCH` brace keys and dot-path segments — are
+/// rewritten in place to the IRIs they name ([`resolve_property_names`]), so the evaluator
+/// looks a property up rather than searching for one that looks like it.
 ///
 /// Returns a list of errors (empty if valid).
-pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
+pub fn type_check(program: &mut Program, layer: &Layer) -> Vec<QueryError> {
     let mut errors = Vec::new();
 
     // Build the institution index once for the whole pass — every
@@ -47,6 +54,16 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // relation, not a chain class), so short-name class resolution must exempt them.
     let relation_names: BTreeSet<String> =
         program.definitions.iter().map(|d| d.name.clone()).collect();
+
+    // Resolve the property names the program writes, before anything reads them: a check
+    // that resolves a short name itself would have to repeat this scope rule, and the
+    // similarity pass below did exactly that through namespaces alone.
+    errors.extend(crate::query::resolve::resolve_property_names(
+        program,
+        layer,
+        &index,
+        &relation_names,
+    ));
 
     // Check DEFINE rules
     for def in &program.definitions {
@@ -1542,8 +1559,8 @@ mod tests {
 
     fn check(layer: &Layer, query_str: &str) -> Vec<QueryError> {
         let tokens = tokenize(query_str).unwrap();
-        let program = parser::parse(tokens).unwrap();
-        type_check(&program, layer)
+        let mut program = parser::parse(tokens).unwrap();
+        type_check(&mut program, layer)
     }
 
     #[test]

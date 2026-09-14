@@ -184,6 +184,15 @@ pub enum Name {
     FullIri(Iri),
 }
 
+impl std::fmt::Display for Name {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Name::ShortName(s) => f.write_str(s),
+            Name::FullIri(i) => f.write_str(i.as_str()),
+        }
+    }
+}
+
 /// A query variable (without the `?` prefix).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Variable {
@@ -298,9 +307,18 @@ pub enum Expression {
         op: AggregateOp,
         arg: Box<Expression>,
     },
+    /// `?root.seg.seg` — property traversal from a bound resource.
+    ///
+    /// A segment is a [`Name`], the same shape a `MATCH` brace key has, because it
+    /// names the same thing: a declared `core:Property`. A short name resolves
+    /// against the root's class where the query states one, against the imported
+    /// namespaces otherwise; a full IRI names the property outright and is the
+    /// escape hatch where neither scope reaches it. `type_check` rewrites every
+    /// short name to the IRI it resolved to, so an evaluated `DotPath` carries
+    /// `FullIri` segments only.
     DotPath {
         root: Variable,
-        segments: Vec<String>,
+        segments: Vec<Name>,
     },
     Array(Vec<Expression>),
     Object(Vec<(Name, Expression)>),

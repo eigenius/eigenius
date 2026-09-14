@@ -879,9 +879,10 @@ Aggregates may only appear in RETURN expressions. Non-aggregated RETURN expressi
 
 ### 5.4 Pattern type rules
 
-- In a typed pattern `ClassName(?var) { prop: ?val }`, `prop` must be a valid property for `ClassName` (directly declared or inherited through `subclass_of`).
+- In a typed pattern `ClassName(?var) { prop: ?val }`, `prop` must be a valid property for `ClassName` (directly declared or inherited through `subclass_of`). Where the pattern states no class, `prop` resolves against the imported namespaces instead — §5.6.1 gives the full scope rule, which brace keys and dot-path segments share.
 - The class must resolve to a resource with `is_a` including `urn:eigenius:core:Class`.
 - The property must resolve to a resource with `is_a` including `urn:eigenius:core:Property`.
+- A shortname that resolves in neither scope is `property_name_unresolved`. Nothing asked this until `2026-09-13`: a mistyped brace key type-checked, matched no resource, and returned an empty result set with no diagnostic.
 - Full IRI references (quoted strings) are resolved directly from the layer chain, bypassing USING.
 
 ### 5.5 RETURN type rules
@@ -892,11 +893,46 @@ Aggregates may only appear in RETURN expressions. Non-aggregated RETURN expressi
 
 ### 5.6 Dot-path type rules
 
-- Each segment in a dot-path `?var.a.b` is resolved as a shortname against the type of the preceding segment.
-- The root variable must be bound to a resource in MATCH.
+- A dot-path segment is a `Name` — a shortname, or a quoted full IRI — the same shape a
+  pattern's brace key has.
+- The root variable must be bound to a resource in MATCH or by a FIBER clause.
+- A shortname segment resolves against the vocabulary in scope for the resource it is read
+  from: for the first segment, the root's scope (§5.6.1); for a later segment, the
+  preceding property's declared range (`core:class_types`). A property declaring no range
+  leaves the next segment on the namespace scope alone.
+- A shortname in neither the class scope nor the namespace scope is
+  `property_name_unresolved`. It is not an empty result set: absence of a property on a
+  resource and absence of the property from the vocabulary are different questions, and
+  conflating them made a typo indistinguishable from a gap in the data.
+- A full-IRI segment resolves directly and needs no scope. It is how a query reaches a
+  property that no class in scope declares and no imported namespace covers. Earlier
+  revisions of this section required multi-pattern decomposition instead; a segment could
+  then only be a bare identifier, which left the shortname rule with no escape hatch and so
+  unenforceable.
 - Each intermediate segment must resolve to a property with data type `resource`.
 - The final segment may resolve to a property of any data type.
-- Dot-paths are unavailable for full IRI property references — use multi-pattern decomposition instead.
+
+#### 5.6.1 The scope of a shortname
+
+This governs brace keys (§5.4) and dot-path segments alike — both name a declared
+`core:Property`, and both resolve by the property's `core:short_name`, never by the
+local-name tail of an IRI the resource happens to carry.
+
+| the resource is | shortnames resolve against |
+|---|---|
+| a pattern subject with a class | that class's `requires` ∪ `recommends` ∪ every `conditional_requires` branch, transitively over `subclass_of` |
+| a `FIBER … AS ?b` binding | the QueryClass's `institution:result_class` (same closure) plus `institution:result_properties` |
+| a pattern subject with no class | `USING NAMESPACE` prefixes plus the implicit core prelude |
+
+The class scope is the narrower one and answers first; the namespace scope answers where it
+does not. A shortname matching more than one property within one scope is
+`ambiguous_short_name`.
+
+Resolution happens once, at type-check, and rewrites the program: an evaluated brace key or
+dot-path segment carries a full IRI. The evaluator used to resolve shortnames a second time,
+by matching against the local names of the IRIs on the resource in hand — a mechanism that
+admits an undeclared property of the right spelling and misses a declared property of the
+wrong one, silently in both directions.
 
 ### 5.7 USING INSTITUTION type rules
 
@@ -983,9 +1019,13 @@ The response resource bound to `?var` carries the QueryClass's
 `result_class` as its `is_a`. When that class is `Verdict`, subsequent
 clauses may use `?var HOLDS` / `?var FAILS` / `?var UNDECIDABLE` for
 projection (§3.8) or pattern-match `MATCH ?var { ctor_name: ?c }`
-directly. For other result classes, the response resource is treated
-as an untyped resource for the purposes of short-name dot-paths on
-`?var` (use full-IRI property references when decomposing).
+directly. For every result class, `result_class` is the binding's
+shortname scope (§5.6.1), widened by `institution:result_properties`.
+This section called a non-Verdict response untyped for that purpose
+until D90 closed the output contract: an institution may now set only
+what those two declare, checked at the dispatch boundary, so the
+vocabulary a query may name on `?var` and the vocabulary the
+institution may return are the same list.
 
 ### 5.9 Institution-dispatched function-call type rules
 
@@ -1613,7 +1653,7 @@ can be projected with `?check HOLDS` (§3.8) or matched directly:
 |----------|----------|-----------|
 | `undefined` literal | Removed; use `NOT EXISTS(?var)` instead | Eigon-JSON has no null; testing for absence is clearer with explicit syntax |
 | Property reference without USING | Always available via full IRI as quoted string; USING enables shortname convenience | Full IRI is the canonical form; USING is sugar |
-| Dot-path navigation | Shortname-only sugar over multi-pattern joins; full IRI uses decomposed patterns | Keeps grammar simple; dot-paths resolve against class property sets |
+| Dot-path navigation | Sugar over multi-pattern joins; a segment is a `Name`, so a full IRI reaches what no scope declares | Keeps grammar simple; dot-paths resolve against class property sets (§5.6.1) |
 | Result modifiers | DISTINCT, ORDER BY, LIMIT, OFFSET included in v1 | Essential for practical use |
 | Aggregation | COUNT, SUM, AVG, MIN, MAX with GROUP BY in v1 | Essential for analytics queries |
 | String concatenation `\|\|` | Added at additive precedence level | Consistent with SQL convention |

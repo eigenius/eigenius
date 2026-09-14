@@ -50,6 +50,17 @@ fn declare_vocabulary(b: &mut LayerBuilder) {
     );
     c.set(iri(wk::DESCRIPTION), Value::String("probe class".into()));
     c.set(iri(wk::SHORT_NAME), Value::String("Widget".into()));
+    // `recommends`, not `requires`: this is the vocabulary a Widget may carry, which is
+    // what puts `size` and `weight` in scope for a short name on a `Widget(?w)` pattern.
+    // Several tests below turn on a widget that carries no size, so requiring it would
+    // make the absence cases uncommittable.
+    c.set(
+        iri(wk::RECOMMENDS),
+        Value::Array(vec![
+            Value::String("urn:ex:size".into()),
+            Value::String("urn:ex:weight".into()),
+        ]),
+    );
     b.add_resource(c).unwrap();
 
     for (prop, short) in [("urn:ex:size", "size"), ("urn:ex:weight", "weight")] {
@@ -229,26 +240,20 @@ fn a_resource_missing_the_property_drops_its_row_without_failing() {
     );
 }
 
-/// **A dot-path segment is resolved against the RESOURCE, not against a namespace.**
+/// **A class in the pattern is scope enough for a dot-path segment.**
 ///
-/// This pins the semantics, because getting it wrong is tempting in a specific way. A
-/// MATCH brace key is a `Name`: it may be a short name resolved through `USING NAMESPACE`
-/// or a full IRI, which is the general rule that a short name means something only where
-/// the class is known or a namespace makes it derivable. A dot-path segment is none of
-/// those — it is a bare identifier matched against the LOCAL NAMES of the properties the
-/// resource actually carries, with no namespace and no class consulted.
+/// This pins the half of the rule that is easy to drop. A short name means something where
+/// the class is known OR a namespace makes it derivable; the query below states a class and
+/// imports no namespace, and `size` resolves out of what `Widget` declares.
 ///
-/// So a dot-path works with no `USING NAMESPACE` at all, as below. A type-check rule that
-/// resolved segments the way brace keys are resolved would reject this query, which
-/// evaluates perfectly well — one was written and reverted for exactly that reason.
-///
-/// The consequence, and it is a real limit rather than an oversight: a MISTYPED segment
-/// cannot be told from one no resource happens to carry. Both are absence, both drop the
-/// row. Telling them apart needs a scope the syntax does not carry, so it would take
-/// giving dot-path segments the same `Name` shape brace keys have — a language change,
-/// not a check.
+/// An earlier rule resolved segments through `USING NAMESPACE` alone and was reverted for
+/// rejecting this query. What made it unsound is that it applied one half of the rule: with
+/// segments restricted to bare identifiers there was no way to write a property that
+/// neither scope reaches, so the namespace clause had to admit everything or lock out the
+/// escape hatch. Segments are `Name`s now, so both halves hold —
+/// `a_short_name_names_a_declared_property.rs` pins the rest.
 #[test]
-fn a_dot_path_needs_no_namespace_declaration() {
+fn a_class_in_the_pattern_scopes_a_dot_path_segment() {
     let layer = corpus();
     let rows = execute_with(
         r#"
@@ -260,7 +265,7 @@ fn a_dot_path_needs_no_namespace_declaration() {
         &layer,
         FiberRuntime::default(),
     )
-    .expect("a dot-path resolves against the resource, so no namespace is needed");
+    .expect("the pattern's class declares `size`, so no namespace import is needed");
     assert_eq!(column(&rows, "w").len(), 2, "sizes 2 and 3 exceed 1");
 }
 

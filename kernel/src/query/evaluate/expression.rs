@@ -26,7 +26,7 @@ use crate::query::error::QueryError;
 use crate::query::functions::{self, like_match, to_f64, values_compare, values_equal};
 use std::collections::BTreeMap;
 
-use super::pattern::{find_property_by_shortname, literal_to_value, Binding};
+use super::pattern::{literal_to_value, Binding};
 use super::FiberRuntime;
 
 /// Evaluate an expression against a binding.
@@ -183,17 +183,21 @@ pub(super) fn eval_expression(
                             current_iri
                         ))
                     })?;
-                // Both of these are the RESOURCE not carrying the property, which is
-                // data absence rather than a fault: a condition over it is not satisfied.
-                // Every other failure in this function is the query being wrong.
-                let prop_iri = find_property_by_shortname(segment, resource.properties())
-                    .ok_or_else(|| {
-                        QueryError::absent_property(format!(
-                            "property '{}' not found on resource '{}'",
-                            segment, current_iri
-                        ))
-                    })?;
-                let value = resource.get(&prop_iri).ok_or_else(|| {
+                // `type_check` resolved every segment to the property IRI it names, so
+                // this is a lookup and not a search. A short name here means the program
+                // reached evaluation without that pass.
+                let prop_iri = match segment {
+                    Name::FullIri(iri) => iri,
+                    Name::ShortName(s) => {
+                        return Err(QueryError::evaluation(format!(
+                            "dot-path segment '{s}' was never resolved to a property IRI"
+                        )))
+                    }
+                };
+                // The RESOURCE not carrying the property is data absence rather than a
+                // fault: a condition over it is not satisfied. Every other failure in
+                // this function is the query being wrong.
+                let value = resource.get(prop_iri).ok_or_else(|| {
                     QueryError::absent_property(format!(
                         "property '{}' has no value on resource '{}'",
                         segment, current_iri

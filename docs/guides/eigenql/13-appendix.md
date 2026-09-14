@@ -81,7 +81,7 @@ PrimaryExpr       ::= '(' Expression ')'
                     | '[' ArgList? ']'                        (* array literal; may be empty *)
                     | ScalarFn '(' ArgList ')'
                     | AggregateFn '(' Expression ')'
-                    | Variable ('.' Identifier)*              (* variable, or a dot-path *)
+                    | Variable ('.' Name)*                    (* variable, or a dot-path *)
                     | (StringLit | QualifiedName | Identifier) '(' ArgList ')'
                     | QualifiedName | Identifier              (* bare name: its own text *)
                     | Literal

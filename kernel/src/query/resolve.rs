@@ -22,11 +22,14 @@
 //!
 //! See `docs/notes/chain-scaling-audit.md` (short-name resolution section).
 
+use crate::institution::registry::InstitutionIndex;
 use crate::layer::{typed_resource_iris, Layer};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
 use crate::ontology::well_known as wk;
+use crate::query::ast::{Clause, Expression, MatchPart, Name, Program};
 use crate::query::error::QueryError;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Is `iri` inside the implicit core namespace or one of the imported namespace
 /// prefixes? A namespace is matched by simple IRI-string prefix (e.g. prefix
@@ -181,4 +184,323 @@ mod tests {
         let got = resolve_scoped_name(&layer, &[], &[wk::CLASS], "Class").expect("no ambiguity");
         assert_eq!(got, Some(iri(wk::CLASS)));
     }
+}
+
+// ─── Property-name resolution ────────────────────────────────────────
+
+/// Resolve every property name the program writes — `MATCH` brace keys and
+/// dot-path segments — to the property IRI it names, rewriting the AST in place.
+///
+/// **Why the AST is rewritten rather than re-resolved at evaluation.** A short name
+/// is matched against a declared property's `core:short_name`; the evaluator used to
+/// match it against the *local name* of whatever IRIs the resource happened to carry.
+/// Two mechanisms for one name, and they disagree in both directions: a property
+/// declared `urn:x:title_text` with `short_name "title"` type-checked and then matched
+/// nothing, and a resource carrying an unrelated `urn:other:title` answered to a name
+/// that meant `urn:x:title_text`. Both were silent. Resolving once, here, leaves the
+/// evaluator a map lookup and no second opinion.
+///
+/// **Scope** (the rule, in full): a short name is admitted when the class is known or it
+/// is derivable from a namespace declaration. The class scope is the pattern's declared
+/// class — or, for a `FIBER … AS ?b` binding, the QueryClass output contract D90 closed;
+/// the namespace scope is `USING NAMESPACE` plus the implicit core prelude. The class is
+/// the narrower scope and answers first. A name in neither is an error rather than an
+/// empty result set, and a full IRI — a quoted segment or key — reaches whatever neither
+/// scope covers.
+pub(crate) fn resolve_property_names(
+    program: &mut Program,
+    layer: &Layer,
+    index: &InstitutionIndex,
+    relation_names: &BTreeSet<String>,
+) -> Vec<QueryError> {
+    let mut errors = Vec::new();
+    for def in &mut program.definitions {
+        let scope = subject_vocabularies(&def.body, layer, index, relation_names);
+        resolve_part(&mut def.body, &scope, layer, &mut errors);
+    }
+    let scope = subject_vocabularies(&program.query.body, layer, index, relation_names);
+    let namespaces = program.query.body.using_namespaces.clone();
+    resolve_part(&mut program.query.body, &scope, layer, &mut errors);
+    // `GROUP BY`, `RETURN` and `ORDER BY` read variables the query body bound, so they
+    // resolve against the query body's scope.
+    for expr in &mut program.query.group_by {
+        resolve_in_expression(expr, &scope, layer, &namespaces, &mut errors);
+    }
+    for item in &mut program.query.result {
+        resolve_in_expression(
+            &mut item.expression,
+            &scope,
+            layer,
+            &namespaces,
+            &mut errors,
+        );
+    }
+    for item in &mut program.query.order_by {
+        resolve_in_expression(
+            &mut item.expression,
+            &scope,
+            layer,
+            &namespaces,
+            &mut errors,
+        );
+    }
+    errors
+}
+
+/// The vocabulary a short name may be drawn from, for one pattern subject or dot-path
+/// root.
+#[derive(Default, Clone)]
+struct Vocabulary {
+    /// What put these properties in scope, named as the chain names it — for the error
+    /// message when a short name is in none of them.
+    sources: Vec<String>,
+    properties: BTreeSet<Iri>,
+}
+
+impl Vocabulary {
+    fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+
+    fn add_class(&mut self, class: &Iri, layer: &Layer) {
+        self.sources.push(class.as_str().to_string());
+        self.properties.extend(layer.declared_properties(class));
+    }
+}
+
+/// The vocabulary each pattern subject and FIBER binding carries.
+///
+/// A variable bound by two classed patterns carries both — resolution searches the
+/// union, so `MATCH ?x Dog { … }, ?x Pet { … }` reaches either class's properties. A
+/// `DEFINE` relation name is not a class and contributes nothing; neither does a class
+/// that fails to resolve, whose dangling reference `check_match_part` reports on its own.
+fn subject_vocabularies(
+    part: &MatchPart,
+    layer: &Layer,
+    index: &InstitutionIndex,
+    relation_names: &BTreeSet<String>,
+) -> BTreeMap<String, Vocabulary> {
+    let mut out: BTreeMap<String, Vocabulary> = BTreeMap::new();
+    for clause in &part.clauses {
+        match clause {
+            Clause::Pattern(p) => {
+                let Some(name) = &p.class else { continue };
+                let iri = match name {
+                    Name::FullIri(iri) => Some(iri.clone()),
+                    Name::ShortName(s) if relation_names.contains(s) => None,
+                    Name::ShortName(s) => {
+                        resolve_scoped_name(layer, &part.using_namespaces, &[wk::CLASS], s)
+                            .ok()
+                            .flatten()
+                    }
+                };
+                if let Some(iri) = iri {
+                    out.entry(p.subject.name.clone())
+                        .or_default()
+                        .add_class(&iri, layer);
+                }
+            }
+            Clause::Fiber(fc) => {
+                // The binding's vocabulary is the QueryClass's output contract, which D90
+                // closed and the kernel enforces at the dispatch boundary: what
+                // `result_class` declares, plus whatever `result_properties` adds. D2 §5.8
+                // step 10 called a non-Verdict response untyped for this purpose; it is
+                // typed now, by a contract that is checked.
+                let qc_iri = match &fc.query_class {
+                    Name::FullIri(iri) => Some(iri.clone()),
+                    Name::ShortName(s) => resolve_scoped_name(
+                        layer,
+                        &part.using_namespaces,
+                        &[wk::QUERY_CLASS_CLASS],
+                        s,
+                    )
+                    .ok()
+                    .flatten(),
+                };
+                if let Some(entry) = qc_iri.as_ref().and_then(|i| index.query_class(i)) {
+                    let vocab = out.entry(fc.binding.name.clone()).or_default();
+                    vocab.add_class(&entry.result_class, layer);
+                    vocab
+                        .properties
+                        .extend(entry.result_properties.iter().cloned());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Brace keys in every pattern, then dot-paths in every condition.
+fn resolve_part(
+    part: &mut MatchPart,
+    scope: &BTreeMap<String, Vocabulary>,
+    layer: &Layer,
+    errors: &mut Vec<QueryError>,
+) {
+    let namespaces = part.using_namespaces.clone();
+    for clause in &mut part.clauses {
+        let Clause::Pattern(p) = clause else { continue };
+        let vocab = scope.get(&p.subject.name).cloned().unwrap_or_default();
+        for pp in &mut p.properties {
+            if let Err(e) = resolve_name_in_place(&mut pp.property, &vocab, layer, &namespaces) {
+                errors.push(e);
+            }
+        }
+    }
+    for expr in &mut part.conditions {
+        resolve_in_expression(expr, scope, layer, &namespaces, errors);
+    }
+}
+
+/// Every dot-path reachable from `expr`.
+fn resolve_in_expression(
+    expr: &mut Expression,
+    scope: &BTreeMap<String, Vocabulary>,
+    layer: &Layer,
+    namespaces: &[String],
+    errors: &mut Vec<QueryError>,
+) {
+    match expr {
+        Expression::DotPath { root, segments } => {
+            let mut vocab = scope.get(&root.name).cloned().unwrap_or_default();
+            for segment in segments.iter_mut() {
+                match resolve_name_in_place(segment, &vocab, layer, namespaces) {
+                    // The next segment is scoped by this property's declared range.
+                    Ok(()) => vocab = range_vocabulary(segment, layer),
+                    Err(e) => {
+                        errors.push(e);
+                        return;
+                    }
+                }
+            }
+        }
+        Expression::Binary { left, right, .. } => {
+            resolve_in_expression(left, scope, layer, namespaces, errors);
+            resolve_in_expression(right, scope, layer, namespaces, errors);
+        }
+        Expression::Unary { operand, .. }
+        | Expression::VerdictPredicate { operand, .. }
+        | Expression::NotExists(operand)
+        | Expression::Aggregate { arg: operand, .. } => {
+            resolve_in_expression(operand, scope, layer, namespaces, errors);
+        }
+        Expression::FunctionCall { args, .. } => {
+            for arg in args {
+                resolve_in_expression(arg, scope, layer, namespaces, errors);
+            }
+        }
+        Expression::Array(elements) => {
+            for elem in elements {
+                resolve_in_expression(elem, scope, layer, namespaces, errors);
+            }
+        }
+        Expression::Object(pairs) => {
+            for (_, v) in pairs {
+                resolve_in_expression(v, scope, layer, namespaces, errors);
+            }
+        }
+        Expression::Similarity { query, .. } => {
+            resolve_in_expression(query, scope, layer, namespaces, errors);
+        }
+        Expression::Literal(_) | Expression::Variable(_) => {}
+    }
+}
+
+/// Rewrite one property name to the IRI it names. A `FullIri` is already resolved.
+fn resolve_name_in_place(
+    name: &mut Name,
+    vocab: &Vocabulary,
+    layer: &Layer,
+    namespaces: &[String],
+) -> Result<(), QueryError> {
+    let Name::ShortName(short) = name else {
+        return Ok(());
+    };
+    let resolved = match scoped_property(short, vocab, layer)? {
+        Some(iri) => Some(iri),
+        None => resolve_scoped_name(layer, namespaces, &[wk::PROPERTY], short)?,
+    };
+    match resolved {
+        Some(iri) => {
+            *name = Name::FullIri(iri);
+            Ok(())
+        }
+        None => Err(QueryError::type_check(
+            "property_name_unresolved",
+            if vocab.is_empty() {
+                format!(
+                    "property '{short}' does not resolve to a declared property in the imported \
+                     namespaces, and nothing in scope declares it — add `USING NAMESPACE`, give \
+                     the pattern a class, or write the full property IRI"
+                )
+            } else {
+                format!(
+                    "property '{short}' is declared by neither {} nor the imported namespaces — \
+                     write the full property IRI to reach a property the class does not declare",
+                    vocab
+                        .sources
+                        .iter()
+                        .map(|c| format!("'{c}'"))
+                        .collect::<Vec<_>>()
+                        .join(" nor ")
+                )
+            },
+        )),
+    }
+}
+
+/// The one property `short` names in `vocab`, if any.
+fn scoped_property(
+    short: &str,
+    vocab: &Vocabulary,
+    layer: &Layer,
+) -> Result<Option<Iri>, QueryError> {
+    let short_prop = wk::iri(wk::SHORT_NAME);
+    let mut matches: BTreeSet<Iri> = BTreeSet::new();
+    for prop in &vocab.properties {
+        let Some(res) = layer.resolve(prop) else {
+            continue;
+        };
+        if let Some(Value::String(sn)) = res.get(&short_prop) {
+            if sn == short {
+                matches.insert(prop.clone());
+            }
+        }
+    }
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(matches.into_iter().next()),
+        _ => Err(QueryError::type_check(
+            "ambiguous_short_name",
+            format!(
+                "short name '{short}' names {} distinct properties in the classes in scope ({}); \
+                 write the full property IRI",
+                matches.len(),
+                matches
+                    .iter()
+                    .map(|i| i.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )),
+    }
+}
+
+/// A property's declared range (`core:class_types`) — the vocabulary for the next
+/// dot-path segment. Empty where the property declares none, which drops the next
+/// segment to the namespace scope.
+fn range_vocabulary(name: &Name, layer: &Layer) -> Vocabulary {
+    let mut vocab = Vocabulary::default();
+    let Name::FullIri(iri) = name else {
+        return vocab;
+    };
+    let Some(res) = layer.resolve(iri) else {
+        return vocab;
+    };
+    if let Some(v) = res.get(&wk::iri(wk::CLASS_TYPES)) {
+        for class in v.as_iri_array() {
+            vocab.add_class(&class, layer);
+        }
+    }
+    vocab
 }

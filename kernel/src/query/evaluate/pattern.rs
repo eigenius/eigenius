@@ -414,14 +414,13 @@ fn try_match_resource(
     // Match property patterns, threading a frontier of partial bindings.
     let mut frontier = vec![base];
     for prop_pat in &pattern.properties {
-        let prop_iri = match &prop_pat.property {
-            Name::ShortName(s) => match find_property_by_shortname(s, resource_props) {
-                Some(iri) => iri,
-                None => return Vec::new(),
-            },
-            Name::FullIri(iri) => iri.clone(),
+        // Resolved by `type_check` to the property IRI the key names — see
+        // `query::resolve::resolve_property_names`. A short name here means the
+        // program reached evaluation without that pass.
+        let Name::FullIri(prop_iri) = &prop_pat.property else {
+            return Vec::new();
         };
-        let value = resource_props.get(&prop_iri);
+        let value = resource_props.get(prop_iri);
 
         let mut next: Vec<Binding> = Vec::new();
         for b in frontier {
@@ -515,16 +514,6 @@ fn bind_positional(vars: &[Variable], elems: &[Value], base: Binding) -> Option<
     Some(b)
 }
 
-pub(super) fn find_property_by_shortname(
-    shortname: &str,
-    props: &BTreeMap<Iri, Value>,
-) -> Option<Iri> {
-    props
-        .keys()
-        .find(|iri| iri.local_name() == shortname)
-        .cloned()
-}
-
 /// Check if a resource is a (subclass-)instance of a class, via the single
 /// foundation authority [`Layer::is_subclass_of`].
 fn is_subclass_instance(resource: &Resource, class_iri: &Iri, layer: &Layer) -> bool {
@@ -597,9 +586,14 @@ mod tests {
         Arc::new(domain_builder.build(storage))
     }
 
+    /// Runs the type-check pass, not because these tests check typing, but because
+    /// that pass resolves the property names the evaluator then looks up. Parsing
+    /// straight into `evaluate` leaves every short name unresolved.
     pub(crate) fn run_query(layer: &Layer, query_str: &str) -> Vec<Resource> {
         let tokens = tokenize(query_str).unwrap();
-        let program = parser::parse(tokens).unwrap();
+        let mut program = parser::parse(tokens).unwrap();
+        let errors = crate::query::type_check::type_check(&mut program, layer);
+        assert!(errors.is_empty(), "type errors: {errors:?}");
         let fp = QueryFingerprint::of(query_str);
         evaluate(&program, layer, &fp, FiberRuntime::default())
             .unwrap()

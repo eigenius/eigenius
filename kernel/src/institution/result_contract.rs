@@ -60,7 +60,6 @@
 //! as a term unless a declaration says to. Check 1 is what stops an institution calling
 //! such a blob its epistemic output.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::layer::Layer;
@@ -217,7 +216,7 @@ pub fn check_output(
 
     out.extend(check_permitted_verdict(permitted, verdict_ctor));
 
-    let mut declared = declared_properties(result_class, layer);
+    let mut declared = layer.declared_properties(result_class);
     declared.extend(result_properties.iter().cloned());
     for (prop_iri, value) in output.properties() {
         if gate_output_is_kernel_stamped(prop_iri.as_str()) {
@@ -266,61 +265,6 @@ fn gate_output_is_kernel_stamped(prop: &str) -> bool {
 /// an institution set them itself and escape the check.
 fn derivation_is_kernel_stamped(prop: &str) -> bool {
     matches!(prop, wk::IS_A | wk::FROM_SUBJECT)
-}
-
-/// Everything a class declares a property for: `requires` ∪ `recommends` ∪ every
-/// `conditional_requires` branch, transitively over `subclass_of`.
-///
-/// **Conditional branches count, unconditionally.** `core:conditional_requires` names a
-/// property that becomes required when a sibling holds a given value. Whether the
-/// condition FIRES is Rule 1's question, and asking it here would refuse a property the
-/// class plainly declares just because a different slot was set differently — which is a
-/// vocabulary question, not a requirement question. So the branches are unioned in
-/// without evaluating them.
-///
-/// A class that does not resolve contributes nothing: Rule 14 reports the dangling
-/// `subclass_of` reference where the class was committed, and repeating it here would be
-/// noise.
-///
-/// D78 unified three implementations of "what does `C` require" onto
-/// `resolve_class_type`'s record, and this is deliberately not a fourth: that record is
-/// the REQUIRED field set (`recommends` contributes nothing to it, by design), and an
-/// institution's output is checked against the whole declared vocabulary rather than
-/// against what an instance must carry. `institution:Verdict` is also an InductiveType,
-/// which `resolve_class_type` answers for as an inductive rather than a record.
-fn declared_properties(class_iri: &Iri, layer: &Arc<Layer>) -> BTreeSet<Iri> {
-    let mut out = BTreeSet::new();
-    let mut visited = BTreeSet::new();
-    let mut frontier = vec![class_iri.clone()];
-    while let Some(next) = frontier.pop() {
-        if !visited.insert(next.clone()) {
-            continue;
-        }
-        let Some(def) = layer.resolve(&next) else {
-            continue;
-        };
-        for field in [wk::REQUIRES, wk::RECOMMENDS] {
-            if let Some(v) = def.get(&wk::iri(field)) {
-                out.extend(v.as_iri_array());
-            }
-        }
-        if let Some(Value::Array(conditions)) = def.get(&wk::iri(wk::CONDITIONAL_REQUIRES)) {
-            for condition in conditions {
-                let Value::Embedded(c) = condition else {
-                    continue;
-                };
-                for field in [wk::THEN_REQUIRES, wk::THEN_RECOMMENDS] {
-                    if let Some(v) = c.get(&wk::iri(field)) {
-                        out.extend(v.as_iri_array());
-                    }
-                }
-            }
-        }
-        if let Some(v) = def.get(&wk::iri(wk::PARENT_CLASSES)) {
-            frontier.extend(v.as_iri_array());
-        }
-    }
-    out
 }
 
 /// Check one property's value, and everything nested under it, against the declared
