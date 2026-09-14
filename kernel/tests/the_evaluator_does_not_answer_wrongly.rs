@@ -584,3 +584,66 @@ fn a_column_named_like_a_variable_is_not_that_variable() {
         "the diagnostic should say what to do: {err:?}"
     );
 }
+
+/// **Absence is false at the test, not fatal to the whole condition.**
+///
+/// This was the deepest of the set and the last found. Absence propagated as an error to
+/// the condition ROOT, where it became "drop the row" — the same answer only for a bare
+/// comparison. Composed with anything, it was wrong: a disjunction dropped a row that
+/// satisfies its other branch, and a negation excluded a row that should survive, because
+/// one absent operand aborted the entire expression tree.
+///
+/// Resolving at the test instead makes every composition follow: `false OR true` is true,
+/// `NOT false` is true, and nothing above needs an absence case of its own.
+#[test]
+fn absence_composes_instead_of_aborting_the_condition() {
+    let boot = eigenius_kernel::testing::bootstrap_context();
+    let mut b = LayerBuilder::new("compose", Some(Arc::clone(boot.head())));
+    declare_vocabulary(&mut b);
+    widget(&mut b, "urn:ex:w1", Some(1), 10);
+    // No size: every condition below mentioning `size` is unsatisfied for this one.
+    widget(&mut b, "urn:ex:w4", None, 40);
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let run = |cond: &str| {
+        execute_with(
+            &format!(
+                r#"
+                USING "urn:ex:Widget"
+                USING NAMESPACE "urn:ex:"
+                MATCH Widget(?w) {{ "urn:ex:weight": ?wt }}
+                WHERE {cond}
+                RETURN [] {{ wt: ?wt }}
+                "#
+            ),
+            &layer,
+            FiberRuntime::default(),
+        )
+        .unwrap_or_else(|e| panic!("`{cond}` should evaluate: {e:?}"))
+    };
+
+    // The right disjunct holds for both widgets, so both survive.
+    assert_eq!(
+        column(&run("?w.size > 0 OR ?wt > 0"), "wt"),
+        vec![Value::Integer(10), Value::Integer(40)],
+        "a disjunction must not drop a row its other branch satisfies"
+    );
+
+    // `size > 100` is unsatisfied for both — for w1 because 1 is not above 100, for w4
+    // because it has no size — so both survive the negation.
+    assert_eq!(
+        column(&run("NOT (?w.size > 100)"), "wt"),
+        vec![Value::Integer(10), Value::Integer(40)],
+        "a negation of an unsatisfied test holds"
+    );
+
+    // Conjunction still excludes: w4's left conjunct is unsatisfied.
+    assert_eq!(
+        column(&run("?w.size > 0 AND ?wt > 0"), "wt"),
+        vec![Value::Integer(10)],
+        "a conjunction still needs both"
+    );
+
+    // And a bare comparison is unchanged — the case that was already right.
+    assert_eq!(column(&run("?w.size > 0"), "wt"), vec![Value::Integer(10)]);
+}

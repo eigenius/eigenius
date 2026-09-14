@@ -43,11 +43,54 @@ pub(super) fn eval_expression(
             .cloned()
             .ok_or_else(|| QueryError::evaluation(format!("unbound variable: ?{}", var.name))),
         Expression::Binary { op, left, right } => {
-            let l = eval_expression(left, binding, layer, runtime)?;
-            let r = eval_expression(right, binding, layer, runtime)?;
-            eval_binary(*op, &l, &r)
+            // **Absence resolves HERE, not at the condition root.** A test over a property
+            // the resource does not carry is NOT SATISFIED — false — and everything above
+            // it composes normally.
+            //
+            // It used to propagate as an error all the way out, where the root turned it
+            // into "drop the row". That is the same answer only for a bare comparison:
+            // `?w.size > 0 OR ?wt > 0` dropped a row that satisfies the right disjunct,
+            // and `NOT (?w.size > 100)` excluded a row that should survive, because one
+            // absent operand aborted the whole tree.
+            //
+            // Two shapes, and the difference matters. A COMPARISON with an absent operand
+            // is false as a whole — `absent > 0` is not satisfied, and substituting a
+            // boolean for the operand would just be a type error. A CONNECTIVE takes the
+            // absent OPERAND as false and combines: making the whole `OR` false would be
+            // the same bug one level down.
+            //
+            // Arithmetic and concatenation propagate instead: an absent operand has no
+            // value there, and `?w.size + 1 > 2` still gets the right answer, because the
+            // absence reaches the comparison above and lands as false there.
+            match op {
+                BinaryOp::And | BinaryOp::Or => {
+                    let l = eval_operand_absent_as_false(left, binding, layer, runtime)?;
+                    let r = eval_operand_absent_as_false(right, binding, layer, runtime)?;
+                    eval_binary(*op, &l, &r)
+                }
+                op if is_test(*op) => {
+                    let l = match eval_expression(left, binding, layer, runtime) {
+                        Ok(v) => v,
+                        Err(e) if e.is_absent_property() => return Ok(Value::Boolean(false)),
+                        Err(e) => return Err(e),
+                    };
+                    let r = match eval_expression(right, binding, layer, runtime) {
+                        Ok(v) => v,
+                        Err(e) if e.is_absent_property() => return Ok(Value::Boolean(false)),
+                        Err(e) => return Err(e),
+                    };
+                    eval_binary(*op, &l, &r)
+                }
+                _ => {
+                    let l = eval_expression(left, binding, layer, runtime)?;
+                    let r = eval_expression(right, binding, layer, runtime)?;
+                    eval_binary(*op, &l, &r)
+                }
+            }
         }
         Expression::Unary { op, operand } => {
+            // `NOT` needs no absence case of its own: its operand is a test, which already
+            // resolved to false above, so this is `NOT false` and the row survives.
             let v = eval_expression(operand, binding, layer, runtime)?;
             eval_unary(*op, &v)
         }
@@ -511,6 +554,42 @@ fn try_dispatch_decidable(
 /// in different modules and a second copy is how they drift apart.
 pub(super) fn aggregate_key(position: usize) -> String {
     format!("AGG#{position}")
+}
+
+/// Does this operator TEST a value, so an absent operand makes the test unsatisfied?
+///
+/// Comparison, membership and pattern matching. The connectives are handled separately —
+/// they take an absent operand as false and combine, rather than being false as a whole.
+/// Arithmetic and concatenation are excluded deliberately: an absent operand has no value
+/// there, so the absence keeps propagating until it reaches a test that can answer false.
+fn is_test(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Eq
+            | BinaryOp::Neq
+            | BinaryOp::Lt
+            | BinaryOp::Lte
+            | BinaryOp::Gt
+            | BinaryOp::Gte
+            | BinaryOp::In
+            | BinaryOp::NotIn
+            | BinaryOp::Like
+            | BinaryOp::NotLike
+    )
+}
+
+/// One operand of a connective, with an absent property reading as false.
+fn eval_operand_absent_as_false(
+    expr: &Expression,
+    binding: &Binding,
+    layer: &Layer,
+    runtime: FiberRuntime<'_>,
+) -> Result<Value, QueryError> {
+    match eval_expression(expr, binding, layer, runtime) {
+        Ok(v) => Ok(v),
+        Err(e) if e.is_absent_property() => Ok(Value::Boolean(false)),
+        Err(e) => Err(e),
+    }
 }
 
 pub(super) fn apply_group_by(
