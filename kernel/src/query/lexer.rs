@@ -546,10 +546,8 @@ impl<'a> Lexer<'a> {
 
     fn lex_number(&mut self, pos: Position) -> Result<Token, QueryError> {
         let start = self.pos;
-        // Optional minus
-        if self.peek() == Some(b'-') {
-            self.advance();
-        }
+        // No sign here: `-` is always emitted as `Minus` and the parser folds it
+        // (eigenius#172), so this function is only ever entered on a digit.
         // Integer part
         while let Some(ch) = self.peek() {
             if ch.is_ascii_digit() {

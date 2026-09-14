@@ -524,14 +524,22 @@ pub(super) fn apply_group_by(
     let mut groups: BTreeMap<Vec<String>, Vec<&Binding>> = BTreeMap::new();
 
     for binding in bindings {
-        let key: Vec<String> = group_by
-            .iter()
-            .map(|expr| {
-                eval_expression(expr, binding, layer, runtime)
-                    .map(|v| format!("{v:?}"))
-                    .unwrap_or_default()
-            })
-            .collect();
+        // **The same swallow `WHERE` had** (eigenius#126), and it collapsed every row into
+        // one group: `unwrap_or_default` gave every failure the empty string, so grouping
+        // by something that cannot be evaluated grouped everything together and reported a
+        // single count with no diagnostic.
+        //
+        // Absence keeps the empty key deliberately — a row whose group-by property is
+        // absent belongs with the other rows that lack it, which is one group of "no
+        // value", not a fault. Every other failure is the query being wrong.
+        let mut key: Vec<String> = Vec::with_capacity(group_by.len());
+        for expr in group_by {
+            match eval_expression(expr, binding, layer, runtime) {
+                Ok(v) => key.push(format!("{v:?}")),
+                Err(e) if e.is_absent_property() => key.push(String::new()),
+                Err(e) => return Err(e),
+            }
+        }
         groups.entry(key).or_default().push(binding);
     }
 
@@ -547,7 +555,7 @@ pub(super) fn apply_group_by(
         // expression's structure, and it cannot collide: `shape_result` walks this same
         // `result` slice, in this same order, and reads item `i` back at key `i`.
         for (i, item) in result.iter().enumerate() {
-            if let Some((_, agg_val)) = eval_aggregate(&item.expression, group, layer, runtime)? {
+            if let Some(agg_val) = eval_aggregate(&item.expression, group, layer, runtime)? {
                 binding.insert(aggregate_key(i), agg_val);
             }
         }
@@ -564,7 +572,7 @@ fn eval_aggregate(
     group: &[&Binding],
     layer: &Layer,
     runtime: FiberRuntime<'_>,
-) -> Result<Option<(String, Value)>, QueryError> {
+) -> Result<Option<Value>, QueryError> {
     if let Expression::Aggregate { op, arg } = expr {
         let values: Vec<Value> = group
             .iter()
@@ -601,9 +609,7 @@ fn eval_aggregate(
                 .unwrap_or(Value::Integer(0)),
         };
 
-        // The name is the operator's, for diagnostics only — `apply_group_by` binds the
-        // value under `aggregate_key(position)`, which is what `shape_result` reads.
-        Ok(Some((format!("AGG#{op:?}"), result)))
+        Ok(Some(result))
     } else {
         Ok(None)
     }

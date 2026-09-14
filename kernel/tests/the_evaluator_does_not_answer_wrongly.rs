@@ -391,8 +391,9 @@ fn a_minus_means_the_same_with_or_without_a_space() {
     );
 }
 
-/// A negative literal is still a negative literal: the parser folds the sign the lexer
-/// stopped folding.
+/// **A control**, and it passes against the unfixed code too — deliberately. It guards the
+/// fix's collateral rather than the defect: the sign has to keep working, and it does,
+/// whether the lexer folds it (before) or the parser does (after).
 #[test]
 fn a_negative_literal_still_compares_as_one() {
     let layer = corpus();
@@ -409,4 +410,177 @@ fn a_negative_literal_still_compares_as_one() {
     )
     .expect("query should succeed");
     assert_eq!(column(&rows, "s").len(), 3, "every size is above -1");
+}
+
+/// **A negative literal is still expressible in a MATCH brace pattern.**
+///
+/// The regression the lexer fix caused, which a review caught: brace-pattern values are
+/// parsed by a different function from expressions, and only the expression path had a
+/// unary-minus arm. So `{ "urn:ex:size": -1 }` stopped parsing — the grammar rejecting
+/// input that should be expressible, which is the shape this project treats as a defect in
+/// the grammar rather than in the input.
+#[test]
+fn a_brace_pattern_still_matches_a_negative_literal() {
+    let boot = eigenius_kernel::testing::bootstrap_context();
+    let mut b = LayerBuilder::new("negative", Some(Arc::clone(boot.head())));
+    declare_vocabulary(&mut b);
+    widget(&mut b, "urn:ex:n1", Some(-1), 10);
+    widget(&mut b, "urn:ex:n2", Some(5), 20);
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let rows = execute_with(
+        r#"
+        USING "urn:ex:Widget"
+        USING NAMESPACE "urn:ex:"
+        MATCH Widget(?w) { "urn:ex:size": -1, "urn:ex:weight": ?wt }
+        RETURN [] { wt: ?wt }
+        "#,
+        &layer,
+        FiberRuntime::default(),
+    )
+    .expect("a negative literal is a value a pattern can match");
+    assert_eq!(
+        column(&rows, "wt"),
+        vec![Value::Integer(10)],
+        "only the widget whose size is -1"
+    );
+}
+
+/// **GROUP BY swallowed the same fault WHERE did**, ten lines from the aggregate key.
+///
+/// `unwrap_or_default` gave every failure the empty string, so grouping by something that
+/// cannot be evaluated collapsed every row into one group and reported a single count
+/// with no diagnostic.
+#[test]
+fn grouping_by_something_unevaluable_is_reported() {
+    let layer = corpus();
+    let err = execute_with(
+        r#"
+        USING "urn:ex:Widget"
+        USING NAMESPACE "urn:ex:"
+        MATCH Widget(?w) { "urn:ex:size": ?s }
+        GROUP BY ?s.size
+        RETURN [] { n: COUNT(?w) }
+        "#,
+        &layer,
+        FiberRuntime::default(),
+    )
+    .expect_err("an integer has no properties to group by");
+    assert!(
+        err.iter().any(|e| e.message.contains("not a resource IRI")),
+        "the diagnostic should name the fault: {err:?}"
+    );
+}
+
+/// **An absent column is omitted from its row, not fatal to the query.**
+///
+/// Re-wrapping every RETURN failure erased the absence distinction, so `WHERE ?w.size > 0`
+/// silently dropped a row lacking `size` while `RETURN { s: ?w.size }` killed the whole
+/// query over the same resource — opposite answers to the same absence. Omitting is
+/// expressible where a null literal is not: the row simply does not carry that property.
+#[test]
+fn an_absent_column_is_omitted_rather_than_fatal() {
+    let boot = eigenius_kernel::testing::bootstrap_context();
+    let mut b = LayerBuilder::new("partial-return", Some(Arc::clone(boot.head())));
+    declare_vocabulary(&mut b);
+    widget(&mut b, "urn:ex:w1", Some(1), 10);
+    widget(&mut b, "urn:ex:w4", None, 40);
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+
+    let rows = execute_with(
+        r#"
+        USING "urn:ex:Widget"
+        USING NAMESPACE "urn:ex:"
+        MATCH Widget(?w) { "urn:ex:weight": ?wt }
+        RETURN [] { s: ?w.size, wt: ?wt }
+        "#,
+        &layer,
+        FiberRuntime::default(),
+    )
+    .expect("an absent column is not a fault");
+    assert_eq!(column(&rows, "wt").len(), 2, "both rows survive");
+    assert_eq!(
+        column(&rows, "s"),
+        vec![Value::Integer(1)],
+        "only the row that has a size carries the column"
+    );
+}
+
+/// **`ORDER BY` over something RETURN does not project is refused, not silently ignored.**
+///
+/// Sorting happens over the shaped resources, so an unprojected expression has nothing to
+/// sort on. It used to come out in source order looking sorted.
+#[test]
+fn ordering_by_an_unprojected_expression_is_refused() {
+    let layer = corpus();
+    let err = execute_with(
+        r#"
+        USING "urn:ex:Widget"
+        USING NAMESPACE "urn:ex:"
+        MATCH Widget(?w) { "urn:ex:size": ?s, "urn:ex:weight": ?wt }
+        RETURN [] { s: ?s }
+        ORDER BY ?wt DESC
+        "#,
+        &layer,
+        FiberRuntime::default(),
+    )
+    .expect_err("there is no weight column to sort on");
+    assert!(
+        err.iter()
+            .any(|e| e.message.contains("RETURN list does not project")),
+        "the diagnostic should say what to do: {err:?}"
+    );
+}
+
+/// **A control**: ordering by a renamed column sorts by the expression, not the name.
+/// Passes either way — the expression match was already there — and guards it against the
+/// fallback removal below.
+#[test]
+fn ordering_by_a_renamed_column_uses_the_expression() {
+    let layer = corpus();
+    let rows = execute_with(
+        r#"
+        USING "urn:ex:Widget"
+        USING NAMESPACE "urn:ex:"
+        MATCH Widget(?w) { "urn:ex:size": ?s }
+        RETURN [] { sz: ?s }
+        ORDER BY ?s DESC
+        "#,
+        &layer,
+        FiberRuntime::default(),
+    )
+    .expect("the RETURN item renames the variable; the expression still matches");
+    assert_eq!(
+        column(&rows, "sz"),
+        vec![Value::Integer(3), Value::Integer(2), Value::Integer(1)]
+    );
+}
+
+/// **A column NAMED like a variable is not that variable.**
+///
+/// The deleted fallback matched `ORDER BY ?s` against the column literally called `s`, so
+/// `RETURN { s: 100 - ?wt } ORDER BY ?s ASC` sorted by `100 - ?wt` while claiming to sort
+/// by `?s` — the two orders are reverses of each other, so it was as wrong as it could be.
+/// With the fallback gone, `?s` is simply not projected, and that is now refused rather
+/// than answered wrongly.
+#[test]
+fn a_column_named_like_a_variable_is_not_that_variable() {
+    let layer = corpus();
+    let err = execute_with(
+        r#"
+        USING "urn:ex:Widget"
+        USING NAMESPACE "urn:ex:"
+        MATCH Widget(?w) { "urn:ex:size": ?s, "urn:ex:weight": ?wt }
+        RETURN [] { s: 100 - ?wt }
+        ORDER BY ?s ASC
+        "#,
+        &layer,
+        FiberRuntime::default(),
+    )
+    .expect_err("?s is not projected; the column merely shares its name");
+    assert!(
+        err.iter()
+            .any(|e| e.message.contains("RETURN list does not project")),
+        "the diagnostic should say what to do: {err:?}"
+    );
 }

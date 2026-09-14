@@ -66,15 +66,32 @@ pub(super) fn shape_result(
 
         // Handle aggregate expressions specially
         let value = match &item.expression {
-            Expression::Aggregate { .. } => binding
-                .get(&super::expression::aggregate_key(position))
-                .cloned()
-                .unwrap_or(Value::Integer(0)),
-            _ => eval_expression(&item.expression, binding, layer, runtime)
-                .map_err(|e| QueryError::evaluation(format!("in RETURN: {e}")))?,
+            Expression::Aggregate { .. } => Some(
+                binding
+                    .get(&super::expression::aggregate_key(position))
+                    .cloned()
+                    .unwrap_or(Value::Integer(0)),
+            ),
+            _ => match eval_expression(&item.expression, binding, layer, runtime) {
+                Ok(v) => Some(v),
+                // **Absence omits the column; it does not kill the query.** Re-wrapping
+                // every error as an evaluation fault erased the distinction, so
+                // `WHERE ?w.size > 0` silently dropped a row lacking `size` while
+                // `RETURN { s: ?w.size }` failed the whole query over the same resource —
+                // opposite answers to the same absence, on the heterogeneous chain that
+                // produces it constantly.
+                //
+                // Omitting is expressible where a null literal is not: a row resource
+                // simply does not carry that property, which is what open-world carrying
+                // already means. Every other failure still fails the query.
+                Err(e) if e.is_absent_property() => None,
+                Err(e) => return Err(QueryError::evaluation(format!("in RETURN: {e}"))),
+            },
         };
 
-        resource.set(prop_iri, value);
+        if let Some(value) = value {
+            resource.set(prop_iri, value);
+        }
     }
 
     Ok(resource)
@@ -149,20 +166,19 @@ fn extract_sort_value(
     items: &[ReturnItem],
     fp: &QueryFingerprint,
 ) -> Option<Value> {
-    // The column the RETURN list projected this expression as. Covers every expression
-    // form, aggregates included, and it is also more correct than the name-based read
-    // below when a RETURN item renames a variable.
-    if let Some(item) = items.iter().find(|i| i.expression == *expr) {
-        let iri = match &item.name {
-            Name::FullIri(iri) => iri.clone(),
-            Name::ShortName(s) => fp.row_property_iri(s),
-        };
-        return resource.get(&iri).cloned();
-    }
-    // A bare variable that the RETURN list did not name explicitly still projects under
-    // its own name, so it sorts without appearing in the list above.
-    match expr {
-        Expression::Variable(var) => resource.get(&fp.row_property_iri(&var.name)).cloned(),
-        _ => None,
-    }
+    // The column the RETURN list projected this expression as. Sorting happens over the
+    // SHAPED resources, so a projected column is the only thing there is to sort on —
+    // which is why type-check requires ORDER BY to name one.
+    //
+    // There was a fallback here reading `fp.row_property_iri(var.name)` for a bare
+    // variable "the RETURN list did not name explicitly". It was dead where its comment
+    // claimed — with no RETURN clause the columns are keyed `urn:query:var:{k}`, never
+    // `{fingerprint}:row:{k}` — and actively wrong where it did fire: `RETURN { s: 100 -
+    // ?wt } ORDER BY ?s` sorted by the column NAMED `s` rather than by `?s`.
+    let item = items.iter().find(|i| i.expression == *expr)?;
+    let prop_iri = match &item.name {
+        Name::FullIri(iri) => iri.clone(),
+        Name::ShortName(s) => fp.row_property_iri(s),
+    };
+    resource.get(&prop_iri).cloned()
 }

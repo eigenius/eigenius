@@ -126,6 +126,9 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
         check_expression_variables(&item.expression, &bound_vars, &mut errors);
     }
 
+    // Check every ORDER BY expression is projected by RETURN.
+    check_order_by_is_projected(program, &mut errors);
+
     // Check aggregate/GROUP BY consistency
     check_aggregate_consistency(program, &mut errors);
 
@@ -434,6 +437,33 @@ fn check_expression_variables(
             check_expression_variables(query, bound, errors);
         }
         Expression::Literal(_) => {}
+    }
+}
+
+/// Every `ORDER BY` expression is projected by `RETURN`.
+///
+/// Sorting happens over the SHAPED resources, after projection, so an expression the
+/// `RETURN` list does not carry has nothing to sort on. That used to be silent: both
+/// operands came back as `None`, the comparison was skipped, and the rows came out in
+/// source order with no diagnostic — `RETURN { s: ?s } ORDER BY ?wt DESC` looked like it
+/// had ordered and had not.
+///
+/// A query with no `RETURN` clause emits no rows to order — the result document carries
+/// only `matched` and `row_count` — so nothing is required of it.
+fn check_order_by_is_projected(program: &Program, errors: &mut Vec<QueryError>) {
+    let items = &program.query.result;
+    if items.is_empty() {
+        return;
+    }
+    for order in &program.query.order_by {
+        if !items.iter().any(|i| i.expression == order.expression) {
+            errors.push(QueryError::type_check(
+                "order_by_not_projected",
+                "ORDER BY names an expression the RETURN list does not project, so there is \
+                 nothing to sort on — name the same expression in RETURN, or sort by a \
+                 column it already carries",
+            ));
+        }
     }
 }
 
