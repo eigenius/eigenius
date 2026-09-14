@@ -575,6 +575,7 @@ mod tests {
             &index_iri,
             &analyzer,
             "wal truncation",
+            usize::MAX,
         )
         .unwrap();
 

@@ -28,10 +28,17 @@ use crate::query::ast::*;
 use crate::query::error::QueryError;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Type-check a parsed EigenQL program against a layer.
+/// Type-check a parsed EigenQL program against a layer, and resolve the names it writes
+/// against that layer's vocabulary.
+///
+/// **It rewrites the program.** The pass already resolved every short name it checked and
+/// then discarded the answer, leaving the evaluator to resolve each one a second time by a
+/// different mechanism. Property names — `MATCH` brace keys and dot-path segments — are
+/// rewritten in place to the IRIs they name ([`resolve_property_names`]), so the evaluator
+/// looks a property up rather than searching for one that looks like it.
 ///
 /// Returns a list of errors (empty if valid).
-pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
+pub fn type_check(program: &mut Program, layer: &Layer) -> Vec<QueryError> {
     let mut errors = Vec::new();
 
     // Build the institution index once for the whole pass — every
@@ -47,6 +54,16 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // relation, not a chain class), so short-name class resolution must exempt them.
     let relation_names: BTreeSet<String> =
         program.definitions.iter().map(|d| d.name.clone()).collect();
+
+    // Resolve the property names the program writes, before anything reads them: a check
+    // that resolves a short name itself would have to repeat this scope rule, and the
+    // similarity pass below did exactly that through namespaces alone.
+    errors.extend(crate::query::resolve::resolve_property_names(
+        program,
+        layer,
+        &index,
+        &relation_names,
+    ));
 
     // Check DEFINE rules
     for def in &program.definitions {
@@ -138,15 +155,7 @@ pub fn type_check(program: &Program, layer: &Layer) -> Vec<QueryError> {
     // checks the LHS is property-bound, the property has an active
     // similarity index of the kind required by `via:` (or any kind
     // by default), and the hint set is internally consistent.
-    let prop_var_index = match build_property_variable_index(program, layer) {
-        Ok(m) => m,
-        Err(e) => {
-            // Ambiguous short name in a property position — surface as a type
-            // error; continue with an empty typing view so other checks still run.
-            errors.push(e);
-            BTreeMap::new()
-        }
-    };
+    let prop_var_index = build_property_variable_index(program);
     let text_indexes = resolve_active_text_indexes(layer);
     let vector_indexes = resolve_active_vector_indexes(layer);
     let check_in_expr = |expr: &Expression, errs: &mut Vec<QueryError>| {
@@ -382,17 +391,24 @@ fn check_expression_variables(
         Expression::VerdictPredicate { operand, .. } => {
             check_expression_variables(operand, bound, errors);
         }
-        Expression::NotExists(var) => {
-            if !bound.contains(&var.name) {
-                errors.push(QueryError::type_check(
-                    "not_exists_unbound",
-                    format!(
-                        "NOT EXISTS variable '?{}' is not bound in any MATCH pattern",
-                        var.name
-                    ),
-                ));
+        // The root variable must be bound either way — `NOT EXISTS(?n.title)` asks about a
+        // property of the resource `?n` names, so `?n` itself has to come from somewhere.
+        // The bare-variable form keeps its own rule, because "NOT EXISTS variable ?x is not
+        // bound" says more than the generic unbound-variable message would.
+        Expression::NotExists(operand) => match operand.as_ref() {
+            Expression::Variable(var) => {
+                if !bound.contains(&var.name) {
+                    errors.push(QueryError::type_check(
+                        "not_exists_unbound",
+                        format!(
+                            "NOT EXISTS variable '?{}' is not bound in any MATCH pattern",
+                            var.name
+                        ),
+                    ));
+                }
             }
-        }
+            other => check_expression_variables(other, bound, errors),
+        },
         Expression::FunctionCall { args, .. } => {
             for arg in args {
                 check_expression_variables(arg, bound, errors);
@@ -1174,17 +1190,18 @@ struct PropertyBinding {
 /// `variable → property_iri` map. Property variables bound by
 /// rule-derived patterns are included too — the rule's body is
 /// typed against the same schema view.
-fn build_property_variable_index(
-    program: &Program,
-    layer: &Layer,
-) -> Result<BTreeMap<String, PropertyBinding>, QueryError> {
+/// The `variable → property_iri` map over every `MATCH` brace key that binds a variable.
+///
+/// Infallible, and takes no layer: `resolve_property_names` already resolved every key
+/// against the full scope rule and reported what it could not. This reads the answer.
+fn build_property_variable_index(program: &Program) -> BTreeMap<String, PropertyBinding> {
     let mut out: BTreeMap<String, PropertyBinding> = BTreeMap::new();
-    let mut visit = |part: &MatchPart| -> Result<(), QueryError> {
+    let mut visit = |part: &MatchPart| {
         for pat in part.patterns() {
             for pp in &pat.properties {
                 if let ValueOrVariable::Variable(var) = &pp.object {
                     if let Some(property_iri) =
-                        resolve_property_name(&pp.property, layer, &part.using_namespaces)?
+                        crate::query::resolve::resolved_property_iri(&pp.property)
                     {
                         out.entry(var.name.clone())
                             .or_insert(PropertyBinding { property_iri });
@@ -1192,29 +1209,12 @@ fn build_property_variable_index(
                 }
             }
         }
-        Ok(())
     };
-    visit(&program.query.body)?;
+    visit(&program.query.body);
     for def in &program.definitions {
-        visit(&def.body)?;
+        visit(&def.body);
     }
-    Ok(out)
-}
-
-/// Resolve a property `Name` to its IRI. `FullIri` returns the IRI
-/// directly; `ShortName` scans the chain-merged view for a Property
-/// Resource whose `short_name` matches.
-fn resolve_property_name(
-    name: &Name,
-    layer: &Layer,
-    namespaces: &[String],
-) -> Result<Option<Iri>, QueryError> {
-    match name {
-        Name::FullIri(iri) => Ok(Some(iri.clone())),
-        Name::ShortName(s) => {
-            crate::query::resolve::resolve_scoped_name(layer, namespaces, &[wk::PROPERTY], s)
-        }
-    }
+    out
 }
 
 /// Does the Property Resource at `property_iri` declare
@@ -1535,8 +1535,8 @@ mod tests {
 
     fn check(layer: &Layer, query_str: &str) -> Vec<QueryError> {
         let tokens = tokenize(query_str).unwrap();
-        let program = parser::parse(tokens).unwrap();
-        type_check(&program, layer)
+        let mut program = parser::parse(tokens).unwrap();
+        type_check(&mut program, layer)
     }
 
     #[test]

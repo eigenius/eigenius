@@ -276,6 +276,11 @@ fn ground_via_form_index(
         &idx.iri,
         analyzer.as_ref(),
         surface,
+        // Unbounded, deliberately. This path AGGREGATES BM25 scores per concept across
+        // every matching lexical entry; a top-k would change which concept wins, not just
+        // how long the list is. The query path takes a bounded top set instead, which is
+        // why the parameter exists.
+        usize::MAX,
     )
     .ok()?;
 
@@ -343,6 +348,13 @@ fn ground_via_description_index(
         &idx.iri,
         analyzer.as_ref(),
         surface,
+        // Unbounded, deliberately — but NOT for the aggregation reason above: this path
+        // is a pure argmax, one description to one hit per concept. Two other reasons
+        // hold. `total` is the confidence denominator over every eligible hit, so a
+        // truncated list would inflate the confidence of whatever survived. And the
+        // axiom-kind filter runs AFTER retrieval, so a top-k could return a page
+        // containing no eligible hit at all.
+        usize::MAX,
     )
     .ok()?;
 

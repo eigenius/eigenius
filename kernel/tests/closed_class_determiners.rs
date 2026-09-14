@@ -3508,6 +3508,7 @@ fn probe_recq_form_index_active_and_populated() {
         &idx.iri,
         analyzer.as_ref(),
         "recq",
+        usize::MAX,
     )
     .expect("search ok");
     eprintln!("HITS for 'recq': {}", hits.len());

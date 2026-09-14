@@ -26,14 +26,13 @@
 
 use crate::layer::{
     resolve_active_text_indexes, resolve_active_vector_indexes, ActiveTextIndex, ActiveVectorIndex,
-    Layer,
+    Layer, LayerId,
 };
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
-use crate::ontology::well_known as wk;
 use crate::program::embedder::EmbedderRegistry;
 use crate::query::ast::{
-    Expression, HintSet, Literal, MatchPart, Name, Program, ValueOrVariable, Variable, Via,
+    BinaryOp, Expression, HintSet, Literal, MatchPart, Program, ValueOrVariable, Variable, Via,
 };
 use crate::query::error::QueryError;
 use crate::query::text::analyzer::registry as analyzer_registry;
@@ -94,7 +93,7 @@ impl SimilarityContext {
         embedders: Option<&EmbedderRegistry>,
         vector_segment_cache: Option<&SegmentCache>,
     ) -> Result<Self, QueryError> {
-        let prop_var_index = build_property_variable_index(program, layer)?;
+        let prop_var_index = build_property_variable_index(program);
         let text_indexes = resolve_active_text_indexes(layer);
         let vector_indexes = resolve_active_vector_indexes(layer);
 
@@ -124,6 +123,7 @@ impl SimilarityContext {
                     property,
                     query,
                     hints,
+                    program.query.top,
                     &prop_var_index,
                     &text_indexes,
                     &vector_indexes,
@@ -151,6 +151,59 @@ impl SimilarityContext {
     /// score 0.0; rows ranked by multiple probes accumulate (the
     /// design's "rows satisfying both rank higher than rows
     /// satisfying one" — §3.3).
+    /// The subjects the similarity CONJUNCTS of `conditions` admit for `subject_var`, if
+    /// any constrain it.
+    ///
+    /// **This is the narrowing set candidate enumeration should start from.** The pre-pass
+    /// already computed it, one probe per similarity node paid once per query, and per-row
+    /// evaluation then answers `false` for every subject outside it. Enumerating the whole
+    /// chain and filtering afterwards does that work twice, the second time over every
+    /// resource in the chain.
+    ///
+    /// **Position is what makes it sound, and position is why this takes the conditions
+    /// rather than a variable name.** A subject outside the probe's map is dropped only
+    /// when the `~` is a CONJUNCT. Under a disjunction the other branch may still admit the
+    /// row; under a negation the predicate rejects exactly the set the probe returned; and
+    /// in `RETURN` or `ORDER BY` the operator is a score projection that filters nothing at
+    /// all. The pre-pass registers a probe for every similarity node in the program
+    /// including all of those, so asking it by variable NAME answers a question the name
+    /// cannot answer — an earlier version did that and returned the intersection of a
+    /// disjunction's branches, and nothing at all for a negation.
+    ///
+    /// Descending only through `And` from the top-level conditions makes the property hold
+    /// by construction, and it is the same discipline `extract_subject_constraint` applies
+    /// to the subject pushdown beside it.
+    pub(super) fn conjunct_subjects_for(
+        &self,
+        subject_var: &str,
+        conditions: &[Expression],
+    ) -> Option<Vec<Iri>> {
+        let mut conjuncts: Vec<&Expression> = Vec::new();
+        for cond in conditions {
+            collect_similarity_conjuncts(cond, &mut conjuncts);
+        }
+        let mut out: Option<Vec<Iri>> = None;
+        for expr in conjuncts {
+            let Some(probe) = self.probe_for(expr) else {
+                continue;
+            };
+            if probe.subject_var != subject_var {
+                continue;
+            }
+            let these: Vec<Iri> = probe.scores.keys().cloned().collect();
+            // Conjuncts, so the admissible set is their INTERSECTION. That is true here
+            // because the walk above admits only conjuncts.
+            out = Some(match out {
+                None => these,
+                Some(prev) => {
+                    let keep: std::collections::BTreeSet<&Iri> = these.iter().collect();
+                    prev.into_iter().filter(|i| keep.contains(i)).collect()
+                }
+            });
+        }
+        out
+    }
+
     pub(crate) fn aggregate_score(&self, binding: &super::pattern::Binding) -> f64 {
         let mut sum = 0.0_f64;
         for probe in self.probes.values() {
@@ -183,17 +236,18 @@ struct PropertyVarBinding {
     subject_var: String,
 }
 
-fn build_property_variable_index(
-    program: &Program,
-    layer: &Layer,
-) -> Result<BTreeMap<String, PropertyVarBinding>, QueryError> {
+/// The `variable → property_iri` map over every `MATCH` brace key that binds a variable.
+///
+/// Infallible, and takes no layer: `resolve_property_names` already resolved every key
+/// against the full scope rule and reported what it could not. This reads the answer.
+fn build_property_variable_index(program: &Program) -> BTreeMap<String, PropertyVarBinding> {
     let mut out: BTreeMap<String, PropertyVarBinding> = BTreeMap::new();
-    let mut visit = |part: &MatchPart| -> Result<(), QueryError> {
+    let mut visit = |part: &MatchPart| {
         for pat in part.patterns() {
             for pp in &pat.properties {
                 if let ValueOrVariable::Variable(var) = &pp.object {
                     if let Some(property_iri) =
-                        resolve_property_name(&pp.property, layer, &part.using_namespaces)?
+                        crate::query::resolve::resolved_property_iri(&pp.property)
                     {
                         out.entry(var.name.clone()).or_insert(PropertyVarBinding {
                             property_iri,
@@ -203,31 +257,37 @@ fn build_property_variable_index(
                 }
             }
         }
-        Ok(())
     };
-    visit(&program.query.body)?;
+    visit(&program.query.body);
     for def in &program.definitions {
-        visit(&def.body)?;
+        visit(&def.body);
     }
-    Ok(out)
-}
-
-fn resolve_property_name(
-    name: &Name,
-    layer: &Layer,
-    namespaces: &[String],
-) -> Result<Option<Iri>, QueryError> {
-    match name {
-        Name::FullIri(iri) => Ok(Some(iri.clone())),
-        Name::ShortName(s) => {
-            crate::query::resolve::resolve_scoped_name(layer, namespaces, &[wk::PROPERTY], s)
-        }
-    }
+    out
 }
 
 fn collect_similarity_nodes<'a>(part: &'a MatchPart, out: &mut Vec<&'a Expression>) {
     for cond in &part.conditions {
         collect_in_expression(cond, out);
+    }
+}
+
+/// The similarity nodes that are CONJUNCTS of `expr`.
+///
+/// Descends only through `And`. A `~` under `Or`, under `Not`, or under any other operator
+/// does not constrain every row the expression admits, so it must not narrow the candidate
+/// set. Mirrors `extract_subject_constraint`'s reading of the same condition list.
+fn collect_similarity_conjuncts<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+    match expr {
+        Expression::Similarity { .. } => out.push(expr),
+        Expression::Binary {
+            op: BinaryOp::And,
+            left,
+            right,
+        } => {
+            collect_similarity_conjuncts(left, out);
+            collect_similarity_conjuncts(right, out);
+        }
+        _ => {}
     }
 }
 
@@ -272,6 +332,9 @@ fn build_probe(
     property: &Variable,
     query: &Expression,
     hints: &HintSet,
+    // `TOP N` from the query, which sizes the candidate pool when no explicit hint says
+    // otherwise. `None` means the query does not rank, so the probe must not truncate.
+    top: Option<usize>,
     prop_var_index: &BTreeMap<String, PropertyVarBinding>,
     text_indexes: &[ActiveTextIndex],
     vector_indexes: &[ActiveVectorIndex],
@@ -304,7 +367,24 @@ fn build_probe(
         .iter()
         .find(|i| i.target_property == binding.property_iri);
 
-    let limit = hints.limit.unwrap_or(DEFAULT_LIMIT);
+    // **How many candidates each probe must return, and the two are not the same.**
+    //
+    // An explicit `{ limit: N }` is the author saying what they want, and `TOP N` means the
+    // query ranks, so the pool needs at least N. This is what makes `TOP` reach the probes
+    // at all: it was read in exactly one place, as a truncation applied to the bindings
+    // AFTER evaluation, so a probe never saw it.
+    let ranked_pool = hints.limit.or_else(|| top.map(|n| n.max(DEFAULT_LIMIT)));
+
+    // **Text, unranked, is a FILTER and must not truncate.** Matching is a predicate —
+    // the document contains the terms or it does not — so a bound drops rows that match.
+    // Using `DEFAULT_LIMIT` here silently returned 200 of 250 matching documents.
+    let text_limit = ranked_pool.unwrap_or(usize::MAX);
+
+    // **Vector is a top-k by construction and has no unranked form.** Every subject has a
+    // distance, so "all matches" is not a set the index can produce; the search allocates
+    // a heap of `k + 1` and derives its search width from `k`. `DEFAULT_LIMIT` is D43's
+    // candidate-pool size and stays the floor when nothing asks for more.
+    let vector_limit = ranked_pool.unwrap_or(DEFAULT_LIMIT);
     let k = hints.k.unwrap_or(DEFAULT_RRF_K);
 
     // §3.5 strategy selection: explicit `via:` wins; otherwise the
@@ -356,6 +436,7 @@ fn build_probe(
             &idx.iri,
             analyzer.as_ref(),
             &query_string,
+            text_limit,
         )
         .map_err(|e| QueryError::evaluation(format!("text probe failed: {e}")))?
     } else {
@@ -396,7 +477,7 @@ fn build_probe(
             vector_segment_cache,
             &idx.iri,
             &query_vec,
-            limit,
+            vector_limit,
             None,
             &idx.model,
             metric,
@@ -413,26 +494,77 @@ fn build_probe(
     })
 }
 
-/// Reciprocal Rank Fusion across an arbitrary set of ranked sources
-/// (D43 §3.5 / §6.4). Each source contributes `1 / (k + rank_i)` to
-/// every subject it ranked; subjects not in a given source receive
-/// no contribution from it. Result is keyed by subject IRI and
-/// sorted-by-key is determined by `BTreeMap`'s ordering — actual
-/// ranking is consumed by callers via `BTreeMap::iter()` plus sort.
+/// Reciprocal Rank Fusion across the ranked sources (D43 §3.5 / §6.4). Each source
+/// contributes `1 / (k + rank)` to every subject it ranked; a subject a source did not
+/// rank contributes nothing from it.
+///
+/// **It calls `query::rank`, which is the point.** That module is the tested
+/// implementation of §6.4 — 1-indexed ranks, deterministic tie-breaking, and an explicit
+/// missing-rank representation — and nothing called it while this function reimplemented
+/// the same formula (eigenius#125). Two implementations of one specification drift.
+///
+/// **Ranks come from the scores, not from each probe's return order, and that settles a
+/// disagreement.** The two probes tie-break in OPPOSITE directions: the text probe sorts
+/// score descending then `defining_layer` ascending then subject ascending, while the
+/// vector probe's `BinaryHeap<Reverse<HeapEntry>>::into_sorted_vec()` yields the whole
+/// tuple descending — layer and subject included. Nothing documented the difference and
+/// there is no reason for two sources feeding one fusion to order ties opposite ways.
+/// Keying `assign_ranks_desc` on `(LayerId, Iri)` gives both the text probe's order.
+///
+/// The `&[Option<usize>]` shape is also what D43 §3.6.4 describes — each `~` operator
+/// contributes a ranked source, fused by one mechanism — and what a `weights:` hint
+/// (§3.4, reserved) would extend. A fixed pair of lists has to be rewritten for that; a
+/// slice of per-source ranks gains an element.
 fn fuse_rrf(
     text_hits: &[TextScoredHit],
     vector_hits: &[VectorScoredHit],
     k: usize,
 ) -> BTreeMap<Iri, f64> {
+    // Keyed by `(defining_layer, subject)` so ties break on the layer first, then the
+    // IRI. `is_shadowed` drops a subject's hits from every layer but the one defining it,
+    // so the key is unique within a source.
+    let rank_by_subject = |scored: Vec<((LayerId, Iri), f64)>| -> BTreeMap<Iri, usize> {
+        crate::query::rank::assign_ranks_desc(&scored)
+            .into_iter()
+            .map(|((_layer, subject), rank)| (subject, rank))
+            .collect()
+    };
+    let text_ranks = rank_by_subject(
+        text_hits
+            .iter()
+            .map(|h| {
+                (
+                    (h.defining_layer.clone(), h.subject.clone()),
+                    h.score as f64,
+                )
+            })
+            .collect(),
+    );
+    let vector_ranks = rank_by_subject(
+        vector_hits
+            .iter()
+            .map(|h| {
+                (
+                    (h.defining_layer.clone(), h.subject.clone()),
+                    h.similarity as f64,
+                )
+            })
+            .collect(),
+    );
+
     let mut scores: BTreeMap<Iri, f64> = BTreeMap::new();
-    let k_f = k as f64;
-    for (rank, hit) in text_hits.iter().enumerate() {
-        let contrib = 1.0 / (k_f + (rank as f64 + 1.0));
-        *scores.entry(hit.subject.clone()).or_insert(0.0) += contrib;
-    }
-    for (rank, hit) in vector_hits.iter().enumerate() {
-        let contrib = 1.0 / (k_f + (rank as f64 + 1.0));
-        *scores.entry(hit.subject.clone()).or_insert(0.0) += contrib;
+    for subject in text_ranks.keys().chain(vector_ranks.keys()) {
+        if scores.contains_key(subject) {
+            continue;
+        }
+        let per_source = [
+            text_ranks.get(subject).copied(),
+            vector_ranks.get(subject).copied(),
+        ];
+        scores.insert(
+            subject.clone(),
+            crate::query::rank::rrf_score(&per_source, k as u32),
+        );
     }
     scores
 }
@@ -483,6 +615,75 @@ mod tests {
         assert!((c - 1.0 / 62.0).abs() < 1e-9);
         // b appears in both → highest fused score.
         assert!(b > a && b > c);
+    }
+
+    /// **A tie fuses the same way whichever order a probe emitted it in.**
+    ///
+    /// Rank came from each hit's POSITION in its probe's returned slice, so the fused
+    /// score of a tied pair was a property of how the probe happened to emit it — and the
+    /// two probes emit ties in opposite directions, text ascending by `defining_layer`
+    /// then subject, vector descending by both because its heap yields the whole tuple
+    /// reversed. Ranks are derived from the scores now, under one key, so emission order
+    /// does not reach the result.
+    ///
+    /// The tie is still broken, not collapsed: `urn:ex:a` sorts before `urn:ex:b` in both
+    /// sources, so it takes rank 1 in both. Under the old path the two probes disagreed
+    /// and the scores cancelled to equal — which looks fairer and was an accident of the
+    /// disagreement, not a decision.
+    #[test]
+    fn a_tie_fuses_independently_of_the_order_a_probe_emitted_it() {
+        let layer = crate::layer::LayerId([0; 32]);
+        let text = |first: &str, second: &str| {
+            vec![
+                TextScoredHit {
+                    subject: iri(first),
+                    score: 1.0,
+                    defining_layer: layer.clone(),
+                },
+                TextScoredHit {
+                    subject: iri(second),
+                    score: 1.0,
+                    defining_layer: layer.clone(),
+                },
+            ]
+        };
+        let vector = |first: &str, second: &str| {
+            vec![
+                VectorScoredHit {
+                    subject: iri(first),
+                    similarity: 1.0,
+                    defining_layer: layer.clone(),
+                },
+                VectorScoredHit {
+                    subject: iri(second),
+                    similarity: 1.0,
+                    defining_layer: layer.clone(),
+                },
+            ]
+        };
+
+        // The probes' actual directions: text ascending, vector descending.
+        let as_emitted = fuse_rrf(
+            &text("urn:ex:a", "urn:ex:b"),
+            &vector("urn:ex:b", "urn:ex:a"),
+            60,
+        );
+        // Both flipped.
+        let flipped = fuse_rrf(
+            &text("urn:ex:b", "urn:ex:a"),
+            &vector("urn:ex:a", "urn:ex:b"),
+            60,
+        );
+        assert_eq!(
+            as_emitted, flipped,
+            "emission order must not reach the fused score"
+        );
+
+        // One key orders the tie, so `a` is rank 1 in both sources and `b` rank 2.
+        let a = *as_emitted.get(&iri("urn:ex:a")).unwrap();
+        let b = *as_emitted.get(&iri("urn:ex:b")).unwrap();
+        assert!((a - 2.0 / 61.0).abs() < 1e-12, "a is rank 1 in both: {a}");
+        assert!((b - 2.0 / 62.0).abs() < 1e-12, "b is rank 2 in both: {b}");
     }
 
     #[test]
@@ -648,6 +849,106 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// **Seeding must not fire for a `~` that is not a conjunct.**
+    ///
+    /// The pre-pass registers a probe for EVERY similarity node in the program — under
+    /// `OR`, under `NOT`, and in `RETURN` / `ORDER BY` where the operator is a score
+    /// projection that filters nothing. Narrowing candidates from any of those is a wrong
+    /// answer, and an earlier version did exactly that by matching probes on the variable
+    /// NAME, having discarded where in the expression they came from.
+    ///
+    /// Each case below returned fewer rows than it should. They are the discriminating
+    /// tests for the fix: against the name-based version, every one fails.
+    #[test]
+    fn a_similarity_under_a_disjunction_does_not_narrow() {
+        let layer = build_text_corpus();
+        let rows = execute_with(
+            r#"
+            USING NAMESPACE "urn:ex:"
+            MATCH ?d { "urn:ex:description": ?desc }
+            WHERE ?desc ~ "kernel" OR ?desc ~ "chain"
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        // d1 carries "kernel", d2 carries "chain". Seeding from either branch alone, or
+        // from their intersection, loses one of them.
+        assert_eq!(
+            matched_subject_iris(&rows, "d").len(),
+            2,
+            "a disjunction admits the union of its branches"
+        );
+    }
+
+    #[test]
+    fn a_similarity_under_a_negation_does_not_narrow() {
+        let layer = build_text_corpus();
+        let rows = execute_with(
+            r#"
+            USING NAMESPACE "urn:ex:"
+            MATCH ?d { "urn:ex:description": ?desc }
+            WHERE NOT (?desc ~ "kernel")
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        // Seeding here would start from exactly the set the predicate then rejects, so
+        // the query returned nothing at all.
+        let matched = matched_subject_iris(&rows, "d");
+        assert!(
+            !matched.is_empty(),
+            "a negation admits the rows the probe did NOT rank, got {matched:?}"
+        );
+        assert!(!matched.iter().any(|s| s == "urn:ex:d1"));
+    }
+
+    #[test]
+    fn a_similarity_in_return_position_does_not_narrow() {
+        let layer = build_text_corpus();
+        let rows = execute_with(
+            r#"
+            USING NAMESPACE "urn:ex:"
+            MATCH ?d { "urn:ex:description": ?desc }
+            RETURN [] { d: ?d, s: ?desc ~ "kernel" }
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        // A score projection filters nothing: every document is still a row.
+        assert_eq!(
+            matched_subject_iris(&rows, "d").len(),
+            3,
+            "a `~` in RETURN ranks rows, it does not select them"
+        );
+    }
+
+    /// The conjunctive case, which is the one seeding is FOR: same answer as before, and
+    /// the untyped shape is the one that used to reach the full-chain scan.
+    #[test]
+    fn a_conjunctive_similarity_narrows_without_changing_the_answer() {
+        let layer = build_text_corpus();
+        let rows = execute_with(
+            r#"
+            USING NAMESPACE "urn:ex:"
+            MATCH ?d { "urn:ex:description": ?desc }
+            WHERE ?desc ~ "WAL truncation"
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        assert_eq!(
+            matched_subject_iris(&rows, "d"),
+            vec!["urn:ex:d3".to_string()]
+        );
     }
 
     #[test]

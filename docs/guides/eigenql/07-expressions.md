@@ -201,26 +201,39 @@ Attempting to evaluate an `Aggregate` expression outside a `GROUP BY` context pr
 ## 7.8. Dot-paths
 
 ```rust
-Expression::DotPath { root: Variable, segments: Vec<String> }
+Expression::DotPath { root: Variable, segments: Vec<Name> }
 ```
 
-Walks property chains through resources. The root variable must be bound to a resource IRI (as a `Value::String`). Each segment is a property short-name; the evaluator resolves each one against the current resource, moves to the referenced resource for the next segment, and returns the final value.
+Walks property chains through resources. The root variable must be bound to a resource IRI (as a `Value::String`). A segment is a `Name` — the same shape a `MATCH` brace key has, because it names the same thing: a declared `core:Property`.
 
 ```eigenql
 RETURN [] {
-    owner_country: ?dog.owner.country
+    owner_country: ?dog.owner.country,
+    registry_id:   ?dog."urn:kennel:registry_id"
 }
 ```
 
+**Scope.** A short-name segment resolves against declared vocabulary, never against whatever IRIs the resource happens to carry:
+
+| the root is | a short name resolves against |
+|---|---|
+| a pattern with a class — `MATCH Dog(?dog)` | that class's `requires` ∪ `recommends`, transitively over `subclass_of` |
+| a `FIBER … AS ?b` binding | the QueryClass's `institution:result_class` plus `institution:result_properties` |
+| a pattern with no class | `USING NAMESPACE` plus the implicit core prelude |
+
+A later segment is scoped by the previous property's declared range (`core:class_types`), so `?dog.owner.country` reads `country` out of `owner`'s range class. A property declaring no range drops the next segment to the namespace scope.
+
+The class is the narrower scope and answers first; the namespaces answer where it does not. A name in neither is a **type error** (`property_name_unresolved`) rather than an empty result set — the escape hatch is the full IRI, quoted, which reaches a property no scope covers.
+
 **Walk mechanics**:
 
-1. Resolve `?dog` to an IRI.
-2. Look up the resource in the layer.
-3. Find the property matching `owner` by short name (same lookup as pattern matching — [`find_property_by_shortname`](../../../kernel/src/query/evaluate/pattern.rs)).
-4. The value must be a resource reference (IRI string). Repeat step 2 with the new IRI.
+1. `type_check` rewrites every short-name segment to the property IRI it resolved to ([`resolve_property_names`](../../../kernel/src/query/resolve.rs)).
+2. Resolve `?dog` to an IRI.
+3. Look up the resource in the layer chain, or in the FIBER overlay.
+4. Read the resolved property IRI off it. The value must be a resource reference (IRI string) for any segment but the last. Repeat step 3 with the new IRI.
 5. After the final segment, return the raw value — may be a literal or another IRI string.
 
-Errors with `"unbound variable"`, `"resource not found in layer chain"`, `"property 'X' not found on resource 'Y'"`, or `"property is not a resource reference"` when the walk fails.
+A resource that does not carry the property is **absence**, not a fault: the row drops out of a `WHERE` test and the column is omitted from a `RETURN` row. A resource the walk cannot reach at all is `unreachable_path`. Errors with `"unbound variable"` or `"property is not a resource reference"` where the walk is malformed.
 
 ## 7.9. Arrays
 

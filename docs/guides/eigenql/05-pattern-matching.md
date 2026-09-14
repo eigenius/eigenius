@@ -85,12 +85,14 @@ where `property` is a `Name` and `target` is a literal value or a variable.
 
 ### Property name resolution
 
-At the point a property pattern is evaluated, the target resource's properties are a `BTreeMap<Iri, Value>`. The property `Name` is resolved in one of two ways:
+A property `Name` is resolved at **type-check**, against declared vocabulary, and the program is rewritten to the IRI it resolved to. By the time the pattern is evaluated the key is a `FullIri` and the target resource's properties — a `BTreeMap<Iri, Value>` — are read by lookup.
 
-1. **`FullIri(iri)`** — used directly: the resource must have that exact IRI key.
-2. **`ShortName(s)`** — the evaluator scans the resource's property keys and finds the IRI whose local name equals `s`. See [`find_property_by_shortname`](../../../kernel/src/query/evaluate/pattern.rs). If multiple keys could match, the first wins (the map is `BTreeMap`-ordered, i.e. sorted by full IRI).
+1. **`FullIri(iri)`** — already resolved: the resource must have that exact IRI key.
+2. **`ShortName(s)`** — resolves to the declared `core:Property` whose `core:short_name` is `s`, searched in the pattern class's `requires` ∪ `recommends` (transitively over `subclass_of`) where the pattern states a class, and in the `USING NAMESPACE` prefixes plus the core prelude otherwise. D2 §5.6.1 gives the full rule; dot-path segments share it. A name in neither scope is `property_name_unresolved`; a name matching two properties in one scope is `ambiguous_short_name`.
 
-A property pattern that references a property the resource doesn't carry causes the match to fail — the pattern drops that resource from the candidate set.
+Until `2026-09-13` a short name was instead matched against the *local name* of whatever IRIs the resource happened to carry, first-wins by IRI order, and nothing checked that it resolved at all. A property declared `urn:ex:title_text` with `short_name "title"` could not be named `title`; an undeclared `urn:other:title` could. Both failures returned an empty result set with no diagnostic.
+
+A property pattern that references a property the resource doesn't carry causes the match to fail — the pattern drops that resource from the candidate set. That is data absence, and distinct from the name not resolving.
 
 ### Literal targets
 

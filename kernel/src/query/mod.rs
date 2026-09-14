@@ -96,13 +96,13 @@ pub fn execute_with_into(
     let tokens = lexer::tokenize(program_str).map_err(|e| vec![e])?;
 
     // 2. Parse
-    let program = parser::parse(tokens).map_err(|e| vec![e])?;
+    let mut program = parser::parse(tokens).map_err(|e| vec![e])?;
 
     // 3. Stratification check
     stratify::stratify(&program.definitions).map_err(|e| vec![e])?;
 
     // 4. Type check
-    let type_errors = type_check::type_check(&program, layer);
+    let type_errors = type_check::type_check(&mut program, layer);
     if !type_errors.is_empty() {
         return Err(type_errors);
     }

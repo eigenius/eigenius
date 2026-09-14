@@ -1946,6 +1946,7 @@ fn verify_grounding_indexes_over_snapshot() {
         &desc_idx.iri,
         analyzer.as_ref(),
         "applaud bravo",
+        usize::MAX,
     )
     .expect("description search ok");
     eprintln!(

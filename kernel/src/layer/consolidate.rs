@@ -2155,6 +2155,7 @@ mod tests {
             &index_iri,
             &analyzer,
             "wal truncation",
+            usize::MAX,
         )
         .expect("pre-consolidation search");
         let subjects_before: std::collections::BTreeSet<String> = hits_before
@@ -2198,6 +2199,7 @@ mod tests {
             &index_iri,
             &analyzer,
             "wal truncation",
+            usize::MAX,
         )
         .expect("post-consolidation search");
         let subjects_after: std::collections::BTreeSet<String> = hits_after
@@ -2311,6 +2313,7 @@ mod tests {
             &index_iri,
             &analyzer,
             "wal truncation",
+            usize::MAX,
         )
         .expect("pre-consolidation search");
         let subjects_before: std::collections::BTreeSet<String> = hits_before
@@ -2349,6 +2352,7 @@ mod tests {
             &index_iri,
             &analyzer,
             "wal truncation",
+            usize::MAX,
         )
         .expect("post-consolidation search");
         let subjects_after: std::collections::BTreeSet<String> = hits_after

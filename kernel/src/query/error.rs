@@ -51,6 +51,9 @@ pub struct QueryError {
 /// rather than comparing the string themselves.
 pub const RULE_ABSENT_PROPERTY: &str = "absent_property";
 
+/// The `rule` for a dot-path that cannot be walked to a value.
+pub const RULE_UNREACHABLE_PATH: &str = "unreachable_path";
+
 impl QueryError {
     pub fn lexer(pos: Position, message: impl Into<String>) -> Self {
         Self {
@@ -109,6 +112,45 @@ impl QueryError {
     /// Whether this is data absence rather than a fault. See [`Self::absent_property`].
     pub fn is_absent_property(&self) -> bool {
         self.rule == RULE_ABSENT_PROPERTY
+    }
+
+    /// A dot-path segment whose value does not resolve to a resource to walk into.
+    ///
+    /// Distinct from absence: the property IS there, and what it names is not reachable.
+    /// A condition over it is still unsatisfied, and `NOT EXISTS` still answers "no value",
+    /// but it is a chain-integrity fact rather than a data-shape one and the two read
+    /// differently in a diagnostic.
+    pub fn unreachable_path(message: impl Into<String>) -> Self {
+        Self {
+            position: None,
+            phase: ErrorPhase::Evaluation,
+            rule: RULE_UNREACHABLE_PATH.to_string(),
+            message: message.into(),
+        }
+    }
+
+    /// See [`Self::unreachable_path`].
+    pub fn is_unreachable_path(&self) -> bool {
+        self.rule == RULE_UNREACHABLE_PATH
+    }
+
+    /// **No value, for a reason that is data rather than a fault.** A dot-path that
+    /// reaches no value does so in two ways — the resource does not carry the property
+    /// ([`Self::absent_property`]), or the property's value names something the chain does
+    /// not hold ([`Self::unreachable_path`]) — and every site that decides "unsatisfied
+    /// rather than failed" answers both the same way.
+    ///
+    /// It exists because that decision is made at five sites, and the two rules were wired
+    /// into one of them: `NOT EXISTS(?d.owner.name)` answered over a dangling reference
+    /// while `?d.owner.name = "Ada"` aborted the whole query on the same row. One
+    /// predicate, named for the question it answers, so the next site cannot get half of
+    /// it.
+    ///
+    /// A path that cannot be WALKED — an intermediate segment whose value is not a
+    /// resource reference — is deliberately not here. That is the query dot-pathing
+    /// through a string, which is the query being wrong.
+    pub fn is_absence(&self) -> bool {
+        self.is_absent_property() || self.is_unreachable_path()
     }
 
     pub fn evaluation(message: impl Into<String>) -> Self {

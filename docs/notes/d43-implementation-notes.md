@@ -200,8 +200,8 @@ Source: [`crates/eigenius-obograph/tests/d43_perf_bench.rs`](../../crates/eigeni
 | `add_resource × 52 032` to LayerBuilder | 0.14s | In-memory accumulation; no I/O |
 | `LayerBuilder::build` | 1.83s | Bloom + triple index + text index population through RocksDB CFs |
 | **Total load**: convert + bootstrap + build | **~2.3s** | Cold start to queryable layer |
-| BM25 `~` query, cold cache | 344-494ms | Across 5 nucleus-vocabulary queries; mean ~398ms |
-| BM25 `~` query, warm cache | 336-420ms | Block cache primed by cold pass; mean ~359ms |
+| BM25 `~` query, cold cache | 344-494ms | Across 5 nucleus-vocabulary queries; mean ~398ms. **Superseded — see below.** |
+| BM25 `~` query, warm cache | 336-420ms | Block cache primed by cold pass; mean ~359ms. **Superseded — see below.** |
 
 **RSS footprint:**
 
@@ -215,7 +215,28 @@ Source: [`crates/eigenius-obograph/tests/d43_perf_bench.rs`](../../crates/eigeni
 
 Per-Resource memory cost is ~9 KiB end-to-end including the BM25 posting lists, triple index, and bloom filter. That's significantly higher than the on-disk Eigon-JSON (~1.3 KiB per Resource average) because the in-memory layout duplicates strings as `Arc<str>` per index lookup path and the Roaring bitmaps for postings carry their own overhead.
 
-**Query-time dominant cost.** A 350-400ms BM25 query against 52 k indexed docs is much slower than the text-search dispatcher itself. Tracing shows the pattern-match scan (`MATCH ?c { description: ?desc }` against every Resource with a description slot) is the bottleneck, not the BM25 probe. Adding a class filter (`USING "..." MATCH SomeClass(?c) { ... }`) would prune the candidate set before the similarity scan, but real GO has no narrowing class above CLASS itself. The bench result is therefore "unfiltered MATCH + BM25 + TOP 10" against the full corpus — the realistic shape an agent asking "find GO terms about X" produces. Improving this number is a planner-pushdown concern (D43 §6.2 top-K pushdown beyond what v1 ships), not a BM25 concern.
+**Query-time dominant cost — diagnosed here in June 2026, closed `2026-09-13`.** A 350-400ms BM25 query against 52 k indexed docs is much slower than the text-search dispatcher itself. Tracing showed the pattern-match scan (`MATCH ?c { description: ?desc }` against every Resource with a description slot) was the bottleneck, not the BM25 probe. Adding a class filter would prune the candidate set before the similarity scan, but real GO has no narrowing class above CLASS itself, so the bench measures "unfiltered MATCH + BM25 + TOP 10" against the full corpus — the realistic shape an agent asking "find GO terms about X" produces.
+
+This paragraph called the fix a planner-pushdown concern. It did not need a planner. The similarity pre-pass already computes, per `~` node, the set of subjects the probe admits; candidate enumeration simply never read it. Seeding enumeration from that set — for a `~` that is a CONJUNCT of the condition, which is what makes the narrowing sound — is the pushdown, and it lives in the pass that already computes the set.
+
+### GO corpus re-measurement (`2026-09-13`)
+
+Same machine, same GO dump, same bench, both commits measured the same day. The load phases are unchanged (convert 0.14s → 0.13s, bootstrap 0.55s → 0.54s, `add_resource` 0.08s → 0.07s, `build` 0.18s → 0.17s); the whole difference is in the query path.
+
+| | before (`16c0212`) | after (`7cefc87`) | |
+|---|---|---|---|
+| BM25 `~` query, cold cache | 181-269ms, mean 207ms | 21-25ms, mean ~23ms | **~9×** |
+| BM25 `~` query, warm cache | 185-203ms, mean 193ms | 21-26ms, mean ~23ms | **~8×** |
+| RSS at end of bench | 514.6 MiB | 360.8 MiB | −154 MiB |
+| net RSS delta (load + index + queries) | 367.4 MiB | 213.7 MiB | −42% |
+
+The memory drop is the same cause: the scan materialised a candidate binding per Resource carrying a `description` before the probe filtered them, so the peak was proportional to the corpus rather than to `TOP N`.
+
+The June 2026 numbers in the table above are not a valid before-baseline for this change — re-running the June commit today gives 207ms, not 398ms, because `LayerBuilder::build` and the index layout moved substantially in between (1.83s → 0.18s on the same bench). The `16c0212` column is the honest comparison.
+
+Rewriting the fusion onto `query::rank` (eigenius#125) did not move the number either: cold 24-27ms, warm 19-21ms, net RSS delta 214.0 MiB at the branch tip, against 21-25ms / 21-26ms / 213.7 MiB at `7cefc87`. Cold-pass runs across this branch span 21.8-26.6ms, so the fusion rewrite sits inside the noise — deriving each rank from the score costs one sort per source over a `TOP`-bounded candidate list, not over the corpus.
+
+Name resolution adds a fixed per-query cost, measured at or below the run-to-run noise of this bench (branch tip 23.4ms cold against item C's 21.8ms, across three runs): short names are resolved once at type-check instead of per candidate at evaluation.
 
 ### HNSW recall + latency (M9.3)
 

@@ -34,40 +34,61 @@ pub(super) type Binding = BTreeMap<String, Value>;
 /// the layer chain (and FIBER overlay) before brace refinement / join.
 type Candidates = Vec<(Option<Iri>, BTreeMap<Iri, Value>)>;
 
+/// What a pattern is matched AGAINST — the chain, the derived relations, the FIBER
+/// overlay, the imported namespaces, and the similarity pre-pass.
+///
+/// Grouped because these five travel together through every pattern entry point and
+/// change only between queries, while the pattern, the bindings so far and the conditions
+/// change per call. Passing them individually pushed `apply_pattern` to eight parameters.
+#[derive(Clone, Copy)]
+pub(super) struct MatchContext<'a> {
+    pub layer: &'a Layer,
+    pub derived: &'a BTreeMap<String, Vec<Binding>>,
+    pub overlay: &'a [(Iri, Resource)],
+    pub namespaces: &'a [String],
+    /// `None` on a path with no runtime — a DEFINE body — and on a negated pattern, where
+    /// narrowing what the negation ranges over would change its meaning.
+    pub similarity: Option<&'a super::similarity::SimilarityContext>,
+}
+
 /// Apply a positive pattern: join with existing bindings.
 ///
-/// `overlay` is the slice of transient fiber-response resources (possibly
-/// empty) produced by earlier FIBER clauses in the same query. They are
-/// merged into the candidate set alongside layer resources so pattern
-/// matching on FIBER-bound variables works uniformly.
+/// The context's `overlay` is the slice of transient fiber-response resources (possibly
+/// empty) produced by earlier FIBER clauses in the same query. They are merged into the
+/// candidate set alongside layer resources so pattern matching on FIBER-bound variables
+/// works uniformly.
 pub(super) fn apply_pattern(
     pattern: &Pattern,
-    layer: &Layer,
-    derived: &BTreeMap<String, Vec<Binding>>,
-    overlay: &[(Iri, Resource)],
+    ctx: MatchContext<'_>,
     existing: Vec<Binding>,
     conditions: &[Expression],
-    namespaces: &[String],
 ) -> Result<Vec<Binding>, QueryError> {
+    let MatchContext { similarity, .. } = ctx;
     // Subject-predicate pushdown: if a WHERE conjunct constrains this pattern's
     // subject to an IRI prefix (`LIKE "p%"`), a single IRI (`= "iri"`), or a set
     // (`IN [...]`), collect candidates by IRI instead of scanning the chain. The
     // WHERE still re-applies the predicate, so this only ever pre-filters — never
     // drops a valid row. Decisive for untyped `MATCH ?r {}` over a large chain.
     let subject_constraint = extract_subject_constraint(&pattern.subject.name, conditions);
-    let candidates = collect_candidates(
-        pattern,
-        layer,
-        derived,
-        overlay,
-        subject_constraint.as_ref(),
-        namespaces,
-    )?;
+    // Similarity pushdown, the same shape as the subject pushdown above and sound for the
+    // same reason: the `~` operator drops every subject outside the probe's result, so
+    // starting from that result removes rows that were going to go. The pre-pass already
+    // computed it; without this the chain is enumerated in full and then filtered down to
+    // the set that was sitting in the runtime when the scan began.
+    let seed =
+        similarity.and_then(|ctx| ctx.conjunct_subjects_for(&pattern.subject.name, conditions));
+    let candidates =
+        collect_candidates(pattern, ctx, subject_constraint.as_ref(), seed.as_deref())?;
     let mut result = Vec::new();
 
     for binding in &existing {
         for (resource_iri, resource) in &candidates {
-            result.extend(try_match_resource(pattern, resource, resource_iri, binding));
+            result.extend(try_match_resource(
+                pattern,
+                resource,
+                resource_iri,
+                binding,
+            )?);
         }
     }
 
@@ -77,21 +98,22 @@ pub(super) fn apply_pattern(
 /// Apply a negated pattern: keep bindings where no match exists.
 pub(super) fn apply_negated_pattern(
     pattern: &Pattern,
-    layer: &Layer,
-    derived: &BTreeMap<String, Vec<Binding>>,
-    overlay: &[(Iri, Resource)],
+    ctx: MatchContext<'_>,
     existing: Vec<Binding>,
-    namespaces: &[String],
 ) -> Result<Vec<Binding>, QueryError> {
-    // No subject pushdown for negated patterns — narrowing the candidate set of a
-    // `NOT` pattern would change its semantics. Always the full candidate view.
-    let candidates = collect_candidates(pattern, layer, derived, overlay, None, namespaces)?;
+    // Neither pushdown applies to a negated pattern: narrowing what a `NOT` ranges over
+    // changes what it means. Always the full candidate view.
+    let candidates = collect_candidates(pattern, ctx, None, None)?;
     let mut result = Vec::new();
 
     for binding in &existing {
-        let has_match = candidates
-            .iter()
-            .any(|(iri, resource)| !try_match_resource(pattern, resource, iri, binding).is_empty());
+        let mut has_match = false;
+        for (iri, resource) in &candidates {
+            if !try_match_resource(pattern, resource, iri, binding)?.is_empty() {
+                has_match = true;
+                break;
+            }
+        }
         if !has_match {
             result.push(binding.clone());
         }
@@ -109,15 +131,19 @@ pub(super) fn apply_negated_pattern(
 /// scan that pre-14h code used. The scan path remains as a fallback for
 /// untyped patterns and for setups where `is_a` somehow lost its
 /// indexable data_type.
-#[allow(clippy::too_many_arguments)]
-fn collect_candidates<'a>(
+fn collect_candidates(
     pattern: &Pattern,
-    layer: &'a Layer,
-    derived: &'a BTreeMap<String, Vec<Binding>>,
-    overlay: &'a [(Iri, Resource)],
+    ctx: MatchContext<'_>,
     subject_constraint: Option<&SubjectConstraint>,
-    namespaces: &[String],
+    similarity_seed: Option<&[Iri]>,
 ) -> Result<Candidates, QueryError> {
+    let MatchContext {
+        layer,
+        derived,
+        overlay,
+        namespaces,
+        ..
+    } = ctx;
     // Check if this references a derived relation. Derived rows are stored as
     // positional tuples ("0" = the relation's first/subject column; see
     // `project_onto_head` in mod.rs). A pattern references a derived relation by
@@ -176,6 +202,15 @@ fn collect_candidates<'a>(
         } else {
             collect_candidates_via_scan(layer, Some(class))
         }
+    } else if let Some(seed) = similarity_seed {
+        // The similarity pre-pass narrowed the subjects. Resolve just those.
+        seed.iter()
+            .filter_map(|iri| {
+                layer
+                    .resolve(iri)
+                    .map(|r| (Some(iri.clone()), r.properties().clone()))
+            })
+            .collect()
     } else if let Some(constraint) = subject_constraint {
         // Untyped pattern with a subject-bound WHERE conjunct: collect by IRI
         // (prefix range over `defined_iris`, or direct resolve) instead of
@@ -370,7 +405,7 @@ fn try_match_resource(
     resource_props: &BTreeMap<Iri, Value>,
     resource_iri: &Option<Iri>,
     existing: &Binding,
-) -> Vec<Binding> {
+) -> Result<Vec<Binding>, QueryError> {
     let mut base = existing.clone();
 
     // Bind the subject variable.
@@ -379,7 +414,7 @@ fn try_match_resource(
         let iri_val = Value::iri(iri);
         if let Some(existing_val) = base.get(subject_name) {
             if !values_equal(existing_val, &iri_val) {
-                return Vec::new(); // conflict with existing binding
+                return Ok(Vec::new()); // conflict with existing binding
             }
         }
         base.insert(subject_name.clone(), iri_val);
@@ -388,14 +423,24 @@ fn try_match_resource(
     // Match property patterns, threading a frontier of partial bindings.
     let mut frontier = vec![base];
     for prop_pat in &pattern.properties {
-        let prop_iri = match &prop_pat.property {
-            Name::ShortName(s) => match find_property_by_shortname(s, resource_props) {
-                Some(iri) => iri,
-                None => return Vec::new(),
-            },
-            Name::FullIri(iri) => iri.clone(),
+        // Resolved by `type_check` to the property IRI the key names — see
+        // `query::resolve::resolve_property_names`. A short name here means the program
+        // reached evaluation without that pass.
+        //
+        // **It says so rather than matching nothing.** Returning no rows made an
+        // unresolved key indistinguishable from a resource that does not carry the
+        // property, which is the silent-empty-set failure this whole rule exists to
+        // remove — and it disagreed with the dot-path site, which errors on the same
+        // state. The state is unreachable now that every name position is resolved
+        // (eigenius#248 tracks making it unrepresentable), so this is a diagnostic for a
+        // pass that did not run, not a branch on user input.
+        let Name::FullIri(prop_iri) = &prop_pat.property else {
+            return Err(QueryError::evaluation(format!(
+                "property key '{}' was never resolved to a property IRI",
+                prop_pat.property
+            )));
         };
-        let value = resource_props.get(&prop_iri);
+        let value = resource_props.get(prop_iri);
 
         let mut next: Vec<Binding> = Vec::new();
         for b in frontier {
@@ -432,11 +477,11 @@ fn try_match_resource(
         }
         frontier = next;
         if frontier.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
     }
 
-    frontier
+    Ok(frontier)
 }
 
 /// Match an array pattern (D59) against a property's elements, pushing every
@@ -487,17 +532,6 @@ fn bind_positional(vars: &[Variable], elems: &[Value], base: Binding) -> Option<
         }
     }
     Some(b)
-}
-
-/// Find a property IRI by shortname by looking it up in the resource's keys.
-pub(super) fn find_property_by_shortname(
-    shortname: &str,
-    props: &BTreeMap<Iri, Value>,
-) -> Option<Iri> {
-    props
-        .keys()
-        .find(|iri| iri.local_name() == shortname)
-        .cloned()
 }
 
 /// Check if a resource is a (subclass-)instance of a class, via the single
@@ -572,9 +606,14 @@ mod tests {
         Arc::new(domain_builder.build(storage))
     }
 
+    /// Runs the type-check pass, not because these tests check typing, but because
+    /// that pass resolves the property names the evaluator then looks up. Parsing
+    /// straight into `evaluate` leaves every short name unresolved.
     pub(crate) fn run_query(layer: &Layer, query_str: &str) -> Vec<Resource> {
         let tokens = tokenize(query_str).unwrap();
-        let program = parser::parse(tokens).unwrap();
+        let mut program = parser::parse(tokens).unwrap();
+        let errors = crate::query::type_check::type_check(&mut program, layer);
+        assert!(errors.is_empty(), "type errors: {errors:?}");
         let fp = QueryFingerprint::of(query_str);
         evaluate(&program, layer, &fp, FiberRuntime::default())
             .unwrap()

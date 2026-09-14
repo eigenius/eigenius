@@ -94,6 +94,31 @@ The IRI in `USING` doesn't exist in the layer. Check the namespace and spelling,
 
 The IRI resolves but doesn't have `is_a: Class` in its metadata. `USING` only accepts Classes; for properties or datatype references, use the full IRI directly in patterns.
 
+**`property_name_unresolved`**
+
+```
+[TypeCheck] property 'titel' is declared by neither 'urn:ex:Notebook' nor the imported
+namespaces — write the full property IRI to reach a property the class does not declare
+```
+
+A property name — a `MATCH` brace key or a dot-path segment — resolves against declared vocabulary: the class where the pattern states one, `USING NAMESPACE` plus the core prelude otherwise (D2 §5.6.1). This is usually a typo. Where it is not, the property exists but sits outside both scopes; write it as a quoted full IRI, which needs no scope:
+
+```eigenql
+MATCH Notebook(?n) { }
+RETURN [] { t: ?n."urn:other:title" }
+```
+
+Before `2026-09-13` neither position was checked and neither reported anything: a mistyped key matched no resource and a mistyped segment read as data absence, so both returned an empty result set.
+
+**`ambiguous_short_name`**
+
+```
+[TypeCheck] short name 'title' names 2 distinct properties in the classes in scope
+(urn:ex:title, urn:other:title); write the full property IRI
+```
+
+Two classes in scope — a subject matched by two classed patterns, or a property with several range classes — each declare a property of that short name. Write the full IRI.
+
 **`unbound_variable`**
 
 ```

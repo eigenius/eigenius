@@ -26,7 +26,7 @@ use crate::query::error::QueryError;
 use crate::query::functions::{self, like_match, to_f64, values_compare, values_equal};
 use std::collections::BTreeMap;
 
-use super::pattern::{find_property_by_shortname, literal_to_value, Binding};
+use super::pattern::{literal_to_value, Binding};
 use super::FiberRuntime;
 
 /// Evaluate an expression against a binding.
@@ -71,12 +71,12 @@ pub(super) fn eval_expression(
                 op if is_test(*op) => {
                     let l = match eval_expression(left, binding, layer, runtime) {
                         Ok(v) => v,
-                        Err(e) if e.is_absent_property() => return Ok(Value::Boolean(false)),
+                        Err(e) if e.is_absence() => return Ok(Value::Boolean(false)),
                         Err(e) => return Err(e),
                     };
                     let r = match eval_expression(right, binding, layer, runtime) {
                         Ok(v) => v,
-                        Err(e) if e.is_absent_property() => return Ok(Value::Boolean(false)),
+                        Err(e) if e.is_absence() => return Ok(Value::Boolean(false)),
                         Err(e) => return Err(e),
                     };
                     eval_binary(*op, &l, &r)
@@ -98,7 +98,35 @@ pub(super) fn eval_expression(
             let v = eval_expression(operand, binding, layer, runtime)?;
             eval_verdict_predicate(*kind, &v, layer, runtime)
         }
-        Expression::NotExists(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
+        // `NOT EXISTS(e)` — does `e` have a value?
+        //
+        // Over a DOT-PATH this is the absence test nothing else provides: `NOT (?n.title
+        // == "x")` is also true when the title is "y", so there was no way to ask for the
+        // resources that carry no title at all. Absence is exactly what
+        // `is_absent_property` reports, so the machinery is already here.
+        //
+        // Over a bare VARIABLE it keeps its old meaning, is-this-bound, which under a
+        // strictly conjunctive `MATCH` is always true — the form was dead and returned
+        // false for every row (eigenius#124). It stays for the FIBER case, where a
+        // variable can genuinely be unbound.
+        Expression::NotExists(operand) => match operand.as_ref() {
+            Expression::Variable(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
+            other => match eval_expression(other, binding, layer, runtime) {
+                Ok(_) => Ok(Value::Boolean(false)),
+                // Both ways a dot-path can have NO VALUE answer this question the same
+                // way — see `QueryError::is_absence`. Propagating the second aborted the
+                // whole query over one dangling reference among the matched resources.
+                //
+                // A segment that is not a resource to WALK INTO is not one of them, and
+                // an earlier version of this comment claimed it was: dot-pathing through
+                // a string is the query being wrong, and it still aborts with a
+                // diagnostic. D2 §5.6 says an intermediate segment must resolve to a
+                // `core:resource`-typed property; nothing checks that at type-check yet,
+                // so the diagnostic is where a reader finds out.
+                Err(e) if e.is_absence() => Ok(Value::Boolean(true)),
+                Err(e) => Err(e),
+            },
+        },
         Expression::FunctionCall { name, args } => {
             let arg_vals: Result<Vec<Value>, QueryError> = args
                 .iter()
@@ -153,22 +181,28 @@ pub(super) fn eval_expression(
             for (i, segment) in segments.iter().enumerate() {
                 let resource = resolve_iri_string(current_iri.as_str(), layer, runtime)
                     .ok_or_else(|| {
-                        QueryError::evaluation(format!(
+                        QueryError::unreachable_path(format!(
                             "resource '{}' not found in layer chain or FIBER overlay",
                             current_iri
                         ))
                     })?;
-                // Both of these are the RESOURCE not carrying the property, which is
-                // data absence rather than a fault: a condition over it is not satisfied.
-                // Every other failure in this function is the query being wrong.
-                let prop_iri = find_property_by_shortname(segment, resource.properties())
-                    .ok_or_else(|| {
-                        QueryError::absent_property(format!(
-                            "property '{}' not found on resource '{}'",
-                            segment, current_iri
-                        ))
-                    })?;
-                let value = resource.get(&prop_iri).ok_or_else(|| {
+                // `type_check` resolved every segment to the property IRI it names, so
+                // this is a lookup and not a search. A short name here means the program
+                // reached evaluation without that pass — unreachable now that every name
+                // position is resolved, and still representable, which eigenius#248
+                // tracks.
+                let prop_iri = match segment {
+                    Name::FullIri(iri) => iri,
+                    Name::ShortName(s) => {
+                        return Err(QueryError::evaluation(format!(
+                            "dot-path segment '{s}' was never resolved to a property IRI"
+                        )))
+                    }
+                };
+                // The RESOURCE not carrying the property is data absence rather than a
+                // fault: a condition over it is not satisfied. Every other failure in
+                // this function is the query being wrong.
+                let value = resource.get(prop_iri).ok_or_else(|| {
                     QueryError::absent_property(format!(
                         "property '{}' has no value on resource '{}'",
                         segment, current_iri
@@ -587,7 +621,7 @@ fn eval_operand_absent_as_false(
 ) -> Result<Value, QueryError> {
     match eval_expression(expr, binding, layer, runtime) {
         Ok(v) => Ok(v),
-        Err(e) if e.is_absent_property() => Ok(Value::Boolean(false)),
+        Err(e) if e.is_absence() => Ok(Value::Boolean(false)),
         Err(e) => Err(e),
     }
 }
@@ -615,7 +649,7 @@ pub(super) fn apply_group_by(
         for expr in group_by {
             match eval_expression(expr, binding, layer, runtime) {
                 Ok(v) => key.push(format!("{v:?}")),
-                Err(e) if e.is_absent_property() => key.push(String::new()),
+                Err(e) if e.is_absence() => key.push(String::new()),
                 Err(e) => return Err(e),
             }
         }
