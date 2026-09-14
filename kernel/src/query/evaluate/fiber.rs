@@ -29,7 +29,7 @@ use crate::query::error::QueryError;
 use std::collections::BTreeMap;
 
 use super::expression::eval_expression;
-use super::pattern::{apply_negated_pattern, apply_pattern, Binding};
+use super::pattern::{apply_negated_pattern, apply_pattern, Binding, MatchContext};
 
 /// Runtime resources available to FIBER clause evaluation.
 /// Both `index` and `runtime` must be `Some` for FIBER dispatch to
@@ -122,21 +122,33 @@ pub(super) fn evaluate_match_part(
         if pattern.negated {
             bindings = apply_negated_pattern(
                 pattern,
-                layer,
-                derived,
-                &[],
+                MatchContext {
+                    layer,
+                    derived,
+                    overlay: &[],
+                    namespaces: &part.using_namespaces,
+                    similarity: None,
+                },
                 bindings,
-                &part.using_namespaces,
             )?;
         } else {
             bindings = apply_pattern(
                 pattern,
-                layer,
-                derived,
-                &[],
+                MatchContext {
+                    layer,
+                    derived,
+                    overlay: &[],
+                    namespaces: &part.using_namespaces,
+                    // A DEFINE body is evaluated with no runtime, so there is nothing to
+                    // seed from here. Note that the pre-pass DOES build a probe for a `~`
+                    // inside a DEFINE body, and evaluating one then fails with "invoked
+                    // outside an evaluator pre-pass context" — pre-existing, and either
+                    // the runtime should be threaded here or type-check should reject `~`
+                    // in a DEFINE body.
+                    similarity: None,
+                },
                 bindings,
                 &part.conditions,
-                &part.using_namespaces,
             )?;
         }
     }
@@ -182,21 +194,27 @@ pub(super) fn evaluate_match_part_with_fiber(
                 bindings = if pattern.negated {
                     apply_negated_pattern(
                         pattern,
-                        layer,
-                        derived,
-                        &overlay.entries,
+                        MatchContext {
+                            layer,
+                            derived,
+                            overlay: &overlay.entries,
+                            namespaces: &part.using_namespaces,
+                            similarity: None,
+                        },
                         bindings,
-                        &part.using_namespaces,
                     )?
                 } else {
                     apply_pattern(
                         pattern,
-                        layer,
-                        derived,
-                        &overlay.entries,
+                        MatchContext {
+                            layer,
+                            derived,
+                            overlay: &overlay.entries,
+                            namespaces: &part.using_namespaces,
+                            similarity: runtime.similarity,
+                        },
                         bindings,
                         &part.conditions,
-                        &part.using_namespaces,
                     )?
                 };
             }

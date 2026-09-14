@@ -91,12 +91,19 @@ pub enum TextSearchError {
 /// catches an Index Resource being re-defined with a different
 /// analyzer without re-indexing (which shouldn't happen under the
 /// §5.7 atomic-reindex policy, but the verification is cheap).
+/// Run a text probe, returning at most `limit` hits, highest-scoring first.
+///
+/// **The bound is the point.** The vector probe has always taken one; this took none, so a
+/// `TOP 10` over a chain of a hundred thousand documents fused a ten-element vector ranking
+/// with an unbounded text ranking. The limit is applied after scoring and sorting, so it
+/// keeps the best hits rather than the first ones the index happened to return.
 pub fn run_text_search(
     head: &Layer,
     text_index: &dyn TextIndex,
     index_iri: &Iri,
     analyzer: &dyn Analyzer,
     query: &str,
+    limit: usize,
 ) -> Result<Vec<TextScoredHit>, TextSearchError> {
     let tokens = analyzer.tokenize(query);
     if tokens.is_empty() {
@@ -188,6 +195,10 @@ pub fn run_text_search(
             .then_with(|| a.subject.as_str().cmp(b.subject.as_str()))
     });
 
+    // After the sort, so the bound keeps the best hits rather than whichever the index
+    // returned first. The ordering above is total and deterministic, so the truncation is
+    // reproducible across runs.
+    hits.truncate(limit);
     Ok(hits)
 }
 
@@ -253,6 +264,7 @@ mod tests {
             &index_iri,
             &analyzer,
             "wal truncation",
+            usize::MAX,
         )
         .unwrap();
 
@@ -304,6 +316,7 @@ mod tests {
             &index_iri,
             &analyzer,
             "alpha beta",
+            usize::MAX,
         )
         .unwrap();
 
@@ -376,16 +389,30 @@ mod tests {
         // Querying at L2 for "alpha" — L1's hit is shadowed by
         // L2's redefinition of s, even though L2 doesn't contain
         // "alpha".
-        let hits =
-            run_text_search(&l2, text_index.as_ref(), &index_iri, &analyzer, "alpha").unwrap();
+        let hits = run_text_search(
+            &l2,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "alpha",
+            usize::MAX,
+        )
+        .unwrap();
         assert!(
             hits.is_empty(),
             "L1 hit on shadowed subject should be dropped, got {hits:?}"
         );
 
         // But querying for "beta" surfaces L2's hit.
-        let hits =
-            run_text_search(&l2, text_index.as_ref(), &index_iri, &analyzer, "beta").unwrap();
+        let hits = run_text_search(
+            &l2,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "beta",
+            usize::MAX,
+        )
+        .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(&hits[0].defining_layer, l2.id());
     }
@@ -397,7 +424,15 @@ mod tests {
         let text_index = Arc::clone(&head.storage().text_index);
         let analyzer = EnStemV1::new();
         let index_iri = iri("urn:eigenius:test:ti");
-        let hits = run_text_search(&head, text_index.as_ref(), &index_iri, &analyzer, "").unwrap();
+        let hits = run_text_search(
+            &head,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "",
+            usize::MAX,
+        )
+        .unwrap();
         assert!(hits.is_empty());
     }
 
@@ -408,8 +443,15 @@ mod tests {
         let text_index = Arc::clone(&head.storage().text_index);
         let analyzer = EnStemV1::new();
         let index_iri = iri("urn:eigenius:test:nonexistent");
-        let hits =
-            run_text_search(&head, text_index.as_ref(), &index_iri, &analyzer, "alpha").unwrap();
+        let hits = run_text_search(
+            &head,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "alpha",
+            usize::MAX,
+        )
+        .unwrap();
         assert!(hits.is_empty());
     }
 
@@ -448,6 +490,7 @@ mod tests {
             &index_iri,
             &wrong_analyzer,
             "alpha",
+            usize::MAX,
         )
         .expect_err("analyzer mismatch should fail");
         match err {
@@ -518,8 +561,15 @@ mod tests {
             )
             .unwrap();
 
-        let hits =
-            run_text_search(&l2, text_index.as_ref(), &index_iri, &analyzer, "alpha").unwrap();
+        let hits = run_text_search(
+            &l2,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "alpha",
+            usize::MAX,
+        )
+        .unwrap();
         assert_eq!(hits.len(), 2);
 
         // The shorter doc (`s_a`) scores higher under length
@@ -527,5 +577,97 @@ mod tests {
         assert_eq!(hits[0].subject.as_str(), "urn:eigenius:test:sa");
         assert_eq!(hits[1].subject.as_str(), "urn:eigenius:test:sb");
         assert!(hits[0].score > hits[1].score);
+    }
+
+    /// **The text probe is bounded.** It took no limit at all, while the vector probe has
+    /// always taken one — so a hybrid query fused a bounded vector ranking with an
+    /// unbounded text ranking, and a `TOP 10` over a large corpus paid for every hit the
+    /// index could produce.
+    ///
+    /// The bound applies AFTER scoring and sorting, so it keeps the best hits rather than
+    /// whichever the index returned first. That distinction is the whole reason to test it:
+    /// truncating before the sort would silently change which documents a query sees.
+    #[test]
+    fn the_limit_keeps_the_highest_scoring_hits() {
+        let (head, storage) = bootstrap_chain();
+        let mut b = LayerBuilder::new("limit", Some(head));
+        b.add_resource(crate::ontology::resource::Resource::new(iri(
+            "urn:eigenius:test:r",
+        )))
+        .unwrap();
+        let layer = Arc::new(b.build((*storage).clone()));
+
+        let text_index = Arc::clone(&layer.storage().text_index);
+        let index_iri = iri("urn:eigenius:test:ti-limit");
+        let analyzer = EnStemV1::new();
+
+        // The search is a CONJUNCTION over query terms, so every hit must carry both. Three
+        // do, at descending term frequency, which is what makes their scores differ and the
+        // truncation observable; the fourth carries neither.
+        let docs: Vec<(Iri, Vec<String>)> = vec![
+            (
+                iri("urn:eigenius:test:hi"),
+                analyzer.tokenize("wal truncation wal truncation wal truncation"),
+            ),
+            (
+                iri("urn:eigenius:test:mid"),
+                analyzer.tokenize("wal truncation wal truncation padding"),
+            ),
+            (
+                iri("urn:eigenius:test:lo"),
+                analyzer.tokenize("wal truncation padding padding padding"),
+            ),
+            (
+                iri("urn:eigenius:test:none"),
+                analyzer.tokenize("unrelated prose entirely"),
+            ),
+        ];
+        let entries: Vec<TextDoc> = docs
+            .iter()
+            .map(|(s, t)| TextDoc {
+                subject: s,
+                tokens: t,
+            })
+            .collect();
+        text_index
+            .extend_layer(&index_iri, layer.id(), "en-stem-v1", &entries)
+            .unwrap();
+
+        let all = run_text_search(
+            &layer,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "wal truncation",
+            usize::MAX,
+        )
+        .expect("unbounded search");
+        assert!(
+            all.len() >= 3,
+            "the fixture needs enough hits to truncate: {}",
+            all.len()
+        );
+
+        let limited = run_text_search(
+            &layer,
+            text_index.as_ref(),
+            &index_iri,
+            &analyzer,
+            "wal truncation",
+            2,
+        )
+        .expect("bounded search");
+        assert_eq!(limited.len(), 2, "the bound is honoured");
+        assert_eq!(
+            limited
+                .iter()
+                .map(|h| h.subject.clone())
+                .collect::<Vec<_>>(),
+            all.iter()
+                .take(2)
+                .map(|h| h.subject.clone())
+                .collect::<Vec<_>>(),
+            "and it keeps the top of the ranking, not an arbitrary prefix"
+        );
     }
 }

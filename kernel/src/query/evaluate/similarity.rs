@@ -33,7 +33,8 @@ use crate::ontology::resource::Value;
 use crate::ontology::well_known as wk;
 use crate::program::embedder::EmbedderRegistry;
 use crate::query::ast::{
-    Expression, HintSet, Literal, MatchPart, Name, Program, ValueOrVariable, Variable, Via,
+    BinaryOp, Expression, HintSet, Literal, MatchPart, Name, Program, ValueOrVariable, Variable,
+    Via,
 };
 use crate::query::error::QueryError;
 use crate::query::text::analyzer::registry as analyzer_registry;
@@ -124,6 +125,7 @@ impl SimilarityContext {
                     property,
                     query,
                     hints,
+                    program.query.top,
                     &prop_var_index,
                     &text_indexes,
                     &vector_indexes,
@@ -151,6 +153,59 @@ impl SimilarityContext {
     /// score 0.0; rows ranked by multiple probes accumulate (the
     /// design's "rows satisfying both rank higher than rows
     /// satisfying one" — §3.3).
+    /// The subjects the similarity CONJUNCTS of `conditions` admit for `subject_var`, if
+    /// any constrain it.
+    ///
+    /// **This is the narrowing set candidate enumeration should start from.** The pre-pass
+    /// already computed it, one probe per similarity node paid once per query, and per-row
+    /// evaluation then answers `false` for every subject outside it. Enumerating the whole
+    /// chain and filtering afterwards does that work twice, the second time over every
+    /// resource in the chain.
+    ///
+    /// **Position is what makes it sound, and position is why this takes the conditions
+    /// rather than a variable name.** A subject outside the probe's map is dropped only
+    /// when the `~` is a CONJUNCT. Under a disjunction the other branch may still admit the
+    /// row; under a negation the predicate rejects exactly the set the probe returned; and
+    /// in `RETURN` or `ORDER BY` the operator is a score projection that filters nothing at
+    /// all. The pre-pass registers a probe for every similarity node in the program
+    /// including all of those, so asking it by variable NAME answers a question the name
+    /// cannot answer — an earlier version did that and returned the intersection of a
+    /// disjunction's branches, and nothing at all for a negation.
+    ///
+    /// Descending only through `And` from the top-level conditions makes the property hold
+    /// by construction, and it is the same discipline `extract_subject_constraint` applies
+    /// to the subject pushdown beside it.
+    pub(super) fn conjunct_subjects_for(
+        &self,
+        subject_var: &str,
+        conditions: &[Expression],
+    ) -> Option<Vec<Iri>> {
+        let mut conjuncts: Vec<&Expression> = Vec::new();
+        for cond in conditions {
+            collect_similarity_conjuncts(cond, &mut conjuncts);
+        }
+        let mut out: Option<Vec<Iri>> = None;
+        for expr in conjuncts {
+            let Some(probe) = self.probe_for(expr) else {
+                continue;
+            };
+            if probe.subject_var != subject_var {
+                continue;
+            }
+            let these: Vec<Iri> = probe.scores.keys().cloned().collect();
+            // Conjuncts, so the admissible set is their INTERSECTION. That is true here
+            // because the walk above admits only conjuncts.
+            out = Some(match out {
+                None => these,
+                Some(prev) => {
+                    let keep: std::collections::BTreeSet<&Iri> = these.iter().collect();
+                    prev.into_iter().filter(|i| keep.contains(i)).collect()
+                }
+            });
+        }
+        out
+    }
+
     pub(crate) fn aggregate_score(&self, binding: &super::pattern::Binding) -> f64 {
         let mut sum = 0.0_f64;
         for probe in self.probes.values() {
@@ -231,6 +286,26 @@ fn collect_similarity_nodes<'a>(part: &'a MatchPart, out: &mut Vec<&'a Expressio
     }
 }
 
+/// The similarity nodes that are CONJUNCTS of `expr`.
+///
+/// Descends only through `And`. A `~` under `Or`, under `Not`, or under any other operator
+/// does not constrain every row the expression admits, so it must not narrow the candidate
+/// set. Mirrors `extract_subject_constraint`'s reading of the same condition list.
+fn collect_similarity_conjuncts<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+    match expr {
+        Expression::Similarity { .. } => out.push(expr),
+        Expression::Binary {
+            op: BinaryOp::And,
+            left,
+            right,
+        } => {
+            collect_similarity_conjuncts(left, out);
+            collect_similarity_conjuncts(right, out);
+        }
+        _ => {}
+    }
+}
+
 fn collect_in_expression<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
     match expr {
         Expression::Similarity { query, .. } => {
@@ -272,6 +347,9 @@ fn build_probe(
     property: &Variable,
     query: &Expression,
     hints: &HintSet,
+    // `TOP N` from the query, which sizes the candidate pool when no explicit hint says
+    // otherwise. `None` means the query does not rank, so the probe must not truncate.
+    top: Option<usize>,
     prop_var_index: &BTreeMap<String, PropertyVarBinding>,
     text_indexes: &[ActiveTextIndex],
     vector_indexes: &[ActiveVectorIndex],
@@ -304,7 +382,24 @@ fn build_probe(
         .iter()
         .find(|i| i.target_property == binding.property_iri);
 
-    let limit = hints.limit.unwrap_or(DEFAULT_LIMIT);
+    // **How many candidates each probe must return, and the two are not the same.**
+    //
+    // An explicit `{ limit: N }` is the author saying what they want, and `TOP N` means the
+    // query ranks, so the pool needs at least N. This is what makes `TOP` reach the probes
+    // at all: it was read in exactly one place, as a truncation applied to the bindings
+    // AFTER evaluation, so a probe never saw it.
+    let ranked_pool = hints.limit.or_else(|| top.map(|n| n.max(DEFAULT_LIMIT)));
+
+    // **Text, unranked, is a FILTER and must not truncate.** Matching is a predicate —
+    // the document contains the terms or it does not — so a bound drops rows that match.
+    // Using `DEFAULT_LIMIT` here silently returned 200 of 250 matching documents.
+    let text_limit = ranked_pool.unwrap_or(usize::MAX);
+
+    // **Vector is a top-k by construction and has no unranked form.** Every subject has a
+    // distance, so "all matches" is not a set the index can produce; the search allocates
+    // a heap of `k + 1` and derives its search width from `k`. `DEFAULT_LIMIT` is D43's
+    // candidate-pool size and stays the floor when nothing asks for more.
+    let vector_limit = ranked_pool.unwrap_or(DEFAULT_LIMIT);
     let k = hints.k.unwrap_or(DEFAULT_RRF_K);
 
     // §3.5 strategy selection: explicit `via:` wins; otherwise the
@@ -356,6 +451,7 @@ fn build_probe(
             &idx.iri,
             analyzer.as_ref(),
             &query_string,
+            text_limit,
         )
         .map_err(|e| QueryError::evaluation(format!("text probe failed: {e}")))?
     } else {
@@ -396,7 +492,7 @@ fn build_probe(
             vector_segment_cache,
             &idx.iri,
             &query_vec,
-            limit,
+            vector_limit,
             None,
             &idx.model,
             metric,
@@ -648,6 +744,106 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// **Seeding must not fire for a `~` that is not a conjunct.**
+    ///
+    /// The pre-pass registers a probe for EVERY similarity node in the program — under
+    /// `OR`, under `NOT`, and in `RETURN` / `ORDER BY` where the operator is a score
+    /// projection that filters nothing. Narrowing candidates from any of those is a wrong
+    /// answer, and an earlier version did exactly that by matching probes on the variable
+    /// NAME, having discarded where in the expression they came from.
+    ///
+    /// Each case below returned fewer rows than it should. They are the discriminating
+    /// tests for the fix: against the name-based version, every one fails.
+    #[test]
+    fn a_similarity_under_a_disjunction_does_not_narrow() {
+        let layer = build_text_corpus();
+        let rows = execute_with(
+            r#"
+            USING NAMESPACE "urn:ex:"
+            MATCH ?d { "urn:ex:description": ?desc }
+            WHERE ?desc ~ "kernel" OR ?desc ~ "chain"
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        // d1 carries "kernel", d2 carries "chain". Seeding from either branch alone, or
+        // from their intersection, loses one of them.
+        assert_eq!(
+            matched_subject_iris(&rows, "d").len(),
+            2,
+            "a disjunction admits the union of its branches"
+        );
+    }
+
+    #[test]
+    fn a_similarity_under_a_negation_does_not_narrow() {
+        let layer = build_text_corpus();
+        let rows = execute_with(
+            r#"
+            USING NAMESPACE "urn:ex:"
+            MATCH ?d { "urn:ex:description": ?desc }
+            WHERE NOT (?desc ~ "kernel")
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        // Seeding here would start from exactly the set the predicate then rejects, so
+        // the query returned nothing at all.
+        let matched = matched_subject_iris(&rows, "d");
+        assert!(
+            !matched.is_empty(),
+            "a negation admits the rows the probe did NOT rank, got {matched:?}"
+        );
+        assert!(!matched.iter().any(|s| s == "urn:ex:d1"));
+    }
+
+    #[test]
+    fn a_similarity_in_return_position_does_not_narrow() {
+        let layer = build_text_corpus();
+        let rows = execute_with(
+            r#"
+            USING NAMESPACE "urn:ex:"
+            MATCH ?d { "urn:ex:description": ?desc }
+            RETURN [] { d: ?d, s: ?desc ~ "kernel" }
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        // A score projection filters nothing: every document is still a row.
+        assert_eq!(
+            matched_subject_iris(&rows, "d").len(),
+            3,
+            "a `~` in RETURN ranks rows, it does not select them"
+        );
+    }
+
+    /// The conjunctive case, which is the one seeding is FOR: same answer as before, and
+    /// the untyped shape is the one that used to reach the full-chain scan.
+    #[test]
+    fn a_conjunctive_similarity_narrows_without_changing_the_answer() {
+        let layer = build_text_corpus();
+        let rows = execute_with(
+            r#"
+            USING NAMESPACE "urn:ex:"
+            MATCH ?d { "urn:ex:description": ?desc }
+            WHERE ?desc ~ "WAL truncation"
+            RETURN [] { d: ?d }
+            "#,
+            &layer,
+            crate::query::evaluate::FiberRuntime::default(),
+        )
+        .expect("query should succeed");
+        assert_eq!(
+            matched_subject_iris(&rows, "d"),
+            vec!["urn:ex:d3".to_string()]
+        );
     }
 
     #[test]

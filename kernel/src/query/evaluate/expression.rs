@@ -113,7 +113,14 @@ pub(super) fn eval_expression(
             Expression::Variable(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
             other => match eval_expression(other, binding, layer, runtime) {
                 Ok(_) => Ok(Value::Boolean(false)),
-                Err(e) if e.is_absent_property() => Ok(Value::Boolean(true)),
+                // Every way a dot-path can fail to REACH a value answers this question
+                // the same way: there is none. Absence is one of them; a segment whose
+                // value does not resolve, or is not a resource to walk into, are the
+                // others. Propagating those aborted the whole query over one dangling
+                // reference among the matched resources.
+                Err(e) if e.is_absent_property() || e.is_unreachable_path() => {
+                    Ok(Value::Boolean(true))
+                }
                 Err(e) => Err(e),
             },
         },
@@ -171,7 +178,7 @@ pub(super) fn eval_expression(
             for (i, segment) in segments.iter().enumerate() {
                 let resource = resolve_iri_string(current_iri.as_str(), layer, runtime)
                     .ok_or_else(|| {
-                        QueryError::evaluation(format!(
+                        QueryError::unreachable_path(format!(
                             "resource '{}' not found in layer chain or FIBER overlay",
                             current_iri
                         ))
