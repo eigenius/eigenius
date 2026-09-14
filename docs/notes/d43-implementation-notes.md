@@ -234,6 +234,8 @@ The memory drop is the same cause: the scan materialised a candidate binding per
 
 The June 2026 numbers in the table above are not a valid before-baseline for this change — re-running the June commit today gives 207ms, not 398ms, because `LayerBuilder::build` and the index layout moved substantially in between (1.83s → 0.18s on the same bench). The `16c0212` column is the honest comparison.
 
+Rewriting the fusion onto `query::rank` (eigenius#125) did not move the number either: cold 24-27ms, warm 19-21ms, net RSS delta 214.0 MiB at the branch tip, against 21-25ms / 21-26ms / 213.7 MiB at `7cefc87`. Cold-pass runs across this branch span 21.8-26.6ms, so the fusion rewrite sits inside the noise — deriving each rank from the score costs one sort per source over a `TOP`-bounded candidate list, not over the corpus.
+
 Name resolution adds a fixed per-query cost, measured at or below the run-to-run noise of this bench (branch tip 23.4ms cold against item C's 21.8ms, across three runs): short names are resolved once at type-check instead of per candidate at evaluation.
 
 ### HNSW recall + latency (M9.3)
