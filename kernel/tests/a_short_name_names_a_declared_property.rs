@@ -292,3 +292,146 @@ fn a_short_name_with_no_scope_at_all_is_a_type_error() {
         "expected property_name_unresolved, got {errs:?}"
     );
 }
+
+// ─── The FIBER binding's scope ───────────────────────────────────────
+//
+// A FIBER response never appears as a pattern subject, so the query text says nothing
+// about its class. Its vocabulary is the QueryClass's output contract — `result_class`
+// plus `result_properties` — which D90 closed and the kernel enforces against the
+// institution at the dispatch boundary. The two lists are therefore the same list: a
+// property the query may name on `?b` is a property the institution may set on it.
+//
+// The live case is `crates/eigenius-julia`'s `?bound.lower` / `?bound.upper` against
+// `qc_compute_bounds`, whose `result_class` is `intervals:BoundedBy` and which requires
+// `intervals:lower` and `intervals:upper`. That test is `#[ignore]`d behind a Julia env
+// image build, so without what follows this scope has no CI coverage at all.
+
+const INST: &str = "urn:eigenius:test:fiberscope:Institution";
+const QC: &str = "urn:eigenius:test:fiberscope:qc";
+const INPUT_CLASS: &str = "urn:ex:BoundsRequest";
+const RESULT_CLASS: &str = "urn:ex:BoundedBy";
+
+/// A chain carrying one OnDemand QueryClass whose result class declares `lower`, plus an
+/// `urn:other:` property the contract does not mention.
+fn with_a_query_class() -> Arc<Layer> {
+    let boot = eigenius_kernel::testing::bootstrap_context();
+    let mut b = LayerBuilder::new("fiberscope", Some(Arc::clone(boot.head())));
+
+    let mut property = |id: &str, short: &str| {
+        let mut p = Resource::new(iri(id));
+        p.set(iri(wk::IS_A), strings(&[wk::PROPERTY]));
+        p.set(iri(wk::DESCRIPTION), Value::String("probe property".into()));
+        p.set(iri(wk::SHORT_NAME), Value::String(short.into()));
+        p.set(
+            iri(wk::DATA_TYPE_PROP),
+            Value::String("urn:eigenius:core:float".into()),
+        );
+        b.add_resource(p).unwrap();
+    };
+    property("urn:ex:lower", "lower");
+    property("urn:ex:expr", "expr");
+    property("urn:other:witness", "witness");
+
+    let mut class = |id: &str, short: &str, requires: &[&str]| {
+        let mut c = Resource::new(iri(id));
+        c.set(iri(wk::IS_A), strings(&[wk::CLASS]));
+        c.set(iri(wk::DESCRIPTION), Value::String("probe class".into()));
+        c.set(iri(wk::SHORT_NAME), Value::String(short.into()));
+        c.set(iri(wk::REQUIRES), strings(requires));
+        b.add_resource(c).unwrap();
+    };
+    class(INPUT_CLASS, "BoundsRequest", &["urn:ex:expr"]);
+    class(RESULT_CLASS, "BoundedBy", &["urn:ex:lower"]);
+
+    let mut institution = Resource::new(iri(INST));
+    institution.set(
+        iri(wk::IS_A),
+        strings(&["urn:eigenius:institution:Institution"]),
+    );
+    institution.set(
+        iri("urn:eigenius:institution:institution_iri"),
+        Value::String(INST.into()),
+    );
+    institution.set(
+        iri("urn:eigenius:institution:institution_name"),
+        Value::String("FiberScopeProbe".into()),
+    );
+    b.add_resource(institution).unwrap();
+
+    let mut qc = Resource::new(iri(QC));
+    qc.set(iri(wk::IS_A), strings(&[wk::QUERY_CLASS_CLASS]));
+    qc.set(iri(wk::QUERY_CLASS), Value::String(INPUT_CLASS.into()));
+    qc.set(iri(wk::RESULT_CLASS), Value::String(RESULT_CLASS.into()));
+    qc.set(iri(wk::DISPATCH_ROLE), strings(&[wk::DISPATCH_ON_DEMAND]));
+    qc.set(
+        iri(wk::QUERY_HANDLER),
+        Value::String("urn:eigenius:test:fiberscope:proc".into()),
+    );
+    qc.set(
+        iri("urn:eigenius:institution:institution_ref"),
+        Value::String(INST.into()),
+    );
+    qc.set(iri(wk::SHORT_NAME), Value::String("qc".into()));
+    b.add_resource(qc).unwrap();
+
+    Arc::new(b.build(LayerStorage::in_memory()))
+}
+
+/// Type-check alone — the dispatch would need a live institution runtime, and resolution
+/// is decided before any of that.
+fn type_errors(layer: &Arc<Layer>, q: &str) -> Vec<QueryError> {
+    let tokens = eigenius_kernel::query::lexer::tokenize(q).expect("lexes");
+    let mut program = eigenius_kernel::query::parser::parse(tokens).expect("parses");
+    eigenius_kernel::query::type_check::type_check(&mut program, layer)
+}
+
+fn fiber_query(projection: &str) -> String {
+    format!(
+        r#"
+USING INSTITUTION "{INST}" AS cap
+FIBER cap:"{QC}" {{ "urn:ex:expr": "x" }} AS ?b
+RETURN [] {{ v: {projection} }}
+"#
+    )
+}
+
+/// **The QueryClass's `result_class` is the binding's scope.** Nothing else in the query
+/// says what `?b` is.
+///
+/// A guard against over-restriction, not a catch: it asserts an error's ABSENCE, and no
+/// such error existed before the rule, so it passes either way. The two below it are the
+/// discriminating pair — every other test in this file fails against the unfixed code.
+#[test]
+fn a_fiber_binding_resolves_against_the_declared_result_class() {
+    let layer = with_a_query_class();
+    let errs = type_errors(&layer, &fiber_query("?b.lower"));
+    assert!(
+        !errs.iter().any(|e| e.rule == "property_name_unresolved"),
+        "`lower` is required by the result class, so it is in scope: {errs:?}"
+    );
+}
+
+/// A name the output contract does not carry is refused. Without the contract as a scope
+/// this could only be answered at evaluation, by whether the institution happened to
+/// return something ending in `witness`.
+#[test]
+fn a_name_outside_the_output_contract_is_refused() {
+    let layer = with_a_query_class();
+    let errs = type_errors(&layer, &fiber_query("?b.witness"));
+    assert!(
+        errs.iter().any(|e| e.rule == "property_name_unresolved"),
+        "`witness` is declared by neither the result class nor an import: {errs:?}"
+    );
+}
+
+/// The escape hatch reaches it anyway, which is what keeps the rule above from being a
+/// restriction on what a query can ask.
+#[test]
+fn a_full_iri_reaches_past_the_output_contract() {
+    let layer = with_a_query_class();
+    let errs = type_errors(&layer, &fiber_query(r#"?b."urn:other:witness""#));
+    assert!(
+        !errs.iter().any(|e| e.rule == "property_name_unresolved"),
+        "a full IRI needs no scope: {errs:?}"
+    );
+}
