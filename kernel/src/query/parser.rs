@@ -836,13 +836,27 @@ impl Parser {
         match self.peek() {
             TokenKind::Not => {
                 self.advance();
-                // NOT EXISTS(?var)
+                // `NOT EXISTS(?var)` or `NOT EXISTS(?var.prop…)`. A dot-path is the
+                // useful form: it asks whether the resource carries the property.
                 if self.at(&TokenKind::Exists) {
                     self.advance();
                     self.expect(&TokenKind::LParen)?;
                     let var = self.parse_variable()?;
+                    let operand = if self.at(&TokenKind::Dot) {
+                        let mut segments = Vec::new();
+                        while self.at(&TokenKind::Dot) {
+                            self.advance();
+                            segments.push(self.parse_identifier()?);
+                        }
+                        Expression::DotPath {
+                            root: var,
+                            segments,
+                        }
+                    } else {
+                        Expression::Variable(var)
+                    };
                     self.expect(&TokenKind::RParen)?;
-                    return Ok(Expression::NotExists(var));
+                    return Ok(Expression::NotExists(Box::new(operand)));
                 }
                 let operand = self.parse_unary_expr()?;
                 Ok(Expression::Unary {

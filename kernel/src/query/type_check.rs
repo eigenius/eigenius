@@ -382,17 +382,24 @@ fn check_expression_variables(
         Expression::VerdictPredicate { operand, .. } => {
             check_expression_variables(operand, bound, errors);
         }
-        Expression::NotExists(var) => {
-            if !bound.contains(&var.name) {
-                errors.push(QueryError::type_check(
-                    "not_exists_unbound",
-                    format!(
-                        "NOT EXISTS variable '?{}' is not bound in any MATCH pattern",
-                        var.name
-                    ),
-                ));
+        // The root variable must be bound either way — `NOT EXISTS(?n.title)` asks about a
+        // property of the resource `?n` names, so `?n` itself has to come from somewhere.
+        // The bare-variable form keeps its own rule, because "NOT EXISTS variable ?x is not
+        // bound" says more than the generic unbound-variable message would.
+        Expression::NotExists(operand) => match operand.as_ref() {
+            Expression::Variable(var) => {
+                if !bound.contains(&var.name) {
+                    errors.push(QueryError::type_check(
+                        "not_exists_unbound",
+                        format!(
+                            "NOT EXISTS variable '?{}' is not bound in any MATCH pattern",
+                            var.name
+                        ),
+                    ));
+                }
             }
-        }
+            other => check_expression_variables(other, bound, errors),
+        },
         Expression::FunctionCall { args, .. } => {
             for arg in args {
                 check_expression_variables(arg, bound, errors);

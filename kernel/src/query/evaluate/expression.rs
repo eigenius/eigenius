@@ -98,7 +98,25 @@ pub(super) fn eval_expression(
             let v = eval_expression(operand, binding, layer, runtime)?;
             eval_verdict_predicate(*kind, &v, layer, runtime)
         }
-        Expression::NotExists(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
+        // `NOT EXISTS(e)` — does `e` have a value?
+        //
+        // Over a DOT-PATH this is the absence test nothing else provides: `NOT (?n.title
+        // == "x")` is also true when the title is "y", so there was no way to ask for the
+        // resources that carry no title at all. Absence is exactly what
+        // `is_absent_property` reports, so the machinery is already here.
+        //
+        // Over a bare VARIABLE it keeps its old meaning, is-this-bound, which under a
+        // strictly conjunctive `MATCH` is always true — the form was dead and returned
+        // false for every row (eigenius#124). It stays for the FIBER case, where a
+        // variable can genuinely be unbound.
+        Expression::NotExists(operand) => match operand.as_ref() {
+            Expression::Variable(var) => Ok(Value::Boolean(!binding.contains_key(&var.name))),
+            other => match eval_expression(other, binding, layer, runtime) {
+                Ok(_) => Ok(Value::Boolean(false)),
+                Err(e) if e.is_absent_property() => Ok(Value::Boolean(true)),
+                Err(e) => Err(e),
+            },
+        },
         Expression::FunctionCall { name, args } => {
             let arg_vals: Result<Vec<Value>, QueryError> = args
                 .iter()

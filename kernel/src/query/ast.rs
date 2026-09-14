@@ -282,7 +282,14 @@ pub enum Expression {
         kind: VerdictPredicate,
         operand: Box<Expression>,
     },
-    NotExists(Variable),
+    /// `NOT EXISTS(e)` — true when `e` has no value.
+    ///
+    /// Held as an expression, not a bare `Variable`, so it reaches a dot-path:
+    /// `NOT EXISTS(?n.title)` asks whether the resource carries the property, which is the
+    /// question this was always meant to answer. Over a bare variable it asks whether the
+    /// variable is bound, which under a strictly conjunctive `MATCH` is always true — so
+    /// that form matched nothing and was dead (eigenius#124).
+    NotExists(Box<Expression>),
     FunctionCall {
         name: String,
         args: Vec<Expression>,
