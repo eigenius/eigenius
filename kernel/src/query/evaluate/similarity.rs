@@ -26,7 +26,7 @@
 
 use crate::layer::{
     resolve_active_text_indexes, resolve_active_vector_indexes, ActiveTextIndex, ActiveVectorIndex,
-    Layer,
+    Layer, LayerId,
 };
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
@@ -494,26 +494,77 @@ fn build_probe(
     })
 }
 
-/// Reciprocal Rank Fusion across an arbitrary set of ranked sources
-/// (D43 §3.5 / §6.4). Each source contributes `1 / (k + rank_i)` to
-/// every subject it ranked; subjects not in a given source receive
-/// no contribution from it. Result is keyed by subject IRI and
-/// sorted-by-key is determined by `BTreeMap`'s ordering — actual
-/// ranking is consumed by callers via `BTreeMap::iter()` plus sort.
+/// Reciprocal Rank Fusion across the ranked sources (D43 §3.5 / §6.4). Each source
+/// contributes `1 / (k + rank)` to every subject it ranked; a subject a source did not
+/// rank contributes nothing from it.
+///
+/// **It calls `query::rank`, which is the point.** That module is the tested
+/// implementation of §6.4 — 1-indexed ranks, deterministic tie-breaking, and an explicit
+/// missing-rank representation — and nothing called it while this function reimplemented
+/// the same formula (eigenius#125). Two implementations of one specification drift.
+///
+/// **Ranks come from the scores, not from each probe's return order, and that settles a
+/// disagreement.** The two probes tie-break in OPPOSITE directions: the text probe sorts
+/// score descending then `defining_layer` ascending then subject ascending, while the
+/// vector probe's `BinaryHeap<Reverse<HeapEntry>>::into_sorted_vec()` yields the whole
+/// tuple descending — layer and subject included. Nothing documented the difference and
+/// there is no reason for two sources feeding one fusion to order ties opposite ways.
+/// Keying `assign_ranks_desc` on `(LayerId, Iri)` gives both the text probe's order.
+///
+/// The `&[Option<usize>]` shape is also what D43 §3.6.4 describes — each `~` operator
+/// contributes a ranked source, fused by one mechanism — and what a `weights:` hint
+/// (§3.4, reserved) would extend. A fixed pair of lists has to be rewritten for that; a
+/// slice of per-source ranks gains an element.
 fn fuse_rrf(
     text_hits: &[TextScoredHit],
     vector_hits: &[VectorScoredHit],
     k: usize,
 ) -> BTreeMap<Iri, f64> {
+    // Keyed by `(defining_layer, subject)` so ties break on the layer first, then the
+    // IRI. `is_shadowed` drops a subject's hits from every layer but the one defining it,
+    // so the key is unique within a source.
+    let rank_by_subject = |scored: Vec<((LayerId, Iri), f64)>| -> BTreeMap<Iri, usize> {
+        crate::query::rank::assign_ranks_desc(&scored)
+            .into_iter()
+            .map(|((_layer, subject), rank)| (subject, rank))
+            .collect()
+    };
+    let text_ranks = rank_by_subject(
+        text_hits
+            .iter()
+            .map(|h| {
+                (
+                    (h.defining_layer.clone(), h.subject.clone()),
+                    h.score as f64,
+                )
+            })
+            .collect(),
+    );
+    let vector_ranks = rank_by_subject(
+        vector_hits
+            .iter()
+            .map(|h| {
+                (
+                    (h.defining_layer.clone(), h.subject.clone()),
+                    h.similarity as f64,
+                )
+            })
+            .collect(),
+    );
+
     let mut scores: BTreeMap<Iri, f64> = BTreeMap::new();
-    let k_f = k as f64;
-    for (rank, hit) in text_hits.iter().enumerate() {
-        let contrib = 1.0 / (k_f + (rank as f64 + 1.0));
-        *scores.entry(hit.subject.clone()).or_insert(0.0) += contrib;
-    }
-    for (rank, hit) in vector_hits.iter().enumerate() {
-        let contrib = 1.0 / (k_f + (rank as f64 + 1.0));
-        *scores.entry(hit.subject.clone()).or_insert(0.0) += contrib;
+    for subject in text_ranks.keys().chain(vector_ranks.keys()) {
+        if scores.contains_key(subject) {
+            continue;
+        }
+        let per_source = [
+            text_ranks.get(subject).copied(),
+            vector_ranks.get(subject).copied(),
+        ];
+        scores.insert(
+            subject.clone(),
+            crate::query::rank::rrf_score(&per_source, k as u32),
+        );
     }
     scores
 }
@@ -564,6 +615,75 @@ mod tests {
         assert!((c - 1.0 / 62.0).abs() < 1e-9);
         // b appears in both → highest fused score.
         assert!(b > a && b > c);
+    }
+
+    /// **A tie fuses the same way whichever order a probe emitted it in.**
+    ///
+    /// Rank came from each hit's POSITION in its probe's returned slice, so the fused
+    /// score of a tied pair was a property of how the probe happened to emit it — and the
+    /// two probes emit ties in opposite directions, text ascending by `defining_layer`
+    /// then subject, vector descending by both because its heap yields the whole tuple
+    /// reversed. Ranks are derived from the scores now, under one key, so emission order
+    /// does not reach the result.
+    ///
+    /// The tie is still broken, not collapsed: `urn:ex:a` sorts before `urn:ex:b` in both
+    /// sources, so it takes rank 1 in both. Under the old path the two probes disagreed
+    /// and the scores cancelled to equal — which looks fairer and was an accident of the
+    /// disagreement, not a decision.
+    #[test]
+    fn a_tie_fuses_independently_of_the_order_a_probe_emitted_it() {
+        let layer = crate::layer::LayerId([0; 32]);
+        let text = |first: &str, second: &str| {
+            vec![
+                TextScoredHit {
+                    subject: iri(first),
+                    score: 1.0,
+                    defining_layer: layer.clone(),
+                },
+                TextScoredHit {
+                    subject: iri(second),
+                    score: 1.0,
+                    defining_layer: layer.clone(),
+                },
+            ]
+        };
+        let vector = |first: &str, second: &str| {
+            vec![
+                VectorScoredHit {
+                    subject: iri(first),
+                    similarity: 1.0,
+                    defining_layer: layer.clone(),
+                },
+                VectorScoredHit {
+                    subject: iri(second),
+                    similarity: 1.0,
+                    defining_layer: layer.clone(),
+                },
+            ]
+        };
+
+        // The probes' actual directions: text ascending, vector descending.
+        let as_emitted = fuse_rrf(
+            &text("urn:ex:a", "urn:ex:b"),
+            &vector("urn:ex:b", "urn:ex:a"),
+            60,
+        );
+        // Both flipped.
+        let flipped = fuse_rrf(
+            &text("urn:ex:b", "urn:ex:a"),
+            &vector("urn:ex:a", "urn:ex:b"),
+            60,
+        );
+        assert_eq!(
+            as_emitted, flipped,
+            "emission order must not reach the fused score"
+        );
+
+        // One key orders the tie, so `a` is rank 1 in both sources and `b` rank 2.
+        let a = *as_emitted.get(&iri("urn:ex:a")).unwrap();
+        let b = *as_emitted.get(&iri("urn:ex:b")).unwrap();
+        assert!((a - 2.0 / 61.0).abs() < 1e-12, "a is rank 1 in both: {a}");
+        assert!((b - 2.0 / 62.0).abs() < 1e-12, "b is rank 2 in both: {b}");
     }
 
     #[test]
