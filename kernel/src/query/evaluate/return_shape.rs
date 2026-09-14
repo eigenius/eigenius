@@ -58,7 +58,7 @@ pub(super) fn shape_result(
         }
     }
 
-    for item in items {
+    for (position, item) in items.iter().enumerate() {
         let prop_iri = match &item.name {
             Name::FullIri(iri) => iri.clone(),
             Name::ShortName(s) => fp.row_property_iri(s),
@@ -66,15 +66,32 @@ pub(super) fn shape_result(
 
         // Handle aggregate expressions specially
         let value = match &item.expression {
-            Expression::Aggregate { op, .. } => {
-                let agg_key = format!("AGG#{op:?}");
-                binding.get(&agg_key).cloned().unwrap_or(Value::Integer(0))
-            }
-            _ => eval_expression(&item.expression, binding, layer, runtime)
-                .map_err(|e| QueryError::evaluation(format!("in RETURN: {e}")))?,
+            Expression::Aggregate { .. } => Some(
+                binding
+                    .get(&super::expression::aggregate_key(position))
+                    .cloned()
+                    .unwrap_or(Value::Integer(0)),
+            ),
+            _ => match eval_expression(&item.expression, binding, layer, runtime) {
+                Ok(v) => Some(v),
+                // **Absence omits the column; it does not kill the query.** Re-wrapping
+                // every error as an evaluation fault erased the distinction, so
+                // `WHERE ?w.size > 0` silently dropped a row lacking `size` while
+                // `RETURN { s: ?w.size }` failed the whole query over the same resource —
+                // opposite answers to the same absence, on the heterogeneous chain that
+                // produces it constantly.
+                //
+                // Omitting is expressible where a null literal is not: a row resource
+                // simply does not carry that property, which is what open-world carrying
+                // already means. Every other failure still fails the query.
+                Err(e) if e.is_absent_property() => None,
+                Err(e) => return Err(QueryError::evaluation(format!("in RETURN: {e}"))),
+            },
         };
 
-        resource.set(prop_iri, value);
+        if let Some(value) = value {
+            resource.set(prop_iri, value);
+        }
     }
 
     Ok(resource)
@@ -106,15 +123,26 @@ pub(super) fn deduplicate(resources: Vec<Resource>) -> Vec<Resource> {
 }
 
 /// Sort results by ORDER BY expressions.
+///
+/// Sorting happens over the SHAPED resources, so an `ORDER BY` expression can only be
+/// read if the `RETURN` list projected it as a column. Matching the expression against
+/// that list is what makes `ORDER BY COUNT(?d) DESC` work: the count lives under whatever
+/// name the `RETURN` item gave it, not under anything derivable from the expression.
+///
+/// It previously matched only a bare `Expression::Variable` and returned `None` for
+/// everything else, so both operands were `None`, the comparison was skipped, and the
+/// order was left untouched — D2 §8.8's own worked example returned an unordered result
+/// with no error.
 pub(super) fn sort_results(
     resources: &mut [Resource],
     order_by: &[OrderItem],
+    items: &[ReturnItem],
     fp: &QueryFingerprint,
 ) {
     resources.sort_by(|a, b| {
         for item in order_by {
-            let val_a = extract_sort_value(a, &item.expression, fp);
-            let val_b = extract_sort_value(b, &item.expression, fp);
+            let val_a = extract_sort_value(a, &item.expression, items, fp);
+            let val_b = extract_sort_value(b, &item.expression, items, fp);
 
             if let (Some(va), Some(vb)) = (&val_a, &val_b) {
                 if let Some(ord) = values_compare(va, vb) {
@@ -135,13 +163,22 @@ pub(super) fn sort_results(
 fn extract_sort_value(
     resource: &Resource,
     expr: &Expression,
+    items: &[ReturnItem],
     fp: &QueryFingerprint,
 ) -> Option<Value> {
-    match expr {
-        Expression::Variable(var) => {
-            let iri = fp.row_property_iri(&var.name);
-            resource.get(&iri).cloned()
-        }
-        _ => None,
-    }
+    // The column the RETURN list projected this expression as. Sorting happens over the
+    // SHAPED resources, so a projected column is the only thing there is to sort on —
+    // which is why type-check requires ORDER BY to name one.
+    //
+    // There was a fallback here reading `fp.row_property_iri(var.name)` for a bare
+    // variable "the RETURN list did not name explicitly". It was dead where its comment
+    // claimed — with no RETURN clause the columns are keyed `urn:query:var:{k}`, never
+    // `{fingerprint}:row:{k}` — and actively wrong where it did fire: `RETURN { s: 100 -
+    // ?wt } ORDER BY ?s` sorted by the column NAMED `s` rather than by `?s`.
+    let item = items.iter().find(|i| i.expression == *expr)?;
+    let prop_iri = match &item.name {
+        Name::FullIri(iri) => iri.clone(),
+        Name::ShortName(s) => fp.row_property_iri(s),
+    };
+    resource.get(&prop_iri).cloned()
 }

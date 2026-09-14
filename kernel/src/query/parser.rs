@@ -1222,6 +1222,27 @@ impl Parser {
     }
 
     fn parse_value_or_variable(&mut self) -> Result<ValueOrVariable, QueryError> {
+        // A negative literal reaches here as two tokens since the lexer stopped folding
+        // the sign (eigenius#172). Without this arm a brace pattern could no longer match
+        // one — `{ "urn:ex:size": -1 }` became a parse error, which is the grammar
+        // rejecting input that should be expressible rather than the input being wrong.
+        if matches!(self.peek(), TokenKind::Minus) {
+            self.advance();
+            return match self.peek().clone() {
+                TokenKind::NumberInt(n) => {
+                    self.advance();
+                    Ok(ValueOrVariable::Literal(Literal::Integer(-n)))
+                }
+                TokenKind::NumberFloat(f) => {
+                    self.advance();
+                    Ok(ValueOrVariable::Literal(Literal::Float(-f)))
+                }
+                other => Err(QueryError::parser(
+                    self.position(),
+                    format!("expected a number after '-', got {other:?}"),
+                )),
+            };
+        }
         match self.peek().clone() {
             TokenKind::LBracket => Ok(ValueOrVariable::Array(self.parse_array_pattern()?)),
             TokenKind::Variable(_) => {
@@ -1278,6 +1299,26 @@ impl Parser {
     }
 
     fn parse_usize(&mut self) -> Result<usize, QueryError> {
+        // The lexer no longer folds a sign into a literal (eigenius#172), so a negative
+        // count arrives as `Minus` then the number. Consume it here to keep rejecting it
+        // with "expected non-negative integer" rather than with a token complaint that
+        // says nothing about what is wrong.
+        if matches!(self.peek(), TokenKind::Minus) {
+            self.advance();
+            return match self.peek() {
+                TokenKind::NumberInt(_) | TokenKind::NumberFloat(_) => {
+                    self.advance();
+                    Err(QueryError::parser(
+                        self.position(),
+                        "expected non-negative integer",
+                    ))
+                }
+                other => Err(QueryError::parser(
+                    self.position(),
+                    format!("expected integer, got {other:?}"),
+                )),
+            };
+        }
         match self.peek() {
             TokenKind::NumberInt(n) => {
                 let n = *n;

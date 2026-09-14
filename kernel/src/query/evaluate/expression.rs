@@ -43,11 +43,54 @@ pub(super) fn eval_expression(
             .cloned()
             .ok_or_else(|| QueryError::evaluation(format!("unbound variable: ?{}", var.name))),
         Expression::Binary { op, left, right } => {
-            let l = eval_expression(left, binding, layer, runtime)?;
-            let r = eval_expression(right, binding, layer, runtime)?;
-            eval_binary(*op, &l, &r)
+            // **Absence resolves HERE, not at the condition root.** A test over a property
+            // the resource does not carry is NOT SATISFIED — false — and everything above
+            // it composes normally.
+            //
+            // It used to propagate as an error all the way out, where the root turned it
+            // into "drop the row". That is the same answer only for a bare comparison:
+            // `?w.size > 0 OR ?wt > 0` dropped a row that satisfies the right disjunct,
+            // and `NOT (?w.size > 100)` excluded a row that should survive, because one
+            // absent operand aborted the whole tree.
+            //
+            // Two shapes, and the difference matters. A COMPARISON with an absent operand
+            // is false as a whole — `absent > 0` is not satisfied, and substituting a
+            // boolean for the operand would just be a type error. A CONNECTIVE takes the
+            // absent OPERAND as false and combines: making the whole `OR` false would be
+            // the same bug one level down.
+            //
+            // Arithmetic and concatenation propagate instead: an absent operand has no
+            // value there, and `?w.size + 1 > 2` still gets the right answer, because the
+            // absence reaches the comparison above and lands as false there.
+            match op {
+                BinaryOp::And | BinaryOp::Or => {
+                    let l = eval_operand_absent_as_false(left, binding, layer, runtime)?;
+                    let r = eval_operand_absent_as_false(right, binding, layer, runtime)?;
+                    eval_binary(*op, &l, &r)
+                }
+                op if is_test(*op) => {
+                    let l = match eval_expression(left, binding, layer, runtime) {
+                        Ok(v) => v,
+                        Err(e) if e.is_absent_property() => return Ok(Value::Boolean(false)),
+                        Err(e) => return Err(e),
+                    };
+                    let r = match eval_expression(right, binding, layer, runtime) {
+                        Ok(v) => v,
+                        Err(e) if e.is_absent_property() => return Ok(Value::Boolean(false)),
+                        Err(e) => return Err(e),
+                    };
+                    eval_binary(*op, &l, &r)
+                }
+                _ => {
+                    let l = eval_expression(left, binding, layer, runtime)?;
+                    let r = eval_expression(right, binding, layer, runtime)?;
+                    eval_binary(*op, &l, &r)
+                }
+            }
         }
         Expression::Unary { op, operand } => {
+            // `NOT` needs no absence case of its own: its operand is a test, which already
+            // resolved to false above, so this is `NOT false` and the row survives.
             let v = eval_expression(operand, binding, layer, runtime)?;
             eval_unary(*op, &v)
         }
@@ -115,15 +158,18 @@ pub(super) fn eval_expression(
                             current_iri
                         ))
                     })?;
+                // Both of these are the RESOURCE not carrying the property, which is
+                // data absence rather than a fault: a condition over it is not satisfied.
+                // Every other failure in this function is the query being wrong.
                 let prop_iri = find_property_by_shortname(segment, resource.properties())
                     .ok_or_else(|| {
-                        QueryError::evaluation(format!(
+                        QueryError::absent_property(format!(
                             "property '{}' not found on resource '{}'",
                             segment, current_iri
                         ))
                     })?;
                 let value = resource.get(&prop_iri).ok_or_else(|| {
-                    QueryError::evaluation(format!(
+                    QueryError::absent_property(format!(
                         "property '{}' has no value on resource '{}'",
                         segment, current_iri
                     ))
@@ -501,6 +547,51 @@ fn try_dispatch_decidable(
 }
 
 /// Apply GROUP BY and aggregation.
+/// The binding key one aggregate column's value is held under.
+///
+/// Position in the `RETURN` list, so two aggregates of the same operator over different
+/// arguments are different columns. One spelling, because the writer and the reader live
+/// in different modules and a second copy is how they drift apart.
+pub(super) fn aggregate_key(position: usize) -> String {
+    format!("AGG#{position}")
+}
+
+/// Does this operator TEST a value, so an absent operand makes the test unsatisfied?
+///
+/// Comparison, membership and pattern matching. The connectives are handled separately —
+/// they take an absent operand as false and combine, rather than being false as a whole.
+/// Arithmetic and concatenation are excluded deliberately: an absent operand has no value
+/// there, so the absence keeps propagating until it reaches a test that can answer false.
+fn is_test(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Eq
+            | BinaryOp::Neq
+            | BinaryOp::Lt
+            | BinaryOp::Lte
+            | BinaryOp::Gt
+            | BinaryOp::Gte
+            | BinaryOp::In
+            | BinaryOp::NotIn
+            | BinaryOp::Like
+            | BinaryOp::NotLike
+    )
+}
+
+/// One operand of a connective, with an absent property reading as false.
+fn eval_operand_absent_as_false(
+    expr: &Expression,
+    binding: &Binding,
+    layer: &Layer,
+    runtime: FiberRuntime<'_>,
+) -> Result<Value, QueryError> {
+    match eval_expression(expr, binding, layer, runtime) {
+        Ok(v) => Ok(v),
+        Err(e) if e.is_absent_property() => Ok(Value::Boolean(false)),
+        Err(e) => Err(e),
+    }
+}
+
 pub(super) fn apply_group_by(
     group_by: &[Expression],
     result: &[ReturnItem],
@@ -512,14 +603,22 @@ pub(super) fn apply_group_by(
     let mut groups: BTreeMap<Vec<String>, Vec<&Binding>> = BTreeMap::new();
 
     for binding in bindings {
-        let key: Vec<String> = group_by
-            .iter()
-            .map(|expr| {
-                eval_expression(expr, binding, layer, runtime)
-                    .map(|v| format!("{v:?}"))
-                    .unwrap_or_default()
-            })
-            .collect();
+        // **The same swallow `WHERE` had** (eigenius#126), and it collapsed every row into
+        // one group: `unwrap_or_default` gave every failure the empty string, so grouping
+        // by something that cannot be evaluated grouped everything together and reported a
+        // single count with no diagnostic.
+        //
+        // Absence keeps the empty key deliberately — a row whose group-by property is
+        // absent belongs with the other rows that lack it, which is one group of "no
+        // value", not a fault. Every other failure is the query being wrong.
+        let mut key: Vec<String> = Vec::with_capacity(group_by.len());
+        for expr in group_by {
+            match eval_expression(expr, binding, layer, runtime) {
+                Ok(v) => key.push(format!("{v:?}")),
+                Err(e) if e.is_absent_property() => key.push(String::new()),
+                Err(e) => return Err(e),
+            }
+        }
         groups.entry(key).or_default().push(binding);
     }
 
@@ -527,12 +626,16 @@ pub(super) fn apply_group_by(
     for group in groups.values() {
         let mut binding = group[0].clone(); // Start with first binding for non-aggregate values
 
-        // Compute aggregates
-        for item in result {
-            if let Some((agg_name, agg_val)) =
-                eval_aggregate(&item.expression, group, layer, runtime)?
-            {
-                binding.insert(agg_name, agg_val);
+        // Compute aggregates, keyed by the RETURN item's POSITION.
+        //
+        // The key was the operator alone, so `RETURN SUM(?a), SUM(?b)` wrote both sums
+        // to `AGG#Sum` and the second won for both reads — two columns, one number, no
+        // diagnostic (eigenius#123). Position is exact rather than a hash of the
+        // expression's structure, and it cannot collide: `shape_result` walks this same
+        // `result` slice, in this same order, and reads item `i` back at key `i`.
+        for (i, item) in result.iter().enumerate() {
+            if let Some(agg_val) = eval_aggregate(&item.expression, group, layer, runtime)? {
+                binding.insert(aggregate_key(i), agg_val);
             }
         }
 
@@ -548,7 +651,7 @@ fn eval_aggregate(
     group: &[&Binding],
     layer: &Layer,
     runtime: FiberRuntime<'_>,
-) -> Result<Option<(String, Value)>, QueryError> {
+) -> Result<Option<Value>, QueryError> {
     if let Expression::Aggregate { op, arg } = expr {
         let values: Vec<Value> = group
             .iter()
@@ -585,9 +688,7 @@ fn eval_aggregate(
                 .unwrap_or(Value::Integer(0)),
         };
 
-        // Use a synthetic name for the aggregate in the binding
-        let name = format!("AGG#{op:?}");
-        Ok(Some((name, result)))
+        Ok(Some(result))
     } else {
         Ok(None)
     }

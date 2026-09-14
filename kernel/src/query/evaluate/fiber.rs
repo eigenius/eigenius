@@ -144,17 +144,7 @@ pub(super) fn evaluate_match_part(
     if !part.conditions.is_empty() {
         // DEFINE bodies have no FIBER access; the institution
         // surface is unavailable here.
-        bindings.retain(|b| {
-            part.conditions.iter().all(|cond| {
-                eval_expression(cond, b, layer, FiberRuntime::default())
-                    .and_then(|v| {
-                        v.as_boolean().ok_or_else(|| {
-                            QueryError::evaluation("WHERE condition must be boolean")
-                        })
-                    })
-                    .unwrap_or(false)
-            })
-        });
+        bindings = retain_satisfying(bindings, &part.conditions, layer, FiberRuntime::default())?;
     }
 
     Ok(bindings)
@@ -235,17 +225,7 @@ pub(super) fn evaluate_match_part_with_fiber(
             overlay: Some(&overlay.entries),
             ..runtime
         };
-        bindings.retain(|b| {
-            part.conditions.iter().all(|cond| {
-                eval_expression(cond, b, layer, where_runtime)
-                    .and_then(|v| {
-                        v.as_boolean().ok_or_else(|| {
-                            QueryError::evaluation("WHERE condition must be boolean")
-                        })
-                    })
-                    .unwrap_or(false)
-            })
-        });
+        bindings = retain_satisfying(bindings, &part.conditions, layer, where_runtime)?;
     }
 
     Ok(bindings)
@@ -859,6 +839,59 @@ fn build_param_iri_table(layer: &Layer, class_iri: &Iri) -> BTreeMap<String, Iri
     collect(&requires_prop);
     collect(&recommends_prop);
     out
+}
+
+/// Evaluate one `WHERE` condition against one binding.
+///
+/// Three outcomes, and separating them is eigenius#126. `Ok(true)` keeps the row,
+/// `Ok(false)` drops it, and `Err` fails the QUERY — because the alternative, which is
+/// what this did, is that a query naming a property that does not exist, or comparing
+/// values of different kinds, or writing a condition that is not boolean, returns an
+/// empty result set indistinguishable from "nothing matched".
+///
+/// Only data absence maps to `Ok(false)`: the resource does not carry the property, so
+/// the condition is not satisfied. That is the case a heterogeneous chain produces
+/// legitimately and often, which is why it cannot be an error.
+fn eval_condition(
+    cond: &Expression,
+    binding: &Binding,
+    layer: &Layer,
+    runtime: FiberRuntime<'_>,
+) -> Result<bool, QueryError> {
+    match eval_expression(cond, binding, layer, runtime) {
+        Ok(v) => v
+            .as_boolean()
+            .ok_or_else(|| QueryError::evaluation("WHERE condition must be boolean")),
+        Err(e) if e.is_absent_property() => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Keep the bindings that satisfy every condition, failing the query on the first fault.
+///
+/// `Vec::retain` cannot do this: its predicate returns `bool`, so an error inside it has
+/// nowhere to go and the only options are to swallow it or to panic. That is why the two
+/// call sites this replaces both ended in `unwrap_or(false)`.
+fn retain_satisfying(
+    bindings: Vec<Binding>,
+    conditions: &[Expression],
+    layer: &Layer,
+    runtime: FiberRuntime<'_>,
+) -> Result<Vec<Binding>, QueryError> {
+    let mut kept = Vec::with_capacity(bindings.len());
+    for b in bindings {
+        let mut all = true;
+        for cond in conditions {
+            if !eval_condition(cond, &b, layer, runtime)? {
+                all = false;
+                break;
+            }
+        }
+        if all {
+            kept.push(b);
+        }
+    }
+    Ok(kept)
 }
 
 #[cfg(test)]

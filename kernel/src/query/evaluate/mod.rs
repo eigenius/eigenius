@@ -245,7 +245,12 @@ pub fn evaluate(
 
     // 6. ORDER BY
     if !program.query.order_by.is_empty() {
-        sort_results(&mut results, &program.query.order_by, fp);
+        sort_results(
+            &mut results,
+            &program.query.order_by,
+            &program.query.result,
+            fp,
+        );
     }
 
     // 7. OFFSET

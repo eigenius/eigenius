@@ -42,6 +42,15 @@ pub struct QueryError {
     pub message: String,
 }
 
+/// The `rule` an absent-property evaluation error carries.
+///
+/// One spelling, so nothing re-types the string and drifts. `rule` is already the
+/// discriminant this error type carries — the validation side uses a proper enum for the
+/// same job, and converting this one is a hundred-call-site refactor that does not belong
+/// in a correctness fix; `QueryError::is_absent_property` is what callers should ask
+/// rather than comparing the string themselves.
+pub const RULE_ABSENT_PROPERTY: &str = "absent_property";
+
 impl QueryError {
     pub fn lexer(pos: Position, message: impl Into<String>) -> Self {
         Self {
@@ -77,6 +86,29 @@ impl QueryError {
             rule: "stratification".to_string(),
             message: message.into(),
         }
+    }
+
+    /// The resource does not carry the property the expression named.
+    ///
+    /// **Data absence, not a fault.** A `WHERE` condition over a property this resource
+    /// has no value for is simply not satisfied, and the row drops — which is what the
+    /// evaluator always did. What it also did was drop the row for every OTHER failure:
+    /// an unbound variable, a value that is not an IRI, a condition that is not boolean.
+    /// Those are the query being wrong, and a wrong query returning an empty result set
+    /// with no diagnostic is the defect (eigenius#126). Separating them is what lets the
+    /// first stay silent and the second be reported.
+    pub fn absent_property(message: impl Into<String>) -> Self {
+        Self {
+            position: None,
+            phase: ErrorPhase::Evaluation,
+            rule: RULE_ABSENT_PROPERTY.to_string(),
+            message: message.into(),
+        }
+    }
+
+    /// Whether this is data absence rather than a fault. See [`Self::absent_property`].
+    pub fn is_absent_property(&self) -> bool {
+        self.rule == RULE_ABSENT_PROPERTY
     }
 
     pub fn evaluation(message: impl Into<String>) -> Self {
