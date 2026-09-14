@@ -9,11 +9,62 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **ACTIVE: entry −4a (`2026-09-13`). The institution result contract (#226).** On
-> `d90-institution-result-contract`. D90, implemented.
+> **ACTIVE: entry −4b (`2026-09-13`). Query processing, items A–C plus the name rule.** On
+> `query-optionality-and-probes`, five commits, pushed. Workspace suite green, clippy and fmt clean.
 >
-> **Exit gate: the merge request lands and #226 closes.** Code complete, workspace suite green,
-> clippy clean, reseed paid off.
+> **Exit gate: the merge request lands.** Item A merged separately as `1a7f2b3` (#247), closing
+> #126, #123 and #172.
+>
+> **B — `NOT EXISTS` asks whether a property has a value (#124, #33).** There was no way to ask for
+> the resources that LACK a property. `NOT EXISTS` tested whether a VARIABLE was bound, which a
+> conjunctive `MATCH` always satisfies, so it matched nothing. It holds an expression now and
+> reaches a dot-path.
+>
+> **C — similarity narrows candidates only where it constrains every row (#125, #62's substance).**
+> The pre-pass computes one probe per `~` node and enumeration seeded from it, asking by VARIABLE
+> NAME — a name that does not say where in the condition tree the operator sits. A `~` under `OR`,
+> under `NOT`, or in `RETURN` / `ORDER BY` constrains no row, and seeding from those returned fewer
+> rows than the query asked for. The seed descends only through `And` now. Both probes are bounded,
+> after scoring rather than before, with different bounds: an unranked text filter must not be
+> capped at a pool size, and vector search computes `k*4` so `usize::MAX` overflows it.
+>
+> **Measured, and it is the only performance number in the set.** Same machine, same GO dump, both
+> commits the same day: cold BM25 207ms → 23ms (~9×), warm 193ms → 23ms, net RSS delta 367 → 214
+> MiB. Load phases unchanged to within 0.01s. D43's June envelope diagnosed exactly this cost and
+> filed the fix as a planner-pushdown concern; it needed no planner, only for enumeration to read
+> the set the pre-pass already had. **The June numbers are not a valid baseline** — re-running that
+> commit today gives 207ms, not the recorded 398ms, because the index layout moved in between.
+>
+> **The name rule, which item A deferred and mis-scoped.** D2 §5.4 and §5.6 have always said a
+> property name resolves against declared vocabulary. The evaluator matched the short name against
+> the LOCAL NAME of whatever IRIs the resource happened to carry. Two mechanisms for one name,
+> disagreeing in both directions and silent in both: a property declared `urn:ex:title_text` with
+> `short_name "title"` could not be named `title`, and an undeclared `urn:other:title` could. And
+> nothing checked that a brace key resolved at all, so a typo was an empty result set.
+>
+> **Both halves, because half of it was already tried and reverted.** A segment is a `Name` now, so
+> a quoted full IRI reaches what no scope declares — without that there was no escape hatch and a
+> namespace rule rejects queries that evaluate correctly. Resolution happens once at type-check and
+> rewrites the program; `find_property_by_shortname` is deleted, so no second opinion remains.
+> Scope is D2 §5.6.1, new: the pattern's class, or a FIBER binding's `result_class` +
+> `result_properties`, else `USING NAMESPACE` + the core prelude.
+>
+> **The FIBER row is D90's contract, not a new list.** The vocabulary a query may NAME on `?b` and
+> the vocabulary an institution may RETURN are the same list, so they cannot drift.
+> `declared_properties` moved onto `Layer` for the same reason — two callers, one answer.
+>
+> **Blast radius measured before the tests were written.** Full suite plus every EigenQL string in
+> the notebooks, the TS clients and the notebook runtime. One test failed: the one that pinned the
+> old dot-path semantics. Nothing outside Rust needed a change.
+>
+> **Lessons worth keeping.** The spec said the rule all along; the implementation applied half of
+> it, and half a rule is unsound rather than merely incomplete. And: save a patch before
+> `git checkout --` — reverting ten files to split a commit, with copies of only two, cost an hour
+> of replay.
+
+
+> **entry −4a (`2026-09-13`). The institution result contract (#226). DONE, merged as `9de9fa2`
+> (#245).** Was on `d90-institution-result-contract`. D90, implemented; #226 closed.
 >
 > **What an institution sends back is now checked against what it declared.** The declared contract
 > was an INPUT class: `marshal.rs` checked arity and property shape inbound, and nothing checked
