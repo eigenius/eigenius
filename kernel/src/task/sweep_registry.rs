@@ -88,6 +88,32 @@ impl SweepHandle {
         self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// A handle over an existing cancellation flag and record.
+    ///
+    /// `#[cfg(test)] pub(crate)` so `gc`'s tests can register an in-flight sweep without
+    /// driving a real one: the registry's own tests already prove cancellation reaches a
+    /// running sweep, and what GC's tests need to prove is that GC *raises* the flag.
+    #[cfg(test)]
+    pub(crate) fn from_parts(
+        cancel: Arc<AtomicBool>,
+        record: Arc<RwLock<TaskRecord>>,
+        indexes: Vec<Iri>,
+    ) -> Self {
+        Self {
+            cancel,
+            record,
+            indexes,
+        }
+    }
+
+    /// Has this sweep been asked to stop?
+    ///
+    /// The flag is cooperative, so `true` means "asked", not "stopped": the sweep
+    /// returns [`SweepError::Cancelled`] at its next per-Resource or per-Index check.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     /// Snapshot the task record (deep-cloned out of the lock).
     pub fn record_snapshot(&self) -> TaskRecord {
         self.record.read().expect("sweep record poisoned").clone()
@@ -147,9 +173,12 @@ impl SweepRegistry {
     }
 
     /// Flip the cancellation flag for the layer's sweep, if any.
-    /// Returns `true` if a sweep was found and signalled. The
-    /// `delete_layer(L)` hook calls this synchronously before
-    /// proceeding to its own GC.
+    /// Returns `true` if a sweep was found and signalled.
+    ///
+    /// Called by GC's sweep phase immediately before `delete_layer`, through
+    /// [`crate::gc::DeletionHooks`] — before, because the flag is cooperative and a sweep
+    /// cannot observe it once its layer is gone. Until eigenius#132 this doc claimed that
+    /// caller existed and it did not; the method had no caller outside its own tests.
     pub fn cancel_by_layer(&self, layer_id: &LayerId) -> bool {
         let guard = self.sweeps.read().expect("sweep registry poisoned");
         if let Some(handle) = guard.get(layer_id) {
@@ -172,7 +201,7 @@ impl SweepRegistry {
             .remove(layer_id);
     }
 
-    fn register(&self, layer_id: LayerId, handle: Arc<SweepHandle>) {
+    pub(crate) fn register(&self, layer_id: LayerId, handle: Arc<SweepHandle>) {
         self.sweeps
             .write()
             .expect("sweep registry poisoned")

@@ -82,14 +82,18 @@ impl EigeniusService {
         // chain use their own per-request storage.
         let storage = LayerStorage::with_persistent(Arc::clone(backend));
         let config = crate::gc::GcConfig::default();
-        let stats = crate::gc::collect(
-            roots,
-            &config,
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
-            backend.as_ref(),
-        )
-        .map_err(|e| Status::internal(format!("gc run failed: {e}")))?;
+        // The sweep registry is reachable here, and this is the only GC entry point where
+        // it is: `SweepCoordinator::registry()` exists to hand one to callers that do not
+        // own the coordinator. Without it, deleting a layer left any sweep against that
+        // layer running (eigenius#132).
+        let sweeps = self.sweep_coordinator.as_ref().map(|c| c.registry());
+        let hooks = crate::gc::DeletionHooks {
+            cache: storage.cache.as_ref(),
+            bloom_cache: storage.bloom_cache.as_ref(),
+            sweeps: sweeps.as_deref(),
+        };
+        let stats = crate::gc::collect(roots, &config, &hooks, backend.as_ref())
+            .map_err(|e| Status::internal(format!("gc run failed: {e}")))?;
 
         Ok(Response::new(RunGcResponse {
             success: true,

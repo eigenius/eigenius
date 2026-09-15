@@ -3092,8 +3092,11 @@ mod tests {
             &GcConfig {
                 min_age: std::time::Duration::from_secs(0),
             },
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &crate::gc::DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
