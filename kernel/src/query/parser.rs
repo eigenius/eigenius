@@ -1094,8 +1094,18 @@ impl Parser {
         Ok((classes, items))
     }
 
+    /// A `RETURN` item's name is a column LABEL, not a reference to declared vocabulary —
+    /// see [`ColumnLabel`]. It parses like a `Name` because the surface syntax is the same;
+    /// it does not become one, because nothing resolves it.
+    fn parse_column_label(&mut self) -> Result<ColumnLabel, QueryError> {
+        Ok(match self.parse_name()? {
+            Name::ShortName(s) => ColumnLabel::Synthesised(s),
+            Name::FullIri(i) => ColumnLabel::Explicit(i),
+        })
+    }
+
     fn parse_return_item(&mut self) -> Result<ReturnItem, QueryError> {
-        let name = self.parse_name()?;
+        let name = self.parse_column_label()?;
         self.expect(&TokenKind::Colon)?;
         let expression = self.parse_expression()?;
         Ok(ReturnItem { name, expression })

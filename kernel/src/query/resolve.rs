@@ -457,11 +457,6 @@ fn resolve_in_expression(
                 resolve_in_expression(elem, scope, layer, namespaces, errors);
             }
         }
-        Expression::Object(pairs) => {
-            for (_, v) in pairs {
-                resolve_in_expression(v, scope, layer, namespaces, errors);
-            }
-        }
         Expression::Similarity { query, .. } => {
             resolve_in_expression(query, scope, layer, namespaces, errors);
         }

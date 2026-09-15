@@ -60,8 +60,8 @@ pub(super) fn shape_result(
 
     for (position, item) in items.iter().enumerate() {
         let prop_iri = match &item.name {
-            Name::FullIri(iri) => iri.clone(),
-            Name::ShortName(s) => fp.row_property_iri(s),
+            ColumnLabel::Explicit(iri) => iri.clone(),
+            ColumnLabel::Synthesised(s) => fp.row_property_iri(s),
         };
 
         // Handle aggregate expressions specially
@@ -177,8 +177,8 @@ fn extract_sort_value(
     // ?wt } ORDER BY ?s` sorted by the column NAMED `s` rather than by `?s`.
     let item = items.iter().find(|i| i.expression == *expr)?;
     let prop_iri = match &item.name {
-        Name::FullIri(iri) => iri.clone(),
-        Name::ShortName(s) => fp.row_property_iri(s),
+        ColumnLabel::Explicit(iri) => iri.clone(),
+        ColumnLabel::Synthesised(s) => fp.row_property_iri(s),
     };
     resource.get(&prop_iri).cloned()
 }

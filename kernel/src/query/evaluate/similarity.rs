@@ -316,11 +316,6 @@ fn collect_in_expression<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>
                 collect_in_expression(e, out);
             }
         }
-        Expression::Object(pairs) => {
-            for (_, v) in pairs {
-                collect_in_expression(v, out);
-            }
-        }
         Expression::Literal(_)
         | Expression::Variable(_)
         | Expression::NotExists(_)

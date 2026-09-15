@@ -184,6 +184,68 @@ pub enum Name {
     FullIri(Iri),
 }
 
+/// The name a `RETURN` item gives one output column.
+///
+/// **Not a [`Name`], though it is spelled like one.** A `Name` is a reference to
+/// something the chain already declares, which resolution must turn into an `Iri` or
+/// reject. A column label is invented by the query author on the spot: `RETURN [] { total:
+/// SUM(?x) }` does not assert that anything called `total` is declared anywhere, and there
+/// is nothing to resolve it against.
+///
+/// The two shared a type until D92, which is how the resolution discipline for one came to
+/// read as the discipline for the other — and why six of the eight `Name` positions were
+/// not following it. Splitting them makes "is this a reference or a label?" a question the
+/// compiler asks at every position rather than one a contributor has to think to ask.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ColumnLabel {
+    /// A bare name. The result document synthesises a per-query property IRI for it,
+    /// `{fingerprint}:row:{name}` — see `QueryFingerprint::row_property_iri`.
+    Synthesised(String),
+    /// An explicit IRI, used verbatim as the column's property.
+    Explicit(Iri),
+}
+
+impl ColumnLabel {
+    /// The bare text of the label, for a diagnostic or a `short_name`. An explicit IRI
+    /// contributes its last colon-separated segment.
+    pub fn text(&self) -> String {
+        match self {
+            ColumnLabel::Synthesised(s) => s.clone(),
+            ColumnLabel::Explicit(iri) => iri
+                .as_str()
+                .rsplit(':')
+                .next()
+                .unwrap_or(iri.as_str())
+                .to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for ColumnLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ColumnLabel::Synthesised(s) => f.write_str(s),
+            ColumnLabel::Explicit(i) => f.write_str(i.as_str()),
+        }
+    }
+}
+
+impl Name {
+    /// The bare text of the name, for a diagnostic or a `short_name`. A full IRI
+    /// contributes its last colon-separated segment.
+    pub fn text(&self) -> String {
+        match self {
+            Name::ShortName(s) => s.clone(),
+            Name::FullIri(iri) => iri
+                .as_str()
+                .rsplit(':')
+                .next()
+                .unwrap_or(iri.as_str())
+                .to_string(),
+        }
+    }
+}
+
 impl std::fmt::Display for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -251,7 +313,7 @@ pub enum Literal {
 /// A RETURN item: maps a property name to an expression.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReturnItem {
-    pub name: Name,
+    pub name: ColumnLabel,
     pub expression: Expression,
 }
 
@@ -321,7 +383,6 @@ pub enum Expression {
         segments: Vec<Name>,
     },
     Array(Vec<Expression>),
-    Object(Vec<(Name, Expression)>),
     /// D43 §3.3 — similarity operator `?prop ~ "query" { hints }`.
     ///
     /// `property` is the property-bound LHS; `query` is the RHS

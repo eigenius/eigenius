@@ -245,7 +245,6 @@ fn expr_has_similarity(expr: &Expression) -> bool {
         Expression::FunctionCall { args, .. } => args.iter().any(expr_has_similarity),
         Expression::Aggregate { arg, .. } => expr_has_similarity(arg),
         Expression::Array(es) => es.iter().any(expr_has_similarity),
-        Expression::Object(pairs) => pairs.iter().any(|(_, v)| expr_has_similarity(v)),
         Expression::Literal(_)
         | Expression::Variable(_)
         | Expression::NotExists(_)
@@ -431,11 +430,6 @@ fn check_expression_variables(
         Expression::Array(elements) => {
             for elem in elements {
                 check_expression_variables(elem, bound, errors);
-            }
-        }
-        Expression::Object(pairs) => {
-            for (_, value) in pairs {
-                check_expression_variables(value, bound, errors);
             }
         }
         Expression::Similarity {
@@ -950,11 +944,6 @@ fn check_qualified_calls(
                 check_qualified_calls(it, index, errors);
             }
         }
-        Expression::Object(pairs) => {
-            for (_, v) in pairs {
-                check_qualified_calls(v, index, errors);
-            }
-        }
         _ => {}
     }
 }
@@ -1106,11 +1095,6 @@ fn check_verdict_in_expression(
         Expression::Array(items) => {
             for it in items {
                 check_verdict_in_expression(it, verdict_vars, index, errors);
-            }
-        }
-        Expression::Object(pairs) => {
-            for (_, v) in pairs {
-                check_verdict_in_expression(v, verdict_vars, index, errors);
             }
         }
         _ => {}
@@ -1334,18 +1318,6 @@ fn check_similarity(
             for e in es {
                 check_similarity(
                     e,
-                    prop_var_index,
-                    text_indexes,
-                    vector_indexes,
-                    layer,
-                    errors,
-                );
-            }
-        }
-        Expression::Object(pairs) => {
-            for (_, v) in pairs {
-                check_similarity(
-                    v,
                     prop_var_index,
                     text_indexes,
                     vector_indexes,

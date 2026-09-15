@@ -117,7 +117,7 @@ pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Res
 
     // Synthesize a Property resource for each RETURN item.
     for item in &query.result {
-        let short_name = short_name_for(&item.name);
+        let short_name = item.name.text();
         let prop_iri = fp.row_property_iri(&short_name);
         property_iris.push(prop_iri.as_str().to_string());
 
@@ -210,18 +210,6 @@ pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Res
     document
 }
 
-fn short_name_for(name: &Name) -> String {
-    match name {
-        Name::ShortName(s) => s.clone(),
-        Name::FullIri(iri) => iri
-            .as_str()
-            .rsplit(':')
-            .next()
-            .unwrap_or(iri.as_str())
-            .to_string(),
-    }
-}
-
 fn class_name_to_iri(name: &Name) -> String {
     match name {
         Name::ShortName(s) => s.clone(),
@@ -233,11 +221,7 @@ fn row_class_short_name(classes: &[Name]) -> String {
     if classes.is_empty() {
         "QueryRow".to_string()
     } else {
-        classes
-            .iter()
-            .map(short_name_for)
-            .collect::<Vec<_>>()
-            .join("_")
+        classes.iter().map(Name::text).collect::<Vec<_>>().join("_")
     }
 }
 

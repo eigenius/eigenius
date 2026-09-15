@@ -239,9 +239,6 @@ pub(super) fn eval_expression(
                 .collect();
             Ok(Value::Array(vals?))
         }
-        Expression::Object(_) => Err(QueryError::evaluation(
-            "object literals in expressions not yet implemented",
-        )),
         Expression::Similarity { .. } => eval_similarity(expr, binding, runtime),
     }
 }
