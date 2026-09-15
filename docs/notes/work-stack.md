@@ -9,6 +9,46 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **ACTIVE: entry −4c (`2026-09-14`). D92 — the resolved query AST (#248).** On
+> `d92-resolved-query-ast`. Workspace suite green, clippy and fmt clean.
+>
+> **Exit gate: the merge request lands and #248 closes.**
+>
+> **Eight `Name` positions, and six were not following the resolution rule.** #249's review
+> found one guarded state; auditing the rest found that a pattern class was resolved THREE
+> times per query by three call sites, a FIBER institution and param table twice, and
+> `result_classes` and `ReturnItem.name` not at all. Every duplicate is a place two
+> mechanisms can disagree about one name, which is what produced #249's silent empty sets.
+>
+> **`Name` conflated two things.** A pattern class is a reference the chain must declare;
+> `ReturnItem.name` is a label the author invents, and `return_shape.rs` synthesises an IRI
+> for it. Same spelling, same type, opposite obligations — which is why the discipline for
+> one read as the discipline for the other.
+>
+> **The AST is generic over a `Stage` trait now**, `Program<Parsed>` to `Program<Resolved>`,
+> with `resolve` a total function between them. The property is not that the unresolved
+> state is checked but that a missed position does not compile — which is exactly how the
+> FIBER defect got in, through an `else { continue }` that skipped a clause variant.
+>
+> **Two design corrections came out of implementing it**, both folded back into the note.
+> One type parameter cannot work: a pattern class resolves to a `ClassRef` (chain class or
+> relation) and everything else to an `Iri`, so one parameter forces a sum, and a sum lets
+> a property key hold a relation — the invalid-but-representable state the note removes,
+> relocated. And a `RelationId` identifies a RELATION, not a rule: a base case and a
+> recursive case are two definitions of one relation, and indexing definitions split the
+> derived facts so the closure never accumulated. The reachability tests caught it.
+>
+> **Six duplicate resolvers deleted, the compiler finding every one.** Including a
+> comorphism resolution that re-derived an IRI by PARSING the short name — a third
+> mechanism that could only succeed for a short name already an IRI.
+>
+> **`Query.result_classes` is checked for the first time.** Blast radius measured before
+> the rule landed: nothing in the tree names a result class, so it rejects nothing.
+>
+> **The cost, taken deliberately:** resolution errors block type errors, where one pass
+> reported both. Recorded in D2 §5.0, which now says resolution is a stage.
+
+
 > **entry −4b (`2026-09-13`). Query processing, items A–C plus the name rule. DONE, merged as
 > `1d75afb` (#249) on `2026-09-14`.** Closed #124, #33 and #125. Item A merged separately as
 > `1a7f2b3` (#247), closing #126, #123 and #172.
