@@ -15,22 +15,114 @@
 //! AST types for EigenQL programs.
 //!
 //! Matches the grammar in design doc D2 §3 and §4.
+//!
+//! # The `S` parameter (D92)
+//!
+//! Every type that holds a reference to declared vocabulary is generic in how that
+//! reference is spelled:
+//!
+//! - `Program<Parsed>` is what the parser builds. A [`Name`] is a short name or a full
+//!   IRI, as written in the query text, and nothing has checked that it names anything.
+//! - `Program<Resolved>` is what resolution produces. Every reference has been looked up
+//!   against the chain, or the program does not exist.
+//!
+//! **The point is not that the unresolved state is checked. It is that a missed position
+//! does not compile.** Resolution is a total function between the two instantiations, so
+//! to produce the second it must produce a resolved reference for *every* parameterised
+//! position — there is no arm it can skip.
+//!
+//! That is not hypothetical. Before D92 the resolution pass matched `Clause::Pattern` and
+//! let `Clause::Fiber` fall through an `else { continue }`, so a dot-path inside a FIBER
+//! param kept its short names, type-checked with zero errors, and failed at evaluation
+//! with a message naming the resolution pass. Under the parameterised AST that `continue`
+//! has no resolved reference to put in the clause it skipped.
+//!
+//! `S` defaults to [`Parsed`] so that code working on parsed programs reads unchanged.
+//!
+//! **A [`ColumnLabel`] is deliberately not parameterised.** It is a name the query author
+//! invents for an output column, not a reference to anything — see its own documentation.
 
 use crate::ontology::iri::Iri;
 
+/// Which stage of the pipeline an AST belongs to, and therefore how the references it
+/// holds are spelled (D92).
+///
+/// **Two associated types, not one, because the positions do not resolve alike.** A
+/// pattern class may name a chain class *or* a `DEFINE` relation, so it resolves to a
+/// [`ClassRef`]; every other reference resolves to the `Iri` of a declared resource. A
+/// single parameter would force one resolved type on both, and that type would have to be
+/// a sum — which would let a property key hold a relation: representable and invalid,
+/// which is the thing this design exists to remove.
+///
+/// The associated types carry the `Debug + Clone + PartialEq` bounds so the AST's derives
+/// hold for every stage.
+pub trait Stage {
+    /// A `MATCH` pattern's class: a chain class or a `DEFINE` relation.
+    type PatternClass: std::fmt::Debug + Clone + PartialEq;
+    /// Every other reference to declared vocabulary — a property key, a dot-path segment,
+    /// a `RETURN` result class, a FIBER institution, query class, param or comorphism.
+    ///
+    /// They share a type because they resolve alike, to the `Iri` of a declared resource.
+    /// Distinguishing them further — a `PropertyIri` that cannot hold a class — wants a
+    /// newtype per metaclass, which is a larger change than D92 and buys nothing this one
+    /// needs.
+    type Ref: std::fmt::Debug + Clone + PartialEq;
+}
+
+/// The stage the parser produces: references as written, none of them checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Parsed;
+
+/// The stage resolution produces: every reference looked up against the chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Resolved;
+
+impl Stage for Parsed {
+    type PatternClass = Name;
+    type Ref = Name;
+}
+
+impl Stage for Resolved {
+    type PatternClass = ClassRef;
+    type Ref = Iri;
+}
+
+/// What a resolved `MATCH` pattern class names.
+///
+/// `MATCH Dog(?d)` names a chain class; `MATCH ancestor(?x, ?y)` names a rule defined by
+/// this program. `check_match_part` carried that distinction as an exemption list inside
+/// one checking function; here it is a variant every consumer has to handle.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClassRef {
+    /// A `core:Class` on the chain.
+    Chain(Iri),
+    /// A `DEFINE` relation, as an index into `Program::definitions`.
+    ///
+    /// An index rather than a name, because a name leaves a lookup at every use — the
+    /// second-resolution pattern D92 removes. An index rather than the `RuleDefinition`
+    /// itself, because `stratify` rejects only *negation* cycles: ordinary positive
+    /// recursion is legal Datalog, and a `ClassRef` embedding its own definition would be
+    /// an infinite value for exactly the rules the feature exists for.
+    Relation(RelationId),
+}
+
+/// An index into `Program::definitions`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RelationId(pub usize);
+
 /// A complete EigenQL program: zero or more rule definitions + a query.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Program {
-    pub definitions: Vec<RuleDefinition>,
-    pub query: Query,
+pub struct Program<S: Stage = Parsed> {
+    pub definitions: Vec<RuleDefinition<S>>,
+    pub query: Query<S>,
 }
 
 /// A DEFINE clause: names a derived relation.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RuleDefinition {
+pub struct RuleDefinition<S: Stage = Parsed> {
     pub name: String,
     pub variables: Vec<Variable>,
-    pub body: MatchPart,
+    pub body: MatchPart<S>,
 }
 
 /// The USING + MATCH + (optional FIBER) + WHERE portion, shared by DEFINE and Query.
@@ -39,7 +131,7 @@ pub struct RuleDefinition {
 /// bindings from preceding MATCH/FIBER clauses and subsequent patterns
 /// can consume bindings produced by FIBER — see D2 §3.5, §6.12.
 #[derive(Debug, Clone, PartialEq)]
-pub struct MatchPart {
+pub struct MatchPart<S: Stage = Parsed> {
     pub using: Vec<Iri>,
     pub using_institutions: Vec<InstitutionAlias>,
     /// `USING NAMESPACE "<prefix>"` declarations — the vocabulary namespaces
@@ -47,15 +139,15 @@ pub struct MatchPart {
     /// classes/properties/query-classes resolve within. See
     /// [`crate::query::resolve`].
     pub using_namespaces: Vec<String>,
-    pub clauses: Vec<Clause>,
-    pub conditions: Vec<Expression>,
+    pub clauses: Vec<Clause<S>>,
+    pub conditions: Vec<Expression<S>>,
 }
 
-impl MatchPart {
+impl<S: Stage> MatchPart<S> {
     /// Iterate over just the MATCH patterns, ignoring FIBER clauses.
     /// Adapter for callers that predate FIBER support (DEFINE bodies,
     /// stratification, etc.). Use `.clauses` directly when FIBER matters.
-    pub fn patterns(&self) -> impl Iterator<Item = &Pattern> {
+    pub fn patterns(&self) -> impl Iterator<Item = &Pattern<S>> {
         self.clauses.iter().filter_map(|c| match c {
             Clause::Pattern(p) => Some(p),
             Clause::Fiber(_) => None,
@@ -70,14 +162,14 @@ impl MatchPart {
 
 /// A single clause inside a MatchPart.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Clause {
+pub enum Clause<S: Stage = Parsed> {
     /// One structural pattern. Multiple consecutive Pattern clauses
     /// correspond to comma-separated patterns in one MATCH clause, but
     /// separating them into multiple MATCH clauses is equivalent
     /// (equi-join over shared variables).
-    Pattern(Pattern),
+    Pattern(Pattern<S>),
     /// A FIBER dispatch to a registered institution. See D2 §3.5.
-    Fiber(FiberClause),
+    Fiber(FiberClause<S>),
 }
 
 /// `USING INSTITUTION "<iri>" AS <alias>` — binds a short name to an
@@ -93,15 +185,15 @@ pub struct InstitutionAlias {
 /// `params`, binds the response resource to `binding` so subsequent
 /// MATCH clauses can decompose it.
 #[derive(Debug, Clone, PartialEq)]
-pub struct FiberClause {
+pub struct FiberClause<S: Stage = Parsed> {
     /// Institution reference — either a USING INSTITUTION alias
     /// (ShortName) or an inline full IRI (FullIri).
-    pub institution: Name,
+    pub institution: S::Ref,
     /// Query class name (must appear in the institution's declared
     /// query_types). Short name or full IRI.
-    pub query_class: Name,
+    pub query_class: S::Ref,
     /// Parameter bindings passed as properties on the query resource.
-    pub params: Vec<ParamBinding>,
+    pub params: Vec<ParamBinding<S>>,
     /// Variable the response resource is bound to.
     pub binding: Variable,
     /// Optional `INTO "<iri>"` suffix (D14 §9.3 chain-reinsertion via
@@ -118,9 +210,9 @@ pub struct FiberClause {
 /// value is either a plain expression or a comorphism coercion
 /// (D2 v2 §3.5).
 #[derive(Debug, Clone, PartialEq)]
-pub struct ParamBinding {
-    pub name: Name,
-    pub value: ParamValue,
+pub struct ParamBinding<S: Stage = Parsed> {
+    pub name: S::Ref,
+    pub value: ParamValue<S>,
 }
 
 /// Two shapes for a FIBER param value (D2 v2 §3.5 / §4):
@@ -133,19 +225,19 @@ pub struct ParamBinding {
 ///   → reify) inline, and the reified target resource is used as the
 ///   param value.
 #[derive(Debug, Clone, PartialEq)]
-pub enum ParamValue {
-    Expression(Expression),
-    Comorphism { name: Name, source: Expression },
+pub enum ParamValue<S: Stage = Parsed> {
+    Expression(Expression<S>),
+    Comorphism { name: S::Ref, source: Expression<S> },
 }
 
 /// A complete query with all clauses.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Query {
-    pub body: MatchPart,
-    pub group_by: Vec<Expression>,
-    pub result_classes: Vec<Name>,
-    pub result: Vec<ReturnItem>,
-    pub order_by: Vec<OrderItem>,
+pub struct Query<S: Stage = Parsed> {
+    pub body: MatchPart<S>,
+    pub group_by: Vec<Expression<S>>,
+    pub result_classes: Vec<S::Ref>,
+    pub result: Vec<ReturnItem<S>>,
+    pub order_by: Vec<OrderItem<S>>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
     pub distinct: bool,
@@ -163,17 +255,17 @@ pub struct Query {
 
 /// A MATCH pattern.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Pattern {
+pub struct Pattern<S: Stage = Parsed> {
     pub subject: Variable,
-    pub class: Option<Name>,
-    pub properties: Vec<PropertyPattern>,
+    pub class: Option<S::PatternClass>,
+    pub properties: Vec<PropertyPattern<S>>,
     pub negated: bool,
 }
 
 /// A property binding within a pattern.
 #[derive(Debug, Clone, PartialEq)]
-pub struct PropertyPattern {
-    pub property: Name,
+pub struct PropertyPattern<S: Stage = Parsed> {
+    pub property: S::Ref,
     pub object: ValueOrVariable,
 }
 
@@ -312,15 +404,15 @@ pub enum Literal {
 
 /// A RETURN item: maps a property name to an expression.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ReturnItem {
+pub struct ReturnItem<S: Stage = Parsed> {
     pub name: ColumnLabel,
-    pub expression: Expression,
+    pub expression: Expression<S>,
 }
 
 /// An ORDER BY item.
 #[derive(Debug, Clone, PartialEq)]
-pub struct OrderItem {
-    pub expression: Expression,
+pub struct OrderItem<S: Stage = Parsed> {
+    pub expression: Expression<S>,
     pub direction: SortDirection,
 }
 
@@ -333,17 +425,17 @@ pub enum SortDirection {
 
 /// An expression in WHERE, RETURN, GROUP BY, or ORDER BY.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expression {
+pub enum Expression<S: Stage = Parsed> {
     Literal(Literal),
     Variable(Variable),
     Binary {
         op: BinaryOp,
-        left: Box<Expression>,
-        right: Box<Expression>,
+        left: Box<Expression<S>>,
+        right: Box<Expression<S>>,
     },
     Unary {
         op: UnaryOp,
-        operand: Box<Expression>,
+        operand: Box<Expression<S>>,
     },
     /// Postfix Verdict projection (D2 v2 §3.7 / §3.8): `?v HOLDS`,
     /// `?v FAILS`, `?v UNDECIDABLE`. The operand must evaluate to a
@@ -351,7 +443,7 @@ pub enum Expression {
     /// `Boolean` true iff the constructor matches.
     VerdictPredicate {
         kind: VerdictPredicate,
-        operand: Box<Expression>,
+        operand: Box<Expression<S>>,
     },
     /// `NOT EXISTS(e)` — true when `e` has no value.
     ///
@@ -360,29 +452,28 @@ pub enum Expression {
     /// question this was always meant to answer. Over a bare variable it asks whether the
     /// variable is bound, which under a strictly conjunctive `MATCH` is always true — so
     /// that form matched nothing and was dead (eigenius#124).
-    NotExists(Box<Expression>),
+    NotExists(Box<Expression<S>>),
     FunctionCall {
         name: String,
-        args: Vec<Expression>,
+        args: Vec<Expression<S>>,
     },
     Aggregate {
         op: AggregateOp,
-        arg: Box<Expression>,
+        arg: Box<Expression<S>>,
     },
     /// `?root.seg.seg` — property traversal from a bound resource.
     ///
-    /// A segment is a [`Name`], the same shape a `MATCH` brace key has, because it
-    /// names the same thing: a declared `core:Property`. A short name resolves
-    /// against the root's class where the query states one, against the imported
-    /// namespaces otherwise; a full IRI names the property outright and is the
-    /// escape hatch where neither scope reaches it. `type_check` rewrites every
-    /// short name to the IRI it resolved to, so an evaluated `DotPath` carries
-    /// `FullIri` segments only.
+    /// A segment is a reference of the same kind a `MATCH` brace key holds, because it
+    /// names the same thing: a declared `core:Property`. In a parsed program that is a
+    /// [`Name`] — a short name resolving against the root's class where the query states
+    /// one and against the imported namespaces otherwise, or a full IRI naming the
+    /// property outright where neither scope reaches it. In a resolved program it is the
+    /// property it resolved to.
     DotPath {
         root: Variable,
-        segments: Vec<Name>,
+        segments: Vec<S::Ref>,
     },
-    Array(Vec<Expression>),
+    Array(Vec<Expression<S>>),
     /// D43 §3.3 — similarity operator `?prop ~ "query" { hints }`.
     ///
     /// `property` is the property-bound LHS; `query` is the RHS
@@ -394,7 +485,7 @@ pub enum Expression {
     /// not the AST.
     Similarity {
         property: Variable,
-        query: Box<Expression>,
+        query: Box<Expression<S>>,
         hints: HintSet,
     },
 }
