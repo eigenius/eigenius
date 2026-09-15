@@ -147,6 +147,9 @@ impl ReindexDriver {
             max_retries: self.max_retries,
             retry_backoff_base_ms: self.retry_backoff_base_ms,
             batch_size: self.batch_size,
+            // The task surface does not expose this yet; the default derives from the
+            // host's parallelism (eigenius#63).
+            ..SweepOptions::default()
         };
         let outcome = reindex_chain(head, &self.target_index_iri, embedders, cache, &options);
         if let Some(record) = self.record.as_mut() {

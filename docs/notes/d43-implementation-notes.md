@@ -208,13 +208,26 @@ runs, and buys **6%** for **9× the CPU**. Scaling `MKL_NUM_THREADS` shows why: 
 these matmuls are too small for intra-op threading to pay. Run-to-run variance also widens
 from ±1s to ±7s.
 
-**The parallelism has to be at the batch level.** Dispatching 8 batches concurrently —
-each one near-single-threaded — gives 46.0s → 13.8s on the same 8 cores, and *beats*
-eigenius#63's 15-30s target. Returns flatten after 8 (16-way gives 13.0s). `Embedder` is
-already `Send + Sync`, and results collect in order, so cache inserts and entry writes
-stay deterministic. Not implemented here: it needs per-chunk error attribution,
-per-batch cancellation, and a `SweepOptions` field rather than the throwaway env var the
-experiment used. It also would not compose with MKL, which already saturates the cores.
+**The parallelism has to be at the batch level, and that is what `SweepOptions::parallelism`
+now does.** Dispatching several batches concurrently — each near-single-threaded — gives
+**46.0s → 14.9s** measured on the shipped implementation (three runs: 15.33 / 14.62 /
+14.80), on the same eight cores MKL needed for 42.3s. That is inside eigenius#63's
+15-30s target. Returns flatten after 8, which is where `default_parallelism()` caps:
+4-way gives 17.8s, 8-way 13.8s, 16-way 13.0s, each additional in-flight batch costing
+peak memory.
+
+CUDA is unchanged at 0.91s — it was never core-starved, so concurrent dispatch neither
+helps nor hurts it.
+
+`Embedder` is already `Send + Sync`. Results are collected and applied in chunk order, so
+the segment write, the cache inserts and the subject named in a dispatch error are all
+identical to the sequential path; `sweep_results_are_independent_of_parallelism` pins
+that. Cancellation is checked per group, which is the granularity the sequential path had
+— a batch already in flight cannot be interrupted either way.
+
+It does not compose with MKL, which already saturates the cores.
+
+**End to end: 101.2s → 14.9s, 6.8×**, recall@10 = 7/7 at every step.
 
 **The harness had to be repaired first.** `go_recall.rs` built its layer on a RocksDB backend and never called `store_layer`, so the derived triple index stayed empty, `resolve_active_vector_indexes` (index-driven, via `scan_chain`) found nothing, the sweep embedded **0 subjects**, and the query failed with `similarity_hint_via_vector_no_vector_index`. The test is `#[ignore]`d, so CI never ran it and never reported the breakage; its sibling `d43_go_subset_integration` has carried the `store_layer` call, with the same explanation, since the D65 index lifecycle changed. No number in this section could be reproduced until that was fixed.
 
