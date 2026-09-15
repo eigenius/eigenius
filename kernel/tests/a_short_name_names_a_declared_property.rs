@@ -377,12 +377,28 @@ fn with_a_query_class() -> Arc<Layer> {
     Arc::new(b.build(LayerStorage::in_memory()))
 }
 
-/// Type-check alone — the dispatch would need a live institution runtime, and resolution
-/// is decided before any of that.
+/// Resolve and type-check, stopping before evaluation — the dispatch would need a live
+/// institution runtime, and every question here is decided before any of that.
 fn type_errors(layer: &Arc<Layer>, q: &str) -> Vec<QueryError> {
+    match resolve_program(layer, q) {
+        Ok(program) => eigenius_kernel::query::type_check::type_check(&program, layer),
+        Err(errors) => errors,
+    }
+}
+
+/// The resolved program, or the errors resolution reported.
+fn resolve_program(
+    layer: &Arc<Layer>,
+    q: &str,
+) -> Result<
+    eigenius_kernel::query::ast::Program<eigenius_kernel::query::ast::Resolved>,
+    Vec<QueryError>,
+> {
     let tokens = eigenius_kernel::query::lexer::tokenize(q).expect("lexes");
-    let mut program = eigenius_kernel::query::parser::parse(tokens).expect("parses");
-    eigenius_kernel::query::type_check::type_check(&mut program, layer)
+    let program = eigenius_kernel::query::parser::parse(tokens).expect("parses");
+    let index =
+        eigenius_kernel::institution::registry::InstitutionIndex::from_layer_indexed(layer).0;
+    eigenius_kernel::query::resolve::resolve(program, layer, &index)
 }
 
 fn fiber_query(projection: &str) -> String {
@@ -462,11 +478,10 @@ RETURN [] {{ v: ?b.lower }}
         !errs.iter().any(|e| e.rule == "property_name_unresolved"),
         "`lower` is in the imported namespace: {errs:?}"
     );
-    // The segment must actually be rewritten — a clean type-check that leaves a ShortName
-    // behind is the defect, not the absence of an error.
-    let tokens = eigenius_kernel::query::lexer::tokenize(&q).expect("lexes");
-    let mut program = eigenius_kernel::query::parser::parse(tokens).expect("parses");
-    let _ = eigenius_kernel::query::type_check::type_check(&mut program, &layer);
+    // The segment must actually be resolved. Under D92 a `Program<Resolved>` cannot hold
+    // an unresolved one — the type is the assertion — so this reads the IRI to confirm it
+    // is the property the namespace scope names, not merely that something is there.
+    let program = resolve_program(&layer, &q).expect("resolves");
     let clause = program
         .query
         .body
@@ -484,10 +499,10 @@ RETURN [] {{ v: ?b.lower }}
     else {
         panic!("expected a dot-path param value, got {:?}", param.value);
     };
-    assert!(
-        matches!(segments[0], eigenius_kernel::query::ast::Name::FullIri(_)),
-        "the param's segment reaches the evaluator unresolved: {:?}",
-        segments[0]
+    assert_eq!(
+        segments[0].as_str(),
+        "urn:ex:lower",
+        "the param's segment resolved to the wrong property"
     );
 }
 

@@ -26,7 +26,7 @@
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
-use crate::query::ast::{AggregateOp, Expression, Name, Query};
+use crate::query::ast::{AggregateOp, Expression, Name, Query, Resolved};
 
 use sha2::{Digest, Sha256};
 
@@ -90,7 +90,7 @@ impl QueryFingerprint {
 /// IRIs (via `evaluate::shape_result`); this function adds the Property,
 /// Class, and ResultSet metadata resources so the document is
 /// self-describing per Appendix A.
-pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Resource> {
+pub fn wrap(query: &Query<Resolved>, query_text: &str, mut rows: Vec<Resource>) -> Vec<Resource> {
     let fp = QueryFingerprint::of(query_text);
 
     // Match-only queries (no RETURN) produce a minimal ResultSet with a
@@ -153,7 +153,7 @@ pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Res
         let parents: Vec<Value> = query
             .result_classes
             .iter()
-            .map(|n| Value::String(class_name_to_iri(n)))
+            .map(|iri| Value::String(iri.as_str().to_string()))
             .collect();
         row_class.set(
             Iri::parse(wk::PARENT_CLASSES).unwrap(),
@@ -210,18 +210,15 @@ pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Res
     document
 }
 
-fn class_name_to_iri(name: &Name) -> String {
-    match name {
-        Name::ShortName(s) => s.clone(),
-        Name::FullIri(iri) => iri.as_str().to_string(),
-    }
-}
-
-fn row_class_short_name(classes: &[Name]) -> String {
+fn row_class_short_name(classes: &[Iri]) -> String {
     if classes.is_empty() {
         "QueryRow".to_string()
     } else {
-        classes.iter().map(Name::text).collect::<Vec<_>>().join("_")
+        classes
+            .iter()
+            .map(|iri| Name::FullIri(iri.clone()).text())
+            .collect::<Vec<_>>()
+            .join("_")
     }
 }
 
@@ -229,7 +226,7 @@ fn row_class_short_name(classes: &[Name]) -> String {
 /// datatypes per D2 §A.3. For other expressions we peek at the first
 /// row's value (if any) — v1 heuristic, acceptable while proper type
 /// inference is future work.
-fn datatype_iri(expr: &Expression, rows: &[Resource], prop_iri: &Iri) -> String {
+fn datatype_iri(expr: &Expression<Resolved>, rows: &[Resource], prop_iri: &Iri) -> String {
     match expr {
         Expression::Aggregate { op, .. } => match op {
             AggregateOp::Count => wk::INTEGER.to_string(),

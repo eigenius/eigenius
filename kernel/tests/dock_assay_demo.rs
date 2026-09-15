@@ -732,7 +732,7 @@ fn auto_on_load_fires_on_assay_prediction() {
 #[test]
 fn fiber_param_comorphism_coercion_runs_four_step_pipeline() {
     use eigenius_kernel::ontology::resource::Resource;
-    use eigenius_kernel::query::ast::{Expression, Name};
+    use eigenius_kernel::query::ast::Expression;
     use std::collections::BTreeMap;
 
     let (layer, storage) = build_demo_layer();
@@ -752,7 +752,7 @@ fn fiber_param_comorphism_coercion_runs_four_step_pipeline() {
     let mut binding: BTreeMap<String, Value> = BTreeMap::new();
     binding.insert("d".into(), Value::Embedded(Box::new(docking)));
 
-    let comorphism_name = Name::FullIri(iri("urn:eigenius:demo:institutions:dock_to_assay"));
+    let comorphism_name = iri("urn:eigenius:demo:institutions:dock_to_assay");
     let source_expr =
         Expression::Variable(eigenius_kernel::query::ast::Variable { name: "d".into() });
 
@@ -1134,7 +1134,7 @@ fn eigenql_postfix_fails_drops_holding_row() {
 /// rather than silently identity-passing the source through.
 #[test]
 fn fiber_param_comorphism_coercion_unknown_comorphism_errors() {
-    use eigenius_kernel::query::ast::{Expression, Name};
+    use eigenius_kernel::query::ast::Expression;
     use std::collections::BTreeMap;
 
     let (layer, storage) = build_demo_layer();
@@ -1153,7 +1153,7 @@ fn fiber_param_comorphism_coercion_unknown_comorphism_errors() {
     let mut binding: BTreeMap<String, Value> = BTreeMap::new();
     binding.insert("d".into(), Value::Embedded(Box::new(docking)));
 
-    let bogus_name = Name::FullIri(iri("urn:eigenius:demo:institutions:nonexistent_comorphism"));
+    let bogus_name = iri("urn:eigenius:demo:institutions:nonexistent_comorphism");
     let source_expr =
         Expression::Variable(eigenius_kernel::query::ast::Variable { name: "d".into() });
 

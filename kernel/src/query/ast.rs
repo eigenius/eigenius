@@ -96,19 +96,40 @@ impl Stage for Resolved {
 pub enum ClassRef {
     /// A `core:Class` on the chain.
     Chain(Iri),
-    /// A `DEFINE` relation, as an index into `Program::definitions`.
+    /// A `DEFINE` relation, by [`RelationId`].
     ///
-    /// An index rather than a name, because a name leaves a lookup at every use — the
-    /// second-resolution pattern D92 removes. An index rather than the `RuleDefinition`
+    /// An id rather than a name, because a name leaves a lookup at every use — the
+    /// second-resolution pattern D92 removes. An id rather than the `RuleDefinition`
     /// itself, because `stratify` rejects only *negation* cycles: ordinary positive
     /// recursion is legal Datalog, and a `ClassRef` embedding its own definition would be
-    /// an infinite value for exactly the rules the feature exists for.
+    /// an infinite value for exactly the rules the feature exists for. And an id per
+    /// RELATION rather than per definition — see [`relation_ids`].
     Relation(RelationId),
 }
 
-/// An index into `Program::definitions`.
+/// Identifies one derived relation within a program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RelationId(pub usize);
+
+/// The id of each distinct relation, assigned by first appearance.
+///
+/// **A relation may be defined by several rules**, and the id identifies the RELATION,
+/// not the rule. `DEFINE Reach(?t) FROM …` followed by `DEFINE Reach(?n) FROM MATCH
+/// Reach(?m) …` is one relation with a base case and a recursive case; keying derived
+/// facts per definition splits it into two, and the closure then never accumulates.
+pub fn relation_ids<S: Stage>(
+    definitions: &[RuleDefinition<S>],
+) -> std::collections::BTreeMap<String, RelationId> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut next = 0usize;
+    for d in definitions {
+        if !out.contains_key(&d.name) {
+            out.insert(d.name.clone(), RelationId(next));
+            next += 1;
+        }
+    }
+    out
+}
 
 /// A complete EigenQL program: zero or more rule definitions + a query.
 #[derive(Debug, Clone, PartialEq)]

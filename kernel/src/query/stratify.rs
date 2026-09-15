@@ -31,7 +31,7 @@ pub struct Stratum {
 /// Check stratification of DEFINE rules and compute evaluation order.
 ///
 /// Returns strata in evaluation order, or an error if a negation cycle exists.
-pub fn stratify(definitions: &[RuleDefinition]) -> Result<Vec<Stratum>, QueryError> {
+pub fn stratify(definitions: &[RuleDefinition<Parsed>]) -> Result<Vec<Stratum>, QueryError> {
     if definitions.is_empty() {
         return Ok(vec![]);
     }

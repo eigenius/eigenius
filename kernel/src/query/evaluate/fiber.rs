@@ -48,7 +48,7 @@ pub struct FiberRuntime<'a> {
     /// evaluation time when this is `None`. v1 restricts the cited
     /// transformation Component to Pure or Read capability levels.
     pub components: Option<&'a crate::program::component::ComponentRegistry>,
-    /// Query-scoped transient overlay populated by FIBER clauses with
+    /// Query<Resolved>-scoped transient overlay populated by FIBER clauses with
     /// their response resources (D2 v2 §6.12). Threaded into the
     /// expression evaluator so postfix Verdict predicates and
     /// resource-typed projections can resolve a FIBER-bound `?var`
@@ -87,7 +87,7 @@ pub struct FiberRuntime<'a> {
 
 /// Resources produced at runtime by FIBER clauses. They live for the
 /// duration of a single query and are discarded when evaluation ends.
-/// Pattern matching scans these in addition to the layer chain — see
+/// Pattern<Resolved> matching scans these in addition to the layer chain — see
 /// D2 §6.12 (the "transient overlay").
 #[derive(Default)]
 pub(super) struct FiberOverlay {
@@ -100,16 +100,16 @@ impl FiberOverlay {
     }
 }
 
-/// Evaluate a MatchPart's pattern-only bodies (DEFINE rules).
+/// Evaluate a MatchPart<Resolved>'s pattern-only bodies (DEFINE rules).
 ///
 /// Errors if any FIBER clause is present — DEFINE bodies can't dispatch
 /// to institutions (no overlay, no runtime context at rule-fixpoint time).
 /// The type checker rejects FIBER in DEFINE bodies so this is a defensive
 /// check.
 pub(super) fn evaluate_match_part(
-    part: &MatchPart,
+    part: &MatchPart<Resolved>,
     layer: &Layer,
-    derived: &BTreeMap<String, Vec<Binding>>,
+    derived: &BTreeMap<crate::query::ast::RelationId, Vec<Binding>>,
 ) -> Result<Vec<Binding>, QueryError> {
     if part.has_fiber() {
         return Err(QueryError::evaluation(
@@ -126,7 +126,6 @@ pub(super) fn evaluate_match_part(
                     layer,
                     derived,
                     overlay: &[],
-                    namespaces: &part.using_namespaces,
                     similarity: None,
                 },
                 bindings,
@@ -138,7 +137,6 @@ pub(super) fn evaluate_match_part(
                     layer,
                     derived,
                     overlay: &[],
-                    namespaces: &part.using_namespaces,
                     // A DEFINE body is evaluated with no runtime, so there is nothing to
                     // seed from here. Note that the pre-pass DOES build a probe for a `~`
                     // inside a DEFINE body, and evaluating one then fails with "invoked
@@ -162,7 +160,7 @@ pub(super) fn evaluate_match_part(
     Ok(bindings)
 }
 
-/// Evaluate a MatchPart with FIBER-clause support (top-level queries).
+/// Evaluate a MatchPart<Resolved> with FIBER-clause support (top-level queries).
 ///
 /// Walks `clauses` in order: Pattern clauses extend bindings via the
 /// normal equi-join mechanism, Fiber clauses dispatch once per binding,
@@ -170,9 +168,9 @@ pub(super) fn evaluate_match_part(
 /// the bound variable. WHERE is applied once after all clauses.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn evaluate_match_part_with_fiber(
-    part: &MatchPart,
+    part: &MatchPart<Resolved>,
     layer: &Layer,
-    derived: &BTreeMap<String, Vec<Binding>>,
+    derived: &BTreeMap<crate::query::ast::RelationId, Vec<Binding>>,
     runtime: FiberRuntime<'_>,
     fp: &QueryFingerprint,
     overlay: &mut FiberOverlay,
@@ -198,7 +196,6 @@ pub(super) fn evaluate_match_part_with_fiber(
                             layer,
                             derived,
                             overlay: &overlay.entries,
-                            namespaces: &part.using_namespaces,
                             similarity: None,
                         },
                         bindings,
@@ -210,7 +207,6 @@ pub(super) fn evaluate_match_part_with_fiber(
                             layer,
                             derived,
                             overlay: &overlay.entries,
-                            namespaces: &part.using_namespaces,
                             similarity: runtime.similarity,
                         },
                         bindings,
@@ -256,12 +252,12 @@ pub(super) fn evaluate_match_part_with_fiber(
 ///   - bound to `fc.binding` in the extended binding
 #[allow(clippy::too_many_arguments)]
 fn apply_fiber_clause(
-    fc: &FiberClause,
+    fc: &FiberClause<Resolved>,
     clause_idx: usize,
     layer: &Layer,
     runtime: FiberRuntime<'_>,
     fp: &QueryFingerprint,
-    aliases: &BTreeMap<&str, &Iri>,
+    _aliases: &BTreeMap<&str, &Iri>,
     overlay: &mut FiberOverlay,
     into_collector: &mut Vec<Resource>,
     existing: Vec<Binding>,
@@ -286,13 +282,11 @@ fn apply_fiber_clause(
         )
     })?;
 
-    let aliased_inst_iri = resolve_fiber_institution(&fc.institution, aliases)?;
-
-    // Resolve the QueryClass IRI from the AST. Short names look up the
-    // resource in the layer by short_name and use its @id; full IRIs
-    // are used directly. Either way, the resolved IRI must be an
-    // indexed QueryClass entry.
-    let query_class_iri = resolve_query_class_iri(&fc.query_class, layer)?;
+    // Both were resolved by `query::resolve`, against the alias table and the chain
+    // respectively. This function used to redo both — a second mechanism for each name,
+    // which is what D92 removes.
+    let aliased_inst_iri = fc.institution.clone();
+    let query_class_iri = fc.query_class.clone();
     let qc_entry = index.query_class(&query_class_iri).ok_or_else(|| {
         QueryError::evaluation(format!(
             "FIBER query class '{query_class_iri}' is not a registered QueryClass"
@@ -323,10 +317,6 @@ fn apply_fiber_clause(
         ))
     })?;
 
-    // Build per-class param IRI resolution table (short_name → Iri)
-    // from the QueryClass input class's requires ∪ recommends.
-    let short_to_iri = build_param_iri_table(layer, &qc_entry.query_class);
-
     let is_a_iri = Iri::parse(wk::IS_A).unwrap();
 
     let mut extended = Vec::with_capacity(existing.len());
@@ -342,15 +332,9 @@ fn apply_fiber_clause(
         );
 
         for param in &fc.params {
-            let param_iri = match &param.name {
-                Name::FullIri(iri) => iri.clone(),
-                Name::ShortName(short) => short_to_iri.get(short).cloned().ok_or_else(|| {
-                    QueryError::evaluation(format!(
-                        "FIBER param '{short}' unresolvable against query class '{}'",
-                        qc_entry.query_class
-                    ))
-                })?,
-            };
+            // Resolved against the QueryClass's input class by `query::resolve`, which
+            // built the same short_name → Iri table this function used to rebuild here.
+            let param_iri = param.name.clone();
             let value = match &param.value {
                 ParamValue::Expression(expr) => eval_expression(expr, binding, layer, runtime)?,
                 ParamValue::Comorphism { name, source } => {
@@ -526,23 +510,6 @@ fn apply_fiber_clause(
     Ok(extended)
 }
 
-fn resolve_fiber_institution(
-    name: &Name,
-    aliases: &BTreeMap<&str, &Iri>,
-) -> Result<Iri, QueryError> {
-    match name {
-        Name::FullIri(iri) => Ok(iri.clone()),
-        Name::ShortName(alias) => aliases
-            .get(alias.as_str())
-            .map(|i| (*i).clone())
-            .ok_or_else(|| {
-                QueryError::evaluation(format!(
-                    "FIBER references undeclared institution alias '{alias}'"
-                ))
-            }),
-    }
-}
-
 /// Run the four-step comorphism pipeline for a FIBER param coercion
 /// (D2 v2 §3.5 / §6.12). Mirrors the kernel-side
 /// [`crate::nbe::eval::try_institution_invoke`] but operates on
@@ -551,8 +518,8 @@ fn resolve_fiber_institution(
 /// transformations to Pure/Read so we don't need IO mode plumbing.
 #[allow(clippy::too_many_arguments)]
 pub fn eval_comorphism_coercion(
-    name: &Name,
-    source: &Expression,
+    name: &Iri,
+    source: &Expression<Resolved>,
     binding: &Binding,
     layer: &Layer,
     index: &InstitutionIndex,
@@ -560,15 +527,10 @@ pub fn eval_comorphism_coercion(
     components: &crate::program::component::ComponentRegistry,
     ctx: &ExecutionContext,
 ) -> Result<Value, QueryError> {
-    // Resolve the comorphism by name / IRI to its index entry.
-    let comorphism_iri = match name {
-        Name::FullIri(i) => i.clone(),
-        Name::ShortName(short) => Iri::parse(short).map_err(|_| {
-            QueryError::evaluation(format!(
-                "comorphism_coercion: '{short}' is not a parseable IRI"
-            ))
-        })?,
-    };
+    // Resolved by `query::resolve` against the chain's Comorphism declarations. This used
+    // to re-derive it by PARSING the short name as an IRI, which is a third mechanism
+    // again, and one that could only work for a short name that was already an IRI.
+    let comorphism_iri = name.clone();
     let comorphism = index.comorphism(&comorphism_iri).ok_or_else(|| {
         QueryError::evaluation(format!(
             "comorphism `{comorphism_iri}` not registered in InstitutionIndex"
@@ -715,33 +677,6 @@ fn value_to_source_resource(value: &Value, layer: &Layer) -> Resource {
     }
 }
 
-/// Resolve a `FIBER fc.query_class` reference (short name or full IRI)
-/// to a QueryClass declaration's IRI. Short-name lookup walks the
-/// layer for a resource with matching `short_name` whose `is_a`
-/// includes `urn:eigenius:institution:QueryClass`.
-fn resolve_query_class_iri(name: &Name, layer: &Layer) -> Result<Iri, QueryError> {
-    match name {
-        Name::FullIri(iri) => Ok(iri.clone()),
-        Name::ShortName(short) => {
-            let qc_class_iri = Iri::parse(wk::QUERY_CLASS_CLASS).unwrap();
-            let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
-            for (iri, res) in layer.iter_all_resources() {
-                if !res.is_instance_of(&qc_class_iri) {
-                    continue;
-                }
-                if let Some(Value::String(s)) = res.get(&short_prop) {
-                    if s == short {
-                        return Ok(iri.clone());
-                    }
-                }
-            }
-            Err(QueryError::evaluation(format!(
-                "FIBER query class '{short}' not resolvable in layer (no QueryClass resource with that short_name)"
-            )))
-        }
-    }
-}
-
 /// For FIBER param values whose target property is typed
 /// `core:resource` (or `core:resource_array`), dereference IRI-shaped
 /// values against the layer and substitute the embedded resource so
@@ -826,39 +761,6 @@ fn deref_iri_to_embedded(iri: &Iri, param_iri: &Iri, layer: &Layer) -> Result<Va
     }
 }
 
-fn build_param_iri_table(layer: &Layer, class_iri: &Iri) -> BTreeMap<String, Iri> {
-    let requires_prop = Iri::parse(wk::REQUIRES).unwrap();
-    let recommends_prop = Iri::parse(wk::RECOMMENDS).unwrap();
-    let short_prop = Iri::parse(wk::SHORT_NAME).unwrap();
-
-    let class_resource = match layer.resolve(class_iri) {
-        Some(r) => r,
-        None => return BTreeMap::new(),
-    };
-
-    let mut out = BTreeMap::new();
-    let mut collect = |prop: &Iri| {
-        if let Some(Value::Array(arr)) = class_resource.get(prop) {
-            for v in arr {
-                let prop_iri = match v {
-                    Value::String(s) => Iri::parse(s).ok(),
-                    _ => None,
-                };
-                if let Some(iri) = prop_iri {
-                    if let Some(prop_res) = layer.resolve(&iri) {
-                        if let Some(Value::String(name)) = prop_res.get(&short_prop) {
-                            out.insert(name.clone(), iri);
-                        }
-                    }
-                }
-            }
-        }
-    };
-    collect(&requires_prop);
-    collect(&recommends_prop);
-    out
-}
-
 /// Evaluate one `WHERE` condition against one binding.
 ///
 /// Three outcomes, and separating them is eigenius#126. `Ok(true)` keeps the row,
@@ -871,7 +773,7 @@ fn build_param_iri_table(layer: &Layer, class_iri: &Iri) -> BTreeMap<String, Iri
 /// the condition is not satisfied. That is the case a heterogeneous chain produces
 /// legitimately and often, which is why it cannot be an error.
 fn eval_condition(
-    cond: &Expression,
+    cond: &Expression<Resolved>,
     binding: &Binding,
     layer: &Layer,
     runtime: FiberRuntime<'_>,
@@ -892,7 +794,7 @@ fn eval_condition(
 /// call sites this replaces both ended in `unwrap_or(false)`.
 fn retain_satisfying(
     bindings: Vec<Binding>,
-    conditions: &[Expression],
+    conditions: &[Expression<Resolved>],
     layer: &Layer,
     runtime: FiberRuntime<'_>,
 ) -> Result<Vec<Binding>, QueryError> {
@@ -963,7 +865,7 @@ mod tests {
 
     #[test]
     fn parser_treats_multi_arg_qualified_call_as_expression() {
-        // Multi-arg qualified-name function calls stay as Expression
+        // Multi-arg qualified-name function calls stay as Expression<Resolved>
         // in FIBER param value position (comorphisms are unary by
         // construction).
         use crate::query::ast::{Clause, Expression, ParamValue};

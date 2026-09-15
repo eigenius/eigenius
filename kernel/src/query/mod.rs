@@ -98,7 +98,8 @@ pub fn execute_with(
 /// document and the chain-commit resources accumulated by
 /// `FIBER ... INTO "<iri>"` clauses.
 ///
-/// Pipeline: lex → parse → stratify → type_check → evaluate → document wrap.
+/// Pipeline: lex → parse → stratify → resolve → type_check → evaluate → document wrap.
+/// Each stage hands the next what it worked out; see D92.
 /// The returned [`QueryOutcome::document`] follows D2 Appendix A:
 /// synthesized Property resources, a row Class, and a ResultSet
 /// referencing them. [`QueryOutcome::into_resources`] is the list of
@@ -113,22 +114,31 @@ pub fn execute_with_into(
     let tokens = lexer::tokenize(program_str).map_err(|e| vec![e])?;
 
     // 2. Parse
-    let mut program = parser::parse(tokens).map_err(|e| vec![e])?;
+    let program = parser::parse(tokens).map_err(|e| vec![e])?;
 
-    // 3. Stratification check
-    stratify::stratify(&program.definitions).map_err(|e| vec![e])?;
+    // 3. Stratify. Syntactic, so it needs nothing from the chain, and it runs before
+    //    resolution so a negation cycle does not pay for resolution's chain lookups. Its
+    //    answer is carried to evaluation rather than recomputed there (D92).
+    let strata = stratify::stratify(&program.definitions).map_err(|e| vec![e])?;
 
-    // 4. Type check
-    let type_errors = type_check::type_check(&mut program, layer);
+    // 4. Resolve every reference the program writes, against the chain. A resolution
+    //    failure blocks type-checking: without a `Program<Resolved>` there is nothing for
+    //    the checks to run on, and a name that does not resolve makes every downstream
+    //    check about it meaningless.
+    let index = crate::institution::registry::InstitutionIndex::from_layer_indexed(layer).0;
+    let program = resolve::resolve(program, layer, &index)?;
+
+    // 5. Type check — checks only; it resolves nothing.
+    let type_errors = type_check::type_check(&program, layer);
     if !type_errors.is_empty() {
         return Err(type_errors);
     }
 
-    // 5. Evaluate — row resources with synthesized Property IRIs;
+    // 6. Evaluate — row resources with synthesized Property IRIs;
     //    INTO-named FIBER responses bubble up alongside.
     let fp = QueryFingerprint::of(program_str);
     let (rows, into_resources) =
-        evaluate::evaluate(&program, layer, &fp, runtime).map_err(|e| vec![e])?;
+        evaluate::evaluate(&program, layer, &fp, runtime, &strata).map_err(|e| vec![e])?;
 
     tracing::debug!(
         { field::OPERATION } = operation::QUERY_EVALUATE,
@@ -137,7 +147,7 @@ pub fn execute_with_into(
         "EigenQL query evaluated"
     );
 
-    // 6. Wrap into a self-describing document (Appendix A).
+    // 7. Wrap into a self-describing document (Appendix A).
     let document = document::wrap(&program.query, program_str, rows);
     Ok(QueryOutcome {
         document,

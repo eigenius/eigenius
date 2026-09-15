@@ -24,6 +24,7 @@ use crate::layer::{
 };
 use crate::ontology::iri::Iri;
 use crate::ontology::well_known as wk;
+use crate::query::ast::Resolved;
 use crate::query::ast::*;
 use crate::query::error::QueryError;
 use std::collections::{BTreeMap, BTreeSet};
@@ -31,14 +32,18 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Type-check a parsed EigenQL program against a layer, and resolve the names it writes
 /// against that layer's vocabulary.
 ///
-/// **It rewrites the program.** The pass already resolved every short name it checked and
-/// then discarded the answer, leaving the evaluator to resolve each one a second time by a
-/// different mechanism. Property names — `MATCH` brace keys and dot-path segments — are
-/// rewritten in place to the IRIs they name ([`resolve_property_names`]), so the evaluator
-/// looks a property up rather than searching for one that looks like it.
+/// **It resolves nothing.** `query::resolve` ran first and produced a `Program<Resolved>`,
+/// so every reference this pass reads is already the IRI it names. What used to happen
+/// here — a pattern class resolved to validate it, a FIBER institution resolved from its
+/// alias, a query class resolved by short name, a param table rebuilt — was resolution
+/// wearing a checking pass's name, and a second mechanism for every one of those names
+/// (D92).
+///
+/// What remains is checking: that a resolved institution is indexed, that a resolved param
+/// is one the QueryClass's input class declares, that arities and types agree.
 ///
 /// Returns a list of errors (empty if valid).
-pub fn type_check(program: &mut Program, layer: &Layer) -> Vec<QueryError> {
+pub fn type_check(program: &Program<Resolved>, layer: &Layer) -> Vec<QueryError> {
     let mut errors = Vec::new();
 
     // Build the institution index once for the whole pass — every
@@ -54,16 +59,6 @@ pub fn type_check(program: &mut Program, layer: &Layer) -> Vec<QueryError> {
     // relation, not a chain class), so short-name class resolution must exempt them.
     let relation_names: BTreeSet<String> =
         program.definitions.iter().map(|d| d.name.clone()).collect();
-
-    // Resolve the property names the program writes, before anything reads them: a check
-    // that resolves a short name itself would have to repeat this scope rule, and the
-    // similarity pass below did exactly that through namespaces alone.
-    errors.extend(crate::query::resolve::resolve_property_names(
-        program,
-        layer,
-        &index,
-        &relation_names,
-    ));
 
     // Check DEFINE rules
     for def in &program.definitions {
@@ -158,7 +153,7 @@ pub fn type_check(program: &mut Program, layer: &Layer) -> Vec<QueryError> {
     let prop_var_index = build_property_variable_index(program);
     let text_indexes = resolve_active_text_indexes(layer);
     let vector_indexes = resolve_active_vector_indexes(layer);
-    let check_in_expr = |expr: &Expression, errs: &mut Vec<QueryError>| {
+    let check_in_expr = |expr: &Expression<Resolved>, errs: &mut Vec<QueryError>| {
         check_similarity(
             expr,
             &prop_var_index,
@@ -225,15 +220,15 @@ pub fn type_check(program: &mut Program, layer: &Layer) -> Vec<QueryError> {
     errors
 }
 
-/// Walk a MatchPart's WHERE conditions looking for a `~` operator
+/// Walk a MatchPart<Resolved>'s WHERE conditions looking for a `~` operator
 /// anywhere — including under boolean combinators and other nested
 /// expressions. Used by the TOP K structural check to ensure ranking
 /// has a source.
-fn any_similarity_in_where(part: &MatchPart) -> bool {
+fn any_similarity_in_where(part: &MatchPart<Resolved>) -> bool {
     part.conditions.iter().any(expr_has_similarity)
 }
 
-fn expr_has_similarity(expr: &Expression) -> bool {
+fn expr_has_similarity(expr: &Expression<Resolved>) -> bool {
     match expr {
         Expression::Similarity { .. } => true,
         Expression::Binary { left, right, .. } => {
@@ -258,9 +253,9 @@ fn expr_has_similarity(expr: &Expression) -> bool {
 /// an unresolvable short-name class is an error, not a silent degradation to an
 /// untyped match-all.
 fn check_match_part(
-    part: &MatchPart,
+    part: &MatchPart<Resolved>,
     layer: &Layer,
-    relation_names: &BTreeSet<String>,
+    _relation_names: &BTreeSet<String>,
     errors: &mut Vec<QueryError>,
 ) {
     // Check USING IRIs
@@ -284,30 +279,9 @@ fn check_match_part(
         }
     }
 
-    // Check short-name pattern classes resolve in scope.
-    for pattern in part.patterns() {
-        if let Some(Name::ShortName(short)) = &pattern.class {
-            if relation_names.contains(short) {
-                continue; // a DEFINE relation reference, not a chain class
-            }
-            match crate::query::resolve::resolve_scoped_name(
-                layer,
-                &part.using_namespaces,
-                &[wk::CLASS],
-                short,
-            ) {
-                Ok(Some(_)) => {}
-                Ok(None) => errors.push(QueryError::type_check(
-                    "unknown_class",
-                    format!(
-                        "pattern class '{short}' does not resolve to a Class in the core namespace \
-                         or any USING NAMESPACE; add `USING NAMESPACE \"<prefix>\"` or use a full IRI"
-                    ),
-                )),
-                Err(e) => errors.push(e),
-            }
-        }
-    }
+    // Pattern classes were resolved, and reported, by `query::resolve` — including the
+    // DEFINE-relation case, which used to be an exemption here. A `Pattern<Resolved>`
+    // cannot carry an unresolved class, so there is nothing left to check (D92).
 }
 
 /// Collect every variable name bound by MATCH patterns and FIBER
@@ -315,7 +289,7 @@ fn check_match_part(
 /// variables. The result is the universe of bindings visible to
 /// RETURN / ORDER BY / GROUP BY positions. There is no third binding
 /// form: D45's `BIND` clause is withdrawn and unimplemented.
-fn collect_bound_variables(program: &Program) -> BTreeSet<String> {
+fn collect_bound_variables(program: &Program<Resolved>) -> BTreeSet<String> {
     let mut vars = BTreeSet::new();
 
     for def in &program.definitions {
@@ -344,7 +318,7 @@ fn collect_bound_variables(program: &Program) -> BTreeSet<String> {
 }
 
 fn collect_pattern_vars<'a>(
-    patterns: impl Iterator<Item = &'a Pattern>,
+    patterns: impl Iterator<Item = &'a Pattern<Resolved>>,
     vars: &mut BTreeSet<String>,
 ) {
     for pattern in patterns {
@@ -367,7 +341,7 @@ fn collect_pattern_vars<'a>(
 
 /// Check that all variables referenced in an expression are bound.
 fn check_expression_variables(
-    expr: &Expression,
+    expr: &Expression<Resolved>,
     bound: &BTreeSet<String>,
     errors: &mut Vec<QueryError>,
 ) {
@@ -460,7 +434,7 @@ fn check_expression_variables(
 ///
 /// A query with no `RETURN` clause emits no rows to order — the result document carries
 /// only `matched` and `row_count` — so nothing is required of it.
-fn check_order_by_is_projected(program: &Program, errors: &mut Vec<QueryError>) {
+fn check_order_by_is_projected(program: &Program<Resolved>, errors: &mut Vec<QueryError>) {
     let items = &program.query.result;
     if items.is_empty() {
         return;
@@ -480,7 +454,7 @@ fn check_order_by_is_projected(program: &Program, errors: &mut Vec<QueryError>) 
 /// Check aggregate/GROUP BY consistency:
 /// - Aggregates only in RETURN
 /// - Non-aggregated RETURN expressions must appear in GROUP BY
-fn check_aggregate_consistency(program: &Program, errors: &mut Vec<QueryError>) {
+fn check_aggregate_consistency(program: &Program<Resolved>, errors: &mut Vec<QueryError>) {
     // Check aggregates don't appear in WHERE (always invalid, regardless of RETURN)
     for cond in &program.query.body.conditions {
         if expr_has_aggregate(cond) {
@@ -518,7 +492,7 @@ fn check_aggregate_consistency(program: &Program, errors: &mut Vec<QueryError>) 
     }
 }
 
-fn expr_has_aggregate(expr: &Expression) -> bool {
+fn expr_has_aggregate(expr: &Expression<Resolved>) -> bool {
     match expr {
         Expression::Aggregate { .. } => true,
         Expression::Binary { left, right, .. } => {
@@ -537,7 +511,7 @@ fn expr_has_aggregate(expr: &Expression) -> bool {
 // ---------------------------------------------------------------------------
 
 fn check_fiber_clauses(
-    part: &MatchPart,
+    part: &MatchPart<Resolved>,
     layer: &Layer,
     index: &InstitutionIndex,
     errors: &mut Vec<QueryError>,
@@ -575,54 +549,24 @@ fn check_fiber_clauses(
             _ => continue,
         };
 
-        // 1. Institution ref — alias must be declared, or inline IRI must
-        //    resolve to an indexed Institution. Capture the resolved IRI
-        //    for the institution-agreement check below.
-        let aliased_inst_iri: Option<Iri> = match &fc.institution {
-            Name::ShortName(alias) => {
-                if !alias_set.contains(alias.as_str()) {
-                    errors.push(QueryError::type_check(
-                        "undeclared_institution_alias",
-                        format!(
-                            "FIBER refers to undeclared institution alias '{alias}' — \
-                             add `USING INSTITUTION \"...\" AS {alias}` or use an inline IRI"
-                        ),
-                    ));
-                    None
-                } else {
-                    alias_iri.get(alias.as_str()).cloned()
-                }
-            }
-            Name::FullIri(iri) => {
-                if index.institution(iri).is_none() {
-                    errors.push(QueryError::type_check(
-                        "using_institution_unresolved",
-                        format!(
-                            "FIBER inline institution '{iri}' does not resolve to an indexed Institution"
-                        ),
-                    ));
-                    None
-                } else {
-                    Some(iri.clone())
-                }
-            }
+        // 1. The institution. `query::resolve` turned the alias or inline IRI into this
+        //    one, so what is left to CHECK is that it names an indexed Institution --
+        //    which resolution, working from the alias table, does not ask.
+        let aliased_inst_iri: Option<Iri> = if index.institution(&fc.institution).is_none() {
+            errors.push(QueryError::type_check(
+                "using_institution_unresolved",
+                format!(
+                    "FIBER institution '{}' does not resolve to an indexed Institution",
+                    fc.institution
+                ),
+            ));
+            None
+        } else {
+            Some(fc.institution.clone())
         };
 
-        // 2. Resolve the QueryClass against the index. Short-name lookup
-        //    walks indexed QueryClass declarations by their resource
-        //    short_name.
-        let qc_iri = match &fc.query_class {
-            Name::FullIri(iri) => Some(iri.clone()),
-            Name::ShortName(short) => {
-                match resolve_short_name_to_query_class(layer, &part.using_namespaces, short) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        errors.push(e);
-                        None
-                    }
-                }
-            }
-        };
+        // 2. The QueryClass, likewise resolved already; the check is that it is indexed.
+        let qc_iri = Some(fc.query_class.clone());
         let qc_entry = qc_iri.as_ref().and_then(|i| index.query_class(i));
         let qc_entry = match qc_entry {
             Some(e) => e,
@@ -631,7 +575,7 @@ fn check_fiber_clauses(
                     "fiber_query_class_not_query_class",
                     format!(
                         "FIBER query class '{}' does not resolve to an indexed QueryClass declaration",
-                        query_class_name_display(&fc.query_class)
+                        fc.query_class
                     ),
                 ));
                 continue;
@@ -722,23 +666,23 @@ fn check_fiber_clauses(
 
         let mut supplied_iris: BTreeSet<String> = BTreeSet::new();
         for param in &fc.params {
-            let resolved_iri = match &param.name {
-                Name::FullIri(iri) => Some(iri.as_str().to_string()),
-                Name::ShortName(short) => {
-                    if let Some(iri) = short_to_iri.get(short) {
-                        Some(iri.clone())
-                    } else {
-                        errors.push(QueryError::type_check(
-                            "fiber_param_short_name_unresolved",
-                            format!(
-                                "FIBER param '{short}' is not a declared property of \
-                                 QueryClass input class '{}' (requires ∪ recommends)",
-                                qc_entry.query_class
-                            ),
-                        ));
-                        None
-                    }
-                }
+            // Resolved against the QueryClass input class by `query::resolve`, which
+            // built the same short_name table this check used to build again. What is
+            // left to check is that the resolved property is one the input class
+            // declares -- a name that resolved through the namespaces could be a real
+            // property the class does not want.
+            let resolved_iri = if allowed_prop_iris.contains(param.name.as_str()) {
+                Some(param.name.as_str().to_string())
+            } else {
+                errors.push(QueryError::type_check(
+                    "fiber_param_short_name_unresolved",
+                    format!(
+                        "FIBER param '{}' is not a declared property of QueryClass input \
+                         class '{}' (requires ∪ recommends)",
+                        param.name, qc_entry.query_class
+                    ),
+                ));
+                None
             };
             if let Some(ref iri) = resolved_iri {
                 supplied_iris.insert(iri.clone());
@@ -776,8 +720,8 @@ fn check_fiber_clauses(
 /// D2 v2 §5.8 step 9 — comorphism-coercion sub-checks.
 #[allow(clippy::too_many_arguments)]
 fn check_comorphism_coercion(
-    name: &Name,
-    source: &Expression,
+    name: &Iri,
+    source: &Expression<Resolved>,
     qc_entry: &crate::institution::registry::QueryClassEntry,
     aliased_inst_iri: Option<&Iri>,
     target_param_iri: Option<&str>,
@@ -786,20 +730,10 @@ fn check_comorphism_coercion(
     errors: &mut Vec<QueryError>,
 ) {
     let _ = (qc_entry, source); // qc_entry used only for context; source typed-checked via expression-variable walk
-                                // Resolve the comorphism IRI.
-    let comorphism_iri = match name {
-        Name::FullIri(i) => i.clone(),
-        Name::ShortName(s) => match Iri::parse(s) {
-            Ok(i) => i,
-            Err(_) => {
-                errors.push(QueryError::type_check(
-                    "comorphism_unresolved",
-                    format!("comorphism coercion `{s}` is not a parseable IRI"),
-                ));
-                return;
-            }
-        },
-    };
+                                // Resolved by `query::resolve` against the chain's Comorphism declarations. This
+                                // used to re-derive it by PARSING the short name as an IRI, which could only succeed
+                                // for a short name that was already one.
+    let comorphism_iri = name.clone();
     let comorphism = match index.comorphism(&comorphism_iri) {
         Some(c) => c,
         None => {
@@ -894,7 +828,7 @@ fn check_comorphism_coercion(
 /// IRIs fall through to evaluation-time `unknown function` (no
 /// type-check error so late institution registration stays valid).
 fn check_qualified_calls(
-    expr: &Expression,
+    expr: &Expression<Resolved>,
     index: &InstitutionIndex,
     errors: &mut Vec<QueryError>,
 ) {
@@ -956,27 +890,17 @@ fn check_qualified_calls(
 /// "is this a Verdict source?" predicate is sufficient (no general
 /// type inference required).
 fn collect_verdict_bound_vars(
-    program: &Program,
-    layer: &Layer,
+    program: &Program<Resolved>,
+    _layer: &Layer,
     index: &InstitutionIndex,
 ) -> BTreeSet<String> {
     let verdict_iri = Iri::parse(wk::VERDICT).expect("well-known IRI");
     let mut verdict_vars = BTreeSet::new();
-    let visit = |part: &MatchPart, set: &mut BTreeSet<String>| {
+    let visit = |part: &MatchPart<Resolved>, set: &mut BTreeSet<String>| {
         for clause in &part.clauses {
             if let Clause::Fiber(fc) = clause {
-                let qc_iri = match &fc.query_class {
-                    Name::FullIri(iri) => Some(iri.clone()),
-                    // Ambiguity here is reported by `check_fiber_clauses`; this
-                    // best-effort verdict scan just skips an unresolved name.
-                    Name::ShortName(short) => {
-                        resolve_short_name_to_query_class(layer, &part.using_namespaces, short)
-                            .ok()
-                            .flatten()
-                    }
-                };
-                if let Some(iri) = qc_iri {
-                    if let Some(qc) = index.query_class(&iri) {
+                {
+                    if let Some(qc) = index.query_class(&fc.query_class) {
                         if qc.result_class == verdict_iri {
                             set.insert(fc.binding.name.clone());
                         }
@@ -1005,7 +929,7 @@ fn collect_verdict_bound_vars(
 /// so propagation through binary / unary / aggregate / dot-path / etc.
 /// is structurally impossible.
 fn is_verdict_source(
-    expr: &Expression,
+    expr: &Expression<Resolved>,
     verdict_vars: &BTreeSet<String>,
     index: &InstitutionIndex,
 ) -> bool {
@@ -1028,7 +952,7 @@ fn is_verdict_source(
 ///   directly in WHERE (or as an AND/OR/NOT operand) without a
 ///   wrapping postfix predicate.
 fn check_verdict_typing(
-    part: &MatchPart,
+    part: &MatchPart<Resolved>,
     verdict_vars: &BTreeSet<String>,
     index: &InstitutionIndex,
     errors: &mut Vec<QueryError>,
@@ -1047,7 +971,7 @@ fn check_verdict_typing(
 /// Recursively walk `expr` checking every `VerdictPredicate { operand }`
 /// node and every Boolean-required sub-position.
 fn check_verdict_in_expression(
-    expr: &Expression,
+    expr: &Expression<Resolved>,
     verdict_vars: &BTreeSet<String>,
     index: &InstitutionIndex,
     errors: &mut Vec<QueryError>,
@@ -1105,7 +1029,7 @@ fn check_verdict_in_expression(
 /// rejects a bare Verdict source — the user must apply a postfix
 /// predicate (`?v HOLDS`, etc.) to project to Boolean.
 fn check_boolean_position(
-    expr: &Expression,
+    expr: &Expression<Resolved>,
     verdict_vars: &BTreeSet<String>,
     index: &InstitutionIndex,
     errors: &mut Vec<QueryError>,
@@ -1142,25 +1066,6 @@ fn collect_property_iris(class_resource: &Resource, prop_iri: &Iri) -> Vec<Iri> 
     }
 }
 
-/// Resolve a `FIBER fc.query_class` short name against indexed
-/// QueryClass declarations. The QueryClass class itself is not a
-/// `urn:eigenius:core:Class` instance — it is its own ontology class
-/// — so the lookup filters on `is_a == QueryClass` directly.
-fn resolve_short_name_to_query_class(
-    layer: &Layer,
-    namespaces: &[String],
-    short: &str,
-) -> Result<Option<Iri>, QueryError> {
-    crate::query::resolve::resolve_scoped_name(layer, namespaces, &[wk::QUERY_CLASS_CLASS], short)
-}
-
-fn query_class_name_display(name: &Name) -> String {
-    match name {
-        Name::ShortName(s) => s.clone(),
-        Name::FullIri(i) => i.as_str().to_string(),
-    }
-}
-
 // ─── D43 §4 — similarity-operator typing ─────────────────────────────
 
 /// Schema view a similarity call needs: which property a variable
@@ -1178,15 +1083,13 @@ struct PropertyBinding {
 ///
 /// Infallible, and takes no layer: `resolve_property_names` already resolved every key
 /// against the full scope rule and reported what it could not. This reads the answer.
-fn build_property_variable_index(program: &Program) -> BTreeMap<String, PropertyBinding> {
+fn build_property_variable_index(program: &Program<Resolved>) -> BTreeMap<String, PropertyBinding> {
     let mut out: BTreeMap<String, PropertyBinding> = BTreeMap::new();
-    let mut visit = |part: &MatchPart| {
+    let mut visit = |part: &MatchPart<Resolved>| {
         for pat in part.patterns() {
             for pp in &pat.properties {
                 if let ValueOrVariable::Variable(var) = &pp.object {
-                    if let Some(property_iri) =
-                        crate::query::resolve::resolved_property_iri(&pp.property)
-                    {
+                    if let Some(property_iri) = Some(pp.property.clone()) {
                         out.entry(var.name.clone())
                             .or_insert(PropertyBinding { property_iri });
                     }
@@ -1232,7 +1135,7 @@ fn property_is_string_typed(property_iri: &Iri, layer: &Layer) -> bool {
 /// Recursively walk `expr`, checking every `Similarity` node against
 /// the schema view per D43 §4.3 / §4.4.
 fn check_similarity(
-    expr: &Expression,
+    expr: &Expression<Resolved>,
     prop_var_index: &BTreeMap<String, PropertyBinding>,
     text_indexes: &[ActiveTextIndex],
     vector_indexes: &[ActiveVectorIndex],
@@ -1336,7 +1239,7 @@ fn check_similarity(
 #[allow(clippy::too_many_arguments)]
 fn check_similarity_node(
     property: &Variable,
-    query: &Expression,
+    query: &Expression<Resolved>,
     hints: &HintSet,
     prop_var_index: &BTreeMap<String, PropertyBinding>,
     text_indexes: &[ActiveTextIndex],
@@ -1507,8 +1410,14 @@ mod tests {
 
     fn check(layer: &Layer, query_str: &str) -> Vec<QueryError> {
         let tokens = tokenize(query_str).unwrap();
-        let mut program = parser::parse(tokens).unwrap();
-        type_check(&mut program, layer)
+        let program = parser::parse(tokens).unwrap();
+        let index = crate::institution::registry::InstitutionIndex::from_layer_indexed(layer).0;
+        match crate::query::resolve::resolve(program, layer, &index) {
+            Ok(program) => type_check(&program, layer),
+            // Resolution failure blocks type-checking: without a resolved program there
+            // is nothing for the checks to run on. Its errors are the answer (D92).
+            Err(errors) => errors,
+        }
     }
 
     #[test]
@@ -1572,9 +1481,12 @@ mod tests {
         let layer = build_core_layer();
         let errors = check(
             &layer,
+            // The pattern is unclassed on purpose. Naming `Foo(?x)` here would be
+            // rejected by RESOLUTION first, which blocks type-checking (D92), and this
+            // test would then be checking the staging rather than the USING rule.
             r#"
             USING "urn:eigenius:nonexistent:Foo"
-            MATCH Foo(?x) {}
+            MATCH ?x {}
             "#,
         );
         assert!(errors.iter().any(|e| e.rule == "using_unresolved"));
@@ -1671,11 +1583,13 @@ mod tests {
             RETURN [] { x: ?x }
             "#,
         );
+        // Reported by RESOLUTION now, not by this pass: a query class that names nothing
+        // cannot produce a `Program<Resolved>`, so type-checking never runs on it (D92).
+        // The diagnosis survives the move — the name is still the one the reader wrote.
         assert!(
-            errors
-                .iter()
-                .any(|e| e.rule == "fiber_query_class_not_query_class"),
-            "expected fiber_query_class_not_query_class; got {errors:?}"
+            errors.iter().any(|e| e.rule == "unresolved_reference"
+                && e.message.contains("not_a_real_query_class")),
+            "expected the query class to be reported unresolvable; got {errors:?}"
         );
     }
 
