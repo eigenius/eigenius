@@ -9,10 +9,67 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **ACTIVE: entry −4c (`2026-09-14`). D92 — the resolved query AST (#248).** On
-> `d92-resolved-query-ast`. Workspace suite green, clippy and fmt clean.
+> **ACTIVE: entry −4d (`2026-09-15`). Query-processing workplan, item D — vector-index
+> lifecycle (#133, #132).** Not started.
 >
-> **Exit gate: the merge request lands and #248 closes.**
+> **Exit gate: the merge request lands and both issues close.**
+>
+> **Three entry points that are written, tested and never invoked.** One decision the
+> workplan already took: D43 names layer deletion as the cancellation point and four
+> source comments repeat it, so cancelling from the caller would leave those comments
+> false and any other delete path uncovered — plumb the registry into the collector so the
+> cancel happens where the delete is decided.
+>
+> **Carry in: make an index-driven read on an uncommitted layer say so.** `PendingStage`
+> is keyed by `LayerId` and holds exactly the built-but-unpersisted layers, so
+> `pending.contains_key(&layer.id)` already *is* "this layer is uncommitted" — no new
+> state needed. `scan_chain` should error on that rather than return an empty result.
+>
+> Found via item F: `go_recall.rs` built its layer on a RocksDB backend and never called
+> `store_layer`, so every index-driven read came back empty and the sweep embedded 0
+> subjects. That test was simply wrong — `build` is prepare, `store_layer` is commit, and
+> it was reading an uncommitted transaction. What makes it worth a guard is that the
+> layer is HALF readable: `Layer::get_resource` consults `pending` deliberately, so direct
+> resolution works while index-driven discovery silently does not, with nothing saying
+> which half you are in.
+>
+> **Not a Drop-based check**, though that was the first instinct. The commit pipeline is
+> `build → structural_validate → persist`, so a REJECTED commit legitimately drops an
+> uncommitted layer; a Drop warning would fire on normal operation unless every
+> abandonment site remembered to mark itself, which is the discipline-someone-must-recall
+> shape D92 exists to remove. The read-side check has no false positives: a rejected layer
+> is dropped without index reads.
+>
+> Production never hits this — the pipeline always persists. The exposure is to test
+> authors and hand-written integration paths, which is what `go_recall.rs` was. Too small
+> for its own merge request; it rides with D because D is the vector-index lifecycle.
+
+
+> **entry −4b2 (`2026-09-15`). Workplan item F — the Candle CPU sweep (#63). DONE, merged
+> as `7d73cfa` (#252).** 101.2s → 14.9s, 6.8×, recall@10 = 7/7 throughout, inside the
+> issue's 15-30s target.
+>
+> **Bucketing was the issue's ask and got halfway**: sorting cache-miss texts by length
+> before chunking took 101.2s → 46.0s, because `BatchLongest` padding scales a batch's
+> cost to its longest member.
+>
+> **The rest was not padding at all — the sweep used 2.5 of 24 cores.** `gemm` does not
+> parallelise much at BERT-small's shapes. A wider batch is monotonically worse
+> (32/64/128/256 → 46.4/53.4/56.0/89.7s) and Intel MKL buys 6% for 9× the CPU, saturating
+> by 8 threads then regressing. Dispatching batches concurrently — parallelism at the
+> BATCH level, not inside the gemm — gives 46.0s → 14.9s on the same eight cores MKL
+> needed for 42.3s.
+>
+> **No `mkl` feature ships.** It cost 38 transitive dependencies and 403 lines of
+> `Cargo.lock`, permanent whether the flag is on or not. The finding is in the D43 notes.
+>
+> **The measured gate had been broken and nobody knew**, because it is `#[ignore]`d. No
+> number in #63 was reproducible until that was fixed — including the issue's own premise,
+> whose 162s/326s pair does not transfer between machines.
+
+
+> **entry −4c (`2026-09-14`). D92 — the resolved query AST (#248). DONE, merged as `8fec584`
+> (#251).** #248 closed.
 >
 > **Eight `Name` positions, and six were not following the resolution rule.** #249's review
 > found one guarded state; auditing the rest found that a pattern class was resolved THREE
