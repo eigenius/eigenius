@@ -85,6 +85,18 @@ pub struct SweepOptions<'a> {
     /// exactly. Larger values raise per-batch peak memory roughly
     /// linearly.
     pub batch_size: usize,
+    /// How many batches to dispatch concurrently. `1` is sequential.
+    ///
+    /// **This is where the parallelism has to be** (eigenius#63). A batched BERT-small
+    /// forward does not give `gemm` enough work to spread across cores — the sweep used
+    /// 2.5 of 24 — and the fix is not a wider batch (monotonically worse) nor a threaded
+    /// BLAS (Intel MKL: 6% for 9× the CPU, saturating by 8 threads then regressing). It
+    /// is several batches at once, each near-single-threaded: 46.0s to 13.8s on the same
+    /// eight cores MKL needed for 42.3s.
+    ///
+    /// Peak memory scales with this times `batch_size`, since that many batches are in
+    /// flight at once.
+    pub parallelism: usize,
 }
 
 impl Default for SweepOptions<'_> {
@@ -94,8 +106,20 @@ impl Default for SweepOptions<'_> {
             max_retries: 0,
             retry_backoff_base_ms: 100,
             batch_size: DEFAULT_BATCH_SIZE,
+            parallelism: default_parallelism(),
         }
     }
+}
+
+/// The default for [`SweepOptions::parallelism`]: the machine's parallelism, capped.
+///
+/// Capped at 8 because the measured returns flatten there — 4-way gives 17.8s, 8-way
+/// 13.8s, 16-way 13.0s — and each additional in-flight batch costs peak memory. A host
+/// that reports nothing usable gets 1, which is the sequential behaviour this replaced.
+fn default_parallelism() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().min(8))
+        .unwrap_or(1)
 }
 
 /// Default batch size for [`SweepOptions::batch_size`]. 32 is the
@@ -967,29 +991,105 @@ fn sweep_one_index(
     // SAFETY-via-lifetime: BTreeMap iteration over `&entries`
     // borrows immutably; collect the (text, indices) pairs into
     // owned slots before mutating `entries[idx].vector` below.
-    let dedup: Vec<(String, Vec<usize>)> = text_to_entries
+    let mut dedup: Vec<(String, Vec<usize>)> = text_to_entries
         .into_iter()
         .map(|(t, idxs)| (t.to_string(), idxs))
         .collect();
+
+    // **Length-bucket before chunking (eigenius#63).** `Tokenizer::encode_batch` pads with
+    // `BatchLongest`, so a batch's forward cost scales to its LONGEST text. These arrive
+    // in `BTreeMap` order — lexicographic, which is uncorrelated with length — so one
+    // 200-token GO label lands among 10-token ones and inflates every one of them to its
+    // own width. On a corpus with that spread the padding waste can outfight the
+    // BLAS-efficiency win batching is for: the issue reports batching making the sweep
+    // SLOWER than the per-text loop it replaced, 162s to 326s.
+    //
+    // Sorting by length first puts similar texts together, so the padding stays small.
+    // The sort is stable, so equal-length texts keep their lexicographic order and the
+    // dispatch order stays deterministic.
+    //
+    // **This reorders DISPATCH, not input.** `idxs` carries each text's original entry
+    // positions, so the fan-out below writes the same `entries` slots whatever order the
+    // chunks ran in; pass 3 iterates `entries`, so the segment write and the HNSW build
+    // order are untouched. `sweep_results_are_independent_of_batch_size` is the invariant
+    // that pins it.
+    //
+    // UTF-8 byte length is a proxy for token count, not a measure of it. Grouping similar
+    // lengths is the whole requirement — the ordering need not be exact — and it costs
+    // nothing, where a true token count would mean tokenising twice.
+    dedup.sort_by_key(|(text, _)| text.len());
+
     let batch_size = options.batch_size.max(1);
-    for chunk in dedup.chunks(batch_size) {
+    let parallelism = options.parallelism.max(1);
+
+    // **Dispatch several batches at once** (eigenius#63). One batched forward does not
+    // give `gemm` enough work to spread across cores, so a sequential sweep left most of
+    // the machine idle; several near-single-threaded batches fill it.
+    //
+    // Results are collected and applied IN ORDER below, so the cache inserts, the
+    // `entries` writes and the error reported for a failing batch are all identical to
+    // the sequential path. Only the order the embedder is CALLED in changes, and
+    // `Embedder` is `Send + Sync` precisely so that is allowed.
+    let all_chunks: Vec<&[(String, Vec<usize>)]> = dedup.chunks(batch_size).collect();
+    let mut embedded: Vec<Vec<Vec<f32>>> = Vec::with_capacity(all_chunks.len());
+
+    for group in all_chunks.chunks(parallelism) {
+        // Checked per group rather than per batch: a batch already in flight cannot be
+        // interrupted, so this is the same granularity the sequential path had — the
+        // next dispatch does not start once the flag flips.
         if is_cancelled(options.cancellation) {
             return Err(SweepError::Cancelled);
         }
+        let emb = embedder.as_ref();
+        let results: Vec<Result<Vec<Vec<f32>>, EmbedderError>> = if group.len() == 1 {
+            // Sequential: no thread, so a `parallelism` of 1 is exactly what it was.
+            let texts: Vec<&str> = group[0].iter().map(|(t, _)| t.as_str()).collect();
+            vec![embed_batch_with_retry(emb, &texts, options)]
+        } else {
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = group
+                    .iter()
+                    .map(|chunk| {
+                        scope.spawn(move || {
+                            let texts: Vec<&str> = chunk.iter().map(|(t, _)| t.as_str()).collect();
+                            embed_batch_with_retry(emb, &texts, options)
+                        })
+                    })
+                    .collect();
+                // A panicking embedder propagates as a panic, as it did sequentially.
+                handles
+                    .into_iter()
+                    .map(|h| match h.join() {
+                        Ok(r) => r,
+                        Err(payload) => std::panic::resume_unwind(payload),
+                    })
+                    .collect()
+            })
+        };
+
+        for (chunk, result) in group.iter().zip(results) {
+            embedded.push(result.map_err(|e| {
+                // First-subject attribution is lossy when many subjects
+                // share a batch; the fallback-to-per-text path in
+                // `embed_batch_with_retry` ensures the *actual* broken
+                // subject's text is the one that surfaces here when the
+                // root cause is per-input.
+                //
+                // Attributed to the chunk that failed, not the group: each chunk keeps
+                // its own first index, so a concurrent dispatch names the same subject a
+                // sequential one would.
+                let first_idx = chunk[0].1[0];
+                SweepError::EmbedderDispatch {
+                    index: index.iri.as_str().to_string(),
+                    subject: entries[first_idx].subject.as_str().to_string(),
+                    source: e,
+                }
+            })?);
+        }
+    }
+
+    for (chunk, vectors) in all_chunks.iter().zip(embedded) {
         let texts: Vec<&str> = chunk.iter().map(|(t, _)| t.as_str()).collect();
-        let vectors = embed_batch_with_retry(embedder.as_ref(), &texts, options).map_err(|e| {
-            // First-subject attribution is lossy when many subjects
-            // share a batch; the fallback-to-per-text path in
-            // `embed_batch_with_retry` ensures the *actual* broken
-            // subject's text is the one that surfaces here when the
-            // root cause is per-input.
-            let first_idx = chunk[0].1[0];
-            SweepError::EmbedderDispatch {
-                index: index.iri.as_str().to_string(),
-                subject: entries[first_idx].subject.as_str().to_string(),
-                source: e,
-            }
-        })?;
         stats.embedder_calls += texts.len();
         for ((text, idxs), v) in chunk.iter().zip(vectors) {
             if let Some(c) = cache {
@@ -1387,6 +1487,62 @@ mod tests {
         assert_eq!(
             seg_1.vectors, seg_32.vectors,
             "vector payload must be byte-identical regardless of batch size"
+        );
+    }
+
+    /// **Concurrency must not reach the result** (eigenius#63).
+    ///
+    /// Dispatching several batches at once changes the order the embedder is CALLED in.
+    /// It must not change the order anything is WRITTEN in: the segment's subjects and
+    /// vectors, and the `embedder_calls` count, all have to match the sequential sweep
+    /// byte for byte. Results are collected and applied in chunk order to make that so,
+    /// and this is what would catch applying them as they complete instead.
+    #[test]
+    fn sweep_results_are_independent_of_parallelism() {
+        const N: usize = 75;
+        let run = |parallelism: usize| {
+            let layer = build_corpus(
+                "urn:eigenius:test:body",
+                "urn:eigenius:embed:dummy:v1",
+                8,
+                N,
+            );
+            let mut reg = EmbedderRegistry::new();
+            reg.register(Arc::new(DummyEmbedder::new(
+                "urn:eigenius:embed:dummy:v1",
+                8,
+            )));
+            let opts = SweepOptions {
+                batch_size: 8,
+                parallelism,
+                ..SweepOptions::default()
+            };
+            let report = sweep_layer_vectors_with_options(&layer, &reg, None, &opts)
+                .expect("sweep should succeed");
+            let seg = layer
+                .storage()
+                .vector_index
+                .get_segment(&iri("urn:eigenius:test:vi"), layer.id())
+                .expect("storage")
+                .expect("segment was written");
+            (report, seg)
+        };
+
+        let (report_seq, seg_seq) = run(1);
+        let (report_par, seg_par) = run(6);
+
+        assert_eq!(report_seq.total_subjects, N);
+        assert_eq!(report_par.total_subjects, N);
+        let stats_key = iri("urn:eigenius:test:vi");
+        assert_eq!(
+            report_seq.per_index.get(&stats_key).unwrap().embedder_calls,
+            report_par.per_index.get(&stats_key).unwrap().embedder_calls,
+            "embedder_calls counts work, not dispatches — concurrency must not change it"
+        );
+        assert_eq!(seg_seq.subjects, seg_par.subjects, "subject IRI order");
+        assert_eq!(
+            seg_seq.vectors, seg_par.vectors,
+            "vector payload must be byte-identical regardless of concurrency"
         );
     }
 

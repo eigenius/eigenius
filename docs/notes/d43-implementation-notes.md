@@ -152,6 +152,7 @@ The semantic recall test [`crates/eigenius-embedder-candle/tests/go_recall.rs`](
 | Vector sweep, CPU per-text (baseline) | 162s |
 | Vector sweep, CPU batched at batch_size=32 | 326s |
 | Vector sweep, CUDA batched at batch_size=32 (RTX 4070) | **3.62s** |
+| — superseded for the batched rows by the `2026-09-15` measurement below — | |
 | Per-query embed + flat search (CPU) | ~130ms |
 | Per-query embed + flat search (CUDA) | ~30ms |
 
@@ -159,7 +160,83 @@ The semantic recall test [`crates/eigenius-embedder-candle/tests/go_recall.rs`](
 
 On **CUDA** (`cargo test -p eigenius-embedder-candle --features cuda ...`) the result is what the trait promised: a single forward pass over `[32, max_seq]` saturates the GPU's compute units, so the dispatch saving dwarfs every other cost. 162s → 3.62s — a 45× speedup over the per-text CPU baseline.
 
-On **CPU**, the batched path was actually ~2× *slower* (326s vs 162s) on this corpus. The cause is well-understood: `Tokenizer::encode_batch` uses `BatchLongest` padding, so each batch's forward cost is `[batch, max_seq] × hidden`. GO Class labels run from ~10 to a few hundred tokens, and a batch with one long member multiplies everyone's compute by an order of magnitude. CPU BLAS's batched-GEMM win (typically 2-5× on fixed-length batches) gets out-fought by that padding penalty. The single-text CPU path embeds each Resource at its own native length and avoids the waste entirely. The standard cure is length-bucketed batching (sort by `text.len()` then chunk so a batch's members are similar in length); that's tracked separately and would be the path to a fast CPU sweep on heterogeneous corpora without needing a GPU.
+On **CPU**, the batched path was actually ~2× *slower* (326s vs 162s) on this corpus. The cause is well-understood: `Tokenizer::encode_batch` uses `BatchLongest` padding, so each batch's forward cost is `[batch, max_seq] × hidden`. GO Class labels run from ~10 to a few hundred tokens, and a batch with one long member multiplies everyone's compute by an order of magnitude. CPU BLAS's batched-GEMM win (typically 2-5× on fixed-length batches) gets out-fought by that padding penalty. The single-text CPU path embeds each Resource at its own native length and avoids the waste entirely.
+
+### Length-bucketed batching (eigenius#63), measured `2026-09-15`
+
+The cure the paragraph above predicted, applied: sort the deduplicated cache-miss texts by `text.len()` before chunking, so a batch's members are similar in length and the padding stays small. Three runs per configuration, one machine (RTX A6000, CUDA 12.8), same 1 007-Class corpus:
+
+| device | before | after | |
+|---|---|---|---|
+| CPU | 101.19s | **46.37s** | 2.18× |
+| CUDA | 1.44s | **0.93s** | 1.55× |
+
+recall@10 stayed 7/7 in every run, with identical ranks — the bucketing changes dispatch order and nothing else, which `sweep_results_are_independent_of_batch_size` pins.
+
+**The hypothesis held directionally, and overstated itself.** CPU is far more padding-sensitive than CUDA, as predicted. But CUDA is not *insensitive*: it gains 1.55×, where the earlier text implied the dispatch saving made padding waste irrelevant there.
+
+**Two numbers above do not reproduce on this machine.** The 162s / 326s pair was measured elsewhere; here the batched CPU baseline is 101s, so the "batching is 2× slower than per-text" result is a property of that machine's BLAS and core count, not a portable fact. The before/after in the table is same-machine, same-day, and is the comparison to trust.
+
+**eigenius#63's target of ~15-30s on CPU was not reached** — 46s is 2.18×, not the 5-10× that target implies. The remaining cost is not padding: with bucketing, a batch's members already have similar widths. Getting further would mean a smaller model, quantisation, or accepting that a 1 000-Resource CPU sweep costs ~45s.
+
+### Where the CPU sweep's time actually goes, measured `2026-09-15`
+
+Bucketing halved it; the obvious follow-ups were measured rather than assumed, and the
+expected winner lost.
+
+| approach | sweep | cores used |
+|---|---|---|
+| batched, unbucketed | 101.2s | ~2.5 |
+| **+ length bucketing** | **46.0s** | ~2.5 |
+| + Intel MKL, 24 threads | ~43.5s | ~23 |
+| + Intel MKL, 8 threads (its best) | 42.3s | ~8 |
+| **+ parallel batch dispatch, 8-way** | **13.8s** | ~8 |
+
+**The sweep was using 2.5 of 24 cores.** `gemm` does not parallelise much at BERT-small's
+shapes, so the machine sat idle. That measurement is what makes the rest legible.
+
+**A bigger batch is worse, monotonically**: 32 → 46.4s, 64 → 53.4s, 128 → 56.0s, 256 →
+89.7s. `DEFAULT_BATCH_SIZE = 32` was not a compromise against padding waste, as the
+comment implied — it is simply the right number.
+
+**Intel MKL is not worth it here.** It links only against a *system* oneMKL: Candle pins
+`intel-mkl-src`'s STATIC config, and when no system MKL is found that crate downloads MKL
+2020.1, which does not export `hgemm_` — the f16 BLAS symbol `candle-core/src/mkl.rs`
+calls — so the build fails at link. With `intel-oneapi-mkl-devel` installed it links and
+runs, and buys **6%** for **9× the CPU**. Scaling `MKL_NUM_THREADS` shows why: 1 → 127s,
+4 → 54.7s, 8 → 42.3s, 24 → ~43.5s. It saturates by 8 threads and then regresses, because
+these matmuls are too small for intra-op threading to pay. Run-to-run variance also widens
+from ±1s to ±7s.
+
+**No `mkl` feature ships.** It was added to run the measurement above and removed after:
+enabling it costs 38 transitive dependencies and 403 lines of `Cargo.lock` — `intel-mkl-src`
+pulls in `ocipkg`, `oci-spec`, `tar`, `chrono` and the whole `windows-*` family — because
+an optional dependency still resolves into the lockfile whether or not the feature is on.
+That is a permanent cost for a measured 6% regression-in-disguise. The finding is the
+thing worth keeping; the flag is not.
+
+**The parallelism has to be at the batch level, and that is what `SweepOptions::parallelism`
+now does.** Dispatching several batches concurrently — each near-single-threaded — gives
+**46.0s → 14.9s** measured on the shipped implementation (three runs: 15.33 / 14.62 /
+14.80), on the same eight cores MKL needed for 42.3s. That is inside eigenius#63's
+15-30s target. Returns flatten after 8, which is where `default_parallelism()` caps:
+4-way gives 17.8s, 8-way 13.8s, 16-way 13.0s, each additional in-flight batch costing
+peak memory.
+
+CUDA is unchanged at 0.91s — it was never core-starved, so concurrent dispatch neither
+helps nor hurts it.
+
+`Embedder` is already `Send + Sync`. Results are collected and applied in chunk order, so
+the segment write, the cache inserts and the subject named in a dispatch error are all
+identical to the sequential path; `sweep_results_are_independent_of_parallelism` pins
+that. Cancellation is checked per group, which is the granularity the sequential path had
+— a batch already in flight cannot be interrupted either way.
+
+It does not compose with MKL, which already saturates the cores.
+
+**End to end: 101.2s → 14.9s, 6.8×**, recall@10 = 7/7 at every step.
+
+**The harness had to be repaired first.** `go_recall.rs` built its layer on a RocksDB backend and never called `store_layer`, so the derived triple index stayed empty, `resolve_active_vector_indexes` (index-driven, via `scan_chain`) found nothing, the sweep embedded **0 subjects**, and the query failed with `similarity_hint_via_vector_no_vector_index`. The test is `#[ignore]`d, so CI never ran it and never reported the breakage; its sibling `d43_go_subset_integration` has carried the `store_layer` call, with the same explanation, since the D65 index lifecycle changed. No number in this section could be reproduced until that was fixed.
 
 Functionally the batched path is correct on both devices — round-trip parity is pinned by [`sweep_results_are_independent_of_batch_size`](../../kernel/src/query/vector/indexing.rs) and the recall@10 stays at 7/7. The intra-sweep deduplication contract that the cache supplied in the per-subject loop is preserved in the batched path explicitly (group cache-miss entries by text, dispatch each unique text once, fan out to peers). Cancellation responsiveness was tightened to also cover the case where cancel fires *during* the final batch's embed — the segment write is now gated on a post-batch cancel check so the cooperative-cancel contract holds regardless of batch size.
 
