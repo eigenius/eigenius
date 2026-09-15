@@ -83,8 +83,19 @@ pub enum TaskStatus {
     /// Persisted mid-flight but not being driven right now (e.g.,
     /// kernel crashed and we haven't picked it back up yet).
     Suspended,
-    /// Cancel requested; waiting on the cooperative grace window
-    /// (D21 §8 cancellation).
+    /// Cancel requested on a task something is driving; waiting on the cooperative
+    /// grace window (D21 §8 cancellation).
+    ///
+    /// **Transient, and deliberately neither resumable nor terminal.** All three
+    /// pin-gathering sites key on `!is_terminal()`, so a record parked here pins its
+    /// `layer_head` as a GC root, blocks `DeleteBranch` under `CheckPins`, and refuses
+    /// consolidation over it. Two things guarantee it is left: the driving evaluator
+    /// finishes the cancellation, or — if the process that was driving it is gone — the
+    /// next restart's resume sweep writes `Cancelled` without re-executing anything
+    /// (eigenius#134).
+    ///
+    /// `CancelTask` never puts a `Suspended` task here: nothing is driving it, so there
+    /// is no window to wait on and it terminates outright.
     Cancelling,
     /// Terminated successfully; `result_layer_head` is set.
     Completed,

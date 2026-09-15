@@ -125,6 +125,18 @@ impl SweepHandle {
     }
 }
 
+/// What an async sweep produced: its task handle, always, and the sweep's own result.
+///
+/// The two are separate because they answer different questions. `result` is whether the
+/// vectors were written; `handle` is the task that tried, carrying the `task_id` and the
+/// terminal [`TaskStatus`] an observer needs — and needs most when `result` is `Err`,
+/// since the registry entry is dropped before [`SweepCoordinator::trigger_async`]
+/// returns and the handle is then the only remaining trace.
+pub struct SweepOutcome {
+    pub handle: SweepHandle,
+    pub result: Result<SweepReport, SweepError>,
+}
+
 /// `BTreeMap<LayerId, Arc<SweepHandle>>` with thread-safe
 /// `register` / `lookup` / `cancel_by_layer` / `iter` operations.
 /// Wrapped in `Arc<RwLock<…>>` internally so the
@@ -598,15 +610,19 @@ impl SweepCoordinator {
     /// dispatches per [`AsyncSweepOptions`]. Registers the sweep
     /// for observability + cancellation throughout.
     ///
-    /// Returns `Ok(None)` when no active VectorIndex Resources
-    /// are visible — same shape as [`Self::trigger_blocking`].
-    pub async fn trigger_async(
-        &self,
-        layer: Arc<Layer>,
-    ) -> Result<Option<(SweepHandle, SweepReport)>, SweepError> {
+    /// Returns `None` when no active VectorIndex Resources are visible — same
+    /// short-circuit as [`Self::trigger_blocking`] — and otherwise a [`SweepOutcome`]
+    /// carrying the handle **whether the sweep succeeded or failed**.
+    ///
+    /// The handle on the failure path is the point (eigenius#254). This unregisters
+    /// before returning, so a finished sweep exists nowhere else: propagating the error
+    /// alone would leave the caller knowing that a sweep failed but not which task it
+    /// was, and a failed sweep is the case worth recording — its layer is left with no
+    /// vectors, which no query reports as an error.
+    pub async fn trigger_async(&self, layer: Arc<Layer>) -> Option<SweepOutcome> {
         let active = resolve_active_vector_indexes(&layer);
         if active.is_empty() {
-            return Ok(None);
+            return None;
         }
         let indexes: Vec<Iri> = active.iter().map(|a| a.iri.clone()).collect();
         let record = TaskRecord::new_vector_sweep(
@@ -649,8 +665,10 @@ impl SweepCoordinator {
             self.admit_swept_segments_to_cache(&layer, &active);
         }
         self.registry.unregister(&layer_id);
-        let report = outcome?;
-        Ok(Some(((*handle).clone(), report)))
+        Some(SweepOutcome {
+            handle: (*handle).clone(),
+            result: outcome,
+        })
     }
 
     /// Post-sweep: for every `(active VectorIndex, just-committed
@@ -1088,14 +1106,12 @@ mod tests {
         let coord = SweepCoordinator::new(Arc::new(reg), None);
 
         let start = std::time::Instant::now();
-        let outcome = coord
-            .trigger_async(Arc::clone(&layer))
-            .await
-            .expect("sweep");
+        let outcome = coord.trigger_async(Arc::clone(&layer)).await;
         let elapsed = start.elapsed();
 
-        let (handle, report) = outcome.expect("handle + report");
-        assert_eq!(handle.status(), TaskStatus::Completed);
+        let outcome = outcome.expect("head has an active index");
+        assert_eq!(outcome.handle.status(), TaskStatus::Completed);
+        let report = outcome.result.expect("sweep");
         assert_eq!(report.total_subjects, 16);
         assert!(
             elapsed.as_millis() < 400,
@@ -1112,7 +1128,7 @@ mod tests {
             .unwrap();
         let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
         let coord = make_coordinator();
-        assert!(coord.trigger_async(layer).await.expect("sweep").is_none());
+        assert!(coord.trigger_async(layer).await.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1125,11 +1141,12 @@ mod tests {
         let mut reg = EmbedderRegistry::new();
         reg.register(Arc::new(DummyEmbedder::new(model, 8)));
         let coord = SweepCoordinator::new(Arc::new(reg), None);
-        let _ = coord
+        coord
             .trigger_async(Arc::clone(&layer))
             .await
-            .expect("sweep")
-            .expect("handle");
+            .expect("head has an active index")
+            .result
+            .expect("sweep");
 
         let segment = layer
             .storage()
@@ -1438,8 +1455,9 @@ mod tests {
         coord
             .trigger_async(Arc::clone(&head))
             .await
-            .expect("post-Load sweep")
-            .expect("head has an active index");
+            .expect("head has an active index")
+            .result
+            .expect("post-Load sweep");
         let handles = coord
             .trigger_reindex_async(Arc::clone(&head))
             .await
@@ -1468,6 +1486,41 @@ mod tests {
             cursor = layer.parent().map(|p| p.as_ref());
         }
         assert_eq!(checked, 2, "expected a segment at both L2 and L3");
+    }
+
+    /// A failed sweep hands back its handle, not just an error.
+    ///
+    /// The registry entry is dropped before `trigger_async` returns, so the handle is the
+    /// only remaining trace of the task — and the failure case is the one worth tracing:
+    /// the layer is left with no vectors, and a query against it returns fewer hits
+    /// rather than an error (eigenius#254).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_failed_sweep_still_returns_its_task_handle() {
+        // A corpus declaring a model no embedder is registered for: the sweep resolves the
+        // Index, registers the task, and fails on dispatch.
+        let layer = build_corpus(2);
+        let coord = SweepCoordinator::new(Arc::new(EmbedderRegistry::new()), None);
+
+        let outcome = coord
+            .trigger_async(Arc::clone(&layer))
+            .await
+            .expect("an active index means a task was created");
+        assert!(
+            outcome.result.is_err(),
+            "no embedder is registered, so the sweep cannot succeed"
+        );
+        assert_eq!(
+            outcome.handle.status(),
+            TaskStatus::Failed,
+            "the handle carries the terminal status the caller persists"
+        );
+        let record = outcome.handle.record_snapshot();
+        assert_eq!(record.kind.label(), "VectorSweep");
+        assert_eq!(record.layer_head, *layer.id());
+        assert!(
+            coord.registry.get(layer.id()).is_none(),
+            "the registry is already empty, which is why the handle has to come back"
+        );
     }
 
     /// The registry is the live view of index tasks for the D21 task RPCs: both kinds

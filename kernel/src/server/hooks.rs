@@ -177,12 +177,14 @@ impl crate::commit::CommitHookHost for EigeniusService {
         let layer_arc = Arc::clone(layer);
         let reindex_layer = Arc::clone(layer);
         let layer_id_disp = format!("{}", layer.id());
-        // A finished reindex unregisters, and with it the only record of what happened.
-        // Sweeps are fine with that — one fires per commit and re-running is cheap — but a
-        // reindex is rare, long, and its failure leaves the chain's segments split across
-        // two models, which an operator has to be able to discover after the fact. So its
-        // terminal record goes to the TaskStore (eigenius#254). In-flight state stays the
-        // registry's, which `GetTaskStatus` consults first.
+        // A finished index task unregisters, and with it the only record of what happened.
+        // What reaches the TaskStore is what an operator could not otherwise discover
+        // (eigenius#254): every reindex, because it is rare, runs for minutes, and its
+        // failure leaves the chain's segments split across two models; and every sweep
+        // that did NOT complete, because the layer is then left with no vectors. A
+        // completed sweep is not stored — one fires per commit, and its segments are the
+        // evidence. In-flight state stays the registry's, which `GetTaskStatus` consults
+        // first.
         let task_store = self.task_store.clone();
         let n_indexes = active.len();
         tracing::info!(
@@ -194,7 +196,7 @@ impl crate::commit::CommitHookHost for EigeniusService {
         );
         tokio::spawn(async move {
             match coord.trigger_async(layer_arc).await {
-                Ok(None) => {
+                None => {
                     tracing::debug!(
                         { crate::observability::field::OPERATION } =
                             crate::observability::operation::COMMIT_DID_PERSIST,
@@ -202,26 +204,49 @@ impl crate::commit::CommitHookHost for EigeniusService {
                         "vector sweep finished: no active indexes (race after detection)"
                     );
                 }
-                Ok(Some((_handle, report))) => {
-                    tracing::info!(
-                        { crate::observability::field::OPERATION } =
-                            crate::observability::operation::COMMIT_DID_PERSIST,
-                        { crate::observability::field::LAYER_ID } = %layer_id_disp,
-                        total_subjects = report.total_subjects,
-                        skipped = report.skipped,
-                        "vector sweep completed"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        { crate::observability::field::OPERATION } =
-                            crate::observability::operation::COMMIT_DID_PERSIST,
-                        { crate::observability::field::ERROR_KIND } = "vector_sweep_failed",
-                        { crate::observability::field::LAYER_ID } = %layer_id_disp,
-                        { crate::observability::field::ERROR_MESSAGE } = %e,
-                        "post-Load vector sweep failed"
-                    );
-                }
+                Some(outcome) => match &outcome.result {
+                    Ok(report) => {
+                        tracing::info!(
+                            { crate::observability::field::OPERATION } =
+                                crate::observability::operation::COMMIT_DID_PERSIST,
+                            { crate::observability::field::LAYER_ID } = %layer_id_disp,
+                            total_subjects = report.total_subjects,
+                            skipped = report.skipped,
+                            "vector sweep completed"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            { crate::observability::field::OPERATION } =
+                                crate::observability::operation::COMMIT_DID_PERSIST,
+                            { crate::observability::field::ERROR_KIND } = "vector_sweep_failed",
+                            { crate::observability::field::LAYER_ID } = %layer_id_disp,
+                            { crate::observability::field::ERROR_MESSAGE } = %e,
+                            "post-Load vector sweep failed"
+                        );
+                        // A sweep that completed needs no record: its segments are the
+                        // evidence, and one stored record per commit would swamp the
+                        // store. A sweep that did NOT complete leaves an absence — the
+                        // layer has no vectors, and a query against it returns fewer
+                        // hits rather than an error — so the record is the only thing
+                        // that makes it discoverable afterwards (eigenius#254).
+                        if let Some(store) = task_store.as_ref() {
+                            let record = outcome.handle.record_snapshot();
+                            if let Err(e) = store.put_task(&record) {
+                                tracing::warn!(
+                                    { crate::observability::field::OPERATION } =
+                                        crate::observability::operation::COMMIT_DID_PERSIST,
+                                    { crate::observability::field::ERROR_KIND } =
+                                        "vector_sweep_record_not_persisted",
+                                    { crate::observability::field::TASK_ID } = %record.task_id,
+                                    { crate::observability::field::ERROR_MESSAGE } = %e,
+                                    "vector sweep failed and its task record could not \
+                                     be stored either"
+                                );
+                            }
+                        }
+                    }
+                },
             }
             // D43 §5.7 — a VectorIndex Resource whose declared model
             // no longer matches its existing segments. Detection is

@@ -102,6 +102,40 @@ pub async fn resume_sweep(
             return;
         }
     };
+    // `Cancelling` records first (eigenius#134). A record in that state was cancelled
+    // while something was driving it; if it survived to a restart, the process that was
+    // driving it is gone, so nothing is going to finish the cooperative grace window. The
+    // status is neither resumable nor terminal, so without this the record sits there —
+    // and because all three pin-gathering sites use `!is_terminal()`, it pins its
+    // `layer_head` against GC, blocks its branch from being deleted, and refuses any
+    // consolidation range covering it, permanently.
+    //
+    // Cancellation completes here: no re-execution, just the terminal status the caller
+    // was told to expect. This is what `CancelTask`'s own comment has always claimed the
+    // resume sweep does.
+    for mut record in records
+        .iter()
+        .filter(|r| r.status == crate::task::TaskStatus::Cancelling)
+        .cloned()
+    {
+        record.status = crate::task::TaskStatus::Cancelled;
+        record.updated_at = crate::server::helpers::now_millis();
+        match inputs.task_store.put_task(&record) {
+            Ok(()) => tracing::info!(
+                { field::OPERATION } = operation::TASK_RESUME,
+                { field::TASK_ID } = %record.task_id,
+                "cancellation completed at restart: no live evaluator remained"
+            ),
+            Err(e) => tracing::warn!(
+                { field::OPERATION } = operation::TASK_RESUME,
+                { field::ERROR_KIND } = "cancelling_not_finalised",
+                { field::TASK_ID } = %record.task_id,
+                { field::ERROR_MESSAGE } = %e,
+                "could not write Cancelled; the record still pins its layer"
+            ),
+        }
+    }
+
     let mut resumable: Vec<crate::task::TaskRecord> = records
         .into_iter()
         .filter(|r| r.status.is_resumable())

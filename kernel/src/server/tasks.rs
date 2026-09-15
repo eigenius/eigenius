@@ -269,13 +269,25 @@ impl EigeniusService {
             }));
         }
 
-        // Flip the persisted status to Cancelling. 9b-iii.4 will
-        // switch this to a cooperative cancellation that the running
-        // evaluator picks up between IO dispatches; for synchronous
-        // 9b-iii.3, CancelTask is effectively an "abandoned" marker
-        // until the next resume sweep re-evaluates the task and sees
-        // it as Cancelling.
-        record.status = crate::task::TaskStatus::Cancelling;
+        // `Cancelling` means "waiting on the cooperative grace window", and that only
+        // describes a task something is actually driving. `Suspended` is defined as
+        // "persisted mid-flight but not being driven right now", so there is no window to
+        // wait on and no evaluator to hear the request: cancellation is complete the
+        // moment it is asked for (eigenius#134).
+        //
+        // The distinction matters because all three pin-gathering sites — GC roots,
+        // `DeleteBranch`'s `CheckPins`, and `build_consolidate_opts` — key on
+        // `!is_terminal()`. Parking a suspended task in `Cancelling` would pin its
+        // `layer_head` against every one of them for no reason.
+        //
+        // `Running` still gets `Cancelling`: it may be driven by a live evaluator in this
+        // process, and whether that evaluator stops is eigenius#51. If it is instead a
+        // leftover from a crash, the resume sweep finalises it at the next restart.
+        record.status = if record.status == crate::task::TaskStatus::Suspended {
+            crate::task::TaskStatus::Cancelled
+        } else {
+            crate::task::TaskStatus::Cancelling
+        };
         record.updated_at = now_millis();
         if let Err(e) = store.put_task(&record) {
             return Err(Status::internal(format!("put_task failed: {e}")));
@@ -410,6 +422,89 @@ mod tests {
             .expect("status")
             .into_inner();
         assert!(!resp.found);
+    }
+
+    /// eigenius#134 — cancelling a `Suspended` task terminates it outright.
+    ///
+    /// `Cancelling` means "waiting on the cooperative grace window", and a suspended task
+    /// is by definition not being driven, so there is no window and nothing to hear the
+    /// request. Leaving it non-terminal would pin its `layer_head` against GC, block its
+    /// branch from deletion under `CheckPins`, and refuse consolidation over it.
+    #[tokio::test]
+    async fn cancelling_a_suspended_task_reaches_terminal_immediately() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(crate::storage::memory::MemoryPersistentBackend::new());
+        let store: Arc<dyn crate::task::TaskStore> =
+            Arc::new(crate::task::BackendTaskStore::new(Arc::clone(&backend)));
+        let mut service = EigeniusService::new().expect("service");
+        service.task_store = Some(Arc::clone(&store));
+
+        let session_id = service.session.read().await.session_id;
+        let task_id = uuid::Uuid::new_v4();
+        let mut record = TaskRecord::new_running(
+            session_id,
+            task_id,
+            "urn:eigenius:test:program:p".to_string(),
+            "urn:eigenius:test:input:i".to_string(),
+            crate::layer::LayerId([3u8; 32]),
+            0,
+        );
+        record.status = TaskStatus::Suspended;
+        store.put_task(&record).expect("put");
+
+        let resp = service
+            .handle_cancel_task(CancelTaskRequest {
+                task_id: task_id.to_string(),
+            })
+            .await
+            .expect("cancel")
+            .into_inner();
+        assert!(resp.success, "error was: {}", resp.error);
+        assert_eq!(resp.status, format!("{:?}", TaskStatus::Cancelled));
+
+        let stored = store
+            .get_task(&session_id, &task_id)
+            .expect("get")
+            .expect("record");
+        assert_eq!(stored.status, TaskStatus::Cancelled);
+        assert!(
+            stored.status.is_terminal(),
+            "terminal is what releases the three pins"
+        );
+    }
+
+    /// A `Running` task still goes to `Cancelling`: it may be driven by a live evaluator
+    /// in this process, and whether that evaluator stops is eigenius#51. The resume sweep
+    /// finalises it if it turns out to be a crash leftover.
+    #[tokio::test]
+    async fn cancelling_a_running_task_still_awaits_the_grace_window() {
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(crate::storage::memory::MemoryPersistentBackend::new());
+        let store: Arc<dyn crate::task::TaskStore> =
+            Arc::new(crate::task::BackendTaskStore::new(Arc::clone(&backend)));
+        let mut service = EigeniusService::new().expect("service");
+        service.task_store = Some(Arc::clone(&store));
+
+        let session_id = service.session.read().await.session_id;
+        let task_id = uuid::Uuid::new_v4();
+        let record = TaskRecord::new_running(
+            session_id,
+            task_id,
+            "urn:eigenius:test:program:p".to_string(),
+            "urn:eigenius:test:input:i".to_string(),
+            crate::layer::LayerId([3u8; 32]),
+            0,
+        );
+        store.put_task(&record).expect("put");
+
+        let resp = service
+            .handle_cancel_task(CancelTaskRequest {
+                task_id: task_id.to_string(),
+            })
+            .await
+            .expect("cancel")
+            .into_inner();
+        assert_eq!(resp.status, format!("{:?}", TaskStatus::Cancelling));
     }
 
     /// `StartReindex` without embedders is a refusal with a reason, not a silent success.

@@ -76,9 +76,14 @@ service EigeniusKernel {
   rpc GetTaskStatus(GetTaskStatusRequest) returns (GetTaskStatusResponse);
 
   // Request cooperative cancellation of a Running / Suspended task
-  // (D21 §8 cancellation). Sets the task's cancel flag and
-  // transitions to Cancelling; a fully-async evaluator (9b-iii.4)
-  // picks this up between IO dispatches and unwinds.
+  // (D21 §8 cancellation).
+  //
+  // A Suspended task is not being driven, so there is no grace window to wait on and it
+  // goes straight to Cancelled. A Running task transitions to Cancelling: it may be held
+  // by a live evaluator, which a fully-async evaluator (9b-iii.4) would pick up between
+  // IO dispatches and unwind. Cancelling is transient either way — if no evaluator ever
+  // finishes it, the next restart's resume sweep writes Cancelled, so the record always
+  // reaches a terminal state and never pins its layer indefinitely.
   //
   // Also cancels an in-flight vector sweep or reindex by its task_id: those run from the
   // SweepRegistry rather than the TaskStore, and their cooperative flag is the same
