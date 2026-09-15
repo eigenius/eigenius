@@ -111,13 +111,22 @@ MATCH ancestor(?x, ?y)
 ```rust
 pub enum ClassRef {
     Chain(Iri),           // a core:Class on the chain
-    Relation(RelationId), // an index into Program.definitions
+    Relation(RelationId), // which DEFINE relation, by id
 }
 ```
 
 The exemption becomes a variant, and every consumer of a resolved class has to say which it handles. This is the kind of thing the parameterisation is for: the special case existed, undocumented in the types, in one checking function.
 
-**`Relation` carries an index, not the definition and not the name.** Carrying the name leaves a string lookup at every use, which is the second-resolution pattern this note exists to remove. Carrying the `RuleDefinition` itself is impossible: `stratify` rejects only *negation* cycles, so ordinary positive recursion is legal Datalog — `ancestor(?a,?b) :- parent(?a,?c), ancestor(?c,?b)` — and a `ClassRef` embedding its own definition would be an infinite value for exactly the rules the feature exists for. An index into `Program.definitions` resolves the reference to a definite target, survives recursion, and costs one slice index where the name cost a hash lookup.
+**`Relation` carries an id, not the definition and not the name.** Carrying the name leaves a string lookup at every use, which is the second-resolution pattern this note exists to remove. Carrying the `RuleDefinition` itself is impossible: `stratify` rejects only *negation* cycles, so ordinary positive recursion is legal Datalog — `ancestor(?a,?b) :- parent(?a,?c), ancestor(?c,?b)` — and a `ClassRef` embedding its own definition would be an infinite value for exactly the rules the feature exists for.
+
+**The id identifies a RELATION, not a rule**, and an earlier draft of this note got that wrong by calling it "an index into `Program.definitions`". A relation may be defined by several rules:
+
+```eigenql
+DEFINE Reach(?t) FROM MATCH ?o { "urn:eigenius:t:thesis": ?t }
+DEFINE Reach(?n) FROM MATCH Reach(?m) { "urn:eigenius:t:dep": [... ?n ...] }
+```
+
+— one relation with a base case and a recursive case. Indexing definitions gives those two ids, which splits the derived facts into two relations, and the closure then never accumulates. Implementation hit it: the reachability tests reported 2 unreachable nodes where 1 was right. `ast::relation_ids` assigns one id per distinct name, by first appearance.
 
 ## Why not the alternatives
 
