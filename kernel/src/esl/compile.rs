@@ -23,6 +23,7 @@ use crate::esl::error::{EslError, Position};
 use crate::nbe::term::{Exp, Patt};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
+use crate::ontology::well_known as wk;
 use std::collections::BTreeMap;
 
 /// Compile an ESL AST to Eigon-JSON resources.
@@ -1242,19 +1243,14 @@ impl Compiler {
             // compile time; the chain resource is just the persisted
             // declaration that downstream layers can deserialize.
             ast::Declaration::Macro(m) => self.compile_macro_resource(m),
-            // D43 §3.1 — text_index / vector_index lowering to Resource
-            // (M2+). M1 lands the AST + parser; the compile stage will
-            // synthesise the equivalent `Resource` with class
-            // `core:TextIndex` / `core:VectorIndex` once M2 storage
-            // substrate work begins.
-            ast::Declaration::TextIndex(ti) => Err(EslError::parser(
-                Some(ti.pos.clone()),
-                "text_index lowering not yet implemented (D43 M2)".to_string(),
-            )),
-            ast::Declaration::VectorIndex(vi) => Err(EslError::parser(
-                Some(vi.pos.clone()),
-                "vector_index lowering not yet implemented (D43 M2)".to_string(),
-            )),
+            // D43 §3.1 — `text_index` / `vector_index` are sugar over a resource
+            // declaration whose class the keyword supplies.
+            ast::Declaration::TextIndex(ti) => {
+                self.compile_index(&ti.name, &ti.body, wk::TEXT_INDEX_CLASS, &ti.pos)
+            }
+            ast::Declaration::VectorIndex(vi) => {
+                self.compile_index(&vi.name, &vi.body, wk::VECTOR_INDEX_CLASS, &vi.pos)
+            }
             ast::Declaration::Axiom(ax) => self.compile_axiom(ax),
             ast::Declaration::Def(d) => self.compile_def(d),
         }
@@ -2830,6 +2826,61 @@ impl Compiler {
         // stamped `DeclaredResource` + "a human asserted this". The author's `is_a` is
         // the category; the eight theory forms below still stamp, because writing
         // `axiom` or `class` IS a human assertion.
+        Ok(vec![r])
+    }
+
+    /// D43 §3.1 — lower `text_index` / `vector_index` to the resource they are sugar for.
+    ///
+    /// **Sugar must produce exactly what the longhand produces.** The form an author writes
+    /// today is `resource <iri> : core:VectorIndex { … }`, and that is what the rest of the
+    /// system reads: `resolve_active_vector_indexes` discovers these through the triple
+    /// index on `is_a`, and every slot it reads — `target_property`, `vec_model`,
+    /// `vec_dim`, `vec_distance`, `vec_strategy`, `vec_hnsw_m`,
+    /// `vec_hnsw_ef_construction`, `vec_embedding_policy` — is an ordinary property on an
+    /// ordinary resource. So this differs from [`Self::compile_resource`] in exactly one
+    /// way: the class comes from the keyword instead of the header.
+    ///
+    /// Not stamped, for the same reason `resource { }` is not (D72 §5). The eight theory
+    /// forms stamp because writing `axiom` or `class` is a human assertion; an index
+    /// declaration is a schema fact, and stamping here would make the sugar and the
+    /// longhand produce different resources — which would make it not sugar.
+    ///
+    /// The deferral this replaced named "D43 M2" as its blocker. That milestone is long
+    /// past: the storage substrate, the sweep, the reindex and the whole task surface over
+    /// these resources all exist (eigenius#140).
+    fn compile_index(
+        &self,
+        name: &ast::QualifiedName,
+        body: &[ast::ResourceField],
+        class: &str,
+        pos: &Position,
+    ) -> Result<Vec<Resource>, EslError> {
+        let id = self.resolve_iri(name)?;
+        let mut r = Resource::new(id);
+        r.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(class.to_string())]),
+        );
+
+        for field in body {
+            let prop_iri = self.resolve_iri(&field.property)?;
+            // `is_a` in the body would contradict the keyword, and silently overwriting
+            // the class would produce a resource the author did not ask for and the form
+            // cannot express. The longhand is the way to say it.
+            if prop_iri.as_str() == wk::IS_A {
+                return Err(EslError::parser(
+                    Some(pos.clone()),
+                    format!(
+                        "`is_a` cannot be set in this body: the keyword already declares \
+                         `{class}`. Write a `resource` declaration instead if the class \
+                         is not what you mean."
+                    ),
+                ));
+            }
+            let value = self.compile_value(&field.value)?;
+            r.set(prop_iri, value);
+        }
+
         Ok(vec![r])
     }
 
@@ -6533,15 +6584,17 @@ mod tests {
         );
     }
 
-    // --- D43 §3.1 — text_index / vector_index compile stub behaviour (M1) ---
+    // --- D43 §3.1 — text_index / vector_index lowering (eigenius#140) ---
 
-    /// M1 lands the AST + parser for `text_index`; the lowering to a
-    /// `core:TextIndex` Resource is M2 work. The compile step emits
-    /// a clear "not yet implemented" error so users get a meaningful
-    /// signal until M2 lands.
+    /// The sugar produces exactly what the longhand produces.
+    ///
+    /// This is the whole contract: `text_index ex:t { … }` and
+    /// `resource ex:t : core:TextIndex { … }` must compile to the same resource, because
+    /// everything downstream — the triple index on `is_a`, `resolve_active_text_indexes`,
+    /// the indexing sweep — reads the longhand's shape and knows nothing about the keyword.
     #[test]
-    fn text_index_compile_emits_not_yet_implemented_until_m2() {
-        let errs = esl::compile(
+    fn text_index_lowers_to_the_resource_it_is_sugar_for() {
+        let sugared = compile_esl(
             r#"
             namespace ex = "urn:ex";
             namespace core = "urn:eigenius:core";
@@ -6550,24 +6603,45 @@ mod tests {
                 core:text_analyzer = "en-stem-v1";
             }
             "#,
-            term_chain(),
-        )
-        .expect_err("text_index compilation should fail with M1 stub");
-        let combined = errs
-            .iter()
-            .map(|e| e.message.as_str())
-            .collect::<Vec<_>>()
-            .join(" | ");
-        assert!(
-            combined.contains("text_index") && combined.contains("M2"),
-            "error should reference text_index and D43 M2, got: {combined}"
+        );
+        let longhand = compile_esl(
+            r#"
+            namespace ex = "urn:ex";
+            namespace core = "urn:eigenius:core";
+            resource ex:description_en : core:TextIndex {
+                core:target_property = ex:description;
+                core:text_analyzer = "en-stem-v1";
+            }
+            "#,
+        );
+        assert_eq!(sugared.len(), 1);
+        assert_eq!(
+            sugared, longhand,
+            "the keyword form must be indistinguishable from the resource form"
+        );
+
+        let r = &sugared[0];
+        assert_eq!(
+            r.id().expect("an index has an @id").as_str(),
+            "urn:ex:description_en"
+        );
+        assert_eq!(
+            r.get(&iri(wk::IS_A)),
+            Some(&Value::Array(vec![Value::String(
+                wk::TEXT_INDEX_CLASS.to_string()
+            )]))
+        );
+        assert_eq!(
+            r.get(&iri("urn:eigenius:core:text_analyzer")),
+            Some(&Value::String("en-stem-v1".to_string()))
         );
     }
 
-    /// Same shape for `vector_index` — M1 parses, M2 lowers.
+    /// Same contract for `vector_index`, over the slots
+    /// `resolve_active_vector_indexes` actually reads.
     #[test]
-    fn vector_index_compile_emits_not_yet_implemented_until_m2() {
-        let errs = esl::compile(
+    fn vector_index_lowers_to_the_resource_it_is_sugar_for() {
+        let sugared = compile_esl(
             r#"
             namespace ex = "urn:ex";
             namespace core = "urn:eigenius:core";
@@ -6575,19 +6649,63 @@ mod tests {
                 core:target_property = ex:description;
                 core:vec_model = ex:openai_text_embedding_3_large_v3;
                 core:vec_dim = 1536;
+                core:vec_distance = core:distances:cosine;
+            }
+            "#,
+        );
+        let longhand = compile_esl(
+            r#"
+            namespace ex = "urn:ex";
+            namespace core = "urn:eigenius:core";
+            resource ex:description_oai : core:VectorIndex {
+                core:target_property = ex:description;
+                core:vec_model = ex:openai_text_embedding_3_large_v3;
+                core:vec_dim = 1536;
+                core:vec_distance = core:distances:cosine;
+            }
+            "#,
+        );
+        assert_eq!(sugared, longhand);
+
+        let r = &sugared[0];
+        assert_eq!(
+            r.get(&iri(wk::IS_A)),
+            Some(&Value::Array(vec![Value::String(
+                wk::VECTOR_INDEX_CLASS.to_string()
+            )]))
+        );
+        // The slots the discovery path reads, carried through unchanged.
+        assert_eq!(
+            r.get(&iri(wk::TARGET_PROPERTY)),
+            Some(&Value::String("urn:ex:description".to_string()))
+        );
+        assert_eq!(r.get(&iri(wk::VEC_DIM)), Some(&Value::Integer(1536)));
+    }
+
+    /// `is_a` in the body contradicts the keyword. Overwriting the class silently would
+    /// emit a resource the author did not ask for and the form cannot express.
+    #[test]
+    fn an_index_body_cannot_redeclare_is_a() {
+        let errs = esl::compile(
+            r#"
+            namespace ex = "urn:ex";
+            namespace core = "urn:eigenius:core";
+            vector_index ex:vi {
+                core:is_a = [ex:SomethingElse];
+                core:target_property = ex:description;
             }
             "#,
             term_chain(),
         )
-        .expect_err("vector_index compilation should fail with M1 stub");
+        .expect_err("a body `is_a` must be refused, not silently overwritten");
         let combined = errs
             .iter()
             .map(|e| e.message.as_str())
             .collect::<Vec<_>>()
             .join(" | ");
         assert!(
-            combined.contains("vector_index") && combined.contains("M2"),
-            "error should reference vector_index and D43 M2, got: {combined}"
+            combined.contains("is_a") && combined.contains("core:VectorIndex"),
+            "the error must name the conflict and the class the keyword declares, got: {combined}"
         );
     }
 
