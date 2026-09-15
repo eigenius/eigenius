@@ -223,6 +223,22 @@ pub trait VectorIndex: Send + Sync {
         index: &Iri,
     ) -> Box<dyn Iterator<Item = Result<LayerId, StorageError>> + 'a>;
 
+    /// Stream `(LayerId, model_iri)` for every layer that has
+    /// contributed a segment under `index`. Caller filters by chain
+    /// membership.
+    ///
+    /// The model-only half of [`Self::scan_index`] + [`Self::get_segment`].
+    /// Reindex-target detection
+    /// ([`crate::layer::detect_reindex_targets`]) asks every visible
+    /// segment which model it was built under, and it runs on the
+    /// commit path; decoding the full segment to read one field
+    /// would deserialize every vector in the chain per commit.
+    /// Implementations decode only the model field.
+    fn scan_index_models<'a>(
+        &'a self,
+        index: &Iri,
+    ) -> Box<dyn Iterator<Item = Result<(LayerId, Iri), StorageError>> + 'a>;
+
     /// Snapshot of operational counters.
     fn stats(&self) -> VectorIndexStats;
 }
@@ -352,6 +368,23 @@ impl VectorIndex for MemoryVectorIndex {
             .keys()
             .filter(|(i, _)| i == index)
             .map(|(_, l)| l.clone())
+            .collect();
+
+        Box::new(results.into_iter().map(Ok))
+    }
+
+    fn scan_index_models<'a>(
+        &'a self,
+        index: &Iri,
+    ) -> Box<dyn Iterator<Item = Result<(LayerId, Iri), StorageError>> + 'a> {
+        let mut state = self.inner.write().expect("MemoryVectorIndex poisoned");
+        state.scans += 1;
+
+        let results: Vec<(LayerId, Iri)> = state
+            .segments
+            .iter()
+            .filter(|((i, _), _)| i == index)
+            .map(|((_, l), seg)| (l.clone(), seg.model_iri.clone()))
             .collect();
 
         Box::new(results.into_iter().map(Ok))

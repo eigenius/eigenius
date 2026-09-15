@@ -213,7 +213,8 @@ impl DeletionHooks<'_> {
     /// **A reindex is deliberately not cancelled here.** `cancel_reindex` is keyed by
     /// index IRI, not by layer: a reindex re-embeds one `core:VectorIndex` across the
     /// chain, so deleting a single layer is not a reason to abandon it. Stopping a
-    /// reindex is an operator action, and that surface is eigenius#133's.
+    /// reindex is an operator action, and that surface does not exist yet
+    /// (eigenius#254).
     fn cancel_sweeps(&self, layer: &LayerId) {
         let Some(registry) = self.sweeps else {
             return;

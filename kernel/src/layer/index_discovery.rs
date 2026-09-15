@@ -431,14 +431,28 @@ pub struct ReindexTarget {
 ///
 /// 1. Resolve every active `core:VectorIndex` Resource at `head`
 ///    via [`resolve_active_vector_indexes`].
-/// 2. For each, ask the VectorIndex backend for the layers under
-///    that Index (`scan_index`) and probe the first chain-visible
-///    segment's `model_iri`. Segments contributed by layers no
-///    longer reachable from `head` are skipped — a model mismatch
-///    against an orphan segment isn't actionable because the
-///    segment isn't queried anyway.
-/// 3. If the segment's model differs from the Index Resource's
-///    declared model, emit a [`ReindexTarget`].
+/// 2. For each, ask the VectorIndex backend which model every
+///    segment under that Index was built with
+///    ([`crate::layer::VectorIndex::scan_index_models`]). Segments
+///    contributed by layers no longer reachable from `head` are
+///    skipped — a model mismatch against an orphan segment isn't
+///    actionable because the segment isn't queried anyway.
+/// 3. If *any* chain-visible segment's model differs from the Index
+///    Resource's declared model, emit a [`ReindexTarget`] naming
+///    that model in `segment_model` and move to the next Index.
+///
+/// The quantifier is the load-bearing part. A chain can hold
+/// segments under two models at once, and routinely does: the
+/// commit hook runs the post-Load sweep before the reindex, so an
+/// upgrade commit that also adds content leaves a
+/// new-model segment at the head layer next to the stale ones
+/// beneath it. `scan_index_models` yields layers in `LayerId`
+/// (content-hash) order, which says nothing about chain position,
+/// so a rule that consulted one segment would answer from whichever
+/// hash sorted first. `detect_reindex_targets_fires_when_the_upgrade_commit_also_adds_content`
+/// pins this. Where several models are stale at once,
+/// `segment_model` names one of them; the reindex rewrites the
+/// whole chain under the declared model either way.
 ///
 /// **Fresh VectorIndex Resources** (no segments yet at any visible
 /// layer) are *not* targets — the regular post-Load sweep
@@ -446,7 +460,7 @@ pub struct ReindexTarget {
 /// Only model upgrades against pre-existing segments need the
 /// chain-wide rewrite.
 ///
-/// Errors from the storage backend during `scan_index` are
+/// Errors from the storage backend during `scan_index_models` are
 /// propagated as `Err`; one target's failure aborts the whole
 /// detection pass rather than silently dropping it — partial
 /// detection would mislead the commit hook into thinking the
@@ -464,31 +478,24 @@ pub fn detect_reindex_targets(
 
     let mut targets = Vec::new();
     for index in &active {
-        // First chain-visible segment determines the recorded model.
-        // Segments from non-reachable layers are skipped; if no
-        // visible segment exists at all, this is a fresh Index — the
-        // sweep handles it, no reindex needed.
-        let mut visible_model: Option<Iri> = None;
-        for layer_id in backend.scan_index(&index.iri) {
-            let layer_id = layer_id?;
+        // Any chain-visible segment built under a model other than
+        // the declared one makes this Index a target. Segments from
+        // non-reachable layers are skipped; an Index with no visible
+        // segment at all is fresh — the sweep handles it, no reindex
+        // needed.
+        for entry in backend.scan_index_models(&index.iri) {
+            let (layer_id, segment_model) = entry?;
             if !reachable.contains(&layer_id) {
                 continue;
             }
-            if let Some(seg) = backend.get_segment(&index.iri, &layer_id)? {
-                visible_model = Some(seg.model_iri.clone());
+            if segment_model != index.model {
+                targets.push(ReindexTarget {
+                    index_iri: index.iri.clone(),
+                    declared_model: index.model.clone(),
+                    segment_model,
+                });
                 break;
             }
-        }
-        let segment_model = match visible_model {
-            Some(m) => m,
-            None => continue,
-        };
-        if segment_model != index.model {
-            targets.push(ReindexTarget {
-                index_iri: index.iri.clone(),
-                declared_model: index.model.clone(),
-                segment_model,
-            });
         }
     }
     Ok(targets)
@@ -838,6 +845,71 @@ mod tests {
         assert_eq!(targets[0].index_iri.as_str(), "urn:ex:vi");
         assert_eq!(targets[0].declared_model.as_str(), model_b);
         assert_eq!(targets[0].segment_model.as_str(), model_a);
+    }
+
+    /// The upgrade commit also adds content — the shape the commit
+    /// hook produces, since it runs the post-Load sweep before the
+    /// reindex. After that sweep the chain holds a model_b segment
+    /// at the head *and* a stale model_a segment at L2, and the
+    /// stale one must still be found.
+    ///
+    /// Detection reads segments in `scan_index` order, which both
+    /// backends yield in `LayerId` (content-hash) order — unrelated
+    /// to chain position. So a rule that samples one segment gets
+    /// this right or wrong depending on the hash. The loop runs
+    /// eight distinct corpora to make the hash order vary; a
+    /// first-seen rule passes one at ~chance.
+    #[test]
+    fn detect_reindex_targets_fires_when_the_upgrade_commit_also_adds_content() {
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let model_a = "urn:eigenius:embed:dummy:v1";
+        let model_b = "urn:eigenius:embed:dummy:v2";
+        let target_prop = "urn:ex:body";
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model_a, 8)));
+        reg.register(Arc::new(DummyEmbedder::new(model_b, 8)));
+
+        for variant in 0..8u32 {
+            let (head, storage) = bootstrap_head();
+            let mut l1 = LayerBuilder::new("l1", Some(head));
+            add_vi(&mut l1, "urn:ex:vi", target_prop, model_a);
+            let l1 = Arc::new(l1.build(storage.clone()));
+
+            // L2: swept under model_a — the segment that goes stale.
+            let mut l2 = LayerBuilder::new("l2", Some(Arc::clone(&l1)));
+            add_doc(
+                &mut l2,
+                "urn:ex:d1",
+                target_prop,
+                &format!("alpha {variant}"),
+            );
+            let l2 = Arc::new(l2.build(storage.clone()));
+            sweep_layer_vectors(&l2, &reg, None).expect("sweep under model_a");
+
+            // L3: re-declares the VI with model_b *and* adds a
+            // document, then gets swept — as the commit hook does.
+            let mut l3 = LayerBuilder::new("l3", Some(Arc::clone(&l2)));
+            add_vi(&mut l3, "urn:ex:vi", target_prop, model_b);
+            add_doc(
+                &mut l3,
+                "urn:ex:d2",
+                target_prop,
+                &format!("gamma {variant}"),
+            );
+            let l3 = Arc::new(l3.build(storage.clone()));
+            sweep_layer_vectors(&l3, &reg, None).expect("sweep under model_b");
+
+            let targets = detect_reindex_targets(&l3).expect("detect");
+            assert_eq!(
+                targets.len(),
+                1,
+                "variant {variant}: L2's model_a segment is stale and must be a \
+                 reindex target even though L3's segment already matches; got {targets:?}"
+            );
+            assert_eq!(targets[0].segment_model.as_str(), model_a);
+        }
     }
 
     /// A freshly-declared VectorIndex with no segments yet is *not* a

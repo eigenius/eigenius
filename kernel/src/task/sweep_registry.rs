@@ -463,6 +463,101 @@ impl SweepCoordinator {
         Ok(out)
     }
 
+    /// Async reindex dispatch — the sibling of
+    /// [`Self::trigger_reindex_blocking`] that the commit hook can
+    /// call without blocking the pipeline on embedder IO.
+    ///
+    /// Same detection, registration and epilogue as the blocking
+    /// form; the difference is where `ReindexDriver::run` executes.
+    /// The driver is synchronous (`reindex_chain` walks the chain
+    /// and calls the `Embedder` in place), so it goes to
+    /// `tokio::task::spawn_blocking` rather than running on an async
+    /// worker. A hosted-API embedder that stalls for a minute then
+    /// occupies one blocking thread instead of one runtime worker.
+    ///
+    /// Cancellation is unaffected: the flag
+    /// [`SweepRegistry::cancel_reindex`] raises is the same
+    /// cooperative `AtomicBool` the driver checks between layers and
+    /// between Resources, and a blocking task observes it exactly as
+    /// an inline call would. `spawn_blocking` itself cannot be
+    /// cancelled, so a `JoinError` here can only be a panic in the
+    /// driver; it is resumed on this task so the async path fails
+    /// the way the blocking path would rather than converting a bug
+    /// into a `Failed` status.
+    ///
+    /// Target detection and the post-reindex SegmentCache admission
+    /// run on the caller's task, matching [`Self::trigger_async`] —
+    /// both are bounded storage work, not embedder IO.
+    ///
+    /// Returns an empty `Vec` when nothing needs reindexing.
+    pub async fn trigger_reindex_async(
+        &self,
+        head: Arc<Layer>,
+    ) -> Result<Vec<SweepHandle>, SweepError> {
+        let targets = detect_reindex_targets(&head).map_err(|source| SweepError::Storage {
+            index: "<reindex-target-detection>".to_string(),
+            source,
+        })?;
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::with_capacity(targets.len());
+        for target in targets {
+            let target_iri = target.index_iri.clone();
+            let record = TaskRecord::new_running(
+                Uuid::nil(),
+                Uuid::new_v4(),
+                "urn:eigenius:program:vector_reindex".into(),
+                target_iri.as_str().to_string(),
+                head.id().clone(),
+                now_millis(),
+            );
+            let mut driver = ReindexDriver::new(target_iri.clone())
+                .with_batch_size(self.default_batch_size)
+                .with_record(record.clone());
+            let cancel = driver.cancel_handle();
+            let record_arc = Arc::new(RwLock::new(record));
+            let handle = Arc::new(SweepHandle {
+                cancel: Arc::clone(&cancel),
+                record: Arc::clone(&record_arc),
+                indexes: vec![target_iri.clone()],
+            });
+            self.registry
+                .register_reindex(target_iri.clone(), Arc::clone(&handle));
+
+            let head_for_task = Arc::clone(&head);
+            let embedders = Arc::clone(&self.embedders);
+            let cache = self.cache.clone();
+            let outcome = match tokio::task::spawn_blocking(move || {
+                driver.run(&head_for_task, &embedders, cache.as_deref())
+            })
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(join_err) => {
+                    // Leave no entry behind for a target whose
+                    // driver panicked — the registry is
+                    // in-flight-plus-just-terminated only.
+                    self.registry.unregister_reindex(&target_iri);
+                    std::panic::resume_unwind(join_err.into_panic())
+                }
+            };
+            let terminal_status = match &outcome {
+                Ok(_) => TaskStatus::Completed,
+                Err(SweepError::Cancelled) => TaskStatus::Cancelled,
+                Err(_) => TaskStatus::Failed,
+            };
+            record_arc.write().expect("reindex record poisoned").status = terminal_status;
+            if outcome.is_ok() {
+                let active = resolve_active_vector_indexes(&head);
+                self.admit_swept_segments_to_cache(&head, &active);
+            }
+            self.registry.unregister_reindex(&target_iri);
+            out.push((*handle).clone());
+        }
+        Ok(out)
+    }
+
     /// Async sweep dispatch — runs the sweep on the current
     /// tokio runtime with `in_flight_limit` concurrent embedder
     /// dispatches per [`AsyncSweepOptions`]. Registers the sweep
@@ -1158,9 +1253,14 @@ mod tests {
     /// declared model and the segment's recorded model disagree;
     /// the coordinator's reindex trigger should detect this, run the
     /// driver, and surface a Completed handle.
+    ///
+    /// `content_at_head` adds an indexable Resource to L3 as well,
+    /// so the commit hook's sweep has something to write there —
+    /// the mixed commit that puts two models in one chain.
     fn build_chain_with_model_upgrade(
         model_a: &str,
         model_b: &str,
+        content_at_head: bool,
     ) -> (Arc<Layer>, EmbedderRegistry) {
         let ctx = bootstrap().expect("bootstrap");
         let head = Arc::clone(ctx.head());
@@ -1210,6 +1310,11 @@ mod tests {
         vi2.set(iri(wk::VEC_MODEL), Value::iri(&iri(model_b)));
         vi2.set(iri(wk::VEC_DIM), Value::Integer(8));
         l3.add_resource(vi2).unwrap();
+        if content_at_head {
+            let mut d2 = Resource::new(iri("urn:eigenius:test:d2"));
+            d2.set(iri(target_prop), Value::String("gamma delta".into()));
+            l3.add_resource(d2).unwrap();
+        }
         let l3 = Arc::new(l3.build(storage));
         (l3, reg)
     }
@@ -1218,7 +1323,7 @@ mod tests {
     fn trigger_reindex_blocking_runs_to_completion_and_unregisters() {
         let model_a = "urn:eigenius:embed:dummy:v1";
         let model_b = "urn:eigenius:embed:dummy:v2";
-        let (head, reg) = build_chain_with_model_upgrade(model_a, model_b);
+        let (head, reg) = build_chain_with_model_upgrade(model_a, model_b, false);
         let coord = SweepCoordinator::new(Arc::new(reg), None);
 
         let handles = coord
@@ -1247,6 +1352,89 @@ mod tests {
             .unwrap()
             .expect("segment exists post-reindex");
         assert_eq!(seg.model_iri.as_str(), model_b);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn trigger_reindex_async_rewrites_segments_and_unregisters() {
+        let model_a = "urn:eigenius:embed:dummy:v1";
+        let model_b = "urn:eigenius:embed:dummy:v2";
+        let (head, reg) = build_chain_with_model_upgrade(model_a, model_b, false);
+        let coord = SweepCoordinator::new(Arc::new(reg), None);
+
+        let handles = coord
+            .trigger_reindex_async(Arc::clone(&head))
+            .await
+            .expect("reindex trigger");
+        assert_eq!(handles.len(), 1, "expected one reindex target");
+        assert_eq!(handles[0].status(), TaskStatus::Completed);
+        assert_eq!(handles[0].indexes[0].as_str(), "urn:eigenius:test:vi");
+        assert!(coord
+            .registry
+            .get_reindex(&iri("urn:eigenius:test:vi"))
+            .is_none());
+
+        let seg = head
+            .storage()
+            .vector_index
+            .get_segment(&iri("urn:eigenius:test:vi"), head.parent().unwrap().id())
+            .unwrap()
+            .expect("segment exists post-reindex");
+        assert_eq!(
+            seg.model_iri.as_str(),
+            model_b,
+            "the async path rewrites the segment the blocking path does"
+        );
+    }
+
+    /// The commit hook's sequence on a model upgrade that also adds
+    /// content: sweep the new layer, then reindex the chain. Both
+    /// layers must end up under the declared model — the sweep
+    /// covers L3's own document, the reindex covers L2's.
+    ///
+    /// The ordering is what makes this worth pinning. The sweep
+    /// writes an L3 segment under model_b before detection runs, so
+    /// detection sees both models at once and has to notice the
+    /// stale one regardless of which segment it reaches first.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sweep_then_reindex_leaves_no_segment_on_the_old_model() {
+        let model_a = "urn:eigenius:embed:dummy:v1";
+        let model_b = "urn:eigenius:embed:dummy:v2";
+        let (head, reg) = build_chain_with_model_upgrade(model_a, model_b, true);
+        let coord = SweepCoordinator::new(Arc::new(reg), None);
+
+        coord
+            .trigger_async(Arc::clone(&head))
+            .await
+            .expect("post-Load sweep")
+            .expect("head has an active index");
+        let handles = coord
+            .trigger_reindex_async(Arc::clone(&head))
+            .await
+            .expect("reindex trigger");
+        assert_eq!(
+            handles.len(),
+            1,
+            "L2's segment is still on model_a after the sweep and must be a target"
+        );
+        assert_eq!(handles[0].status(), TaskStatus::Completed);
+
+        let vi = iri("urn:eigenius:test:vi");
+        let backend = &head.storage().vector_index;
+        let mut checked = 0;
+        let mut cursor = Some(head.as_ref());
+        while let Some(layer) = cursor {
+            if let Some(seg) = backend.get_segment(&vi, layer.id()).unwrap() {
+                assert_eq!(
+                    seg.model_iri.as_str(),
+                    model_b,
+                    "segment at layer {} still carries the superseded model",
+                    layer.id()
+                );
+                checked += 1;
+            }
+            cursor = layer.parent().map(|p| p.as_ref());
+        }
+        assert_eq!(checked, 2, "expected a segment at both L2 and L3");
     }
 
     #[test]

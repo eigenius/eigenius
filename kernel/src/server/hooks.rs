@@ -136,14 +136,28 @@ impl crate::commit::CommitHookHost for EigeniusService {
         Ok(())
     }
 
-    /// D43 §5.5 — post-Load vector-index sweep. The coordinator is
-    /// optional: no embedders registered → no coordinator → hook is
-    /// a no-op. When present, we spawn the sweep onto the current
-    /// tokio runtime via [`SweepCoordinator::trigger_async`] so the
-    /// commit pipeline doesn't block on Embedder IO (per D43 §5.5's
-    /// "async and non-gating" stance). The handle is intentionally
-    /// detached — the sweep's terminal state is observable via the
+    /// D43 §5.5 — post-Load vector-index sweep, then §5.7's
+    /// reindex. The coordinator is optional: no embedders
+    /// registered → no coordinator → hook is a no-op. When present,
+    /// we spawn both onto the current tokio runtime via
+    /// [`SweepCoordinator::trigger_async`] and
+    /// [`SweepCoordinator::trigger_reindex_async`] so the commit
+    /// pipeline doesn't block on Embedder IO (per D43 §5.5's "async
+    /// and non-gating" stance). The handles are intentionally
+    /// detached — terminal state is observable via the
     /// `SweepRegistry`, not by awaiting here.
+    ///
+    /// The sweep runs first and the reindex second, per D43 §5.7:
+    /// the sweep gives the new layer its own segments under whatever
+    /// model is declared now, and the reindex rewrites the
+    /// pre-existing layers whose segments were built under the old
+    /// one. Running the reindex first would leave the new layer's
+    /// content unembedded until the sweep caught up.
+    ///
+    /// The reindex runs whether or not the sweep succeeded. They
+    /// cover disjoint layers, and a sweep that fails on the new
+    /// layer's content is no reason to leave the rest of the chain
+    /// on a superseded model.
     fn trigger_vector_sweep_for_layer(
         &self,
         layer: &Arc<crate::layer::Layer>,
@@ -161,6 +175,7 @@ impl crate::commit::CommitHookHost for EigeniusService {
             return Ok(());
         }
         let layer_arc = Arc::clone(layer);
+        let reindex_layer = Arc::clone(layer);
         let layer_id_disp = format!("{}", layer.id());
         let n_indexes = active.len();
         tracing::info!(
@@ -198,6 +213,59 @@ impl crate::commit::CommitHookHost for EigeniusService {
                         { crate::observability::field::LAYER_ID } = %layer_id_disp,
                         { crate::observability::field::ERROR_MESSAGE } = %e,
                         "post-Load vector sweep failed"
+                    );
+                }
+            }
+            // D43 §5.7 — a VectorIndex Resource whose declared model
+            // no longer matches its existing segments. Detection is
+            // its own pre-check: it returns an empty Vec when every
+            // visible segment already carries the declared model,
+            // which is every commit that isn't a model upgrade.
+            match coord.trigger_reindex_async(reindex_layer).await {
+                Ok(handles) if handles.is_empty() => {}
+                Ok(handles) => {
+                    // Targets are independent: one failing does not
+                    // abort the others, and `trigger_reindex_async`
+                    // returns `Err` only when detection itself
+                    // failed. So a failed target arrives here as a
+                    // handle with a non-`Completed` status, and
+                    // logging every handle at info would bury it.
+                    for handle in handles {
+                        let status = handle.status();
+                        for index in &handle.indexes {
+                            if status == crate::task::TaskStatus::Completed {
+                                tracing::info!(
+                                    { crate::observability::field::OPERATION } =
+                                        crate::observability::operation::COMMIT_DID_PERSIST,
+                                    { crate::observability::field::LAYER_ID } = %layer_id_disp,
+                                    index = %index,
+                                    "vector reindex completed"
+                                );
+                            } else {
+                                tracing::warn!(
+                                    { crate::observability::field::OPERATION } =
+                                        crate::observability::operation::COMMIT_DID_PERSIST,
+                                    { crate::observability::field::ERROR_KIND } =
+                                        "vector_reindex_failed",
+                                    { crate::observability::field::LAYER_ID } = %layer_id_disp,
+                                    index = %index,
+                                    status = ?status,
+                                    "vector reindex did not complete: this Index's segments \
+                                     are left split between the declared model and the old one"
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        { crate::observability::field::OPERATION } =
+                            crate::observability::operation::COMMIT_DID_PERSIST,
+                        { crate::observability::field::ERROR_KIND } =
+                            "vector_reindex_detection_failed",
+                        { crate::observability::field::LAYER_ID } = %layer_id_disp,
+                        { crate::observability::field::ERROR_MESSAGE } = %e,
+                        "post-Load vector reindex detection failed"
                     );
                 }
             }

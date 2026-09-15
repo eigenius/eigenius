@@ -45,9 +45,11 @@
 //!   handle is exposed via [`VectorSweepDriver::cancel_handle`]; the
 //!   sweep checks it between Resources and Indexes and returns
 //!   [`crate::query::vector::indexing::SweepError::Cancelled`] when
-//!   raised. Nothing flips it in production: `delete_layer(L)` does not
-//!   cancel an in-flight sweep against `L`, and
-//!   `SweepRegistry::cancel_by_layer` has no caller outside tests.
+//!   raised. `delete_layer(L)` flips it: GC calls
+//!   `SweepRegistry::cancel_by_layer` through
+//!   [`crate::gc::DeletionHooks`] before deleting the layer, so a
+//!   sweep does not keep writing segments for a layer that is going
+//!   away (eigenius#132).
 //! - **Retry.** Transient [`crate::program::embedder::EmbedderError::Io`]
 //!   failures retry up to `max_retries` times with exponential
 //!   backoff per [`SweepOptions::retry_backoff_base_ms`].

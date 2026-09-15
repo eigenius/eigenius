@@ -10,39 +10,52 @@ any detour.
 ## Stack (top → bottom)
 
 > **ACTIVE: entry −4d (`2026-09-15`). Query-processing workplan, item D — vector-index
-> lifecycle (#133, #132).** Not started.
+> lifecycle (#133, #132).** Code complete on `d-vector-index-lifecycle`; PR open.
 >
 > **Exit gate: the merge request lands and both issues close.**
 >
-> **Three entry points that are written, tested and never invoked.** One decision the
-> workplan already took: D43 names layer deletion as the cancellation point and four
-> source comments repeat it, so cancelling from the caller would leave those comments
-> false and any other delete path uncovered — plumb the registry into the collector so the
-> cancel happens where the delete is decided.
+> **#132 — deletion cancels the sweep against the layer.** `gc::DeletionHooks` bundles the
+> resource cache, the bloom cache and the sweep registry, and GC cancels before
+> `delete_layer` and evicts after. D43 names layer deletion as the cancellation point and
+> four source comments repeated it, so cancelling from the caller would have left those
+> comments false and any other delete path uncovered. A reindex is deliberately *not*
+> cancelled: it is keyed by index IRI, not layer.
 >
-> **Carry in: make an index-driven read on an uncommitted layer say so.** `PendingStage`
-> is keyed by `LayerId` and holds exactly the built-but-unpersisted layers, so
-> `pending.contains_key(&layer.id)` already *is* "this layer is uncommitted" — no new
-> state needed. `scan_chain` should error on that rather than return an empty result.
+> **#133 — the commit hook now fires the reindex.** `trigger_reindex_async` puts
+> `ReindexDriver::run` on `spawn_blocking` (the driver is synchronous and the commit path
+> must not block on embedder IO) and the hook calls it after the post-Load sweep.
+>
+> **Wiring it exposed that the detection it depends on was wrong.**
+> `detect_reindex_targets` consulted the *first* chain-visible segment, and both backends
+> yield layers in `LayerId` (content-hash) order — nothing to do with chain position. The
+> hook's own sweep writes a new-model segment at the head layer before detection runs, so
+> on an upgrade commit that also adds content the chain holds two models and detection
+> answered from whichever hash sorted first. It now fires on *any* stale visible segment.
+> Cost is contained by a new `VectorIndex::scan_index_models`, which decodes only the
+> model field — the full decode would have deserialized every vector in the chain per
+> commit. Filed #254 for the operator surface (#133's other half: no list, no status, no
+> cancel for either sweep or reindex) and #253 for GC not evicting segment-cache entries.
+>
+> **Carry-in delivered, but not as specified.** The planned check —
+> `scan_chain` errors when `pending.contains_key(&layer.id)` — does not work, twice over:
+> retroactive validation calls `scan_chain(new_layer, …)` on the commit path, where the
+> layer is legitimately pending; and backend-less storage never drains `pending`, so every
+> layer there is "uncommitted" forever. `pending` membership is not the predicate.
+>
+> What ships instead is `Layer::is_persisted()` — one `load_handle` against the backend,
+> `true` when there is no backend — enforced at the three vector-sweep entry points as
+> `SweepError::LayerNotStored`. Those are places with no legitimate uncommitted use, which
+> `scan_chain` is not.
 >
 > Found via item F: `go_recall.rs` built its layer on a RocksDB backend and never called
 > `store_layer`, so every index-driven read came back empty and the sweep embedded 0
-> subjects. That test was simply wrong — `build` is prepare, `store_layer` is commit, and
-> it was reading an uncommitted transaction. What makes it worth a guard is that the
-> layer is HALF readable: `Layer::get_resource` consults `pending` deliberately, so direct
-> resolution works while index-driven discovery silently does not, with nothing saying
-> which half you are in.
+> subjects. What makes it worth catching is that the layer is HALF readable:
+> `Layer::get_resource` consults `pending` deliberately, so direct resolution works while
+> index-driven discovery silently does not, with nothing saying which half you are in.
 >
 > **Not a Drop-based check**, though that was the first instinct. The commit pipeline is
 > `build → structural_validate → persist`, so a REJECTED commit legitimately drops an
-> uncommitted layer; a Drop warning would fire on normal operation unless every
-> abandonment site remembered to mark itself, which is the discipline-someone-must-recall
-> shape D92 exists to remove. The read-side check has no false positives: a rejected layer
-> is dropped without index reads.
->
-> Production never hits this — the pipeline always persists. The exposure is to test
-> authors and hand-written integration paths, which is what `go_recall.rs` was. Too small
-> for its own merge request; it rides with D because D is the vector-index lifecycle.
+> uncommitted layer; a Drop warning would fire on normal operation.
 
 
 > **entry −4b2 (`2026-09-15`). Workplan item F — the Candle CPU sweep (#63). DONE, merged
