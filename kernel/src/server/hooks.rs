@@ -230,6 +230,10 @@ impl crate::commit::CommitHookHost for EigeniusService {
                         // layer has no vectors, and a query against it returns fewer
                         // hits rather than an error — so the record is the only thing
                         // that makes it discoverable afterwards (eigenius#254).
+                        //
+                        // A failure that persists across a bulk load still writes one
+                        // record per commit, and nothing reaps task records today:
+                        // eigenius#258 covers retention and paging for every task kind.
                         if let Some(store) = task_store.as_ref() {
                             let record = outcome.handle.record_snapshot();
                             if let Err(e) = store.put_task(&record) {

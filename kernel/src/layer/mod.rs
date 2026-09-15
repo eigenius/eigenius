@@ -66,10 +66,11 @@ pub use index::{
     OwnedTriple, Triple, TripleIndex,
 };
 pub use index_discovery::{
-    detect_reindex_targets, extract_value_entries, resolve_active_text_indexes,
-    resolve_active_value_indexes, resolve_active_vector_indexes, verify_text_index_multiplicity,
-    verify_value_index_multiplicity, verify_vector_index_multiplicity, ActiveTextIndex,
-    ActiveValueIndex, ActiveVectorIndex, ReindexTarget,
+    detect_reindex_targets, detect_unswept_layers, extract_value_entries,
+    resolve_active_text_indexes, resolve_active_value_indexes, resolve_active_vector_indexes,
+    verify_text_index_multiplicity, verify_value_index_multiplicity,
+    verify_vector_index_multiplicity, ActiveTextIndex, ActiveValueIndex, ActiveVectorIndex,
+    ReindexTarget, UnsweptLayer,
 };
 pub use redirect::{
     augment_topology_with_redirects, manufacture_tombstone, MemoryRedirectMap, NoRedirects,

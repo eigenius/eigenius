@@ -471,6 +471,17 @@ pub fn task_meta_prefix(session_id: &Uuid) -> String {
     format!("session:{session_id}:task:")
 }
 
+/// `session:<id>:task:<id>:` — everything one task owns.
+///
+/// The record, its checkpoints and its traces all live under this prefix, which is why
+/// [`TaskStore::list_tasks`] has to filter on `:meta` to avoid picking up the siblings.
+/// Deleting a task means deleting the prefix: the record is the only index into the rest,
+/// so removing it alone would leave the checkpoints and traces unreachable and
+/// unreclaimed.
+pub fn task_prefix(session_id: &Uuid, task_id: &Uuid) -> String {
+    format!("session:{session_id}:task:{task_id}:")
+}
+
 // --- Task store trait & backend adapter -------------------------------
 
 /// Persistence API for tasks. Mirrors `BackendTraceStore` in shape.
@@ -544,8 +555,21 @@ impl TaskStore for BackendTaskStore {
     }
 
     fn delete_task(&self, session_id: &Uuid, task_id: &Uuid) -> Result<(), TaskError> {
-        let key = task_meta_key(session_id, task_id);
-        self.backend.delete_meta(&key)?;
+        // Everything under `session:<id>:task:<id>:`, not just `:meta`. The record is the
+        // only index into a task's checkpoints and traces, so deleting it alone strands
+        // them: unreachable, and still occupying the space the delete was meant to
+        // reclaim. One `write_batch` so a crash cannot leave the record gone and its
+        // siblings behind (D21 §8 step atomicity, applied to the teardown).
+        let prefix = task_prefix(session_id, task_id);
+        let keys = self.backend.list_meta_prefix(&prefix)?;
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let ops: Vec<BatchOp> = keys
+            .into_iter()
+            .map(|key| BatchOp::DeleteMeta { key })
+            .collect();
+        self.backend.write_batch(&ops)?;
         Ok(())
     }
 

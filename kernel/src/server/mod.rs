@@ -748,6 +748,27 @@ impl EigeniusKernel for EigeniusService {
         self.handle_start_reindex(request.into_inner()).await
     }
 
+    async fn delete_task(
+        &self,
+        request: Request<DeleteTaskRequest>,
+    ) -> Result<Response<DeleteTaskResponse>, Status> {
+        self.handle_delete_task(request.into_inner()).await
+    }
+
+    async fn prune_tasks(
+        &self,
+        request: Request<PruneTasksRequest>,
+    ) -> Result<Response<PruneTasksResponse>, Status> {
+        self.handle_prune_tasks(request.into_inner()).await
+    }
+
+    async fn start_sweep(
+        &self,
+        request: Request<StartSweepRequest>,
+    ) -> Result<Response<StartSweepResponse>, Status> {
+        self.handle_start_sweep(request.into_inner()).await
+    }
+
     async fn layer_topology(
         &self,
         request: Request<LayerTopologyRequest>,

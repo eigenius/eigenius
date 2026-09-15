@@ -119,6 +119,20 @@ impl SweepHandle {
         self.record.read().expect("sweep record poisoned").clone()
     }
 
+    /// Record that cancellation was requested, so an observer reading the record sees
+    /// the same thing the `CancelTask` caller was told.
+    ///
+    /// Distinct from [`Self::cancel`], which raises the flag the driver polls: this only
+    /// moves the *record*. The driver stamps the terminal status itself at its next
+    /// check, so unlike a `ProgramRun`'s `Cancelling` (eigenius#134) this one always has
+    /// an exit.
+    pub fn mark_cancelling(&self) {
+        let mut record = self.record.write().expect("sweep record poisoned");
+        if !record.status.is_terminal() {
+            record.status = TaskStatus::Cancelling;
+        }
+    }
+
     /// Status convenience accessor.
     pub fn status(&self) -> TaskStatus {
         self.record.read().expect("sweep record poisoned").status
@@ -620,7 +634,19 @@ impl SweepCoordinator {
     /// was, and a failed sweep is the case worth recording — its layer is left with no
     /// vectors, which no query reports as an error.
     pub async fn trigger_async(&self, layer: Arc<Layer>) -> Option<SweepOutcome> {
-        let active = resolve_active_vector_indexes(&layer);
+        self.trigger_sweep_at(&layer, Arc::clone(&layer)).await
+    }
+
+    /// Sweep `layer` for the Indexes active at `head`.
+    ///
+    /// The commit hook's case is `head == layer`, which is what [`Self::trigger_async`]
+    /// passes. Repair is not: an unswept layer is typically an *ancestor* of the head,
+    /// and `resolve_active_vector_indexes` walks upward from the layer it is given, so
+    /// resolving against the layer being swept would miss every Index declared above it
+    /// and sweep nothing at all (eigenius#254). [`reindex_chain`] already resolves its
+    /// target at the head for the same reason.
+    pub async fn trigger_sweep_at(&self, head: &Layer, layer: Arc<Layer>) -> Option<SweepOutcome> {
+        let active = resolve_active_vector_indexes(head);
         if active.is_empty() {
             return None;
         }
@@ -650,6 +676,7 @@ impl SweepCoordinator {
         };
         let outcome = sweep_layer_vectors_async(
             Arc::clone(&layer),
+            &active,
             Arc::clone(&self.embedders),
             self.cache.clone(),
             options,
@@ -675,8 +702,13 @@ impl SweepCoordinator {
     /// segment)` pair under `layer`, build the HNSW graph per the
     /// Index's strategy and admit the resulting [`SegmentView`] to
     /// the shared SegmentCache. No-op when no segment cache is
-    /// attached or when no segment was actually written (small
-    /// layers with no indexable resources).
+    /// attached.
+    ///
+    /// **Swept markers are not admitted.** A layer with nothing indexable under this
+    /// Index now has an empty segment rather than no segment (eigenius#254); it holds no
+    /// vectors, so caching it buys nothing, and the cache is the one read path that could
+    /// hand a marker to `verify_segment_shape` — which would fail the query with
+    /// `ModelMismatch` after a model upgrade, where the layer used to be skipped.
     fn admit_swept_segments_to_cache(&self, layer: &Layer, active: &[ActiveVectorIndex]) {
         let Some(segment_cache) = self.segment_cache.as_ref() else {
             return;
@@ -687,9 +719,9 @@ impl SweepCoordinator {
                 .vector_index
                 .get_segment(&index.iri, layer.id())
             {
-                Ok(Some(s)) => s,
-                _ => continue, // no segment written (e.g. no indexable
-                               // resources under this Index in this layer)
+                // A zero-vector segment is the swept marker, not content.
+                Ok(Some(s)) if s.count() > 0 => s,
+                _ => continue,
             };
             let metric = match Metric::from_short_name(
                 &index.distance.as_str()[index
@@ -1471,7 +1503,10 @@ mod tests {
 
         let vi = iri("urn:eigenius:test:vi");
         let backend = &head.storage().vector_index;
-        let mut checked = 0;
+        // Every segment in the chain must be on the declared model — including the empty
+        // swept markers the reindex rewrites as it walks (eigenius#254), which is why the
+        // count of segments carrying vectors is what identifies L2 and L3.
+        let mut with_vectors = 0;
         let mut cursor = Some(head.as_ref());
         while let Some(layer) = cursor {
             if let Some(seg) = backend.get_segment(&vi, layer.id()).unwrap() {
@@ -1481,11 +1516,95 @@ mod tests {
                     "segment at layer {} still carries the superseded model",
                     layer.id()
                 );
-                checked += 1;
+                if seg.count() > 0 {
+                    with_vectors += 1;
+                }
             }
             cursor = layer.parent().map(|p| p.as_ref());
         }
-        assert_eq!(checked, 2, "expected a segment at both L2 and L3");
+        assert_eq!(with_vectors, 2, "expected vectors at both L2 and L3");
+    }
+
+    /// Repairing an unswept layer sweeps an ANCESTOR of the head, and the Index that
+    /// applies to it is declared above it (eigenius#254).
+    ///
+    /// `resolve_active_vector_indexes` walks upward from the layer it is given, so
+    /// resolving against the layer being swept finds nothing and the sweep silently does
+    /// nothing — `trigger_async` would return `None`, no task would be registered, and
+    /// `StartSweep` would report success while making no progress on every re-run.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn repair_sweeps_a_layer_below_the_index_declaration() {
+        let ctx = bootstrap().expect("bootstrap");
+        let root = Arc::clone(ctx.head());
+        let storage = root.storage().clone();
+        let target_prop = "urn:eigenius:test:body";
+        let model = "urn:eigenius:embed:dummy:v1";
+
+        // L1 carries the content and is committed BEFORE any Index exists.
+        let mut l1 = LayerBuilder::new("content-first", Some(root));
+        let mut prop = Resource::new(iri(target_prop));
+        prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
+        );
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
+        l1.add_resource(prop).unwrap();
+        let mut d = Resource::new(iri("urn:eigenius:test:d1"));
+        d.set(iri(target_prop), Value::String("alpha beta".into()));
+        l1.add_resource(d).unwrap();
+        let l1 = Arc::new(l1.build(storage.clone()));
+
+        // L2 declares the Index afterwards — the ordinary "index what I already have".
+        let mut l2 = LayerBuilder::new("declare-index", Some(Arc::clone(&l1)));
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
+        );
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        l2.add_resource(vi).unwrap();
+        let l2 = Arc::new(l2.build(storage.clone()));
+
+        // L1 is exactly what detection names.
+        let unswept = crate::layer::detect_unswept_layers(&l2).expect("detect");
+        assert!(
+            unswept.iter().any(|u| u.layer_id == *l1.id()),
+            "L1 holds the content and has no segment"
+        );
+
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model, 8)));
+        let coord = SweepCoordinator::new(Arc::new(reg), None);
+
+        let outcome = coord
+            .trigger_sweep_at(&l2, Arc::clone(&l1))
+            .await
+            .expect("the Index is active at the head, so a task must run");
+        let report = outcome.result.expect("sweep");
+        assert_eq!(
+            report.total_subjects, 1,
+            "L1's document must be embedded; resolving the Index at L1 would find none"
+        );
+        assert_eq!(outcome.handle.status(), TaskStatus::Completed);
+
+        let seg = l2
+            .storage()
+            .vector_index
+            .get_segment(&iri("urn:eigenius:test:vi"), l1.id())
+            .unwrap()
+            .expect("a segment at L1");
+        assert_eq!(seg.count(), 1);
+
+        // And the repair is complete: nothing below the head is left unswept.
+        let unswept = crate::layer::detect_unswept_layers(&l2).expect("detect");
+        assert!(
+            !unswept.iter().any(|u| u.layer_id == *l1.id()),
+            "L1 must no longer be reported unswept"
+        );
     }
 
     /// A failed sweep hands back its handle, not just an error.

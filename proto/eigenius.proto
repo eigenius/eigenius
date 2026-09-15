@@ -67,9 +67,15 @@ service EigeniusKernel {
   // Generate a JSON Schema for an ontology class.
   rpc GetSchema(GetSchemaRequest) returns (GetSchemaResponse);
 
-  // List all tasks in the session (D21 §3.1). Returns empty when no
-  // persistent backend is attached — ephemeral kernels don't track
-  // tasks across invocations.
+  // List tasks in the session, newest first (D21 §3.1). Returns empty when no persistent
+  // backend is attached — ephemeral kernels don't track tasks across invocations —
+  // except for in-flight vector sweeps and reindexes, which live in the SweepRegistry
+  // and are reported whether or not a store is attached.
+  //
+  // Paged: at most `limit` per response, default 100, capped at 1000. A non-empty
+  // `next_cursor` means there are more; pass it back verbatim as `cursor`. Ordering is
+  // by created_at descending, task_id ascending as the tie-break — a total order, so
+  // paging cannot skip or repeat an entry that does not change underneath it.
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
 
   // Look up a specific task's status + metadata (D21 §3.1).
@@ -90,6 +96,24 @@ service EigeniusKernel {
   // mechanism (D43 §5.5 / §5.7).
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
 
+  // Delete one terminal task and everything it owns — its record, checkpoints and traces
+  // (D21 §3.1). Nothing expires task records on its own, so this and PruneTasks are how
+  // the keyspace is reclaimed (eigenius#258).
+  //
+  // Refuses a task that is not terminal. A non-terminal record pins its layer_head as a
+  // GC root, blocks DeleteBranch under CheckPins, and blocks consolidation over it;
+  // deleting one would silently drop those pins while the task still intends to resume
+  // against that layer. Cancel it first, which is what gives it a terminal state.
+  rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse);
+
+  // Delete every terminal task older than a cutoff (eigenius#258). The bulk form of
+  // DeleteTask, with the same refusal: non-terminal records are never touched, whatever
+  // their age.
+  //
+  // With dry_run the response reports exactly what a real run would delete and nothing is
+  // written — the intended way to use this on a store you care about.
+  rpc PruneTasks(PruneTasksRequest) returns (PruneTasksResponse);
+
   // Start a D43 §5.7 chain-wide reindex for every core:VectorIndex whose declared model no
   // longer matches its stored segments. The commit hook fires this automatically on the
   // layer it just persisted; this is the repair path for a reindex that failed or was
@@ -100,6 +124,23 @@ service EigeniusKernel {
   // for minutes and must not hold an RPC open — so poll ListTasks for their task_ids and
   // GetTaskStatus for each outcome.
   rpc StartReindex(StartReindexRequest) returns (StartReindexResponse);
+
+  // Re-run the D43 §5.5 post-Load vector sweep for layers it never covered.
+  //
+  // The commit hook sweeps each layer once, as it is persisted, and nothing retries. A
+  // sweep that failed — embedder down, dim mismatch, cancelled by GC — leaves that layer
+  // with no vectors, which no query reports as an error: the layer simply contributes no
+  // candidates. There is otherwise no way to re-run it, since committing new data sweeps
+  // only the new layer.
+  //
+  // With no layer given, every visible layer that has no segment under an active
+  // VectorIndex is swept. That set is computable because a sweep that finds nothing
+  // indexable still writes an empty segment, so a missing segment means "never swept"
+  // rather than "nothing to index".
+  //
+  // Detection runs before this returns; the sweeps themselves are detached. Poll
+  // ListTasks for them, as with StartReindex.
+  rpc StartSweep(StartSweepRequest) returns (StartSweepResponse);
 
   // Walk the layer chain and return a graph (nodes + edges) suitable
   // for the notebook's layer-stack visualisation (D22 §4.2). The
@@ -1021,10 +1062,23 @@ message TaskInfo {
   repeated string indexes = 17;
 }
 
-message ListTasksRequest {}
+message ListTasksRequest {
+  // Maximum tasks in this response. 0 means the default, 100; values above 1000 are
+  // clamped to 1000.
+  uint32 limit = 1;
+  // Continue a previous listing: pass the `next_cursor` it returned, verbatim.
+  string cursor = 2;
+}
 
 message ListTasksResponse {
   repeated TaskInfo tasks = 1;
+  // Pass back as `cursor` for the next page. Empty when this was the last one.
+  //
+  // Note this bounds the RESPONSE, not the work: the kernel has no index ordering task
+  // records by time, so each page reads and decodes every record in the session before
+  // slicing. Paging through a large store is quadratic — PruneTasks is what keeps the
+  // store small (eigenius#258).
+  string next_cursor = 2;
 }
 
 message GetTaskStatusRequest {
@@ -1038,6 +1092,49 @@ message GetTaskStatusResponse {
 
 message CancelTaskRequest {
   string task_id = 1;             // UUID as string
+}
+
+message DeleteTaskRequest {
+  string task_id = 1;             // UUID as string
+}
+
+message DeleteTaskResponse {
+  bool success = 1;
+  // The status that made it deletable, or the status that refused the delete.
+  string status = 2;
+  string error = 3;               // Populated when !success: unknown task, or not terminal
+}
+
+message PruneTasksRequest {
+  // Delete terminal tasks whose updated_at is older than this many milliseconds ago.
+  // 0 means every terminal task regardless of age.
+  uint64 older_than_ms = 1;
+  // Report what would be deleted without deleting it.
+  bool dry_run = 2;
+}
+
+message PruneTasksResponse {
+  bool success = 1;
+  // Task ids deleted, or — under dry_run — the ids that would be.
+  repeated string task_ids = 2;
+  // Tasks left alone because they are not terminal. Surfaced rather than silently
+  // skipped: a caller expecting a clean store should see why it is not one.
+  uint32 retained_non_terminal = 3;
+  string error = 4;
+}
+
+message StartSweepRequest {
+  // Layer to sweep, as 64 hex chars. Empty means "every visible layer that was never
+  // swept", which is the repair case.
+  string layer = 1;
+}
+
+message StartSweepResponse {
+  bool success = 1;
+  // Hex-encoded ids of the layers scheduled for a sweep, in chain order. Empty when
+  // every visible layer already has its segments.
+  repeated string layers = 2;
+  string error = 3;
 }
 
 message StartReindexRequest {

@@ -393,6 +393,78 @@ fn _collect_ancestors_reachable(head: &Layer) -> std::collections::BTreeSet<crat
     collect_ancestors(head)
 }
 
+/// One `(VectorIndex, layer)` pair the post-Load sweep never covered.
+///
+/// Emitted by [`detect_unswept_layers`]. The layer defines resources but has no segment
+/// under that Index, which means its sweep did not run or did not finish — the layer's
+/// content is invisible to vector search, and silently so, since a missing segment
+/// contributes no candidates rather than an error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsweptLayer {
+    /// The active `core:VectorIndex` Resource the layer has no segment under.
+    pub index_iri: Iri,
+    /// The layer that was never swept for it.
+    pub layer_id: crate::layer::LayerId,
+}
+
+/// Find every `(active VectorIndex, visible layer)` pair with no segment — the layers
+/// whose sweep did not complete (eigenius#254).
+///
+/// **This is decidable only because an empty sweep writes a marker.** A sweep that finds
+/// nothing indexable still writes a zero-vector segment, so a segment exists iff the
+/// layer was swept for that Index. Without that, "no segment" would equally describe the
+/// common case of a layer carrying nothing for this Index, and every chain would look
+/// broken.
+///
+/// Layers that define nothing at all are skipped: they have nothing to sweep, carry no
+/// marker by design, and would otherwise report as unswept forever.
+///
+/// Costs one `scan_index` per active Index plus a chain walk. `scan_index` yields layer
+/// ids, but the RocksDB implementation gets them from a `prefix_iterator_cf`, which
+/// materialises each segment's value and drops it — so the read volume is the whole
+/// vector index for that Index, not just its keys. Making that iteration key-only is a
+/// storage-side improvement this does not depend on.
+///
+/// The counterpart of [`detect_reindex_targets`]: that one asks whether stored vectors
+/// were built with the wrong model, this one asks whether they were stored at all.
+pub fn detect_unswept_layers(
+    head: &Layer,
+) -> Result<Vec<UnsweptLayer>, crate::storage::StorageError> {
+    use std::collections::BTreeSet;
+    let active = resolve_active_vector_indexes(head);
+    if active.is_empty() {
+        return Ok(Vec::new());
+    }
+    let backend = head.storage().vector_index.clone();
+
+    let mut out = Vec::new();
+    for index in &active {
+        let mut swept: BTreeSet<crate::layer::LayerId> = BTreeSet::new();
+        for layer_id in backend.scan_index(&index.iri) {
+            swept.insert(layer_id?);
+        }
+        // Walk every parent, not just the first. A trivial-merge layer has several, and
+        // `collect_ancestors` — which `detect_reindex_targets` uses to decide chain
+        // membership — is a full traversal; following `parent()` alone would silently
+        // under-report every layer reachable only through a second parent.
+        let mut visited: BTreeSet<crate::layer::LayerId> = BTreeSet::new();
+        let mut queue: Vec<&Layer> = vec![head];
+        while let Some(layer) = queue.pop() {
+            if !visited.insert(layer.id().clone()) {
+                continue;
+            }
+            if !layer.defined_iris().is_empty() && !swept.contains(layer.id()) {
+                out.push(UnsweptLayer {
+                    index_iri: index.iri.clone(),
+                    layer_id: layer.id().clone(),
+                });
+            }
+            queue.extend(layer.parents().iter().map(|p| p.as_ref()));
+        }
+    }
+    Ok(out)
+}
+
 /// D43 §5.7 / M8.4 — one active VectorIndex Resource whose declared
 /// `vec_model` no longer matches the model that produced its
 /// existing segments. Triggers a chain-wide reindex against the new
@@ -910,6 +982,117 @@ mod tests {
             );
             assert_eq!(targets[0].segment_model.as_str(), model_a);
         }
+    }
+
+    /// The swept marker makes "unswept" decidable, and a swept layer carrying nothing
+    /// indexable is not reported as unswept (eigenius#254).
+    #[test]
+    fn detect_unswept_layers_distinguishes_never_swept_from_nothing_to_index() {
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let model = "urn:eigenius:embed:dummy:v1";
+        let target_prop = "urn:ex:body";
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model, 8)));
+
+        let (head, storage) = bootstrap_head();
+        let mut l1 = LayerBuilder::new("l1", Some(head));
+        add_vi(&mut l1, "urn:ex:vi", target_prop, model);
+        let l1 = Arc::new(l1.build(storage.clone()));
+
+        // L2 carries indexable content. L3 defines a resource with no body — nothing to
+        // index, but it is still a layer the sweep must have visited.
+        let mut l2 = LayerBuilder::new("l2", Some(Arc::clone(&l1)));
+        add_doc(&mut l2, "urn:ex:d1", target_prop, "alpha beta");
+        let l2 = Arc::new(l2.build(storage.clone()));
+        let mut l3 = LayerBuilder::new("l3", Some(Arc::clone(&l2)));
+        l3.add_resource(make_resource("urn:ex:plain", "urn:ex:Thing", vec![]))
+            .unwrap();
+        let l3 = Arc::new(l3.build(storage.clone()));
+
+        // Nothing swept yet: every layer that defines something is unswept, including the
+        // one declaring the Index and every core-ontology layer beneath it. The latter is
+        // not an artifact — the commit hook sweeps only the layer it just persisted, so a
+        // VectorIndex declared over an existing chain covers none of it until something
+        // sweeps those layers.
+        let unswept = detect_unswept_layers(&l3).expect("detect");
+        let ids: Vec<_> = unswept.iter().map(|u| u.layer_id.clone()).collect();
+        assert!(ids.contains(l2.id()), "L2 has content and no segment");
+        assert!(ids.contains(l3.id()), "L3 was never swept either");
+        // The pre-existing chain is unswept too: the commit hook sweeps only the layer it
+        // just persisted, so declaring an Index over an existing chain covers none of it.
+        // That those layers can actually be repaired is
+        // `repair_sweeps_a_layer_below_the_index_declaration`; this test only establishes
+        // that detection names them.
+        assert!(ids.len() > 3, "ancestors below the declaration are unswept");
+
+        // Sweep the three, as the commit hook would have.
+        sweep_layer_vectors(&l1, &reg, None).expect("sweep l1");
+        sweep_layer_vectors(&l2, &reg, None).expect("sweep l2");
+        sweep_layer_vectors(&l3, &reg, None).expect("sweep l3");
+
+        let unswept = detect_unswept_layers(&l3).expect("detect");
+        let ids: Vec<_> = unswept.iter().map(|u| u.layer_id.clone()).collect();
+        assert!(
+            !ids.contains(l3.id()),
+            "L3 was swept and carries nothing indexable — a marker, not an absence"
+        );
+        assert!(
+            !ids.contains(l2.id()),
+            "L2 was swept and has a real segment"
+        );
+        assert!(!ids.contains(l1.id()), "L1 was swept");
+
+        // L3's marker is a real segment with no vectors — that is what makes it decidable.
+        let marker = l3
+            .storage()
+            .vector_index
+            .get_segment(&iri("urn:ex:vi"), l3.id())
+            .unwrap()
+            .expect("a swept layer has a segment even with nothing to index");
+        assert_eq!(marker.count(), 0);
+        assert_eq!(marker.model_iri.as_str(), model);
+    }
+
+    /// The marker is invisible to readers: an empty segment contributes nothing, exactly
+    /// as a missing one did, and does not trip the model check during an upgrade.
+    #[test]
+    fn the_swept_marker_is_not_visible_to_vector_search() {
+        use crate::program::embedder::{DummyEmbedder, EmbedderRegistry};
+        use crate::query::vector::indexing::sweep_layer_vectors;
+
+        let model = "urn:eigenius:embed:dummy:v1";
+        let target_prop = "urn:ex:body";
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model, 8)));
+
+        let (head, storage) = bootstrap_head();
+        let mut l1 = LayerBuilder::new("l1", Some(head));
+        add_vi(&mut l1, "urn:ex:vi", target_prop, model);
+        l1.add_resource(make_resource("urn:ex:plain", "urn:ex:Thing", vec![]))
+            .unwrap();
+        let l1 = Arc::new(l1.build(storage.clone()));
+        sweep_layer_vectors(&l1, &reg, None).expect("sweep");
+
+        let active = resolve_active_vector_indexes(&l1);
+        let index = active
+            .iter()
+            .find(|a| a.iri.as_str() == "urn:ex:vi")
+            .unwrap();
+        let hits = crate::query::vector::search::top_k_subjects(
+            l1.as_ref(),
+            l1.storage().vector_index.as_ref(),
+            None,
+            &index.iri,
+            &[0.1f32; 8],
+            4,
+            None,
+            &index.model,
+            crate::query::vector::distance::Metric::Cosine,
+        )
+        .expect("a marker-only chain must not fail the query");
+        assert!(hits.is_empty(), "a marker contributes no candidates");
     }
 
     /// A freshly-declared VectorIndex with no segments yet is *not* a

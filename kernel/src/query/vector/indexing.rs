@@ -473,10 +473,13 @@ pub fn reindex_chain(
 /// dispatch immediately, without paying a rebuild cost on the
 /// first query (M6-finish.4).
 ///
-/// Per-Index errors propagate as `SweepError::Storage`. Empty
-/// segments (no surviving vectors under a given Index) are
-/// silently skipped — they don't need an entry, and writing an
-/// empty `extend_layer` would be wasted work.
+/// Per-Index errors propagate as `SweepError::Storage`.
+///
+/// **An Index with no surviving vectors still gets a segment** — the empty swept marker
+/// (eigenius#254). Consolidation is the only writer of a consolidated layer's vectors; no
+/// sweep follows it. Skipping the empty case would leave that layer with no segment under
+/// that Index and nothing that could ever give it one, so `detect_unswept_layers` would
+/// report it forever and `StartSweep` would rewrite it on every run.
 pub fn consolidate_layer_vectors(
     consolidated: &Layer,
     range_layers: &[Arc<Layer>],
@@ -531,10 +534,6 @@ pub fn consolidate_layer_vectors(
                     .entry(subject.clone())
                     .or_insert_with(|| segment.vector_at(i).to_vec());
             }
-        }
-
-        if by_subject.is_empty() {
-            continue;
         }
 
         let count = by_subject.len();
@@ -623,21 +622,30 @@ impl Default for AsyncSweepOptions<'_> {
 /// The function returns to the caller's task; spawning + driving
 /// it on a dedicated runtime is the
 /// [`crate::task::sweep_registry::SweepCoordinator`]'s job.
+///
+/// **`active` is supplied by the caller, not resolved here.** Which Indexes apply to a
+/// layer is not a property of that layer: `resolve_active_vector_indexes` walks a chain
+/// *upward from* the layer it is given, so resolving against `layer` sees only Indexes
+/// declared at or below it. Sweeping an ancestor — which is what repairing an unswept
+/// layer means (eigenius#254) — would then find nothing and silently do nothing. The
+/// caller resolves once against the head it means, exactly as [`reindex_chain`] does with
+/// its target, and that one set is also what the task record and the SegmentCache
+/// admission report.
 pub async fn sweep_layer_vectors_async(
     layer: Arc<Layer>,
+    active: &[ActiveVectorIndex],
     embedders: Arc<EmbedderRegistry>,
     cache: Option<Arc<EmbeddingCache>>,
     options: AsyncSweepOptions<'_>,
 ) -> Result<SweepReport, SweepError> {
     require_persisted(&layer)?;
-    let active = resolve_active_vector_indexes(&layer);
     if active.is_empty() {
         return Ok(SweepReport::default());
     }
 
     let semaphore = Arc::new(tokio::sync::Semaphore::new(options.in_flight_limit.max(1)));
     let mut report = SweepReport::default();
-    for index in &active {
+    for index in active {
         if is_cancelled(options.cancellation) {
             return Err(SweepError::Cancelled);
         }
@@ -818,7 +826,21 @@ async fn sweep_one_index_async(
     }
 
     stats.subjects = owned_subjects.len();
-    if owned_subjects.is_empty() {
+    // An empty result still writes a segment — the swept marker (eigenius#254).
+    //
+    // Without it, "no segment for (index, layer)" means two different things that no
+    // caller can tell apart: the sweep ran and this layer carries nothing indexable
+    // (the common case — most layers carry nothing for any given Index), or the sweep
+    // never ran or failed. Writing the empty case makes the invariant exact: a segment
+    // exists iff the layer was swept for that Index. `detect_unswept_layers` is the
+    // difference that becomes computable, and `fetch_segment` skips empty segments so
+    // readers see what they always saw.
+    //
+    // A layer that defines nothing at all is the exception, and gets no marker: it has
+    // nothing to sweep now or ever, and `reindex_chain` skips such layers outright — so
+    // a marker there would keep its old model after a reindex and re-fire detection on
+    // every commit, a reindex that could never make progress.
+    if owned_subjects.is_empty() && layer.defined_iris().is_empty() {
         return Ok(stats);
     }
     let docs: Vec<VectorDoc<'_>> = owned_subjects
@@ -1168,7 +1190,21 @@ fn sweep_one_index(
         .unzip();
 
     stats.subjects = owned_subjects.len();
-    if owned_subjects.is_empty() {
+    // An empty result still writes a segment — the swept marker (eigenius#254).
+    //
+    // Without it, "no segment for (index, layer)" means two different things that no
+    // caller can tell apart: the sweep ran and this layer carries nothing indexable
+    // (the common case — most layers carry nothing for any given Index), or the sweep
+    // never ran or failed. Writing the empty case makes the invariant exact: a segment
+    // exists iff the layer was swept for that Index. `detect_unswept_layers` is the
+    // difference that becomes computable, and `fetch_segment` skips empty segments so
+    // readers see what they always saw.
+    //
+    // A layer that defines nothing at all is the exception, and gets no marker: it has
+    // nothing to sweep now or ever, and `reindex_chain` skips such layers outright — so
+    // a marker there would keep its old model after a reindex and re-fire detection on
+    // every commit, a reindex that could never make progress.
+    if owned_subjects.is_empty() && layer.defined_iris().is_empty() {
         return Ok(stats);
     }
 

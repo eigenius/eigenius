@@ -200,7 +200,7 @@ async fn list_tasks_and_get_task_status() {
     // ListTasks
     let list = service
         .list_tasks(Request::new(
-            eigenius_kernel::server::proto::ListTasksRequest {},
+            eigenius_kernel::server::proto::ListTasksRequest::default(),
         ))
         .await
         .expect("list_tasks")

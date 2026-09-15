@@ -343,10 +343,23 @@ fn fetch_segment(
 ) -> Result<Option<Arc<SegmentView>>, StorageError> {
     if let Some(c) = cache {
         if let Some(hit) = c.get(index_iri, layer_id) {
+            // The marker check has to cover this path too: `admit_swept_segments_to_cache`
+            // does not admit markers, but a cache is shared and this is the one place a
+            // zero-vector view could still reach `verify_segment_shape`.
+            if hit.subjects().is_empty() {
+                return Ok(None);
+            }
             return Ok(Some(hit));
         }
     }
     let view = match vector_index.get_segment(index_iri, layer_id)? {
+        // An empty segment is the swept marker, not content: it records that the sweep
+        // ran over this layer and found nothing carrying the target property (D43 §5.5,
+        // eigenius#254). Readers treat it exactly as they treated a missing segment
+        // before the marker existed — skipped, contributing nothing. Returning it would
+        // also put it through `verify_segment_shape`, which would turn a contentless
+        // layer into a `ModelMismatch` failure during a model upgrade.
+        Some(s) if s.count() == 0 => return Ok(None),
         Some(s) => Arc::new(SegmentView::from_segment(s)),
         None => return Ok(None),
     };

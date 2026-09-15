@@ -77,8 +77,12 @@ impl DocsCache {
         self.inner.insert((index, layer), docs);
     }
 
-    /// Invalidate a single entry. Used by consolidation, which
-    /// knows the exact `(index, layer)` pairs it replaced.
+    /// Invalidate a single entry by `(index, layer)`.
+    ///
+    /// No production caller — the callers are this module's own tests. GC reaches this
+    /// cache through [`Self::evict_layer`], which is keyed by layer alone, and
+    /// consolidation uses [`Self::invalidate_all`]. Kept because a caller that knows the
+    /// exact pair it replaced should not have to scan.
     pub fn invalidate(&self, index: &Iri, layer: &LayerId) {
         self.inner.invalidate(&(index.clone(), layer.clone()));
     }
