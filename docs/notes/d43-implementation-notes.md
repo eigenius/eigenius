@@ -104,7 +104,18 @@ A reindex (D43 §5.7 model upgrade) walks the entire chain, not one layer. Sever
 
 Sharing one map would either (a) require synthetic composite keys, (b) lose the "multiple concurrent reindexes against one head" affordance, or (c) introduce per-key disambiguation (sweep vs reindex prefix). All worse than two purpose-built maps.
 
-Cancellation propagates the same way through both: `cancel_by_layer(L)` flips the sweep flag for layer L; `cancel_reindex(I)` flips the reindex flag for Index I. The `delete_layer(L)` hook would call both before proceeding to GC.
+Cancellation propagates the same way through both: `cancel_by_layer(L)` flips the sweep flag for layer L; `cancel_reindex(I)` flips the reindex flag for Index I. GC calls only the first (eigenius#132) — the key shapes decide it. Deleting one layer says nothing about whether a chain-wide reindex of one Index should be abandoned, and there is no layer-to-reindex mapping to make it say something. Stopping a reindex is an operator action; that surface is eigenius#254.
+
+## Reindex detection cannot sample one segment
+
+`detect_reindex_targets` originally read the *first* chain-visible segment under each active Index and compared its model against the declared one. That is only correct while every visible segment agrees, and they routinely do not:
+
+- The commit hook runs the post-Load sweep before the reindex, so an upgrade commit that also adds content leaves a new-model segment at the head layer and stale ones beneath it.
+- D43 §5.7 makes the chain-wide reindex non-atomic on purpose ("progressive availability"), so a cancelled or failed reindex leaves the chain split between two models — exactly the state a retry must detect.
+
+"First" was also not a defined position: both backends yield layers from `scan_index` in `LayerId` order, and a `LayerId` is a content hash. So detection answered from whichever hash sorted first, and wiring the commit hook to it would have skipped the reindex about half the time on mixed commits. `detect_reindex_targets_fires_when_the_upgrade_commit_also_adds_content` runs eight distinct corpora to pin this, since one corpus passes at chance.
+
+The predicate is now "any chain-visible segment whose model differs from the declared one". Scanning all of them means reading every segment under the Index on the commit path, so `VectorIndex::scan_index_models` yields `(LayerId, model)` decoding only the model field — serde skips the subject IRIs and the `count × dim × 4` vector payload. The IO was already being paid: RocksDB's `scan_index` materialises each value as it iterates and discards it. Making that iteration key-only is a separate, un-filed improvement.
 
 ## `~` at relational precedence, not unary
 

@@ -180,11 +180,65 @@ pub struct SweepStats {
 /// any partial sweep that occurred before the error remains in the
 /// store; a future `collect` call will pick up where this one left
 /// off (mark phase is recomputed; idempotent).
+/// Everything that must be told a layer is being deleted, and when.
+///
+/// **It is a bundle rather than a parameter list because the set kept growing silently.**
+/// GC notified two of these — the resource cache and the bloom cache — while four source
+/// comments elsewhere claimed it notified a third: `SweepRegistry::cancel_by_layer`'s own
+/// doc said "the `delete_layer(L)` hook calls this synchronously", and it had no caller
+/// outside tests (eigenius#132). A subsystem that needs telling is now a field, so adding
+/// one breaks every construction site and makes the question unavoidable rather than
+/// leaving a comment to claim an answer.
+///
+/// Ordering is the reason for two methods rather than one. `cancel_sweeps` runs *before*
+/// the delete, because the sweep's flag is cooperative and unobservable once the layer is
+/// gone; `evict` runs *after*, because a cache must not be asked to drop what the delete
+/// might still fail to remove.
+pub struct DeletionHooks<'a> {
+    /// The resource cache. Evicted after the delete.
+    pub cache: &'a dyn ResourceCache,
+    /// The bloom cache. Evicted after the delete.
+    pub bloom_cache: &'a dyn BloomCache,
+    /// The sweep registry, where one is reachable. Cancelled before the delete.
+    ///
+    /// `None` for callers with no sweeps in flight — consolidation's own GC passes, and
+    /// tests. A `None` here is the honest statement that this caller cannot cancel
+    /// anything, not a default that quietly skips the step.
+    pub sweeps: Option<&'a crate::task::sweep_registry::SweepRegistry>,
+}
+
+impl DeletionHooks<'_> {
+    /// Raise the cancellation flag for a sweep against `layer`, if one is in flight.
+    ///
+    /// **A reindex is deliberately not cancelled here.** `cancel_reindex` is keyed by
+    /// index IRI, not by layer: a reindex re-embeds one `core:VectorIndex` across the
+    /// chain, so deleting a single layer is not a reason to abandon it. Stopping a
+    /// reindex is an operator action, and that surface does not exist yet
+    /// (eigenius#254).
+    fn cancel_sweeps(&self, layer: &LayerId) {
+        let Some(registry) = self.sweeps else {
+            return;
+        };
+        if registry.cancel_by_layer(layer) {
+            tracing::info!(
+                { field::OPERATION } = operation::GC_SWEEP,
+                layer = %hex::encode(layer.0),
+                "cancelled in-flight vector sweep for a layer being deleted"
+            );
+        }
+    }
+
+    /// Drop what the caches hold for `layer`, after the delete has succeeded.
+    fn evict(&self, layer: &LayerId) {
+        self.cache.evict_layer(layer);
+        self.bloom_cache.evict_layer(layer);
+    }
+}
+
 pub fn collect(
     roots: GcRoots,
     config: &GcConfig,
-    cache: &dyn ResourceCache,
-    bloom_cache: &dyn BloomCache,
+    hooks: &DeletionHooks<'_>,
     backend: &dyn PersistentBackend,
 ) -> Result<SweepStats, StorageError> {
     // Step 1: snapshot under the branch lock. Topology + redirects
@@ -233,11 +287,22 @@ pub fn collect(
             stats.layers_protected_by_age += 1;
             continue;
         }
+        // **Cancel before deleting.** The sweep's cancellation flag is cooperative —
+        // checked between resources and between indexes — so it can only be observed
+        // while the sweep is still running. Raised after the delete it would be raised
+        // at a sweep already reading a layer that is gone, and any segment it had
+        // written would be index state for a layer `delete_layer`'s own index cleanup
+        // has run past (D43 §5.5, eigenius#132).
+        //
+        // Cooperative means this does not *wait*: the delete still races the sweep's
+        // next check. Whether GC should block until the sweep acknowledges is a separate
+        // question, recorded in #132 and not answered here.
+        hooks.cancel_sweeps(&handle.id);
+
         // Atomic delete + cache eviction. The delete is per-layer;
         // failure propagates so a partial pass is visible.
         backend.delete_layer(&handle.id)?;
-        cache.evict_layer(&handle.id);
-        bloom_cache.evict_layer(&handle.id);
+        hooks.evict(&handle.id);
         stats.layers_swept += 1;
         stats.bytes_reclaimable += handle.byte_size;
     }
@@ -590,6 +655,98 @@ mod tests {
         assert_eq!(backend.load_topology().unwrap().layer_count(), 1);
     }
 
+    /// **Deleting a layer cancels a sweep against it** (eigenius#132, D43 §5.5).
+    ///
+    /// Four source comments said this happened. `SweepRegistry::cancel_by_layer` — the
+    /// method that does it — had no caller outside its own tests, and `gc::collect` had
+    /// no parameter through which a registry could be reached, so a GC pass and a vector
+    /// sweep could run against the same layer concurrently: the sweep reading resources
+    /// out from under the delete, and writing segments for a layer the topology no longer
+    /// contained.
+    ///
+    /// The registry's own tests prove cancellation reaches a running sweep. What this
+    /// proves is the half that was missing: that GC raises the flag, and raises it
+    /// *before* the delete, since a cooperative flag cannot be observed afterwards.
+    #[test]
+    fn sweeping_a_layer_cancels_an_in_flight_sweep_against_it() {
+        use crate::task::sweep_registry::{SweepHandle, SweepRegistry};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::RwLock;
+
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, &storage);
+        let orphan = commit_child(
+            &*backend,
+            &storage,
+            Arc::clone(&root),
+            "orphan",
+            "urn:eigenius:test:o",
+        );
+
+        // An in-flight sweep against the layer GC is about to delete.
+        let registry = SweepRegistry::new();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let record = Arc::new(RwLock::new(crate::task::TaskRecord::new_running(
+            uuid::Uuid::nil(),
+            uuid::Uuid::new_v4(),
+            "urn:eigenius:program:vector_sweep".into(),
+            "urn:eigenius:input:none".into(),
+            orphan.id().clone(),
+            0,
+        )));
+        let handle = Arc::new(SweepHandle::from_parts(
+            Arc::clone(&cancel),
+            record,
+            Vec::new(),
+        ));
+        registry.register(orphan.id().clone(), Arc::clone(&handle));
+        assert!(!handle.is_cancelled(), "not cancelled before the sweep");
+
+        collect(
+            GcRoots::default(),
+            &no_age_config(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: Some(&registry),
+            },
+            &*backend,
+        )
+        .unwrap();
+
+        assert!(
+            handle.is_cancelled(),
+            "GC deleted the layer without cancelling the sweep against it"
+        );
+        assert!(
+            cancel.load(Ordering::SeqCst),
+            "the flag the sweep loop actually polls must be the one raised"
+        );
+    }
+
+    /// A GC pass with no registry reachable deletes exactly as it did before — `None` is
+    /// "this caller cannot cancel anything", not a silently skipped step.
+    #[test]
+    fn sweeping_without_a_registry_still_deletes() {
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let _root = commit_root(&*backend, &storage);
+
+        let stats = collect(
+            GcRoots::default(),
+            &no_age_config(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
+            &*backend,
+        )
+        .unwrap();
+        assert_eq!(stats.layers_swept, 1);
+    }
+
     #[test]
     fn unreachable_layer_swept_when_no_root_references_it() {
         let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
@@ -609,8 +766,11 @@ mod tests {
         let stats = collect(
             GcRoots::default(),
             &no_age_config(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
@@ -667,8 +827,11 @@ mod tests {
         let stats = collect(
             roots,
             &no_age_config(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
@@ -702,8 +865,11 @@ mod tests {
         let stats = collect(
             roots,
             &no_age_config(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
@@ -737,8 +903,11 @@ mod tests {
         let stats = collect(
             roots,
             &no_age_config(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
@@ -771,8 +940,11 @@ mod tests {
         let stats_with_tag = collect(
             GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
@@ -785,8 +957,11 @@ mod tests {
         let stats_after = collect(
             GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
@@ -804,8 +979,11 @@ mod tests {
         let stats = collect(
             GcRoots::default(),
             &GcConfig::default(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
@@ -863,8 +1041,11 @@ mod tests {
         let stats = collect(
             GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
@@ -903,8 +1084,11 @@ mod tests {
         let stats1 = collect(
             GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
@@ -913,8 +1097,11 @@ mod tests {
         let stats2 = collect(
             GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();
@@ -1171,8 +1358,11 @@ mod tests {
         let stats = collect(
             GcRoots::from_branches(&*backend).unwrap(),
             &no_age_config(),
-            storage.cache.as_ref(),
-            storage.bloom_cache.as_ref(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+            },
             &*backend,
         )
         .unwrap();

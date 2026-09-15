@@ -77,8 +77,13 @@ impl DocsCache {
         self.inner.insert((index, layer), docs);
     }
 
-    /// Invalidate a single entry. Called by the M2.7 `delete_layer`
-    /// path so a layer's docs blob doesn't survive its GC.
+    /// Invalidate a single entry.
+    ///
+    /// No production caller: `delete_layer` does not reach this
+    /// cache, so a deleted layer's docs blob stays cached until LRU
+    /// evicts it. Harmless for answers — a deleted layer is in no
+    /// chain, so nothing looks the entry up — but it holds capacity.
+    /// eigenius#253.
     pub fn invalidate(&self, index: &Iri, layer: &LayerId) {
         self.inner.invalidate(&(index.clone(), layer.clone()));
     }

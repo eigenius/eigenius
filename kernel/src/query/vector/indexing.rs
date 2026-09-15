@@ -20,8 +20,10 @@
 //! Component for every indexable string. D43 §5.5 commits to making
 //! that work **asynchronous and non-gating**: a layer commits without
 //! waiting on the embedder, and a separate post-Load sweep produces
-//! the `vec_seg:<I>:<L>` segments later. The sweep is observable
-//! through a D21 TaskRecord and cancellable via `delete_layer(L)`.
+//! the `vec_seg:<I>:<L>` segments later. The sweep carries a D21
+//! TaskRecord — in-process only, since `SweepCoordinator` holds no
+//! `TaskStore` handle — and `delete_layer(L)` cancels a sweep
+//! against `L` (eigenius#132).
 //!
 //! For v1 the proper task infrastructure (in-flight cap, exponential
 //! backoff, the TaskRecord surface) is deferred. This module ships
@@ -202,6 +204,20 @@ pub enum SweepError {
     /// the cancellation check remains in the index.
     #[error("sweep cancelled before completion")]
     Cancelled,
+    /// The layer was built but never stored, so the derived indexes
+    /// the sweep reads to find its work do not exist yet (D65:
+    /// indexes materialise in `store_layer`).
+    ///
+    /// Without this the sweep reports success over an empty active
+    /// set, writes no segment, and the first query against the layer
+    /// fails much later with "no vector index" — which is what the
+    /// `go_recall` harness did for as long as it was `#[ignore]`d.
+    #[error(
+        "layer `{layer}` was built but never stored: call `Layer::persist` \
+         (or `store_layer`) before sweeping — the vector index the sweep \
+         reads is materialised at persist, not at build"
+    )]
+    LayerNotStored { layer: String },
 }
 
 /// Map an `ActiveVectorIndex.distance` IRI to the short name used
@@ -242,6 +258,7 @@ pub fn sweep_layer_vectors_with_options(
     cache: Option<&EmbeddingCache>,
     options: &SweepOptions<'_>,
 ) -> Result<SweepReport, SweepError> {
+    require_persisted(layer)?;
     let active = resolve_active_vector_indexes(layer);
     if active.is_empty() {
         return Ok(SweepReport::default());
@@ -257,6 +274,26 @@ pub fn sweep_layer_vectors_with_options(
         report.per_index.insert(index.iri.clone(), stats);
     }
     Ok(report)
+}
+
+/// Refuse to sweep a layer whose content has no durable home yet.
+///
+/// A `StorageError` from the probe is reported as
+/// [`SweepError::Storage`] rather than swallowed: if the backend
+/// cannot answer whether the layer is there, the sweep has no basis
+/// to proceed.
+fn require_persisted(layer: &Layer) -> Result<(), SweepError> {
+    let persisted = layer.is_persisted().map_err(|source| SweepError::Storage {
+        index: "<layer-persistence-probe>".to_string(),
+        source,
+    })?;
+    if persisted {
+        Ok(())
+    } else {
+        Err(SweepError::LayerNotStored {
+            layer: layer.id().to_string(),
+        })
+    }
 }
 
 fn is_cancelled(token: Option<&AtomicBool>) -> bool {
@@ -365,6 +402,7 @@ pub fn reindex_chain(
     cache: Option<&EmbeddingCache>,
     options: &SweepOptions<'_>,
 ) -> Result<SweepReport, SweepError> {
+    require_persisted(head)?;
     let active = resolve_active_vector_indexes(head);
     let target = active.iter().find(|i| &i.iri == target_index_iri).ok_or(
         SweepError::EmbedderNotRegistered {
@@ -591,6 +629,7 @@ pub async fn sweep_layer_vectors_async(
     cache: Option<Arc<EmbeddingCache>>,
     options: AsyncSweepOptions<'_>,
 ) -> Result<SweepReport, SweepError> {
+    require_persisted(&layer)?;
     let active = resolve_active_vector_indexes(&layer);
     if active.is_empty() {
         return Ok(SweepReport::default());
@@ -1225,6 +1264,71 @@ mod tests {
         }
 
         Arc::new(b.build(crate::layer::LayerStorage::in_memory()))
+    }
+
+    /// A layer built on persistent storage and never stored is the
+    /// shape that cost the #63 measurement: `store_layer` is where
+    /// the triple index is materialised (D65), so
+    /// `resolve_active_vector_indexes` — index-driven — finds
+    /// nothing, the sweep embeds nothing, reports success, and the
+    /// first query fails much later with "no vector index".
+    ///
+    /// The sweep refuses instead, and names the layer.
+    #[test]
+    fn sweeping_a_layer_that_was_never_stored_is_an_error() {
+        use crate::storage::memory::MemoryPersistentBackend;
+
+        let backend: Arc<dyn crate::storage::PersistentBackend> =
+            Arc::new(MemoryPersistentBackend::new());
+        let ctx = crate::bootstrap::bootstrap_persistent(Arc::clone(&backend)).expect("bootstrap");
+        let storage = crate::layer::LayerStorage::with_persistent(Arc::clone(&backend));
+        let mut b = LayerBuilder::new("unstored", Some(Arc::clone(ctx.head())));
+        let mut prop = Resource::new(iri("urn:eigenius:test:body"));
+        prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
+        );
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
+        b.add_resource(prop).unwrap();
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
+        );
+        vi.set(
+            iri(wk::TARGET_PROPERTY),
+            Value::iri(&iri("urn:eigenius:test:body")),
+        );
+        vi.set(
+            iri(wk::VEC_MODEL),
+            Value::iri(&iri("urn:eigenius:embed:dummy:v1")),
+        );
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        b.add_resource(vi).unwrap();
+        let mut d = Resource::new(iri("urn:eigenius:test:doc0"));
+        d.set(iri("urn:eigenius:test:body"), Value::String("alpha".into()));
+        b.add_resource(d).unwrap();
+        let layer = Arc::new(b.build(storage));
+
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(
+            "urn:eigenius:embed:dummy:v1",
+            8,
+        )));
+
+        match sweep_layer_vectors(&layer, &reg, None) {
+            Err(SweepError::LayerNotStored { layer: named }) => {
+                assert_eq!(named, layer.id().to_string());
+            }
+            other => panic!("expected LayerNotStored, got {other:?}"),
+        }
+
+        // Stored, the same sweep runs.
+        layer.persist().expect("persist");
+        let report = sweep_layer_vectors(&layer, &reg, None).expect("sweep after persist");
+        assert_eq!(report.total_subjects, 1);
     }
 
     #[test]

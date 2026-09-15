@@ -602,6 +602,34 @@ impl Layer {
         &self.storage
     }
 
+    /// Is this layer's content in its durable home?
+    ///
+    /// `false` means the layer was built but never stored: its resources are
+    /// staged in [`LayerStorage::pending`], and nothing derived from them
+    /// exists. The derived indexes — triple, text, vector, value — materialise
+    /// in `store_layer`, so before that an index-driven read of this layer
+    /// finds nothing and says so by returning nothing (D65). That is the state
+    /// worth catching at the point of use: it looks like an empty layer rather
+    /// than an unfinished one.
+    ///
+    /// Storage with no persistent backend answers `true`. There the build *is*
+    /// the durable state — `store_layer` keeps the staged resources as the only
+    /// read home and index population happens at build — so there is nothing
+    /// pending a commit.
+    ///
+    /// Costs one `load_handle`, which is a single metadata lookup.
+    ///
+    /// Note this asks the backend rather than reading
+    /// [`LayerStorage::pending`]. Pending membership does not answer the
+    /// question: a layer under validation on the commit path is legitimately
+    /// pending, and on backend-less storage every layer is pending forever.
+    pub fn is_persisted(&self) -> Result<bool, crate::storage::StorageError> {
+        let Some(backend) = self.storage.persistent_backend.as_ref() else {
+            return Ok(true);
+        };
+        Ok(backend.load_handle(&self.id)?.is_some())
+    }
+
     /// Persist this layer to the store it is bound to.
     ///
     /// **The sanctioned write path.** It takes no destination, because the layer

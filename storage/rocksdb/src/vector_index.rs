@@ -155,6 +155,22 @@ struct VectorSegmentCbor {
     hnsw_graph: Option<serde_bytes::ByteBuf>,
 }
 
+/// Model-only view of the same on-disk map. Serde ignores the
+/// fields it does not name, so decoding this skips the subject
+/// IRIs and the `count × dim × 4` vector payload — what
+/// [`VectorIndex::scan_index_models`] needs and no more.
+#[derive(Debug, Deserialize)]
+struct VectorSegmentModelCbor {
+    model_iri: String,
+}
+
+fn segment_model_from_cbor(bytes: &[u8]) -> Result<Iri, StorageError> {
+    let cbor: VectorSegmentModelCbor = ciborium::from_reader(bytes)
+        .map_err(|e| StorageError::Internal(format!("vec_seg decode: {e}")))?;
+    Iri::parse(&cbor.model_iri)
+        .map_err(|e| StorageError::Internal(format!("vec_seg model_iri: {e}")))
+}
+
 fn segment_to_cbor(segment: &VectorSegment) -> Vec<u8> {
     let mut vector_bytes = Vec::with_capacity(segment.vectors.len() * 4);
     for &v in &segment.vectors {
@@ -439,6 +455,48 @@ impl VectorIndex for RocksVectorIndex {
         Box::new(results.into_iter())
     }
 
+    fn scan_index_models<'a>(
+        &'a self,
+        index: &Iri,
+    ) -> Box<dyn Iterator<Item = Result<(LayerId, Iri), StorageError>> + 'a> {
+        let prefix = vec_seg_index_prefix(index);
+        let results: Vec<Result<(LayerId, Iri), StorageError>> = run_blocking(|| {
+            let cf = match self.cf_vec() {
+                Ok(cf) => cf,
+                Err(e) => return vec![Err(e)],
+            };
+            let mut out: Vec<Result<(LayerId, Iri), StorageError>> = Vec::new();
+            let iter = self.db.prefix_iterator_cf(&cf, prefix.as_slice());
+            for item in iter {
+                match item {
+                    Ok((key, value)) => {
+                        if !key.starts_with(prefix.as_slice()) {
+                            break;
+                        }
+                        if key.len() < prefix.len() + 32 {
+                            out.push(Err(StorageError::Internal(format!(
+                                "vec_seg key too short: {}",
+                                key.len()
+                            ))));
+                            continue;
+                        }
+                        let mut layer_bytes = [0u8; 32];
+                        layer_bytes.copy_from_slice(&key[prefix.len()..prefix.len() + 32]);
+                        out.push(
+                            segment_model_from_cbor(&value).map(|m| (LayerId(layer_bytes), m)),
+                        );
+                    }
+                    Err(e) => out.push(Err(StorageError::Internal(format!(
+                        "scan_index_models iter: {e}"
+                    )))),
+                }
+            }
+            out
+        });
+        self.scans.fetch_add(1, Ordering::Relaxed);
+        Box::new(results.into_iter())
+    }
+
     fn stats(&self) -> VectorIndexStats {
         // Live counts would require a full scan; for v1 we only
         // report the cumulative scan counter.
@@ -573,6 +631,59 @@ mod tests {
         assert_eq!(i1_layers, BTreeSet::from([l1, l2]));
         let i2_layers: BTreeSet<LayerId> = idx.scan_index(&i2).map(|r| r.unwrap()).collect();
         assert_eq!(i2_layers, BTreeSet::from([l3]));
+    }
+
+    /// `scan_index_models` reports each segment's model without
+    /// decoding the rest of it. Two layers under one Index carrying
+    /// different models is the state a reindex leaves behind when it
+    /// is cancelled part-way, and the state the commit hook's sweep
+    /// creates before the reindex runs — so the pairing has to be
+    /// per-layer, not one answer for the Index.
+    #[test]
+    fn scan_index_models_reports_each_segments_model() {
+        let (store, _dir) = open_temp_store();
+        let idx = RocksVectorIndex::new(Arc::clone(&store.db));
+        let i1 = iri("urn:eigenius:test:i1");
+        let i2 = iri("urn:eigenius:test:i2");
+        let l1 = layer_id(1);
+        let l2 = layer_id(2);
+        let l3 = layer_id(3);
+        let model_a = iri("urn:eigenius:test:m_a");
+        let model_b = iri("urn:eigenius:test:m_b");
+        let s = iri("urn:eigenius:test:s");
+        let v = [1.0f32, 0.5];
+        let docs = [VectorDoc {
+            subject: &s,
+            vector: &v,
+        }];
+
+        idx.extend_layer(&i1, &l1, &model_a, 2, "cosine", &docs, None)
+            .unwrap();
+        idx.extend_layer(&i1, &l2, &model_b, 2, "cosine", &docs, None)
+            .unwrap();
+        idx.extend_layer(&i2, &l3, &model_a, 2, "cosine", &docs, None)
+            .unwrap();
+
+        let got: BTreeSet<(LayerId, String)> = idx
+            .scan_index_models(&i1)
+            .map(|r| {
+                let (l, m) = r.unwrap();
+                (l, m.as_str().to_string())
+            })
+            .collect();
+        assert_eq!(
+            got,
+            BTreeSet::from([
+                (l1.clone(), model_a.as_str().to_string()),
+                (l2, model_b.as_str().to_string()),
+            ])
+        );
+
+        // The model-only decode agrees with the full one.
+        assert_eq!(
+            idx.get_segment(&i1, &l1).unwrap().unwrap().model_iri,
+            model_a
+        );
     }
 
     /// drop_layer removes every segment under that layer; segments

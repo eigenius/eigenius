@@ -116,10 +116,17 @@ impl ReindexDriver {
         &self.target_index_iri
     }
 
-    /// Clonable handle on the cooperative-cancellation flag.
-    /// `delete_layer(L)` on any layer the reindex touches flips
-    /// this; the reindex returns `SweepError::Cancelled` at the
-    /// next check.
+    /// Clonable handle on the cooperative-cancellation flag. The
+    /// reindex returns `SweepError::Cancelled` at its next
+    /// per-layer or per-Resource check once raised.
+    ///
+    /// `delete_layer` does **not** raise it. GC cancels by layer,
+    /// and a reindex is keyed by index IRI: it re-embeds one
+    /// `core:VectorIndex` across the whole chain, so one layer
+    /// going away is not a reason to abandon it (see
+    /// [`crate::gc::DeletionHooks`]). Today the only production
+    /// caller of `SweepRegistry::cancel_reindex` would be an
+    /// operator surface, which does not exist yet (eigenius#254).
     pub fn cancel_handle(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.cancel)
     }

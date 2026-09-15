@@ -1943,8 +1943,12 @@ mod tests {
             &crate::gc::GcConfig {
                 min_age: std::time::Duration::from_secs(0),
             },
-            gc_storage.cache.as_ref(),
-            gc_storage.bloom_cache.as_ref(),
+            &crate::gc::DeletionHooks {
+                cache: gc_storage.cache.as_ref(),
+                bloom_cache: gc_storage.bloom_cache.as_ref(),
+                // A test GC with no coordinator: nothing to cancel, said explicitly.
+                sweeps: None,
+            },
             backend.as_ref(),
         )
         .expect("gc collect");
@@ -2018,8 +2022,12 @@ mod tests {
             &crate::gc::GcConfig {
                 min_age: std::time::Duration::from_secs(0),
             },
-            gc_storage.cache.as_ref(),
-            gc_storage.bloom_cache.as_ref(),
+            &crate::gc::DeletionHooks {
+                cache: gc_storage.cache.as_ref(),
+                bloom_cache: gc_storage.bloom_cache.as_ref(),
+                // A test GC with no coordinator: nothing to cancel, said explicitly.
+                sweeps: None,
+            },
             backend.as_ref(),
         )
         .expect("gc collect");
