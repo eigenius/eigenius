@@ -171,7 +171,29 @@ mechanical, and separable from this note's work.
 
 That is a real cost and the note takes it deliberately. A name that does not resolve makes every downstream check about it meaningless, so the second error is as likely to be noise as signal. The alternative — a partial program carrying resolution holes — reintroduces exactly the representable-but-invalid state this note exists to remove.
 
-**Per-query resolution cost drops.** Three class resolutions become one, two query-class resolutions become one, and the FIBER param table is built once instead of twice. The #249 review measured 2.5s of type-check for one untyped five-property query on a 100-layer chain; that is the same `resolve_scoped_name` machinery, and this removes repeat calls rather than making any single call cheaper. Not the motivation, and worth measuring after.
+**Per-query resolution cost drops, where the duplicates were.** Measured after, by
+`kernel/tests/d92_resolution_cost.rs`, against `main` at `54cb647` on one machine. The
+harness stops at type-check, so it sees two of `main`'s three class resolutions — the
+third is at evaluation.
+
+A chain of **2000 classes**, `MATCH Big(?x) { … }` with a short-name class:
+
+| depth | main | branch | |
+|---|---|---|---|
+| 0 | 3ms | 2ms | |
+| 25 | 10ms | 5ms | 2.0× |
+| 50 | 18ms | 9ms | 2.0× |
+| 100 | 34ms | 19ms | 1.8× |
+
+A chain of **2000 properties** shows **no change at all** — 81ms against 86ms untyped at
+depth 100, 1ms against 1ms typed. That is the honest shape of the result and it is worth
+stating plainly: D92 de-duplicated *class* and *query-class* lookups, not property
+lookups, so a chain with few classes cannot show a difference however many properties it
+has. `resolve_scoped_name` is O(vocabulary of the metaclass × depth), and the metaclass
+decides which chains benefit.
+
+The GO bench is unmoved (cold 21-29ms, inside this branch's 19-27ms spread), which is what
+a branch touching the whole evaluation path should show.
 
 **D2 needs a section.** The specification describes short-name resolution per construct (§5.4, §5.6.1, §5.8) and does not say that resolution is a pipeline stage with a before and an after. That is now a language-level fact, not an implementation detail.
 
