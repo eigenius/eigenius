@@ -47,25 +47,49 @@ They are spelled the same and typed the same, so the discipline for one silently
 
 ## The decision: parameterise the AST over its name type
 
-One set of AST structs, generic in the name:
+One set of AST structs, generic in the *stage* they belong to:
 
 ```rust
-pub struct Pattern<N> {
-    pub subject: Variable,
-    pub class: Option<N>,
-    pub properties: Vec<PropertyPattern<N>>,
-    pub negated: bool,
+pub trait Stage {
+    /// A `MATCH` pattern's class: a chain class or a DEFINE relation.
+    type PatternClass: Debug + Clone + PartialEq;
+    /// Every other reference — property key, dot-path segment, RETURN result class,
+    /// FIBER institution, query class, param, comorphism.
+    type Ref: Debug + Clone + PartialEq;
 }
 
-pub type ParsedProgram = Program<Name>;      // what the parser builds
-pub type ResolvedProgram = Program<ClassRef>; // what everything after resolution sees
+impl Stage for Parsed   { type PatternClass = Name;     type Ref = Name; }
+impl Stage for Resolved { type PatternClass = ClassRef; type Ref = Iri;  }
+
+pub struct Pattern<S: Stage = Parsed> {
+    pub subject: Variable,
+    pub class: Option<S::PatternClass>,
+    pub properties: Vec<PropertyPattern<S>>,
+    pub negated: bool,
+}
 ```
 
-and resolution as a total function between the two:
+and resolution as a total function between the two instantiations:
 
 ```rust
-pub fn resolve(program: ParsedProgram, layer: &Layer) -> Result<ResolvedProgram, Vec<QueryError>>
+pub fn resolve(program: Program<Parsed>, layer: &Layer)
+    -> Result<Program<Resolved>, Vec<QueryError>>
 ```
+
+**Two associated types, not one type parameter.** The first draft of this note said
+`Program<Name>` to `Program<ClassRef>`, which does not work: the positions do not resolve
+alike. A pattern class may name a chain class *or* a `DEFINE` relation, so it resolves to
+a `ClassRef`; every other reference resolves to the `Iri` of a declared resource. Forcing
+one resolved type on both makes that type a sum, and a sum lets a property key hold a
+`Relation` — representable and invalid, which is the state this note exists to remove,
+relocated rather than removed. Implementation surfaced it; the design is corrected here.
+
+They stop at two. Distinguishing a property `Iri` from a class `Iri` in the type — so a
+property key could not hold a class — wants a newtype per metaclass. That is a larger
+change than this note, and nothing here needs it.
+
+`S` defaults to `Parsed`, so code working on parsed programs reads unchanged and the
+migration is per-consumer rather than all at once.
 
 **The property that matters is not that the state is checked. It is that a missed position does not compile.** To produce a `Program<Iri>` the pass must produce an `Iri` for every parameterised position; there is no arm it can skip.
 
@@ -82,7 +106,7 @@ DEFINE ancestor(?a, ?b) ...
 MATCH ancestor(?x, ?y)
 ```
 
-`check_match_part` exempts relation names from class resolution today, as a special case inside the check. Under the staged AST the resolved type states it:
+`check_match_part` exempts relation names from class resolution today, as a special case inside the check. Under the staged AST the resolved type states it — and it is why `Stage` needs `PatternClass` separately from `Ref`:
 
 ```rust
 pub enum ClassRef {
