@@ -19,6 +19,7 @@ use crate::layer::Layer;
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
+use crate::query::ast::Resolved;
 use crate::query::ast::*;
 use crate::query::document::QueryFingerprint;
 use crate::query::error::QueryError;
@@ -35,8 +36,8 @@ use super::FiberRuntime;
 /// resources. Full-IRI RETURN items use the user-supplied IRI unchanged.
 pub(super) fn shape_result(
     binding: &Binding,
-    classes: &[Name],
-    items: &[ReturnItem],
+    classes: &[Iri],
+    items: &[ReturnItem<Resolved>],
     layer: &Layer,
     fp: &QueryFingerprint,
     runtime: FiberRuntime<'_>,
@@ -46,13 +47,7 @@ pub(super) fn shape_result(
     // Set is_a from result classes
     if !classes.is_empty() {
         let is_a_iri = Iri::parse(wk::IS_A).unwrap();
-        let class_values: Vec<Value> = classes
-            .iter()
-            .map(|n| match n {
-                Name::FullIri(iri) => Value::iri(iri),
-                Name::ShortName(s) => Value::String(s.clone()),
-            })
-            .collect();
+        let class_values: Vec<Value> = classes.iter().map(Value::iri).collect();
         if !class_values.is_empty() {
             resource.set(is_a_iri, Value::Array(class_values));
         }
@@ -60,8 +55,8 @@ pub(super) fn shape_result(
 
     for (position, item) in items.iter().enumerate() {
         let prop_iri = match &item.name {
-            Name::FullIri(iri) => iri.clone(),
-            Name::ShortName(s) => fp.row_property_iri(s),
+            ColumnLabel::Explicit(iri) => iri.clone(),
+            ColumnLabel::Synthesised(s) => fp.row_property_iri(s),
         };
 
         // Handle aggregate expressions specially
@@ -98,7 +93,7 @@ pub(super) fn shape_result(
 }
 
 /// Convert a binding to a simple resource (for match queries without RETURN).
-pub(super) fn binding_to_resource(binding: &Binding, _classes: &[Name]) -> Resource {
+pub(super) fn binding_to_resource(binding: &Binding, _classes: &[Iri]) -> Resource {
     let mut resource = Resource::new_embedded();
     for (key, value) in binding {
         if let Ok(iri) = Iri::parse(&format!("urn:query:var:{key}")) {
@@ -135,8 +130,8 @@ pub(super) fn deduplicate(resources: Vec<Resource>) -> Vec<Resource> {
 /// with no error.
 pub(super) fn sort_results(
     resources: &mut [Resource],
-    order_by: &[OrderItem],
-    items: &[ReturnItem],
+    order_by: &[OrderItem<Resolved>],
+    items: &[ReturnItem<Resolved>],
     fp: &QueryFingerprint,
 ) {
     resources.sort_by(|a, b| {
@@ -162,8 +157,8 @@ pub(super) fn sort_results(
 
 fn extract_sort_value(
     resource: &Resource,
-    expr: &Expression,
-    items: &[ReturnItem],
+    expr: &Expression<Resolved>,
+    items: &[ReturnItem<Resolved>],
     fp: &QueryFingerprint,
 ) -> Option<Value> {
     // The column the RETURN list projected this expression as. Sorting happens over the
@@ -177,8 +172,8 @@ fn extract_sort_value(
     // ?wt } ORDER BY ?s` sorted by the column NAMED `s` rather than by `?s`.
     let item = items.iter().find(|i| i.expression == *expr)?;
     let prop_iri = match &item.name {
-        Name::FullIri(iri) => iri.clone(),
-        Name::ShortName(s) => fp.row_property_iri(s),
+        ColumnLabel::Explicit(iri) => iri.clone(),
+        ColumnLabel::Synthesised(s) => fp.row_property_iri(s),
     };
     resource.get(&prop_iri).cloned()
 }

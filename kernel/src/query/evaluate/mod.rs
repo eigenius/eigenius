@@ -38,7 +38,7 @@ mod similarity;
 
 use crate::layer::Layer;
 use crate::ontology::resource::Resource;
-use crate::query::ast::Program;
+use crate::query::ast::Resolved;
 use crate::query::document::QueryFingerprint;
 use crate::query::error::QueryError;
 use std::collections::BTreeMap;
@@ -78,11 +78,14 @@ fn project_onto_head(bindings: Vec<Binding>, head: &[crate::query::ast::Variable
 }
 
 pub fn evaluate(
-    program: &Program,
+    resolved: &crate::query::resolve::ResolvedProgram,
     layer: &Layer,
     fp: &QueryFingerprint,
     runtime: FiberRuntime<'_>,
 ) -> Result<(Vec<Resource>, Vec<Resource>), QueryError> {
+    let program = &resolved.program;
+    let strata = &resolved.strata;
+    let relation_ids = &resolved.relation_ids;
     // D43 §6 — similarity-operator pre-pass: probe every active
     // similarity index referenced by a `~` operator in the program,
     // fuse the per-source rankings into a subject → score map, and
@@ -99,7 +102,7 @@ pub fn evaluate(
         ..runtime
     };
 
-    let mut derived: BTreeMap<String, Vec<Binding>> = BTreeMap::new();
+    let mut derived: BTreeMap<crate::query::ast::RelationId, Vec<Binding>> = BTreeMap::new();
 
     // 1. Evaluate DEFINE rules, stratum by stratum, with a naive
     //    fixpoint per stratum. Naive, not seminaive: there is no delta
@@ -124,15 +127,24 @@ pub fn evaluate(
     // consumer (collect_candidates) cannot map. Positional projection gives one
     // canonical tuple shape per relation and drops rule-local junk variables.
     if !program.definitions.is_empty() {
-        let strata = crate::query::stratify::stratify(&program.definitions)?;
+        // Stratification ran once, before resolution, and its answer was carried here.
+        // This used to call `stratify` a SECOND time and throw the pipeline's result away
+        // (D92) — the same shape as re-resolving a name, minus the chance of disagreeing.
         let max_iterations = 1000; // Safety bound
-        for stratum in &strata {
+        for stratum in strata {
             let in_stratum: std::collections::BTreeSet<&str> =
                 stratum.relations.iter().map(String::as_str).collect();
-            let rules: Vec<&crate::query::ast::RuleDefinition> = program
+            // Carrying the id, because a resolved pattern names a relation by id rather
+            // than by name (D92). Several rules may share one relation — a base case and
+            // a recursive case — and they must accumulate into one entry.
+            let rules: Vec<(
+                crate::query::ast::RelationId,
+                &crate::query::ast::RuleDefinition<Resolved>,
+            )> = program
                 .definitions
                 .iter()
                 .filter(|d| in_stratum.contains(d.name.as_str()))
+                .map(|d| (relation_ids[&d.name], d))
                 .collect();
 
             // Fixpoint over this stratum only; lower strata are fixed.
@@ -143,10 +155,10 @@ pub fn evaluate(
             // the size of the relation.
             for _ in 0..=max_iterations {
                 let mut new_facts = false;
-                for def in &rules {
+                for (id, def) in &rules {
                     let bindings = evaluate_match_part(&def.body, layer, &derived)?;
                     let projected = project_onto_head(bindings, &def.variables);
-                    let entry = derived.entry(def.name.clone()).or_default();
+                    let entry = derived.entry(*id).or_default();
                     for binding in projected {
                         if !entry.contains(&binding) {
                             entry.push(binding);

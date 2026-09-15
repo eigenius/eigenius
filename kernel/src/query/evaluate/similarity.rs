@@ -32,7 +32,8 @@ use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
 use crate::program::embedder::EmbedderRegistry;
 use crate::query::ast::{
-    BinaryOp, Expression, HintSet, Literal, MatchPart, Program, ValueOrVariable, Variable, Via,
+    BinaryOp, Expression, HintSet, Literal, MatchPart, Program, Resolved, ValueOrVariable,
+    Variable, Via,
 };
 use crate::query::error::QueryError;
 use crate::query::text::analyzer::registry as analyzer_registry;
@@ -73,9 +74,9 @@ pub(super) struct SimilarityProbe {
 /// resolve a `Similarity` node back to its precomputed score map in
 /// O(1).
 ///
-/// Pointer identity (`*const Expression`) keys the map. The AST is
-/// owned by the [`Program`] for the duration of evaluation, so
-/// `&Expression` references remain stable and the pointer is a
+/// Pointer identity (`*const Expression<Resolved>`) keys the map. The AST is
+/// owned by the [`Program<Resolved>`] for the duration of evaluation, so
+/// `&Expression<Resolved>` references remain stable and the pointer is a
 /// stable identifier — equivalent to a node ID without needing a
 /// parallel index walk on the eval side.
 #[derive(Debug, Default)]
@@ -89,7 +90,7 @@ impl SimilarityContext {
     /// short-circuits evaluation with a `QueryError` before any
     /// per-row work runs.
     pub fn new(
-        program: &Program,
+        program: &Program<Resolved>,
         layer: &Layer,
         embedders: Option<&EmbedderRegistry>,
         vector_segment_cache: Option<&SegmentCache>,
@@ -99,7 +100,7 @@ impl SimilarityContext {
         let vector_indexes = resolve_active_vector_indexes(layer);
 
         let mut probes: BTreeMap<usize, SimilarityProbe> = BTreeMap::new();
-        let mut collected: Vec<&Expression> = Vec::new();
+        let mut collected: Vec<&Expression<Resolved>> = Vec::new();
         collect_similarity_nodes(&program.query.body, &mut collected);
         for item in &program.query.result {
             collect_in_expression(&item.expression, &mut collected);
@@ -141,7 +142,7 @@ impl SimilarityContext {
     /// Resolve a `Similarity` AST node to its precomputed probe
     /// state, if any. Returns `None` for non-similarity expressions
     /// (callers gate on the AST variant).
-    pub(super) fn probe_for(&self, expr: &Expression) -> Option<&SimilarityProbe> {
+    pub(super) fn probe_for(&self, expr: &Expression<Resolved>) -> Option<&SimilarityProbe> {
         self.probes.get(&(expr as *const _ as usize))
     }
 
@@ -177,9 +178,9 @@ impl SimilarityContext {
     pub(super) fn conjunct_subjects_for(
         &self,
         subject_var: &str,
-        conditions: &[Expression],
+        conditions: &[Expression<Resolved>],
     ) -> Option<Vec<Iri>> {
-        let mut conjuncts: Vec<&Expression> = Vec::new();
+        let mut conjuncts: Vec<&Expression<Resolved>> = Vec::new();
         for cond in conditions {
             collect_similarity_conjuncts(cond, &mut conjuncts);
         }
@@ -239,22 +240,20 @@ struct PropertyVarBinding {
 
 /// The `variable → property_iri` map over every `MATCH` brace key that binds a variable.
 ///
-/// Infallible, and takes no layer: `resolve_property_names` already resolved every key
-/// against the full scope rule and reported what it could not. This reads the answer.
-fn build_property_variable_index(program: &Program) -> BTreeMap<String, PropertyVarBinding> {
+/// Infallible, and takes no layer: `query::resolve` already resolved every key against
+/// the full scope rule and reported what it could not. This reads the answer.
+fn build_property_variable_index(
+    program: &Program<Resolved>,
+) -> BTreeMap<String, PropertyVarBinding> {
     let mut out: BTreeMap<String, PropertyVarBinding> = BTreeMap::new();
-    let mut visit = |part: &MatchPart| {
+    let mut visit = |part: &MatchPart<Resolved>| {
         for pat in part.patterns() {
             for pp in &pat.properties {
                 if let ValueOrVariable::Variable(var) = &pp.object {
-                    if let Some(property_iri) =
-                        crate::query::resolve::resolved_property_iri(&pp.property)
-                    {
-                        out.entry(var.name.clone()).or_insert(PropertyVarBinding {
-                            property_iri,
-                            subject_var: pat.subject.name.clone(),
-                        });
-                    }
+                    out.entry(var.name.clone()).or_insert(PropertyVarBinding {
+                        property_iri: pp.property.clone(),
+                        subject_var: pat.subject.name.clone(),
+                    });
                 }
             }
         }
@@ -266,7 +265,10 @@ fn build_property_variable_index(program: &Program) -> BTreeMap<String, Property
     out
 }
 
-fn collect_similarity_nodes<'a>(part: &'a MatchPart, out: &mut Vec<&'a Expression>) {
+fn collect_similarity_nodes<'a>(
+    part: &'a MatchPart<Resolved>,
+    out: &mut Vec<&'a Expression<Resolved>>,
+) {
     for cond in &part.conditions {
         collect_in_expression(cond, out);
     }
@@ -277,7 +279,10 @@ fn collect_similarity_nodes<'a>(part: &'a MatchPart, out: &mut Vec<&'a Expressio
 /// Descends only through `And`. A `~` under `Or`, under `Not`, or under any other operator
 /// does not constrain every row the expression admits, so it must not narrow the candidate
 /// set. Mirrors `extract_subject_constraint`'s reading of the same condition list.
-fn collect_similarity_conjuncts<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+fn collect_similarity_conjuncts<'a>(
+    expr: &'a Expression<Resolved>,
+    out: &mut Vec<&'a Expression<Resolved>>,
+) {
     match expr {
         Expression::Similarity { .. } => out.push(expr),
         Expression::Binary {
@@ -292,7 +297,10 @@ fn collect_similarity_conjuncts<'a>(expr: &'a Expression, out: &mut Vec<&'a Expr
     }
 }
 
-fn collect_in_expression<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>) {
+fn collect_in_expression<'a>(
+    expr: &'a Expression<Resolved>,
+    out: &mut Vec<&'a Expression<Resolved>>,
+) {
     match expr {
         Expression::Similarity { query, .. } => {
             out.push(expr);
@@ -316,11 +324,6 @@ fn collect_in_expression<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>
                 collect_in_expression(e, out);
             }
         }
-        Expression::Object(pairs) => {
-            for (_, v) in pairs {
-                collect_in_expression(v, out);
-            }
-        }
         Expression::Literal(_)
         | Expression::Variable(_)
         | Expression::NotExists(_)
@@ -331,7 +334,7 @@ fn collect_in_expression<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>
 #[allow(clippy::too_many_arguments)]
 fn build_probe(
     property: &Variable,
-    query: &Expression,
+    query: &Expression<Resolved>,
     hints: &HintSet,
     // `TOP N` from the query, which sizes the candidate pool when no explicit hint says
     // otherwise. `None` means the query does not rank, so the probe must not truncate.

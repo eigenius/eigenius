@@ -107,7 +107,6 @@ AggregateFn       ::= 'COUNT' | 'SUM' | 'AVG' | 'MIN' | 'MAX'
 - `IN`, `NOT IN`, `LIKE`, and `NOT LIKE` accept any `AdditiveExpr` on the right — typically an array literal for `IN` and a string for `LIKE`, but a variable bound to a list/string is also valid.
 - Equality and relational chains are written as `*` to match the parser, but consecutive non-associative comparisons are unusual; pre-formed chains like `?a = ?b = ?c` are valid by grammar, evaluated left-associatively.
 - `**` binds *looser* than the unary operators and folds **left**: `parse_power_expr` calls `parse_unary_expr` on each side and loops rather than recursing, so `-a ** b` is `(-a) ** b` and `2 ** 3 ** 2` is `64`, not `512`. Parenthesise stacked exponents.
-- `Expression::Object` exists in the AST and has no production: object literals in expression position do not parse, and the evaluator's arm for the variant reports `object literals in expressions not yet implemented`.
 - A bare `Identifier` in expression position evaluates to the identifier text as a string literal (used to pass shortnames as values, e.g., in `RETURN`).
 - **A `-` immediately before a digit lexes as part of the number**, so `?a -1` is two adjacent tokens (`?a`, `-1`) with no operator between them and fails at end of input. Write `?a - 1`.
 

@@ -22,6 +22,7 @@ use crate::layer::{is_indexable_predicate, scan_chain, Layer};
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
+use crate::query::ast::Resolved;
 use crate::query::ast::*;
 use crate::query::error::QueryError;
 use crate::query::functions::values_equal;
@@ -35,17 +36,16 @@ pub(super) type Binding = BTreeMap<String, Value>;
 type Candidates = Vec<(Option<Iri>, BTreeMap<Iri, Value>)>;
 
 /// What a pattern is matched AGAINST — the chain, the derived relations, the FIBER
-/// overlay, the imported namespaces, and the similarity pre-pass.
+/// overlay, and the similarity pre-pass.
 ///
-/// Grouped because these five travel together through every pattern entry point and
+/// Grouped because these four travel together through every pattern entry point and
 /// change only between queries, while the pattern, the bindings so far and the conditions
 /// change per call. Passing them individually pushed `apply_pattern` to eight parameters.
 #[derive(Clone, Copy)]
 pub(super) struct MatchContext<'a> {
     pub layer: &'a Layer,
-    pub derived: &'a BTreeMap<String, Vec<Binding>>,
+    pub derived: &'a BTreeMap<crate::query::ast::RelationId, Vec<Binding>>,
     pub overlay: &'a [(Iri, Resource)],
-    pub namespaces: &'a [String],
     /// `None` on a path with no runtime — a DEFINE body — and on a negated pattern, where
     /// narrowing what the negation ranges over would change its meaning.
     pub similarity: Option<&'a super::similarity::SimilarityContext>,
@@ -58,10 +58,10 @@ pub(super) struct MatchContext<'a> {
 /// candidate set alongside layer resources so pattern matching on FIBER-bound variables
 /// works uniformly.
 pub(super) fn apply_pattern(
-    pattern: &Pattern,
+    pattern: &Pattern<Resolved>,
     ctx: MatchContext<'_>,
     existing: Vec<Binding>,
-    conditions: &[Expression],
+    conditions: &[Expression<Resolved>],
 ) -> Result<Vec<Binding>, QueryError> {
     let MatchContext { similarity, .. } = ctx;
     // Subject-predicate pushdown: if a WHERE conjunct constrains this pattern's
@@ -97,7 +97,7 @@ pub(super) fn apply_pattern(
 
 /// Apply a negated pattern: keep bindings where no match exists.
 pub(super) fn apply_negated_pattern(
-    pattern: &Pattern,
+    pattern: &Pattern<Resolved>,
     ctx: MatchContext<'_>,
     existing: Vec<Binding>,
 ) -> Result<Vec<Binding>, QueryError> {
@@ -132,7 +132,7 @@ pub(super) fn apply_negated_pattern(
 /// untyped patterns and for setups where `is_a` somehow lost its
 /// indexable data_type.
 fn collect_candidates(
-    pattern: &Pattern,
+    pattern: &Pattern<Resolved>,
     ctx: MatchContext<'_>,
     subject_constraint: Option<&SubjectConstraint>,
     similarity_seed: Option<&[Iri]>,
@@ -141,7 +141,6 @@ fn collect_candidates(
         layer,
         derived,
         overlay,
-        namespaces,
         ..
     } = ctx;
     // Check if this references a derived relation. Derived rows are stored as
@@ -155,8 +154,8 @@ fn collect_candidates(
     // A column IRI that doesn't resolve (a dangling reference) yields empty
     // properties: the subject still binds (the row is in the relation) but no
     // brace refinement can match it.
-    if let Some(Name::ShortName(ref name)) = pattern.class {
-        if let Some(derived_bindings) = derived.get(name) {
+    if let Some(ClassRef::Relation(id)) = pattern.class {
+        if let Some(derived_bindings) = derived.get(&id) {
             return Ok(derived_bindings
                 .iter()
                 .filter_map(|b| {
@@ -175,9 +174,13 @@ fn collect_candidates(
         }
     }
 
+    // Resolved by `query::resolve`. A relation was handled above; a chain class is the
+    // IRI it resolved to. This used to call `resolve_name`, the THIRD site resolving a
+    // pattern class for one query — `check_match_part` validated one, the dot-path scope
+    // built another, and this one answered again at evaluation (D92).
     let class_iri = match pattern.class.as_ref() {
-        Some(n) => resolve_name(n, layer, namespaces)?,
-        None => None,
+        Some(ClassRef::Chain(iri)) => Some(iri.clone()),
+        Some(ClassRef::Relation(_)) | None => None,
     };
     let is_a_iri = Iri::parse(wk::IS_A).expect("well-known is_a IRI");
 
@@ -271,7 +274,7 @@ enum SubjectConstraint {
 /// the normal scan + WHERE filter.
 fn extract_subject_constraint(
     subject: &str,
-    conditions: &[Expression],
+    conditions: &[Expression<Resolved>],
 ) -> Option<SubjectConstraint> {
     for cond in conditions {
         let Expression::Binary { op, left, right } = cond else {
@@ -401,7 +404,7 @@ fn class_with_subclass_closure(class_iri: &Iri, layer: &Layer) -> BTreeSet<Iri> 
 /// (Each) form iterates a property's elements (D59). Each property pattern is a
 /// join step over the running frontier of partial bindings.
 fn try_match_resource(
-    pattern: &Pattern,
+    pattern: &Pattern<Resolved>,
     resource_props: &BTreeMap<Iri, Value>,
     resource_iri: &Option<Iri>,
     existing: &Binding,
@@ -423,24 +426,11 @@ fn try_match_resource(
     // Match property patterns, threading a frontier of partial bindings.
     let mut frontier = vec![base];
     for prop_pat in &pattern.properties {
-        // Resolved by `type_check` to the property IRI the key names — see
-        // `query::resolve::resolve_property_names`. A short name here means the program
-        // reached evaluation without that pass.
-        //
-        // **It says so rather than matching nothing.** Returning no rows made an
-        // unresolved key indistinguishable from a resource that does not carry the
-        // property, which is the silent-empty-set failure this whole rule exists to
-        // remove — and it disagreed with the dot-path site, which errors on the same
-        // state. The state is unreachable now that every name position is resolved
-        // (eigenius#248 tracks making it unrepresentable), so this is a diagnostic for a
-        // pass that did not run, not a branch on user input.
-        let Name::FullIri(prop_iri) = &prop_pat.property else {
-            return Err(QueryError::evaluation(format!(
-                "property key '{}' was never resolved to a property IRI",
-                prop_pat.property
-            )));
-        };
-        let value = resource_props.get(prop_iri);
+        // A resolved brace key IS the property IRI. The guard that used to stand here —
+        // and the one in `expression.rs` that disagreed with it, one erroring where the
+        // other silently matched nothing — guarded a state the type no longer has
+        // (eigenius#248).
+        let value = resource_props.get(&prop_pat.property);
 
         let mut next: Vec<Binding> = Vec::new();
         for b in frontier {
@@ -543,23 +533,6 @@ fn is_subclass_instance(resource: &Resource, class_iri: &Iri, layer: &Layer) -> 
         .any(|res_class| layer.is_subclass_of(res_class, class_iri))
 }
 
-/// Resolve a pattern-class `Name` to an IRI. `FullIri` passes through; a
-/// `ShortName` resolves to a `core:Class` within the imported `namespaces`
-/// (`USING NAMESPACE`) via the index-driven, namespace-scoped resolver —
-/// never a whole-chain scan. Ambiguity (more than one match) is an error.
-fn resolve_name(
-    name: &Name,
-    layer: &Layer,
-    namespaces: &[String],
-) -> Result<Option<Iri>, QueryError> {
-    match name {
-        Name::FullIri(iri) => Ok(Some(iri.clone())),
-        Name::ShortName(s) => {
-            crate::query::resolve::resolve_scoped_name(layer, namespaces, &[wk::CLASS], s)
-        }
-    }
-}
-
 pub(super) fn literal_to_value(lit: &Literal) -> Value {
     match lit {
         Literal::String(s) => Value::String(s.clone()),
@@ -611,11 +584,15 @@ mod tests {
     /// straight into `evaluate` leaves every short name unresolved.
     pub(crate) fn run_query(layer: &Layer, query_str: &str) -> Vec<Resource> {
         let tokens = tokenize(query_str).unwrap();
-        let mut program = parser::parse(tokens).unwrap();
-        let errors = crate::query::type_check::type_check(&mut program, layer);
+        let program = parser::parse(tokens).unwrap();
+        let strata = crate::query::stratify::stratify(&program.definitions).unwrap();
+        let index = crate::institution::registry::InstitutionIndex::from_layer_indexed(layer).0;
+        let resolved = crate::query::resolve::resolve(program, strata, layer, &index)
+            .unwrap_or_else(|e| panic!("resolve errors: {e:?}"));
+        let errors = crate::query::type_check::type_check(&resolved.program, layer, &index);
         assert!(errors.is_empty(), "type errors: {errors:?}");
         let fp = QueryFingerprint::of(query_str);
-        evaluate(&program, layer, &fp, FiberRuntime::default())
+        evaluate(&resolved, layer, &fp, FiberRuntime::default())
             .unwrap()
             .0
     }

@@ -377,12 +377,31 @@ fn with_a_query_class() -> Arc<Layer> {
     Arc::new(b.build(LayerStorage::in_memory()))
 }
 
-/// Type-check alone — the dispatch would need a live institution runtime, and resolution
-/// is decided before any of that.
+/// Resolve and type-check, stopping before evaluation — the dispatch would need a live
+/// institution runtime, and every question here is decided before any of that.
 fn type_errors(layer: &Arc<Layer>, q: &str) -> Vec<QueryError> {
+    let index =
+        eigenius_kernel::institution::registry::InstitutionIndex::from_layer_indexed(layer).0;
+    match resolve_program(layer, q) {
+        Ok(resolved) => {
+            eigenius_kernel::query::type_check::type_check(&resolved.program, layer, &index)
+        }
+        Err(errors) => errors,
+    }
+}
+
+/// The resolved program, or the errors resolution reported.
+fn resolve_program(
+    layer: &Arc<Layer>,
+    q: &str,
+) -> Result<eigenius_kernel::query::resolve::ResolvedProgram, Vec<QueryError>> {
     let tokens = eigenius_kernel::query::lexer::tokenize(q).expect("lexes");
-    let mut program = eigenius_kernel::query::parser::parse(tokens).expect("parses");
-    eigenius_kernel::query::type_check::type_check(&mut program, layer)
+    let program = eigenius_kernel::query::parser::parse(tokens).expect("parses");
+    let strata =
+        eigenius_kernel::query::stratify::stratify(&program.definitions).expect("stratifies");
+    let index =
+        eigenius_kernel::institution::registry::InstitutionIndex::from_layer_indexed(layer).0;
+    eigenius_kernel::query::resolve::resolve(program, strata, layer, &index)
 }
 
 fn fiber_query(projection: &str) -> String {
@@ -462,12 +481,12 @@ RETURN [] {{ v: ?b.lower }}
         !errs.iter().any(|e| e.rule == "property_name_unresolved"),
         "`lower` is in the imported namespace: {errs:?}"
     );
-    // The segment must actually be rewritten — a clean type-check that leaves a ShortName
-    // behind is the defect, not the absence of an error.
-    let tokens = eigenius_kernel::query::lexer::tokenize(&q).expect("lexes");
-    let mut program = eigenius_kernel::query::parser::parse(tokens).expect("parses");
-    let _ = eigenius_kernel::query::type_check::type_check(&mut program, &layer);
-    let clause = program
+    // The segment must actually be resolved. Under D92 a `Program<Resolved>` cannot hold
+    // an unresolved one — the type is the assertion — so this reads the IRI to confirm it
+    // is the property the namespace scope names, not merely that something is there.
+    let resolved = resolve_program(&layer, &q).expect("resolves");
+    let clause = resolved
+        .program
         .query
         .body
         .clauses
@@ -484,10 +503,10 @@ RETURN [] {{ v: ?b.lower }}
     else {
         panic!("expected a dot-path param value, got {:?}", param.value);
     };
-    assert!(
-        matches!(segments[0], eigenius_kernel::query::ast::Name::FullIri(_)),
-        "the param's segment reaches the evaluator unresolved: {:?}",
-        segments[0]
+    assert_eq!(
+        segments[0].as_str(),
+        "urn:ex:lower",
+        "the param's segment resolved to the wrong property"
     );
 }
 
@@ -539,5 +558,156 @@ fn an_imported_namespace_wins_over_the_core_prelude() {
         column(&rows, "d"),
         vec!["the import's".to_string()],
         "the imported namespace names the property, not the prelude"
+    );
+}
+
+// ─── What the D92 review found ───────────────────────────────────────
+
+/// **A relation defined by several rules is ONE relation.**
+///
+/// `RelationId` first indexed `Program::definitions`, which splits a base case and a
+/// recursive case into two relations: the derived facts never meet and the closure never
+/// accumulates. The reachability tests caught it behaviourally — 2 unreachable nodes
+/// where 1 was right — and this names the invariant so the next reader does not have to
+/// infer it from a graph fixture.
+#[test]
+fn several_rules_defining_one_relation_share_an_id() {
+    use eigenius_kernel::query::ast::{relation_ids, RelationId};
+    let q = r#"
+        DEFINE Reach(?t) FROM MATCH ?o { "urn:ex:seed": ?t }
+        DEFINE Reach(?n) FROM MATCH Reach(?m) { "urn:ex:dep": ?n }
+        DEFINE Other(?x) FROM MATCH ?x { "urn:ex:seed": ?v }
+        MATCH Reach(?r) {} RETURN [] { r: ?r }
+    "#;
+    let tokens = eigenius_kernel::query::lexer::tokenize(q).expect("lexes");
+    let program = eigenius_kernel::query::parser::parse(tokens).expect("parses");
+    assert_eq!(program.definitions.len(), 3, "three rules");
+
+    let ids = relation_ids(&program.definitions);
+    assert_eq!(ids.len(), 2, "but two relations");
+    assert_eq!(
+        ids["Reach"],
+        RelationId(0),
+        "both Reach rules share the first id"
+    );
+    assert_eq!(ids["Other"], RelationId(1));
+}
+
+/// **`RETURN Class [] { … }` names a chain class, and it is checked.**
+///
+/// Nothing asked this before D92: the bare string was stamped into the row class's
+/// `is_a` and `subclass_of`, so a `RETURN` naming a class the chain does not declare
+/// produced rows asserting membership of nothing.
+#[test]
+fn a_return_result_class_that_resolves_nowhere_is_refused() {
+    let layer = notebooks();
+    let errs = errors(
+        &layer,
+        r#"
+        USING "urn:ex:Notebook"
+        MATCH "urn:ex:Notebook"(?n) { }
+        RETURN [NoSuchClass] { t: ?n."urn:ex:title_text" }
+        "#,
+    );
+    assert!(
+        errs.iter()
+            .any(|e| e.rule == "unresolved_reference" && e.message.contains("NoSuchClass")),
+        "expected the result class to be reported unresolvable: {errs:?}"
+    );
+}
+
+/// The same position, resolving: a `RETURN` class in an imported namespace is accepted,
+/// so the rule above rejects unresolvable names rather than the construct.
+#[test]
+fn a_return_result_class_resolves_through_the_namespace_scope() {
+    let layer = notebooks();
+    let errs = errors(
+        &layer,
+        r#"
+        USING NAMESPACE "urn:ex:"
+        MATCH ?n { title: ?t }
+        RETURN [Notebook] { t: ?t }
+        "#,
+    );
+    assert!(
+        !errs.iter().any(|e| e.rule == "unresolved_reference"),
+        "`Notebook` is declared in the imported namespace: {errs:?}"
+    );
+}
+
+/// **Resolution reports every unresolvable name, not the first.**
+///
+/// The pass's own doc said so and `Option`'s `FromIterator` did not: it stops at the
+/// first `None`, so one run named one bad key where the code it replaced named both.
+#[test]
+fn resolution_reports_every_unresolvable_name() {
+    let layer = notebooks();
+    let errs = errors(
+        &layer,
+        r#"
+        USING "urn:ex:Notebook"
+        MATCH "urn:ex:Notebook"(?n) { nope_one: ?a, nope_two: ?b }
+        RETURN [] { a: ?a }
+        "#,
+    );
+    let unresolved: Vec<_> = errs
+        .iter()
+        .filter(|e| e.rule == "property_name_unresolved")
+        .collect();
+    assert_eq!(
+        unresolved.len(),
+        2,
+        "both keys are unresolvable and both should be reported: {errs:?}"
+    );
+    assert!(errs.iter().any(|e| e.message.contains("nope_one")));
+    assert!(errs.iter().any(|e| e.message.contains("nope_two")));
+}
+
+/// **A full-IRI FIBER param is not gated on the input class.**
+///
+/// It never was: this pass accepted any full-IRI param and checked its shape, not its
+/// membership. A D92 draft made every param go through the input class's vocabulary,
+/// which rejected `{ "urn:ex:sidecar": … }` that used to dispatch — a language change
+/// D92 did not argue for.
+#[test]
+fn a_full_iri_fiber_param_is_not_gated_on_the_input_class() {
+    let layer = with_a_query_class();
+    let q = format!(
+        r#"
+USING INSTITUTION "{INST}" AS cap
+FIBER cap:"{QC}" {{ "urn:ex:expr": "x", "urn:other:witness": "y" }} AS ?b
+RETURN [] {{ v: ?b.lower }}
+"#
+    );
+    let errs = type_errors(&layer, &q);
+    assert!(
+        !errs
+            .iter()
+            .any(|e| e.rule == "fiber_param_short_name_unresolved"),
+        "a full-IRI param is not required to be declared by the input class: {errs:?}"
+    );
+}
+
+/// **A full-IRI FIBER query class that is not an indexed QueryClass is still refused.**
+///
+/// Resolution accepts a full IRI without asking what it names — that is what a full IRI
+/// means — so this rule is type-check's, and it is the check D92 left `type_check` doing
+/// after it stopped resolving. Its only test was retargeted to the resolution error when
+/// the staging changed, which left both of its two reachable paths uncovered.
+#[test]
+fn a_fiber_query_class_that_is_not_indexed_is_refused() {
+    let layer = with_a_query_class();
+    let q = format!(
+        r#"
+USING INSTITUTION "{INST}" AS cap
+FIBER cap:"urn:ex:not_a_query_class" {{ "urn:ex:expr": "x" }} AS ?b
+RETURN [] {{ v: ?b."urn:ex:lower" }}
+"#
+    );
+    let errs = type_errors(&layer, &q);
+    assert!(
+        errs.iter()
+            .any(|e| e.rule == "fiber_query_class_not_query_class"),
+        "a full IRI naming no indexed QueryClass must be refused: {errs:?}"
     );
 }

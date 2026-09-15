@@ -26,7 +26,7 @@
 use crate::ontology::iri::Iri;
 use crate::ontology::resource::{Resource, Value};
 use crate::ontology::well_known as wk;
-use crate::query::ast::{AggregateOp, Expression, Name, Query};
+use crate::query::ast::{AggregateOp, Expression, Name, Query, Resolved};
 
 use sha2::{Digest, Sha256};
 
@@ -90,7 +90,12 @@ impl QueryFingerprint {
 /// IRIs (via `evaluate::shape_result`); this function adds the Property,
 /// Class, and ResultSet metadata resources so the document is
 /// self-describing per Appendix A.
-pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Resource> {
+pub fn wrap(
+    query: &Query<Resolved>,
+    query_text: &str,
+    layer: &crate::layer::Layer,
+    mut rows: Vec<Resource>,
+) -> Vec<Resource> {
     let fp = QueryFingerprint::of(query_text);
 
     // Match-only queries (no RETURN) produce a minimal ResultSet with a
@@ -117,7 +122,7 @@ pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Res
 
     // Synthesize a Property resource for each RETURN item.
     for item in &query.result {
-        let short_name = short_name_for(&item.name);
+        let short_name = item.name.text();
         let prop_iri = fp.row_property_iri(&short_name);
         property_iris.push(prop_iri.as_str().to_string());
 
@@ -146,14 +151,14 @@ pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Res
     );
     row_class.set(
         Iri::parse(wk::SHORT_NAME).unwrap(),
-        Value::String(row_class_short_name(&query.result_classes)),
+        Value::String(row_class_short_name(&query.result_classes, layer)),
     );
     if !query.result_classes.is_empty() {
         // Parent classes: whatever the user declared in RETURN.
         let parents: Vec<Value> = query
             .result_classes
             .iter()
-            .map(|n| Value::String(class_name_to_iri(n)))
+            .map(|iri| Value::String(iri.as_str().to_string()))
             .collect();
         row_class.set(
             Iri::parse(wk::PARENT_CLASSES).unwrap(),
@@ -210,42 +215,40 @@ pub fn wrap(query: &Query, query_text: &str, mut rows: Vec<Resource>) -> Vec<Res
     document
 }
 
-fn short_name_for(name: &Name) -> String {
-    match name {
-        Name::ShortName(s) => s.clone(),
-        Name::FullIri(iri) => iri
-            .as_str()
-            .rsplit(':')
-            .next()
-            .unwrap_or(iri.as_str())
-            .to_string(),
-    }
-}
-
-fn class_name_to_iri(name: &Name) -> String {
-    match name {
-        Name::ShortName(s) => s.clone(),
-        Name::FullIri(iri) => iri.as_str().to_string(),
-    }
-}
-
-fn row_class_short_name(classes: &[Name]) -> String {
+/// The row class's `short_name`, built from the classes `RETURN` named.
+///
+/// **It reads the DECLARED `core:short_name`, not the IRI's tail.** `RETURN RowKind { … }`
+/// should name the row class `RowKind`, which is what the author wrote and what the class
+/// declares; the tail of `urn:ex:row_kind` is `row_kind`. Before D92 this position held
+/// the author's word because it held an unresolved `Name`; resolution replaced it with
+/// the IRI, and reading the tail would have silently changed the document.
+///
+/// A class that does not resolve, or declares no short name, falls back to the tail.
+fn row_class_short_name(classes: &[Iri], layer: &crate::layer::Layer) -> String {
     if classes.is_empty() {
-        "QueryRow".to_string()
-    } else {
-        classes
-            .iter()
-            .map(short_name_for)
-            .collect::<Vec<_>>()
-            .join("_")
+        return "QueryRow".to_string();
     }
+    let short_name_prop = Iri::parse(wk::SHORT_NAME).unwrap();
+    classes
+        .iter()
+        .map(|iri| {
+            layer
+                .resolve(iri)
+                .and_then(|r| match r.get(&short_name_prop) {
+                    Some(Value::String(s)) => Some(s.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| Name::FullIri(iri.clone()).text())
+        })
+        .collect::<Vec<_>>()
+        .join("_")
 }
 
 /// Infer a datatype IRI for a RETURN expression. Aggregates have fixed
 /// datatypes per D2 §A.3. For other expressions we peek at the first
 /// row's value (if any) — v1 heuristic, acceptable while proper type
 /// inference is future work.
-fn datatype_iri(expr: &Expression, rows: &[Resource], prop_iri: &Iri) -> String {
+fn datatype_iri(expr: &Expression<Resolved>, rows: &[Resource], prop_iri: &Iri) -> String {
     match expr {
         Expression::Aggregate { op, .. } => match op {
             AggregateOp::Count => wk::INTEGER.to_string(),

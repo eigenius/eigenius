@@ -31,7 +31,7 @@ use super::FiberRuntime;
 
 /// Evaluate an expression against a binding.
 pub(super) fn eval_expression(
-    expr: &Expression,
+    expr: &Expression<Resolved>,
     binding: &Binding,
     layer: &Layer,
     runtime: FiberRuntime<'_>,
@@ -191,14 +191,10 @@ pub(super) fn eval_expression(
                 // reached evaluation without that pass — unreachable now that every name
                 // position is resolved, and still representable, which eigenius#248
                 // tracks.
-                let prop_iri = match segment {
-                    Name::FullIri(iri) => iri,
-                    Name::ShortName(s) => {
-                        return Err(QueryError::evaluation(format!(
-                            "dot-path segment '{s}' was never resolved to a property IRI"
-                        )))
-                    }
-                };
+                // A resolved segment IS the property IRI — `query::resolve` produced it,
+                // and the type says so, so there is no unresolved case to guard against.
+                // Both guards eigenius#248 described are gone with it.
+                let prop_iri = segment;
                 // The RESOURCE not carrying the property is data absence rather than a
                 // fault: a condition over it is not satisfied. Every other failure in
                 // this function is the query being wrong.
@@ -239,9 +235,6 @@ pub(super) fn eval_expression(
                 .collect();
             Ok(Value::Array(vals?))
         }
-        Expression::Object(_) => Err(QueryError::evaluation(
-            "object literals in expressions not yet implemented",
-        )),
         Expression::Similarity { .. } => eval_similarity(expr, binding, runtime),
     }
 }
@@ -257,7 +250,7 @@ pub(super) fn eval_expression(
 /// Float). Future revisions can expose it via an `EXPLAIN`-shaped
 /// surface (§3.7).
 fn eval_similarity(
-    expr: &Expression,
+    expr: &Expression<Resolved>,
     binding: &Binding,
     runtime: FiberRuntime<'_>,
 ) -> Result<Value, QueryError> {
@@ -491,13 +484,13 @@ pub(super) fn resolve_iri_string(
 }
 
 /// Check if any return item uses an aggregate function.
-pub(super) fn has_aggregates(result: &[ReturnItem]) -> bool {
+pub(super) fn has_aggregates(result: &[ReturnItem<Resolved>]) -> bool {
     result
         .iter()
         .any(|item| expr_has_aggregate(&item.expression))
 }
 
-fn expr_has_aggregate(expr: &Expression) -> bool {
+fn expr_has_aggregate(expr: &Expression<Resolved>) -> bool {
     match expr {
         Expression::Aggregate { .. } => true,
         Expression::Binary { left, right, .. } => {
@@ -614,7 +607,7 @@ fn is_test(op: BinaryOp) -> bool {
 
 /// One operand of a connective, with an absent property reading as false.
 fn eval_operand_absent_as_false(
-    expr: &Expression,
+    expr: &Expression<Resolved>,
     binding: &Binding,
     layer: &Layer,
     runtime: FiberRuntime<'_>,
@@ -627,8 +620,8 @@ fn eval_operand_absent_as_false(
 }
 
 pub(super) fn apply_group_by(
-    group_by: &[Expression],
-    result: &[ReturnItem],
+    group_by: &[Expression<Resolved>],
+    result: &[ReturnItem<Resolved>],
     bindings: &[Binding],
     layer: &Layer,
     runtime: FiberRuntime<'_>,
@@ -681,7 +674,7 @@ pub(super) fn apply_group_by(
 
 /// Evaluate an aggregate expression over a group of bindings.
 fn eval_aggregate(
-    expr: &Expression,
+    expr: &Expression<Resolved>,
     group: &[&Binding],
     layer: &Layer,
     runtime: FiberRuntime<'_>,
