@@ -208,6 +208,13 @@ runs, and buys **6%** for **9× the CPU**. Scaling `MKL_NUM_THREADS` shows why: 
 these matmuls are too small for intra-op threading to pay. Run-to-run variance also widens
 from ±1s to ±7s.
 
+**No `mkl` feature ships.** It was added to run the measurement above and removed after:
+enabling it costs 38 transitive dependencies and 403 lines of `Cargo.lock` — `intel-mkl-src`
+pulls in `ocipkg`, `oci-spec`, `tar`, `chrono` and the whole `windows-*` family — because
+an optional dependency still resolves into the lockfile whether or not the feature is on.
+That is a permanent cost for a measured 6% regression-in-disguise. The finding is the
+thing worth keeping; the flag is not.
+
 **The parallelism has to be at the batch level, and that is what `SweepOptions::parallelism`
 now does.** Dispatching several batches concurrently — each near-single-threaded — gives
 **46.0s → 14.9s** measured on the shipped implementation (three runs: 15.33 / 14.62 /
