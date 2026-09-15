@@ -301,8 +301,20 @@ fn go_recall_with_candle_bge_small() {
     }
     let t = Instant::now();
     let layer = Arc::new(b.build(storage));
+    // D65 index lifecycle: derived indexes (triple / text / value) are materialised at
+    // the PERSIST step, not eagerly at build. Without this the VectorIndex resource is in
+    // the layer but not in the triple index, so `resolve_active_vector_indexes` --
+    // index-driven, via `scan_chain` -- finds nothing: the sweep embeds 0 subjects and
+    // the query below fails with `similarity_hint_via_vector_no_vector_index`.
+    //
+    // This test is `#[ignore]`d, so CI never ran it and never reported the breakage.
+    // `d43_go_subset_integration` has carried the same `store_layer` call, with the same
+    // explanation, since the lifecycle changed.
+    backend
+        .store_layer(&layer)
+        .expect("store go-candle-corpus layer");
     eprintln!(
-        "  LayerBuilder::build (bloom + triple, no text):  {:.2}s",
+        "  LayerBuilder::build + persist (bloom + triple, no text):  {:.2}s",
         t.elapsed().as_secs_f64()
     );
 

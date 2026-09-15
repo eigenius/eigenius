@@ -152,6 +152,7 @@ The semantic recall test [`crates/eigenius-embedder-candle/tests/go_recall.rs`](
 | Vector sweep, CPU per-text (baseline) | 162s |
 | Vector sweep, CPU batched at batch_size=32 | 326s |
 | Vector sweep, CUDA batched at batch_size=32 (RTX 4070) | **3.62s** |
+| — superseded for the batched rows by the `2026-09-15` measurement below — | |
 | Per-query embed + flat search (CPU) | ~130ms |
 | Per-query embed + flat search (CUDA) | ~30ms |
 
@@ -159,7 +160,26 @@ The semantic recall test [`crates/eigenius-embedder-candle/tests/go_recall.rs`](
 
 On **CUDA** (`cargo test -p eigenius-embedder-candle --features cuda ...`) the result is what the trait promised: a single forward pass over `[32, max_seq]` saturates the GPU's compute units, so the dispatch saving dwarfs every other cost. 162s → 3.62s — a 45× speedup over the per-text CPU baseline.
 
-On **CPU**, the batched path was actually ~2× *slower* (326s vs 162s) on this corpus. The cause is well-understood: `Tokenizer::encode_batch` uses `BatchLongest` padding, so each batch's forward cost is `[batch, max_seq] × hidden`. GO Class labels run from ~10 to a few hundred tokens, and a batch with one long member multiplies everyone's compute by an order of magnitude. CPU BLAS's batched-GEMM win (typically 2-5× on fixed-length batches) gets out-fought by that padding penalty. The single-text CPU path embeds each Resource at its own native length and avoids the waste entirely. The standard cure is length-bucketed batching (sort by `text.len()` then chunk so a batch's members are similar in length); that's tracked separately and would be the path to a fast CPU sweep on heterogeneous corpora without needing a GPU.
+On **CPU**, the batched path was actually ~2× *slower* (326s vs 162s) on this corpus. The cause is well-understood: `Tokenizer::encode_batch` uses `BatchLongest` padding, so each batch's forward cost is `[batch, max_seq] × hidden`. GO Class labels run from ~10 to a few hundred tokens, and a batch with one long member multiplies everyone's compute by an order of magnitude. CPU BLAS's batched-GEMM win (typically 2-5× on fixed-length batches) gets out-fought by that padding penalty. The single-text CPU path embeds each Resource at its own native length and avoids the waste entirely.
+
+### Length-bucketed batching (eigenius#63), measured `2026-09-15`
+
+The cure the paragraph above predicted, applied: sort the deduplicated cache-miss texts by `text.len()` before chunking, so a batch's members are similar in length and the padding stays small. Three runs per configuration, one machine (RTX A6000, CUDA 12.8), same 1 007-Class corpus:
+
+| device | before | after | |
+|---|---|---|---|
+| CPU | 101.19s | **46.37s** | 2.18× |
+| CUDA | 1.44s | **0.93s** | 1.55× |
+
+recall@10 stayed 7/7 in every run, with identical ranks — the bucketing changes dispatch order and nothing else, which `sweep_results_are_independent_of_batch_size` pins.
+
+**The hypothesis held directionally, and overstated itself.** CPU is far more padding-sensitive than CUDA, as predicted. But CUDA is not *insensitive*: it gains 1.55×, where the earlier text implied the dispatch saving made padding waste irrelevant there.
+
+**Two numbers above do not reproduce on this machine.** The 162s / 326s pair was measured elsewhere; here the batched CPU baseline is 101s, so the "batching is 2× slower than per-text" result is a property of that machine's BLAS and core count, not a portable fact. The before/after in the table is same-machine, same-day, and is the comparison to trust.
+
+**eigenius#63's target of ~15-30s on CPU was not reached** — 46s is 2.18×, not the 5-10× that target implies. The remaining cost is not padding: with bucketing, a batch's members already have similar widths. Getting further would mean a smaller model, quantisation, or accepting that a 1 000-Resource CPU sweep costs ~45s.
+
+**The harness had to be repaired first.** `go_recall.rs` built its layer on a RocksDB backend and never called `store_layer`, so the derived triple index stayed empty, `resolve_active_vector_indexes` (index-driven, via `scan_chain`) found nothing, the sweep embedded **0 subjects**, and the query failed with `similarity_hint_via_vector_no_vector_index`. The test is `#[ignore]`d, so CI never ran it and never reported the breakage; its sibling `d43_go_subset_integration` has carried the `store_layer` call, with the same explanation, since the D65 index lifecycle changed. No number in this section could be reproduced until that was fixed.
 
 Functionally the batched path is correct on both devices — round-trip parity is pinned by [`sweep_results_are_independent_of_batch_size`](../../kernel/src/query/vector/indexing.rs) and the recall@10 stays at 7/7. The intra-sweep deduplication contract that the cache supplied in the per-subject loop is preserved in the batched path explicitly (group cache-miss entries by text, dispatch each unique text once, fan out to peers). Cancellation responsiveness was tightened to also cover the case where cancel fires *during* the final batch's embed — the segment write is now gated on a post-batch cancel check so the cooperative-cancel contract holds regardless of batch size.
 

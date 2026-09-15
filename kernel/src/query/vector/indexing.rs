@@ -967,10 +967,34 @@ fn sweep_one_index(
     // SAFETY-via-lifetime: BTreeMap iteration over `&entries`
     // borrows immutably; collect the (text, indices) pairs into
     // owned slots before mutating `entries[idx].vector` below.
-    let dedup: Vec<(String, Vec<usize>)> = text_to_entries
+    let mut dedup: Vec<(String, Vec<usize>)> = text_to_entries
         .into_iter()
         .map(|(t, idxs)| (t.to_string(), idxs))
         .collect();
+
+    // **Length-bucket before chunking (eigenius#63).** `Tokenizer::encode_batch` pads with
+    // `BatchLongest`, so a batch's forward cost scales to its LONGEST text. These arrive
+    // in `BTreeMap` order — lexicographic, which is uncorrelated with length — so one
+    // 200-token GO label lands among 10-token ones and inflates every one of them to its
+    // own width. On a corpus with that spread the padding waste can outfight the
+    // BLAS-efficiency win batching is for: the issue reports batching making the sweep
+    // SLOWER than the per-text loop it replaced, 162s to 326s.
+    //
+    // Sorting by length first puts similar texts together, so the padding stays small.
+    // The sort is stable, so equal-length texts keep their lexicographic order and the
+    // dispatch order stays deterministic.
+    //
+    // **This reorders DISPATCH, not input.** `idxs` carries each text's original entry
+    // positions, so the fan-out below writes the same `entries` slots whatever order the
+    // chunks ran in; pass 3 iterates `entries`, so the segment write and the HNSW build
+    // order are untouched. `sweep_results_are_independent_of_batch_size` is the invariant
+    // that pins it.
+    //
+    // UTF-8 byte length is a proxy for token count, not a measure of it. Grouping similar
+    // lengths is the whole requirement — the ordering need not be exact — and it costs
+    // nothing, where a true token count would mean tokenising twice.
+    dedup.sort_by_key(|(text, _)| text.len());
+
     let batch_size = options.batch_size.max(1);
     for chunk in dedup.chunks(batch_size) {
         if is_cancelled(options.cancellation) {
