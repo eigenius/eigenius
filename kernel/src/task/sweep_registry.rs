@@ -255,6 +255,47 @@ impl SweepRegistry {
             .expect("reindex registry poisoned")
             .remove(index_iri);
     }
+
+    /// Every in-flight index task, sweeps and reindexes alike, as task records.
+    ///
+    /// The D21 task surface is keyed by `task_id`, and these tasks carry one — so
+    /// `ListTasks` can report them beside `TaskStore` tasks without a second vocabulary
+    /// (eigenius#254). The registry is the live view: a terminated sweep unregisters, so
+    /// what this returns is in-flight plus just-terminated.
+    pub fn list_records(&self) -> Vec<TaskRecord> {
+        let sweeps = self.sweeps.read().expect("sweep registry poisoned");
+        let reindexes = self.reindexes.read().expect("reindex registry poisoned");
+        sweeps
+            .values()
+            .chain(reindexes.values())
+            .map(|handle| handle.record_snapshot())
+            .collect()
+    }
+
+    /// Find an in-flight index task by its `task_id`.
+    ///
+    /// Scans both maps, which is what makes `task_id` the right key for the RPC surface:
+    /// sweeps are keyed by `LayerId` and reindexes by index IRI, so a caller holding one
+    /// id would otherwise have to say which kind it meant. The scan is over in-flight
+    /// tasks only — a handful at most, one per committing layer.
+    pub fn find_by_task_id(&self, task_id: &Uuid) -> Option<Arc<SweepHandle>> {
+        let found = self
+            .sweeps
+            .read()
+            .expect("sweep registry poisoned")
+            .values()
+            .find(|handle| handle.record_snapshot().task_id == *task_id)
+            .map(Arc::clone);
+        if found.is_some() {
+            return found;
+        }
+        self.reindexes
+            .read()
+            .expect("reindex registry poisoned")
+            .values()
+            .find(|handle| handle.record_snapshot().task_id == *task_id)
+            .map(Arc::clone)
+    }
 }
 
 /// Bundles the [`SweepRegistry`] with the dispatchable resources
@@ -332,11 +373,9 @@ impl SweepCoordinator {
             return Ok(None);
         }
         let indexes: Vec<Iri> = active.iter().map(|a| a.iri.clone()).collect();
-        let record = TaskRecord::new_running(
-            Uuid::nil(),
+        let record = TaskRecord::new_vector_sweep(
             Uuid::new_v4(),
-            "urn:eigenius:program:vector_sweep".into(),
-            "urn:eigenius:input:none".into(),
+            indexes.iter().map(|i| i.as_str().to_string()).collect(),
             layer.id().clone(),
             now_millis(),
         );
@@ -414,10 +453,8 @@ impl SweepCoordinator {
         let mut out = Vec::with_capacity(targets.len());
         for target in targets {
             let target_iri = target.index_iri.clone();
-            let record = TaskRecord::new_running(
-                Uuid::nil(),
+            let record = TaskRecord::new_vector_reindex(
                 Uuid::new_v4(),
-                "urn:eigenius:program:vector_reindex".into(),
                 target_iri.as_str().to_string(),
                 head.id().clone(),
                 now_millis(),
@@ -504,10 +541,8 @@ impl SweepCoordinator {
         let mut out = Vec::with_capacity(targets.len());
         for target in targets {
             let target_iri = target.index_iri.clone();
-            let record = TaskRecord::new_running(
-                Uuid::nil(),
+            let record = TaskRecord::new_vector_reindex(
                 Uuid::new_v4(),
-                "urn:eigenius:program:vector_reindex".into(),
                 target_iri.as_str().to_string(),
                 head.id().clone(),
                 now_millis(),
@@ -574,11 +609,9 @@ impl SweepCoordinator {
             return Ok(None);
         }
         let indexes: Vec<Iri> = active.iter().map(|a| a.iri.clone()).collect();
-        let record = TaskRecord::new_running(
-            Uuid::nil(),
+        let record = TaskRecord::new_vector_sweep(
             Uuid::new_v4(),
-            "urn:eigenius:program:vector_sweep".into(),
-            "urn:eigenius:input:none".into(),
+            indexes.iter().map(|i| i.as_str().to_string()).collect(),
             layer.id().clone(),
             now_millis(),
         );
@@ -1435,6 +1468,105 @@ mod tests {
             cursor = layer.parent().map(|p| p.as_ref());
         }
         assert_eq!(checked, 2, "expected a segment at both L2 and L3");
+    }
+
+    /// The registry is the live view of index tasks for the D21 task RPCs: both kinds
+    /// list, and either is findable by the `task_id` those RPCs key on (eigenius#254).
+    #[test]
+    fn index_tasks_list_and_resolve_by_task_id() {
+        use crate::task::TaskKind;
+
+        let registry = SweepRegistry::new();
+        let layer = LayerId([7u8; 32]);
+        let index = iri("urn:eigenius:test:vi");
+
+        let sweep_record = TaskRecord::new_vector_sweep(
+            Uuid::new_v4(),
+            vec![index.as_str().to_string()],
+            layer.clone(),
+            0,
+        );
+        let sweep_task_id = sweep_record.task_id;
+        let sweep = Arc::new(SweepHandle::from_parts(
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(RwLock::new(sweep_record)),
+            vec![index.clone()],
+        ));
+        registry.register(layer.clone(), Arc::clone(&sweep));
+
+        let reindex_record = TaskRecord::new_vector_reindex(
+            Uuid::new_v4(),
+            index.as_str().to_string(),
+            layer.clone(),
+            0,
+        );
+        let reindex_task_id = reindex_record.task_id;
+        let reindex = Arc::new(SweepHandle::from_parts(
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(RwLock::new(reindex_record)),
+            vec![index.clone()],
+        ));
+        registry.register_reindex(index.clone(), Arc::clone(&reindex));
+
+        let records = registry.list_records();
+        assert_eq!(records.len(), 2, "both kinds list");
+        let kinds: Vec<&str> = records.iter().map(|r| r.kind.label()).collect();
+        assert!(kinds.contains(&"VectorSweep"));
+        assert!(kinds.contains(&"VectorReindex"));
+
+        // A sweep is keyed by layer and a reindex by Index IRI, so task_id is the only key
+        // a caller can use without knowing which kind it holds.
+        let found = registry
+            .find_by_task_id(&sweep_task_id)
+            .expect("sweep findable by task_id");
+        assert!(matches!(
+            found.record_snapshot().kind,
+            TaskKind::VectorSweep { .. }
+        ));
+        let found = registry
+            .find_by_task_id(&reindex_task_id)
+            .expect("reindex findable by task_id");
+        assert!(matches!(
+            found.record_snapshot().kind,
+            TaskKind::VectorReindex { .. }
+        ));
+        assert!(registry.find_by_task_id(&Uuid::new_v4()).is_none());
+
+        // Cancelling through the handle the RPC found is what the driver polls.
+        assert!(!found.is_cancelled());
+        found.cancel();
+        assert!(found.is_cancelled());
+        assert!(
+            reindex.is_cancelled(),
+            "the handle the registry hands out shares the registered flag"
+        );
+    }
+
+    /// A sweep's record says it is a sweep. It used to claim to be a `ProgramRun` of
+    /// `urn:eigenius:program:vector_sweep`, a program that does not exist — the synthetic
+    /// IRI D71 §6 rejected for formalization, for the same reason.
+    #[test]
+    fn index_task_records_name_their_kind_not_a_synthetic_program() {
+        let record = TaskRecord::new_vector_sweep(
+            Uuid::new_v4(),
+            vec!["urn:eigenius:test:vi".to_string()],
+            LayerId([1u8; 32]),
+            0,
+        );
+        assert_eq!(record.kind.label(), "VectorSweep");
+        assert_eq!(record.kind.program_iri(), None);
+        assert_eq!(record.kind.input_iri(), None);
+        assert_eq!(record.kind.index_iris(), ["urn:eigenius:test:vi"]);
+        assert!(record.kind.is_index_task());
+
+        let record = TaskRecord::new_vector_reindex(
+            Uuid::new_v4(),
+            "urn:eigenius:test:vi".to_string(),
+            LayerId([1u8; 32]),
+            0,
+        );
+        assert_eq!(record.kind.label(), "VectorReindex");
+        assert_eq!(record.kind.index_iris(), ["urn:eigenius:test:vi"]);
     }
 
     #[test]

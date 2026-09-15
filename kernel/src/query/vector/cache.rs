@@ -76,15 +76,38 @@ impl SegmentCache {
         self.inner.insert((index, layer), segment);
     }
 
-    /// Invalidate a single entry.
-    ///
-    /// No production caller: `delete_layer` does not reach this
-    /// cache, so a deleted layer's segment stays cached until LRU
-    /// evicts it. Harmless for answers — a deleted layer is in no
-    /// chain, so nothing looks the entry up — but it holds capacity.
-    /// eigenius#253.
+    /// Invalidate a single entry. Used by consolidation, which
+    /// knows the exact `(index, layer)` pairs it replaced.
     pub fn invalidate(&self, index: &Iri, layer: &LayerId) {
         self.inner.invalidate(&(index.clone(), layer.clone()));
+    }
+
+    /// Drop every entry contributed by `layer`, across all Indexes.
+    ///
+    /// Called by GC's `delete_layer` path through
+    /// [`crate::gc::DeletionHooks`]. A deleted layer is in no chain,
+    /// so a surviving entry never answers a query — but a
+    /// `SegmentView` holds the layer's whole vector payload plus its
+    /// HNSW graph, so leaving it to age out holds that capacity
+    /// against live layers (eigenius#253).
+    ///
+    /// Same shape as [`crate::layer::ResourceCache::evict_layer`] and
+    /// for the same reason: moka's `invalidate_entries_if` queues
+    /// removals for background maintenance, while per-key
+    /// `invalidate` is synchronous, and a GC caller expects the
+    /// entries to be gone when this returns. Iteration is a
+    /// weakly-consistent snapshot; a concurrent insert for a layer
+    /// being deleted races the delete itself, not this loop.
+    pub fn evict_layer(&self, layer: &LayerId) {
+        let mut to_drop: Vec<(Iri, LayerId)> = Vec::new();
+        for entry in self.inner.iter() {
+            if entry.0 .1 == *layer {
+                to_drop.push(entry.0.as_ref().clone());
+            }
+        }
+        for key in to_drop {
+            self.inner.invalidate(&key);
+        }
     }
 
     /// Invalidate every cached entry — used after consolidation

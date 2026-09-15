@@ -531,6 +531,19 @@ enum TaskCommands {
         #[arg(value_name = "TASK_ID")]
         task_id: String,
     },
+
+    /// Start a vector reindex for every VectorIndex whose model no longer
+    /// matches its stored segments (D43 §5.7)
+    ///
+    /// The commit hook does this automatically for each layer it persists;
+    /// this is the repair path after a reindex failed or was cancelled.
+    /// Prints what was found stale and returns — poll `tasks list` for the
+    /// running reindexes.
+    Reindex {
+        /// Layer to detect against, as 64 hex chars. Defaults to the branch head.
+        #[arg(long, value_name = "LAYER")]
+        layer: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3336,6 +3349,44 @@ async fn remote_tasks(endpoint: &str, command: TaskCommands, json: bool) {
         TaskCommands::List => remote_tasks_list(endpoint, json).await,
         TaskCommands::Status { task_id } => remote_task_status(endpoint, &task_id, json).await,
         TaskCommands::Cancel { task_id } => remote_task_cancel(endpoint, &task_id, json).await,
+        TaskCommands::Reindex { layer } => {
+            remote_task_reindex(endpoint, layer.as_deref().unwrap_or_default(), json).await
+        }
+    }
+}
+
+async fn remote_task_reindex(endpoint: &str, layer: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::StartReindexRequest {
+        layer: layer.to_string(),
+    };
+    match client.start_reindex(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "success": resp.success,
+                    "indexes": resp.indexes,
+                    "error": resp.error,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if !resp.success {
+                eprintln!("Reindex not started: {}", resp.error);
+                std::process::exit(1);
+            } else if resp.indexes.is_empty() {
+                println!("Nothing to reindex: every visible segment carries its declared model.");
+            } else {
+                println!("Reindexing {} index(es):", resp.indexes.len());
+                for i in &resp.indexes {
+                    println!("  {i}");
+                }
+                println!("Running in the background — `eigenius tasks list` to follow them.");
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -3355,6 +3406,7 @@ async fn remote_tasks_list(endpoint: &str, json_output: bool) {
                             "kind": t.kind,
                             "program_iri": t.program_iri,
                             "doc_id": t.doc_id,
+                            "indexes": t.indexes,
                             "status": t.status,
                             "layer_head": t.layer_head,
                             "step_seq": t.step_seq,
@@ -3368,20 +3420,23 @@ async fn remote_tasks_list(endpoint: &str, json_output: bool) {
                 println!("No tasks.");
             } else {
                 println!(
-                    "{:<36}  {:<12}  {:<11}  SUBJECT",
+                    "{:<36}  {:<12}  {:<14}  SUBJECT",
                     "TASK ID", "STATUS", "KIND"
                 );
                 for t in &resp.tasks {
                     // Each kind names its own subject: a program run its program, a formalization
-                    // its doc branch. Printing `program_iri` for both would show a blank column and
-                    // invite the reader to assume the task is broken.
-                    let subject = if t.doc_id.is_empty() {
-                        t.program_iri.as_str()
+                    // its doc branch, a sweep or reindex the VectorIndexes it covers. Printing
+                    // `program_iri` for all of them would show a blank column and invite the
+                    // reader to assume the task is broken.
+                    let subject = if !t.doc_id.is_empty() {
+                        t.doc_id.clone()
+                    } else if !t.indexes.is_empty() {
+                        t.indexes.join(", ")
                     } else {
-                        t.doc_id.as_str()
+                        t.program_iri.clone()
                     };
                     println!(
-                        "{:<36}  {:<12}  {:<11}  {}",
+                        "{:<36}  {:<12}  {:<14}  {}",
                         t.task_id, t.status, t.kind, subject
                     );
                 }
@@ -3416,6 +3471,7 @@ async fn remote_task_status(endpoint: &str, task_id: &str, json_output: bool) {
                     "input_iri": t.input_iri,
                     "doc_id": t.doc_id,
                     "source_sha256": t.source_sha256,
+                    "indexes": t.indexes,
                     "status": t.status,
                     "layer_head": t.layer_head,
                     "step_seq": t.step_seq,
@@ -3438,6 +3494,9 @@ async fn remote_task_status(endpoint: &str, task_id: &str, json_output: bool) {
                 if !t.doc_id.is_empty() {
                     println!("Doc branch:   doc-{}", t.doc_id);
                     println!("Source sha:   {}", t.source_sha256);
+                }
+                if !t.indexes.is_empty() {
+                    println!("Indexes:      {}", t.indexes.join(", "));
                 }
                 println!("Layer head:   {}", t.layer_head);
                 println!("Step seq:     {}", t.step_seq);

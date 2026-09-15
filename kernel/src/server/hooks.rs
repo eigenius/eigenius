@@ -177,6 +177,13 @@ impl crate::commit::CommitHookHost for EigeniusService {
         let layer_arc = Arc::clone(layer);
         let reindex_layer = Arc::clone(layer);
         let layer_id_disp = format!("{}", layer.id());
+        // A finished reindex unregisters, and with it the only record of what happened.
+        // Sweeps are fine with that — one fires per commit and re-running is cheap — but a
+        // reindex is rare, long, and its failure leaves the chain's segments split across
+        // two models, which an operator has to be able to discover after the fact. So its
+        // terminal record goes to the TaskStore (eigenius#254). In-flight state stays the
+        // registry's, which `GetTaskStatus` consults first.
+        let task_store = self.task_store.clone();
         let n_indexes = active.len();
         tracing::info!(
             { crate::observability::field::OPERATION } =
@@ -232,6 +239,20 @@ impl crate::commit::CommitHookHost for EigeniusService {
                     // logging every handle at info would bury it.
                     for handle in handles {
                         let status = handle.status();
+                        if let Some(store) = task_store.as_ref() {
+                            let record = handle.record_snapshot();
+                            if let Err(e) = store.put_task(&record) {
+                                tracing::warn!(
+                                    { crate::observability::field::OPERATION } =
+                                        crate::observability::operation::COMMIT_DID_PERSIST,
+                                    { crate::observability::field::ERROR_KIND } =
+                                        "vector_reindex_record_not_persisted",
+                                    { crate::observability::field::TASK_ID } = %record.task_id,
+                                    { crate::observability::field::ERROR_MESSAGE } = %e,
+                                    "reindex finished but its task record could not be stored"
+                                );
+                            }
+                        }
                         for index in &handle.indexes {
                             if status == crate::task::TaskStatus::Completed {
                                 tracing::info!(

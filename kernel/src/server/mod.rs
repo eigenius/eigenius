@@ -741,6 +741,13 @@ impl EigeniusKernel for EigeniusService {
         self.handle_cancel_task(request.into_inner()).await
     }
 
+    async fn start_reindex(
+        &self,
+        request: Request<StartReindexRequest>,
+    ) -> Result<Response<StartReindexResponse>, Status> {
+        self.handle_start_reindex(request.into_inner()).await
+    }
+
     async fn layer_topology(
         &self,
         request: Request<LayerTopologyRequest>,

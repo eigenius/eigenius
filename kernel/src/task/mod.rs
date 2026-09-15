@@ -137,6 +137,22 @@ pub enum TaskKind {
         /// The exact bytes formalized, so a task is attributable to a source without the source.
         source_sha256: String,
     },
+    /// A D43 §5.5 post-Load vector sweep. **Not resumable** — a sweep is cheap to re-run
+    /// and idempotent by `(index, layer)`, so recovery is another sweep, not a restore.
+    /// `layer_head` is the layer being swept.
+    VectorSweep {
+        /// The `core:VectorIndex` Resources this sweep materialises. A sweep covers every
+        /// Index active at its layer in one driver call, so there can be several.
+        indexes: Vec<String>,
+    },
+    /// A D43 §5.7 chain-wide reindex after a `core:VectorIndex` changed its declared model.
+    /// **Not resumable** for the same reason, though re-running is not free: it re-embeds
+    /// the chain. `layer_head` is the head the reindex walks down from.
+    VectorReindex {
+        /// The target `core:VectorIndex` Resource. One reindex, one Index — several can be
+        /// in flight against one head.
+        index_iri: String,
+    },
 }
 
 impl TaskKind {
@@ -145,7 +161,27 @@ impl TaskKind {
         match self {
             Self::ProgramRun { .. } => "ProgramRun",
             Self::Formalize { .. } => "Formalize",
+            Self::VectorSweep { .. } => "VectorSweep",
+            Self::VectorReindex { .. } => "VectorReindex",
         }
+    }
+
+    /// The `core:VectorIndex` Resources an index task covers; empty for every other kind.
+    /// A sweep names each Index active at its layer; a reindex names its single target.
+    pub fn index_iris(&self) -> &[String] {
+        match self {
+            Self::VectorSweep { indexes } => indexes,
+            Self::VectorReindex { index_iri } => std::slice::from_ref(index_iri),
+            _ => &[],
+        }
+    }
+
+    /// Is this an index-maintenance task — a vector sweep or reindex?
+    ///
+    /// These live in the [`crate::task::sweep_registry::SweepRegistry`] while in flight
+    /// rather than in the `TaskStore`, so the RPC handlers consult both.
+    pub fn is_index_task(&self) -> bool {
+        matches!(self, Self::VectorSweep { .. } | Self::VectorReindex { .. })
     }
 
     /// The program a `ProgramRun` runs; `None` for every other kind. Callers that need a program
@@ -234,6 +270,38 @@ impl TaskRecord {
                 doc_id,
                 source_sha256,
             },
+            layer_head,
+            now_millis,
+        )
+    }
+
+    /// Construct a fresh `Running` record for a post-Load vector sweep (D43 §5.5).
+    pub fn new_vector_sweep(
+        task_id: Uuid,
+        indexes: Vec<String>,
+        layer_head: LayerId,
+        now_millis: i64,
+    ) -> Self {
+        Self::new_of_kind(
+            Uuid::nil(),
+            task_id,
+            TaskKind::VectorSweep { indexes },
+            layer_head,
+            now_millis,
+        )
+    }
+
+    /// Construct a fresh `Running` record for a chain-wide reindex (D43 §5.7).
+    pub fn new_vector_reindex(
+        task_id: Uuid,
+        index_iri: String,
+        layer_head: LayerId,
+        now_millis: i64,
+    ) -> Self {
+        Self::new_of_kind(
+            Uuid::nil(),
+            task_id,
+            TaskKind::VectorReindex { index_iri },
             layer_head,
             now_millis,
         )

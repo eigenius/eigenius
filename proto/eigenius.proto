@@ -79,7 +79,22 @@ service EigeniusKernel {
   // (D21 §8 cancellation). Sets the task's cancel flag and
   // transitions to Cancelling; a fully-async evaluator (9b-iii.4)
   // picks this up between IO dispatches and unwinds.
+  //
+  // Also cancels an in-flight vector sweep or reindex by its task_id: those run from the
+  // SweepRegistry rather than the TaskStore, and their cooperative flag is the same
+  // mechanism (D43 §5.5 / §5.7).
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+
+  // Start a D43 §5.7 chain-wide reindex for every core:VectorIndex whose declared model no
+  // longer matches its stored segments. The commit hook fires this automatically on the
+  // layer it just persisted; this is the repair path for a reindex that failed or was
+  // cancelled, where the alternative would be committing something to re-trigger detection.
+  //
+  // Detection is the pre-check and runs before this returns, so the response says whether
+  // anything was stale. The reindexes themselves are detached — a chain-wide re-embed runs
+  // for minutes and must not hold an RPC open — so poll ListTasks for their task_ids and
+  // GetTaskStatus for each outcome.
+  rpc StartReindex(StartReindexRequest) returns (StartReindexResponse);
 
   // Walk the layer chain and return a graph (nodes + edges) suitable
   // for the notebook's layer-stack visualisation (D22 §4.2). The
@@ -982,9 +997,10 @@ message TaskInfo {
   int64 created_at_ms = 11;
   int64 updated_at_ms = 12;
   bool retain_forever = 13;
-  // D71 §6 — what this task IS: "ProgramRun" | "Formalize". Tasks were program-bound; a document
-  // formalization is a task operationally (minutes, N LLM round-trips, wants progress and cancel)
-  // and program-bound by nothing. `program_iri` / `input_iri` are populated for ProgramRun and
+  // D71 §6 — what this task IS: "ProgramRun" | "Formalize" | "VectorSweep" | "VectorReindex".
+  // Tasks were program-bound; a document formalization is a task operationally (minutes, N LLM
+  // round-trips, wants progress and cancel) and program-bound by nothing, and so are the two
+  // index-maintenance tasks. `program_iri` / `input_iri` are populated for ProgramRun and
   // EMPTY otherwise, so a reader that only understands programs sees nothing rather than a
   // synthetic IRI it would then have to special-case.
   string kind = 14;
@@ -992,6 +1008,12 @@ message TaskInfo {
   // sha256 of the bytes formalized. Empty for other kinds.
   string doc_id = 15;
   string source_sha256 = 16;
+  // VectorSweep / VectorReindex only: the core:VectorIndex Resources the task covers. A sweep
+  // names every Index active at `layer_head`; a reindex names its single target. Empty for other
+  // kinds. In-flight index tasks are reported from the SweepRegistry rather than the TaskStore
+  // (D43 §5.5 fires a sweep per commit, which would swamp a persisted store); a reindex also
+  // persists, because it is rare and its failure leaves segments split across two models.
+  repeated string indexes = 17;
 }
 
 message ListTasksRequest {}
@@ -1011,6 +1033,25 @@ message GetTaskStatusResponse {
 
 message CancelTaskRequest {
   string task_id = 1;             // UUID as string
+}
+
+message StartReindexRequest {
+  // Head to detect against and walk down from. Empty means the current branch head, which
+  // is what an operator means by "reindex what is live".
+  string layer = 1;
+}
+
+message StartReindexResponse {
+  bool success = 1;
+  // The core:VectorIndex Resources found stale and scheduled for reindex, in detection
+  // order. Empty when every visible segment already carries its declared model — which is
+  // the answer "nothing to do", not a failure.
+  //
+  // Task ids are deliberately absent: they exist only once each task registers, and this
+  // returns before that. ListTasks reports the in-flight reindexes with both their task_id
+  // and the Index each targets, which is the join.
+  repeated string indexes = 2;
+  string error = 3;
 }
 
 message CancelTaskResponse {

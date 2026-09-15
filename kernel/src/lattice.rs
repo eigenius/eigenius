@@ -3096,6 +3096,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
