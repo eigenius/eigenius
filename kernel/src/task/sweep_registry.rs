@@ -119,10 +119,36 @@ impl SweepHandle {
         self.record.read().expect("sweep record poisoned").clone()
     }
 
+    /// Record that cancellation was requested, so an observer reading the record sees
+    /// the same thing the `CancelTask` caller was told.
+    ///
+    /// Distinct from [`Self::cancel`], which raises the flag the driver polls: this only
+    /// moves the *record*. The driver stamps the terminal status itself at its next
+    /// check, so unlike a `ProgramRun`'s `Cancelling` (eigenius#134) this one always has
+    /// an exit.
+    pub fn mark_cancelling(&self) {
+        let mut record = self.record.write().expect("sweep record poisoned");
+        if !record.status.is_terminal() {
+            record.status = TaskStatus::Cancelling;
+        }
+    }
+
     /// Status convenience accessor.
     pub fn status(&self) -> TaskStatus {
         self.record.read().expect("sweep record poisoned").status
     }
+}
+
+/// What an async sweep produced: its task handle, always, and the sweep's own result.
+///
+/// The two are separate because they answer different questions. `result` is whether the
+/// vectors were written; `handle` is the task that tried, carrying the `task_id` and the
+/// terminal [`TaskStatus`] an observer needs — and needs most when `result` is `Err`,
+/// since the registry entry is dropped before [`SweepCoordinator::trigger_async`]
+/// returns and the handle is then the only remaining trace.
+pub struct SweepOutcome {
+    pub handle: SweepHandle,
+    pub result: Result<SweepReport, SweepError>,
 }
 
 /// `BTreeMap<LayerId, Arc<SweepHandle>>` with thread-safe
@@ -255,6 +281,47 @@ impl SweepRegistry {
             .expect("reindex registry poisoned")
             .remove(index_iri);
     }
+
+    /// Every in-flight index task, sweeps and reindexes alike, as task records.
+    ///
+    /// The D21 task surface is keyed by `task_id`, and these tasks carry one — so
+    /// `ListTasks` can report them beside `TaskStore` tasks without a second vocabulary
+    /// (eigenius#254). The registry is the live view: a terminated sweep unregisters, so
+    /// what this returns is in-flight plus just-terminated.
+    pub fn list_records(&self) -> Vec<TaskRecord> {
+        let sweeps = self.sweeps.read().expect("sweep registry poisoned");
+        let reindexes = self.reindexes.read().expect("reindex registry poisoned");
+        sweeps
+            .values()
+            .chain(reindexes.values())
+            .map(|handle| handle.record_snapshot())
+            .collect()
+    }
+
+    /// Find an in-flight index task by its `task_id`.
+    ///
+    /// Scans both maps, which is what makes `task_id` the right key for the RPC surface:
+    /// sweeps are keyed by `LayerId` and reindexes by index IRI, so a caller holding one
+    /// id would otherwise have to say which kind it meant. The scan is over in-flight
+    /// tasks only — a handful at most, one per committing layer.
+    pub fn find_by_task_id(&self, task_id: &Uuid) -> Option<Arc<SweepHandle>> {
+        let found = self
+            .sweeps
+            .read()
+            .expect("sweep registry poisoned")
+            .values()
+            .find(|handle| handle.record_snapshot().task_id == *task_id)
+            .map(Arc::clone);
+        if found.is_some() {
+            return found;
+        }
+        self.reindexes
+            .read()
+            .expect("reindex registry poisoned")
+            .values()
+            .find(|handle| handle.record_snapshot().task_id == *task_id)
+            .map(Arc::clone)
+    }
 }
 
 /// Bundles the [`SweepRegistry`] with the dispatchable resources
@@ -332,11 +399,9 @@ impl SweepCoordinator {
             return Ok(None);
         }
         let indexes: Vec<Iri> = active.iter().map(|a| a.iri.clone()).collect();
-        let record = TaskRecord::new_running(
-            Uuid::nil(),
+        let record = TaskRecord::new_vector_sweep(
             Uuid::new_v4(),
-            "urn:eigenius:program:vector_sweep".into(),
-            "urn:eigenius:input:none".into(),
+            indexes.iter().map(|i| i.as_str().to_string()).collect(),
             layer.id().clone(),
             now_millis(),
         );
@@ -414,10 +479,8 @@ impl SweepCoordinator {
         let mut out = Vec::with_capacity(targets.len());
         for target in targets {
             let target_iri = target.index_iri.clone();
-            let record = TaskRecord::new_running(
-                Uuid::nil(),
+            let record = TaskRecord::new_vector_reindex(
                 Uuid::new_v4(),
-                "urn:eigenius:program:vector_reindex".into(),
                 target_iri.as_str().to_string(),
                 head.id().clone(),
                 now_millis(),
@@ -504,10 +567,8 @@ impl SweepCoordinator {
         let mut out = Vec::with_capacity(targets.len());
         for target in targets {
             let target_iri = target.index_iri.clone();
-            let record = TaskRecord::new_running(
-                Uuid::nil(),
+            let record = TaskRecord::new_vector_reindex(
                 Uuid::new_v4(),
-                "urn:eigenius:program:vector_reindex".into(),
                 target_iri.as_str().to_string(),
                 head.id().clone(),
                 now_millis(),
@@ -563,22 +624,36 @@ impl SweepCoordinator {
     /// dispatches per [`AsyncSweepOptions`]. Registers the sweep
     /// for observability + cancellation throughout.
     ///
-    /// Returns `Ok(None)` when no active VectorIndex Resources
-    /// are visible — same shape as [`Self::trigger_blocking`].
-    pub async fn trigger_async(
-        &self,
-        layer: Arc<Layer>,
-    ) -> Result<Option<(SweepHandle, SweepReport)>, SweepError> {
-        let active = resolve_active_vector_indexes(&layer);
+    /// Returns `None` when no active VectorIndex Resources are visible — same
+    /// short-circuit as [`Self::trigger_blocking`] — and otherwise a [`SweepOutcome`]
+    /// carrying the handle **whether the sweep succeeded or failed**.
+    ///
+    /// The handle on the failure path is the point (eigenius#254). This unregisters
+    /// before returning, so a finished sweep exists nowhere else: propagating the error
+    /// alone would leave the caller knowing that a sweep failed but not which task it
+    /// was, and a failed sweep is the case worth recording — its layer is left with no
+    /// vectors, which no query reports as an error.
+    pub async fn trigger_async(&self, layer: Arc<Layer>) -> Option<SweepOutcome> {
+        self.trigger_sweep_at(&layer, Arc::clone(&layer)).await
+    }
+
+    /// Sweep `layer` for the Indexes active at `head`.
+    ///
+    /// The commit hook's case is `head == layer`, which is what [`Self::trigger_async`]
+    /// passes. Repair is not: an unswept layer is typically an *ancestor* of the head,
+    /// and `resolve_active_vector_indexes` walks upward from the layer it is given, so
+    /// resolving against the layer being swept would miss every Index declared above it
+    /// and sweep nothing at all (eigenius#254). [`reindex_chain`] already resolves its
+    /// target at the head for the same reason.
+    pub async fn trigger_sweep_at(&self, head: &Layer, layer: Arc<Layer>) -> Option<SweepOutcome> {
+        let active = resolve_active_vector_indexes(head);
         if active.is_empty() {
-            return Ok(None);
+            return None;
         }
         let indexes: Vec<Iri> = active.iter().map(|a| a.iri.clone()).collect();
-        let record = TaskRecord::new_running(
-            Uuid::nil(),
+        let record = TaskRecord::new_vector_sweep(
             Uuid::new_v4(),
-            "urn:eigenius:program:vector_sweep".into(),
-            "urn:eigenius:input:none".into(),
+            indexes.iter().map(|i| i.as_str().to_string()).collect(),
             layer.id().clone(),
             now_millis(),
         );
@@ -601,6 +676,7 @@ impl SweepCoordinator {
         };
         let outcome = sweep_layer_vectors_async(
             Arc::clone(&layer),
+            &active,
             Arc::clone(&self.embedders),
             self.cache.clone(),
             options,
@@ -616,16 +692,23 @@ impl SweepCoordinator {
             self.admit_swept_segments_to_cache(&layer, &active);
         }
         self.registry.unregister(&layer_id);
-        let report = outcome?;
-        Ok(Some(((*handle).clone(), report)))
+        Some(SweepOutcome {
+            handle: (*handle).clone(),
+            result: outcome,
+        })
     }
 
     /// Post-sweep: for every `(active VectorIndex, just-committed
     /// segment)` pair under `layer`, build the HNSW graph per the
     /// Index's strategy and admit the resulting [`SegmentView`] to
     /// the shared SegmentCache. No-op when no segment cache is
-    /// attached or when no segment was actually written (small
-    /// layers with no indexable resources).
+    /// attached.
+    ///
+    /// **Swept markers are not admitted.** A layer with nothing indexable under this
+    /// Index now has an empty segment rather than no segment (eigenius#254); it holds no
+    /// vectors, so caching it buys nothing, and the cache is the one read path that could
+    /// hand a marker to `verify_segment_shape` — which would fail the query with
+    /// `ModelMismatch` after a model upgrade, where the layer used to be skipped.
     fn admit_swept_segments_to_cache(&self, layer: &Layer, active: &[ActiveVectorIndex]) {
         let Some(segment_cache) = self.segment_cache.as_ref() else {
             return;
@@ -636,9 +719,9 @@ impl SweepCoordinator {
                 .vector_index
                 .get_segment(&index.iri, layer.id())
             {
-                Ok(Some(s)) => s,
-                _ => continue, // no segment written (e.g. no indexable
-                               // resources under this Index in this layer)
+                // A zero-vector segment is the swept marker, not content.
+                Ok(Some(s)) if s.count() > 0 => s,
+                _ => continue,
             };
             let metric = match Metric::from_short_name(
                 &index.distance.as_str()[index
@@ -1055,14 +1138,12 @@ mod tests {
         let coord = SweepCoordinator::new(Arc::new(reg), None);
 
         let start = std::time::Instant::now();
-        let outcome = coord
-            .trigger_async(Arc::clone(&layer))
-            .await
-            .expect("sweep");
+        let outcome = coord.trigger_async(Arc::clone(&layer)).await;
         let elapsed = start.elapsed();
 
-        let (handle, report) = outcome.expect("handle + report");
-        assert_eq!(handle.status(), TaskStatus::Completed);
+        let outcome = outcome.expect("head has an active index");
+        assert_eq!(outcome.handle.status(), TaskStatus::Completed);
+        let report = outcome.result.expect("sweep");
         assert_eq!(report.total_subjects, 16);
         assert!(
             elapsed.as_millis() < 400,
@@ -1079,7 +1160,7 @@ mod tests {
             .unwrap();
         let layer = Arc::new(b.build(crate::layer::LayerStorage::in_memory()));
         let coord = make_coordinator();
-        assert!(coord.trigger_async(layer).await.expect("sweep").is_none());
+        assert!(coord.trigger_async(layer).await.is_none());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1092,11 +1173,12 @@ mod tests {
         let mut reg = EmbedderRegistry::new();
         reg.register(Arc::new(DummyEmbedder::new(model, 8)));
         let coord = SweepCoordinator::new(Arc::new(reg), None);
-        let _ = coord
+        coord
             .trigger_async(Arc::clone(&layer))
             .await
-            .expect("sweep")
-            .expect("handle");
+            .expect("head has an active index")
+            .result
+            .expect("sweep");
 
         let segment = layer
             .storage()
@@ -1405,8 +1487,9 @@ mod tests {
         coord
             .trigger_async(Arc::clone(&head))
             .await
-            .expect("post-Load sweep")
-            .expect("head has an active index");
+            .expect("head has an active index")
+            .result
+            .expect("post-Load sweep");
         let handles = coord
             .trigger_reindex_async(Arc::clone(&head))
             .await
@@ -1420,7 +1503,10 @@ mod tests {
 
         let vi = iri("urn:eigenius:test:vi");
         let backend = &head.storage().vector_index;
-        let mut checked = 0;
+        // Every segment in the chain must be on the declared model — including the empty
+        // swept markers the reindex rewrites as it walks (eigenius#254), which is why the
+        // count of segments carrying vectors is what identifies L2 and L3.
+        let mut with_vectors = 0;
         let mut cursor = Some(head.as_ref());
         while let Some(layer) = cursor {
             if let Some(seg) = backend.get_segment(&vi, layer.id()).unwrap() {
@@ -1430,11 +1516,229 @@ mod tests {
                     "segment at layer {} still carries the superseded model",
                     layer.id()
                 );
-                checked += 1;
+                if seg.count() > 0 {
+                    with_vectors += 1;
+                }
             }
             cursor = layer.parent().map(|p| p.as_ref());
         }
-        assert_eq!(checked, 2, "expected a segment at both L2 and L3");
+        assert_eq!(with_vectors, 2, "expected vectors at both L2 and L3");
+    }
+
+    /// Repairing an unswept layer sweeps an ANCESTOR of the head, and the Index that
+    /// applies to it is declared above it (eigenius#254).
+    ///
+    /// `resolve_active_vector_indexes` walks upward from the layer it is given, so
+    /// resolving against the layer being swept finds nothing and the sweep silently does
+    /// nothing — `trigger_async` would return `None`, no task would be registered, and
+    /// `StartSweep` would report success while making no progress on every re-run.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn repair_sweeps_a_layer_below_the_index_declaration() {
+        let ctx = bootstrap().expect("bootstrap");
+        let root = Arc::clone(ctx.head());
+        let storage = root.storage().clone();
+        let target_prop = "urn:eigenius:test:body";
+        let model = "urn:eigenius:embed:dummy:v1";
+
+        // L1 carries the content and is committed BEFORE any Index exists.
+        let mut l1 = LayerBuilder::new("content-first", Some(root));
+        let mut prop = Resource::new(iri(target_prop));
+        prop.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::iri(&iri(wk::PROPERTY))]),
+        );
+        prop.set(iri(wk::DATA_TYPE_PROP), Value::iri(&iri(wk::STRING)));
+        l1.add_resource(prop).unwrap();
+        let mut d = Resource::new(iri("urn:eigenius:test:d1"));
+        d.set(iri(target_prop), Value::String("alpha beta".into()));
+        l1.add_resource(d).unwrap();
+        let l1 = Arc::new(l1.build(storage.clone()));
+
+        // L2 declares the Index afterwards — the ordinary "index what I already have".
+        let mut l2 = LayerBuilder::new("declare-index", Some(Arc::clone(&l1)));
+        let mut vi = Resource::new(iri("urn:eigenius:test:vi"));
+        vi.set(
+            iri(wk::IS_A),
+            Value::Array(vec![Value::String(
+                iri(wk::VECTOR_INDEX_CLASS).as_str().to_string(),
+            )]),
+        );
+        vi.set(iri(wk::TARGET_PROPERTY), Value::iri(&iri(target_prop)));
+        vi.set(iri(wk::VEC_MODEL), Value::iri(&iri(model)));
+        vi.set(iri(wk::VEC_DIM), Value::Integer(8));
+        l2.add_resource(vi).unwrap();
+        let l2 = Arc::new(l2.build(storage.clone()));
+
+        // L1 is exactly what detection names.
+        let unswept = crate::layer::detect_unswept_layers(&l2).expect("detect");
+        assert!(
+            unswept.iter().any(|u| u.layer_id == *l1.id()),
+            "L1 holds the content and has no segment"
+        );
+
+        let mut reg = EmbedderRegistry::new();
+        reg.register(Arc::new(DummyEmbedder::new(model, 8)));
+        let coord = SweepCoordinator::new(Arc::new(reg), None);
+
+        let outcome = coord
+            .trigger_sweep_at(&l2, Arc::clone(&l1))
+            .await
+            .expect("the Index is active at the head, so a task must run");
+        let report = outcome.result.expect("sweep");
+        assert_eq!(
+            report.total_subjects, 1,
+            "L1's document must be embedded; resolving the Index at L1 would find none"
+        );
+        assert_eq!(outcome.handle.status(), TaskStatus::Completed);
+
+        let seg = l2
+            .storage()
+            .vector_index
+            .get_segment(&iri("urn:eigenius:test:vi"), l1.id())
+            .unwrap()
+            .expect("a segment at L1");
+        assert_eq!(seg.count(), 1);
+
+        // And the repair is complete: nothing below the head is left unswept.
+        let unswept = crate::layer::detect_unswept_layers(&l2).expect("detect");
+        assert!(
+            !unswept.iter().any(|u| u.layer_id == *l1.id()),
+            "L1 must no longer be reported unswept"
+        );
+    }
+
+    /// A failed sweep hands back its handle, not just an error.
+    ///
+    /// The registry entry is dropped before `trigger_async` returns, so the handle is the
+    /// only remaining trace of the task — and the failure case is the one worth tracing:
+    /// the layer is left with no vectors, and a query against it returns fewer hits
+    /// rather than an error (eigenius#254).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_failed_sweep_still_returns_its_task_handle() {
+        // A corpus declaring a model no embedder is registered for: the sweep resolves the
+        // Index, registers the task, and fails on dispatch.
+        let layer = build_corpus(2);
+        let coord = SweepCoordinator::new(Arc::new(EmbedderRegistry::new()), None);
+
+        let outcome = coord
+            .trigger_async(Arc::clone(&layer))
+            .await
+            .expect("an active index means a task was created");
+        assert!(
+            outcome.result.is_err(),
+            "no embedder is registered, so the sweep cannot succeed"
+        );
+        assert_eq!(
+            outcome.handle.status(),
+            TaskStatus::Failed,
+            "the handle carries the terminal status the caller persists"
+        );
+        let record = outcome.handle.record_snapshot();
+        assert_eq!(record.kind.label(), "VectorSweep");
+        assert_eq!(record.layer_head, *layer.id());
+        assert!(
+            coord.registry.get(layer.id()).is_none(),
+            "the registry is already empty, which is why the handle has to come back"
+        );
+    }
+
+    /// The registry is the live view of index tasks for the D21 task RPCs: both kinds
+    /// list, and either is findable by the `task_id` those RPCs key on (eigenius#254).
+    #[test]
+    fn index_tasks_list_and_resolve_by_task_id() {
+        use crate::task::TaskKind;
+
+        let registry = SweepRegistry::new();
+        let layer = LayerId([7u8; 32]);
+        let index = iri("urn:eigenius:test:vi");
+
+        let sweep_record = TaskRecord::new_vector_sweep(
+            Uuid::new_v4(),
+            vec![index.as_str().to_string()],
+            layer.clone(),
+            0,
+        );
+        let sweep_task_id = sweep_record.task_id;
+        let sweep = Arc::new(SweepHandle::from_parts(
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(RwLock::new(sweep_record)),
+            vec![index.clone()],
+        ));
+        registry.register(layer.clone(), Arc::clone(&sweep));
+
+        let reindex_record = TaskRecord::new_vector_reindex(
+            Uuid::new_v4(),
+            index.as_str().to_string(),
+            layer.clone(),
+            0,
+        );
+        let reindex_task_id = reindex_record.task_id;
+        let reindex = Arc::new(SweepHandle::from_parts(
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(RwLock::new(reindex_record)),
+            vec![index.clone()],
+        ));
+        registry.register_reindex(index.clone(), Arc::clone(&reindex));
+
+        let records = registry.list_records();
+        assert_eq!(records.len(), 2, "both kinds list");
+        let kinds: Vec<&str> = records.iter().map(|r| r.kind.label()).collect();
+        assert!(kinds.contains(&"VectorSweep"));
+        assert!(kinds.contains(&"VectorReindex"));
+
+        // A sweep is keyed by layer and a reindex by Index IRI, so task_id is the only key
+        // a caller can use without knowing which kind it holds.
+        let found = registry
+            .find_by_task_id(&sweep_task_id)
+            .expect("sweep findable by task_id");
+        assert!(matches!(
+            found.record_snapshot().kind,
+            TaskKind::VectorSweep { .. }
+        ));
+        let found = registry
+            .find_by_task_id(&reindex_task_id)
+            .expect("reindex findable by task_id");
+        assert!(matches!(
+            found.record_snapshot().kind,
+            TaskKind::VectorReindex { .. }
+        ));
+        assert!(registry.find_by_task_id(&Uuid::new_v4()).is_none());
+
+        // Cancelling through the handle the RPC found is what the driver polls.
+        assert!(!found.is_cancelled());
+        found.cancel();
+        assert!(found.is_cancelled());
+        assert!(
+            reindex.is_cancelled(),
+            "the handle the registry hands out shares the registered flag"
+        );
+    }
+
+    /// A sweep's record says it is a sweep. It used to claim to be a `ProgramRun` of
+    /// `urn:eigenius:program:vector_sweep`, a program that does not exist — the synthetic
+    /// IRI D71 §6 rejected for formalization, for the same reason.
+    #[test]
+    fn index_task_records_name_their_kind_not_a_synthetic_program() {
+        let record = TaskRecord::new_vector_sweep(
+            Uuid::new_v4(),
+            vec!["urn:eigenius:test:vi".to_string()],
+            LayerId([1u8; 32]),
+            0,
+        );
+        assert_eq!(record.kind.label(), "VectorSweep");
+        assert_eq!(record.kind.program_iri(), None);
+        assert_eq!(record.kind.input_iri(), None);
+        assert_eq!(record.kind.index_iris(), ["urn:eigenius:test:vi"]);
+        assert!(record.kind.is_index_task());
+
+        let record = TaskRecord::new_vector_reindex(
+            Uuid::new_v4(),
+            "urn:eigenius:test:vi".to_string(),
+            LayerId([1u8; 32]),
+            0,
+        );
+        assert_eq!(record.kind.label(), "VectorReindex");
+        assert_eq!(record.kind.index_iris(), ["urn:eigenius:test:vi"]);
     }
 
     #[test]

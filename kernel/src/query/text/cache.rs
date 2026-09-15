@@ -77,15 +77,39 @@ impl DocsCache {
         self.inner.insert((index, layer), docs);
     }
 
-    /// Invalidate a single entry.
+    /// Invalidate a single entry by `(index, layer)`.
     ///
-    /// No production caller: `delete_layer` does not reach this
-    /// cache, so a deleted layer's docs blob stays cached until LRU
-    /// evicts it. Harmless for answers — a deleted layer is in no
-    /// chain, so nothing looks the entry up — but it holds capacity.
-    /// eigenius#253.
+    /// No production caller — the callers are this module's own tests. GC reaches this
+    /// cache through [`Self::evict_layer`], which is keyed by layer alone, and
+    /// consolidation uses [`Self::invalidate_all`]. Kept because a caller that knows the
+    /// exact pair it replaced should not have to scan.
     pub fn invalidate(&self, index: &Iri, layer: &LayerId) {
         self.inner.invalidate(&(index.clone(), layer.clone()));
+    }
+
+    /// Drop every entry contributed by `layer`, across all Indexes.
+    ///
+    /// Called by GC's `delete_layer` path through
+    /// [`crate::gc::DeletionHooks`]. A deleted layer is in no chain,
+    /// so a surviving entry never answers a query — but the docs
+    /// blob holds the layer's analysed text, so leaving it to age
+    /// out holds that capacity against live layers (eigenius#253).
+    ///
+    /// Same shape as [`crate::layer::ResourceCache::evict_layer`]:
+    /// per-key `invalidate` is synchronous where
+    /// `invalidate_entries_if` queues removals for background
+    /// maintenance, and a GC caller expects the entries to be gone
+    /// when this returns.
+    pub fn evict_layer(&self, layer: &LayerId) {
+        let mut to_drop: Vec<(Iri, LayerId)> = Vec::new();
+        for entry in self.inner.iter() {
+            if entry.0 .1 == *layer {
+                to_drop.push(entry.0.as_ref().clone());
+            }
+        }
+        for key in to_drop {
+            self.inner.invalidate(&key);
+        }
     }
 
     /// Invalidate every cached entry — used after consolidation

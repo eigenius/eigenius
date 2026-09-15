@@ -1948,6 +1948,8 @@ mod tests {
                 bloom_cache: gc_storage.bloom_cache.as_ref(),
                 // A test GC with no coordinator: nothing to cancel, said explicitly.
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             backend.as_ref(),
         )
@@ -2027,6 +2029,8 @@ mod tests {
                 bloom_cache: gc_storage.bloom_cache.as_ref(),
                 // A test GC with no coordinator: nothing to cancel, said explicitly.
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             backend.as_ref(),
         )

@@ -390,6 +390,7 @@ pub(super) fn task_record_to_info(record: crate::task::TaskRecord) -> TaskInfo {
             crate::task::TaskKind::Formalize { source_sha256, .. } => source_sha256.clone(),
             _ => String::new(),
         },
+        indexes: record.kind.index_iris().to_vec(),
         status: format!("{:?}", record.status),
         layer_head: hex::encode(record.layer_head.0),
         step_seq: record.step_seq,

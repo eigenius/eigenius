@@ -91,6 +91,15 @@ impl EigeniusService {
             cache: storage.cache.as_ref(),
             bloom_cache: storage.bloom_cache.as_ref(),
             sweeps: sweeps.as_deref(),
+            // `None` because this service owns neither index cache: the Query
+            // handler builds its `FiberRuntime` with `vector_segment_cache: None`
+            // and nothing calls `SweepCoordinator::with_segment_cache`, so
+            // D43 §5.9's caches have no production owner to evict from
+            // (eigenius#256). `DeletionHooks` covers them the moment one is
+            // attached; until then this `None` is the honest statement, not a
+            // skipped step.
+            segments: None,
+            text_docs: None,
         };
         let stats = crate::gc::collect(roots, &config, &hooks, backend.as_ref())
             .map_err(|e| Status::internal(format!("gc run failed: {e}")))?;

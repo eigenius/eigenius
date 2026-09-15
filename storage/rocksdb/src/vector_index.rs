@@ -287,10 +287,6 @@ impl RocksVectorIndex {
         docs: &[VectorDoc<'_>],
         hnsw_graph: Option<&[u8]>,
     ) -> Result<(), StorageError> {
-        if docs.is_empty() {
-            return Ok(());
-        }
-
         // Validate dimensionality before mutating anything.
         let dim_usize = dim as usize;
         for (i, d) in docs.iter().enumerate() {
@@ -373,9 +369,6 @@ impl VectorIndex for RocksVectorIndex {
         docs: &[VectorDoc<'_>],
         hnsw_graph: Option<&[u8]>,
     ) -> Result<(), StorageError> {
-        if docs.is_empty() {
-            return Ok(());
-        }
         run_blocking(|| {
             let mut batch = rocksdb::WriteBatch::default();
             self.extend_into_batch(
@@ -631,6 +624,43 @@ mod tests {
         assert_eq!(i1_layers, BTreeSet::from([l1, l2]));
         let i2_layers: BTreeSet<LayerId> = idx.scan_index(&i2).map(|r| r.unwrap()).collect();
         assert_eq!(i2_layers, BTreeSet::from([l3]));
+    }
+
+    /// An empty doc list writes an empty segment — the swept marker (eigenius#254).
+    ///
+    /// The guard that made this a no-op was removed in both `extend_layer` bodies here,
+    /// not only in `MemoryVectorIndex`, so the CBOR round-trip of a zero-vector segment
+    /// and its reverse-index entry need their own coverage.
+    #[test]
+    fn empty_docs_writes_a_swept_marker() {
+        let (store, _dir) = open_temp_store();
+        let idx = RocksVectorIndex::new(Arc::clone(&store.db));
+        let i1 = iri("urn:eigenius:test:i1");
+        let l1 = layer_id(1);
+        let model = iri("urn:eigenius:test:m");
+
+        idx.extend_layer(&i1, &l1, &model, 4, "cosine", &[], None)
+            .unwrap();
+
+        let seg = idx
+            .get_segment(&i1, &l1)
+            .unwrap()
+            .expect("the marker survives the CBOR round-trip");
+        assert_eq!(seg.count(), 0);
+        assert!(seg.vectors.is_empty());
+        assert_eq!(seg.model_iri, model, "it records the model that swept");
+        assert_eq!(seg.dim, 4);
+        assert_eq!(seg.distance, "cosine");
+
+        // Visible to both scans, which is what makes "unswept" computable.
+        let layers: BTreeSet<LayerId> = idx.scan_index(&i1).map(|r| r.unwrap()).collect();
+        assert_eq!(layers, BTreeSet::from([l1.clone()]));
+        let models: Vec<_> = idx.scan_index_models(&i1).map(|r| r.unwrap()).collect();
+        assert_eq!(models, vec![(l1.clone(), model.clone())]);
+
+        // And the reverse index carries it, so GC reclaims it with the layer.
+        idx.drop_layer(&l1).unwrap();
+        assert!(idx.get_segment(&i1, &l1).unwrap().is_none());
     }
 
     /// `scan_index_models` reports each segment's model without

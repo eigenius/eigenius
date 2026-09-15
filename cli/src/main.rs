@@ -515,8 +515,16 @@ enum BranchCommands {
 
 #[derive(Subcommand)]
 enum TaskCommands {
-    /// List all tasks in the session
-    List,
+    /// List tasks in the session, newest first
+    List {
+        /// Tasks per page. Server default is 100, capped at 1000.
+        #[arg(long, value_name = "N")]
+        limit: Option<u32>,
+
+        /// Follow the cursor and print every page
+        #[arg(long)]
+        all: bool,
+    },
 
     /// Show a task's status and metadata
     Status {
@@ -530,6 +538,58 @@ enum TaskCommands {
         /// Task UUID
         #[arg(value_name = "TASK_ID")]
         task_id: String,
+    },
+
+    /// Start a vector reindex for every VectorIndex whose model no longer
+    /// matches its stored segments (D43 §5.7)
+    ///
+    /// The commit hook does this automatically for each layer it persists;
+    /// this is the repair path after a reindex failed or was cancelled.
+    /// Prints what was found stale and returns — poll `tasks list` for the
+    /// running reindexes.
+    Reindex {
+        /// Layer to detect against, as 64 hex chars. Defaults to the branch head.
+        #[arg(long, value_name = "LAYER")]
+        layer: Option<String>,
+    },
+
+    /// Delete one terminal task and everything it owns (record, checkpoints, traces)
+    ///
+    /// Refuses a task that is not terminal: a live record pins its layer
+    /// against GC and blocks branch deletion and consolidation, and
+    /// deleting it would drop those pins while the task still means to
+    /// resume. Cancel it first.
+    Delete {
+        /// Task UUID
+        #[arg(value_name = "TASK_ID")]
+        task_id: String,
+    },
+
+    /// Delete terminal tasks older than a cutoff
+    ///
+    /// Nothing expires task records on its own, so this is how the keyspace
+    /// is reclaimed. Non-terminal tasks are never touched, whatever their age.
+    Prune {
+        /// Age cutoff: a number followed by s, m, h or d (e.g. 30d). Omit to
+        /// prune every terminal task regardless of age.
+        #[arg(long, value_name = "DURATION")]
+        older_than: Option<String>,
+
+        /// Report what would be deleted without deleting anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Re-run the post-Load vector sweep for layers it never covered (D43 §5.5)
+    ///
+    /// The commit hook sweeps each layer once and nothing retries, so a sweep
+    /// that failed leaves that layer's content invisible to vector search with
+    /// no error anywhere. With no --layer, every visible layer missing its
+    /// segments is swept.
+    Sweep {
+        /// Layer to sweep, as 64 hex chars. Defaults to every unswept layer.
+        #[arg(long, value_name = "LAYER")]
+        layer: Option<String>,
     },
 }
 
@@ -3333,56 +3393,120 @@ async fn remote_get_schema(endpoint: &str, class_iri: &str, _json_output: bool) 
 
 async fn remote_tasks(endpoint: &str, command: TaskCommands, json: bool) {
     match command {
-        TaskCommands::List => remote_tasks_list(endpoint, json).await,
+        TaskCommands::List { limit, all } => remote_tasks_list(endpoint, limit, all, json).await,
         TaskCommands::Status { task_id } => remote_task_status(endpoint, &task_id, json).await,
         TaskCommands::Cancel { task_id } => remote_task_cancel(endpoint, &task_id, json).await,
+        TaskCommands::Reindex { layer } => {
+            remote_task_reindex(endpoint, layer.as_deref().unwrap_or_default(), json).await
+        }
+        TaskCommands::Delete { task_id } => remote_task_delete(endpoint, &task_id, json).await,
+        TaskCommands::Prune {
+            older_than,
+            dry_run,
+        } => remote_task_prune(endpoint, older_than.as_deref(), dry_run, json).await,
+        TaskCommands::Sweep { layer } => {
+            remote_task_sweep(endpoint, layer.as_deref().unwrap_or_default(), json).await
+        }
     }
 }
 
-async fn remote_tasks_list(endpoint: &str, json_output: bool) {
+/// `30d`, `12h`, `45m`, `90s` → milliseconds. Bare digits are seconds.
+fn parse_duration_ms(spec: &str) -> Result<u64, String> {
+    let spec = spec.trim();
+    let (digits, mult) = match spec.chars().last() {
+        Some('s') => (&spec[..spec.len() - 1], 1_000u64),
+        Some('m') => (&spec[..spec.len() - 1], 60_000),
+        Some('h') => (&spec[..spec.len() - 1], 3_600_000),
+        Some('d') => (&spec[..spec.len() - 1], 86_400_000),
+        _ => (spec, 1_000),
+    };
+    let n: u64 = digits
+        .parse()
+        .map_err(|_| format!("not a duration: {spec} (expected e.g. 30d, 12h, 45m, 90s)"))?;
+    n.checked_mul(mult)
+        .ok_or_else(|| format!("duration out of range: {spec}"))
+}
+
+async fn remote_task_delete(endpoint: &str, task_id: &str, json_output: bool) {
     let mut client = connect_client(endpoint).await;
-    let request = eigenius_kernel::server::proto::ListTasksRequest {};
-    match client.list_tasks(request).await {
+    let request = eigenius_kernel::server::proto::DeleteTaskRequest {
+        task_id: task_id.to_string(),
+    };
+    match client.delete_task(request).await {
         Ok(response) => {
             let resp = response.into_inner();
             if json_output {
-                let items: Vec<serde_json::Value> = resp
-                    .tasks
-                    .iter()
-                    .map(|t| {
-                        serde_json::json!({
-                            "task_id": t.task_id,
-                            "kind": t.kind,
-                            "program_iri": t.program_iri,
-                            "doc_id": t.doc_id,
-                            "status": t.status,
-                            "layer_head": t.layer_head,
-                            "step_seq": t.step_seq,
-                            "result_layer_head": t.result_layer_head,
-                            "created_at_ms": t.created_at_ms,
-                        })
-                    })
-                    .collect();
-                println!("{}", serde_json::to_string_pretty(&items).unwrap());
-            } else if resp.tasks.is_empty() {
-                println!("No tasks.");
+                let j = serde_json::json!({
+                    "success": resp.success,
+                    "status": resp.status,
+                    "error": resp.error,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if resp.success {
+                println!("Deleted task {task_id} ({}).", resp.status);
             } else {
-                println!(
-                    "{:<36}  {:<12}  {:<11}  SUBJECT",
-                    "TASK ID", "STATUS", "KIND"
-                );
-                for t in &resp.tasks {
-                    // Each kind names its own subject: a program run its program, a formalization
-                    // its doc branch. Printing `program_iri` for both would show a blank column and
-                    // invite the reader to assume the task is broken.
-                    let subject = if t.doc_id.is_empty() {
-                        t.program_iri.as_str()
-                    } else {
-                        t.doc_id.as_str()
-                    };
+                eprintln!("{}", resp.error);
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_task_prune(
+    endpoint: &str,
+    older_than: Option<&str>,
+    dry_run: bool,
+    json_output: bool,
+) {
+    let older_than_ms = match older_than {
+        Some(spec) => match parse_duration_ms(spec) {
+            Ok(ms) => ms,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
+        None => 0,
+    };
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::PruneTasksRequest {
+        older_than_ms,
+        dry_run,
+    };
+    match client.prune_tasks(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "success": resp.success,
+                    "dry_run": dry_run,
+                    "task_ids": resp.task_ids,
+                    "retained_non_terminal": resp.retained_non_terminal,
+                    "error": resp.error,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if !resp.success {
+                eprintln!("{}", resp.error);
+                std::process::exit(1);
+            } else {
+                let verb = if dry_run { "Would delete" } else { "Deleted" };
+                if resp.task_ids.is_empty() {
+                    println!("Nothing to prune.");
+                } else {
+                    println!("{verb} {} task(s):", resp.task_ids.len());
+                    for id in &resp.task_ids {
+                        println!("  {id}");
+                    }
+                }
+                if resp.retained_non_terminal > 0 {
                     println!(
-                        "{:<36}  {:<12}  {:<11}  {}",
-                        t.task_id, t.status, t.kind, subject
+                        "Kept {} non-terminal task(s) — cancel them first to make them \
+                         deletable.",
+                        resp.retained_non_terminal
                     );
                 }
             }
@@ -3391,6 +3515,161 @@ async fn remote_tasks_list(endpoint: &str, json_output: bool) {
             eprintln!("gRPC error: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+async fn remote_task_sweep(endpoint: &str, layer: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::StartSweepRequest {
+        layer: layer.to_string(),
+    };
+    match client.start_sweep(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "success": resp.success,
+                    "layers": resp.layers,
+                    "error": resp.error,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if !resp.success {
+                eprintln!("Sweep not started: {}", resp.error);
+                std::process::exit(1);
+            } else if resp.layers.is_empty() {
+                println!("Nothing to sweep: every visible layer already has its segments.");
+            } else {
+                println!("Sweeping {} layer(s):", resp.layers.len());
+                for l in &resp.layers {
+                    println!("  {l}");
+                }
+                println!("Running in the background — `eigenius tasks list` to follow them.");
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_task_reindex(endpoint: &str, layer: &str, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    let request = eigenius_kernel::server::proto::StartReindexRequest {
+        layer: layer.to_string(),
+    };
+    match client.start_reindex(request).await {
+        Ok(response) => {
+            let resp = response.into_inner();
+            if json_output {
+                let j = serde_json::json!({
+                    "success": resp.success,
+                    "indexes": resp.indexes,
+                    "error": resp.error,
+                });
+                println!("{}", serde_json::to_string_pretty(&j).unwrap());
+            } else if !resp.success {
+                eprintln!("Reindex not started: {}", resp.error);
+                std::process::exit(1);
+            } else if resp.indexes.is_empty() {
+                println!("Nothing to reindex: every visible segment carries its declared model.");
+            } else {
+                println!("Reindexing {} index(es):", resp.indexes.len());
+                for i in &resp.indexes {
+                    println!("  {i}");
+                }
+                println!("Running in the background — `eigenius tasks list` to follow them.");
+            }
+        }
+        Err(e) => {
+            eprintln!("gRPC error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn remote_tasks_list(endpoint: &str, limit: Option<u32>, all: bool, json_output: bool) {
+    let mut client = connect_client(endpoint).await;
+    // `--all` follows the cursor to the end; otherwise one page and a note that there is
+    // more, so a large store does not scroll past by default.
+    let mut cursor = String::new();
+    let mut tasks = Vec::new();
+    let mut truncated = false;
+    loop {
+        let request = eigenius_kernel::server::proto::ListTasksRequest {
+            limit: limit.unwrap_or(0),
+            cursor: cursor.clone(),
+        };
+        match client.list_tasks(request).await {
+            Ok(response) => {
+                let resp = response.into_inner();
+                tasks.extend(resp.tasks);
+                if resp.next_cursor.is_empty() {
+                    break;
+                }
+                if !all {
+                    truncated = true;
+                    break;
+                }
+                cursor = resp.next_cursor;
+            }
+            Err(e) => {
+                eprintln!("gRPC error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+    let resp = eigenius_kernel::server::proto::ListTasksResponse {
+        tasks,
+        next_cursor: String::new(),
+    };
+    if json_output {
+        let items: Vec<serde_json::Value> = resp
+            .tasks
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "task_id": t.task_id,
+                    "kind": t.kind,
+                    "program_iri": t.program_iri,
+                    "doc_id": t.doc_id,
+                    "indexes": t.indexes,
+                    "status": t.status,
+                    "layer_head": t.layer_head,
+                    "step_seq": t.step_seq,
+                    "result_layer_head": t.result_layer_head,
+                    "created_at_ms": t.created_at_ms,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&items).unwrap());
+    } else if resp.tasks.is_empty() {
+        println!("No tasks.");
+    } else {
+        println!(
+            "{:<36}  {:<12}  {:<14}  SUBJECT",
+            "TASK ID", "STATUS", "KIND"
+        );
+        for t in &resp.tasks {
+            // Each kind names its own subject: a program run its program, a formalization
+            // its doc branch, a sweep or reindex the VectorIndexes it covers. Printing
+            // `program_iri` for all of them would show a blank column and invite the
+            // reader to assume the task is broken.
+            let subject = if !t.doc_id.is_empty() {
+                t.doc_id.clone()
+            } else if !t.indexes.is_empty() {
+                t.indexes.join(", ")
+            } else {
+                t.program_iri.clone()
+            };
+            println!(
+                "{:<36}  {:<12}  {:<14}  {}",
+                t.task_id, t.status, t.kind, subject
+            );
+        }
+    }
+    if truncated {
+        println!("(more tasks — re-run with --all, or --limit to widen the page)");
     }
 }
 
@@ -3416,6 +3695,7 @@ async fn remote_task_status(endpoint: &str, task_id: &str, json_output: bool) {
                     "input_iri": t.input_iri,
                     "doc_id": t.doc_id,
                     "source_sha256": t.source_sha256,
+                    "indexes": t.indexes,
                     "status": t.status,
                     "layer_head": t.layer_head,
                     "step_seq": t.step_seq,
@@ -3438,6 +3718,9 @@ async fn remote_task_status(endpoint: &str, task_id: &str, json_output: bool) {
                 if !t.doc_id.is_empty() {
                     println!("Doc branch:   doc-{}", t.doc_id);
                     println!("Source sha:   {}", t.source_sha256);
+                }
+                if !t.indexes.is_empty() {
+                    println!("Indexes:      {}", t.indexes.join(", "));
                 }
                 println!("Layer head:   {}", t.layer_head);
                 println!("Step seq:     {}", t.step_seq);

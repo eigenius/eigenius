@@ -205,6 +205,13 @@ pub struct DeletionHooks<'a> {
     /// tests. A `None` here is the honest statement that this caller cannot cancel
     /// anything, not a default that quietly skips the step.
     pub sweeps: Option<&'a crate::task::sweep_registry::SweepRegistry>,
+    /// The vector segment cache, where one is reachable. Evicted after the delete.
+    ///
+    /// `None` when the caller has no segment cache attached — the same honest
+    /// statement `sweeps` makes.
+    pub segments: Option<&'a crate::query::vector::cache::SegmentCache>,
+    /// The text docs cache, where one is reachable. Evicted after the delete.
+    pub text_docs: Option<&'a crate::query::text::cache::DocsCache>,
 }
 
 impl DeletionHooks<'_> {
@@ -229,9 +236,21 @@ impl DeletionHooks<'_> {
     }
 
     /// Drop what the caches hold for `layer`, after the delete has succeeded.
+    ///
+    /// The two index caches are keyed `(index_iri, layer_id)` and hold the layer's
+    /// derived payloads — a `SegmentView`'s vectors plus its HNSW graph, and the
+    /// analysed docs blob. A deleted layer is in no chain, so a surviving entry never
+    /// answers a query; it just holds capacity against live layers until LRU reaches it
+    /// (eigenius#253).
     fn evict(&self, layer: &LayerId) {
         self.cache.evict_layer(layer);
         self.bloom_cache.evict_layer(layer);
+        if let Some(segments) = self.segments {
+            segments.evict_layer(layer);
+        }
+        if let Some(text_docs) = self.text_docs {
+            text_docs.evict_layer(layer);
+        }
     }
 }
 
@@ -687,11 +706,9 @@ mod tests {
         // An in-flight sweep against the layer GC is about to delete.
         let registry = SweepRegistry::new();
         let cancel = Arc::new(AtomicBool::new(false));
-        let record = Arc::new(RwLock::new(crate::task::TaskRecord::new_running(
-            uuid::Uuid::nil(),
+        let record = Arc::new(RwLock::new(crate::task::TaskRecord::new_vector_sweep(
             uuid::Uuid::new_v4(),
-            "urn:eigenius:program:vector_sweep".into(),
-            "urn:eigenius:input:none".into(),
+            Vec::new(),
             orphan.id().clone(),
             0,
         )));
@@ -710,6 +727,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: Some(&registry),
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -722,6 +741,101 @@ mod tests {
         assert!(
             cancel.load(Ordering::SeqCst),
             "the flag the sweep loop actually polls must be the one raised"
+        );
+    }
+
+    /// GC drops the deleted layer's index-cache entries and leaves a surviving layer's
+    /// alone (eigenius#253).
+    ///
+    /// Latent in production today: nothing constructs either cache outside tests
+    /// (eigenius#256), so `DeletionHooks` is handed `None` at the one production site.
+    /// This pins the hook for the moment one is attached.
+    #[test]
+    fn sweeping_a_layer_evicts_its_segment_and_docs_cache_entries() {
+        use crate::layer::{TextDocs, VectorSegment};
+        use crate::query::text::cache::DocsCache;
+        use crate::query::vector::cache::SegmentCache;
+        use crate::query::vector::segment::SegmentView;
+
+        fn segment() -> Arc<SegmentView> {
+            Arc::new(SegmentView::from_segment(VectorSegment {
+                model_iri: Iri::parse("urn:eigenius:embed:test:m1").unwrap(),
+                dim: 2,
+                distance: "cosine".into(),
+                subjects: vec![Iri::parse("urn:eigenius:test:s0").unwrap()],
+                vectors: vec![0.5f32; 2],
+                hnsw_graph_bytes: None,
+            }))
+        }
+        fn docs_blob() -> Arc<TextDocs> {
+            Arc::new(TextDocs {
+                subjects: vec![Iri::parse("urn:eigenius:test:s0").unwrap()],
+                doc_lengths: vec![1],
+            })
+        }
+
+        let backend: Arc<dyn PersistentBackend> = Arc::new(MemoryPersistentBackend::new());
+        let storage = LayerStorage::with_persistent(Arc::clone(&backend));
+        let root = commit_root(&*backend, &storage);
+        let orphan = commit_child(
+            &*backend,
+            &storage,
+            Arc::clone(&root),
+            "orphan",
+            "urn:eigenius:test:o",
+        );
+
+        let index = Iri::parse("urn:eigenius:test:vi").unwrap();
+        let other_index = Iri::parse("urn:eigenius:test:vi2").unwrap();
+        let segments = SegmentCache::new(16);
+        let docs = DocsCache::new(16);
+
+        // Two Indexes for the doomed layer, and one entry for the root, which survives.
+        segments.insert(index.clone(), orphan.id().clone(), segment());
+        segments.insert(other_index.clone(), orphan.id().clone(), segment());
+        segments.insert(index.clone(), root.id().clone(), segment());
+        docs.insert(index.clone(), orphan.id().clone(), docs_blob());
+        docs.insert(index.clone(), root.id().clone(), docs_blob());
+
+        // The root is pinned so it survives the pass — the point is that eviction is
+        // scoped to what was actually deleted.
+        collect(
+            GcRoots {
+                branch_heads: vec![root.id().clone()],
+                task_pins: Vec::new(),
+                tag_targets: Vec::new(),
+            },
+            &no_age_config(),
+            &DeletionHooks {
+                cache: storage.cache.as_ref(),
+                bloom_cache: storage.bloom_cache.as_ref(),
+                sweeps: None,
+                segments: Some(&segments),
+                text_docs: Some(&docs),
+            },
+            &*backend,
+        )
+        .unwrap();
+
+        assert!(
+            segments.get(&index, orphan.id()).is_none(),
+            "GC deleted the layer and left its segment cached"
+        );
+        assert!(
+            segments.get(&other_index, orphan.id()).is_none(),
+            "eviction is by layer, so every Index under it goes"
+        );
+        assert!(
+            docs.get(&index, orphan.id()).is_none(),
+            "GC deleted the layer and left its docs blob cached"
+        );
+        assert!(
+            segments.get(&index, root.id()).is_some(),
+            "a surviving layer's segment must not be evicted"
+        );
+        assert!(
+            docs.get(&index, root.id()).is_some(),
+            "a surviving layer's docs blob must not be evicted"
         );
     }
 
@@ -740,6 +854,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -770,6 +886,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -831,6 +949,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -869,6 +989,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -907,6 +1029,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -944,6 +1068,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -961,6 +1087,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -983,6 +1111,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -1045,6 +1175,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -1088,6 +1220,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -1101,6 +1235,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )
@@ -1362,6 +1498,8 @@ mod tests {
                 cache: storage.cache.as_ref(),
                 bloom_cache: storage.bloom_cache.as_ref(),
                 sweeps: None,
+                segments: None,
+                text_docs: None,
             },
             &*backend,
         )

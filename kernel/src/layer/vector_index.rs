@@ -173,6 +173,13 @@ pub trait VectorIndex: Send + Sync {
     /// 3. Records the reverse-index entry so
     ///    [`Self::drop_layer`] can enumerate what to delete.
     ///
+    /// **An empty `docs` writes an empty segment, and that is deliberate.** It is the
+    /// swept marker (eigenius#254): a sweep that found nothing carrying the target
+    /// property still records that it ran, so a segment exists iff the layer was swept
+    /// for that Index, and `detect_unswept_layers` can name the difference. Readers skip
+    /// empty segments (`fetch_segment`), so they see what they saw when the empty case
+    /// stored nothing at all.
+    ///
     /// Idempotent by `(index, layer)` — re-inserting under the same
     /// pair overwrites the segment in place. This mirrors the §5.7
     /// atomic-reindex semantics where the sweep may re-materialise
@@ -290,10 +297,6 @@ impl VectorIndex for MemoryVectorIndex {
         docs: &[VectorDoc<'_>],
         hnsw_graph: Option<&[u8]>,
     ) -> Result<(), StorageError> {
-        if docs.is_empty() {
-            return Ok(());
-        }
-
         // Validate vector dimensionality before mutating anything.
         let dim_usize = dim as usize;
         for (i, d) in docs.iter().enumerate() {
@@ -650,20 +653,34 @@ mod tests {
         assert_eq!(seg.vector_at(0), &v_v2, "new write overwrites prior");
     }
 
-    /// Empty doc list is a no-op (no segment written; no reverse
-    /// index entry; stats unchanged).
+    /// An empty doc list writes an empty segment — the swept marker (eigenius#254).
+    ///
+    /// It used to be a no-op, which is what made "no segment" ambiguous: it equally
+    /// described a layer the sweep had covered and found nothing in, and a layer the
+    /// sweep never reached. The segment is the record that it ran. It carries no vectors,
+    /// so it contributes nothing to `total_vectors` and readers skip it.
     #[test]
-    fn empty_docs_is_noop() {
+    fn empty_docs_writes_a_swept_marker() {
         let idx = MemoryVectorIndex::new();
         let i1 = iri("urn:eigenius:test:i1");
         let l1 = layer_id(1);
         let model = iri("urn:eigenius:test:m");
         idx.extend_layer(&i1, &l1, &model, 4, "cosine", &[], None)
             .unwrap();
-        assert!(idx.get_segment(&i1, &l1).unwrap().is_none());
+        let seg = idx
+            .get_segment(&i1, &l1)
+            .unwrap()
+            .expect("the marker is a real segment");
+        assert_eq!(seg.count(), 0);
+        assert_eq!(seg.model_iri, model, "it records the model that swept");
+        assert_eq!(seg.dim, 4);
         let s = idx.stats();
-        assert_eq!(s.segments, 0);
-        assert_eq!(s.total_vectors, 0);
+        assert_eq!(s.segments, 1, "the marker counts as a segment");
+        assert_eq!(s.total_vectors, 0, "and holds no vectors");
+
+        // The reverse index carries it too, so GC's `drop_layer` reclaims it.
+        idx.drop_layer(&l1).unwrap();
+        assert!(idx.get_segment(&i1, &l1).unwrap().is_none());
     }
 
     /// Stats reflect indexes, layers, segments, total_vectors, and

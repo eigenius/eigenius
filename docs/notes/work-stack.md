@@ -9,10 +9,8 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **ACTIVE: entry −4d (`2026-09-15`). Query-processing workplan, item D — vector-index
-> lifecycle (#133, #132).** Code complete on `d-vector-index-lifecycle`; PR open.
->
-> **Exit gate: the merge request lands and both issues close.**
+> **entry −4d (`2026-09-15`). Query-processing workplan, item D — vector-index lifecycle
+> (#133, #132). DONE, merged as `37149af` (#255).** Both issues closed.
 >
 > **#132 — deletion cancels the sweep against the layer.** `gc::DeletionHooks` bundles the
 > resource cache, the bloom cache and the sweep registry, and GC cancels before
@@ -376,7 +374,7 @@ any detour.
 > now say the same thing: these were description edits and one constructor binder, and neither
 > touched what a chain means.
 
-> **entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
+> **ACTIVE: entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
 > (`docs/design/judgements-and-warrants.tex`) is the design; **P0 of
 > `docs/notes/judgements-warrants-build-plan.md` is the next task** — measurement only, no code.
 > The paper supersedes the D83 markdown draft (removed) and two of D82's conclusions: the
@@ -391,7 +389,7 @@ any detour.
 > proof systems are not exclusive, and the kernel is a *degenerate* institution. P7 relocates
 > vocabulary the kernel owns; it does not dissolve anything.
 
-> **ACTIVE: entry 1 (`2026-08-24`, re-scoped `2026-08-25`), pushed on top of P2.** D75 diagnosed the
+> **entry 1 (`2026-08-24`, re-scoped `2026-08-25`), pushed on top of P2.** D75 diagnosed the
 > two seams as one problem, so the fusion work outranks the individual P2 issues it subsumes.
 > **D76 and D78 are complete.** D77 was drafted as the third follow-on and turned out to carry three
 > separable projects; it was split on `2026-08-25` into a dependency chain, and the build order is the

@@ -263,3 +263,67 @@ async fn resume_sweep_ignores_terminal_tasks() {
         );
     }
 }
+
+/// eigenius#134 — a record left in `Cancelling` reaches a terminal state at the next
+/// restart, and is not re-executed on the way there.
+///
+/// `Cancelling` is neither resumable nor terminal, so before this the record sat there
+/// forever. That matters because all three pin-gathering sites key on `!is_terminal()`:
+/// the stuck record pinned its `layer_head` as a GC root, blocked `DeleteBranch` under
+/// `CheckPins`, and refused any consolidation range covering it.
+#[tokio::test]
+async fn resume_sweep_finalises_a_cancelling_task() {
+    let tmp = TempDir::new().unwrap();
+    let store = Arc::new(RocksStore::open(tmp.path()).unwrap());
+    let backend: Arc<dyn PersistentBackend> = store;
+    let _ = bootstrap::bootstrap_persistent(Arc::clone(&backend)).unwrap();
+
+    let task_store: Arc<dyn TaskStore> = Arc::new(BackendTaskStore::new(Arc::clone(&backend)));
+    let session_id = Uuid::nil();
+    let task_id = Uuid::from_u128(0x134_0001);
+
+    // The program IRI does not resolve. If the sweep were to *resume* this record rather
+    // than finalise it, it would run and land on `Failed` — so `Cancelled` is evidence
+    // that cancellation completed rather than the task being re-executed.
+    let mut record = TaskRecord::new_running(
+        session_id,
+        task_id,
+        "urn:eigenius:test:program:does_not_exist".to_string(),
+        "urn:eigenius:test:input:payload".to_string(),
+        eigenius_kernel::layer::LayerId([0; 32]),
+        1_000_000,
+    );
+    record.status = TaskStatus::Cancelling;
+    task_store.put_task(&record).unwrap();
+
+    let resume_state = Arc::new(ResumeState::default());
+    let inputs = ResumeInputs {
+        task_store: Arc::clone(&task_store),
+        backend: Arc::clone(&backend),
+        trace_store: Arc::new(eigenius_kernel::program::trace::InMemoryTraceStore::new()),
+        resume_state: Arc::clone(&resume_state),
+    };
+    resume_sweep(
+        inputs,
+        session_id,
+        Arc::new(ComponentRegistry::default()),
+        ResumeConfig::default(),
+    )
+    .await;
+
+    let final_record = task_store.get_task(&session_id, &task_id).unwrap().unwrap();
+    assert_eq!(
+        final_record.status,
+        TaskStatus::Cancelled,
+        "a Cancelling record must reach Cancelled at restart, not sit there"
+    );
+    assert!(
+        final_record.status.is_terminal(),
+        "and terminal is what clears the GC pin, the branch-delete block and the \
+         consolidation refusal"
+    );
+    assert_eq!(
+        final_record.step_seq, record.step_seq,
+        "finalising must not re-execute the task"
+    );
+}
