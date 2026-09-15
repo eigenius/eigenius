@@ -33,6 +33,17 @@ thiserror = { workspace = true }
 default = []
 cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+# CPU BLAS via Intel MKL, for hosts with no accelerator. Same shape as the two
+# above: the flag gates the backend inside the Candle crates.
+#
+# Needs a SYSTEM MKL, and a recent one. `intel-mkl-src` asks pkg-config, then
+# `$MKLROOT`, then `/opt/intel` — and only if none has it does it download
+# MKL 2020.1, which does not export `hgemm_`, the f16 BLAS symbol
+# `candle-core/src/mkl.rs` calls. That fallback fails to LINK, so this feature
+# is only usable where oneAPI MKL is installed (`intel-oneapi-mkl-devel`).
+# Candle pins the STATIC config, so the PyPI `mkl` wheels do not satisfy it —
+# they ship no `.a`.
+mkl = ["candle-core/mkl", "candle-nn/mkl", "candle-transformers/mkl"]
 
 [dev-dependencies]
 # Real-recall integration test against the GO corpus: convert via

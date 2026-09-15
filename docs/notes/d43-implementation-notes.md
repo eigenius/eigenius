@@ -179,6 +179,43 @@ recall@10 stayed 7/7 in every run, with identical ranks — the bucketing change
 
 **eigenius#63's target of ~15-30s on CPU was not reached** — 46s is 2.18×, not the 5-10× that target implies. The remaining cost is not padding: with bucketing, a batch's members already have similar widths. Getting further would mean a smaller model, quantisation, or accepting that a 1 000-Resource CPU sweep costs ~45s.
 
+### Where the CPU sweep's time actually goes, measured `2026-09-15`
+
+Bucketing halved it; the obvious follow-ups were measured rather than assumed, and the
+expected winner lost.
+
+| approach | sweep | cores used |
+|---|---|---|
+| batched, unbucketed | 101.2s | ~2.5 |
+| **+ length bucketing** | **46.0s** | ~2.5 |
+| + Intel MKL, 24 threads | ~43.5s | ~23 |
+| + Intel MKL, 8 threads (its best) | 42.3s | ~8 |
+| **+ parallel batch dispatch, 8-way** | **13.8s** | ~8 |
+
+**The sweep was using 2.5 of 24 cores.** `gemm` does not parallelise much at BERT-small's
+shapes, so the machine sat idle. That measurement is what makes the rest legible.
+
+**A bigger batch is worse, monotonically**: 32 → 46.4s, 64 → 53.4s, 128 → 56.0s, 256 →
+89.7s. `DEFAULT_BATCH_SIZE = 32` was not a compromise against padding waste, as the
+comment implied — it is simply the right number.
+
+**Intel MKL is not worth it here.** It links only against a *system* oneMKL: Candle pins
+`intel-mkl-src`'s STATIC config, and when no system MKL is found that crate downloads MKL
+2020.1, which does not export `hgemm_` — the f16 BLAS symbol `candle-core/src/mkl.rs`
+calls — so the build fails at link. With `intel-oneapi-mkl-devel` installed it links and
+runs, and buys **6%** for **9× the CPU**. Scaling `MKL_NUM_THREADS` shows why: 1 → 127s,
+4 → 54.7s, 8 → 42.3s, 24 → ~43.5s. It saturates by 8 threads and then regresses, because
+these matmuls are too small for intra-op threading to pay. Run-to-run variance also widens
+from ±1s to ±7s.
+
+**The parallelism has to be at the batch level.** Dispatching 8 batches concurrently —
+each one near-single-threaded — gives 46.0s → 13.8s on the same 8 cores, and *beats*
+eigenius#63's 15-30s target. Returns flatten after 8 (16-way gives 13.0s). `Embedder` is
+already `Send + Sync`, and results collect in order, so cache inserts and entry writes
+stay deterministic. Not implemented here: it needs per-chunk error attribution,
+per-batch cancellation, and a `SweepOptions` field rather than the throwaway env var the
+experiment used. It also would not compose with MKL, which already saturates the cores.
+
 **The harness had to be repaired first.** `go_recall.rs` built its layer on a RocksDB backend and never called `store_layer`, so the derived triple index stayed empty, `resolve_active_vector_indexes` (index-driven, via `scan_chain`) found nothing, the sweep embedded **0 subjects**, and the query failed with `similarity_hint_via_vector_no_vector_index`. The test is `#[ignore]`d, so CI never ran it and never reported the breakage; its sibling `d43_go_subset_integration` has carried the `store_layer` call, with the same explanation, since the D65 index lifecycle changed. No number in this section could be reproduced until that was fixed.
 
 Functionally the batched path is correct on both devices — round-trip parity is pinned by [`sweep_results_are_independent_of_batch_size`](../../kernel/src/query/vector/indexing.rs) and the recall@10 stays at 7/7. The intra-sweep deduplication contract that the cache supplied in the per-subject loop is preserved in the batched path explicitly (group cache-miss entries by text, dispatch each unique text once, fan out to peers). Cancellation responsiveness was tightened to also cover the case where cancel fires *during* the final batch's embed — the segment write is now gated on a post-batch cancel check so the cooperative-cancel contract holds regardless of batch size.
