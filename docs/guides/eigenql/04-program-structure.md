@@ -216,9 +216,9 @@ RETURN [Prediction, AssayResult] {
 
 **Behaviour**:
 
-- The class list (between `[` and `]`) becomes the `is_a` array on each result row.
-- Each `ReturnItem` is a name-expression pair. The expression is evaluated against the binding to produce a value.
-- Name resolution: a `FullIri` is used verbatim as the property IRI; a `ShortName` is mapped to a synthesized per-query property IRI via [`QueryFingerprint::row_property_iri`](../../../kernel/src/query/document.rs). This keeps every query's result shape self-describing (see [chapter 11](11-result-format.md)).
+- The class list (between `[` and `]`) becomes the `is_a` array on each result row. **Each name in it is a reference to a class the chain declares**, resolved under the same scope rule as a pattern class (D2 §5.6.1), and a name that resolves nowhere is a type error. Nothing checked this before `2026-09-14`: the bare word was stamped into `is_a` and `subclass_of`, so a `RETURN` naming a class the chain did not declare produced rows asserting membership of nothing.
+- Each `ReturnItem` is a **label**-expression pair. The expression is evaluated against the binding to produce a value.
+- **A return item's label is not a reference**, and it is the one name in a query that is not resolved against anything: `RETURN [] { total: SUM(?x) }` does not assert that `total` is declared. A bare label is mapped to a synthesized per-query property IRI via [`QueryFingerprint::row_property_iri`](../../../kernel/src/query/document.rs); a quoted full IRI is used verbatim. This keeps every query's result shape self-describing (see [chapter 11](11-result-format.md)).
 - Aggregate expressions (see §4.9) are only permitted when `GROUP BY` is present or when the entire query has no non-aggregate return items.
 
 **Empty return** (`RETURN [] {}`) produces a guard-style result — one empty row per binding. Useful for counting or existence checks.

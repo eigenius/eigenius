@@ -38,7 +38,7 @@ type Candidates = Vec<(Option<Iri>, BTreeMap<Iri, Value>)>;
 /// What a pattern is matched AGAINST — the chain, the derived relations, the FIBER
 /// overlay, and the similarity pre-pass.
 ///
-/// Grouped because these five travel together through every pattern entry point and
+/// Grouped because these four travel together through every pattern entry point and
 /// change only between queries, while the pattern, the bindings so far and the conditions
 /// change per call. Passing them individually pushed `apply_pattern` to eight parameters.
 #[derive(Clone, Copy)]
@@ -587,12 +587,12 @@ mod tests {
         let program = parser::parse(tokens).unwrap();
         let strata = crate::query::stratify::stratify(&program.definitions).unwrap();
         let index = crate::institution::registry::InstitutionIndex::from_layer_indexed(layer).0;
-        let program = crate::query::resolve::resolve(program, layer, &index)
+        let resolved = crate::query::resolve::resolve(program, strata, layer, &index)
             .unwrap_or_else(|e| panic!("resolve errors: {e:?}"));
-        let errors = crate::query::type_check::type_check(&program, layer);
+        let errors = crate::query::type_check::type_check(&resolved.program, layer, &index);
         assert!(errors.is_empty(), "type errors: {errors:?}");
         let fp = QueryFingerprint::of(query_str);
-        evaluate(&program, layer, &fp, FiberRuntime::default(), &strata)
+        evaluate(&resolved, layer, &fp, FiberRuntime::default())
             .unwrap()
             .0
     }

@@ -90,7 +90,12 @@ impl QueryFingerprint {
 /// IRIs (via `evaluate::shape_result`); this function adds the Property,
 /// Class, and ResultSet metadata resources so the document is
 /// self-describing per Appendix A.
-pub fn wrap(query: &Query<Resolved>, query_text: &str, mut rows: Vec<Resource>) -> Vec<Resource> {
+pub fn wrap(
+    query: &Query<Resolved>,
+    query_text: &str,
+    layer: &crate::layer::Layer,
+    mut rows: Vec<Resource>,
+) -> Vec<Resource> {
     let fp = QueryFingerprint::of(query_text);
 
     // Match-only queries (no RETURN) produce a minimal ResultSet with a
@@ -146,7 +151,7 @@ pub fn wrap(query: &Query<Resolved>, query_text: &str, mut rows: Vec<Resource>) 
     );
     row_class.set(
         Iri::parse(wk::SHORT_NAME).unwrap(),
-        Value::String(row_class_short_name(&query.result_classes)),
+        Value::String(row_class_short_name(&query.result_classes, layer)),
     );
     if !query.result_classes.is_empty() {
         // Parent classes: whatever the user declared in RETURN.
@@ -210,16 +215,33 @@ pub fn wrap(query: &Query<Resolved>, query_text: &str, mut rows: Vec<Resource>) 
     document
 }
 
-fn row_class_short_name(classes: &[Iri]) -> String {
+/// The row class's `short_name`, built from the classes `RETURN` named.
+///
+/// **It reads the DECLARED `core:short_name`, not the IRI's tail.** `RETURN RowKind { … }`
+/// should name the row class `RowKind`, which is what the author wrote and what the class
+/// declares; the tail of `urn:ex:row_kind` is `row_kind`. Before D92 this position held
+/// the author's word because it held an unresolved `Name`; resolution replaced it with
+/// the IRI, and reading the tail would have silently changed the document.
+///
+/// A class that does not resolve, or declares no short name, falls back to the tail.
+fn row_class_short_name(classes: &[Iri], layer: &crate::layer::Layer) -> String {
     if classes.is_empty() {
-        "QueryRow".to_string()
-    } else {
-        classes
-            .iter()
-            .map(|iri| Name::FullIri(iri.clone()).text())
-            .collect::<Vec<_>>()
-            .join("_")
+        return "QueryRow".to_string();
     }
+    let short_name_prop = Iri::parse(wk::SHORT_NAME).unwrap();
+    classes
+        .iter()
+        .map(|iri| {
+            layer
+                .resolve(iri)
+                .and_then(|r| match r.get(&short_name_prop) {
+                    Some(Value::String(s)) => Some(s.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| Name::FullIri(iri.clone()).text())
+        })
+        .collect::<Vec<_>>()
+        .join("_")
 }
 
 /// Infer a datatype IRI for a RETURN expression. Aggregates have fixed

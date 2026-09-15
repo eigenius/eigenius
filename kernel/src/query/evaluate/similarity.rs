@@ -240,8 +240,8 @@ struct PropertyVarBinding {
 
 /// The `variable → property_iri` map over every `MATCH` brace key that binds a variable.
 ///
-/// Infallible, and takes no layer: `resolve_property_names` already resolved every key
-/// against the full scope rule and reported what it could not. This reads the answer.
+/// Infallible, and takes no layer: `query::resolve` already resolved every key against
+/// the full scope rule and reported what it could not. This reads the answer.
 fn build_property_variable_index(
     program: &Program<Resolved>,
 ) -> BTreeMap<String, PropertyVarBinding> {
@@ -250,12 +250,10 @@ fn build_property_variable_index(
         for pat in part.patterns() {
             for pp in &pat.properties {
                 if let ValueOrVariable::Variable(var) = &pp.object {
-                    if let Some(property_iri) = Some(pp.property.clone()) {
-                        out.entry(var.name.clone()).or_insert(PropertyVarBinding {
-                            property_iri,
-                            subject_var: pat.subject.name.clone(),
-                        });
-                    }
+                    out.entry(var.name.clone()).or_insert(PropertyVarBinding {
+                        property_iri: pp.property.clone(),
+                        subject_var: pat.subject.name.clone(),
+                    });
                 }
             }
         }

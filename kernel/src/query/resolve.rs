@@ -227,14 +227,35 @@ mod tests {
 ///
 /// Errors accumulate rather than short-circuiting, so one run reports every unresolvable
 /// name rather than the first.
+pub struct ResolvedProgram {
+    pub program: Program<Resolved>,
+    /// What `stratify` worked out, carried rather than recomputed.
+    ///
+    /// **It travels with the program because it is only true OF that program.** An
+    /// earlier version of this passed the strata to `evaluate` as a separate argument,
+    /// which let the two disagree: handed an empty or foreign stratum list, the fixpoint
+    /// loop never ran, `derived` stayed empty, and a `MATCH Rel(?x)` fell through to an
+    /// untyped match-all over the whole chain — 1350 rows where 2 were right, with no
+    /// error. That is the same shape D92 removes from name resolution, reintroduced one
+    /// line below where the duplicate `stratify` call was deleted. A pair that cannot be
+    /// mismatched is the fix; checking that it matches would be the guard.
+    pub strata: Vec<crate::query::stratify::Stratum>,
+    /// One id per distinct relation, by first appearance — see [`relation_ids`]. Carried
+    /// for the same reason: `evaluate` keys derived facts by it and must agree with the
+    /// ids `resolve` put in the `ClassRef`s.
+    pub relation_ids: BTreeMap<String, RelationId>,
+}
+
 pub fn resolve(
     program: Program<Parsed>,
+    strata: Vec<crate::query::stratify::Stratum>,
     layer: &Layer,
     index: &InstitutionIndex,
-) -> Result<Program<Resolved>, Vec<QueryError>> {
+) -> Result<ResolvedProgram, Vec<QueryError>> {
     // One id per relation, assigned by first appearance. `stratify` has already run, so
     // the definition set is checked as well as fixed.
     let relations = crate::query::ast::relation_ids(&program.definitions);
+    let relations_out = relations.clone();
 
     let mut errors = Vec::new();
     let definitions: Vec<Option<RuleDefinition<Resolved>>> = program
@@ -257,7 +278,11 @@ pub fn resolve(
     }
     let definitions: Option<Vec<_>> = definitions.into_iter().collect();
     match (definitions, query) {
-        (Some(definitions), Some(query)) => Ok(Program { definitions, query }),
+        (Some(definitions), Some(query)) => Ok(ResolvedProgram {
+            program: Program { definitions, query },
+            strata,
+            relation_ids: relations_out,
+        }),
         // Unreachable: every `None` above pushes an error, and the empty-error case
         // returned already. Reported rather than panicked, because "unreachable" is what
         // the guards this design removes also claimed.
@@ -268,6 +293,18 @@ pub fn resolve(
     }
 }
 
+/// Collect every element, then decide — rather than `Option`'s `FromIterator`, which
+/// stops at the first `None`.
+///
+/// The difference is the number of errors one run reports. Each resolver pushes its own
+/// error before returning `None`, so short-circuiting here loses every error after the
+/// first: `MATCH C(?n) { nope_one: ?a, nope_two: ?b }` reported two before D92 and one
+/// after, until this was fixed.
+fn all<T>(items: impl IntoIterator<Item = Option<T>>) -> Option<Vec<T>> {
+    let collected: Vec<Option<T>> = items.into_iter().collect();
+    collected.into_iter().collect()
+}
+
 fn resolve_query(
     query: Query<Parsed>,
     layer: &Layer,
@@ -276,58 +313,45 @@ fn resolve_query(
     errors: &mut Vec<QueryError>,
 ) -> Option<Query<Resolved>> {
     let namespaces = query.body.using_namespaces.clone();
-    let scope = subject_vocabularies(&query.body, layer, index, relations);
-    let body = resolve_part_with_scope(query.body, &scope, layer, index, relations, errors);
+    let scope = build_scope(&query.body, layer, index, relations, errors);
+    let body = resolve_part_with_scope(query.body, &scope, layer, index, errors);
 
     // `GROUP BY`, `RETURN` and `ORDER BY` read variables the query body bound, so they
     // resolve against the query body's scope.
-    let group_by: Option<Vec<_>> = query
+    let group_by = all(query
         .group_by
         .into_iter()
-        .map(|e| resolve_expression(e, &scope, layer, &namespaces, errors))
-        .collect();
-    let result: Option<Vec<_>> = query
-        .result
-        .into_iter()
-        .map(|item| {
-            resolve_expression(item.expression, &scope, layer, &namespaces, errors).map(
-                |expression| ReturnItem {
-                    name: item.name,
-                    expression,
-                },
-            )
+        .map(|e| resolve_expression(e, &scope, layer, &namespaces, errors)));
+    let result = all(query.result.into_iter().map(|item| {
+        resolve_expression(item.expression, &scope, layer, &namespaces, errors).map(|expression| {
+            ReturnItem {
+                name: item.name,
+                expression,
+            }
         })
-        .collect();
-    let order_by: Option<Vec<_>> = query
-        .order_by
-        .into_iter()
-        .map(|item| {
-            resolve_expression(item.expression, &scope, layer, &namespaces, errors).map(
-                |expression| OrderItem {
-                    expression,
-                    direction: item.direction,
-                },
-            )
+    }));
+    let order_by = all(query.order_by.into_iter().map(|item| {
+        resolve_expression(item.expression, &scope, layer, &namespaces, errors).map(|expression| {
+            OrderItem {
+                expression,
+                direction: item.direction,
+            }
         })
-        .collect();
+    }));
 
     // **`RETURN Class [] { … }` is a chain reference and is now checked.** It is stamped
     // as `is_a` on every result row, so a class the chain does not declare produces rows
     // asserting membership of nothing. Nothing asked this before D92.
-    let result_classes: Option<Vec<_>> = query
-        .result_classes
-        .into_iter()
-        .map(|name| {
-            resolve_chain_name(
-                &name,
-                &[wk::CLASS],
-                "result class",
-                layer,
-                &namespaces,
-                errors,
-            )
-        })
-        .collect();
+    let result_classes = all(query.result_classes.into_iter().map(|name| {
+        resolve_chain_name(
+            &name,
+            &[wk::CLASS],
+            "result class",
+            layer,
+            &namespaces,
+            errors,
+        )
+    }));
 
     Some(Query {
         body: body?,
@@ -349,16 +373,15 @@ fn resolve_part(
     relations: &BTreeMap<String, RelationId>,
     errors: &mut Vec<QueryError>,
 ) -> Option<MatchPart<Resolved>> {
-    let scope = subject_vocabularies(&part, layer, index, relations);
-    resolve_part_with_scope(part, &scope, layer, index, relations, errors)
+    let scope = build_scope(&part, layer, index, relations, errors);
+    resolve_part_with_scope(part, &scope, layer, index, errors)
 }
 
 fn resolve_part_with_scope(
     part: MatchPart<Parsed>,
-    scope: &BTreeMap<String, Vocabulary>,
+    scope: &Scope,
     layer: &Layer,
     index: &InstitutionIndex,
-    relations: &BTreeMap<String, RelationId>,
     errors: &mut Vec<QueryError>,
 ) -> Option<MatchPart<Resolved>> {
     let namespaces = part.using_namespaces.clone();
@@ -370,23 +393,23 @@ fn resolve_part_with_scope(
         .map(|a| (a.alias.clone(), a.iri.clone()))
         .collect();
 
-    let clauses: Option<Vec<_>> = part
+    let clauses = all(part
         .clauses
         .into_iter()
-        .map(|clause| match clause {
-            Clause::Pattern(p) => resolve_pattern(p, scope, layer, &namespaces, relations, errors)
-                .map(Clause::Pattern),
+        .enumerate()
+        .map(|(i, clause)| match clause {
+            Clause::Pattern(p) => {
+                resolve_pattern(p, i, scope, layer, &namespaces, errors).map(Clause::Pattern)
+            }
             Clause::Fiber(fc) => {
-                resolve_fiber(fc, scope, layer, index, &namespaces, &aliases, errors)
+                resolve_fiber(fc, i, scope, layer, index, &namespaces, &aliases, errors)
                     .map(Clause::Fiber)
             }
-        })
-        .collect();
-    let conditions: Option<Vec<_>> = part
+        }));
+    let conditions = all(part
         .conditions
         .into_iter()
-        .map(|e| resolve_expression(e, scope, layer, &namespaces, errors))
-        .collect();
+        .map(|e| resolve_expression(e, scope, layer, &namespaces, errors)));
 
     Some(MatchPart {
         using: part.using,
@@ -399,34 +422,32 @@ fn resolve_part_with_scope(
 
 fn resolve_pattern(
     pattern: Pattern<Parsed>,
-    scope: &BTreeMap<String, Vocabulary>,
+    clause_index: usize,
+    scope: &Scope,
     layer: &Layer,
     namespaces: &[String],
-    relations: &BTreeMap<String, RelationId>,
     errors: &mut Vec<QueryError>,
 ) -> Option<Pattern<Resolved>> {
     let vocab = scope
+        .vocabularies
         .get(&pattern.subject.name)
         .cloned()
         .unwrap_or_default();
+    // Read, not resolve: `build_scope` resolved this class and reported it if it could
+    // not. A pattern that states a class the scope pass could not resolve has no entry,
+    // and its error is already recorded.
     let class = match pattern.class {
         None => None,
-        Some(name) => Some(resolve_pattern_class(
-            &name, layer, namespaces, relations, errors,
-        )?),
+        Some(_) => Some(scope.classes.get(&clause_index)?.clone()),
     };
-    let properties: Option<Vec<_>> = pattern
-        .properties
-        .into_iter()
-        .map(|pp| {
-            resolve_property(&pp.property, &vocab, layer, namespaces, errors).map(|property| {
-                PropertyPattern {
-                    property,
-                    object: pp.object,
-                }
-            })
+    let properties = all(pattern.properties.into_iter().map(|pp| {
+        resolve_property(&pp.property, &vocab, layer, namespaces, errors).map(|property| {
+            PropertyPattern {
+                property,
+                object: pp.object,
+            }
         })
-        .collect();
+    }));
     Some(Pattern {
         subject: pattern.subject,
         class,
@@ -505,9 +526,11 @@ fn resolve_chain_name(
 
 /// A FIBER clause names an institution (through an alias or inline), a query class, and a
 /// param per declared property of that query class's input class.
+#[allow(clippy::too_many_arguments)]
 fn resolve_fiber(
     fc: FiberClause<Parsed>,
-    scope: &BTreeMap<String, Vocabulary>,
+    clause_index: usize,
+    scope: &Scope,
     layer: &Layer,
     index: &InstitutionIndex,
     namespaces: &[String],
@@ -532,14 +555,8 @@ fn resolve_fiber(
         },
     };
 
-    let query_class = resolve_chain_name(
-        &fc.query_class,
-        &[wk::QUERY_CLASS_CLASS],
-        "FIBER query class",
-        layer,
-        namespaces,
-        errors,
-    );
+    // Read, not resolve — `build_scope` already did, and reported.
+    let query_class = scope.query_classes.get(&clause_index).cloned();
 
     // A param names a declared property of the QueryClass's INPUT class, which is a
     // vocabulary no pattern puts in scope — so it is resolved here rather than through
@@ -554,39 +571,34 @@ fn resolve_fiber(
         })
         .unwrap_or_default();
 
-    let params: Option<Vec<_>> = fc
-        .params
-        .into_iter()
-        .map(|param| {
-            let name = resolve_property(&param.name, &param_vocab, layer, namespaces, errors);
-            let value = match param.value {
-                ParamValue::Expression(e) => {
-                    resolve_expression(e, scope, layer, namespaces, errors)
-                        .map(ParamValue::Expression)
-                }
-                // A comorphism is a declared resource like any other.
-                ParamValue::Comorphism { name, source } => {
-                    let cm = resolve_chain_name(
-                        &name,
-                        &[wk::COMORPHISM],
-                        "comorphism",
-                        layer,
-                        namespaces,
-                        errors,
-                    );
-                    let src = resolve_expression(source, scope, layer, namespaces, errors);
-                    match (cm, src) {
-                        (Some(name), Some(source)) => Some(ParamValue::Comorphism { name, source }),
-                        _ => None,
-                    }
-                }
-            };
-            match (name, value) {
-                (Some(name), Some(value)) => Some(ParamBinding { name, value }),
-                _ => None,
+    let params = all(fc.params.into_iter().map(|param| {
+        let name = resolve_property(&param.name, &param_vocab, layer, namespaces, errors);
+        let value = match param.value {
+            ParamValue::Expression(e) => {
+                resolve_expression(e, scope, layer, namespaces, errors).map(ParamValue::Expression)
             }
-        })
-        .collect();
+            // A comorphism is a declared resource like any other.
+            ParamValue::Comorphism { name, source } => {
+                let cm = resolve_chain_name(
+                    &name,
+                    &[wk::COMORPHISM],
+                    "comorphism",
+                    layer,
+                    namespaces,
+                    errors,
+                );
+                let src = resolve_expression(source, scope, layer, namespaces, errors);
+                match (cm, src) {
+                    (Some(name), Some(source)) => Some(ParamValue::Comorphism { name, source }),
+                    _ => None,
+                }
+            }
+        };
+        match (name, value) {
+            (Some(name), Some(value)) => Some(ParamBinding { name, value }),
+            _ => None,
+        }
+    }));
 
     Some(FiberClause {
         institution: institution?,
@@ -601,7 +613,7 @@ fn resolve_fiber(
 /// sub-expressions hold.
 fn resolve_expression(
     expr: Expression<Parsed>,
-    scope: &BTreeMap<String, Vocabulary>,
+    scope: &Scope,
     layer: &Layer,
     namespaces: &[String],
     errors: &mut Vec<QueryError>,
@@ -612,11 +624,17 @@ fn resolve_expression(
     Some(match expr {
         Expression::Literal(l) => Expression::Literal(l),
         Expression::Variable(v) => Expression::Variable(v),
-        Expression::Binary { op, left, right } => Expression::Binary {
-            op,
-            left: go(*left, errors)?,
-            right: go(*right, errors)?,
-        },
+        Expression::Binary { op, left, right } => {
+            // Both sides, before deciding. `left?` would stop at the first failure and
+            // `?a.nope_left = ?a.nope_right` would report one error where it names two.
+            let left = go(*left, errors);
+            let right = go(*right, errors);
+            Expression::Binary {
+                op,
+                left: left?,
+                right: right?,
+            }
+        }
         Expression::Unary { op, operand } => Expression::Unary {
             op,
             operand: go(*operand, errors)?,
@@ -628,10 +646,9 @@ fn resolve_expression(
         Expression::NotExists(operand) => Expression::NotExists(go(*operand, errors)?),
         Expression::FunctionCall { name, args } => Expression::FunctionCall {
             name,
-            args: args
+            args: all(args
                 .into_iter()
-                .map(|a| resolve_expression(a, scope, layer, namespaces, errors))
-                .collect::<Option<Vec<_>>>()?,
+                .map(|a| resolve_expression(a, scope, layer, namespaces, errors)))?,
         },
         Expression::Aggregate { op, arg } => Expression::Aggregate {
             op,
@@ -640,7 +657,14 @@ fn resolve_expression(
         Expression::DotPath { root, segments } => {
             // Each segment is scoped by the previous property's declared range; the first
             // by the root's own vocabulary.
-            let mut vocab = scope.get(&root.name).cloned().unwrap_or_default();
+            // A failed segment stops THIS path — the next segment's scope is the failed
+            // one's range, so there is nothing to resolve it against — but the error is
+            // recorded and the rest of the program still resolves.
+            let mut vocab = scope
+                .vocabularies
+                .get(&root.name)
+                .cloned()
+                .unwrap_or_default();
             let mut resolved = Vec::with_capacity(segments.len());
             for segment in segments {
                 let iri = resolve_property(&segment, &vocab, layer, namespaces, errors)?;
@@ -652,12 +676,9 @@ fn resolve_expression(
                 segments: resolved,
             }
         }
-        Expression::Array(elements) => Expression::Array(
-            elements
-                .into_iter()
-                .map(|e| resolve_expression(e, scope, layer, namespaces, errors))
-                .collect::<Option<Vec<_>>>()?,
-        ),
+        Expression::Array(elements) => Expression::Array(all(elements
+            .into_iter()
+            .map(|e| resolve_expression(e, scope, layer, namespaces, errors)))?),
         Expression::Similarity {
             property,
             query,
@@ -699,54 +720,75 @@ impl Vocabulary {
 /// so `MATCH ?x Dog { … }, ?x Pet { … }` reaches either class's properties. A `DEFINE`
 /// relation is not a class and contributes nothing; neither does a class that fails to
 /// resolve, whose error the pattern's own resolution reports.
-fn subject_vocabularies(
+/// What one `MATCH` part's scope pass worked out: the vocabulary each subject carries,
+/// and the reference each clause's class resolved to.
+///
+/// **Both come from one pass because they come from one lookup.** Building the vocabulary
+/// requires resolving the pattern's class, and so does producing its `ClassRef`; doing
+/// them in separate passes resolves each class name twice. That is the duplication D92
+/// removes from the pipeline, and it would be odd to leave a copy of it inside the pass
+/// that removes it.
+#[derive(Default)]
+struct Scope {
+    vocabularies: BTreeMap<String, Vocabulary>,
+    /// By clause index, for the pattern clauses whose class resolved.
+    classes: BTreeMap<usize, ClassRef>,
+    /// By clause index, for the FIBER clauses whose query class resolved.
+    query_classes: BTreeMap<usize, Iri>,
+}
+
+/// Resolve every class in a match part, and build the vocabulary each subject carries.
+///
+/// A variable bound by two classed patterns carries both — resolution searches the union,
+/// so `MATCH ?x Dog { … }, ?x Pet { … }` reaches either class's properties. A `DEFINE`
+/// relation is not a class and contributes no vocabulary.
+fn build_scope(
     part: &MatchPart<Parsed>,
     layer: &Layer,
     index: &InstitutionIndex,
     relations: &BTreeMap<String, RelationId>,
-) -> BTreeMap<String, Vocabulary> {
-    let mut out: BTreeMap<String, Vocabulary> = BTreeMap::new();
-    for clause in &part.clauses {
+    errors: &mut Vec<QueryError>,
+) -> Scope {
+    let mut out = Scope::default();
+    for (i, clause) in part.clauses.iter().enumerate() {
         match clause {
             Clause::Pattern(p) => {
                 let Some(name) = &p.class else { continue };
-                let iri = match name {
-                    Name::FullIri(iri) => Some(iri.clone()),
-                    Name::ShortName(s) if relations.contains_key(s) => None,
-                    Name::ShortName(s) => {
-                        resolve_scoped_name(layer, &part.using_namespaces, &[wk::CLASS], s)
-                            .ok()
-                            .flatten()
-                    }
+                let Some(class) =
+                    resolve_pattern_class(name, layer, &part.using_namespaces, relations, errors)
+                else {
+                    continue;
                 };
-                if let Some(iri) = iri {
-                    out.entry(p.subject.name.clone())
+                if let ClassRef::Chain(iri) = &class {
+                    out.vocabularies
+                        .entry(p.subject.name.clone())
                         .or_default()
-                        .add_class(&iri, layer);
+                        .add_class(iri, layer);
                 }
+                out.classes.insert(i, class);
             }
             Clause::Fiber(fc) => {
+                let Some(qc_iri) = resolve_chain_name(
+                    &fc.query_class,
+                    &[wk::QUERY_CLASS_CLASS],
+                    "FIBER query class",
+                    layer,
+                    &part.using_namespaces,
+                    errors,
+                ) else {
+                    continue;
+                };
                 // The binding's vocabulary is the QueryClass's output contract, which D90
                 // closed and the kernel enforces at the dispatch boundary: what
                 // `result_class` declares, plus whatever `result_properties` adds.
-                let qc_iri = match &fc.query_class {
-                    Name::FullIri(iri) => Some(iri.clone()),
-                    Name::ShortName(s) => resolve_scoped_name(
-                        layer,
-                        &part.using_namespaces,
-                        &[wk::QUERY_CLASS_CLASS],
-                        s,
-                    )
-                    .ok()
-                    .flatten(),
-                };
-                if let Some(entry) = qc_iri.as_ref().and_then(|i| index.query_class(i)) {
-                    let vocab = out.entry(fc.binding.name.clone()).or_default();
+                if let Some(entry) = index.query_class(&qc_iri) {
+                    let vocab = out.vocabularies.entry(fc.binding.name.clone()).or_default();
                     vocab.add_class(&entry.result_class, layer);
                     vocab
                         .properties
                         .extend(entry.result_properties.iter().cloned());
                 }
+                out.query_classes.insert(i, qc_iri);
             }
         }
     }

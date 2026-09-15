@@ -149,6 +149,22 @@ Blast radius is 12 files, all under `kernel/src/query/` except `program/embedder
 
 Stages 1 and 2 are mechanical and large. Stages 3 to 5 are where the six positions actually change behaviour, and each should land with the same discipline #249 used: a test that fails against the unresolved version.
 
+## A ninth position, knowingly outside the guarantee
+
+`Expression::FunctionCall.name` is a bare `String`. A qualified call `inst:proc(?x)` is a
+reference to a declared Decidable QueryClass, and it is resolved twice — `Iri::parse` plus
+`index.query_class()` at type-check (`type_check.rs`), and the same pair again at
+evaluation (`evaluate/expression.rs`).
+
+It is not parameterised, so it sits outside the guarantee the argument above rests on: a
+pass that forgot it would compile. Both mechanisms are identical today, so they cannot
+disagree; what is lost is the compiler's help if one ever changes.
+
+Stated here rather than left for a reader to notice, because "a missed position does not
+compile" is the claim this note is built on and it is true of eight positions, not nine.
+Closing it means the `name` field becoming a reference type the way the others did —
+mechanical, and separable from this note's work.
+
 ## Consequences
 
 **Resolution errors will block type errors.** Today one pass reports both together. A staged pipeline cannot: without a `ResolvedProgram` there is nothing for type-check to run on. A query with a typo'd class and a genuine type error will report the typo first and the type error on the next run.

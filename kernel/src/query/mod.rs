@@ -126,10 +126,13 @@ pub fn execute_with_into(
     //    the checks to run on, and a name that does not resolve makes every downstream
     //    check about it meaningless.
     let index = crate::institution::registry::InstitutionIndex::from_layer_indexed(layer).0;
-    let program = resolve::resolve(program, layer, &index)?;
+    let resolved = resolve::resolve(program, strata, layer, &index)?;
 
-    // 5. Type check — checks only; it resolves nothing.
-    let type_errors = type_check::type_check(&program, layer);
+    // 5. Type check — checks only; it resolves nothing. It takes the index this stage
+    //    already built, rather than building a second one: `InstitutionIndex` is a
+    //    per-query cost the type-check module's own comment records as having been a
+    //    ~3.5s floor on a large chain before it was made index-driven.
+    let type_errors = type_check::type_check(&resolved.program, layer, &index);
     if !type_errors.is_empty() {
         return Err(type_errors);
     }
@@ -138,7 +141,7 @@ pub fn execute_with_into(
     //    INTO-named FIBER responses bubble up alongside.
     let fp = QueryFingerprint::of(program_str);
     let (rows, into_resources) =
-        evaluate::evaluate(&program, layer, &fp, runtime, &strata).map_err(|e| vec![e])?;
+        evaluate::evaluate(&resolved, layer, &fp, runtime).map_err(|e| vec![e])?;
 
     tracing::debug!(
         { field::OPERATION } = operation::QUERY_EVALUATE,
@@ -148,7 +151,7 @@ pub fn execute_with_into(
     );
 
     // 7. Wrap into a self-describing document (Appendix A).
-    let document = document::wrap(&program.query, program_str, rows);
+    let document = document::wrap(&resolved.program.query, program_str, layer, rows);
     Ok(QueryOutcome {
         document,
         into_resources,

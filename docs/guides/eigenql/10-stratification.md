@@ -1,6 +1,6 @@
 # 9. Stratification
 
-`DEFINE` rules can recurse and can use negation, but not both arbitrarily. **Stratification** is the rule that makes the combination decidable: a relation may not depend on its own negation, directly or transitively. The stratifier is [`kernel/src/query/stratify.rs`](../../../kernel/src/query/stratify.rs), run as pipeline stage 3 in [`execute_with`](../../../kernel/src/query/mod.rs), between parsing and type-checking.
+`DEFINE` rules can recurse and can use negation, but not both arbitrarily. **Stratification** is the rule that makes the combination decidable: a relation may not depend on its own negation, directly or transitively. The stratifier is [`kernel/src/query/stratify.rs`](../../../kernel/src/query/stratify.rs), run as pipeline stage 3 in [`execute_with`](../../../kernel/src/query/mod.rs), between parsing and **resolution** (D2 §5.0). It is purely syntactic — it reads rule names and dependency edges and needs nothing from the chain — so a program with a negation cycle is rejected before paying for resolution's chain lookups. Its result is carried forward to evaluation rather than recomputed there.
 
 ## 10.1. Why stratification exists
 
@@ -83,7 +83,7 @@ Evaluation order is by `order` ascending. Relations in the same stratum are eval
 The evaluator ([`kernel/src/query/evaluate/mod.rs`](../../../kernel/src/query/evaluate/mod.rs), step 1) evaluates the strata **in dependency order**, running a fixpoint over each stratum's rules with every lower stratum already fully computed:
 
 ```rust
-let strata = crate::query::stratify::stratify(&program.definitions)?;
+// the strata the pipeline computed, carried in the ResolvedProgram
 let max_iterations = 1000; // Safety bound
 for stratum in &strata {
     let rules = /* the definitions whose name is in this stratum */;
@@ -92,7 +92,7 @@ for stratum in &strata {
         for def in &rules {
             let bindings = evaluate_match_part(&def.body, layer, &derived)?;
             let projected = project_onto_head(bindings, &def.variables);
-            let entry = derived.entry(def.name.clone()).or_default();
+            let entry = derived.entry(relation_id).or_default();
             for binding in projected {
                 if !entry.contains(&binding) {
                     entry.push(binding);

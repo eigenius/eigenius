@@ -38,7 +38,6 @@ mod similarity;
 
 use crate::layer::Layer;
 use crate::ontology::resource::Resource;
-use crate::query::ast::Program;
 use crate::query::ast::Resolved;
 use crate::query::document::QueryFingerprint;
 use crate::query::error::QueryError;
@@ -79,12 +78,14 @@ fn project_onto_head(bindings: Vec<Binding>, head: &[crate::query::ast::Variable
 }
 
 pub fn evaluate(
-    program: &Program<Resolved>,
+    resolved: &crate::query::resolve::ResolvedProgram,
     layer: &Layer,
     fp: &QueryFingerprint,
     runtime: FiberRuntime<'_>,
-    strata: &[crate::query::stratify::Stratum],
 ) -> Result<(Vec<Resource>, Vec<Resource>), QueryError> {
+    let program = &resolved.program;
+    let strata = &resolved.strata;
+    let relation_ids = &resolved.relation_ids;
     // D43 §6 — similarity-operator pre-pass: probe every active
     // similarity index referenced by a `~` operator in the program,
     // fuse the per-source rankings into a subject → score map, and
@@ -129,7 +130,6 @@ pub fn evaluate(
         // Stratification ran once, before resolution, and its answer was carried here.
         // This used to call `stratify` a SECOND time and throw the pipeline's result away
         // (D92) — the same shape as re-resolving a name, minus the chance of disagreeing.
-        let relation_ids = crate::query::ast::relation_ids(&program.definitions);
         let max_iterations = 1000; // Safety bound
         for stratum in strata {
             let in_stratum: std::collections::BTreeSet<&str> =

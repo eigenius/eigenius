@@ -48,7 +48,7 @@ pub struct FiberRuntime<'a> {
     /// evaluation time when this is `None`. v1 restricts the cited
     /// transformation Component to Pure or Read capability levels.
     pub components: Option<&'a crate::program::component::ComponentRegistry>,
-    /// Query<Resolved>-scoped transient overlay populated by FIBER clauses with
+    /// Query-scoped transient overlay populated by FIBER clauses with
     /// their response resources (D2 v2 §6.12). Threaded into the
     /// expression evaluator so postfix Verdict predicates and
     /// resource-typed projections can resolve a FIBER-bound `?var`
@@ -87,7 +87,7 @@ pub struct FiberRuntime<'a> {
 
 /// Resources produced at runtime by FIBER clauses. They live for the
 /// duration of a single query and are discarded when evaluation ends.
-/// Pattern<Resolved> matching scans these in addition to the layer chain — see
+/// Pattern matching scans these in addition to the layer chain — see
 /// D2 §6.12 (the "transient overlay").
 #[derive(Default)]
 pub(super) struct FiberOverlay {
@@ -100,7 +100,7 @@ impl FiberOverlay {
     }
 }
 
-/// Evaluate a MatchPart<Resolved>'s pattern-only bodies (DEFINE rules).
+/// Evaluate a match part's pattern-only bodies (DEFINE rules).
 ///
 /// Errors if any FIBER clause is present — DEFINE bodies can't dispatch
 /// to institutions (no overlay, no runtime context at rule-fixpoint time).
@@ -160,7 +160,7 @@ pub(super) fn evaluate_match_part(
     Ok(bindings)
 }
 
-/// Evaluate a MatchPart<Resolved> with FIBER-clause support (top-level queries).
+/// Evaluate a match part with FIBER-clause support (top-level queries).
 ///
 /// Walks `clauses` in order: Pattern clauses extend bindings via the
 /// normal equi-join mechanism, Fiber clauses dispatch once per binding,
@@ -177,14 +177,6 @@ pub(super) fn evaluate_match_part_with_fiber(
     into_collector: &mut Vec<Resource>,
 ) -> Result<Vec<Binding>, QueryError> {
     let mut bindings: Vec<Binding> = vec![BTreeMap::new()];
-
-    // Resolve USING INSTITUTION aliases once; used to dereference FIBER
-    // `institution` short names at dispatch time.
-    let aliases: BTreeMap<&str, &Iri> = part
-        .using_institutions
-        .iter()
-        .map(|a| (a.alias.as_str(), &a.iri))
-        .collect();
 
     for (clause_idx, clause) in part.clauses.iter().enumerate() {
         match clause {
@@ -221,7 +213,6 @@ pub(super) fn evaluate_match_part_with_fiber(
                     layer,
                     runtime,
                     fp,
-                    &aliases,
                     overlay,
                     into_collector,
                     bindings,
@@ -257,7 +248,6 @@ fn apply_fiber_clause(
     layer: &Layer,
     runtime: FiberRuntime<'_>,
     fp: &QueryFingerprint,
-    _aliases: &BTreeMap<&str, &Iri>,
     overlay: &mut FiberOverlay,
     into_collector: &mut Vec<Resource>,
     existing: Vec<Binding>,
@@ -865,7 +855,7 @@ mod tests {
 
     #[test]
     fn parser_treats_multi_arg_qualified_call_as_expression() {
-        // Multi-arg qualified-name function calls stay as Expression<Resolved>
+        // Multi-arg qualified-name function calls stay as expressions
         // in FIBER param value position (comorphisms are unary by
         // construction).
         use crate::query::ast::{Clause, Expression, ParamValue};

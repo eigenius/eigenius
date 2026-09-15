@@ -227,7 +227,7 @@ The class is the narrower scope and answers first; the namespaces answer where i
 
 **Walk mechanics**:
 
-1. `type_check` rewrites every short-name segment to the property IRI it resolved to ([`resolve_property_names`](../../../kernel/src/query/resolve.rs)).
+1. The [`resolve`](../../../kernel/src/query/resolve.rs) stage turned every segment into the property IRI it names, before type-checking ran. An evaluated `DotPath` holds IRIs — its segment type says so (D2 §5.0).
 2. Resolve `?dog` to an IRI.
 3. Look up the resource in the layer chain, or in the FIBER overlay.
 4. Read the resolved property IRI off it. The value must be a resource reference (IRI string) for any segment but the last. Repeat step 3 with the new IRI.
@@ -268,19 +268,9 @@ WHERE ?desc ~ "WAL truncation" { k: 30, limit: 50 }
 
 The operator returns Boolean for filtering; the platform-internal similarity score it computed feeds `TOP N`'s implicit ranking (see [chapter 4 §4.10](04-program-structure.md#410-order-by-limit-top-offset-distinct)).
 
-Precedence: relational tier (§7.12). `~` is non-chaining on the left — `?a ~ "x" ~ "y"` is rejected by the parser. The full surface, the hint catalogue, the typecheck rules, and worked examples live in **[chapter 6](06-text-and-vector-retrieval.md)**.
+Precedence: relational tier (§7.11). `~` is non-chaining on the left — `?a ~ "x" ~ "y"` is rejected by the parser. The full surface, the hint catalogue, the typecheck rules, and worked examples live in **[chapter 6](06-text-and-vector-retrieval.md)**.
 
-## 7.11. Objects
-
-```rust
-Expression::Object(Vec<(Name, Expression)>)
-```
-
-Object literals in expression position are **not yet supported** by the evaluator — `eval_expression` returns `"object literals in expressions not yet implemented"`. They're reserved in the AST for future use.
-
-`RETURN [] { ... }` uses a similar-looking object syntax but that's a distinct grammar production: a list of `ReturnItem`, not an expression.
-
-## 7.12. Precedence
+## 7.11. Precedence
 
 From tightest to loosest binding, implemented as the [`parse_*_expr`](../../../kernel/src/query/parser.rs) ladder:
 
