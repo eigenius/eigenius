@@ -840,6 +840,45 @@ on `ParamValue.kind = 'comorphism'`, not on the `function` variant.
 
 Type checking is performed at query submission time, before evaluation begins.
 
+### 5.0 Resolution is a stage, and it precedes type checking
+
+A query is processed in five stages:
+
+```
+lex → parse → stratify → resolve → type-check → evaluate
+```
+
+**Resolution turns every reference into the thing it names.** A `Name` — a shortname or a
+full IRI, as written — is a reference to something the chain must already declare: a
+pattern class, a property key, a dot-path segment, a `RETURN` result class, a FIBER
+institution, query class, param or comorphism. Resolution looks each one up under the
+scope rules of §5.4 and §5.6.1 and replaces it with the resource it resolved to. A query
+in which any reference does not resolve **has no resolved form**, and the stages after it
+do not run.
+
+Three consequences are normative rather than implementation detail:
+
+1. **Resolution happens once.** A reference is looked up in this stage and nowhere else.
+   Evaluation reads what resolution recorded; it does not resolve a shortname a second
+   time. Two passes resolving one name is how they come to disagree, silently — see the
+   failures §5.4 and §5.6.1 record.
+
+2. **Resolution errors block type errors.** A query with an unresolvable class *and* a
+   type error reports the first and not the second, because a reference that names nothing
+   makes every check about it meaningless. One error at a time is the cost; the
+   alternative is a half-resolved program, which is the state this staging removes.
+
+3. **A column label is not a reference.** `RETURN [] { total: SUM(?x) }` does not assert
+   that anything called `total` is declared: the label names an output column, and the
+   result document synthesises a property IRI for it (Appendix A). Labels are not resolved,
+   because there is nothing to resolve them against.
+
+`stratify` precedes resolution: it reads rule names and dependency edges, which are
+syntactic, so a program with a negation cycle is malformed regardless of what any layer
+declares and should not pay for chain lookups to find out.
+
+See D92 for the design.
+
 ### 5.1 Variable typing
 
 - A variable bound to a property in MATCH inherits the property's declared data type from the ontology.
