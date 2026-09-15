@@ -9,6 +9,10 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **The stack is drained (`2026-09-15`).** Every entry below is DONE, entry 0 included —
+> the next piece of work is a choice, not a resume. Do not read the topmost entry as
+> active; when work starts, push a new entry and mark it ACTIVE.
+
 > **entry −4d (`2026-09-15`). Query-processing workplan, item D — vector-index lifecycle
 > (#133, #132). DONE, merged as `37149af` (#255).** Both issues closed.
 >
@@ -374,20 +378,50 @@ any detour.
 > now say the same thing: these were description edits and one constructor binder, and neither
 > touched what a chain means.
 
-> **ACTIVE: entry 0 (`2026-08-28`).** *Judgements, Warrants, and Logics*
-> (`docs/design/judgements-and-warrants.tex`) is the design; **P0 of
-> `docs/notes/judgements-warrants-build-plan.md` is the next task** — measurement only, no code.
-> The paper supersedes the D83 markdown draft (removed) and two of D82's conclusions: the
-> institution criterion and the constructive/classical conjecture. D82 remains the derivation record.
+> **entry 0 (`2026-08-28`, audited `2026-09-15`). *Judgements, Warrants, and Logics*
+> (`docs/design/judgements-and-warrants.tex`). DONE — P0 through P7 all landed.**
 >
-> This subsumes what entry 1 below scheduled as D80 (witness and institution machinery) and reaches
-> further: the build plan's P3 and P7 cover D80's W-phases, and D77's merge work is downstream of
-> both. Do not start D80 as scheduled below.
+> **This entry said "P0 is the next task" until `2026-09-15`, and had been wrong since
+> `2026-08-29`** — P0 ran the day after the entry was written and left its numbers note at
+> [`2026-08-29-p0-measurements.md`](2026-08-29-p0-measurements.md). The rest of the plan
+> landed over the following fortnight while the stack's attention was on entries −1 to −4d,
+> and nobody came back to this line. It was read back as the active task on `2026-09-15`
+> and corrected the same day.
 >
-> **Note on a superseded conclusion:** D82 §5b.7 argued the reasoning institution is not an
-> institution and should dissolve. The paper rejects the criterion that rested on — institutions and
-> proof systems are not exclusive, and the kernel is a *degenerate* institution. P7 relocates
-> vocabulary the kernel owns; it does not dissolve anything.
+> Verified against the tree: P1 (`eigentt:Term`, `eigentt:Judgement`/`Logic` with
+> `holds(...)`, the `justification:` namespace); P2 (`eigentt:expected_type` and a uniform
+> `Ann` rule; `PROPOSITION_SLOTS` retired, its exemption list replaced by a structural
+> condition); P3 (`proof_term` gone from both named sites, `is_fully_verified` reading
+> `Ground::Verified` leaves, the gate asserted in `notebook_fixture_test.rs`); P6
+> (`kernel/tests/justification_wellfounded.rs`). P4 and P5 record "Exit criteria met" in
+> the plan itself. The successor plan states it outright:
+> `numeric-core-and-verification-judgement-build-plan.md` opens *"Follows … and
+> `judgements-warrants-build-plan.md`, whose P0–P7 all landed."*
+>
+> **P7's one deferred question is also closed.** §"Open after P7" left whether the witness
+> index is a soundness boundary or a cache over relations, to be answered once at the end.
+> D87 §7 answered it — `Verified` was the family where it is not a boundary — and `06b70e5`
+> is the closeout. #235 closed, #239 merged.
+>
+> **How this went unnoticed is the part worth keeping.** The plan records completion as
+> prose inside each phase ("**Exit criteria, met.**") rather than a status line per phase,
+> so "how far did this get" cannot be answered from the top of the document — it takes a
+> grep per phase against the tree. Two phases carry that marker; the rest carry none,
+> including phases that are done.
+>
+> **Nothing from this line of work is open.** The last candidate was
+> [`next-steps-after-d88.md`](next-steps-after-d88.md) §B6's `OPEN (2026-09-09)` marker —
+> `parse_literal` and `resource_value_to_val` deciding a value is an IRI by matching the
+> `urn:`/`http` prefix instead of reading a declared type. That marker is stale as well:
+> `e10d390` (#242, *"A string is a reference because a declaration says so, not because of
+> its prefix"*) rewrote both sites, `resource_value_to_val` now branches on
+> `StringRole::Reference` and `parse_literal` has no prefix test left, and #195 is closed.
+> The marker outlived its defect by six days.
+>
+> **Two stale markers found while auditing one entry, both pointing forward at work already
+> done.** Prose status inside a long document decays silently: nothing fails when it goes
+> wrong, and the next reader inherits it as fact. Treat a "next task" or "OPEN" line as a
+> claim to re-verify against the tree, not as state.
 
 > **entry 1 (`2026-08-24`, re-scoped `2026-08-25`), pushed on top of P2.** D75 diagnosed the
 > two seams as one problem, so the fusion work outranks the individual P2 issues it subsumes.
