@@ -28,8 +28,8 @@ ESL has two structurally distinct surfaces:
 | `def` | `eigentt:Definition` (D66) | [4](04-declarations.md) |
 | `macro` | compile-time smart constructor (D52 §12), plus a chain resource for cross-file visibility | [4](04-declarations.md) |
 | `merge_comorphism` | `MergeComorphism` (D37 §3.3) | [4](04-declarations.md) |
-| `text_index` | **nothing — the lowering is unimplemented**; the compiler returns `text_index lowering not yet implemented (D43 M2)`. Write the `core:TextIndex` resource declaration directly. | — |
-| `vector_index` | **nothing — unimplemented**, exactly as `text_index`. | — |
+| `text_index` | `core:TextIndex` (D43 §3.1) | [4](04-declarations.md) |
+| `vector_index` | `core:VectorIndex` (D43 §3.1) | [4](04-declarations.md) |
 
 `namespace ns = "urn:…";` is the file-level alias form and emits no resource.
 

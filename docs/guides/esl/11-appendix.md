@@ -34,7 +34,7 @@ VectorIndexDecl::= 'vector_index' QualifiedName '{' ResourceField* '}'
 
 The file loop dispatches on each token in turn, so `namespace` aliases and declarations may appear in any order — there is no namespace phase followed by a declaration phase.
 
-**`text_index` and `vector_index` lex and parse but do not compile.** `compile_declaration` returns `text_index lowering not yet implemented (D43 M2)` / `vector_index lowering not yet implemented (D43 M2)`. They are the only two forms the parser accepts and the compiler cannot emit; write the `core:TextIndex` / `core:VectorIndex` resource declaration directly instead.
+**`text_index` and `vector_index` are sugar, and nothing more.** Each lowers to exactly the resource its longhand emits — `resource <iri> : core:TextIndex { … }` / `core:VectorIndex` — with the class supplied by the keyword instead of the header. Writing either form is equivalent; the resource the compiler emits is identical, which is what lets the discovery path read both without knowing which was written. Setting `core:is_a` in the body is refused rather than overwriting the keyword's class: the longhand is the way to say that.
 
 `transformation` in a `merge_comorphism` reference body is a *contextual* identifier, not a reserved keyword: it is matched by name at that one position and remains a free identifier everywhere else.
 
