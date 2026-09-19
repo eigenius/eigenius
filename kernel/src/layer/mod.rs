@@ -103,14 +103,23 @@ pub fn build_chain(
     info: crate::storage::ChainInfo,
     storage: LayerStorage,
 ) -> std::sync::Arc<Layer> {
+    // `info` is owned and each layer's IRI set is consumed exactly once, so MOVE each set out
+    // rather than cloning it. The clone held both copies live at the same time — the `ChainInfo`
+    // map and the `Arc<Layer>` chain — for no gain, since the map is dropped on return.
+    //
+    // This is NOT on the bulk-load path, and a reader chasing a reseed OOM should look elsewhere:
+    // `ExecutionContext::advance_head` installs the newly built `Arc<Layer>` directly, so a load
+    // grows the chain by pointer and never rebuilds it. `build_chain` runs at startup, on task
+    // rehydration, and in the branch and consolidate paths.
+    let crate::storage::ChainInfo {
+        handles,
+        mut defined_iris_per_layer,
+        ..
+    } = info;
     let mut parent: Option<std::sync::Arc<Layer>> = None;
-    for handle in info.handles {
+    for handle in handles {
         let id = handle.id.clone();
-        let defined = info
-            .defined_iris_per_layer
-            .get(&id)
-            .cloned()
-            .unwrap_or_default();
+        let defined = defined_iris_per_layer.remove(&id).unwrap_or_default();
         let layer = Layer::from_handle(handle, parent.clone(), defined, storage.clone());
         let mut arc = std::sync::Arc::new(layer);
         // D25 §12.8 / Phase 17f: if this layer is a redirect source,
