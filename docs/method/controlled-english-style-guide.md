@@ -11,6 +11,11 @@ carried is superseded — the corpus now parses 62/62 with `grammar-gap 0` and `
 exists. **Corrections applied in the same pass are marked ⚠ below.** This is an authoring guide, so it
 is expected to drift as the grammar grows; check a claim against the baseline before relying on it.*
 
+*Revised `2026-09-20` for measured quantities. **Those rules are marked 🔜 and are NOT yet live** —
+D93 (units of measure) and D95 (quantities in the parser) are specifications, not implementations,
+and this guide does not state aspiration as capability. Until they land, the 🔜 rules describe how to
+author for the parser that is coming; the ⚠ and unmarked rules describe the one that exists.*
+
 ## Purpose & posture
 
 The parser is the oracle: a sentence either composes into a kernel-checked typed tree or it does not.
@@ -76,7 +81,9 @@ Two rules sit above everything else:
 
 | Avoid (journal style) | Why | Rewrite recipe |
 |---|---|---|
-| **Inline numbers / statistics** (`n = 37`, `P = 4.2 × 10⁻¹³`, `51 cell lines`, `0.56-fold`, `15%`) | The parser routes non-prose out; numbers are **dropped**, so a numeric claim is lost. | State the **qualitative** claim; put the statistic elsewhere (a separate D52 record). `… showed greater dependence …` not `(n=37; P=…)`. |
+| **Test statistics** (`n = 37`, `P = 4.2 × 10⁻¹³`, `Q = 4.8 × 10⁻²⁴`) | Out of the claim **by design** — a statistic qualifies a claim, it is not one. Routed to a D52 record. | State the **qualitative** claim; the statistic lives elsewhere. `… showed greater dependence …`, not `(n = 37; P = …)`. Unchanged by D93/D95. |
+| **Measured quantities** (`37 °C`, `1 h`, `5 ml`, `0.2 mg`, `15%`) | 🔜 Today these are dropped like statistics, so the claim loses them. Under D93/D95 they become part of the claim. | **Today:** state qualitatively, or keep the quantity and record the gap (R2 — a faithful un-parsed claim beats a parsed distorted one). **Once D95 lands:** write the quantity; see "Measured quantities" below. |
+| **Ranges and intervals** (`20–30%`, `15–18`, `45–60%`) | Deferred in D95; the en-dash/hyphen distinction that separates a range from a catalogue number is not built. | Keep the range and record the gap. Do **not** collapse it to one endpoint or to a midpoint — that changes the claim, which R2 forbids. |
 | **Parenthetical asides / inline abbreviations** (`(MSI)`, `(PARP-1)`, `(Fig. 1a)`) | Asides are dropped; the parenthetical can't be a claim. | Introduce an abbreviation in its **own** sentence, or just use one form consistently. Drop figure/citation refs. |
 | **Em-dash appositives** (`—an interaction…—`) | Not covered; the dash content is dropped. | Split into separate sentences: `Synthetic lethality is an interaction between two genetic events. …` |
 | **Long multi-clause sentences** (relative + subordinate + parenthetical stacked) | Each clause must compose; one gap kills the whole, and long units hit the beam. | **One claim per sentence.** |
@@ -86,6 +93,37 @@ Two rules sit above everything else:
 | **Novel / OOV or en-dash hyphenations** (`CRISPR–Cas9-mediated`; an en-dash `–`, not a hyphen) | An unknown head/base is OOV; the en-dash isn't the hyphen token. | Rephrase or drop the modifier. **But a hyphenated compound whose head is a known adjective now PARSES** (D63 morphology: `double-stranded`, `pcr-based`, `large-scale`, `synthetic-lethal`) — **prefer** hyphenation for lexicalized compound modifiers (DO §5), don't avoid it. |
 | **Possessive ellipsis / heavy gapping**, fronted reduced clauses with complex complements | Limited; gapping beyond same-type `but not` isn't covered. | Use an explicit subject and a full verb in each clause. |
 | **`and/or`** | Not a token; collapsing it to `and` overstates (requires *both*). | Write **`or`** — `logic:Or` is **inclusive** (true if either or both), which is exactly what `and/or` means. (Faithfulness rule, not just style — `and/or → and` is a meaning change; `and/or → or` is meaning-preserving.) |
+
+## 🔜 Measured quantities (D93 / D95 — not yet live)
+
+A measured quantity is `⟨numeral⟩ ⟨unit symbol⟩`, and under D95 it becomes one chart item denoting a
+value, so it composes as an ordinary noun phrase: a preposition's object (`at 37 °C`, `for 1 h`), a
+nominal modifier (`a 24 h incubation`), or a predicate (`The incubation was 1 h.`).
+
+1. **Write the symbol, not the spelled-out unit.** `5 ml`, not `5 millilitres`. The symbol is what
+   the unit parser reads; the spelled form is ordinary English words and parses as a different
+   thing entirely.
+2. **Put a space between the numeral and the symbol.** `37 °C`, `5 ml`, `625 mg`. This is the SI's
+   own convention, and it makes the span unambiguous. The exceptions the SI itself makes are `%`
+   and the angle symbols (`50%`, `90°`), which close up.
+3. **Write compound units with a slash, one solidus only.** `mg/dL`, `ml/min`. Not `mg/ml/h` —
+   more than one solidus is ambiguous without brackets, and the SI says so. For anything deeper,
+   use negative powers: `mg ml⁻¹ h⁻¹`.
+4. **Express a temperature DIFFERENCE in kelvin, never in °C.** `rose by 5 K`, not `rose by 5 °C`.
+   The degree Celsius is equal in magnitude to the kelvin, so this is exact and loses nothing — and
+   it sidesteps the one genuine ambiguity in the unit system: a bare °C is read as a *point*
+   (D93), so `by 5 °C` would be mis-normalised by 273.15. Use °C for a temperature, K for a change
+   in temperature.
+5. **Disambiguate `g`.** The symbol is both the gram and standard gravity, and only context
+   separates them. Write `931 × g` or `931g` for centrifugal force and `931 g` for mass — and
+   prefer rephrasing to `931 times gravity` where the sentence allows, since the ranker resolving
+   this correctly is not something to rely on in authored text.
+6. **One quantity per role.** `incubated at 37 °C for 1 h` is fine — two quantities filling two
+   different roles. `between 37 °C and 39 °C` is a range, which is deferred (see the DON'T table).
+
+**What this does not change.** A statistic is still not a quantity. `n = 37` counts samples and
+`P = 4.2 × 10⁻¹³` qualifies an inference; neither is a measured value of a physical quantity, and
+both stay out of the claim.
 
 ## Hyphenate lexicalized compound modifiers (`synthetic-lethal`, not `synthetic lethal`)
 
@@ -130,8 +168,36 @@ exonuclease activity."*
 
 Two same-shape SVO clauses; the contrast is preserved as an explicit negation; both compose.
 
+## 🔜 Worked example (one WRN methods sentence)
+
+**Original (journal):** *"Experiments were performed in triplicate by adding the appropriate volume
+of lentivirus to integrate vectors that encoded the desired sgRNA and the plates were spun at 931g
+for 2 h at 30 °C."*
+
+Two claims, a relative clause, a coordination, and three quantities — one of them the ambiguous `g`.
+
+**Controlled:**
+> Experiments were performed in triplicate.
+> The vectors encoded the desired sgRNA.
+> The plates were spun at 931 times gravity for 2 h at 30 °C.
+
+R1 splits the compound sentence; the relative clause becomes its own claim; `931g` is rephrased
+because the symbol is ambiguous between the gram and standard gravity (rule 5). The two unambiguous
+quantities stay as written, filling two roles of one event — which is the case the methods register
+produces constantly and the results register almost never does.
+
+**What is still lost:** *"in triplicate"* is a replication count, which is D52's, not a quantity.
+Do not rewrite it as `3 replicates` to make it look like one.
+
 ## Success criterion
 
 A passage is "parser-faithful" when every sentence yields a **closed or open** kernel-checked parse
 (no GRAMMAR-GAP), and the set of parses captures the passage's factual claims. The experiment measures
 the closed/open/gap distribution on the rewritten WRN page against the original.
+
+🔜 **The tracked corpus does not exercise quantities.** The CNL page is results prose and contains
+one unit in 2,738 words; the methods material contains 35 in 4,912. So the current gates certify a
+register that excludes the very thing D93/D95 add, and a quantity-bearing corpus with a
+re-established baseline is part of landing them (D95). A quantity gap and a syntax gap must be
+distinguishable in that report — the methods register is where the parser is weakest, and
+conflating the two would make the measurement useless.
