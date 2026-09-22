@@ -36,6 +36,7 @@ pub mod justification;
 pub mod lattice;
 pub mod layer;
 pub mod nbe;
+pub mod numeric;
 pub mod observability;
 pub mod ontology;
 pub mod program;
