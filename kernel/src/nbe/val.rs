@@ -95,6 +95,9 @@ pub enum Val {
     /// Literal boolean value (eigenius#142). Type:
     /// `Val::EigonPrimitive(PrimitiveType::Boolean)`.
     LitBool(bool),
+    /// `Exp::LitRat` at the value level (D94) — canonical, so two of
+    /// these compare structurally and `conv` does no arithmetic.
+    LitRat(crate::numeric::Rational),
     /// Template value with resolved property type requirements.
     /// Template("literal", [(iri, resolved_type)])
     TemplateVal(String, Vec<(Iri, Val)>),

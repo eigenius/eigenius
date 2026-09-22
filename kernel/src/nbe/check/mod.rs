@@ -558,6 +558,20 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             }
         }
 
+        // A rational literal against `core:bigint`. The same shape as `core:iri` above and for
+        // the same reason: `check_infer` answers `Rational` for every `LitRat`, and the declared
+        // type is what says an integer was meant. Checking VERIFIES the refinement rather than
+        // coercing — a non-integer rational is refused, not truncated.
+        (Exp::LitRat(r), Val::EigonPrimitive(crate::nbe::term::PrimitiveType::BigInt)) => {
+            if r.is_integer() {
+                Ok(())
+            } else {
+                Err(CheckError::TypeMismatch(format!(
+                    "`{r}` is declared `core:bigint` but is not an integer"
+                )))
+            }
+        }
+
         // Lambda against Pi type
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
             let gen = gen_val(&ctx.rho);
@@ -1381,6 +1395,11 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::LitBool(_) => Ok(Val::EigonPrimitive(
             crate::nbe::term::PrimitiveType::Boolean,
         )),
+        // Answers `Rational`, never `BigInt` — a bare literal cannot know which it is meant to be.
+        // `BigInt` is reachable only in CHECK mode, where a declared type asks for it (D94, D88 §3).
+        Exp::LitRat(_) => Ok(Val::EigonPrimitive(
+            crate::nbe::term::PrimitiveType::Rational,
+        )),
 
         e => Err(CheckError::CannotInfer(format!(
             "cannot infer type of: {e:?}"
@@ -1507,6 +1526,58 @@ mod tests {
     #[test]
     fn check_unit_has_type_one() {
         check(&mut ctx(), &Exp::Unit, &Val::One).unwrap();
+    }
+
+    // ── D94 exact rationals: one carrier, `core:bigint` as a refinement ──
+
+    fn rat(n: i64, d: i64) -> Exp {
+        Exp::LitRat(crate::numeric::Rational::new(n.into(), d.into()).expect("admissible"))
+    }
+
+    /// A bare literal cannot know which of the two declared types it is meant to be, so it
+    /// answers the carrier. The same asymmetry `LitString` has to `Iri` (D88 §3).
+    #[test]
+    fn a_rational_literal_infers_to_rational_never_to_bigint() {
+        let t = check_infer(&mut ctx(), &rat(1, 2)).unwrap();
+        assert!(matches!(t, Val::EigonPrimitive(PrimitiveType::Rational)));
+
+        // Even one that IS an integer: inference does not look at the value.
+        let t = check_infer(&mut ctx(), &rat(4, 2)).unwrap();
+        assert!(matches!(t, Val::EigonPrimitive(PrimitiveType::Rational)));
+    }
+
+    /// `core:bigint` is reachable only in CHECK mode, where it VERIFIES `den == 1`.
+    #[test]
+    fn checking_against_bigint_verifies_the_refinement() {
+        // 4/2 reduces to 2, an integer — admitted.
+        check(
+            &mut ctx(),
+            &rat(4, 2),
+            &Val::EigonPrimitive(PrimitiveType::BigInt),
+        )
+        .unwrap();
+
+        // 1/2 is not. Refused, not truncated: an exact value silently adjusted is worse than none.
+        let e = check(
+            &mut ctx(),
+            &rat(1, 2),
+            &Val::EigonPrimitive(PrimitiveType::BigInt),
+        )
+        .unwrap_err();
+        assert!(
+            format!("{e:?}").contains("not an integer"),
+            "expected a refinement failure, got {e:?}"
+        );
+    }
+
+    /// The subtyping runs one way, as it does for `Iri <: String`.
+    #[test]
+    fn bigint_is_a_subtype_of_rational_and_not_the_converse() {
+        assert!(PrimitiveType::BigInt.subtype_of(PrimitiveType::Rational));
+        assert!(!PrimitiveType::Rational.subtype_of(PrimitiveType::BigInt));
+        // And neither is confusable with the approximating carriers.
+        assert!(!PrimitiveType::Rational.subtype_of(PrimitiveType::Float));
+        assert!(!PrimitiveType::BigInt.subtype_of(PrimitiveType::Integer));
     }
 
     // ── Exp::Ann — the bidirectional mode switch (D63 §8.2) ──────────────

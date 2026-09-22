@@ -225,6 +225,7 @@ pub(crate) fn eval_impl<T: Tracer>(
         Exp::LitInt(n) => Ok((Val::LitInt(*n), T::leaf())),
         Exp::LitFloat(f) => Ok((Val::LitFloat(*f), T::leaf())),
         Exp::LitBool(b) => Ok((Val::LitBool(*b), T::leaf())),
+        Exp::LitRat(r) => Ok((Val::LitRat(r.clone()), T::leaf())),
 
         Exp::Dec(d, e) => {
             // Branching on the *capability*, not on the environment (D76 Phase B):
@@ -898,6 +899,9 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
         (Val::LitInt(a), Val::LitInt(b)) => a == b,
         (Val::LitFloat(a), Val::LitFloat(b)) => a == b,
         (Val::LitBool(a), Val::LitBool(b)) => a == b,
+        // Canonical form is what makes this structural: two rationals are equal iff their
+        // components are, so `conv` does no arithmetic (D94).
+        (Val::LitRat(a), Val::LitRat(b)) => a == b,
         (Val::ResourceVal(a), Val::ResourceVal(b)) => {
             // Compare resource contents for equality
             a.properties() == b.properties() && a.id() == b.id()
@@ -978,6 +982,31 @@ mod tests {
     fn eval_set() -> Result<(), EvalError> {
         let v = eval(&Exp::sort(1), &Rho::Nil)?;
         assert!(matches!(&v, Val::Sort(l) if l.is_nat(1)));
+        Ok(())
+    }
+
+    /// D94 — canonical form is what lets `conv` compare rationals structurally. Without the
+    /// `LitRat` arm in `ground_values_equal`, `DecEq(LitRat(1/2), LitRat(1/2))` falls through to
+    /// false, which is the bug eigenius#142 fixed for `LitInt`.
+    #[test]
+    fn equal_rationals_are_definitionally_equal_however_written() -> Result<(), EvalError> {
+        let rat = |n: i64, d: i64| {
+            Exp::LitRat(crate::numeric::Rational::new(n.into(), d.into()).expect("admissible"))
+        };
+        let half = eval(&rat(1, 2), &Rho::Nil)?;
+        let also_half = eval(&rat(50, 100), &Rho::Nil)?;
+        let third = eval(&rat(1, 3), &Rho::Nil)?;
+        assert!(ground_values_equal(&half, &also_half));
+        assert!(!ground_values_equal(&half, &third));
+        Ok(())
+    }
+
+    /// A literal normalises to itself: no reduction, no neutral substructure.
+    #[test]
+    fn a_rational_literal_normalises_to_itself() -> Result<(), EvalError> {
+        let r = crate::numeric::Rational::new(1.into(), 2.into()).unwrap();
+        let v = eval(&Exp::LitRat(r.clone()), &Rho::Nil)?;
+        assert!(matches!(&v, Val::LitRat(got) if got == &r));
         Ok(())
     }
 

@@ -497,6 +497,8 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
         Exp::App(f, x) => has_ind_occurrence(decl, f) || has_ind_occurrence(decl, x),
         Exp::Pair(a, b) => has_ind_occurrence(decl, a) || has_ind_occurrence(decl, b),
         Exp::Con(_, e) => has_ind_occurrence(decl, e),
+        // A literal is closed: no type sits inside it, so nothing can occur.
+        Exp::LitRat(_) => false,
         Exp::Fst(e) | Exp::Snd(e) => has_ind_occurrence(decl, e),
         Exp::Data(summands) => summands.iter().any(|s| has_ind_occurrence(decl, &s.typ)),
         Exp::Case(branches) => branches.iter().any(|b| has_ind_occurrence(decl, &b.body)),

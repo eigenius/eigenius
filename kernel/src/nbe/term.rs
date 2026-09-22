@@ -208,6 +208,19 @@ pub enum Exp {
     /// `eigentt:Term`. Added so `program:Literal` booleans decode
     /// to their value rather than to `EigonPrimitive(Boolean)`.
     LitBool(bool),
+    /// Literal exact rational at the expression level (D94).
+    /// Type: `Exp::EigonPrimitive(PrimitiveType::Rational)`. The value
+    /// is always canonical — reduced, positive denominator, sign on the
+    /// numerator — because [`crate::numeric::Rational`]'s constructor
+    /// establishes that. So `conv` compares two of these structurally
+    /// and does no arithmetic.
+    ///
+    /// ONE carrier serves both `core:rational` and `core:bigint`, which
+    /// is a refinement checking `den == 1` — the relationship `Iri` has
+    /// to `String` (D88 §3). D94 left this open, noting that what would
+    /// decide it is "whether any slot wants an exact integer that is
+    /// not part of a rational"; nothing identified does.
+    LitRat(crate::numeric::Rational),
     /// Property access on a resource: e.property
     PropAccess(Box<Exp>, Iri),
     /// Template literal with extracted property references.
@@ -418,15 +431,34 @@ pub enum PrimitiveType {
     Float,
     Boolean,
     Json,
+    /// An exact rational (D94). Its values are `Exp::LitRat`, always in canonical form.
+    ///
+    /// Distinct from [`PrimitiveType::Float`], which is binary64 and approximates: `0.05` as a
+    /// float is 3602879701896397/2^56, and as a rational is 1/20. They are different numbers, so
+    /// this is a separate carrier rather than a refinement of `Float`.
+    Rational,
+    /// An exact integer of arbitrary size (D94). A REFINEMENT of [`PrimitiveType::Rational`], not
+    /// a separate carrier: its values are `Exp::LitRat` with `den == 1`, and the difference is
+    /// that checking one verifies that (D88 §3, the shape `Iri` has to `String`).
+    ///
+    /// `LitRat` INFERS to `Rational`, never to this — a bare literal cannot know which it is meant
+    /// to be. `BigInt` is reachable only in CHECK mode, where a declared type asks for it.
+    ///
+    /// Distinct from [`PrimitiveType::Integer`], which is `i64` sized to `core:integer`'s 53-bit
+    /// safe range. Eight of the 24 SI prefixes exceed `u64` (D93), so that range is not enough.
+    BigInt,
 }
 
 impl PrimitiveType {
     /// Whether a value of `self` is admissible where `other` is expected.
     ///
-    /// Only `Iri <: String` holds — every IRI is a string. The converse does not: that is the
-    /// whole point of declaring the slot.
+    /// Two refinements hold: `Iri <: String` — every IRI is a string — and `BigInt <: Rational`,
+    /// since an integer is a rational with `den == 1`. Neither converse does: that is the whole
+    /// point of declaring the slot.
     pub fn subtype_of(self, other: PrimitiveType) -> bool {
-        self == other || (self == PrimitiveType::Iri && other == PrimitiveType::String)
+        self == other
+            || (self == PrimitiveType::Iri && other == PrimitiveType::String)
+            || (self == PrimitiveType::BigInt && other == PrimitiveType::Rational)
     }
 }
 
@@ -708,6 +740,8 @@ impl Exp {
                 iri.clone(),
                 levels.iter().map(|l| l.subst(ks, vs)).collect(),
             ),
+
+            Exp::LitRat(r) => Exp::LitRat(r.clone()),
 
             Exp::Lam(p, b) => Exp::Lam(p.clone(), bx(b)),
             Exp::Pi(p, a, b) => Exp::Pi(p.clone(), bx(a), bx(b)),

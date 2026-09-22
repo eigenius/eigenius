@@ -16,7 +16,14 @@ walks together settles it.
 
 ## Blast radius, measured
 
-`Exp::LitInt` is matched in **19 kernel files**. The concentration is what matters:
+**Corrected after slice 2.** This section first counted *occurrences of the string* `LitInt` — 19
+files — and read that as the blast radius. The real number is **six exhaustive match sites**: four
+for `Exp::LitRat` (`nbe/eval/mod.rs`, `nbe/positivity.rs`, `nbe/term.rs`'s `subst_levels`, and the
+mirror's primitive→IRI table) and two more for `Val::LitRat` (`nbe/readback.rs`, `nbe/unify.rs`).
+Everything else was a non-exhaustive match or a comment. Counting occurrences over-estimated by
+three times; the compiler enumerates the real set in one build, and that is the measurement to take.
+
+The original table, kept because the concentration is still the right guide to where the work sits:
 
 | File | Sites |
 |---|---|
@@ -53,7 +60,19 @@ admits at 4096.
 
 No `Exp` change, no chain change, no reseed. Fully isolated.
 
-## Slice 2 — the `Exp` carrier
+## Slice 2 — the `Exp` carrier — DONE
+
+**Two gaps the compiler did not catch**, both found by reading rather than building:
+
+- `ground_values_equal` (`nbe/eval/mod.rs`) has explicit per-literal arms, so `Val::LitRat` fell
+  through to `false` and two identical rationals were not definitionally equal. Its own comment
+  records the same bug being fixed for `LitInt` in eigenius#142.
+- `check_infer` hit the `CannotInfer` catch-all, so no rational literal was typeable.
+
+Neither is a compile error. A literal carrier added by following the compiler alone would have been
+silently broken in both.
+
+### As planned
 
 - `Exp::LitRat(Rational)` beside `LitInt`/`LitFloat` in `kernel/src/nbe/term.rs:188-203`.
 - `PrimitiveType::Rational` and `PrimitiveType::BigInt` at `term.rs:402`.
