@@ -46,5 +46,6 @@ pub mod server;
 pub mod storage;
 pub mod task;
 pub mod testing;
+pub mod units;
 pub mod validation;
 pub mod witness;

@@ -227,17 +227,22 @@ additional primitives. The trusted surface is:
 
 - seven base-unit symbols (second, metre, kilogram, ampere, kelvin, mole, candela),
 - a rational exponent vector over them,
-- a quantity-kind tag (see "Dimension is not the whole of a unit"),
+- a rational exponent vector over the quantity kinds (see "Dimension is not the whole of a unit"),
 - a declared constant set — `{π}` in v1 — and integer exponents over it,
 - a canonicalisation: sort, reduce the fractions, drop zero exponents.
 
 That is the whole TCB addition. The SI *content* lives in chain ontology where it is authored,
 reviewed and replaceable without touching the checker.
 
-The kind tag is the one part that is a tag rather than an algebra, and it is worth being explicit
-that it grows: `rad`, `sr` and plain-dimensionless are the v1 set, and admitting a new kind is a
-vocabulary edit in the units layer, not a checker change — provided the normaliser treats kinds
-opaquely and only compares them for equality.
+**An earlier draft called the kind axis a tag rather than an algebra.** That is superseded by
+"Dimension is not the whole of a unit" below, which gives kinds an exponent vector so that
+`sr = rad²` falls out instead of being asserted — a tag cannot express that relation, which is the
+whole reason for the step past QUDT. The two descriptions are recorded together because the tag
+reading is the weaker one and was chosen against.
+
+The kind SYMBOL set is what grows: one symbol in v1, `angle`, over which `rad` is `angle¹` and `sr`
+is `angle²`. Admitting a new kind is a vocabulary edit in the units layer, not a checker change,
+because the normaliser adds and compares kind exponents without interpreting the symbols.
 
 ## Dimension is not the whole of a unit
 
