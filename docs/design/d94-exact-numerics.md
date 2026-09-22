@@ -114,12 +114,9 @@ authored terms, that is a denial-of-service vector in the trusted computing base
 v1 therefore carries a **declared bound on magnitude** — a maximum bit-width for a bigint, checked
 when a literal is admitted, refusing rather than truncating.
 
-**This document does not yet give the number, and an earlier draft claimed it did.** The number
-depends on two things it has not settled: which requirement is actually established (see the
-reading of D86 above — 2¹⁰⁷⁴ may not be justified), and whether magnitudes are computed on at all,
-since a literal bound constrains nothing if a multiplication can double a value's width. A worked
-composition makes the point: a binary64-derived denominator times a 10⁻³⁰ prefix is about 1175
-bits, and sizing consumers one at a time misses it.
+**The number is 4096 bits**, justified under "The magnitude bound" below. It is set for
+termination rather than precision, and it is meaningful only because magnitudes are never computed
+on — a literal bound constrains nothing if a multiplication can double a width.
 
 Refusing loudly is the required behaviour. A silently truncated exact value is worse than no exact
 value, because it looks like the thing it is not.
@@ -143,7 +140,7 @@ The requirement is exactness, not range.
 **Keep `i64` and have callers scale.** This is what `core:float` does today with units, and it is
 the defect D93 exists to remove: a scale that lives in the caller's head is not checked.
 
-## Open questions
+## Decided while elaborating
 
 ### Is `core:bigint` separately needed?
 
@@ -162,96 +159,219 @@ Two things argue against collapsing them:
 What would decide it: whether any slot wants an exact integer that is not part of a rational.
 Nothing identified so far does — every large magnitude is a numerator or a denominator.
 
-### How much arithmetic must the kernel do?
+### How much arithmetic must the kernel do? — decided
 
-The draft assumed "literals only, no arithmetic". **That is already false, in two places.**
+**Why a rational and not a decimal — the question that decides whether gcd is needed at all.**
+Every terminating decimal is a rational with a `2^a·5^b` denominator, so a decimal carrier
+(arbitrary-precision significand, base-10 exponent) would be more compact and **canonical without
+arithmetic**: strip trailing zeros, and `0.05`, `5/100` and `1/20` all become `(5, −2)` by
+inspection. Its coverage is wide — every v1 conversion factor terminates (eV→J, lb→kg, hour, au,
+every prefix), as does every binary64 value, since 2 divides 10. Measurements, thresholds and D86's
+exact float values would all be decimals.
 
-**Canonical form requires `gcd`.** A rational is canonical when numerator and denominator are
-coprime, and *verifying* coprimality is computing the gcd — there is no cheaper check. The
-alternative is to trust the authored form, which is unsound: a non-reduced rational would compare
-unequal to its reduced twin, and structural equality is the whole reason for canonical form. So the
-kernel computes one gcd per rational literal at admission. This is exactly Lean's own `Rat`
-invariant, whose `reduced` field is discharged the same way, and D86 §4 records nanoda accelerating
-gcd for precisely this.
+**D93's magnitude decision is what rules it out.** The angle factors do not terminate: `37/180`
+(180 = 2²·3²·5) and `1/32400` (32400 = 2⁴·3⁴·5²) both carry a factor of 3. So admitting the
+transcendental category — angles, the parsec, atomic units — requires general rationals, and general
+rationals require reduction. Had that decision gone the other way, this document would need **no
+kernel arithmetic whatsoever**.
 
-**D93's unit normalisation requires rational addition.** Multiplying units adds exponents:
-`m * m → m²` needs 1 + 1, `m * m⁻¹ → 1` needs 1 + (−1), and with rational exponents
-`m^(1/2) * m^(1/2) → m` needs ½ + ½. The normaliser lives in the kernel primitive, so rational
-addition is in the trusted surface whether or not general arithmetic is.
+The cost is one gcd per literal, and it is the price of `37π/180`. Lean's `Rat` pays the same price
+for the same reason. It is also not an angle-only quirk: `torr` is `101325/760`, which does not
+terminate either — any unit defined by a ratio rather than a decimal lands here.
 
-**This suggests a distinction the draft did not make**, and it may be the resolution:
+**`gcd` at admission, and nothing else.** A rational is canonical when numerator and denominator are
+coprime, and verifying coprimality *is* computing the gcd — there is no cheaper check, and trusting
+the authored form is unsound, since a non-reduced rational would compare unequal to its reduced
+twin. So one gcd per literal at admission. This is Lean's own `Rat` invariant, discharged the same
+way, and D86 §4 records nanoda accelerating gcd for exactly this.
 
-| | magnitude rationals | exponent rationals |
+**Exponent arithmetic is not this document's.** An earlier draft put D93's unit-exponent arithmetic
+here, on the grounds that the kernel needs it. It does — but not on `core:rational`. D93's decisions
+separated the two cleanly:
+
+| | magnitude coefficient | the three exponent vectors |
 |---|---|---|
-| size | large — 2¹⁰⁷⁴, 10³⁰ | tiny — ½, ⅓, 2, −1 |
-| operations needed | equality, and gcd once at admission | add, subtract, negate, **multiply by a scalar**, and **gcd** |
-| bound | generous, refuses above it | very small; nothing needs `m^(10²⁰)` |
+| carries | `10³⁰`, `10⁻²⁸`, composed values | `1`, `2`, `−3`, `½`, `−⅓` |
+| needs | arbitrary precision | a **small fixed width** — 16 bits of numerator and denominator allows `m^32767` |
+| operations | equality; gcd once at admission | add, subtract, scalar-multiply, gcd |
+| where | `core:rational`, this document | inside the `Unit` primitive, D93 |
 
-**The exponent column is larger than an earlier draft claimed.** Addition alone does not cover it:
+So exponents never touch `core:bigint`. They are an internal representation of the `Unit` primitive
+with their own tiny bound, and the arithmetic on them belongs to D93's normaliser. That answers the
+"two carriers or three" question: **two chain primitives**, and exponents are not one of them.
 
-- **Scalar multiplication.** Expanding a derived unit under a power multiplies its whole exponent
-  vector — `N²` → `kg² m² s⁻⁴`. `√Hz` is `(s⁻¹)^(1/2)` → `s^(−1/2)`, which is this document's own
-  first motivating row.
-- **gcd.** `a/b + c/d = (ad+cb)/(bd)` is not reduced, and this document's own argument — verifying
-  coprimality has no cheaper check than computing the gcd — applies identically to exponents.
-- **Integer multiplication**, since `ad`, `cb` and `bd` are products.
+### The magnitude bound — decided
 
-So the arithmetic-heavy carrier needs a small rational *field*, not an additive group. It remains
-bounded, which is the property that matters.
+**4096 bits**, checked when a literal is admitted, refusing rather than truncating.
 
-If the two are separated, the unbounded carrier needs almost no arithmetic and the arithmetic-heavy
-one needs almost no range. That is a much smaller trusted surface than one general-purpose exact
-rational with full arithmetic.
+The largest identified requirement is a binary64-derived denominator (2¹⁰⁷⁴) composed with a quecto
+prefix (10⁻³⁰) — about **1175 bits**. Four thousand and ninety-six clears that by more than triple,
+covers every prefix and conversion factor with room, and still refuses `10^1000000` long before
+anything threatens termination. The bound is for **termination, not precision**: it exists so an
+authored term cannot ask the checker for unbounded work, and a value that needs more than 4096 bits
+is far likelier to be an attack or a bug than a measurement.
 
-### What is the magnitude bound, and does it bound anything?
+**The bound is meaningful because magnitudes are never computed on.** A literal bound constrains
+nothing if a multiplication can double a width — and this document puts size-increasing magnitude
+arithmetic out of v1 precisely so the bound holds. D93's base-units-only decision is what makes that
+affordable: conversion happens at ingest, outside the kernel, so the kernel only ever compares.
 
-The known requirements are modest: 2¹⁰⁷⁴ for binary64 subnormals is the largest justified, which is
-1075 bits; quetta at 10³⁰ is about 100 bits. A bound of a few thousand bits clears both with room.
+## Decided: carrier disambiguation and lowering
 
-But **a bound on literals does not bound computation.** Multiplying two 1000-bit values yields 2000
-bits. So the bound is only a real limit if the kernel does no size-increasing arithmetic on
-magnitudes — which is the case if the section above holds, and is not if general arithmetic is
-admitted later. The two questions are one question.
+### Is a numeric literal polymorphic in its carrier? — decided: no
 
-Shape also matters: a bit-width bound on a literal is checked once and cheaply. A fuel or
-term-size budget would bound computation too, at the cost of being a much larger change to how the
-checker accounts for work.
+**Not open: who reduces.** The elaborator reduces and the kernel verifies with one gcd. A division
+left in the term is arithmetic in the checking loop, which is D86 §4's lesson about emitting
+`Rat.mk'` rather than `HDiv.hDiv` and D93's about canonical forms — normalise in the bridge, compare
+structurally in the kernel.
 
-### ESL surface syntax
+**Not open either: the radix.** IEEE 854 parameterised the radix because floating point
+*approximates*, and the radix fixes the lattice of representable values — `1/10` is on the decimal
+lattice and off the binary one. Exact rationals have no lattice: every rational is representable, so
+`0.05`, `5×10⁻²` and `1/20` are three spellings of one value rather than three approximations. Radix
+has no semantic role here, only a surface one.
 
-How an author writes an exact value, and — given canonical form — **who reduces it**.
+**The question is disambiguation.** Given that the spellings agree, how does an author say *this
+literal is exact* rather than *this literal is a binary64 approximation*? Three answers:
 
-If the surface is a division (`1602176634/10^28`, reducing to `801088317/(5×10^27)`), the elaborator
-must reduce before the term is
-built, because a division in the term is arithmetic in the checking loop. That is D86 §4's lesson
-about emitting `Rat.mk'` rather than `HDiv.hDiv`, and D93's about canonical unit spines: normalise
-in the bridge, compare structurally in the kernel.
+- **Type-directed** — one spelling, the expected type resolves the carrier. Lean does this, writing
+  `(0.05 : Rat)` and `(0.05 : Float)` identically via `OfScientific`.
+- **A distinct marker** — `0.05r` or similar. Verbose; makes the carrier visible without knowing the
+  slot's type.
+- **No decimal surface for exact values** — write `1602176634/10^28`. Unambiguous and unreadable.
 
-So the elaborator reduces and the kernel verifies (one gcd). A decimal surface that elaborates to
-the exact rational — `0.05` meaning 1/20 rather than the binary64 value — would be convenient and is
-a trap: D86 §4 is explicit that a stored `0.05` is the binary64 value `0.05000000000000000277…`, and
-a surface that silently means something else reintroduces the delta that section exists to prevent.
-If both are wanted they need distinct syntax.
+**There is an in-codebase precedent for the first, and it does not transfer.** D88 §3 makes `Iri` a
+check-mode-only refinement of `String`: *"`LitString` INFERS to `String`, never to this: a bare
+literal cannot know which it is meant to be. `Iri` is reachable only in CHECK mode, where a declared
+type asks for it."* Same shape, and safe there — because `"urn:x"` as a `String` and as an `Iri` is
+the **same value**; the refinement adds a check, not a denotation.
+
+`0.05` as a float and as a rational are **different numbers**: `3602879701896397/2⁵⁶`, which is
+`0.05000000000000000277…`, versus `1/20`. So the polymorphic reading carries a hazard the precedent
+does not:
+
+- two occurrences of `0.05` in one document denote different numbers depending on their slot's type;
+- and retyping a slot from `core:float` to `core:rational` changes every literal's value **with no
+  textual diff**. D86's pivot is precisely such a retyping, and the manifest pin would record that
+  the ontology moved while nothing recorded that the numbers did.
+
+That asymmetry is the argument, and it is why this is a decision rather than an inherited
+convention.
+
+**Decided: a distinct marker, as a surface feature.** `0.05` is binary64; `0.05r` is exact `1/20`.
+The carrier is visible in the source text without knowing the slot's type, so neither hazard above
+can fire: two occurrences of `0.05` denote the same number wherever they appear, and retyping a slot
+from `core:float` to `core:rational` leaves every literal's value unchanged — the retyping either
+type-errors against the unsuffixed literals or leaves them alone. D86's pivot becomes a diff.
+
+The marker is surface only. It does not reach the chain, because by then the carrier is a declared
+`data_type` rather than a spelling.
+
+### Lowering to Eigon-JSON — decided
+
+**An exact value cannot be a JSON number.** `Value::Integer` is documented as *"Signed integer in
+the 53-bit safe range"* (`kernel/src/ontology/resource.rs:32-33`), which states the constraint
+outright: JSON numbers are read as IEEE doubles by every practical parser, so anything above 2⁵³
+does not round-trip. The exact `0.05` is `3602879701896397 / 2⁵⁶`; the numerator (≈3.6×10¹⁵) fits
+under 2⁵³ and the denominator (≈7.2×10¹⁶) does not. The eV denominator, 10²⁸, misses by twelve
+orders of magnitude.
+
+**Decided: canonical decimal `num/den`, carried as `Value::String` and discriminated by the
+property's declared `data_type`.**
+
+```
+rational ::= '-'? uint ( '/' uint )?
+uint     ::= '0' | [1-9] [0-9]*
+```
+
+- reduced — `gcd(num, den) = 1`, established at admission (see "How much arithmetic must the kernel
+  do?");
+- `den > 0`, with the sign carried on the numerator;
+- `den = 1` emits a bare integer, with no `/1`;
+- no leading zeros, no `+`, no whitespace.
+
+Canonical form makes string equality value equality, so `values_equal` needs no rational-specific
+arm. That is the one thing `ResourceRef` got wrong and D84 §5 records: it "has a special case in
+`values_equal` that derived `PartialEq` does not share."
+
+**No new `Value` variant.** D84 §5 withdrew `Value::Json`'s split into `Inductive` /
+`InductiveRef` and gives two boundary tests a variant must pass. `Value::Rational` fails both:
+
+1. *The parser cannot produce it.* Discriminating `"1/20"` from the string `"1/20"` requires the
+   property's `data_type` — a schema fact — and the parser has no `Layer`, because `bootstrap`
+   parses `core-ontology.json` with `parent: None` and that parse creates `core:data_type`.
+2. *CBOR cannot preserve it.* `eigon_cbor.rs:203` maps `Value::String → Text` and `:370` maps
+   `Text → Value::String`. A rational encoded as text decodes back as a string.
+
+A variant failing both "exist[s] only between `LayerBuilder::build` and the next serialisation."
+The house pattern after D84 is `Value::iri`, which returns an ordinary `Value::String` and "makes no
+claim a reader could depend on" (`resource.rs:47-56`). Rationals follow it.
+
+**The magnitude is `Value::Embedded`, not a string.** D93's magnitude is `q × Π cᵢ^{eᵢ}` — a
+rational coefficient and a constant-exponent vector — so it is composite, and a delimited string
+would re-encode structure that Eigon-JSON already has. `Embedded` is anchored on a shape rather than
+a schema lookup, which is why D84 kept it: `eigon_cbor.rs:207` and `:397` round-trip it through the
+map form. The coefficient inside is a `core:rational` string by the rule above.
+
+**The suffix survives lowering, which is what makes it more than cosmetic.** `0.05` lowers to
+`Value::Float(0.05)` and serialises as the JSON number `0.05`; `0.05r` lowers to a `core:rational`
+and serialises as `"1/20"`. The two are structurally distinct in the serialised form, so the
+distinction is legible to a reader who never saw the ESL source.
+
+### Why not base64 — decided
+
+The codebase already assigns base64 a meaning: opaque bulk bytes in a string-typed slot. From
+`crates/eigenius-julia/src/conventions.rs:76-79` — *"Binary content rides through base64 because the
+ontology declares the property as `data_type: json`"* — and every call site is a file payload
+(`content_base64`, `content_b64`, source-tree archives). A rational is a small semantic scalar, not
+binary content.
+
+Base64 is 1.8× more compact asymptotically (1.33 chars/byte against decimal's 2.41), and
+bytes→bigint parses linearly where decimal→bigint is superlinear. Both wins are gated on magnitude,
+and the crossover sits above every value this document cites:
+
+| value | bits | decimal | base64 + framing |
+|---|---|---|---|
+| `1/20` | 9 | 4 | ~8 |
+| exact `0.05` (`3602879701896397/2⁵⁶`) | 109 | 34 | ~24 |
+| eV denominator `10²⁸` | 93 | 29 | ~16 |
+| at the 4096-bit bound | 4096 | ~1233 | ~683 |
+
+Base64 also does not reduce the canonicalisation burden. It trades four traps — leading zeros, sign
+placement, `den = 1`, reduction — for five: padding, alphabet (`+/` against `-_`), minimal-length
+two's complement, sign convention, and num/den framing. The trap it adds matters because the content
+hash runs over the serialised resource: a canonicality violation in decimal is visible (`01/20`),
+and one in base64 is not (a spurious leading `0x00` byte). When two resources hash differently over
+the same rational, decimal shows which digit diverged.
+
+**The condition that would reopen this:** rationals routinely landing within an order of magnitude
+of the 4096-bit bound. The size and parse-cost arguments turn on together at that point. The bound
+is a refusal threshold, not a typical size, so nothing currently approaches it.
 
 ## Scope
 
 **In.** `core:bigint` and `core:rational` as primitives; canonical form for rationals; new `Exp`
 literal variants; refusal behaviour above a bound; the chain-level type declarations.
 
-**In, and unspecified — this document must not be implemented until they are.** The bound's actual
-value; whether exponent rationals are a separate bounded carrier from magnitude rationals (which
-changes whether "In" names two primitives or three); and the chain-side surface every new literal
-needs — a new `eigentt:Term` constructor, encode/decode arms in the D47 mirror
-(`kernel/src/program/eigentt_type_mirror.rs`), a carrier in `ontology::Value` (whose `Integer` is
-documented as the 53-bit safe range, so an exact literal has no home today), the D1 Eigon-JSON form,
-and the ESL printer and compiler arms.
+**Two chain primitives, not three.** `core:bigint` and `core:rational` carry magnitude
+coefficients. The three exponent vectors D93 defines — dimension, kind, constants — are small fixed
+width and internal to the `Unit` primitive; they never touch arbitrary precision, and the arithmetic
+on them is D93's.
 
-**In, and only discovered while elaborating the open questions:** `gcd` at literal admission, since
+**Bound: 4096 bits**, refusing rather than truncating.
+
+**Also in: the chain-side surface every new literal needs** — a new `eigentt:Term` constructor,
+encode/decode arms in the D47 mirror (`kernel/src/program/eigentt_type_mirror.rs`), a carrier in
+`ontology::Value` (whose `Integer` is documented as the 53-bit safe range, so an exact literal has
+no home today), the D1 Eigon-JSON form, and the ESL printer and compiler arms.
+
+**In, and only discovered while elaborating:** `gcd` at literal admission, since
 verifying canonical form has no cheaper check; and rational addition on D93's unit exponents, since
 normalising `m^(1/2) * m^(1/2)` to `m` is exponent arithmetic. The draft's original scope said
 kernel-side arithmetic was out unless a consumer needed one — two do.
 
 **Out of v1.** General size-increasing arithmetic on magnitudes (multiplication, division), which is
-what would make the magnitude bound meaningless — note this exempts the exponent arithmetic admitted
-above, which is size-increasing but bounded, and the exemption is deliberate; a decimal surface type; arbitrary-precision floats;
+what would make the bound meaningless. Exponent arithmetic is not an exception to this: it is
+size-increasing but bounded at 16 bits, and it lives in D93's `Unit` primitive rather than on
+`core:rational`. a decimal surface type; arbitrary-precision floats;
 any change to `LitInt` or `LitFloat`.

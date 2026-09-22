@@ -71,8 +71,10 @@ denominator is 1 for nearly every unit; the cases where it is not are standard, 
 
 Manning's `n` is why the requirement is *rational* and not merely half-integer.
 
-**Taking a square root does not force this.** Kennedy types `sqrt : float<'u ^ 2> -> float<'u>` —
-the input is constrained to be a perfect square, so a root never produces a fractional exponent.
+**Taking a square root does not force this** — and in v1 the question does not arise, because
+`sqrt`-shaped signatures are out (see Scope). Kennedy types `sqrt : float<'u ^ 2> -> float<'u>`,
+constraining the input to a perfect square so a root never produces a fractional exponent; typing an
+*application* of that signature would need AG-unification, which v1 excludes.
 Standard deviation and RMS carry the quantity's own unit, and variance is squared. What forces
 rational exponents is a *stated* unit that is irreducibly fractional, which is what the table lists.
 
@@ -95,6 +97,70 @@ therefore not free. Three consequences:
   equations; over ℚ the same problem is ordinary linear algebra. Since v1 defers unification this
   costs nothing now, but re-establishing the most-general-unifier property over ℚ is part of
   whatever later brings it into scope, and should not be assumed from the paper.
+
+## The algebra, stated once: exponent vectors and a coefficient
+
+Earlier drafts conflated three structures. Separating them is what keeps symbolic algebra out of the
+kernel.
+
+| | structure | kernel operations |
+|---|---|---|
+| unit exponents | ℚ⁷ — a vector space over the seven base dimensions | add, subtract, scalar-multiply, compare |
+| kind exponents | ℚᴷ, *if* kinds get an algebra (open) | the same |
+| magnitude | ℚ × ℤ^C — a rational coefficient and integer powers of declared constants | **compare only** |
+
+All three are exponent vectors over a symbol set; a magnitude is that plus a rational coefficient.
+One mechanism, three instances, and no expressions anywhere — which is why the kernel needs no
+symbolic algebra.
+
+**A magnitude is a canonical datum, not a formula.** `q × Π cᵢ^{eᵢ}`, canonicalised by reducing `q`,
+sorting the constants and dropping zero exponents; zero is `(0, [])`. So `37π/180` and `π·37/180`
+are both `(37/180, [π ↦ 1])` and compare syntactically. There is nothing to reorder, which is the
+point: making `37 × π` and `π × 37` compare equal *as expressions* would need AC-normalisation, and
+that is symbolic algebra in the trusted surface.
+
+**It is a multiplicative group and deliberately not a ring.** `37π/180 + 1/2` escapes the form
+entirely — magnitudes are not closed under addition. They do not need to be: the kernel's only
+magnitude operation is equality. Unit normalisation adds *exponents*, not magnitudes; conversion
+multiplies, and happens at ingest outside the TCB.
+
+Where addition would be needed — anything that computes with quantities rather than checking them —
+the closure is `ℚ[π, π⁻¹]`, and with division `ℚ(π)`. Because π is transcendental that field is
+isomorphic to `ℚ(x)`: π is an indeterminate, equality reduces to comparing rational functions in
+lowest terms, and no transcendence question arises. It costs **polynomial** gcd rather than integer
+gcd, and it belongs to an institution or a program. Never the kernel.
+
+### The constant set is declared, and v1 declares `{π}`
+
+**With one constant the canonical form is provably a normal form.** `q₁·π^{k₁} = q₂·π^{k₂}` would
+require `q₁/q₂ = π^{k₂−k₁}`, and since π is transcendental (Lindemann, 1882) `π^n` is irrational for
+every `n ≠ 0`. So the exponents and coefficients must match, and syntactic equality of canonical
+forms **decides** value equality. A theorem, not an assumption.
+
+**With two or more it rests on an open problem.** The requirement is that the constants be
+multiplicatively independent modulo ℚ — no product of integer powers equal to a rational except
+trivially. Whether π and ln 2 satisfy that is **unknown**; each is individually transcendental (ln 2
+because otherwise `2 = e^{ln 2}` would be transcendental, by Lindemann–Weierstrass), but their joint
+independence would follow from Schanuel's conjecture and is unproved.
+
+**The failure mode is incompleteness, not unsoundness.** A hidden relation would make two magnitudes
+denoting one real compare *unequal* — the kernel refuses an equality that holds, never asserts a
+false one. That is the D86 posture, and deciding real equality is undecidable in general regardless.
+
+**And the boundary coincides with one this document already drew.** Every constant beyond π is
+needed by units v1 already excludes:
+
+| constant | needed by | v1 |
+|---|---|---|
+| π | angles, parsec, atomic units | **in**, provably decidable |
+| ln 10, ln 2 | neper, bel, decibel | already out — logarithmic units |
+| e | nothing in scope | — |
+
+So `{π}` is not a convenience. It is the exact closure of the unit set v1 admits, and admitting a
+second constant means admitting logarithmic units, which carry their own problems. The set is a
+**declared** part of the primitive, and the point at which a second constant is added is the point
+at which the normal-form guarantee changes from proved to assumed — which must be written down then,
+not discovered later.
 
 ## Normalisation only; parameterisation instead of unification
 
@@ -134,16 +200,20 @@ group is divisible rather than free, and Gaussian elimination over linear Diopha
 different algorithm from linear algebra over ℚ. This document says exactly that two sections below,
 and an earlier draft asserted the opposite here.
 
-**Implicit unit arguments are admissible, under one condition.** Writing `mean {u} [x,y,z]` and
-having `u` inferred is implicit-argument solving, and it stays first-order — hence within the
-existing `implicit(…)` machinery that `justification:Grounds.app` already uses — precisely when
-**every implicit unit variable appears alone as the index of at least one explicit argument's
-type**. Then solving is `Quantity ?u ≡ Quantity m`, which is syntactic.
+**Implicit unit arguments are in, and they require a kernel change.** `mean {u} [x,y,z]` with `u`
+inferred is implicit-argument solving, and it stays first-order — `Quantity ?u ≡ Quantity m` is
+syntactic — precisely when **every implicit unit variable appears alone as the index of at least one
+explicit argument's type**. A signature violating that, such as `c : {u} -> Quantity (u * u)`,
+requires `?u · ?u ≡ m · m`, which is AG-unification and stays out of v1. Those signatures are
+rejected rather than half-supported; the explicit Π is always available.
 
-A signature that violates the condition — an implicit `u` occurring only inside a product, as in a
-polymorphic constant `c : {u} -> Quantity (u * u)` — requires solving `?u * ?u ≡ m * m`, which is
-AG-unification and therefore outside v1. Such a signature is rejected rather than half-supported;
-writing the unit explicitly as a Π parameter is always available.
+**What it costs is larger than units.** The existing `implicit(…)` is `InductiveCtorDecl::implicit`
+— a per-constructor declaration on inductive types, whose only user is `justification:Grounds`.
+`Exp::Pi` carries no implicitness at all, so implicit function arguments do not exist in EigenTT
+today. Admitting them is a **general** kernel change — every Π type gains the affordance, not only
+unit-indexed ones — and it moves `eigentt:Term`'s `Pi` constructor and the D47 codec with it. Units
+motivate it; they are not the only beneficiary, and the blast radius is the whole type theory's
+binder.
 
 ## What is trusted, and how little
 
@@ -158,6 +228,7 @@ additional primitives. The trusted surface is:
 - seven base-unit symbols (second, metre, kilogram, ampere, kelvin, mole, candela),
 - a rational exponent vector over them,
 - a quantity-kind tag (see "Dimension is not the whole of a unit"),
+- a declared constant set — `{π}` in v1 — and integer exponents over it,
 - a canonicalisation: sort, reduce the fractions, drop zero exponents.
 
 That is the whole TCB addition. The SI *content* lives in chain ontology where it is authored,
@@ -191,11 +262,30 @@ derivable from the 2019 printing's Table 4, which the current edition removed.
 | `%` | not a unit — notation for a number | 0.01 |
 | `ppm` | not a unit | 10⁻⁶ |
 
-**Decided.** A unit carries a **quantity kind** alongside its dimension, and kind participates in
-the normal form, so `rad` and `sr` do not unify even though both have dimension 1. This is QUDT's split between `qudt:QuantityKind` and
-`qudt:QuantityKindDimensionVector` — and QUDT already carries this exact case: `PlaneAngle` and
-`SolidAngle` are distinct quantity kinds sharing one dimension vector (`A0E0L0I0M0H0T0D1`). One more
-reason to align rather than mint.
+**Decided.** A unit carries a **kind exponent vector** alongside its dimension vector — the same
+structure, over a set of quantity kinds rather than base dimensions (see "The algebra, stated
+once"). So `rad` is `angle¹`, `sr` is `angle²`, and `sr = rad²` falls out rather than being denied.
+
+**And kind exponents are carried only when the dimension vector is zero, discarded otherwise.**
+Without that rule a multiplicative kind vector re-breaks `s = rθ`: arc length is a length times a
+radian, the dimension works (`m × 1 = m`) but the kind multiplies too, leaving a length that carries
+`angle¹`. Which is precisely why an eighth base dimension was rejected below.
+
+| | dimension | kind | result |
+|---|---|---|---|
+| `rad · rad` | 0 | `angle²` | `sr` — kept, dimension is zero |
+| `m · rad` (arc length) | `L¹` | discarded | a plain length |
+| `m / m` | 0 | none | dimensionless, and distinct from `rad` |
+
+The rule is principled rather than a patch: the kind axis exists *because* dimension cannot separate
+dimensionless quantities. Once a quantity has a dimension, dimension does the separating and the
+kind has no work left.
+
+**This is stronger than the QUDT precedent**, and the difference should be recorded. QUDT has
+`PlaneAngle` and `SolidAngle` as distinct `qudt:QuantityKind`s sharing one dimension vector
+(`A0E0L0I0M0H0T0D1`) — a *classification*. It does not say `SolidAngle = PlaneAngle²`. Giving kinds
+an algebra is a deliberate step past it, taken so the relation between the two falls out instead of
+being asserted.
 `%` and `ppm` are not kinds but **scales** on the plain dimensionless unit, which is what they
 actually are.
 
@@ -239,12 +329,14 @@ The layer holds:
 - the SI-accepted non-SI units (min, h, d, ha, L, t, Da, eV, au),
 - conversion factors between commensurable units.
 
-**Load order.** After `core`, which supplies the primitive types the magnitude rests on. Before
-`formulas` and `statistics`, both of which would reference it — `formulas:Operator` signatures for
-unit-typed operators, and D52 quantities for their units. In the current bootstrap sequence
-(`kernel/src/bootstrap/mod.rs`) that places it between `runtime` and `formulas`; today `formulas`
-loads eighth and `statistics` twelfth, and neither references units yet, so inserting the layer is
-additive rather than a reordering.
+**Load order.** After `core`, which supplies the primitive types the magnitude rests on, and before
+`statistics`, whose quantities carry units. Nothing else constrains it.
+
+An earlier draft placed it before `formulas` and created a circularity: it also put conversion
+factors — including the symbolic `1° = π/180 rad` — *inside* the units layer as `FormulaTerm`
+values, and a layer holding `FormulaTerm` values cannot load before `formulas`. Retargeting to
+`eigentt:Term` dissolves that: the units layer holds no `formulas:` values, so its position is
+unconstrained relative to `formulas`.
 
 Adding a bootstrap layer moves the manifest and obliges a reseed. That is the same cost B6 and D89
 paid, and it is the reason the placement is settled here rather than discovered during
@@ -265,13 +357,18 @@ errors" is the requirement, and this does not deliver it.
 (`kernel/src/nbe/term.rs:135`). Rejected for the same reason, more sharply: unit agreement becomes a
 checked side condition, which breaks the type-level equality that parameterised functions depend on.
 
-**Units only in `FormulaTerm`.** Its constructors are `Var | LitFloat | OpRef | App | Lam | Pi`
-(the ontology's own prose says it "mirrors `Exp::Var / App / Lam / Pi` one-for-one", which
-undercounts by two). A unit expression *is* a product of powers, so it fits that fragment
-as an `App` spine over base-unit constants, and `formulas:Operator` already carries typed signatures
-with declared associativity and commutativity. But FormulaTerm is a chain-level projection that
-institutions read; putting units only there leaves the kernel unable to check them. FormulaTerm
-should carry the *projection* of a unit, not its definition.
+**Units in `FormulaTerm`.** Earlier drafts of this document treated `formulas:FormulaTerm` as the
+place units live. **That was a category error.** Propositions are `eigentt:Term` values, and a
+quantity inside `lt(dose, threshold)` has to be expressible there. `FormulaTerm` is something else
+by its own description — "the shared formula language across every numerical institution
+(Symbolics, IntervalArithmetic, JuMP, DiffEq, Catalyst)" — an exchange format for handing formulas
+to external solvers. The capability gap follows: `eigentt:Term` has 22 constructors including
+`CtorApp` and `ConstRef`; `FormulaTerm` has six (`Var | LitFloat | OpRef | App | Lam | Pi`) and a
+single float literal.
+
+So `formulas:` keeps a role, but a later and smaller one: a **projection** so numerical institutions
+can receive quantities. Out of v1. Putting units there would also leave the kernel unable to check them,
+since the kernel checks `eigentt:Term`.
 
 ## Affine units are an extension, not part of v1
 
@@ -285,12 +382,24 @@ paper addresses offsets nowhere. So °C needs its own construction.
 because °C is used for two different things, and the SI says so: a temperature *point*
 (`heated to 85 °C` → 358.15 K) and a temperature *difference* (`rose by 5 °C` → 5 K, **not**
 278.15 K, because the degree Celsius is equal in magnitude to the kelvin). Nothing in the unit
-distinguishes them; the disambiguator is in the prose — "to" versus "by".
+distinguishes them; the disambiguator is in the prose.
+
+**Not "to" versus "by", which this document assumed and D95 refuted.** `at` carries both readings
+(`incubated at 37 °C` is a point, `sampled at 5 °C intervals` a difference), and three constructions
+carry the difference reading with no preposition at all (`the temperature rose 5 °C`, `a 5 °C
+increase`, `5 °C warmer`). The measure phrase is neutral and its **consumer** supplies the reading —
+prepositions by vector semantics, scalar-change verbs by the measure-of-change function, the
+comparative morpheme by arithmetic. D95 records the evidence and the mechanism.
+
+The general rule this fixes: when a consumer takes the **vector** reading of a measure phrase in an
+affine unit, the result carries the associated vector unit. °C is the only affine derived unit in the
+SI, so the rule has exactly one instance — °C difference lands in K.
 
 So affine handling is partly a *grammar* concern, not purely a units one. v1:
 
 - assumes the **point** reading for a bare °C, which dominates in methods prose (`85 °C`, `37 °C`),
-- records the **difference** reading as a known gap until the grammar can disambiguate,
+- records the **difference** reading as a known gap until the grammar can disambiguate — the
+  mechanism is now settled (D95, "The quantity is neutral"), the grammar work is not yet done,
 - **normalises the value but never loses the authored unit** — storing 358.15 K where the source
   span reads "85 °C" is acceptable only because `enc:from_unit` keeps the surface recoverable. "What
   the author wrote" is a separate proposition from "what the quantity is", and this system says so
@@ -310,16 +419,43 @@ prefixes exceed `u64`, and 1 eV = 1.602176634 × 10⁻¹⁹ J needs a denominato
 
 - **Exactly rational** — most of them, many by definition since the 2019 SI: 1 h = 3600 s,
   1 au = 149597870700 m, 1 lb = 0.45359237 kg, every prefix as a power of ten.
-- **Irrational but exactly expressible** — 1° = π/180 rad. No rational represents it. The factor is
-  a symbolic expression with π as a constant — **which `formulas:` does not currently provide.** Its
-  operator catalogue is `add sub mul div pow neg exp log sin cos tan sqrt abs eq lt le derivative`
-  over `types:Real/Int/Bool`; there is no π, e or c. Adding the mathematical constants is scope, not
-  an existing affordance.
+- **Defined geometrically, giving a transcendental factor.** This is a *category*, not the single
+  exception an earlier draft implied by naming only `1° = π/180 rad`:
+  - the whole **angular family** — degree, arcminute, arcsecond, gradian, revolution, and
+    square-degree to steradian through π²;
+  - the **parsec**, which is a *length*: IAU 2015 defines it as exactly `648000/π` au, so
+    `1 pc = 149597870700 × 648000/π` m. A dimensional unit with a transcendental factor and nothing
+    angular about it once converted;
+  - **atomic units**, which reach π through `ħ = h/2π` — exactly, since `h` is fixed post-2019.
+
+  **The factor is not an expression.** Every member of this category has the form
+  `rational × π^k` — `(37/180, π¹)` for the degree, `(149597870700 × 648000, π⁻¹)` for the parsec,
+  `(1/32400, π²)` for the square degree — so it is a canonical datum in the same shape as a unit,
+  not a formula in `eigentt:Term` or `formulas:`. See "The algebra, stated once" above. An earlier
+  draft placed it in `eigentt:Term` as a `ConstRef` expression, which would have required
+  AC-normalisation to compare.
+
+  **Base-units-only sharpens this.** Since the chain admits no unit but the base ones, a degree
+  quantity must be converted before it is stored, and its converted magnitude is irrational. So the
+  magnitude carrier decides whether this category is expressible: strictly-rational puts every unit
+  in it out of v1 by consequence rather than by choice.
 - **Measured, carrying uncertainty** — the dalton is 1.660 539 068 92(52) × 10⁻²⁷ kg (CODATA 2022),
-  a measurement rather than a definition. It is also the case in point: an earlier draft of this
-  document quoted the CODATA 2018 value, superseded in 2024, while arguing in this very paragraph
-  that a measured factor must not masquerade as exact. A measured constant carries a *vintage* as
-  well as an uncertainty, and the chain must record both. A conversion factor that is itself a measurement belongs to D52, not
+  a measurement rather than a definition. It is also the case in point: an earlier draft quoted the
+  CODATA 2018 value, superseded in 2024, while arguing in this very paragraph that a measured factor
+  must not masquerade as exact. A measured constant carries a **vintage** as well as an uncertainty,
+  and the chain must record both.
+
+  **Decided: `Da` stays in v1 as a documented exception.** Base-units-only removed the alternative —
+  it can no longer keep its own base and defer the conversion — so `50 Da` becomes kilograms at
+  ingest by multiplying through a measured constant. The exception is that this conversion is
+  **not** exact and must not present as though it were: the converted quantity records the
+  constant's identity and its CODATA vintage alongside the stated unit, so a reader can tell a
+  magnitude derived through a measurement from one derived through a definition. Every other
+  SI-accepted unit in v1 converts through an exact factor and needs no such record.
+
+  This is narrower than it sounds — `Da` is the only measured-factor unit in v1's list. It is also
+  the one that will recur: any unit defined by a measured constant rather than a fixed one lands
+  here, and the mechanism is what makes admitting the next one a decision rather than an accident. A conversion factor that is itself a measurement belongs to D52, not
   here, and must not masquerade as exact.
 
 The second and third categories are small but they are not edge cases to be discovered later: angle
@@ -341,7 +477,8 @@ That resolves the two purposes without trading them off:
 Coercion disappears as a question: nothing converts at check time because everything already
 normalised at ingest, and the authored form was not discarded to achieve it.
 
-**What remains open is where the stated unit sits**, and the candidates trade against each other.
+**Where the stated unit sits** was reopened once and settled the other way; the candidates and the
+argument that moved it are below.
 
 **In the term, participating in equality.** Rejected: `24 h` and `86400 s` would then be distinct
 terms, and claims from different papers would not unify — losing the property that motivated
@@ -367,36 +504,68 @@ are what EigenQL is good at. But one property cannot disambiguate **several quan
 proposition** — `lt(dose, threshold)` with the dose stated in mg/kg and the threshold in mg/dL has
 two stated units and one slot.
 
-**Decided: in the term.** The question was whether a single proposition carries quantities stated in
-different units, and the WRN methods material answers it. Of 240 sentences, **nine carry two
-distinct units and one carries three**:
+**Decided: at the encoding level, on the source-span record — not in the term.**
+
+An earlier draft decided the opposite, putting the stated unit in the term. Its argument against a
+resource-level record was that one property cannot disambiguate **several quantities in one
+proposition**: of 240 WRN methods sentences, nine carry two distinct units and one carries three.
 
 > "The flask was placed on a rotator and incubated at 37 °C for 1 h."
 >
 > "…the plates were spun at 931g for 2 h at 30 °C."
 
-One claim, two or three quantities, unrelated units. A single resource-level property cannot record
-them, so the stated unit rides with the quantity in the term and the resource-property option is
-out.
+That argument assumed **one property on the claim resource**. The pipeline already carries something
+finer. `enc:EncodedClaim` *requires* `enc:from_unit`, the link back to the source span
+(`ontologies/encoding/encoding.esl:369, 409`), and the span it reaches — `enc:DiscourseUnit` — holds
+`enc:prose`, the verbatim source text, with `enc:span_start` and `enc:span_end` (`:33-42`). A stated
+unit keyed to a **sub-span** is not one property: nine sentences with two units are nine records
+carrying two, and the sentence with three carries three. The data is exactly representable.
 
-**The consequence is accepted, not evaded.** Stated units are not queryable until EigenQL can decode
-terms. "Which claims reported a dose in mg/kg" is not a query today. That is the same limitation the
-justification vocabulary already records for warrant projections, and the same answer applies: it is
-a Rust-API question now and an EigenQL one when terms become decodable. Recording an unqueryable
-fact correctly is better than recording a queryable one that cannot represent the data.
+**The tell that it never belonged in the term.** This document's own requirement for the term node
+was *preserved by `eval` and `readback`, ignored by `conv`*. A datum every semantic operation must
+ignore is not semantic content — it is provenance about the text, and the system has a provenance
+layer that is already mandatory on every encoded claim.
 
-**What this costs**, beyond the node itself:
+**What this avoids**, all of which the in-term decision had accepted as scope:
 
-- **Reference edges.** The stated unit names unit resources by IRI, and `core:mentions` projects a
-  term's internal references into the graph. So every quantity occurrence adds an edge to the units
-  layer, every claim carrying a quantity acquires a dependency on it, and the justification
-  well-foundedness check — transitive closure over `core:mentions` — grows accordingly.
-- **Term size.** The stated unit is a second full unit term per quantity, duplicated at every
-  occurrence, in a system where terms are stored and re-checked.
-- **The codec.** A new `eigentt:Term` constructor, encode/decode arms in the D47 mirror, a carrier
-  in `ontology::Value`, the D1 Eigon-JSON form, and the ESL printer and compiler.
+- **Queryability.** Resource properties are what EigenQL is good at, so "which claims reported a
+  dose in mg/kg" becomes a query now rather than after terms become decodable.
+- **Reference edges.** No unit IRIs inside terms, so `core:mentions` gains no edge per quantity
+  occurrence and the justification well-foundedness closure does not grow.
+- **Term size.** No second full unit term per quantity, duplicated at every occurrence.
+- **The codec, entirely.** No new `eigentt:Term` constructor, no D47 mirror arms, no
+  `ontology::Value` carrier, no D1 Eigon-JSON form, no ESL printer or compiler change.
 
-None of these is an objection; all of them are scope, and an earlier draft named only the node.
+The normalised term keeps one unit, so `24 h` and `86400 s` still unify — which is what normalising
+was for.
+
+**And nothing new is needed, because the stated unit is not a datum to record — it is the raw input
+to a normalisation, and the raw input is the prose.**
+
+`24 h` → `86400 s` is a function application. The term holds the output; `enc:prose` holds the input,
+verbatim, with `enc:span_start` and `enc:span_end`, and `enc:EncodedClaim` *requires* the link to it.
+The conversion is deterministic — exact rationals, no search (D94) — so input, function and output
+are all fixed. That is a complete record of the normalisation, and it needs no slot of its own.
+
+**A distinction an earlier draft of this section collapsed.** There are two separate things in the
+pipeline and only one of them is a record:
+
+| | What it is | Where it lives |
+|---|---|---|
+| the stated unit | the **input** to a deterministic normalisation | `enc:prose`, already required |
+| `931g` as gram or as standard gravity | a **choice** among felicitous parses | `enc:DecisionPoint` |
+
+`enc:DecisionPoint` "records a structural-disambiguation choice (S4) … All candidates already
+type-check, so this is auditable selection, not generation" (`encoding.esl:172-176`). It is the right
+home for the `931g` sense, and the wrong frame for the stated unit: nothing was selected when an
+author wrote `24 h`.
+
+**What remains open is narrow.** Aligning a prose sub-span with the quantity it produced in the term
+is re-derivable, since the prose is stored and the parse is deterministic, but it is not *recorded* —
+so "which claims reported a dose in mg/kg" is a text search over `enc:prose` rather than a query, and
+in the ten WRN sentences carrying two or three units a text match does not say which quantity was
+which. Whether that alignment is worth a structured slot is the open part, and it is a queryability
+question rather than a correctness one: nothing is lost either way.
 
 **A vocabulary hazard the same evidence surfaced — and this document currently guarantees it.**
 `931g` is g-force, not grams. The v1 vocabulary above is 7 base + 22 derived + 24 prefixes + the
@@ -408,6 +577,41 @@ So v1 must do one of two things, and it must say which: admit standard gravity (
 relative-centrifugal-force reading) as a named sense so the ranker can choose, or **refuse** to
 split a `g`-suffixed numeral rather than resolve it wrongly. Refusing is the fail-closed option and
 is the default until the sense exists.
+
+## "Normalised" names two operations, and only one is the kernel's
+
+The word is used for both below, which invites a contradiction that is not there.
+
+**Kennedy normalisation** sorts and reduces an exponent vector: `m · s⁻¹ · m → m² s⁻¹`. It converts
+nothing. This is what the kernel primitive does, and it is why an open expression like
+`Quantity (u · v⁻¹)` can be decided at check time.
+
+**Base conversion** rewrites `km` as `m` and scales the magnitude by 1000. This happens once, at
+ingest, when the stated form is turned into the normalised one.
+
+Two consequences follow, and they answer a question that otherwise looks open:
+
+- **The type index carries no scale**, because it is always in base units. `Quantity(km)` is not a
+  type that arises; `Quantity(m)` with a magnitude of 1000 and a stated unit of `km` is.
+- **The kernel never multiplies a magnitude.** Scale is consumed before anything reaches it, so the
+  "size-increasing magnitude arithmetic" D94 puts out of v1 is genuinely out, not smuggled in by
+  prefix folding.
+
+**Decided: the chain carries base units only.** A type index is an exponent vector over the seven
+base units and nothing else. `Quantity(g)` and `Quantity(km)` are not terms that arise; `Quantity(N)`
+is not either, since a derived unit is a definitional abbreviation for `kg m s⁻²` and normalises to
+that vector. The kernel therefore **restricts** rather than converts — an index that is not in base
+form is rejected, not rewritten — and it never applies a scale.
+
+That answers what happens to a term the parser did not build. An ESL source, the Rust API and an
+institution result are all held to the same contract, so none of them needs an ingest normaliser and
+none of them can smuggle in a scaled index.
+
+**Convenience functions do the mapping.** An author writing `5 g`, or an API caller passing grams,
+goes through a helper that converts to base units and records `g` as the stated unit. These live in
+the ESL elaborator and the Rust API — outside the kernel, on the same side of the TCB boundary as
+D86's literal normalisation and the bridge's unit canonicalisation. Three carriers, one discipline,
+and the kernel checks the result rather than performing it.
 
 ## Prefixes fold in the normalised form and survive in the stated one
 
@@ -490,7 +694,10 @@ draft claimed the whole composition layer was unaffected. Three things in the co
 - **`denote_cat` hard-codes `Entity` into every PP denotation** — `⟦cat_pp_arg(prep)⟧ = Entity`,
   `⟦cat_pp⟧ = Entity → Prop`, `⟦cat_measure⟧ = Entity → float`
   (`kernel/src/dcg/category.rs:71-104`). Since the felicity gate kernel-checks `sem : ⟦cat⟧`,
-  `at 37 °C` as an argument PP fails there rather than composing.
+  `at 37 °C` as an argument PP fails there rather than composing. `cat_measure` is the exception
+  that stays as it is: it denotes an **ordinal** scale, which admits ordering and no arithmetic, so
+  measured quantities take a separate category rather than widening this one (D95, "Opaque scales
+  and measured quantities are two sorts").
 - **Every preposition entry is monomorphic at `Entity`** — `lexicon:at_arg` is
   `cat_np(lexicon:Entity, num_any)` with `sem_type = Entity -> Entity`
   (`ontologies/lexicon/closed-class.esl:1756-1763`), and `ontology:prep_at` is itself an
@@ -511,15 +718,13 @@ What is genuinely new is narrower than it first appeared:
   tokenizer. The recognised span becomes **one chart item** carrying a magnitude and, where present,
   a unit — a bare `0.56` is the same item with no unit, which is what keeps cardinality and
   quantities on one path rather than two.
-- **Whether prepositions constrain their object's type.** `at 37 °C` and `at the promoter` are the
-  same preposition over different index types. If `at` is already polymorphic in its object's `T`,
-  nothing changes; if it is constrained, it needs widening. This is a question about the existing
-  lexicon, answerable by reading it.
-- **Which `Num` a quantity carries.** The feature is syntactic and erased by ⟦·⟧, so it only routes
-  agreement. `mass` (used bare as an argument, no determiner) is the closest existing fit — `24 h`
-  takes no article the way `MSI` does not — but `name` (D70, proper name of a kind) is also bare.
-  Reusing `mass` risks agreement behaviour a quantity should not have; a distinguished variant may
-  be cleaner. Small, but it should be decided rather than defaulted.
+- **The type-indexing of the PP categories.** `at 37 °C` and `at the promoter` are the same
+  preposition over different index types, and reading the lexicon settled it: `⟦cat_pp_arg(_)⟧ =
+  Entity`, `⟦cat_pp⟧ = Entity -> Prop` and `⟦cat_pp_than⟧ = Entity` all fix the object, so the
+  widening is required. D95 records it.
+- **`Num` is not a question.** A measure phrase is not a noun phrase: it is `MP`, and consumers
+  subcategorise for it directly, so no agreement feature is chosen lexically. The earlier framing
+  here, weighing `mass` against `name` (D70), does not apply. D95 records the mechanism.
 
 **Unit symbols are ambiguous, and the existing machinery already handles that kind of problem.**
 `931g` is g-force; `10 g` is grams. `M` is molar or mega. This is **polysemy, not a special case**:
@@ -542,47 +747,92 @@ correct for test statistics. The guide anticipates this: it "is expected to drif
 grows; check a claim against the baseline before relying on it." D93 landing means that guide needs
 a revision, not just an addition.
 
-## Open questions
+## The magnitude carrier — decided
 
-### The magnitude's numeric type
+`Quantity u` wraps a **magnitude**: a reduced rational coefficient and an integer exponent vector
+over the declared constant set, `q × Π cᵢ^{eᵢ}` with `C = {π}` in v1. Not a float, and not a bare
+rational.
 
-`Quantity u` wraps a number, and which number is D86's to settle, not this document's: §4 records
-that the founding argument for `core:float` does not survive and points at an exact rational without
-taking the pivot. A float-backed quantity inherits every D86 problem — non-reducing literals, the
-literal-normalisation workaround, the Lean-version gate. An exact-rational one inherits none.
+That admits the transcendental unit category — angles, the parsec, atomic units — which a strict
+rational would have excluded by consequence rather than by choice. It costs one more exponent
+vector, which is the mechanism the primitive already has, and no new kind of machinery. D94
+therefore supplies a *component* of a magnitude rather than the whole of it.
 
-Two things make the rational reading better than it first looks:
+**And it costs one thing that was not on the table when the choice was made: `gcd` in the kernel.**
+Everything else v1 stores is a terminating decimal — every conversion factor (eV→J, lb→kg, hour,
+au, the prefixes), every measurement, and every binary64 value, since 2 divides 10. A decimal
+carrier would therefore have sufficed for all of them and been canonical **by inspection**: strip
+trailing zeros, no arithmetic. The angle factors are what break it — `37/180` and `1/32400` both
+carry a factor of 3 and do not terminate — so the coefficient must be a general rational, and a
+general rational must be reduced to compare structurally. One gcd per literal at admission, which
+is what D94 now carries. Lean's own `Rat` pays the same price for the same reason.
+
+### Why not the other two
+
+`Quantity u` wraps a number, and D86 §4 records that the founding argument for `core:float` does not
+survive while declining to take the pivot.
+
+The choice is wider than float-versus-rational, and the third option is the one this document's
+algebra section supplies:
+
+| | transcendental units (angles, parsec, atomic units) | cost |
+|---|---|---|
+| `core:float` | representable, inexactly | inherits every D86 problem — non-reducing literals, the normalisation workaround, the version gate |
+| strict `core:rational` | **out of v1 by consequence**, not by choice | simplest carrier |
+| `q × Π cᵢ^{eᵢ}` over `{π}` | **in**, with equality provably decided | `Quantity` wraps a pair; the kernel gains one more exponent vector and no new kind of machinery |
+
+The third buys angles, parsecs and atomic units for a mechanism the primitive already needs for
+units, and keeps π in the kernel as a symbol rather than a number. Its cost is that a magnitude is
+not "a number" — which also means D94 supplies a component of the magnitude rather than the whole
+of it.
+
+Two things make the exact readings better than they first look:
 
 - **Every measurement is a finite decimal, hence exactly rational.** An instrument reports 4.21 mm,
-  not √2 mm. The irrational quantities in science are *constants* (π, e, c in natural units), and
-  those are symbolic. `formulas:` does **not** carry them today — no π, e or c in the operator
-  catalogue — so admitting them is scope.
+  not √2 mm. Irrationality enters through *constants*, not measurements — and under the third
+  option a constant is a declared symbol carrying an integer exponent in the magnitude's canonical
+  form, not a `ConstRef` inside an expression. That is what keeps the comparison syntactic.
 - **The kernel does not compute with magnitudes.** Institutions do. So the usual objection to exact
   rationals — repeated arithmetic blows up the denominator — does not apply where the value is
   stored and compared rather than accumulated.
 
-What would decide it: whether any kernel-side operation needs to *reduce* a magnitude rather than
-compare it. D94 argues none does.
-
 ## Scope
 
-**In.** The `Unit` kernel primitive (seven base symbols, a rational exponent vector, a quantity-kind
-tag, and canonicalisation);
+**In.** The `Unit` kernel primitive: seven base symbols with a rational exponent vector; a **kind
+exponent vector** carried only when the dimension vector is zero; a declared constant set `{π}` with
+integer exponents; and canonicalisation over all three. A **magnitude** of `q × Π cᵢ^{eᵢ}`.
+**Implicit Π** as a kernel change — not a unit feature but a general one that units motivate, moving
+`eigentt:Term`'s `Pi` constructor and the D47 codec with it;
 `Quantity : Unit -> Set`; the SI content as chain ontology (7 base, 22 derived, 24 prefixes,
 SI-accepted non-SI units — min, h, d, ha, L, t, Da, eV, au); conversion factors as exact rationals
-(D94); the FormulaTerm projection; °C as a documented extension with the point assumption; an erased
-annotation node so a quantity can carry its stated unit without that unit entering definitional
-equality.
+(D94); a new `eigentt:Term` constructor carrying a unit value, with the codec arms it obliges (the
+D47 mirror, `ontology::Value` as `Value::Embedded` per D94, Eigon-JSON, the ESL printer and compiler) — note `eigentt:Term`'s
+literals are `LitInt/LitString/LitFloat/LitBool` with **no `LitUnit`**, which is a cost a primitive
+`Unit` pays and an inductive one would not; °C as a documented extension with the point assumption;
+and — at the encoding level, not in the term — a per-occurrence stated-unit record hung off the
+source span (`enc:DiscourseUnit`, which already carries `enc:prose` and character offsets), with
+whatever occurrence identity lets it name which quantity in the term it is the surface of.
+
+An earlier draft put an **erased annotation node** in the term for the stated unit. That is out: a
+datum every semantic operation must ignore is provenance, not meaning, and the encoding layer that
+holds it is already required on every `enc:EncodedClaim`.
 
 **Consequent work, specified in D95.** Span recognition before tokenization, the unit sub-parser,
-quantity items in `seed_leaves`, unit-symbol lexical entries with senses, the `Num` decision, and a
-revision of `docs/method/controlled-english-style-guide.md` — whose first DON'T instructs authors to
+quantity items in `seed_leaves`, unit-symbol lexical entries with senses, the measure-phrase category
+and the subcategorised preposition entries that take it, and a revision of
+`docs/method/controlled-english-style-guide.md` — whose first DON'T instructs authors to
 drop inline numbers and becomes wrong for quantities once they parse.
 
-**Out of v1.** AG-unification and unit-variable inference; affine units other than °C; logarithmic
-units (dB, Np, pH); **intervals and ranges** (`15–18`, `20–30%`) — a follow-up that needs the
+**Out of v1.** AG-unification and unit-variable inference — including **`sqrt`-shaped signatures**,
+since typing an application of `float<'u^2> -> float<'u>` requires solving `?u · ?u ≡ m²`. This costs
+less than it appears: rational exponents were decided for *stated* units (`V/√Hz`, `MPa·√m`,
+Manning's `s·m^(−1/3)`), not for root operations, and D52 is unblocked because an institution
+computes a standard deviation however it likes and **declares** its result's unit. Also out: affine
+units other than °C; logarithmic units (dB, Np, pH), which are also the only thing needing a second
+constant; **intervals and ranges** (`15–18`, `20–30%`) — a follow-up that needs the
 en-dash/hyphen distinction to separate a range from a catalogue number, and an interval type that
-`formulas:` already anticipates by naming IntervalArithmetic as a target institution.
+`formulas:` anticipates by naming IntervalArithmetic as a target institution — which is the kind of
+thing `formulas:` is actually for, and the shape a later quantity projection into it would take.
 
 **Prior art to align to rather than mint.** The BIPM SI Brochure as normative — the seven base units
 are defined by fixed constants, which suits a formal system. Cite the **current** edition, not the
