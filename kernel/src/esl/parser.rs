@@ -1370,6 +1370,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 return Ok(Term::LitFloat { value: f, pos });
             }
+            TokenKind::RatLit(r) => {
+                self.advance();
+                return Ok(Term::LitRat { value: r, pos });
+            }
             TokenKind::BoolLit(b) => {
                 self.advance();
                 return Ok(Term::LitBool { value: b, pos });

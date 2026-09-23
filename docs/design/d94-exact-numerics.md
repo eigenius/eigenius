@@ -267,6 +267,24 @@ type-errors against the unsuffixed literals or leaves them alone. D86's pivot be
 The marker is surface only. It does not reach the chain, because by then the carrier is a declared
 `data_type` rather than a spelling.
 
+**Two surface forms, not one — the suffix alone is incomplete.** Only a rational whose reduced
+denominator is `2^a · 5^b` has a terminating decimal, so the suffix cannot express `37/180`, which
+is this project's own degrees-to-radians coefficient (D93), nor `1/3`. The surface therefore admits:
+
+| Form | Example | Role |
+|---|---|---|
+| decimal suffix | `0.05r` | what an author writes; exact, so `0.05r` is `1/20` and never the binary64 |
+| canonical | `r"37/180"` | always expressible, always reparses; **what the printer emits** |
+
+`r"..."` is lexed before the identifier branch, so a bare `r` is still an identifier, and `5rem`
+still lexes as an integer followed by a name. The quoted form refuses a non-canonical spelling
+rather than normalising it, for the reason the codec does: two spellings of one value would hash
+differently.
+
+**Extending the lexer to accept `37/180r` was rejected.** On seeing `37/180` it would have to decide
+literal-versus-division with only a trailing `r` to disambiguate, which is unbounded lookahead past
+a `/`.
+
 ### Lowering to Eigon-JSON — decided
 
 **An exact value cannot be a JSON number.** `Value::Integer` is documented as *"Signed integer in

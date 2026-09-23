@@ -676,6 +676,11 @@ pub enum Term {
         value: f64,
         pos: Position,
     },
+    /// D94 — an exact rational, from `0.05r` or `r"37/180"`. Lowers to `Exp::LitRat`.
+    LitRat {
+        value: crate::numeric::Rational,
+        pos: Position,
+    },
     /// eigenius#142 — boolean literal in type position. Lowers to
     /// `Exp::LitBool`. Needed so a D47 term containing the `LitBool`
     /// ctor prints to ESL source that reparses.
@@ -811,6 +816,7 @@ impl Term {
             | Term::LitString { pos, .. }
             | Term::LitInt { pos, .. }
             | Term::LitFloat { pos, .. }
+            | Term::LitRat { pos, .. }
             | Term::LitBool { pos, .. } => pos,
         }
     }

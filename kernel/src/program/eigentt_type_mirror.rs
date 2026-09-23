@@ -406,6 +406,13 @@ pub(crate) fn encode_term(exp: &Exp, names: &CodecNames) -> Result<Value, Encode
         ),
         Exp::LitString(s) => term(names, "LitString", vec![Value::String(s.clone())]),
         Exp::LitInt(n) => term(names, "LitInt", vec![Value::Integer(*n)]),
+        // Canonical decimal in a string: the only form an exact value round-trips through, since
+        // `Value::Integer` is the 53-bit safe range and JSON numbers are doubles (D94).
+        Exp::LitRat(r) => term(
+            names,
+            "LitRat",
+            vec![Value::String(r.to_canonical_string())],
+        ),
         Exp::LitFloat(f) => term(names, "LitFloat", vec![Value::Float(*f)]),
         Exp::LitBool(b) => term(names, "LitBool", vec![Value::Boolean(*b)]),
         other => Err(EncodeError::NotATypeLevelExp(format!("{other:?}"))),
@@ -1117,6 +1124,20 @@ fn decode_value(r: &Resource, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
             })?;
             Ok(Exp::LitInt(n))
         }
+        "LitRat" => {
+            expect_arg_count("LitRat", 1, args)?;
+            let s = args[0].as_str().ok_or_else(|| {
+                DecodeError::MalformedValue(format!(
+                    "LitRat arg must be a canonical rational string, got {:?}",
+                    args[0]
+                ))
+            })?;
+            // Refuse a non-canonical spelling rather than normalise it: the encoder only ever
+            // emits canonical form, so anything else was authored or corrupted.
+            let r = crate::numeric::Rational::parse_canonical(s)
+                .map_err(|e| DecodeError::MalformedValue(e.to_string()))?;
+            Ok(Exp::LitRat(r))
+        }
         "LitFloat" => {
             expect_arg_count("LitFloat", 1, args)?;
             let f = args[0].as_float().ok_or_else(|| {
@@ -1241,6 +1262,8 @@ fn resolve_const_ref(iri: Iri, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> 
         wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
         wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
         wk::JSON => return Ok(Exp::EigonPrimitive(PrimitiveType::Json)),
+        wk::RATIONAL => return Ok(Exp::EigonPrimitive(PrimitiveType::Rational)),
+        wk::BIGINT => return Ok(Exp::EigonPrimitive(PrimitiveType::BigInt)),
         _ => {}
     }
     let resource = ctx
@@ -1622,6 +1645,48 @@ mod tests {
         let encoded = encode_type(&original, crate::testing::codec_names()).unwrap();
         let decoded = decode_type(&encoded, &layer).unwrap();
         assert_eq!(decoded, original);
+    }
+
+    /// D94 — an exact rational round-trips through D47 as a canonical decimal STRING. The values
+    /// are the ones a JSON number cannot carry: the exact binary64 `0.05` (a 57-bit denominator)
+    /// and the eV denominator 10^28 (93 bits), both past `core:integer`'s 53-bit safe range.
+    #[test]
+    fn lit_rat_roundtrip_carries_values_a_json_number_cannot() {
+        use num_bigint::BigInt;
+        use num_traits::Pow;
+        let layer = empty_layer();
+        let cases = [
+            crate::numeric::Rational::new(1.into(), 20.into()).unwrap(),
+            crate::numeric::Rational::new((-37).into(), 180.into()).unwrap(),
+            crate::numeric::Rational::new(
+                BigInt::from(3602879701896397i64),
+                BigInt::from(2).pow(56u32),
+            )
+            .unwrap(),
+            crate::numeric::Rational::new(BigInt::from(1602176634i64), BigInt::from(10).pow(28u32))
+                .unwrap(),
+        ];
+        for r in cases {
+            let original = Exp::LitRat(r.clone());
+            let encoded = encode_type(&original, crate::testing::codec_names()).unwrap();
+            let decoded = decode_type(&encoded, &layer).unwrap();
+            assert_eq!(decoded, original, "round-trip failed for {r}");
+        }
+    }
+
+    /// The decoder refuses a non-canonical spelling rather than normalising it. The encoder only
+    /// ever emits canonical form, so anything else was authored or corrupted.
+    #[test]
+    fn lit_rat_decode_refuses_a_non_canonical_spelling() {
+        let layer = empty_layer();
+        let names = crate::testing::codec_names();
+        for bad in ["2/4", "01", "1/1", "+1", "1.5", "", "one"] {
+            let encoded = term(names, "LitRat", vec![Value::String(bad.to_string())]).unwrap();
+            assert!(
+                decode_type(&encoded, &layer).is_err(),
+                "expected `{bad}` to be refused"
+            );
+        }
     }
 
     #[test]

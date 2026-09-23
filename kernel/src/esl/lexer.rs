@@ -119,6 +119,11 @@ pub enum TokenKind {
     StringLit(String),
     IntLit(i64),
     FloatLit(f64),
+    /// An exact rational (D94), from either surface form: the decimal suffix `0.05r`, or the
+    /// canonical `r"37/180"`. Two forms because the suffix cannot express a rational whose
+    /// reduced denominator is not 2^a·5^b — and `37/180`, degrees to radians, is exactly such a
+    /// value (D93). The canonical form is what the printer emits.
+    RatLit(crate::numeric::Rational),
     BoolLit(bool),
 
     // Identifier (bare word: name, breed, short_name)
@@ -373,6 +378,12 @@ impl<'a> Lexer<'a> {
             return self.lex_number(pos);
         }
 
+        // Rational literal in canonical form — `r"37/180"`. Checked BEFORE the identifier
+        // branch, which would otherwise take the `r`.
+        if ch == b'r' && self.peek_at(1) == Some(b'"') {
+            return self.lex_rational_string(pos);
+        }
+
         // Lambda unicode: λ is U+03BB, encoded as CE BB in UTF-8
         if ch == 0xCE && self.peek_at(1) == Some(0xBB) {
             self.advance();
@@ -397,6 +408,30 @@ impl<'a> Lexer<'a> {
             pos,
             format!("unexpected character: '{}'", ch as char),
         ))
+    }
+
+    /// `r"37/180"` — a rational in canonical form. Refuses a non-canonical spelling rather than
+    /// normalising it, for the same reason the codec does: two spellings of one value would hash
+    /// differently (D94).
+    fn lex_rational_string(&mut self, pos: Position) -> Result<Token, EslError> {
+        self.advance(); // the `r`
+        let tok = self.lex_string(pos.clone())?;
+        let TokenKind::StringLit(s) = tok.kind else {
+            return Err(EslError::lexer(
+                pos,
+                "expected a string after `r`".to_string(),
+            ));
+        };
+        let r = crate::numeric::Rational::parse_canonical(&s).map_err(|e| {
+            EslError::lexer(
+                pos.clone(),
+                format!("invalid rational literal `r\"{s}\"`: {e}"),
+            )
+        })?;
+        Ok(Token {
+            kind: TokenKind::RatLit(r),
+            pos,
+        })
     }
 
     fn lex_string(&mut self, pos: Position) -> Result<Token, EslError> {
@@ -464,6 +499,31 @@ impl<'a> Lexer<'a> {
         }
 
         let text = &self.input[start..self.pos];
+
+        // The `r` suffix makes the literal EXACT: `0.05r` is 1/20, where a bare `0.05` is the
+        // binary64 3602879701896397/2^56. Different numbers, which is why the marker is on the
+        // surface rather than inferred from the slot's type (D94).
+        //
+        // Guarded against swallowing an identifier: `5rem` is not a rational followed by `em`.
+        if self.peek() == Some(b'r')
+            && !self
+                .peek_at(1)
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == b'_')
+        {
+            let text = text.to_string();
+            self.advance(); // the `r`
+            let r = crate::numeric::Rational::parse_decimal(&text).map_err(|e| {
+                EslError::lexer(
+                    pos.clone(),
+                    format!("invalid rational literal `{text}r`: {e}"),
+                )
+            })?;
+            return Ok(Token {
+                kind: TokenKind::RatLit(r),
+                pos,
+            });
+        }
+
         if is_float {
             let val: f64 = text
                 .parse()
@@ -968,5 +1028,65 @@ mod tests {
                 TokenKind::RBrace,
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod rational_literal_tests {
+    use super::*;
+
+    fn kinds(src: &str) -> Vec<TokenKind> {
+        tokenize(src)
+            .expect("lexes")
+            .into_iter()
+            .map(|t| t.kind)
+            .filter(|k| *k != TokenKind::Eof)
+            .collect()
+    }
+
+    fn rat(s: &str) -> TokenKind {
+        TokenKind::RatLit(crate::numeric::Rational::parse_canonical(s).unwrap())
+    }
+
+    #[test]
+    fn the_suffix_makes_a_decimal_exact() {
+        // `0.05r` is 1/20. A bare `0.05` is the binary64 3602879701896397/2^56 — a different
+        // number, which is why the marker is on the surface (D94).
+        assert_eq!(kinds("0.05r")[0], rat("1/20"));
+        assert_eq!(kinds("0.05")[0], TokenKind::FloatLit(0.05));
+    }
+
+    #[test]
+    fn the_canonical_form_expresses_what_a_decimal_cannot() {
+        // 37/180 — degrees to radians (D93) — has no terminating decimal, so the suffix form
+        // cannot reach it. This is why there are two surface forms.
+        assert_eq!(kinds("r\"37/180\"")[0], rat("37/180"));
+        assert_eq!(kinds("r\"-1/3\"")[0], rat("-1/3"));
+        assert_eq!(kinds("r\"7\"")[0], rat("7"));
+    }
+
+    #[test]
+    fn an_integer_takes_the_suffix_too() {
+        assert_eq!(kinds("37r")[0], rat("37"));
+    }
+
+    #[test]
+    fn the_suffix_does_not_swallow_an_identifier() {
+        // `5rem` is an integer followed by an identifier, not a rational followed by `em`.
+        let k = kinds("5rem");
+        assert_eq!(k[0], TokenKind::IntLit(5));
+    }
+
+    #[test]
+    fn a_non_canonical_quoted_form_is_refused() {
+        // The same refusal the codec makes: two spellings of one value would hash differently.
+        for bad in ["r\"2/4\"", "r\"01\"", "r\"1/1\"", "r\"1.5\""] {
+            assert!(tokenize(bad).is_err(), "expected `{bad}` to be refused");
+        }
+    }
+
+    #[test]
+    fn a_bare_r_is_still_an_identifier() {
+        assert!(matches!(kinds("r")[0], TokenKind::Ident(_)));
     }
 }

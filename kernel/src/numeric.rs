@@ -28,6 +28,13 @@ use std::fmt;
 /// by more than triple and still refuses `10^1000000` long before anything threatens termination.
 pub const MAX_BITS: u64 = 4096;
 
+/// The largest power of ten a bounded value can carry: `10^1233` is 4096 bits, `10^1234` is 4099.
+///
+/// Checked BEFORE the power is computed. [`MAX_BITS`] exists so an authored term cannot ask the
+/// checker for unbounded work (D94), and computing `10^999999999` to discover it is too large does
+/// exactly that work — the check has to come first or it is not a bound.
+const MAX_DECIMAL_EXPONENT: u32 = 1233;
+
 /// Why a rational could not be admitted.
 ///
 /// Every variant REFUSES. Nothing here truncates, rounds or normalises a malformed input into a
@@ -178,6 +185,73 @@ impl Rational {
         Ok(value)
     }
 
+    /// Parses a decimal literal EXACTLY — `0.05` is 1/20, not 3602879701896397/2^56.
+    ///
+    /// Accepts the spellings a source text uses: `37`, `0.05`, `5e-2`, `1.6e-19`, with an optional
+    /// leading `-`. They denote one value, not three approximations: an exact rational has no
+    /// lattice of representable values, so the radix has no semantic role here, only a surface one
+    /// (D94, "Not open either: the radix").
+    ///
+    /// This is the conversion behind the `r` suffix. Without it `0.05r` would have to be written
+    /// `1/20` to be exact, and a decimal surface where `0.05` silently meant the binary64 value
+    /// would be the trap the suffix exists to close.
+    pub fn parse_decimal(s: &str) -> Result<Self, RationalError> {
+        let bad = || RationalError::Malformed(s.to_string());
+        let (negative, rest) = match s.strip_prefix('-') {
+            Some(r) => (true, r),
+            None => (false, s),
+        };
+        let (mantissa, exp) = match rest.split_once(['e', 'E']) {
+            Some((m, e)) => {
+                let e: i32 = e.parse().map_err(|_| bad())?;
+                (m, e)
+            }
+            None => (rest, 0),
+        };
+        let (int_part, frac_part) = match mantissa.split_once('.') {
+            Some((i, f)) => (i, f),
+            None => (mantissa, ""),
+        };
+        if int_part.is_empty() && frac_part.is_empty() {
+            return Err(bad());
+        }
+        let digits = format!("{int_part}{frac_part}");
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(bad());
+        }
+        // Before parsing: a decimal with more digits than the bound allows cannot be admitted, and
+        // reading it into a bignum first would be the unbounded work the bound forbids.
+        if digits.len() > MAX_DECIMAL_EXPONENT as usize + 1 {
+            return Err(RationalError::TooLarge {
+                component: Component::Numerator,
+                bits: MAX_BITS + 1,
+            });
+        }
+        let mut numer: BigInt = digits.parse().map_err(|_| bad())?;
+        if negative {
+            numer = -numer;
+        }
+        // The value is `digits × 10^(exp - frac_len)`. A negative power becomes the denominator.
+        let scale = exp - i32::try_from(frac_part.len()).map_err(|_| bad())?;
+        let ten = BigInt::from(10);
+        let magnitude = scale.unsigned_abs();
+        if magnitude > MAX_DECIMAL_EXPONENT {
+            return Err(RationalError::TooLarge {
+                component: if scale >= 0 {
+                    Component::Numerator
+                } else {
+                    Component::Denominator
+                },
+                bits: MAX_BITS + 1,
+            });
+        }
+        if scale >= 0 {
+            Rational::from_integer(numer * ten.pow(magnitude))
+        } else {
+            Rational::new(numer, ten.pow(magnitude))
+        }
+    }
+
     /// Renders the canonical decimal form: `num`, or `num/den` when the denominator is not 1.
     pub fn to_canonical_string(&self) -> String {
         if self.is_integer() {
@@ -191,6 +265,28 @@ impl Rational {
 impl fmt::Display for Rational {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_canonical_string())
+    }
+}
+
+/// Serialises as the canonical decimal STRING, never as a number.
+///
+/// A JSON number is an IEEE double, so an exact value does not survive one. Making this the only
+/// serde representation means every path through serde is canonical by construction rather than by
+/// each call site remembering (D94).
+impl serde::Serialize for Rational {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(&self.to_canonical_string())
+    }
+}
+
+/// Deserialises from the canonical form, REFUSING any other spelling.
+///
+/// `2/4` and `01` are numbers, and are still rejected: two spellings of one value would hash
+/// differently, and the content hash runs over the serialised resource.
+impl<'de> serde::Deserialize<'de> for Rational {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let s = <String as serde::Deserialize>::deserialize(de)?;
+        Rational::parse_canonical(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -277,6 +373,95 @@ mod tests {
         ] {
             assert!(
                 Rational::parse_canonical(s).is_err(),
+                "expected `{s}` to be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn decimal_spellings_denote_one_exact_value() {
+        // D94: `0.05`, `5e-2` and `1/20` are three spellings of one value, not three
+        // approximations. Contrast the binary64 reading below, which is a different number.
+        for s in ["0.05", "5e-2", "0.0500", "5E-2", "500e-4"] {
+            assert_eq!(
+                Rational::parse_decimal(s).expect(s).to_canonical_string(),
+                "1/20",
+                "for `{s}`"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_decimal_is_exact_where_binary64_is_not() {
+        // The whole reason for the suffix: these are different numbers.
+        let exact = Rational::parse_decimal("0.05").unwrap();
+        let binary64 = Rational::new(
+            BigInt::from(3602879701896397i64),
+            BigInt::from(2).pow(56u32),
+        )
+        .unwrap();
+        assert_ne!(exact, binary64);
+        assert_eq!(exact.to_canonical_string(), "1/20");
+    }
+
+    #[test]
+    fn parse_decimal_handles_signs_integers_and_exponents() {
+        assert_eq!(
+            Rational::parse_decimal("37").unwrap().to_canonical_string(),
+            "37"
+        );
+        assert_eq!(
+            Rational::parse_decimal("-0.5")
+                .unwrap()
+                .to_canonical_string(),
+            "-1/2"
+        );
+        assert_eq!(
+            Rational::parse_decimal("1.5e2")
+                .unwrap()
+                .to_canonical_string(),
+            "150"
+        );
+        assert_eq!(
+            Rational::parse_decimal("0").unwrap().to_canonical_string(),
+            "0"
+        );
+    }
+
+    /// The bound has to be checked BEFORE the power is computed, or it is not a bound: `10^1e9`
+    /// is a 3.3-billion-bit integer — about 415 MB, and some thirty squarings to build — and an
+    /// earlier version of `parse_decimal` constructed it before discovering it was too large.
+    #[test]
+    fn a_huge_exponent_is_refused_without_computing_it() {
+        let start = std::time::Instant::now();
+        for s in ["1e999999999", "1e-999999999", "1e2000", "1e-2000"] {
+            assert!(
+                matches!(
+                    Rational::parse_decimal(s),
+                    Err(RationalError::TooLarge { .. })
+                ),
+                "expected `{s}` to be refused as too large"
+            );
+        }
+        // Generous, but four exponentiations at that size would not finish this side of a year.
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "the bound was checked after the work, not before"
+        );
+    }
+
+    #[test]
+    fn the_largest_admissible_power_of_ten_still_parses() {
+        // 10^1233 is 4096 bits; 10^1234 is 4099.
+        assert!(Rational::parse_decimal(&format!("1e{MAX_DECIMAL_EXPONENT}")).is_ok());
+        assert!(Rational::parse_decimal(&format!("1e{}", MAX_DECIMAL_EXPONENT + 1)).is_err());
+    }
+
+    #[test]
+    fn parse_decimal_refuses_what_is_not_a_decimal() {
+        for s in ["", ".", "1.2.3", "1e", "abc", "1/2"] {
+            assert!(
+                Rational::parse_decimal(s).is_err(),
                 "expected `{s}` to be refused"
             );
         }

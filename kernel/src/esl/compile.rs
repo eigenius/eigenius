@@ -795,6 +795,7 @@ fn expand_aliases(typ: &ast::Term, env: &BTreeMap<String, ast::Term>) -> ast::Te
         ast::Term::Sort { .. }
         | ast::Term::LitString { .. }
         | ast::Term::LitInt { .. }
+        | ast::Term::LitRat { .. }
         | ast::Term::LitFloat { .. }
         | ast::Term::LitBool { .. } => typ.clone(),
     }
@@ -1609,6 +1610,7 @@ impl Compiler {
             )),
             ast::Term::LitString { pos, .. }
             | ast::Term::LitInt { pos, .. }
+            | ast::Term::LitRat { pos, .. }
             | ast::Term::LitFloat { pos, .. }
             | ast::Term::LitBool { pos, .. } => Err(EslError::compiler(
                 Some(pos.clone()),
@@ -2021,6 +2023,7 @@ impl Compiler {
             // `Vec(3, A)`, etc.) inside `type_expr(...)`.
             ast::Term::LitString { value, .. } => Ok(Exp::LitString(value.clone())),
             ast::Term::LitInt { value, .. } => Ok(Exp::LitInt(*value)),
+            ast::Term::LitRat { value, .. } => Ok(Exp::LitRat(value.clone())),
             ast::Term::LitFloat { value, .. } => Ok(Exp::LitFloat(*value)),
             ast::Term::LitBool { value, .. } => Ok(Exp::LitBool(*value)),
             // Eliminated by the early-return at the top of this fn.
@@ -2287,6 +2290,7 @@ impl Compiler {
             ast::Term::Sort { .. }
             | ast::Term::LitString { .. }
             | ast::Term::LitInt { .. }
+            | ast::Term::LitRat { .. }
             | ast::Term::LitFloat { .. }
             | ast::Term::LitBool { .. } => encode_leaf(self, typ),
             // Eliminated by the early-return at the top of this fn.
