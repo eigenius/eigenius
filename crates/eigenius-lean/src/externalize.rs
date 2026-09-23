@@ -468,6 +468,21 @@ fn go<'x, 't: 'x, 'p: 't>(
                     PrimitiveType::Integer => "Int",
                     PrimitiveType::Boolean => "Bool",
                     PrimitiveType::Float => "Float",
+                    // D86 §4 settled this target: Lean's `Rat` is
+                    // `structure Rat where mk' :: num : Int; den : Nat; den_nz; reduced`, and its
+                    // invariant — `den ≠ 0` and `num.natAbs.Coprime den` — is exactly what
+                    // `numeric::Rational`'s constructor establishes. So the comorphism asserts an
+                    // agreement that holds by construction on both sides, which is what makes it
+                    // a supportable TCB entry rather than a hopeful one.
+                    PrimitiveType::Rational => "Rat",
+                    // Lean's `Int` is arbitrary precision, so every `core:bigint` is one. The
+                    // 4096-bit bound is ours, for termination (D94), not a claim about which
+                    // integers exist — so the mapping is total in the direction that matters.
+                    //
+                    // `core:integer` maps here too. The two differ in chain-side REPRESENTATION,
+                    // i64 against arbitrary precision, and not in what they denote; Lean has one
+                    // integer type and both are subsets of it.
+                    PrimitiveType::BigInt => "Int",
                     // `Float` has the same problem `LitFloat` has, and `Json` is a chain-side
                     // carrier with no Lean image at all.
                     PrimitiveType::Json => {
@@ -644,6 +659,26 @@ fn go<'x, 't: 'x, 'p: 't>(
         // `3.141592653589793`, so this is a reproduction of the value rather than an
         // approximation of it — the distinction §5 turns on.
         Exp::LitFloat(f) => float_literal(*f, tc.ctx, cx),
+
+        // D86 §4 specifies the shape: a rational is emitted as the normalized STRUCTURE LITERAL
+        // `Rat.mk' num den _ _`, never as `num / den`. A division puts `HDiv.hDiv` in the term, so
+        // every `def_eq` against it drives `Rat.div → Rat.inv → Rat.mul → Rat.normalize → Nat.gcd`
+        // — the reduction that normalising exists to avoid, reintroduced on the exact type.
+        //
+        // What is not built yet is the two proof fields. `den_nz` and `reduced` are `by decide`,
+        // and discharging them from Rust means constructing `Decidable.decide` applications and
+        // `of_decide_eq_true` witnesses in nanoda. That is its own piece of work, and nothing on
+        // the chain needs it: the type mapping above is enough for a proposition that QUANTIFIES
+        // over rationals, and this refusal is reached only by one that contains a literal.
+        //
+        // The invariant itself is already free — `numeric::Rational`'s constructor establishes
+        // exactly `den ≠ 0` and `num.natAbs.Coprime den`, which is what the two fields assert.
+        Exp::LitRat(_) => outside(
+            "LitRat",
+            "D86 §4's shape is `Rat.mk' num den _ _`, whose `den_nz` and `reduced` fields are \
+             `by decide` proofs this externalizer cannot yet construct. The type maps (Rat); the \
+             literal does not",
+        ),
 
         Exp::Data(_) => outside(
             "Data",
