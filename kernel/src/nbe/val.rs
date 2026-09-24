@@ -98,6 +98,9 @@ pub enum Val {
     /// `Exp::LitRat` at the value level (D94) — canonical, so two of
     /// these compare structurally and `conv` does no arithmetic.
     LitRat(crate::numeric::Rational),
+    /// `Exp::LitUnit` at the value level (D93) — canonical for the same
+    /// reason, and distinct from [`Val::Unit`], which is `()`.
+    LitUnit(crate::units::Unit),
     /// Template value with resolved property type requirements.
     /// Template("literal", [(iri, resolved_type)])
     TemplateVal(String, Vec<(Iri, Val)>),

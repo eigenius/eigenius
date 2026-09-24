@@ -363,6 +363,7 @@ pub(crate) fn encode_term(exp: &Exp, names: &CodecNames) -> Result<Value, Encode
                 PrimitiveType::Json => wk::JSON,
                 PrimitiveType::Rational => wk::RATIONAL,
                 PrimitiveType::BigInt => wk::BIGINT,
+                PrimitiveType::Unit => wk::UNIT,
             };
             const_ref(names, iri_str, &[])
         }

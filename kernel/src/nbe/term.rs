@@ -221,6 +221,20 @@ pub enum Exp {
     /// decide it is "whether any slot wants an exact integer that is
     /// not part of a rational"; nothing identified does.
     LitRat(crate::numeric::Rational),
+    /// Literal unit of measure at the expression level (D93).
+    /// Type: `Exp::EigonPrimitive(PrimitiveType::Unit)`.
+    ///
+    /// NOT [`Exp::Unit`], which is `()`, the value of the unit TYPE
+    /// [`Exp::One`]. The `Lit` prefix is the disambiguator, as it is for
+    /// every other literal here. This one carries a
+    /// [`crate::units::Unit`] — a rational exponent vector over the seven
+    /// SI base dimensions, plus kind exponents.
+    ///
+    /// Always canonical, because `units::Unit` is only constructible
+    /// through operations that canonicalise: exponents reduced, zeros
+    /// dropped, and kinds discarded once the dimension vector is
+    /// non-zero. So `conv` compares two of these structurally.
+    LitUnit(crate::units::Unit),
     /// Property access on a resource: e.property
     PropAccess(Box<Exp>, Iri),
     /// Template literal with extracted property references.
@@ -431,6 +445,11 @@ pub enum PrimitiveType {
     Float,
     Boolean,
     Json,
+    /// A unit of measure (D93). Its values are `Exp::LitUnit`, always canonical.
+    ///
+    /// NOT the unit type: that is `Exp::One`, whose value is `Exp::Unit`. This is `m`, `kg·s^-2`,
+    /// `rad` — the index a `Quantity` is parameterised by.
+    Unit,
     /// An exact rational (D94). Its values are `Exp::LitRat`, always in canonical form.
     ///
     /// Distinct from [`PrimitiveType::Float`], which is binary64 and approximates: `0.05` as a
@@ -742,6 +761,7 @@ impl Exp {
             ),
 
             Exp::LitRat(r) => Exp::LitRat(r.clone()),
+            Exp::LitUnit(u) => Exp::LitUnit(u.clone()),
 
             Exp::Lam(p, b) => Exp::Lam(p.clone(), bx(b)),
             Exp::Pi(p, a, b) => Exp::Pi(p.clone(), bx(a), bx(b)),

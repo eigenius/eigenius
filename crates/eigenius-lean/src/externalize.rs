@@ -483,6 +483,23 @@ fn go<'x, 't: 'x, 'p: 't>(
                     // i64 against arbitrary precision, and not in what they denote; Lean has one
                     // integer type and both are subsets of it.
                     PrimitiveType::BigInt => "Int",
+                    // D93 units. Lean's core has no units-of-measure type, and the shape is not
+                    // one a comorphism can fake: a unit is a rational exponent vector over seven
+                    // base dimensions with kind exponents beside it, canonicalised by rules
+                    // (kinds discarded once the dimension vector is non-zero) that no Lean
+                    // structure carries. Mapping it to a `Nat`-indexed vector would assert an
+                    // agreement about CANONICAL FORM that nothing on the Lean side establishes.
+                    //
+                    // What would lift the refusal: a Lean development of the same algebra whose
+                    // normal form we can state agrees with `units::Unit`'s — at which point this
+                    // becomes a TCB entry reviewable on its merits, as the `Iri` note below says
+                    // of `Std.URI`.
+                    PrimitiveType::Unit => return outside(
+                        "EigonPrimitive(Unit)",
+                        "a unit of measure; Lean core has no units-of-measure type, and asserting \
+                         a canonical-form agreement with one we invented would be an unsupportable \
+                         TCB entry",
+                    ),
                     // `Float` has the same problem `LitFloat` has, and `Json` is a chain-side
                     // carrier with no Lean image at all.
                     PrimitiveType::Json => {
@@ -673,6 +690,15 @@ fn go<'x, 't: 'x, 'p: 't>(
         //
         // The invariant itself is already free — `numeric::Rational`'s constructor establishes
         // exactly `den ≠ 0` and `num.natAbs.Coprime den`, which is what the two fields assert.
+        // No Lean image for the type (see `PrimitiveType::Unit` below), so none for its values
+        // either. Refused rather than approximated: a unit erased to a bare number is a quantity
+        // whose dimension is gone, which is the silent mistyping D93 exists to prevent.
+        Exp::LitUnit(_) => outside(
+            "LitUnit",
+            "a unit-of-measure literal; its type has no Lean image, and erasing the unit would \
+             leave a dimensionless number",
+        ),
+
         Exp::LitRat(_) => outside(
             "LitRat",
             "D86 §4's shape is `Rat.mk' num den _ _`, whose `den_nz` and `reduced` fields are \

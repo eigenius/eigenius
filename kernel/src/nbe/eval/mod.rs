@@ -226,6 +226,7 @@ pub(crate) fn eval_impl<T: Tracer>(
         Exp::LitFloat(f) => Ok((Val::LitFloat(*f), T::leaf())),
         Exp::LitBool(b) => Ok((Val::LitBool(*b), T::leaf())),
         Exp::LitRat(r) => Ok((Val::LitRat(r.clone()), T::leaf())),
+        Exp::LitUnit(u) => Ok((Val::LitUnit(u.clone()), T::leaf())),
 
         Exp::Dec(d, e) => {
             // Branching on the *capability*, not on the environment (D76 Phase B):
@@ -902,6 +903,10 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
         // Canonical form is what makes this structural: two rationals are equal iff their
         // components are, so `conv` does no arithmetic (D94).
         (Val::LitRat(a), Val::LitRat(b)) => a == b,
+        // Same for units (D93): `units::Unit` canonicalises on construction — exponents reduced,
+        // zeros dropped, kinds discarded once the dimension vector is non-zero — so `m·s^-1·m` and
+        // `m^2·s^-1` ARE the same value and compare equal without normalising here.
+        (Val::LitUnit(a), Val::LitUnit(b)) => a == b,
         (Val::ResourceVal(a), Val::ResourceVal(b)) => {
             // Compare resource contents for equality
             a.properties() == b.properties() && a.id() == b.id()
@@ -998,6 +1003,43 @@ mod tests {
         let third = eval(&rat(1, 3), &Rho::Nil)?;
         assert!(ground_values_equal(&half, &also_half));
         assert!(!ground_values_equal(&half, &third));
+        Ok(())
+    }
+
+    /// D93 — the arm the compiler does NOT flag. `units::Unit` canonicalises on construction, so
+    /// `m·s⁻¹·m` and `m²·s⁻¹` are one value and must compare equal; without the `LitUnit` arm in
+    /// `ground_values_equal` they fall through to `false`, which is eigenius#142's bug on a new
+    /// carrier.
+    #[test]
+    fn equal_units_are_definitionally_equal_however_written() -> Result<(), EvalError> {
+        use crate::units::{BaseDimension, Exponent, Unit};
+        let m = Unit::base(BaseDimension::Length);
+        let s_ = Unit::base(BaseDimension::Time);
+
+        // `m · s⁻¹ · m` against `m² · s⁻¹`.
+        let long = m.mul(&s_.recip().unwrap()).unwrap().mul(&m).unwrap();
+        let short = m
+            .pow(Exponent::integer(2))
+            .unwrap()
+            .mul(&s_.recip().unwrap())
+            .unwrap();
+
+        let a = eval(&Exp::LitUnit(long), &Rho::Nil)?;
+        let b = eval(&Exp::LitUnit(short), &Rho::Nil)?;
+        let c = eval(&Exp::LitUnit(m.clone()), &Rho::Nil)?;
+        assert!(ground_values_equal(&a, &b));
+        assert!(!ground_values_equal(&a, &c));
+        Ok(())
+    }
+
+    /// `rad` and the plain dimensionless unit share a dimension vector and must NOT be equal —
+    /// the whole reason the kind axis exists.
+    #[test]
+    fn rad_is_not_the_plain_dimensionless_unit() -> Result<(), EvalError> {
+        use crate::units::{Kind, Unit};
+        let rad = eval(&Exp::LitUnit(Unit::kind(Kind::Angle, 1)), &Rho::Nil)?;
+        let one = eval(&Exp::LitUnit(Unit::dimensionless()), &Rho::Nil)?;
+        assert!(!ground_values_equal(&rad, &one));
         Ok(())
     }
 

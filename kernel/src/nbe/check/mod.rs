@@ -1400,6 +1400,9 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::LitRat(_) => Ok(Val::EigonPrimitive(
             crate::nbe::term::PrimitiveType::Rational,
         )),
+        // D93. Unlike `LitRat`, there is no refinement to reach in check mode, so this is the
+        // whole story: a unit literal has one type.
+        Exp::LitUnit(_) => Ok(Val::EigonPrimitive(crate::nbe::term::PrimitiveType::Unit)),
 
         e => Err(CheckError::CannotInfer(format!(
             "cannot infer type of: {e:?}"
@@ -1544,6 +1547,33 @@ mod tests {
         // Even one that IS an integer: inference does not look at the value.
         let t = check_infer(&mut ctx(), &rat(4, 2)).unwrap();
         assert!(matches!(t, Val::EigonPrimitive(PrimitiveType::Rational)));
+    }
+
+    /// D93 — the other arm the compiler does NOT flag. Without it a unit literal hits
+    /// `CannotInfer` and is untypeable.
+    #[test]
+    fn a_unit_literal_infers_to_the_unit_primitive() {
+        let u = Exp::LitUnit(crate::units::Unit::base(
+            crate::units::BaseDimension::Length,
+        ));
+        let t = check_infer(&mut ctx(), &u).unwrap();
+        assert!(matches!(t, Val::EigonPrimitive(PrimitiveType::Unit)));
+    }
+
+    /// `PrimitiveType::Unit` is a unit of MEASURE. It is not the unit type `One`, and not
+    /// confusable with any other carrier.
+    #[test]
+    fn the_unit_primitive_is_unrelated_to_every_other_carrier() {
+        for other in [
+            PrimitiveType::String,
+            PrimitiveType::Integer,
+            PrimitiveType::Float,
+            PrimitiveType::Rational,
+            PrimitiveType::BigInt,
+        ] {
+            assert!(!PrimitiveType::Unit.subtype_of(other));
+            assert!(!other.subtype_of(PrimitiveType::Unit));
+        }
     }
 
     /// `core:bigint` is reachable only in CHECK mode, where it VERIFIES `den == 1`.
