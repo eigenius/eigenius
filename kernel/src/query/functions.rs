@@ -27,7 +27,6 @@ pub fn call_function(name: &str, args: &[Value]) -> Result<Value, QueryError> {
         "CONTAINS" => fn_contains(args),
         "CONCAT" => fn_concat(args),
         "UNIT" => fn_unit(args),
-        "MAGNITUDE" => fn_magnitude(args),
         "DIMENSION" => fn_dimension(args),
         _ => Err(QueryError::evaluation(format!("unknown function: {name}"))),
     }
@@ -83,7 +82,7 @@ fn fn_regex(args: &[Value]) -> Result<Value, QueryError> {
 /// D93 carries a unit as its canonical STRING rather than as an embedded resource, for three
 /// reasons recorded there: an embedded value adds a `core:mentions` edge per quantity occurrence,
 /// it costs term size, and a string keeps one carrier rule shared with `core:rational`. This
-/// function and the two below are what pays for that — the query layer decomposes the string, so
+/// function and `DIMENSION` below are what pay for that — the query layer decomposes the string, so
 /// nothing is lost by not storing it decomposed.
 ///
 /// `DATE` above is the same shape: a composite value (year, month, day) carried as canonical text
@@ -98,19 +97,6 @@ fn fn_unit(args: &[Value]) -> Result<Value, QueryError> {
     let u = crate::units::Unit::parse_canonical(s)
         .map_err(|e| QueryError::evaluation(format!("UNIT: {e}")))?;
     Ok(Value::String(u.to_canonical_string()))
-}
-
-/// `MAGNITUDE(s)` — validates a canonical magnitude string and returns it.
-fn fn_magnitude(args: &[Value]) -> Result<Value, QueryError> {
-    if args.len() != 1 {
-        return Err(QueryError::evaluation("MAGNITUDE requires 1 argument"));
-    }
-    let s = args[0]
-        .as_str()
-        .ok_or_else(|| QueryError::evaluation("MAGNITUDE argument must be a string"))?;
-    let m = crate::units::Magnitude::parse_canonical(s)
-        .map_err(|e| QueryError::evaluation(format!("MAGNITUDE: {e}")))?;
-    Ok(Value::String(m.to_canonical_string()))
 }
 
 /// `DIMENSION(u)` — the unit with its kinds dropped, leaving the physical dimension.
@@ -393,16 +379,5 @@ mod tests {
             call("DIMENSION", &["m"]).unwrap(),
             Value::String("m".to_string())
         );
-    }
-
-    #[test]
-    fn magnitude_validates_a_canonical_string() {
-        assert_eq!(
-            call("MAGNITUDE", &["37/180\u{b7}\u{3c0}"]).unwrap(),
-            Value::String("37/180\u{b7}\u{3c0}".to_string())
-        );
-        // The decimal surface belongs to ingest, not to the stored form.
-        assert!(call("MAGNITUDE", &["0.5"]).is_err());
-        assert!(call("MAGNITUDE", &["2/4"]).is_err());
     }
 }

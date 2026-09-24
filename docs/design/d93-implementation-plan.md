@@ -55,9 +55,14 @@ constructs than by raw embedded fields, and the pattern is already in the system
 (`query/functions.rs:33-47`) takes a canonical STRING, validates its format, and returns it. A date
 is composite — year, month, day — carried as text and given meaning by a function.
 
-So `DIMENSION(q)`, `COMMENSURABLE(a, b)` and `MAGNITUDE(q)` join the six functions
-`call_function` already dispatches. That is a better interface than filtering on a field named
-`dimension_2`, and it keeps the carrier consistent with D94's.
+So `UNIT(u)` and `DIMENSION(u)` join the six functions `call_function` already dispatches. That is
+a better interface than filtering on a field named `dimension_2`, and it keeps the carrier
+consistent with D94's. `COMMENSURABLE(a, b)` is not added: it is `DIMENSION(a) = DIMENSION(b)`.
+
+**A magnitude has no carrier of its own.** It reaches a term as the two arguments of
+`Quantity.mk(coefficient : core:rational, pi : core:integer)` — see D93, "How a magnitude reaches a
+term". Slice 2 first gave `Magnitude` a canonical string, serde and a `MAGNITUDE()` query function;
+all three were removed once that was decided, because nothing on the chain stores one.
 
 **Consequent on this:** canonical form must be established at construction, as `Rational`'s is, so
 string equality is value equality and `conv` does no arithmetic. `units::Unit` already guarantees it.
@@ -92,10 +97,10 @@ Two things the compiler will NOT flag, both of which bit D94 silently:
 
 Neither is a compile error. Add both arms and a test for each before moving on.
 
-## Slice 2 — `Unit` and `Magnitude` carriers, and the EigenQL constructs
+## Slice 2 — the `Unit` string carrier, and the EigenQL constructs
 
-The canonical string form (parse and print, refusing non-canonical input, as `Rational` does), plus
-`DIMENSION`, `COMMENSURABLE` and `MAGNITUDE` in `call_function`. No longer blocked.
+Done (`24c09a5`). The canonical string form for `Unit` (parse and print, refusing non-canonical
+input, as `Rational` does), serde over it, and `UNIT` and `DIMENSION` in `call_function`.
 
 ## Slice 3 — chain surface AND SI content, then ONE reseed
 
@@ -106,7 +111,9 @@ a units layer moves it just as `core-ontology.json` does. Both must land togethe
 - `core:unit` as a `DataType` in `core-ontology.json`, **and its entry in `core:data_type`'s
   `allows_only` set** — that set is closed, and omitting it fails the bootstrap outright (D94 hit
   exactly this).
-- `Quantity : Unit -> Set` as a chain inductive, value-indexed by a unit.
+- `units:Quantity (u : core:unit) : Set` as a chain inductive with `u` a uniform parameter, as
+  `core:Asserts` has `iri : core:string`. One constructor,
+  `mk(coefficient : core:rational, pi : core:integer)`.
 - A new `eigentt:Term` constructor carrying a unit value, with its D47 mirror arms.
 - The Eigon-JSON form, and the ESL printer and compiler arms.
 - `ontologies/units/units.esl` as a 21st `BootstrapOntology`: 7 base, 22 named derived, 24 prefixes,

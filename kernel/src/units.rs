@@ -534,53 +534,6 @@ impl Magnitude {
     pub fn constant_exponent(&self, c: Constant) -> i16 {
         self.constants.get(&c).copied().unwrap_or(0)
     }
-
-    /// Renders the canonical form: the coefficient, then each constant in `Constant` order.
-    pub fn to_canonical_string(&self) -> String {
-        self.to_string()
-    }
-
-    /// Parses the canonical form, refusing every other spelling — mirrors [`Unit::parse_canonical`]
-    /// including the closing round-trip check.
-    ///
-    /// The coefficient is a canonical [`Rational`], so `0.5` is refused here as it is there: the
-    /// decimal surface belongs to `Rational::parse_decimal` at ingest, not to the stored form.
-    pub fn parse_canonical(s: &str) -> Result<Magnitude, UnitError> {
-        let bad = || UnitError::Malformed(s.to_string());
-        let mut parts = s.split('\u{b7}');
-        let coefficient =
-            Rational::parse_canonical(parts.next().ok_or_else(bad)?).map_err(|_| bad())?;
-        let mut m = Magnitude::rational(coefficient);
-        for part in parts {
-            let (name, power) = match part.split_once('^') {
-                Some((n, e)) => {
-                    let (negative, digits) = match e.strip_prefix('-') {
-                        Some(rest) => (true, rest),
-                        None => (false, e),
-                    };
-                    if !is_canonical_uint(digits) || digits == "0" {
-                        return Err(bad());
-                    }
-                    let v: i16 = digits.parse().map_err(|_| bad())?;
-                    (n, if negative { -v } else { v })
-                }
-                None => (part, 1),
-            };
-            let c = match name {
-                "\u{3c0}" => Constant::Pi,
-                _ => return Err(bad()),
-            };
-            // A repeated constant would otherwise be silently overwritten by `with_constant`.
-            if m.constant_exponent(c) != 0 {
-                return Err(bad());
-            }
-            m = m.with_constant(c, power);
-        }
-        if m.to_canonical_string() != s {
-            return Err(bad());
-        }
-        Ok(m)
-    }
 }
 
 impl fmt::Display for Magnitude {
@@ -616,19 +569,6 @@ impl<'de> serde::Deserialize<'de> for Unit {
     fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         let s = <String as serde::Deserialize>::deserialize(de)?;
         Unit::parse_canonical(&s).map_err(serde::de::Error::custom)
-    }
-}
-
-impl serde::Serialize for Magnitude {
-    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
-        ser.serialize_str(&self.to_canonical_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Magnitude {
-    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        let s = <String as serde::Deserialize>::deserialize(de)?;
-        Magnitude::parse_canonical(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -863,39 +803,6 @@ mod tests {
         assert_eq!(m.dimension_only(), m);
     }
 
-    #[test]
-    fn canonical_magnitude_strings_round_trip() {
-        let cases = [
-            Magnitude::rational(rat(37, 1)),
-            Magnitude::rational(rat(37, 180)).with_constant(Constant::Pi, 1),
-            Magnitude::rational(rat(1, 1)).with_constant(Constant::Pi, -2),
-        ];
-        for m in cases {
-            let printed = m.to_canonical_string();
-            let back = Magnitude::parse_canonical(&printed)
-                .unwrap_or_else(|e| panic!("{printed:?} did not parse: {e}"));
-            assert_eq!(m, back);
-        }
-    }
-
-    #[test]
-    fn non_canonical_magnitude_spellings_are_refused() {
-        for bad in [
-            "0.5",                         // the decimal surface belongs to ingest
-            "2/4",                         // unreduced
-            "1\u{b7}\u{3c0}^1",            // explicit `^1`
-            "1\u{b7}\u{3c0}^0",            // a zero power is dropped
-            "1\u{b7}\u{3c0}\u{b7}\u{3c0}", // repeated constant
-            "1\u{b7}e",                    // undeclared constant
-            "\u{3c0}",                     // no coefficient
-        ] {
-            assert!(
-                Magnitude::parse_canonical(bad).is_err(),
-                "{bad:?} should have been refused"
-            );
-        }
-    }
-
     /// serde carries the canonical string and nothing else, so a structural spelling cannot enter
     /// through a deserialiser.
     #[test]
@@ -909,9 +816,5 @@ mod tests {
 
         // A non-canonical spelling is refused at the serde boundary too.
         assert!(serde_json::from_str::<Unit>("\"m\u{b7}m\"").is_err());
-
-        let m = Magnitude::rational(rat(37, 180)).with_constant(Constant::Pi, 1);
-        let json = serde_json::to_string(&m).unwrap();
-        assert_eq!(serde_json::from_str::<Magnitude>(&json).unwrap(), m);
     }
 }

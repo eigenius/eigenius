@@ -848,6 +848,36 @@ Two things make the exact readings better than they first look:
   rationals — repeated arithmetic blows up the denominator — does not apply where the value is
   stored and compared rather than accumulated.
 
+### How a magnitude reaches a term — decided: as the arguments of `Quantity.mk`
+
+`units:Quantity (u : core:unit) : Set` has one constructor:
+
+```
+mk(coefficient : core:rational, pi : core:integer) : Quantity u
+```
+
+`37°` is `mk(r"37/180", 1)` at `Quantity(angle)`. The type theory has no magnitude carrier: no `Exp`
+variant, no `PrimitiveType`, no DataType, no ESL literal. `units::Magnitude` is computed at ingest
+and lowered into these two arguments.
+
+The pair is canonical by construction. A canonical rational and an integer each have one spelling,
+and a quantity without π carries `pi = 0`. Equality is constructor-application equality on those
+arguments, which the kernel already decides.
+
+**The alternative was a `LitMagnitude` literal**: one canonical string in one slot, matching the
+Rust type exactly. It would make a second constant an additive change, where this shape makes it an
+arity change and a reseed. That cost lands where it belongs. A second constant needs a unit v1
+excludes (the table above), and it is the point at which canonical equality goes from proved, by
+Lindemann, to assumed, by Schanuel's conjecture. This document already requires that point to be
+written down when it is reached.
+
+**`units::Magnitude` is more general than this chain form**, in two ways the lowering must respect:
+
+- `constants` is a map over `Constant`; the chain has one slot. Lowering is total while `Constant`
+  has one variant, and becomes partial exactly when a second is added.
+- The exponent is `i16`; `core:integer` is the 53-bit safe range. Lowering always fits. Raising a
+  stored `pi` refuses a value outside `i16` rather than truncating it.
+
 ## Scope
 
 **In.** The `Unit` kernel primitive: seven base symbols with a rational exponent vector; a **kind
