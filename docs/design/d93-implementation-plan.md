@@ -11,11 +11,8 @@ D94 is done and landed, so exact rationals are available for conversion factors.
 
 None can be worked around, and each changes what gets written.
 
-1. **The embedded shape for `Unit` and `Magnitude`.** D94's lowering settles that a magnitude is
-   composite and lowers to `Value::Embedded`, but not what the fields are. `Unit` carries three
-   exponent vectors (dimension ℚ⁷, kind ℚᴷ, and — on a magnitude — constants ℤ^C); `Magnitude`
-   carries a rational coefficient beside its constant exponents. Flagged as "verify before starting"
-   in the D94 plan and still open.
+1. ~~**The embedded shape for `Unit` and `Magnitude`.**~~ **DECIDED — canonical string, not
+   `Value::Embedded`.** See "The carrier for `Unit` and `Magnitude`" below.
 2. **`931g`.** D93 states v1 "must do one of two things, and it must say which": admit standard
    gravity into the vocabulary, or refuse the numeral/unit split for it. Against the 7 + 22 + 24
    list as written, `931g` resolves to 931 **grams** — the silent mistyping the document warns
@@ -23,6 +20,43 @@ None can be worked around, and each changes what gets written.
 3. **Occurrence identity for the stated-unit record.** A per-occurrence record must name WHICH
    quantity in the term it is the surface of. Unambiguous for a single-quantity claim; not for the
    ten WRN sentences carrying two or three units.
+
+## The carrier for `Unit` and `Magnitude` — decided
+
+**A canonical string in `Value::String`, with EigenQL surface constructs for querying. Not
+`Value::Embedded`.**
+
+An earlier draft of this plan said `Value::Embedded`, on the grounds that a unit is *composite*.
+That reason does not survive: a rational is composite too — numerator and denominator — and D94 put
+it in `Value::String`. Composite-ness only rules out a SCALAR carrier like `Value::Float`. A string
+is not a scalar carrier, it is a serialisation, and a CANONICAL composite serialises to one exactly
+as `1/20` does.
+
+What actually separates the two is that `Embedded` is a resource and a string is text. Three
+consequences, and they run one way:
+
+- **`core:mentions` edges.** `term_mentions.rs:93-99` is explicit: `Value::String(_) => {}` — "a bare
+  string is not a reference" — while `Value::Embedded(r)` inserts every class in `r.is_a()`. So an
+  embedded unit adds an edge per quantity occurrence, and D93 already names the cost: "every claim
+  carrying a quantity acquires a dependency on [the units layer], and the justification
+  well-foundedness check — transitive closure over `core:mentions` — grows accordingly." A string
+  adds none.
+- **Term size**, which D93 lists as a cost in its own right. `s^-1·m^2` is what `Unit`'s `Display`
+  already emits.
+- **Consistency** with the rational carrier, so one rule covers both.
+
+**The one argument for `Embedded` was queryability** — dimension exponents are something you would
+plausibly filter on, unlike a rational's numerator. That is answered better by dedicated EigenQL
+constructs than by raw embedded fields, and the pattern is already in the system: `DATE`
+(`query/functions.rs:33-47`) takes a canonical STRING, validates its format, and returns it. A date
+is composite — year, month, day — carried as text and given meaning by a function.
+
+So `DIMENSION(q)`, `COMMENSURABLE(a, b)` and `MAGNITUDE(q)` join the six functions
+`call_function` already dispatches. That is a better interface than filtering on a field named
+`dimension_2`, and it keeps the carrier consistent with D94's.
+
+**Consequent on this:** canonical form must be established at construction, as `Rational`'s is, so
+string equality is value equality and `conv` does no arithmetic. `units::Unit` already guarantees it.
 
 ## Blast radius: let the compiler count it
 
@@ -54,10 +88,10 @@ Two things the compiler will NOT flag, both of which bit D94 silently:
 
 Neither is a compile error. Add both arms and a test for each before moving on.
 
-## Slice 2 — `Magnitude` → `Value::Embedded`
+## Slice 2 — `Unit` and `Magnitude` carriers, and the EigenQL constructs
 
-Blocked on decision 1. `Value::Embedded` is shape-anchored, so it survives the parser and CBOR
-boundaries that D84 §5's tests rule a schema-discriminated variant out of.
+The canonical string form (parse and print, refusing non-canonical input, as `Rational` does), plus
+`DIMENSION`, `COMMENSURABLE` and `MAGNITUDE` in `call_function`. No longer blocked.
 
 ## Slice 3 — chain surface AND SI content, then ONE reseed
 
