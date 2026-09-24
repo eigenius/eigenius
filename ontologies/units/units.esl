@@ -1,6 +1,6 @@
 // Units of measure — D93.
 //
-// Two things live here: the type a quantity has, and the SI vocabulary a stated unit is
+// Two things live here: the type a quantity has, and the SI vocabulary an authored unit is
 // normalised through. Neither is in the trusted surface. The kernel's addition is the `Unit`
 // primitive alone — seven base dimensions, a kind vector, and a canonicalisation — and this layer
 // is chain data that can be reviewed and replaced without touching the checker (D93, "What is
@@ -14,7 +14,7 @@
 // are both `s^-1`; Gy and Sv are both `s^-2·m^2`; lm is `cd`, because a kind is dropped once the
 // dimension vector is non-zero, so `cd·sr` canonicalises to `cd`. v1 declares one kind, `angle`,
 // and the SI's own distinctions between these pairs rest on quantity kinds it does not declare.
-// The stated-unit record at the encoding level keeps which one the author wrote.
+// The prose keeps which one the author wrote; the term does not.
 //
 // Placed after `core`, which supplies `core:unit` and `core:rational`, and before `statistics`,
 // whose quantities carry units. Not under `urn:eigenius:measurements`, which is the D52 statistics

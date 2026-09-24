@@ -18,12 +18,11 @@ None can be worked around, and each changes what gets written.
    uses that the SI does not accept", and `rpm` in the same corpus sentence queues up behind it, so
    the category gets opened deliberately with a criterion rather than one symbol at a time. D93
    records the full reasoning.
-3. ~~**Occurrence identity for the stated-unit record.**~~ **DECIDED — offsets alone.** The record
-   carries `(stated_unit, span_start, span_end)`. An ordinal is derivable by ranking on
-   `span_start`, so storing it would be redundant state that can drift. Term paths, value-keying
-   and in-term occurrence IRIs are declined with their failure modes recorded in D93.
+3. ~~**Occurrence identity for the stated-unit record.**~~ **DROPPED — there is no record.** Its one
+   addition over `enc:prose` was making "which claims reported a dose in mg/kg" a query, and that is
+   not a query this system needs. See D93, "Decided: no per-occurrence record".
 
-**All three are now closed.** Slices 1-4 are unblocked.
+**All three are closed.** Slices 1-3 are built; slice 4 is dropped.
 
 ## The carrier for `Unit` and `Magnitude` — decided
 
@@ -131,25 +130,11 @@ timeout — the three things that made the 2026-09-23 run succeed after two fail
 `EXPECTED` in `kernel/tests/bootstrap_manifest_pinned.rs` in the SAME commit as the ontology edit,
 as that test requires, then `scripts/build-alignment-snapshot.sh`.
 
-## Slice 4 — the stated-unit record
+## Slice 4 — dropped
 
-New `enc:` vocabulary: a per-occurrence record carrying `(stated_unit, span_start, span_end)`, hung
-off `enc:DiscourseUnit`, which already holds `enc:prose` and the unit's own offsets. NOT in the
-term: a datum every semantic operation must ignore is provenance, not meaning.
-
-The offsets come from chart seeding, where an occurrence's token position is already fixed
-(`dcg/parse/seed.rs:585-588`), so nothing needs deriving from the built term.
-
-This is `enc:` vocabulary, and `ontologies/encoding/encoding.esl` is a bootstrap ontology — so it
-moves the manifest and belongs in slice 3's landing, not after it.
-
-**Open: the type of `stated_unit`.** The units layer holds atoms (`units:gram`, `units:milli`). A
-stated unit such as `mg/kg` or `μmol·L⁻¹` is a prefixed compound over them, so it cannot be one
-`units:NamedUnit` reference. Candidates: the unit's surface as a string (queryable by exact match,
-but `mg/kg` and `mg kg⁻¹` do not unify); a structured factor list such as
-`[(milli, gram, 1), (kilogram, −1)]`, whose shape depends on D95's unit sub-parser; or deferring the
-record to D95. D95 moves the bootstrap manifest anyway — its measure-phrase category and preposition
-entries go into `lexicon-ontology.esl` and `closed-class.esl` — so deferring costs no second reseed.
+The stated-unit record was designed through several rounds and then dropped with the query it
+served; see decision 3. What the author wrote stays in `enc:prose`, reachable from every claim
+through `enc:from_unit`.
 
 ## Deferred, with reasons
 

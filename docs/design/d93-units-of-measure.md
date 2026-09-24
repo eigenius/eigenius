@@ -347,7 +347,7 @@ The layer holds:
 - **Several named units share a unit value.** Hz and Bq are both `s^-1`; Gy and Sv are both
   `s^-2·m^2`; lm is `cd`, because the steradian's kind is dropped beside a dimension. v1 declares one
   kind, `angle`, and the SI's distinctions between these pairs rest on quantity kinds it does not
-  declare. The stated-unit record keeps which one the author wrote.
+  declare. The prose keeps which one the author wrote.
 
 **Load order.** After `core`, which supplies the primitive types the magnitude rests on, and before
 `statistics`, whose quantities carry units. **Also after `prov`**, which this document originally
@@ -471,10 +471,12 @@ prefixes exceed `u64`, and 1 eV = 1.602176634 × 10⁻¹⁹ J needs a denominato
   **Decided: `Da` stays in v1 as a documented exception.** Base-units-only removed the alternative —
   it can no longer keep its own base and defer the conversion — so `50 Da` becomes kilograms at
   ingest by multiplying through a measured constant. The exception is that this conversion is
-  **not** exact and must not present as though it were: the converted quantity records the
-  constant's identity and its CODATA vintage alongside the stated unit, so a reader can tell a
-  magnitude derived through a measurement from one derived through a definition. Every other
-  SI-accepted unit in v1 converts through an exact factor and needs no such record.
+  **not** exact and must not present as though it were. A reader can tell a magnitude derived
+  through a measurement from one derived through a definition without a per-quantity record:
+  `units:dalton` carries `units:factor_uncertainty` and `units:factor_source` (CODATA 2022), the
+  units layer is bootstrap, and a store cannot be resumed under a different manifest — so the
+  constant and its vintage are fixed for every quantity in a store, and the authored `Da` is in the
+  prose. Every other SI-accepted unit in v1 converts through an exact factor.
 
   This is narrower than it sounds — `Da` is the only measured-factor unit in v1's list. It is also
   the one that will recur: any unit defined by a measured constant rather than a fixed one lands
@@ -583,37 +585,13 @@ type-check, so this is auditable selection, not generation" (`encoding.esl:172-1
 home for the `931g` sense, and the wrong frame for the stated unit: nothing was selected when an
 author wrote `24 h`.
 
-**Decided: a per-occurrence record carrying the stated unit and its offsets. No ordinal.**
+**Decided: no per-occurrence record.** The prose is the record, as the paragraph above argues.
 
-The record hangs off the source span and holds `(stated_unit, span_start, span_end)`. That makes
-"which claims reported a dose in mg/kg" a query rather than a text search over `enc:prose`, and the
-offsets identify *which* quantity — which a unit-level record alone cannot do for the ten WRN
-sentences carrying two or three units.
-
-**An ordinal was considered and dropped as redundant.** Distinct occurrences have distinct start
-offsets, so the offsets already totally order them and the ordinal is derivable by ranking on
-`span_start`. Storing it would be a denormalisation for query convenience, and redundant state that
-can disagree with itself is the kind this project declines.
-
-**Surface order is structural, not an assumption.** `seed_leaves` walks token positions
-(`for i in 0..n { for j in i..last { … } }`, `dcg/parse/seed.rs:585-588`), so an occurrence's
-position in the prose is fixed at seed time, before composition, normalisation or term building.
-
-**What the offsets do NOT give is a link to the term.** Term order is the grammar's, and it can
-differ from surface order — "the threshold exceeds the dose" against "the dose is below the
-threshold". That link is deliberately absent: it was options C and E below, both declined.
-
-**Three alternatives declined, with their failure modes**, so they are not rediscovered:
-
-- **A term path** — an argument-index chain into the term. Exact, and brittle twice: the stored term
-  is the NORMALISED one, so a path computed against the authored term may not survive, and any
-  change to how terms are built invalidates every existing record.
-- **Value-keyed** — "the quantity whose normalised value is `86400 s` was written `24 h`". No
-  positional fragility, but it collides: `for 1 h … for 60 min` both normalise to 3600 s, and
-  methods prose plausibly writes that.
-- **A synthetic occurrence IRI carried in the term** — robust, and ruled out by the reasoning that
-  moved the stated unit out of the term at all. It puts a datum back in the term, and an IRI in a
-  term creates `core:mentions` edges, the cost this document declined to pay for units themselves.
+A record `(stated_unit, span_start, span_end)` hung off the source span was designed and then
+dropped. The one thing it added over `enc:prose` was making "which claims reported a dose in mg/kg"
+a query over a field rather than a text search, and that is not a query this system needs. The
+designs considered for identifying an occurrence — offsets, an ordinal, a term path, a value key, an
+occurrence IRI in the term — went with it; none was needed once the question was.
 
 **A vocabulary hazard the same evidence surfaced — and this document currently guarantees it.**
 `931g` is g-force, not grams. The v1 vocabulary above is 7 base + 22 derived + 24 prefixes + the
@@ -678,7 +656,7 @@ institution result are all held to the same contract, so none of them needs an i
 none of them can smuggle in a scaled index.
 
 **Convenience functions do the mapping.** An author writing `5 g`, or an API caller passing grams,
-goes through a helper that converts to base units and records `g` as the stated unit. These live in
+goes through a helper that converts to base units; the source it was called from shows `g`. These live in
 the ESL elaborator and the Rust API — outside the kernel, on the same side of the TCB boundary as
 D86's literal normalisation and the bridge's unit canonicalisation. Three carriers, one discipline,
 and the kernel checks the result rather than performing it.
@@ -913,13 +891,12 @@ integer exponents; and canonicalisation over all three. A **magnitude** of `q ×
 `eigentt:Term`'s `Pi` constructor and the D47 codec with it;
 `Quantity : Unit -> Set`; the SI content as chain ontology (7 base, 22 derived, 24 prefixes,
 SI-accepted non-SI units — min, h, d, ha, L, t, Da, eV, au); conversion factors as exact rationals
-(D94); a new `eigentt:Term` constructor carrying a unit value, with the codec arms it obliges (the
-D47 mirror, `ontology::Value` as `Value::Embedded` per D94, Eigon-JSON, the ESL printer and compiler) — note `eigentt:Term`'s
-literals are `LitInt/LitString/LitFloat/LitBool` with **no `LitUnit`**, which is a cost a primitive
-`Unit` pays and an inductive one would not; °C as a documented extension with the point assumption;
-and — at the encoding level, not in the term — a per-occurrence stated-unit record hung off the
-source span (`enc:DiscourseUnit`, which already carries `enc:prose` and character offsets), with
-whatever occurrence identity lets it name which quantity in the term it is the surface of.
+(D94); a new `eigentt:Term` constructor carrying a unit value, `LitUnit`, with the codec arms it
+obliges (the D47 mirror, `ontology::Value` as a canonical string — the rule `core:rational` follows,
+see the implementation plan's "The carrier for `Unit` and `Magnitude`" — Eigon-JSON, the ESL printer
+and compiler), a cost a primitive `Unit` pays and an inductive one would not; °C as a documented
+extension with the point assumption. No stated-unit record: the prose is the record of what the
+author wrote (see "Decided: no per-occurrence record").
 
 An earlier draft put an **erased annotation node** in the term for the stated unit. That is out: a
 datum every semantic operation must ignore is provenance, not meaning, and the encoding layer that
