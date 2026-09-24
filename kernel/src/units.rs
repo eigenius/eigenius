@@ -64,6 +64,11 @@ impl BaseDimension {
             BaseDimension::LuminousIntensity => "cd",
         }
     }
+
+    /// The inverse of [`BaseDimension::symbol`]. Exact — no aliases, no case folding.
+    pub fn from_symbol(sym: &str) -> Option<BaseDimension> {
+        BaseDimension::ALL.into_iter().find(|d| d.symbol() == sym)
+    }
 }
 
 /// A quantity kind — the axis that separates dimensionless quantities from each other.
@@ -97,6 +102,8 @@ pub enum UnitError {
     ExponentOverflow,
     /// A zero denominator in an exponent.
     ZeroDenominator,
+    /// A string was not the canonical form of a unit or magnitude. Carries the offending input.
+    Malformed(String),
 }
 
 impl fmt::Display for UnitError {
@@ -104,6 +111,7 @@ impl fmt::Display for UnitError {
         match self {
             UnitError::ExponentOverflow => write!(f, "unit exponent outside the 16-bit range"),
             UnitError::ZeroDenominator => write!(f, "unit exponent has a zero denominator"),
+            UnitError::Malformed(input) => write!(f, "not a canonical unit form: {input:?}"),
         }
     }
 }
@@ -345,6 +353,99 @@ impl Unit {
         }
         Ok(canonicalise(dimension, kinds))
     }
+
+    /// This unit with its kinds dropped, leaving the physical dimension alone.
+    ///
+    /// `rad` and the plain dimensionless unit both give `1` here, which is the point: the kind axis
+    /// separates them for EQUALITY, and this is the projection that deliberately does not.
+    pub fn dimension_only(&self) -> Unit {
+        canonicalise(self.dimension, BTreeMap::new())
+    }
+
+    /// Renders the canonical form: base symbols in [`BaseDimension::ALL`] order, then kinds, joined
+    /// by `·`, with `1` for the dimensionless unit and no explicit `^1`.
+    pub fn to_canonical_string(&self) -> String {
+        self.to_string()
+    }
+
+    /// Parses the canonical form, refusing every other spelling of the same value.
+    ///
+    /// `m·s^-1·m` is REFUSED even though it denotes `s^-1·m^2`, and so are `m^1`, `m^0`, a repeated
+    /// symbol, and a kind written beside a non-zero dimension. The reason is the one
+    /// [`crate::numeric::Rational::parse_canonical`] gives: the content hash runs over the
+    /// serialised resource, so two spellings of one value would hash differently, and a parser that
+    /// accepted both would make that unobservable.
+    ///
+    /// The closing round-trip check is what enforces it. Rather than enumerating the ways an input
+    /// can be non-canonical, this builds the value and then demands the input already be what that
+    /// value prints as — so every future change to canonical form tightens the parser for free.
+    pub fn parse_canonical(s: &str) -> Result<Unit, UnitError> {
+        let bad = || UnitError::Malformed(s.to_string());
+        if s == "1" {
+            return Ok(Unit::dimensionless());
+        }
+        if s.is_empty() {
+            return Err(bad());
+        }
+        let mut acc = Unit::dimensionless();
+        for part in s.split('\u{b7}') {
+            let (sym, exp) = match part.split_once('^') {
+                Some((sym, e)) => (sym, parse_exponent(e).ok_or_else(bad)?),
+                None => (part, Exponent::ONE),
+            };
+            let factor = if let Some(d) = BaseDimension::from_symbol(sym) {
+                Unit::base(d).pow(exp)?
+            } else if sym == "angle" {
+                Unit::kind(Kind::Angle, 1).pow(exp)?
+            } else {
+                return Err(bad());
+            };
+            acc = acc.mul(&factor)?;
+        }
+        if acc.to_canonical_string() != s {
+            return Err(bad());
+        }
+        Ok(acc)
+    }
+}
+
+/// Parses one exponent — `-?uint` or `-?uint/uint`, canonical only.
+fn parse_exponent(s: &str) -> Option<Exponent> {
+    let (num_str, den_str) = match s.split_once('/') {
+        Some((n, d)) => (n, Some(d)),
+        None => (s, None),
+    };
+    let (negative, digits) = match num_str.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, num_str),
+    };
+    // `^0` has no spelling: a zero exponent is DROPPED by canonicalisation.
+    if !is_canonical_uint(digits) || digits == "0" {
+        return None;
+    }
+    let numer: i16 = digits.parse().ok()?;
+    let numer = if negative { -numer } else { numer };
+    let denom = match den_str {
+        None => 1,
+        Some(d) => {
+            // `/1` is a second spelling of the integer form.
+            if !is_canonical_uint(d) || d == "0" || d == "1" {
+                return None;
+            }
+            d.parse().ok()?
+        }
+    };
+    Exponent::new(numer, denom).ok()
+}
+
+/// `0`, or a digit string with no leading zero. No sign, no whitespace, no `+`.
+fn is_canonical_uint(s: &str) -> bool {
+    match s.as_bytes() {
+        [] => false,
+        [b'0'] => true,
+        [b'0', ..] => false,
+        bytes => bytes.iter().all(|b| b.is_ascii_digit()),
+    }
 }
 
 /// Drops zero exponents, and drops every kind once the dimension vector is non-zero.
@@ -433,6 +534,53 @@ impl Magnitude {
     pub fn constant_exponent(&self, c: Constant) -> i16 {
         self.constants.get(&c).copied().unwrap_or(0)
     }
+
+    /// Renders the canonical form: the coefficient, then each constant in `Constant` order.
+    pub fn to_canonical_string(&self) -> String {
+        self.to_string()
+    }
+
+    /// Parses the canonical form, refusing every other spelling — mirrors [`Unit::parse_canonical`]
+    /// including the closing round-trip check.
+    ///
+    /// The coefficient is a canonical [`Rational`], so `0.5` is refused here as it is there: the
+    /// decimal surface belongs to `Rational::parse_decimal` at ingest, not to the stored form.
+    pub fn parse_canonical(s: &str) -> Result<Magnitude, UnitError> {
+        let bad = || UnitError::Malformed(s.to_string());
+        let mut parts = s.split('\u{b7}');
+        let coefficient =
+            Rational::parse_canonical(parts.next().ok_or_else(bad)?).map_err(|_| bad())?;
+        let mut m = Magnitude::rational(coefficient);
+        for part in parts {
+            let (name, power) = match part.split_once('^') {
+                Some((n, e)) => {
+                    let (negative, digits) = match e.strip_prefix('-') {
+                        Some(rest) => (true, rest),
+                        None => (false, e),
+                    };
+                    if !is_canonical_uint(digits) || digits == "0" {
+                        return Err(bad());
+                    }
+                    let v: i16 = digits.parse().map_err(|_| bad())?;
+                    (n, if negative { -v } else { v })
+                }
+                None => (part, 1),
+            };
+            let c = match name {
+                "\u{3c0}" => Constant::Pi,
+                _ => return Err(bad()),
+            };
+            // A repeated constant would otherwise be silently overwritten by `with_constant`.
+            if m.constant_exponent(c) != 0 {
+                return Err(bad());
+            }
+            m = m.with_constant(c, power);
+        }
+        if m.to_canonical_string() != s {
+            return Err(bad());
+        }
+        Ok(m)
+    }
 }
 
 impl fmt::Display for Magnitude {
@@ -449,6 +597,38 @@ impl fmt::Display for Magnitude {
             }
         }
         Ok(())
+    }
+}
+
+/// Serialises as the canonical STRING, never as a structure.
+///
+/// The same reasoning as [`crate::numeric::Rational`]'s: making this the only serde representation
+/// means every path through serde is canonical by construction rather than by each call site
+/// remembering. A structural form would also put the exponent vector's interior into the serialised
+/// resource, where `core:mentions` walks it and the content hash covers it (D93).
+impl serde::Serialize for Unit {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(&self.to_canonical_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Unit {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let s = <String as serde::Deserialize>::deserialize(de)?;
+        Unit::parse_canonical(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl serde::Serialize for Magnitude {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(&self.to_canonical_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Magnitude {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let s = <String as serde::Deserialize>::deserialize(de)?;
+        Magnitude::parse_canonical(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -583,5 +763,155 @@ mod tests {
     fn a_magnitude_with_a_constant_differs_from_its_coefficient() {
         let with_pi = Magnitude::rational(rat(1, 1)).with_constant(Constant::Pi, 1);
         assert_ne!(with_pi, Magnitude::rational(rat(1, 1)));
+    }
+
+    // ── canonical string round-trip (D93 slice 2) ────────────────────────────────────────────
+
+    /// Every canonical form parses back to the value that printed it.
+    #[test]
+    fn canonical_unit_strings_round_trip() {
+        let cases = [
+            Unit::dimensionless(),
+            Unit::base(BaseDimension::Length),
+            Unit::base(BaseDimension::Mass),
+            Unit::kind(Kind::Angle, 1),
+            Unit::kind(Kind::Angle, 2),
+            Unit::base(BaseDimension::Length)
+                .pow(Exponent::integer(2))
+                .unwrap()
+                .mul(&Unit::base(BaseDimension::Time).recip().unwrap())
+                .unwrap(),
+            Unit::base(BaseDimension::Length)
+                .pow(Exponent::new(2, 3).unwrap())
+                .unwrap(),
+        ];
+        for u in cases {
+            let printed = u.to_canonical_string();
+            let back = Unit::parse_canonical(&printed)
+                .unwrap_or_else(|e| panic!("{printed:?} did not parse: {e}"));
+            assert_eq!(u, back, "round-trip changed the value for {printed:?}");
+            assert_eq!(printed, back.to_canonical_string());
+        }
+    }
+
+    /// The dimensionless unit prints and parses as `1`, not as the empty string.
+    #[test]
+    fn the_dimensionless_unit_is_spelled_one() {
+        assert_eq!(Unit::dimensionless().to_canonical_string(), "1");
+        assert_eq!(Unit::parse_canonical("1").unwrap(), Unit::dimensionless());
+        assert!(Unit::parse_canonical("").is_err());
+    }
+
+    /// A second spelling of a value is REFUSED, not normalised. The content hash runs over the
+    /// serialised resource, so accepting both would make two hashes for one value unobservable.
+    #[test]
+    fn non_canonical_unit_spellings_are_refused() {
+        for bad in [
+            "m\u{b7}s^-1\u{b7}m",  // unreduced: denotes `s^-1·m^2`
+            "m^1",                 // explicit `^1`
+            "m^0",                 // a zero exponent has no spelling
+            "m^2/1",               // `/1` is the integer form
+            "m^02",                // leading zero
+            "m^+2",                // leading `+`
+            "m\u{b7}m",            // repeated symbol
+            "m^2/0",               // zero denominator
+            "m\u{b7}angle",        // a kind beside a non-zero dimension: canonicalise drops it
+            "s^-1\u{b7}m^2\u{b7}", // trailing separator
+            "M",                   // wrong case
+            "metre",               // not a symbol
+            " m",                  // whitespace
+            "1\u{b7}m",            // `1` is not a factor
+        ] {
+            assert!(
+                Unit::parse_canonical(bad).is_err(),
+                "{bad:?} should have been refused"
+            );
+        }
+    }
+
+    /// Base symbols print in `BaseDimension::ALL` order — time before length — so a value has one
+    /// spelling regardless of how it was built.
+    #[test]
+    fn base_symbols_print_in_canonical_order() {
+        let m2_per_s = Unit::base(BaseDimension::Length)
+            .pow(Exponent::integer(2))
+            .unwrap()
+            .mul(&Unit::base(BaseDimension::Time).recip().unwrap())
+            .unwrap();
+        let built_other_way = Unit::base(BaseDimension::Time)
+            .recip()
+            .unwrap()
+            .mul(
+                &Unit::base(BaseDimension::Length)
+                    .pow(Exponent::integer(2))
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(m2_per_s.to_canonical_string(), "s^-1\u{b7}m^2");
+        assert_eq!(m2_per_s, built_other_way);
+    }
+
+    /// `dimension_only` groups what the kind axis separates.
+    #[test]
+    fn dimension_only_drops_kinds() {
+        let rad = Unit::kind(Kind::Angle, 1);
+        assert_ne!(rad, Unit::dimensionless());
+        assert_eq!(rad.dimension_only(), Unit::dimensionless());
+
+        // On a dimensioned unit it is the identity, since canonicalise already dropped the kinds.
+        let m = Unit::base(BaseDimension::Length);
+        assert_eq!(m.dimension_only(), m);
+    }
+
+    #[test]
+    fn canonical_magnitude_strings_round_trip() {
+        let cases = [
+            Magnitude::rational(rat(37, 1)),
+            Magnitude::rational(rat(37, 180)).with_constant(Constant::Pi, 1),
+            Magnitude::rational(rat(1, 1)).with_constant(Constant::Pi, -2),
+        ];
+        for m in cases {
+            let printed = m.to_canonical_string();
+            let back = Magnitude::parse_canonical(&printed)
+                .unwrap_or_else(|e| panic!("{printed:?} did not parse: {e}"));
+            assert_eq!(m, back);
+        }
+    }
+
+    #[test]
+    fn non_canonical_magnitude_spellings_are_refused() {
+        for bad in [
+            "0.5",                         // the decimal surface belongs to ingest
+            "2/4",                         // unreduced
+            "1\u{b7}\u{3c0}^1",            // explicit `^1`
+            "1\u{b7}\u{3c0}^0",            // a zero power is dropped
+            "1\u{b7}\u{3c0}\u{b7}\u{3c0}", // repeated constant
+            "1\u{b7}e",                    // undeclared constant
+            "\u{3c0}",                     // no coefficient
+        ] {
+            assert!(
+                Magnitude::parse_canonical(bad).is_err(),
+                "{bad:?} should have been refused"
+            );
+        }
+    }
+
+    /// serde carries the canonical string and nothing else, so a structural spelling cannot enter
+    /// through a deserialiser.
+    #[test]
+    fn serde_uses_the_canonical_string() {
+        let u = Unit::base(BaseDimension::Length)
+            .pow(Exponent::integer(2))
+            .unwrap();
+        let json = serde_json::to_string(&u).unwrap();
+        assert_eq!(json, "\"m^2\"");
+        assert_eq!(serde_json::from_str::<Unit>(&json).unwrap(), u);
+
+        // A non-canonical spelling is refused at the serde boundary too.
+        assert!(serde_json::from_str::<Unit>("\"m\u{b7}m\"").is_err());
+
+        let m = Magnitude::rational(rat(37, 180)).with_constant(Constant::Pi, 1);
+        let json = serde_json::to_string(&m).unwrap();
+        assert_eq!(serde_json::from_str::<Magnitude>(&json).unwrap(), m);
     }
 }

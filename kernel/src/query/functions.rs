@@ -26,6 +26,9 @@ pub fn call_function(name: &str, args: &[Value]) -> Result<Value, QueryError> {
         "LENGTH" => fn_length(args),
         "CONTAINS" => fn_contains(args),
         "CONCAT" => fn_concat(args),
+        "UNIT" => fn_unit(args),
+        "MAGNITUDE" => fn_magnitude(args),
+        "DIMENSION" => fn_dimension(args),
         _ => Err(QueryError::evaluation(format!("unknown function: {name}"))),
     }
 }
@@ -73,6 +76,59 @@ fn fn_regex(args: &[Value]) -> Result<Value, QueryError> {
         .ok_or_else(|| QueryError::evaluation("REGEX argument must be a string"))?;
     regex::Regex::new(s).map_err(|e| QueryError::evaluation(format!("invalid regex: {e}")))?;
     Ok(Value::String(s.to_string()))
+}
+
+/// `UNIT(s)` — validates a canonical unit string and returns it.
+///
+/// D93 carries a unit as its canonical STRING rather than as an embedded resource, for three
+/// reasons recorded there: an embedded value adds a `core:mentions` edge per quantity occurrence,
+/// it costs term size, and a string keeps one carrier rule shared with `core:rational`. This
+/// function and the two below are what pays for that — the query layer decomposes the string, so
+/// nothing is lost by not storing it decomposed.
+///
+/// `DATE` above is the same shape: a composite value (year, month, day) carried as canonical text
+/// and given meaning by a function.
+fn fn_unit(args: &[Value]) -> Result<Value, QueryError> {
+    if args.len() != 1 {
+        return Err(QueryError::evaluation("UNIT requires 1 argument"));
+    }
+    let s = args[0]
+        .as_str()
+        .ok_or_else(|| QueryError::evaluation("UNIT argument must be a string"))?;
+    let u = crate::units::Unit::parse_canonical(s)
+        .map_err(|e| QueryError::evaluation(format!("UNIT: {e}")))?;
+    Ok(Value::String(u.to_canonical_string()))
+}
+
+/// `MAGNITUDE(s)` — validates a canonical magnitude string and returns it.
+fn fn_magnitude(args: &[Value]) -> Result<Value, QueryError> {
+    if args.len() != 1 {
+        return Err(QueryError::evaluation("MAGNITUDE requires 1 argument"));
+    }
+    let s = args[0]
+        .as_str()
+        .ok_or_else(|| QueryError::evaluation("MAGNITUDE argument must be a string"))?;
+    let m = crate::units::Magnitude::parse_canonical(s)
+        .map_err(|e| QueryError::evaluation(format!("MAGNITUDE: {e}")))?;
+    Ok(Value::String(m.to_canonical_string()))
+}
+
+/// `DIMENSION(u)` — the unit with its kinds dropped, leaving the physical dimension.
+///
+/// `DIMENSION('angle')` is `'1'`: `rad` and the plain dimensionless unit are distinct VALUES, which
+/// is why the kind axis exists, and this is the projection that groups them again. Two units are
+/// commensurable — convertible by scaling — exactly when their dimensions are equal, so
+/// `DIMENSION(a) = DIMENSION(b)` is that test and no separate function is needed for it.
+fn fn_dimension(args: &[Value]) -> Result<Value, QueryError> {
+    if args.len() != 1 {
+        return Err(QueryError::evaluation("DIMENSION requires 1 argument"));
+    }
+    let s = args[0]
+        .as_str()
+        .ok_or_else(|| QueryError::evaluation("DIMENSION argument must be a string"))?;
+    let u = crate::units::Unit::parse_canonical(s)
+        .map_err(|e| QueryError::evaluation(format!("DIMENSION: {e}")))?;
+    Ok(Value::String(u.dimension_only().to_canonical_string()))
 }
 
 fn fn_length(args: &[Value]) -> Result<Value, QueryError> {
@@ -285,5 +341,68 @@ mod tests {
             values_compare(&Value::Integer(1), &Value::Integer(2)),
             Some(std::cmp::Ordering::Less)
         );
+    }
+
+    fn call(name: &str, args: &[&str]) -> Result<Value, QueryError> {
+        let owned: Vec<Value> = args.iter().map(|a| Value::String(a.to_string())).collect();
+        call_function(name, &owned)
+    }
+
+    /// `UNIT` validates and returns the canonical form — the `DATE` shape, on a unit.
+    #[test]
+    fn unit_validates_a_canonical_string() {
+        assert_eq!(
+            call("UNIT", &["s^-1\u{b7}m^2"]).unwrap(),
+            Value::String("s^-1\u{b7}m^2".to_string())
+        );
+        assert_eq!(
+            call("UNIT", &["1"]).unwrap(),
+            Value::String("1".to_string())
+        );
+    }
+
+    /// A non-canonical spelling is an ERROR, not a silent normalisation — the query layer holds the
+    /// same line as the parser and the serde boundary.
+    #[test]
+    fn unit_refuses_a_non_canonical_string() {
+        for bad in ["m\u{b7}s^-1\u{b7}m", "m^1", "metre", "M"] {
+            assert!(call("UNIT", &[bad]).is_err(), "{bad:?} should have failed");
+        }
+        assert!(call_function("UNIT", &[Value::Integer(3)]).is_err());
+        assert!(call_function("UNIT", &[]).is_err());
+    }
+
+    /// `DIMENSION` groups what the kind axis separates: `rad` and `1` share a dimension.
+    #[test]
+    fn dimension_drops_the_kind() {
+        assert_eq!(
+            call("DIMENSION", &["angle"]).unwrap(),
+            Value::String("1".to_string())
+        );
+        assert_eq!(
+            call("DIMENSION", &["1"]).unwrap(),
+            Value::String("1".to_string())
+        );
+        // Equal dimensions is the commensurability test, so no separate function exists for it.
+        assert_eq!(
+            call("DIMENSION", &["angle"]).unwrap(),
+            call("DIMENSION", &["1"]).unwrap()
+        );
+        // And a dimensioned unit is unchanged.
+        assert_eq!(
+            call("DIMENSION", &["m"]).unwrap(),
+            Value::String("m".to_string())
+        );
+    }
+
+    #[test]
+    fn magnitude_validates_a_canonical_string() {
+        assert_eq!(
+            call("MAGNITUDE", &["37/180\u{b7}\u{3c0}"]).unwrap(),
+            Value::String("37/180\u{b7}\u{3c0}".to_string())
+        );
+        // The decimal surface belongs to ingest, not to the stored form.
+        assert!(call("MAGNITUDE", &["0.5"]).is_err());
+        assert!(call("MAGNITUDE", &["2/4"]).is_err());
     }
 }
