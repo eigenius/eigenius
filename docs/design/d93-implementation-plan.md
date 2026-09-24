@@ -18,10 +18,10 @@ None can be worked around, and each changes what gets written.
    uses that the SI does not accept", and `rpm` in the same corpus sentence queues up behind it, so
    the category gets opened deliberately with a criterion rather than one symbol at a time. D93
    records the full reasoning.
-3. ~~**Occurrence identity for the stated-unit record.**~~ **DECIDED — offsets and an ordinal.**
-   The record carries `(stated_unit, span_start, span_end, ordinal)`, the ordinal counting
-   quantities in surface order within the unit. Term paths, value-keying and in-term occurrence
-   IRIs are declined with their failure modes recorded in D93.
+3. ~~**Occurrence identity for the stated-unit record.**~~ **DECIDED — offsets alone.** The record
+   carries `(stated_unit, span_start, span_end)`. An ordinal is derivable by ranking on
+   `span_start`, so storing it would be redundant state that can drift. Term paths, value-keying
+   and in-term occurrence IRIs are declined with their failure modes recorded in D93.
 
 **All three are now closed.** Slices 1-4 are unblocked.
 
@@ -122,13 +122,12 @@ as that test requires, then `scripts/build-alignment-snapshot.sh`.
 
 ## Slice 4 — the stated-unit record
 
-New `enc:` vocabulary: a per-occurrence record carrying `(stated_unit, span_start, span_end,
-ordinal)`, hung off `enc:DiscourseUnit`, which already holds `enc:prose` and the unit's own offsets.
-NOT in the term: a datum every semantic operation must ignore is provenance, not meaning.
+New `enc:` vocabulary: a per-occurrence record carrying `(stated_unit, span_start, span_end)`, hung
+off `enc:DiscourseUnit`, which already holds `enc:prose` and the unit's own offsets. NOT in the
+term: a datum every semantic operation must ignore is provenance, not meaning.
 
-**Verify before relying on the ordinal.** It assumes the parser emits quantities in surface order
-and nothing downstream reorders them. Establish that from the term walk rather than presuming it;
-the ordinal is meaningless otherwise, and silently so.
+The offsets come from chart seeding, where an occurrence's token position is already fixed
+(`dcg/parse/seed.rs:585-588`), so nothing needs deriving from the built term.
 
 This is `enc:` vocabulary, and `ontologies/encoding/encoding.esl` is a bootstrap ontology — so it
 moves the manifest and belongs in slice 3's landing, not after it.

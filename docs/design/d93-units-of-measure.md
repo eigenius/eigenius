@@ -565,17 +565,25 @@ type-check, so this is auditable selection, not generation" (`encoding.esl:172-1
 home for the `931g` sense, and the wrong frame for the stated unit: nothing was selected when an
 author wrote `24 h`.
 
-**Decided: a per-occurrence record carrying the stated unit, its offsets, and an ordinal.**
+**Decided: a per-occurrence record carrying the stated unit and its offsets. No ordinal.**
 
-The record hangs off the source span and holds `(stated_unit, span_start, span_end, ordinal)`, where
-the ordinal counts quantities in surface order within the unit. Offsets make "which claims reported
-a dose in mg/kg" a query rather than a text search over `enc:prose`; the ordinal answers *which*
-quantity, which offsets alone cannot for the ten WRN sentences carrying two or three units.
+The record hangs off the source span and holds `(stated_unit, span_start, span_end)`. That makes
+"which claims reported a dose in mg/kg" a query rather than a text search over `enc:prose`, and the
+offsets identify *which* quantity — which a unit-level record alone cannot do for the ten WRN
+sentences carrying two or three units.
 
-The ordinal rests on an assumption that must be CHECKED, not presumed: that the parser emits
-quantities in surface order and nothing downstream reorders them. Kennedy normalisation sorts
-exponent vectors *within* a unit, which is not the same thing, but the term walk has to be verified
-to yield surface order before the ordinal means anything.
+**An ordinal was considered and dropped as redundant.** Distinct occurrences have distinct start
+offsets, so the offsets already totally order them and the ordinal is derivable by ranking on
+`span_start`. Storing it would be a denormalisation for query convenience, and redundant state that
+can disagree with itself is the kind this project declines.
+
+**Surface order is structural, not an assumption.** `seed_leaves` walks token positions
+(`for i in 0..n { for j in i..last { … } }`, `dcg/parse/seed.rs:585-588`), so an occurrence's
+position in the prose is fixed at seed time, before composition, normalisation or term building.
+
+**What the offsets do NOT give is a link to the term.** Term order is the grammar's, and it can
+differ from surface order — "the threshold exceeds the dose" against "the dose is below the
+threshold". That link is deliberately absent: it was options C and E below, both declined.
 
 **Three alternatives declined, with their failure modes**, so they are not rediscovered:
 
