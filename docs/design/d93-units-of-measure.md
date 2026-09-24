@@ -565,12 +565,29 @@ type-check, so this is auditable selection, not generation" (`encoding.esl:172-1
 home for the `931g` sense, and the wrong frame for the stated unit: nothing was selected when an
 author wrote `24 h`.
 
-**What remains open is narrow.** Aligning a prose sub-span with the quantity it produced in the term
-is re-derivable, since the prose is stored and the parse is deterministic, but it is not *recorded* —
-so "which claims reported a dose in mg/kg" is a text search over `enc:prose` rather than a query, and
-in the ten WRN sentences carrying two or three units a text match does not say which quantity was
-which. Whether that alignment is worth a structured slot is the open part, and it is a queryability
-question rather than a correctness one: nothing is lost either way.
+**Decided: a per-occurrence record carrying the stated unit, its offsets, and an ordinal.**
+
+The record hangs off the source span and holds `(stated_unit, span_start, span_end, ordinal)`, where
+the ordinal counts quantities in surface order within the unit. Offsets make "which claims reported
+a dose in mg/kg" a query rather than a text search over `enc:prose`; the ordinal answers *which*
+quantity, which offsets alone cannot for the ten WRN sentences carrying two or three units.
+
+The ordinal rests on an assumption that must be CHECKED, not presumed: that the parser emits
+quantities in surface order and nothing downstream reorders them. Kennedy normalisation sorts
+exponent vectors *within* a unit, which is not the same thing, but the term walk has to be verified
+to yield surface order before the ordinal means anything.
+
+**Three alternatives declined, with their failure modes**, so they are not rediscovered:
+
+- **A term path** — an argument-index chain into the term. Exact, and brittle twice: the stored term
+  is the NORMALISED one, so a path computed against the authored term may not survive, and any
+  change to how terms are built invalidates every existing record.
+- **Value-keyed** — "the quantity whose normalised value is `86400 s` was written `24 h`". No
+  positional fragility, but it collides: `for 1 h … for 60 min` both normalise to 3600 s, and
+  methods prose plausibly writes that.
+- **A synthetic occurrence IRI carried in the term** — robust, and ruled out by the reasoning that
+  moved the stated unit out of the term at all. It puts a datum back in the term, and an IRI in a
+  term creates `core:mentions` edges, the cost this document declined to pay for units themselves.
 
 **A vocabulary hazard the same evidence surfaced — and this document currently guarantees it.**
 `931g` is g-force, not grams. The v1 vocabulary above is 7 base + 22 derived + 24 prefixes + the

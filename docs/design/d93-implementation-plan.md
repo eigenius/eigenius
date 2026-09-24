@@ -18,9 +18,12 @@ None can be worked around, and each changes what gets written.
    uses that the SI does not accept", and `rpm` in the same corpus sentence queues up behind it, so
    the category gets opened deliberately with a criterion rather than one symbol at a time. D93
    records the full reasoning.
-3. **Occurrence identity for the stated-unit record.** A per-occurrence record must name WHICH
-   quantity in the term it is the surface of. Unambiguous for a single-quantity claim; not for the
-   ten WRN sentences carrying two or three units.
+3. ~~**Occurrence identity for the stated-unit record.**~~ **DECIDED — offsets and an ordinal.**
+   The record carries `(stated_unit, span_start, span_end, ordinal)`, the ordinal counting
+   quantities in surface order within the unit. Term paths, value-keying and in-term occurrence
+   IRIs are declined with their failure modes recorded in D93.
+
+**All three are now closed.** Slices 1-4 are unblocked.
 
 ## The carrier for `Unit` and `Magnitude` — decided
 
@@ -119,9 +122,16 @@ as that test requires, then `scripts/build-alignment-snapshot.sh`.
 
 ## Slice 4 — the stated-unit record
 
-Blocked on decision 3. At the encoding level, hung off `enc:DiscourseUnit`, which already carries
-`enc:prose` and character offsets. NOT in the term: a datum every semantic operation must ignore is
-provenance, not meaning.
+New `enc:` vocabulary: a per-occurrence record carrying `(stated_unit, span_start, span_end,
+ordinal)`, hung off `enc:DiscourseUnit`, which already holds `enc:prose` and the unit's own offsets.
+NOT in the term: a datum every semantic operation must ignore is provenance, not meaning.
+
+**Verify before relying on the ordinal.** It assumes the parser emits quantities in surface order
+and nothing downstream reorders them. Establish that from the term walk rather than presuming it;
+the ordinal is meaningless otherwise, and silently so.
+
+This is `enc:` vocabulary, and `ontologies/encoding/encoding.esl` is a bootstrap ontology — so it
+moves the manifest and belongs in slice 3's landing, not after it.
 
 ## Deferred, with reasons
 
