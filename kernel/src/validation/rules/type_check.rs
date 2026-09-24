@@ -61,6 +61,12 @@ impl Validator {
                     if crate::numeric::Rational::parse_canonical(s)
                         .is_ok_and(|r| r.is_integer()))
             }
+            // D93. Canonical unit form, for the same reason as `core:rational`: `m·s^-1·m` denotes
+            // `s^-1·m^2`, and accepting both spellings would put two hashes on one value.
+            wk::UNIT => {
+                matches!(value, Value::String(s)
+                    if crate::units::Unit::parse_canonical(s).is_ok())
+            }
             wk::RESOURCE => {
                 // A resource reference is an IRI-valued text. Rule 3 is the wire-level
                 // *shape* gate and must be invariant under persist/reload, so it accepts

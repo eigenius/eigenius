@@ -334,8 +334,26 @@ The layer holds:
 - the SI-accepted non-SI units (min, h, d, ha, L, t, Da, eV, au),
 - conversion factors between commensurable units.
 
+**As built (`ontologies/units/units.esl`), the vocabulary departs from that list in four ways:**
+
+- **The gram is included.** It is not a base unit and is in none of the lists above, but the SI forms
+  every mass multiple by prefixing the gram (`mg`, `μg`), never the kilogram. `units:gram` carries
+  dimension `kg` and factor `1/1000`; `units:kilogram` is not prefixable.
+- **The degree, arcminute and arcsecond are included.** They are in the SI Brochure's accepted table
+  (Table 8) with min, h, d, ha, L, t, Da, eV and au, and the π-carrying magnitude exists to admit
+  them. The logarithmic units in the same table (Np, B, dB) stay out.
+- **The degree Celsius is not prefixable.** A prefix on an offset unit is well-defined only for a
+  difference, and v1 assumes the point reading.
+- **Several named units share a unit value.** Hz and Bq are both `s^-1`; Gy and Sv are both
+  `s^-2·m^2`; lm is `cd`, because the steradian's kind is dropped beside a dimension. v1 declares one
+  kind, `angle`, and the SI's distinctions between these pairs rest on quantity kinds it does not
+  declare. The stated-unit record keeps which one the author wrote.
+
 **Load order.** After `core`, which supplies the primitive types the magnitude rests on, and before
-`statistics`, whose quantities carry units. Nothing else constrains it.
+`statistics`, whose quantities carry units. **Also after `prov`**, which this document originally
+missed: the layer is authored in ESL, and the ESL compiler stamps `prov:was_attributed_to` on every
+declaration, so a slot directly after `core` fails the bootstrap with an unresolved property. It
+loads immediately before `statistics`.
 
 An earlier draft placed it before `formulas` and created a circularity: it also put conversion
 factors — including the symbolic `1° = π/180 rad` — *inside* the units layer as `FormulaTerm`
@@ -848,15 +866,23 @@ Two things make the exact readings better than they first look:
   rationals — repeated arithmetic blows up the denominator — does not apply where the value is
   stored and compared rather than accumulated.
 
-### How a magnitude reaches a term — decided: as the arguments of `Quantity.mk`
+### How a magnitude reaches a term — decided: as the arguments of `units:mk_quantity`
 
 `units:Quantity (u : core:unit) : Set` has one constructor:
 
 ```
-mk(coefficient : core:rational, pi : core:integer) : Quantity u
+mk_quantity : forall (u : core:unit) => core:rational -> core:integer -> units:Quantity(u)
 ```
 
-`37°` is `mk(r"37/180", 1)` at `Quantity(angle)`. The type theory has no magnitude carrier: no `Exp`
+`37°` is `mk_quantity(r"37/180", 1)` at `Quantity(angle)`. Constructors live flat in their data
+type's namespace, so a bare `mk` would be `urn:eigenius:units:mk`, too generic for a namespace
+that will grow.
+
+**`u` is a parameter, so a quantity term does not carry its unit.** `mk_quantity(r"37/180", 1)`
+inhabits `Quantity(u)` for every `u`, as `nil` inhabits every `List A`. The unit is fixed by the
+type the term is checked against — a verb's signature, or an annotation. A quantity checked against
+the wrong unit is refused, and so is `rad` against the plain dimensionless unit, since the kind axis
+reaches `conv` on the chain path (`kernel/tests/units_layer.rs`). The type theory has no magnitude carrier: no `Exp`
 variant, no `PrimitiveType`, no DataType, no ESL literal. `units::Magnitude` is computed at ingest
 and lowered into these two arguments.
 

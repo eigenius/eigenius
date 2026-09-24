@@ -681,6 +681,11 @@ pub enum Term {
         value: crate::numeric::Rational,
         pos: Position,
     },
+    /// D93 — a unit of measure in canonical form, from `u"s^-1·m^2"`. Lowers to `Exp::LitUnit`.
+    LitUnit {
+        value: crate::units::Unit,
+        pos: Position,
+    },
     /// eigenius#142 — boolean literal in type position. Lowers to
     /// `Exp::LitBool`. Needed so a D47 term containing the `LitBool`
     /// ctor prints to ESL source that reparses.
@@ -817,6 +822,7 @@ impl Term {
             | Term::LitInt { pos, .. }
             | Term::LitFloat { pos, .. }
             | Term::LitRat { pos, .. }
+            | Term::LitUnit { pos, .. }
             | Term::LitBool { pos, .. } => pos,
         }
     }

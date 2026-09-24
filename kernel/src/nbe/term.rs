@@ -469,6 +469,51 @@ pub enum PrimitiveType {
 }
 
 impl PrimitiveType {
+    /// Every primitive. [`PrimitiveType::from_datatype_iri`] searches this list, so a variant
+    /// missing from it is unreachable from the chain: add new variants HERE as well as to
+    /// [`PrimitiveType::datatype_iri`], which the compiler does check.
+    pub const ALL: [PrimitiveType; 9] = [
+        PrimitiveType::String,
+        PrimitiveType::Iri,
+        PrimitiveType::Integer,
+        PrimitiveType::Float,
+        PrimitiveType::Boolean,
+        PrimitiveType::Json,
+        PrimitiveType::Rational,
+        PrimitiveType::BigInt,
+        PrimitiveType::Unit,
+    ];
+
+    /// The `core:` DataType IRI this primitive is the chain image of.
+    pub fn datatype_iri(self) -> &'static str {
+        use crate::ontology::well_known as wk;
+        match self {
+            PrimitiveType::String => wk::STRING,
+            PrimitiveType::Iri => wk::IRI_TYPE,
+            PrimitiveType::Integer => wk::INTEGER,
+            PrimitiveType::Float => wk::FLOAT,
+            PrimitiveType::Boolean => wk::BOOLEAN,
+            PrimitiveType::Json => wk::JSON,
+            PrimitiveType::Rational => wk::RATIONAL,
+            PrimitiveType::BigInt => wk::BIGINT,
+            PrimitiveType::Unit => wk::UNIT,
+        }
+    }
+
+    /// The inverse of [`PrimitiveType::datatype_iri`]: `None` for any IRI that does not name a
+    /// primitive DataType.
+    ///
+    /// This replaced five hand-written string matches — one in the D47 mirror, four in
+    /// `program::ground` — each with a fallback arm, so none could be flagged when a primitive
+    /// was added. D94 added `core:rational` and `core:bigint` to one of them. In the other four a
+    /// rational-typed property grounded to `Sort 1`, and a rational-typed constructor argument was
+    /// read as a reference to an inductive NAMED `core:rational`.
+    pub fn from_datatype_iri(iri: &str) -> Option<PrimitiveType> {
+        PrimitiveType::ALL
+            .into_iter()
+            .find(|p| p.datatype_iri() == iri)
+    }
+
     /// Whether a value of `self` is admissible where `other` is expected.
     ///
     /// Two refinements hold: `Iri <: String` — every IRI is a string — and `BigInt <: Rational`,

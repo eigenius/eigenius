@@ -717,6 +717,19 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Value::Bool(b))
             }
+            // D94 / D93 — the exact literals, as property values. Both lower to the canonical
+            // STRING, which is the chain form of `core:rational` and `core:unit` and what Rule 21
+            // validates. Before this they were accepted only inside `type_expr(…)`, so a
+            // `core:rational` property had to be authored as a hand-reduced fraction: 1 eV as
+            // `"801088317/5000000000000000000000000000"` rather than `1.602176634e-19r`.
+            TokenKind::RatLit(r) => {
+                self.advance();
+                Ok(Value::String(r.to_canonical_string()))
+            }
+            TokenKind::UnitLit(u) => {
+                self.advance();
+                Ok(Value::String(u.to_canonical_string()))
+            }
             // Unary minus on a numeric literal — preserves the
             // pre-Phase-19f.3 shape `ex:value = -1.5;`. Lexer used to
             // sign-fold negative numbers; now it always emits `Minus`
@@ -1373,6 +1386,10 @@ impl<'a> Parser<'a> {
             TokenKind::RatLit(r) => {
                 self.advance();
                 return Ok(Term::LitRat { value: r, pos });
+            }
+            TokenKind::UnitLit(u) => {
+                self.advance();
+                return Ok(Term::LitUnit { value: u, pos });
             }
             TokenKind::BoolLit(b) => {
                 self.advance();

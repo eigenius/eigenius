@@ -36,14 +36,8 @@ use std::sync::Arc;
 /// - Recommended properties: Σ name : Option(T). ...
 pub fn resolve_class_type(class_iri: &Iri, layer: &Layer) -> Result<Val, String> {
     // Check for primitive types first
-    match class_iri.as_str() {
-        wk::STRING => return Ok(Val::EigonPrimitive(PrimitiveType::String)),
-        wk::IRI_TYPE => return Ok(Val::EigonPrimitive(PrimitiveType::Iri)),
-        wk::INTEGER => return Ok(Val::EigonPrimitive(PrimitiveType::Integer)),
-        wk::FLOAT => return Ok(Val::EigonPrimitive(PrimitiveType::Float)),
-        wk::BOOLEAN => return Ok(Val::EigonPrimitive(PrimitiveType::Boolean)),
-        wk::JSON => return Ok(Val::EigonPrimitive(PrimitiveType::Json)),
-        _ => {}
+    if let Some(p) = PrimitiveType::from_datatype_iri(class_iri.as_str()) {
+        return Ok(Val::EigonPrimitive(p));
     }
 
     let resource_arc = layer
@@ -272,14 +266,10 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
         None => return Ok(Val::sort(1)), // Unknown data type
     };
 
+    if let Some(p) = PrimitiveType::from_datatype_iri(&data_type_str) {
+        return Ok(Val::EigonPrimitive(p));
+    }
     match data_type_str.as_str() {
-        wk::STRING => Ok(Val::EigonPrimitive(PrimitiveType::String)),
-        wk::IRI_TYPE => Ok(Val::EigonPrimitive(PrimitiveType::Iri)),
-        wk::INTEGER => Ok(Val::EigonPrimitive(PrimitiveType::Integer)),
-        wk::FLOAT => Ok(Val::EigonPrimitive(PrimitiveType::Float)),
-        wk::BOOLEAN => Ok(Val::EigonPrimitive(PrimitiveType::Boolean)),
-        wk::JSON => Ok(Val::EigonPrimitive(PrimitiveType::Json)),
-
         wk::RESOURCE => {
             // Check for allows_only first (enum type)
             let ao_iri = Iri::parse(wk::ALLOWS_ONLY).unwrap();
@@ -317,14 +307,8 @@ pub fn resolve_property_type(prop_iri: &Iri, layer: &Layer) -> Result<Val, Strin
             let et_iri = Iri::parse(wk::ELEMENT_TYPE).unwrap();
             let elem_type = if let Some(et_iri_val) = resource.get(&et_iri).and_then(|v| v.as_iri())
             {
-                match et_iri_val.as_str() {
-                    wk::STRING => Val::EigonPrimitive(PrimitiveType::String),
-                    wk::IRI_TYPE => Val::EigonPrimitive(PrimitiveType::Iri),
-                    wk::INTEGER => Val::EigonPrimitive(PrimitiveType::Integer),
-                    wk::FLOAT => Val::EigonPrimitive(PrimitiveType::Float),
-                    wk::BOOLEAN => Val::EigonPrimitive(PrimitiveType::Boolean),
-                    _ => Val::sort(1),
-                }
+                PrimitiveType::from_datatype_iri(et_iri_val.as_str())
+                    .map_or_else(|| Val::sort(1), Val::EigonPrimitive)
             } else {
                 Val::sort(1)
             };
@@ -1031,14 +1015,8 @@ fn decode_arg_type(class_iri: &Iri, value: &Value, layer: &Layer) -> Result<Exp,
     }
 
     // Primitive type IRIs get folded to the corresponding Exp form.
-    match arg_iri.as_str() {
-        wk::STRING => return Ok(Exp::EigonPrimitive(PrimitiveType::String)),
-        wk::IRI_TYPE => return Ok(Exp::EigonPrimitive(PrimitiveType::Iri)),
-        wk::INTEGER => return Ok(Exp::EigonPrimitive(PrimitiveType::Integer)),
-        wk::FLOAT => return Ok(Exp::EigonPrimitive(PrimitiveType::Float)),
-        wk::BOOLEAN => return Ok(Exp::EigonPrimitive(PrimitiveType::Boolean)),
-        wk::JSON => return Ok(Exp::EigonPrimitive(PrimitiveType::Json)),
-        _ => {}
+    if let Some(p) = PrimitiveType::from_datatype_iri(arg_iri.as_str()) {
+        return Ok(Exp::EigonPrimitive(p));
     }
 
     // Cross-inductive reference: the arg type is some other declared

@@ -60,7 +60,7 @@ a better interface than filtering on a field named `dimension_2`, and it keeps t
 consistent with D94's. `COMMENSURABLE(a, b)` is not added: it is `DIMENSION(a) = DIMENSION(b)`.
 
 **A magnitude has no carrier of its own.** It reaches a term as the two arguments of
-`Quantity.mk(coefficient : core:rational, pi : core:integer)` — see D93, "How a magnitude reaches a
+`units:mk_quantity(coefficient : core:rational, pi : core:integer)` — see D93, "How a magnitude reaches a
 term". Slice 2 first gave `Magnitude` a canonical string, serde and a `MAGNITUDE()` query function;
 all three were removed once that was decided, because nothing on the chain stores one.
 
@@ -104,6 +104,10 @@ input, as `Rational` does), serde over it, and `UNIT` and `DIMENSION` in `call_f
 
 ## Slice 3 — chain surface AND SI content, then ONE reseed
 
+**Built, except the reseed** (see the commit adding `ontologies/units/units.esl`). As built, the
+units layer loads after `prov` rather than directly after `core` (D93, "Load order"), and its
+vocabulary adds the gram and the three plane angles to the lists below (D93, "As built").
+
 The seam is wider than D94's, because the SI content is also bootstrap. Anything compiled in via
 `include_str!` in `kernel/src/bootstrap/mod.rs` — 20 ontologies today — is part of the manifest, so
 a units layer moves it just as `core-ontology.json` does. Both must land together.
@@ -113,7 +117,7 @@ a units layer moves it just as `core-ontology.json` does. Both must land togethe
   exactly this).
 - `units:Quantity (u : core:unit) : Set` as a chain inductive with `u` a uniform parameter, as
   `core:Asserts` has `iri : core:string`. One constructor,
-  `mk(coefficient : core:rational, pi : core:integer)`.
+  `mk_quantity(coefficient : core:rational, pi : core:integer)`.
 - A new `eigentt:Term` constructor carrying a unit value, with its D47 mirror arms.
 - The Eigon-JSON form, and the ESL printer and compiler arms.
 - `ontologies/units/units.esl` as a 21st `BootstrapOntology`: 7 base, 22 named derived, 24 prefixes,
@@ -138,6 +142,14 @@ The offsets come from chart seeding, where an occurrence's token position is alr
 
 This is `enc:` vocabulary, and `ontologies/encoding/encoding.esl` is a bootstrap ontology — so it
 moves the manifest and belongs in slice 3's landing, not after it.
+
+**Open: the type of `stated_unit`.** The units layer holds atoms (`units:gram`, `units:milli`). A
+stated unit such as `mg/kg` or `μmol·L⁻¹` is a prefixed compound over them, so it cannot be one
+`units:NamedUnit` reference. Candidates: the unit's surface as a string (queryable by exact match,
+but `mg/kg` and `mg kg⁻¹` do not unify); a structured factor list such as
+`[(milli, gram, 1), (kilogram, −1)]`, whose shape depends on D95's unit sub-parser; or deferring the
+record to D95. D95 moves the bootstrap manifest anyway — its measure-phrase category and preposition
+entries go into `lexicon-ontology.esl` and `closed-class.esl` — so deferring costs no second reseed.
 
 ## Deferred, with reasons
 

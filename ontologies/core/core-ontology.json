@@ -272,6 +272,7 @@
       "urn:eigenius:core:float",
       "urn:eigenius:core:rational",
       "urn:eigenius:core:bigint",
+      "urn:eigenius:core:unit",
       "urn:eigenius:core:boolean",
       "urn:eigenius:core:resource",
       "urn:eigenius:core:resource_array",
@@ -600,6 +601,14 @@
     ],
     "urn:eigenius:core:description": "An exact integer of arbitrary size. A REFINEMENT of core:rational checking that the denominator is 1, not a separate carrier -- the relationship core:iri has to core:string (D88 3). Distinct from core:integer, which is the 53-bit safe range: eight of the 24 SI prefixes exceed u64 (D93).",
     "urn:eigenius:core:short_name": "bigint"
+  },
+  {
+    "@id": "urn:eigenius:core:unit",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:DataType"
+    ],
+    "urn:eigenius:core:description": "A unit of measure: a rational exponent vector over the seven SI base dimensions (s, m, kg, A, K, mol, cd), plus kind exponents carried only when every dimension exponent is zero. Represented as a JSON STRING in canonical form -- base symbols in that order, then kinds, joined by U+00B7, no explicit ^1, `1` for the dimensionless unit, e.g. `s^-1·m^2` or `angle` -- so string equality is value equality and the content hash is stable. Every other spelling of a value is refused, not normalised. Always in base units: `km` is not a value of this type; it is `m` with the factor moved into the magnitude at ingest. NOT the unit type `One`, whose value is `()` (D93).",
+    "urn:eigenius:core:short_name": "unit"
   },
   {
     "@id": "urn:eigenius:core:boolean",
@@ -1338,6 +1347,27 @@
                 "urn:eigenius:eigentt:Term-ConstRef"
               ],
               "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:rational",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:core:InductiveCtor"
+        ],
+        "urn:eigenius:core:ctor_name": "LitUnit",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "value",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:unit",
               "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           }

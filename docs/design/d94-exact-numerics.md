@@ -366,6 +366,24 @@ the same rational, decimal shows which digit diverged.
 of the 4096-bit bound. The size and parse-cost arguments turn on together at that point. The bound
 is a refusal threshold, not a typical size, so nothing currently approaches it.
 
+## Found while building D93
+
+Two gaps in what D94 landed, both found when D93's units layer became its first consumer.
+
+**Four of five DataType-to-primitive mappings did not know the new carriers.** The IRI →
+`PrimitiveType` mapping existed as five hand-written string matches — one in the D47 mirror, four in
+`program::ground` — each ending in a fallback arm, so adding a primitive flagged none of them. D94
+updated the mirror's. In the other four, a `core:rational` property grounded to `Sort 1`, and a
+`core:rational` constructor argument was read as a reference to an inductive NAMED `core:rational`;
+`units:mk_quantity`'s coefficient is exactly such an argument. All five now read
+`PrimitiveType::from_datatype_iri`, the inverse of the exhaustive `PrimitiveType::datatype_iri`.
+
+**`r"…"` and `0.05r` were not valid property values.** The resource-body value parser accepted
+string, integer, float and boolean literals, so the rational literal worked only inside
+`type_expr(…)`, and a `core:rational` property had to be written as a hand-reduced fraction — 1 eV
+as `"801088317/5000000000000000000000000000"`. Both exact literals, `r"…"` and D93's `u"…"`, now
+lower to their canonical string as property values, which is the form Rule 21 validates.
+
 ## Scope
 
 **In.** `core:bigint` and `core:rational` as primitives; canonical form for rationals; new `Exp`

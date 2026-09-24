@@ -1560,6 +1560,33 @@ mod tests {
         assert!(matches!(t, Val::EigonPrimitive(PrimitiveType::Unit)));
     }
 
+    /// One mapping between primitives and their chain DataTypes, in both directions. Five
+    /// hand-written copies preceded it, and D94 updated one of them.
+    #[test]
+    fn every_primitive_round_trips_through_its_datatype_iri() {
+        let mut seen = std::collections::BTreeSet::new();
+        for p in PrimitiveType::ALL {
+            let iri = p.datatype_iri();
+            assert!(
+                seen.insert(iri),
+                "{p:?} shares {iri} with another primitive"
+            );
+            assert_eq!(PrimitiveType::from_datatype_iri(iri), Some(p));
+        }
+        // The three D93/D94 carriers are the ones the stale copies lacked.
+        for (iri, p) in [
+            ("urn:eigenius:core:rational", PrimitiveType::Rational),
+            ("urn:eigenius:core:bigint", PrimitiveType::BigInt),
+            ("urn:eigenius:core:unit", PrimitiveType::Unit),
+        ] {
+            assert_eq!(PrimitiveType::from_datatype_iri(iri), Some(p));
+        }
+        assert_eq!(
+            PrimitiveType::from_datatype_iri("urn:eigenius:core:resource"),
+            None
+        );
+    }
+
     /// `PrimitiveType::Unit` is a unit of MEASURE. It is not the unit type `One`, and not
     /// confusable with any other carrier.
     #[test]

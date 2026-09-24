@@ -352,6 +352,17 @@ const BOOTSTRAP_CHAIN: &[BootstrapOntology] = &[
     // SampleSet sum-types, the seven smart-constructor macros, analysis-plan
     // classes, the §7 stance markers + QueryClasses). Above reasoning so the
     // notebook sees both (the D52 → D39 composition).
+    // units (D93) — `units:Quantity : Unit -> Set` and the SI vocabulary: 7 base units, the gram,
+    // 22 named derived units, the SI-accepted non-SI units and 24 prefixes, each with its base
+    // dimension and exact factor. It references only `core` (`core:unit`, `core:rational`), but it
+    // is ESL, and the ESL compiler stamps `prov:was_attributed_to` on every declaration — so it
+    // loads after `prov`, which D93's "nothing else constrains it" missed. Before `statistics`,
+    // whose quantities carry units.
+    BootstrapOntology {
+        name: "units",
+        source: include_str!("../../../ontologies/units/units.esl"),
+        format: OntologyFormat::Esl,
+    },
     BootstrapOntology {
         name: "statistics",
         source: include_str!("../../../ontologies/statistics/statistics.esl"),
@@ -954,64 +965,27 @@ class p:Cat { description = "a dog"; }"#;
     #[test]
     fn bootstrap_succeeds() {
         let ctx = bootstrap().unwrap();
-        // Head is the encoding layer
-        // (on top of lean-institution → lean-runtime-classes →
-        // formulas → runtime → institution → reflection → program → core).
-        // formulas inserted at Phase 19d.0.d / D32 §4 so FormulaTerm
-        // and the operator catalog ride above the runtime substrate
-        // lean-runtime-classes inserted at Phase 20a.5a / D28 §10.3
-        // to declare LeanProject / LeanEnvironment subclasses.
-        // lean-institution inserted at Phase 20a.4 / D28 to declare
-        // the LeanProofTerm class + qc_proof_check QueryClass.
-        // reasoning inserted at D39 Phase 8 to declare the
-        // Justification Logic institution and its chain artifacts.
-        // statistics inserted at D52 Phase 5 to declare the
-        // Measurement Statistics institution and its chain artifacts.
-        assert!(!ctx.head().is_root());
-        // closed-class (D63 §8.3) is the tip; then ontology (D63 §8.5 3c), lexicon,
-        // logic, reference, ingest (D53), notebook.
-        // encoding (D71) sits at the tip: the D62 pipeline contract, bootstrapped
-        // because the kernel already names its IRIs (see BOOTSTRAP_CHAIN).
-        let closed_class = ctx.head().parent().unwrap();
-        assert!(!closed_class.is_root());
-        let ontology = closed_class.parent().unwrap();
-        assert!(!ontology.is_root());
-        let lexicon = ontology.parent().unwrap();
-        assert!(!lexicon.is_root());
-        let logic = lexicon.parent().unwrap();
-        assert!(!logic.is_root());
-        let reference = logic.parent().unwrap();
-        assert!(!reference.is_root());
-        let ingest = reference.parent().unwrap();
-        assert!(!ingest.is_root());
-        let notebook = ingest.parent().unwrap();
-        assert!(!notebook.is_root());
-        let statistics = notebook.parent().unwrap();
-        assert!(!statistics.is_root());
-        let reasoning = statistics.parent().unwrap();
-        assert!(!reasoning.is_root());
-        let lean_institution = reasoning.parent().unwrap();
-        assert!(!lean_institution.is_root());
-        let lean_runtime_classes = lean_institution.parent().unwrap();
-        assert!(!lean_runtime_classes.is_root());
-        // `lean-expressions` sat here until D74 §6.3.1 removed it.
-        let formulas = lean_runtime_classes.parent().unwrap();
-        assert!(!formulas.is_root());
-        let runtime = formulas.parent().unwrap();
-        assert!(!runtime.is_root());
-        let institution = runtime.parent().unwrap();
-        assert!(!institution.is_root());
-        let obo = institution.parent().unwrap();
-        assert!(!obo.is_root());
-        let prov = obo.parent().unwrap();
-        assert!(!prov.is_root());
-        let reflection = prov.parent().unwrap();
-        assert!(!reflection.is_root());
-        let program = reflection.parent().unwrap();
-        assert!(!program.is_root());
-        // `program`'s parent is core, and core is the root. The EigenTT type fragment sat between
-        // them until it was merged into core — the namespaces stayed separate, the layers did not.
-        assert!(program.parent().unwrap().is_root());
+        // The chain, root first, must be BOOTSTRAP_CHAIN in declaration order: each layer's parent
+        // is the one declared before it, and core is the root.
+        //
+        // This used to walk `parent()` a fixed number of hops into named locals that nothing
+        // checked — two were already mislabelled (`reasoning` for justification, `reflection` for
+        // program-traces) — so it tested the chain's LENGTH, and adding any layer broke it.
+        let mut names = Vec::new();
+        let mut layer = Some(ctx.head());
+        while let Some(l) = layer {
+            names.push(l.name().to_string());
+            layer = l.parent();
+        }
+        names.reverse();
+        let declared: Vec<&str> = BOOTSTRAP_CHAIN.iter().map(|o| o.name).collect();
+        assert_eq!(names, declared);
+        let mut root = ctx.head();
+        while let Some(p) = root.parent() {
+            root = p;
+        }
+        assert!(root.is_root());
+        assert_eq!(root.name(), "core");
     }
 
     #[test]

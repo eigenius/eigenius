@@ -249,7 +249,7 @@ fn gcd(mut a: u32, mut b: u32) -> u32 {
 /// separating and the kind has no work left. Without it a multiplicative kind vector re-breaks
 /// `s = rθ`, leaving arc length as a length carrying `angle¹` — which is why an eighth base
 /// dimension was rejected.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Unit {
     dimension: [Exponent; 7],
     kinds: BTreeMap<Kind, Exponent>,
@@ -457,6 +457,14 @@ fn canonicalise(dimension: [Exponent; 7], kinds: BTreeMap<Kind, Exponent>) -> Un
         BTreeMap::new()
     };
     Unit { dimension, kinds }
+}
+
+/// The canonical form, not the exponent array. Type-mismatch errors print both sides with `{:?}`,
+/// and seven `Exponent { numer, denom }` structs per side made `angle ≠ m` unreadable.
+impl fmt::Debug for Unit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Unit({self})")
+    }
 }
 
 impl fmt::Display for Unit {

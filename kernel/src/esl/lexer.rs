@@ -124,6 +124,9 @@ pub enum TokenKind {
     /// reduced denominator is not 2^a·5^b — and `37/180`, degrees to radians, is exactly such a
     /// value (D93). The canonical form is what the printer emits.
     RatLit(crate::numeric::Rational),
+    /// A unit of measure (D93), from `u"s^-1·m^2"`. Canonical form only, and unlike `RatLit`
+    /// there is no second surface: a unit has no decimal spelling to abbreviate.
+    UnitLit(crate::units::Unit),
     BoolLit(bool),
 
     // Identifier (bare word: name, breed, short_name)
@@ -384,6 +387,13 @@ impl<'a> Lexer<'a> {
             return self.lex_rational_string(pos);
         }
 
+        // Unit literal — `u"s^-1·m^2"` (D93). Same placement and the same rule as `r"…"`: only an
+        // IMMEDIATELY following quote triggers it, so `u` as a universe-level variable (`Sort u`)
+        // and `f(u, "x")` stay an identifier.
+        if ch == b'u' && self.peek_at(1) == Some(b'"') {
+            return self.lex_unit_string(pos);
+        }
+
         // Lambda unicode: λ is U+03BB, encoded as CE BB in UTF-8
         if ch == 0xCE && self.peek_at(1) == Some(0xBB) {
             self.advance();
@@ -430,6 +440,26 @@ impl<'a> Lexer<'a> {
         })?;
         Ok(Token {
             kind: TokenKind::RatLit(r),
+            pos,
+        })
+    }
+
+    /// `u"s^-1·m^2"` — a unit in canonical form. Refuses a non-canonical spelling rather than
+    /// normalising it, for the reason `lex_rational_string` gives.
+    fn lex_unit_string(&mut self, pos: Position) -> Result<Token, EslError> {
+        self.advance(); // the `u`
+        let tok = self.lex_string(pos.clone())?;
+        let TokenKind::StringLit(s) = tok.kind else {
+            return Err(EslError::lexer(
+                pos,
+                "expected a string after `u`".to_string(),
+            ));
+        };
+        let u = crate::units::Unit::parse_canonical(&s).map_err(|e| {
+            EslError::lexer(pos.clone(), format!("invalid unit literal `u\"{s}\"`: {e}"))
+        })?;
+        Ok(Token {
+            kind: TokenKind::UnitLit(u),
             pos,
         })
     }
@@ -1032,7 +1062,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod rational_literal_tests {
+mod exact_literal_tests {
     use super::*;
 
     fn kinds(src: &str) -> Vec<TokenKind> {
@@ -1083,6 +1113,40 @@ mod rational_literal_tests {
         for bad in ["r\"2/4\"", "r\"01\"", "r\"1/1\"", "r\"1.5\""] {
             assert!(tokenize(bad).is_err(), "expected `{bad}` to be refused");
         }
+    }
+
+    // ── D93: `u"…"` ─────────────────────────────────────────────────────────
+
+    fn unit(s: &str) -> TokenKind {
+        TokenKind::UnitLit(crate::units::Unit::parse_canonical(s).unwrap())
+    }
+
+    #[test]
+    fn a_unit_literal_lexes_in_canonical_form() {
+        assert_eq!(kinds("u\"s^-1\u{b7}m^2\"")[0], unit("s^-1\u{b7}m^2"));
+        assert_eq!(kinds("u\"angle\"")[0], unit("angle"));
+        assert_eq!(kinds("u\"1\"")[0], unit("1"));
+    }
+
+    /// Refused, not normalised — `m·s^-1·m` denotes `s^-1·m^2`, and two spellings of one value
+    /// would hash differently.
+    #[test]
+    fn a_non_canonical_unit_literal_is_refused() {
+        for bad in ["u\"m\u{b7}s^-1\u{b7}m\"", "u\"m^1\"", "u\"metre\"", "u\"\""] {
+            assert!(tokenize(bad).is_err(), "expected `{bad}` to be refused");
+        }
+    }
+
+    /// `u` is the conventional universe-level variable (`Sort u`), so only an IMMEDIATELY following
+    /// quote makes a unit literal.
+    #[test]
+    fn a_bare_u_is_still_an_identifier() {
+        assert!(matches!(kinds("u")[0], TokenKind::Ident(_)));
+        let k = kinds("Sort u");
+        assert!(matches!(&k[1], TokenKind::Ident(n) if n == "u"));
+        let k = kinds("u \"m\"");
+        assert!(matches!(k[0], TokenKind::Ident(_)));
+        assert!(matches!(k[1], TokenKind::StringLit(_)));
     }
 
     #[test]
