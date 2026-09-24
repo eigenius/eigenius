@@ -13,10 +13,11 @@ None can be worked around, and each changes what gets written.
 
 1. ~~**The embedded shape for `Unit` and `Magnitude`.**~~ **DECIDED — canonical string, not
    `Value::Embedded`.** See "The carrier for `Unit` and `Magnitude`" below.
-2. **`931g`.** D93 states v1 "must do one of two things, and it must say which": admit standard
-   gravity into the vocabulary, or refuse the numeral/unit split for it. Against the 7 + 22 + 24
-   list as written, `931g` resolves to 931 **grams** — the silent mistyping the document warns
-   about, guaranteed rather than risked.
+2. ~~**`931g`.**~~ **DECIDED — refuse.** v1 does not split a `g`-suffixed numeral; `931g` stays
+   unparsed rather than becoming 931 grams. Admitting standard gravity would open "units science
+   uses that the SI does not accept", and `rpm` in the same corpus sentence queues up behind it, so
+   the category gets opened deliberately with a criterion rather than one symbol at a time. D93
+   records the full reasoning.
 3. **Occurrence identity for the stated-unit record.** A per-occurrence record must name WHICH
    quantity in the term it is the surface of. Unambiguous for a single-quantity claim; not for the
    ten WRN sentences carrying two or three units.

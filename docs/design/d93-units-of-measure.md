@@ -578,10 +578,32 @@ SI-accepted list, which contains **gram and not standard gravity**. D95's split 
 suffix that is a known unit", so against this vocabulary `931g` resolves to 931 grams — precisely
 the silent mistyping this paragraph warns about.
 
-So v1 must do one of two things, and it must say which: admit standard gravity (and the
-relative-centrifugal-force reading) as a named sense so the ranker can choose, or **refuse** to
-split a `g`-suffixed numeral rather than resolve it wrongly. Refusing is the fail-closed option and
-is the default until the sense exists.
+**Decided: v1 REFUSES to split a `g`-suffixed numeral.** `931g` stays unparsed rather than becoming
+931 grams — the CNL guide's R2, *a faithful un-parsed claim beats a parsed distorted one*.
+
+The two senses are not near-misses. Gram is a mass; standard gravity is an acceleration, `L T⁻²`,
+so a wrong resolution types the wrong DIMENSION rather than the wrong magnitude.
+
+**What admitting it would have cost, and why that is the real question.** The conversion is the
+cheap part: g₀ is *defined* by CGPM (1901) as exactly 9.80665 m/s², so it is `196133/20000` as a
+D94 rational — the clean side of this document's own distinction, unlike the dalton, which is
+measured and carries a CODATA vintage as a documented exception. Prefixes disambiguate for free,
+since gram takes the 24 and standard gravity takes none: `μg`, `mg` and `kg` stay unambiguously
+mass, and only a bare `g` is two-sensed.
+
+What it really commits to is a CATEGORY. The v1 vocabulary is 7 base + 22 derived + 24 prefixes +
+the SI's own accepted non-SI list; standard gravity is not on that list. Admitting it opens "units
+science uses that the SI does not accept", and the corpus queues up more immediately — `rpm` appears
+in the same WRN methods section, with °F, psi, mmHg and the calorie behind it. Admitting `g` alone
+buys little while `rpm` in the same sentence stays unparseable.
+
+So the category is worth opening deliberately, with a criterion for what enters it, rather than one
+symbol at a time. Until then, refusing is fail-closed and costs nothing but coverage.
+
+There is a second choice inside the admission, recorded so it is not rediscovered: RCF is
+conventionally reported as a dimensionless multiple of g₀, not as an acceleration in m/s². So `931g`
+could be `9131 m·s⁻²` or a scale on the plain dimensionless unit — which is how `%` and `ppm` are
+already handled.
 
 ## "Normalised" names two operations, and only one is the kernel's
 
