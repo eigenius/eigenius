@@ -210,7 +210,10 @@ ESL sugar desugaring to these calls, never kernel syntax; not built now.
 to `LitUnit(m)` — that instantiating a closure re-normalises — and that normalising a canonical
 spine returns it unchanged.
 
-`units.esl` gains the two axioms, so `units` moves again; one reseed covers 5a and 5.
+`units.esl` gains the two axioms, so `units` moves again; one reseed covers 5a and 5 — run
+2026-09-25 at `d342cc9`: 9,440,702 resources across 32 layers into `db-snapshot/wordnet-umls-2026-09-25`,
+aligned into `wordnet-umls-aligned-2026-09-25` with 40,375 alignment resources, both unchanged from
+2026-09-24 because the lexicon data did not change.
 
 **Built.** `nbe/unit_ext.rs`, hooked in `Val::app_impl`. On the commit path: a unit-generic
 `ratio` applied to `m` and `s` has result type `Quantity(s^-1·m)`, and swapped it is refused as
