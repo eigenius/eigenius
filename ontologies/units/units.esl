@@ -33,6 +33,16 @@ data units:Quantity (u : core:unit) : Set {
     mk_quantity : forall (u : core:unit) => core:rational -> core:integer -> units:Quantity(u)
 }
 
+// ── The unit operators ───────────────────────────────────────────────────────────────────────────
+// Declared constants, reduced by the kernel (`kernel/src/nbe/unit_ext.rs`) the way nanoda's kernel
+// reduces `Nat.add`: recognised by name, with no term form of their own. A product of literal units
+// reduces to a literal; a product with unit variables in it normalises, so `mul(u, v)` and
+// `mul(v, u)` are the same unit (D93, "Normalisation only; parameterisation instead of
+// unification"). Division is `mul(a, pow(b, r"-1"))`.
+
+axiom units:mul : core:unit -> core:unit -> core:unit
+axiom units:pow : core:unit -> core:rational -> core:unit
+
 // ── Vocabulary classes ───────────────────────────────────────────────────────────────────────────
 
 class units:NamedUnit {

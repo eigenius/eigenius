@@ -556,18 +556,18 @@ impl Layer {
     ///
     /// On a malformed axiom (decode failure, statement that doesn't
     /// type-check), this returns an `AxiomEnv` containing only the
-    /// axioms that DID admit. The malformed axioms are dropped; chain
-    /// validation should have caught them at ingest time, so reaching
-    /// this code path with a bad axiom is a defensive fallback. Callers
+    /// axioms that DID admit. The malformed axioms are dropped, and each
+    /// failure is recorded (`AxiomEnv::failure`) so a reference to one
+    /// reports why; chain validation should have caught them at ingest
+    /// time, so reaching this code path with a bad axiom is a defensive
+    /// fallback. Callers
     /// that need the strict error-surfaced view call
     /// `crate::program::axiom_env::build_axiom_env(self)` directly.
     pub fn axiom_env(
         self: &std::sync::Arc<Self>,
     ) -> std::sync::Arc<crate::program::axiom_env::AxiomEnv> {
         let env = self.axiom_env.get_or_init(|| {
-            std::sync::Arc::new(
-                crate::program::axiom_env::build_axiom_env(self).unwrap_or_default(),
-            )
+            std::sync::Arc::new(crate::program::axiom_env::build_axiom_env_lenient(self))
         });
         std::sync::Arc::clone(env)
     }

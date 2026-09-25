@@ -1346,12 +1346,16 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             let layer = ctx.env.layer().ok_or_else(|| {
                 format!("Exp::EigonAxiom({iri}): no layer context available for axiom resolution")
             })?;
-            let env = layer.axiom_env();
-            env.get(iri).map(|entry| entry.typ.clone()).ok_or_else(|| {
-                CheckError::IllFormed(format!(
+            // Through `axiom_type`, never `layer.axiom_env()` directly: while that environment is
+            // being built, the answer must come from the construction, or checking an axiom whose
+            // statement mentions another re-enters the cache's initialisation and deadlocks.
+            match crate::program::axiom_env::axiom_type(layer, iri) {
+                Ok(Some(typ)) => Ok(typ),
+                Ok(None) => Err(CheckError::IllFormed(format!(
                     "axiom `{iri}` not registered in chain axiom environment"
-                ))
-            })
+                ))),
+                Err(e) => Err(CheckError::IllFormed(format!("axiom `{iri}`: {e}"))),
+            }
         }
         // D87 §4.3 — a reference to a proof an EXTERNAL checker verified. Refused here, and the
         // refusal is the enforcement.

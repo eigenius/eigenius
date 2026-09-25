@@ -57,6 +57,9 @@ pub struct AxiomEntry {
 #[derive(Debug, Clone, Default)]
 pub struct AxiomEnv {
     axioms: BTreeMap<Iri, AxiomEntry>,
+    /// Axioms that did not admit, with why — so a reference to one reports the reason instead of
+    /// "not registered".
+    failures: BTreeMap<Iri, AxiomEnvError>,
 }
 
 impl AxiomEnv {
@@ -65,6 +68,11 @@ impl AxiomEnv {
     }
 
     /// Look up an admitted axiom by IRI.
+    /// Why `iri` did not admit, when it is an axiom that failed.
+    pub fn failure(&self, iri: &Iri) -> Option<&AxiomEnvError> {
+        self.failures.get(iri)
+    }
+
     pub fn get(&self, iri: &Iri) -> Option<&AxiomEntry> {
         self.axioms.get(iri)
     }
@@ -95,6 +103,9 @@ pub enum AxiomEnvError {
     DecodeFailed { axiom: Iri, details: String },
     /// The decoded statement fails to type-check as a well-formed type.
     NotAWellFormedType { axiom: Iri, details: String },
+    /// The axiom's statement needs the axiom itself, directly or through other axioms. A
+    /// declaration's type is not in the scope of the declaration.
+    Cyclic(Iri),
 }
 
 impl std::fmt::Display for AxiomEnvError {
@@ -112,28 +123,31 @@ impl std::fmt::Display for AxiomEnvError {
                     "axiom `{axiom}` statement is not a well-formed type: {details}"
                 )
             }
+            AxiomEnvError::Cyclic(axiom) => write!(
+                f,
+                "axiom `{axiom}` is needed by its own statement, directly or through other axioms"
+            ),
         }
     }
 }
 
 impl std::error::Error for AxiomEnvError {}
 
-/// Walk a layer chain, collect every `eigentt:Axiom` resource, decode
-/// its `axiom_statement` back to an [`Exp`], type-check it as a
-/// well-formed type, and register the resulting `IRI → type` binding
-/// in a fresh [`AxiomEnv`].
+/// Walk a layer chain, collect every `eigentt:Axiom` resource, decode its statement, type-check
+/// it, and evaluate it into the type any reference to the axiom inhabits.
 ///
-/// Errors short-circuit on the first malformed axiom — chain commits
-/// that get past the D47 §5 validator should never produce errors
-/// here, so an error indicates either a validator bug or a manually-
-/// crafted bad resource bypassing normal commit. The caller may
-/// choose to treat this as fatal.
+/// **A statement may mention other axioms** — `ratio : … -> Quantity(units:mul(u, …))` mentions
+/// `units:mul` — and checking it needs their types. Those come from THIS construction, never from
+/// `layer.axiom_env()`: that accessor is a `OnceLock` whose initialiser is this function, and
+/// asking it for a type mid-construction re-entered its own initialisation and deadlocked, both
+/// threads parked in `futex_wait`. Nothing hit it while no axiom's statement mentioned another.
+///
+/// So axioms are admitted ON DEMAND: checking one that mentions another admits the other first
+/// (through [`axiom_type`]), in whatever order the chain lists them. A statement that needs its own
+/// axiom — directly, or through others — is refused, because a declaration's type is not in the
+/// scope of the declaration.
 pub fn build_axiom_env(layer: &Arc<Layer>) -> Result<AxiomEnv, AxiomEnvError> {
     let axiom_class = wk::iri(AXIOM_CLASS_IRI);
-    let stmt_prop = wk::iri(AXIOM_STATEMENT_IRI);
-    let justification_prop = wk::iri("urn:eigenius:eigentt:axiom_justification");
-
-    let mut env = AxiomEnv::new();
 
     // INDEX-DRIVEN enumeration of `eigentt:Axiom` instances (was a full-chain
     // `iter_all_resources()` scan that eagerly materialised the ENTIRE merged chain into a
@@ -143,43 +157,224 @@ pub fn build_axiom_env(layer: &Arc<Layer>) -> Result<AxiomEnv, AxiomEnvError> {
     // (`scan_predicate_object(is_a, eigentt:Axiom)`) plus staged/pending entries, so this is
     // O(#axioms). The post-`resolve` `is_axiom` guard is retained: a higher layer may tombstone or
     // redefine an indexed subject so its *effective* resource is no longer an axiom.
+    let mut unstarted = BTreeMap::new();
     for iri in crate::layer::typed_resource_iris(layer, &[AXIOM_CLASS_IRI]) {
-        let resource = match layer.resolve(&iri) {
-            Some(r) => r,
-            None => continue,
-        };
-        if !is_axiom(&resource, &axiom_class) {
+        let Some(resource) = layer.resolve(&iri) else {
             continue;
+        };
+        if is_axiom(&resource, &axiom_class) {
+            unstarted.insert(iri, resource);
         }
-        let statement_value = resource
-            .get(&stmt_prop)
-            .ok_or_else(|| AxiomEnvError::MissingStatement(iri.clone()))?;
-        let exp = crate::program::eigentt_type_mirror::decode_type(statement_value, layer)
-            .map_err(|e| AxiomEnvError::DecodeFailed {
-                axiom: iri.clone(),
-                details: e.to_string(),
-            })?;
-        let typ = type_check_axiom_statement(&exp, layer).map_err(|e| {
-            AxiomEnvError::NotAWellFormedType {
-                axiom: iri.clone(),
-                details: e,
-            }
-        })?;
-        let justification = resource.get(&justification_prop).and_then(|v| match v {
-            Value::String(s) => Some(s.clone()),
-            _ => None,
+    }
+    let order: Vec<Iri> = unstarted.keys().cloned().collect();
+    let scope = ConstructionScope::enter(layer, unstarted);
+    for iri in &order {
+        admit(layer.id(), iri)?;
+    }
+    Ok(scope.finish())
+}
+
+/// Like [`build_axiom_env`], but an axiom that fails is dropped and recorded rather than failing the
+/// whole environment — what `Layer::axiom_env` caches.
+///
+/// It replaces `build_axiom_env(self).unwrap_or_default()`, which its own doc described as keeping
+/// the axioms that admit but which returned an EMPTY environment on the first failure: one bad axiom
+/// made every axiom reference on the chain fail as "not registered", and the reason was discarded.
+pub fn build_axiom_env_lenient(layer: &Arc<Layer>) -> AxiomEnv {
+    let axiom_class = wk::iri(AXIOM_CLASS_IRI);
+    let mut unstarted = BTreeMap::new();
+    for iri in crate::layer::typed_resource_iris(layer, &[AXIOM_CLASS_IRI]) {
+        let Some(resource) = layer.resolve(&iri) else {
+            continue;
+        };
+        if is_axiom(&resource, &axiom_class) {
+            unstarted.insert(iri, resource);
+        }
+    }
+    let order: Vec<Iri> = unstarted.keys().cloned().collect();
+    let scope = ConstructionScope::enter(layer, unstarted);
+    for iri in &order {
+        // Recorded in the construction's `failed` either way; the lenient build keeps going.
+        let _ = admit(layer.id(), iri);
+    }
+    scope.finish()
+}
+
+/// The type an axiom inhabits, as seen from `layer`; `None` when `iri` names no axiom there.
+///
+/// While `layer`'s environment is being built on this thread, the answer comes from that
+/// construction, admitting `iri` first if it has not been; otherwise from the layer's cached
+/// environment. `check_infer` asks here and nowhere else, which is what keeps construction from
+/// asking the cache it is filling.
+pub(crate) fn axiom_type(layer: &Arc<Layer>, iri: &Iri) -> Result<Option<Val>, String> {
+    let constructing = CONSTRUCTIONS.with(|c| c.borrow().iter().any(|k| k.layer_id == *layer.id()));
+    if constructing {
+        return admit(layer.id(), iri).map_err(|e| e.to_string());
+    }
+    let env = layer.axiom_env();
+    if let Some(entry) = env.get(iri) {
+        return Ok(Some(entry.typ.clone()));
+    }
+    match env.failure(iri) {
+        Some(failure) => Err(failure.to_string()),
+        None => Ok(None),
+    }
+}
+
+/// One environment under construction on this thread.
+struct Construction {
+    layer_id: crate::layer::LayerId,
+    layer: Arc<Layer>,
+    /// Axioms not yet started.
+    unstarted: BTreeMap<Iri, Arc<Resource>>,
+    /// Axioms whose statements are being checked. Meeting one of these again is a cycle.
+    in_progress: std::collections::BTreeSet<Iri>,
+    /// Axioms that did not admit. Kept so a later reference reports the same failure rather than
+    /// finding the axiom neither started nor admitted.
+    failed: BTreeMap<Iri, AxiomEnvError>,
+    env: AxiomEnv,
+}
+
+thread_local! {
+    /// A STACK, because building one layer's environment may build another's — a different
+    /// `OnceLock`, so no re-entrancy — and each must find its own.
+    static CONSTRUCTIONS: std::cell::RefCell<Vec<Construction>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Pushes a construction for its lifetime and pops it on drop, so an early `?` return cannot leave
+/// a stale construction for a later check on this thread to find.
+struct ConstructionScope {
+    finished: bool,
+}
+
+impl ConstructionScope {
+    fn enter(layer: &Arc<Layer>, unstarted: BTreeMap<Iri, Arc<Resource>>) -> Self {
+        CONSTRUCTIONS.with(|c| {
+            c.borrow_mut().push(Construction {
+                layer_id: layer.id().clone(),
+                layer: Arc::clone(layer),
+                unstarted,
+                in_progress: std::collections::BTreeSet::new(),
+                failed: BTreeMap::new(),
+                env: AxiomEnv::new(),
+            })
         });
-        env.axioms.insert(
-            iri.clone(),
-            AxiomEntry {
-                iri: iri.clone(),
-                typ,
-                justification,
-            },
-        );
+        ConstructionScope { finished: false }
     }
 
-    Ok(env)
+    fn finish(mut self) -> AxiomEnv {
+        self.finished = true;
+        let con = CONSTRUCTIONS.with(|c| c.borrow_mut().pop().expect("the scope pushed it"));
+        let mut env = con.env;
+        env.failures = con.failed;
+        env
+    }
+}
+
+impl Drop for ConstructionScope {
+    fn drop(&mut self) {
+        if !self.finished {
+            CONSTRUCTIONS.with(|c| c.borrow_mut().pop());
+        }
+    }
+}
+
+/// Admits `iri` into the construction for `layer_id` and returns its type; `None` when it is not an
+/// axiom of that chain.
+///
+/// The thread-local is borrowed only to read and to record — never across the check, which may
+/// admit further axioms through [`axiom_type`] and so re-enter this function.
+fn admit(layer_id: &crate::layer::LayerId, iri: &Iri) -> Result<Option<Val>, AxiomEnvError> {
+    enum Step {
+        Known(Option<Val>),
+        Failed(AxiomEnvError),
+        Cycle,
+        Start(Arc<Layer>, Arc<Resource>),
+    }
+    let step = CONSTRUCTIONS.with(|c| {
+        let mut c = c.borrow_mut();
+        let con = c
+            .iter_mut()
+            .rev()
+            .find(|k| k.layer_id == *layer_id)
+            .expect("admit is reached only through an active construction");
+        if let Some(entry) = con.env.get(iri) {
+            return Step::Known(Some(entry.typ.clone()));
+        }
+        if let Some(failure) = con.failed.get(iri) {
+            return Step::Failed(failure.clone());
+        }
+        if con.in_progress.contains(iri) {
+            return Step::Cycle;
+        }
+        match con.unstarted.remove(iri) {
+            Some(resource) => {
+                con.in_progress.insert(iri.clone());
+                Step::Start(Arc::clone(&con.layer), resource)
+            }
+            None => Step::Known(None),
+        }
+    });
+    let (layer, resource) = match step {
+        Step::Known(typ) => return Ok(typ),
+        Step::Failed(failure) => return Err(failure),
+        Step::Cycle => return Err(AxiomEnvError::Cyclic(iri.clone())),
+        Step::Start(layer, resource) => (layer, resource),
+    };
+    let result = admit_resource(iri, &resource, &layer);
+    CONSTRUCTIONS.with(|c| {
+        let mut c = c.borrow_mut();
+        let con = c
+            .iter_mut()
+            .rev()
+            .find(|k| k.layer_id == *layer_id)
+            .expect("the construction outlives its admissions");
+        con.in_progress.remove(iri);
+        match &result {
+            Ok(entry) => {
+                con.env.axioms.insert(iri.clone(), entry.clone());
+            }
+            Err(failure) => {
+                con.failed.insert(iri.clone(), failure.clone());
+            }
+        }
+    });
+    result.map(|entry| Some(entry.typ))
+}
+
+/// Decode, check and evaluate one axiom's statement.
+fn admit_resource(
+    iri: &Iri,
+    resource: &Resource,
+    layer: &Arc<Layer>,
+) -> Result<AxiomEntry, AxiomEnvError> {
+    let stmt_prop = wk::iri(AXIOM_STATEMENT_IRI);
+    let justification_prop = wk::iri("urn:eigenius:eigentt:axiom_justification");
+    let statement_value = resource
+        .get(&stmt_prop)
+        .ok_or_else(|| AxiomEnvError::MissingStatement(iri.clone()))?;
+    let exp =
+        crate::program::eigentt_type_mirror::decode_type(statement_value, layer).map_err(|e| {
+            AxiomEnvError::DecodeFailed {
+                axiom: iri.clone(),
+                details: e.to_string(),
+            }
+        })?;
+    let typ =
+        type_check_axiom_statement(&exp, layer).map_err(|e| AxiomEnvError::NotAWellFormedType {
+            axiom: iri.clone(),
+            details: e,
+        })?;
+    let justification = resource.get(&justification_prop).and_then(|v| match v {
+        Value::String(s) => Some(s.clone()),
+        _ => None,
+    });
+    Ok(AxiomEntry {
+        iri: iri.clone(),
+        typ,
+        justification,
+    })
 }
 
 fn is_axiom(resource: &Resource, axiom_class: &Iri) -> bool {
@@ -257,7 +452,10 @@ mod tests {
         //   plus the future/conditional/deontic `logic:Will` / `Would` / `Should`
         //   (opaque `Prop → Prop`, witnessed downstream — see `ontologies/logic/logic.esl`); and
         // - the D62 §2e / D64 referent-hole placeholder `lexicon:anaphor : Entity` (a pronoun
-        //   stores it; the parser freshens it into an open-parse hole — `closed-class.esl`).
+        //   stores it; the parser freshens it into an open-parse hole — `closed-class.esl`); and
+        // - the D93 unit operators `units:mul` / `units:pow`, which the kernel reduces
+        //   (`nbe/unit_ext.rs`) — named one by one, so a further `units:` axiom must be listed here
+        //   deliberately rather than admitted by prefix.
         // Every bootstrap axiom should be in one of those families.
         let head = Arc::clone(crate::testing::bootstrap_context().head());
         let env = build_axiom_env(&head).unwrap();
@@ -274,6 +472,9 @@ mod tests {
             "urn:eigenius:lexicon:anaphor_of",
             "urn:eigenius:lexicon:speaker",
             "urn:eigenius:lexicon:poss_of",
+            // D93 — reduced by the kernel, not opaque; see `nbe/unit_ext.rs`.
+            "urn:eigenius:units:mul",
+            "urn:eigenius:units:pow",
         ];
         let unexpected: Vec<&Iri> = env
             .iter()
@@ -291,7 +492,8 @@ mod tests {
         assert!(
             unexpected.is_empty(),
             "bootstrap axioms should be the D52 measurement set + the D63 ontology \
-             relations + the modal operators + the `lexicon:card` cardinality functor; \
+             relations + the modal operators + the `lexicon:card` cardinality functor + the \
+             D93 unit operators; \
              unexpected axioms: {unexpected:?}"
         );
     }

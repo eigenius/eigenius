@@ -212,6 +212,27 @@ spine returns it unchanged.
 
 `units.esl` gains the two axioms, so `units` moves again; one reseed covers 5a and 5.
 
+**Built.** `nbe/unit_ext.rs`, hooked in `Val::app_impl`. On the commit path: a unit-generic
+`ratio` applied to `m` and `s` has result type `Quantity(s^-1·m)`, and swapped it is refused as
+`s·m^-1`; over unit variables `mul(v, u)` is accepted where `mul(u, v)` is expected, and `mul(u, u)`
+is refused.
+
+**Found while building: axioms could not mention axioms.** `Layer::axiom_env` is a `OnceLock` whose
+initialiser type-checks every axiom's statement, and checking one that mentions another asked
+`axiom_env` for that type — re-entering its own initialisation and deadlocking, both threads in
+`futex_wait`. No axiom's statement had mentioned another until `ratio : … -> Quantity(units:mul(…))`.
+It is independent of units: `axiom x : p("a") -> Prop` hung the same way. Admission is now on
+demand inside the construction (`program::axiom_env::axiom_type`), and a statement that needs its
+own axiom, directly or through others, is refused by name. `kernel/tests/
+axiom_statements_mention_axioms.rs` runs each case under a watchdog, so a regression fails rather
+than hangs.
+
+**And the cache discarded every axiom on one failure.** It held
+`build_axiom_env(..).unwrap_or_default()`: its doc said a malformed axiom would be dropped, and the
+code returned an EMPTY environment, so one bad axiom made every axiom reference on the chain fail as
+"not registered", with the reason gone. The cached build now keeps what admits and records why the
+rest did not.
+
 ## Slice 6 — base conversion: authored units into base units
 
 **What D93 requires.** "An author writing `5 g`, or an API caller passing grams, goes through a helper

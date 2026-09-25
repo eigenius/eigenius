@@ -433,3 +433,72 @@ fn the_coefficient_must_be_rational() {
         "EigonPrimitive(Rational)",
     );
 }
+
+// ── Unit expressions (slice 5): `units:mul` / `units:pow` ────────────────────────────────────────
+
+fn check_with_operators(prop: &str) -> Vec<(ValidationRule, String)> {
+    validate_esl(&format!(
+        r#"
+namespace core    = "urn:eigenius:core";
+namespace eigentt = "urn:eigenius:eigentt";
+namespace prov    = "urn:eigenius:prov";
+namespace units   = "urn:eigenius:units";
+namespace probe   = "urn:eigenius:probe";
+
+axiom probe:is_speed : units:Quantity(u"s^-1·m") -> Prop
+axiom probe:ratio : forall (u : core:unit, v : core:unit) => units:Quantity(u) -> units:Quantity(v) -> units:Quantity(units:mul(u, units:pow(v, r"-1")))
+axiom probe:needs_uv : forall (u : core:unit, v : core:unit) => units:Quantity(units:mul(u, v)) -> Prop
+
+resource probe:claim : core:Resource {{
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
+    eigentt:proposition = type_expr( {prop} );
+}}"#
+    ))
+}
+
+fn assert_operators_commit(prop: &str) {
+    let errs = check_with_operators(prop);
+    assert!(errs.is_empty(), "{prop}\nshould commit, got: {errs:#?}");
+}
+
+fn assert_operators_refused(prop: &str, needle: &str) {
+    let errs = check_with_operators(prop);
+    assert!(
+        errs.iter()
+            .any(|(rule, msg)| *rule == ValidationRule::TermIllTyped && msg.contains(needle)),
+        "{prop}\nshould be ill-typed mentioning {needle:?}, got: {errs:#?}"
+    );
+}
+
+/// D52's ratio: a unit-generic function applied to literal units. Its result type,
+/// `Quantity(mul(u, pow(v, -1)))`, becomes `Quantity(s^-1·m)` when `u := m, v := s` — so
+/// substitution re-normalises and the closed product reduces to a literal.
+#[test]
+fn a_unit_generic_function_applied_to_literal_units_reduces() {
+    assert_operators_commit(
+        r#"probe:is_speed(probe:ratio(u"m", u"s", (units:mk_quantity(r"3", 0) : units:Quantity(u"m")), (units:mk_quantity(r"2", 0) : units:Quantity(u"s"))))"#,
+    );
+    // The same function with its arguments swapped gives s·m⁻¹, which is not a speed.
+    assert_operators_refused(
+        r#"probe:is_speed(probe:ratio(u"s", u"m", (units:mk_quantity(r"3", 0) : units:Quantity(u"s")), (units:mk_quantity(r"2", 0) : units:Quantity(u"m"))))"#,
+        "Unit(s·m^-1)",
+    );
+}
+
+/// Over unit VARIABLES: `q : Quantity(mul(v, u))` is accepted where `Quantity(mul(u, v))` is
+/// expected — the open normalisation D93 requires and nanoda's `try_reduce_nat` does not do.
+#[test]
+fn an_open_product_commutes_on_the_commit_path() {
+    assert_operators_commit(
+        r#"forall (u : core:unit, v : core:unit, q : units:Quantity(units:mul(v, u))) => probe:needs_uv(u, v, q)"#,
+    );
+}
+
+/// The negative that makes the positive mean something: `u·u` is not `u·v`.
+#[test]
+fn a_square_is_not_a_product_of_two_variables() {
+    assert_operators_refused(
+        r#"forall (u : core:unit, v : core:unit, q : units:Quantity(units:mul(u, u))) => probe:needs_uv(u, v, q)"#,
+        "urn:eigenius:units:pow",
+    );
+}

@@ -455,7 +455,15 @@ impl Val {
                     arg_node,
                 ))
             }
-            Val::Nt(k) => Ok((Val::Nt(Neut::App(Box::new(k), Box::new(v))), arg_node)),
+            Val::Nt(k) => {
+                let n = Neut::App(Box::new(k), Box::new(v));
+                // D93: a complete `units:mul` / `units:pow` application reduces here — the place
+                // nanoda's `try_reduce_nat` sits relative to its `whnf`.
+                match crate::nbe::unit_ext::try_reduce_unit(&n)? {
+                    Some(reduced) => Ok((reduced, arg_node)),
+                    None => Ok((Val::Nt(n), arg_node)),
+                }
+            }
             other => Err(EvalError::NotAFunction(format!("{other:?}"))),
         }
     }

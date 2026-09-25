@@ -31,4 +31,5 @@ pub mod recursor;
 pub mod subst;
 pub mod term;
 pub mod unify;
+pub(crate) mod unit_ext;
 pub mod val;

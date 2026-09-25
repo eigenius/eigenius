@@ -147,6 +147,25 @@ impl Exponent {
     }
 
     /// Builds an integer exponent.
+    /// The exponent a canonical rational denotes, refused when a part leaves the fixed width.
+    ///
+    /// A canonical [`Rational`] is already reduced with a positive denominator, which is this
+    /// type's invariant, so the parts are taken as they are.
+    pub fn from_rational(r: &Rational) -> Result<Exponent, UnitError> {
+        use num_traits::ToPrimitive;
+        let numer = r.numer().to_i16().ok_or(UnitError::ExponentOverflow)?;
+        let denom = r.denom().to_u16().ok_or(UnitError::ExponentOverflow)?;
+        Ok(Exponent { numer, denom })
+    }
+
+    /// This exponent as a canonical rational.
+    pub fn to_rational(self) -> Rational {
+        // Both parts fit 16 bits and the pair is reduced with a positive denominator, so this is
+        // always an admissible rational, far inside D94's bound.
+        Rational::new(self.numer.into(), self.denom.into())
+            .expect("an Exponent is a reduced, bounded rational")
+    }
+
     pub fn integer(n: i16) -> Exponent {
         Exponent { numer: n, denom: 1 }
     }

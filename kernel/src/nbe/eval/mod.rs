@@ -70,6 +70,9 @@ pub enum EvalError {
         component_iri: String,
         message: String,
     },
+    /// A `units:mul` or `units:pow` whose result leaves the unit exponents' fixed width (D93) —
+    /// refused rather than wrapped, since a wrapped exponent is a different unit.
+    UnitOverflow(String),
 }
 
 impl std::fmt::Display for EvalError {
@@ -88,6 +91,7 @@ impl std::fmt::Display for EvalError {
                 component_iri,
                 message,
             } => write!(f, "component '{component_iri}' failed: {message}"),
+            Self::UnitOverflow(s) => write!(f, "unit exponent out of range: {s}"),
         }
     }
 }
