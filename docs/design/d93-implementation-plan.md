@@ -103,9 +103,15 @@ input, as `Rational` does), serde over it, and `UNIT` and `DIMENSION` in `call_f
 
 ## Slice 3 — chain surface AND SI content, then ONE reseed
 
-**Built, except the reseed** (see the commit adding `ontologies/units/units.esl`). As built, the
-units layer loads after `prov` rather than directly after `core` (D93, "Load order"), and its
+**Done.** Built in the commit adding `ontologies/units/units.esl`; reseeded 2026-09-24. As built,
+the units layer loads after `prov` rather than directly after `core` (D93, "Load order"), and its
 vocabulary adds the gram and the three plane angles to the lists below (D93, "As built").
+
+The reseed loaded 9,440,702 resources across 32 layers with the Wiktionary countability list
+provisioned — 43,474 WordNet and 1,543,129 UMLS additive mass entries — into
+`db-snapshot/wordnet-umls-2026-09-24`; the aligned snapshot `wordnet-umls-aligned-2026-09-24` carries
+40,375 alignment resources. Earlier snapshots on this machine were built without the countability
+list, which is the likely cause of their 35,376 alignment resources against 40,357 elsewhere.
 
 The seam is wider than D94's, because the SI content is also bootstrap. Anything compiled in via
 `include_str!` in `kernel/src/bootstrap/mod.rs` — 20 ontologies today — is part of the manifest, so
