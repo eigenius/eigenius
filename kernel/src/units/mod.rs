@@ -23,6 +23,8 @@
 //! It lives in chain ontology, where it is authored, reviewed and replaceable without touching the
 //! checker. Those are abbreviations that normalise away, not primitives.
 
+pub mod convert;
+
 use crate::numeric::Rational;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -171,6 +173,10 @@ impl Exponent {
     }
 
     /// Whether this is zero.
+    pub fn is_positive(self) -> bool {
+        self.numer > 0
+    }
+
     pub fn is_zero(self) -> bool {
         self.numer == 0
     }
@@ -474,6 +480,23 @@ impl Magnitude {
     /// The exponent of one constant, zero when absent.
     pub fn constant_exponent(&self, c: Constant) -> i16 {
         self.constants.get(&c).copied().unwrap_or(0)
+    }
+
+    /// The chain form: `units:mk_quantity`'s `(coefficient, pi)` arguments (D93, "How a magnitude
+    /// reaches a term"). Total while [`Constant`] has one variant; a second makes it partial, which
+    /// is where D93 puts that decision.
+    pub fn chain_pair(&self) -> (Rational, i64) {
+        (
+            self.coefficient.clone(),
+            i64::from(self.constant_exponent(Constant::Pi)),
+        )
+    }
+
+    /// The inverse of [`Magnitude::chain_pair`]. A stored `pi` outside `i16` is REFUSED rather than
+    /// truncated: `core:integer` is the 53-bit range and a magnitude's exponent is 16 bits.
+    pub fn from_chain_pair(coefficient: Rational, pi: i64) -> Result<Magnitude, UnitError> {
+        let pi = i16::try_from(pi).map_err(|_| UnitError::ExponentOverflow)?;
+        Ok(Magnitude::rational(coefficient).with_constant(Constant::Pi, pi))
     }
 }
 

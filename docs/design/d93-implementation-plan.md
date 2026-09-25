@@ -275,6 +275,17 @@ which has the chain; it produces the annotated term above.
 **Verify:** a round trip for every entry in `units.esl`, and that `37 °C`, `5 mg/kg`, `50 kDa` and
 `37 °` produce the magnitudes D93 states.
 
+**Built** (`kernel/src/units/convert.rs`; `kernel/tests/unit_conversion.rs`). Both verifications
+hold: every one of the 41 named symbols converts from `1` to its own declared factor, power of π and
+dimension, and the four D93 examples give 6203/20 K, 1/200000, 50000 × 1.66053906892 × 10⁻²⁷ kg and
+37π/180. On the commit path, `u:quantity(0.5r, "km/min")` is a speed under the author's own prefix,
+`u:quantity(3, "m")` is refused where a speed is expected, and an unknown symbol, a prefix on an
+unprefixable unit or a float value fails at compile time with the reason.
+
+Found while building: the stated form was first split at `/` before exponents were read, so
+`m^(1/2)` broke at the `/` inside its exponent. The numerator and denominator are divided at the one
+`/` outside parentheses.
+
 ## Deferred, with reasons
 
 - **Implicit Π.** D93 calls it a general kernel change where "the blast radius is the whole type

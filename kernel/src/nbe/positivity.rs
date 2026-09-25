@@ -1243,6 +1243,7 @@ data t:B { description = "the other half"; mkB(t:A) }
             None,
             crate::esl::compile::collect_ctors_from_layer(crate::testing::term_chain()),
             Default::default(),
+            None,
         )
         .expect("compiles");
         assert_eq!(rs.len(), 2, "two inductive declarations");

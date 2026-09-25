@@ -683,6 +683,22 @@ the ESL elaborator and the Rust API — outside the kernel, on the same side of 
 D86's literal normalisation and the bridge's unit canonicalisation. Three carriers, one discipline,
 and the kernel checks the result rather than performing it.
 
+**Built** (`kernel/src/units/convert.rs`). The Rust API is `Vocabulary::from_layer(chain)` and
+`convert(value, "mg/kg")`, reading symbols, factors, prefixes, the °C offset and kinds from the
+units layer rather than restating them. The ESL form is `units:quantity(5, "mg/kg")`, resolved by the
+compiler where the vocabulary is in hand into `(units:mk_quantity(c, pi) : units:Quantity(dim))`; it
+is an elaboration form, not a chain constant, and its value must be an exact literal — `0.5` is
+refused, `0.5r` accepted. The magnitude arithmetic lives in that module alone: `Rational` still has
+none, so the checker cannot multiply a magnitude, which keeps D94's line. Two rules are decided
+there:
+
+- **The °C offset applies only to a bare `°C`**, the point reading. Inside a compound — `°C/min` —
+  the reading is a difference, and °C converts as K with no offset: the rule above that a vector
+  reading carries the vector unit.
+- **Kinds come back beside the unit.** `rad/s` converts to `s⁻¹` with a plane angle in the
+  numerator; `sr/rad` to `1` with a solid angle over a plane angle, which the unit, where both are
+  `1`, cannot say (see "Kinds are metadata, not algebra").
+
 ## Prefixes fold in the normalised form and survive in the stated one
 
 Whether `km` folds to `1000 m` looked like a standing question. The stated/normalised split answers

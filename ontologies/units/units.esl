@@ -18,8 +18,14 @@
 // kinds; the others are for when something consumes them. (D93, "Kinds are metadata, not
 // algebra".) The prose keeps which unit the author wrote; the term does not.
 //
-// Placed after `core`, which supplies `core:unit` and `core:rational`, and before `statistics`,
-// whose quantities carry units. Not under `urn:eigenius:measurements`, which is the D52 statistics
+// **An authored quantity is written `units:quantity(5, "mg/kg")`.** That is not a chain constant:
+// the ESL compiler resolves it against this layer's vocabulary into the annotated term
+// `(units:mk_quantity(c, pi) : units:Quantity(dim))` (`kernel/src/units/convert.rs`), and the Rust
+// API does the same with `Vocabulary::convert`.
+//
+// Placed after `core`, which supplies `core:unit` and `core:rational`, and after `prov`, since the
+// ESL compiler stamps `prov:was_attributed_to` on every declaration; before `statistics`, whose
+// quantities carry units. Not under `urn:eigenius:measurements`, which is the D52 statistics
 // institution: a measured length has a unit whether or not anyone runs a test on it.
 
 namespace core  = "urn:eigenius:core";

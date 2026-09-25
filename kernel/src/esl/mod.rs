@@ -57,7 +57,8 @@ pub fn compile(
     let file = parser::parse(&tokens).map_err(|e| vec![e])?;
     let external_ctors = compile::collect_ctors_from_layer(layer);
     let external_macros = compile::collect_macros_from_layer(layer);
-    compile::compile_file_with_context(&file, None, external_ctors, external_macros)
+    let units = crate::units::convert::Vocabulary::from_layer(layer).ok();
+    compile::compile_file_with_context(&file, None, external_ctors, external_macros, units)
 }
 
 /// Compile an ESL source string with both an [`InstitutionIndex`]
@@ -80,5 +81,12 @@ pub fn compile_full(
     let file = parser::parse(&tokens).map_err(|e| vec![e])?;
     let external_ctors = compile::collect_ctors_from_layer(layer);
     let external_macros = compile::collect_macros_from_layer(layer);
-    compile::compile_file_with_context(&file, Some(institutions), external_ctors, external_macros)
+    let units = crate::units::convert::Vocabulary::from_layer(layer).ok();
+    compile::compile_file_with_context(
+        &file,
+        Some(institutions),
+        external_ctors,
+        external_macros,
+        units,
+    )
 }
