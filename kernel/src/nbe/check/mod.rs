@@ -558,6 +558,20 @@ pub fn check(ctx: &mut CheckCtx, exp: &Exp, typ: &Val) -> Result<(), CheckError>
             }
         }
 
+        // A rational literal against `core:bigint`. The same shape as `core:iri` above and for
+        // the same reason: `check_infer` answers `Rational` for every `LitRat`, and the declared
+        // type is what says an integer was meant. Checking VERIFIES the refinement rather than
+        // coercing — a non-integer rational is refused, not truncated.
+        (Exp::LitRat(r), Val::EigonPrimitive(crate::nbe::term::PrimitiveType::BigInt)) => {
+            if r.is_integer() {
+                Ok(())
+            } else {
+                Err(CheckError::TypeMismatch(format!(
+                    "`{r}` is declared `core:bigint` but is not an integer"
+                )))
+            }
+        }
+
         // Lambda against Pi type
         (Exp::Lam(p, e), Val::Pi(t, g)) => {
             let gen = gen_val(&ctx.rho);
@@ -1332,12 +1346,16 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             let layer = ctx.env.layer().ok_or_else(|| {
                 format!("Exp::EigonAxiom({iri}): no layer context available for axiom resolution")
             })?;
-            let env = layer.axiom_env();
-            env.get(iri).map(|entry| entry.typ.clone()).ok_or_else(|| {
-                CheckError::IllFormed(format!(
+            // Through `axiom_type`, never `layer.axiom_env()` directly: while that environment is
+            // being built, the answer must come from the construction, or checking an axiom whose
+            // statement mentions another re-enters the cache's initialisation and deadlocks.
+            match crate::program::axiom_env::axiom_type(layer, iri) {
+                Ok(Some(typ)) => Ok(typ),
+                Ok(None) => Err(CheckError::IllFormed(format!(
                     "axiom `{iri}` not registered in chain axiom environment"
-                ))
-            })
+                ))),
+                Err(e) => Err(CheckError::IllFormed(format!("axiom `{iri}`: {e}"))),
+            }
         }
         // D87 §4.3 — a reference to a proof an EXTERNAL checker verified. Refused here, and the
         // refusal is the enforcement.
@@ -1381,6 +1399,14 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
         Exp::LitBool(_) => Ok(Val::EigonPrimitive(
             crate::nbe::term::PrimitiveType::Boolean,
         )),
+        // Answers `Rational`, never `BigInt` — a bare literal cannot know which it is meant to be.
+        // `BigInt` is reachable only in CHECK mode, where a declared type asks for it (D94, D88 §3).
+        Exp::LitRat(_) => Ok(Val::EigonPrimitive(
+            crate::nbe::term::PrimitiveType::Rational,
+        )),
+        // D93. Unlike `LitRat`, there is no refinement to reach in check mode, so this is the
+        // whole story: a unit literal has one type.
+        Exp::LitUnit(_) => Ok(Val::EigonPrimitive(crate::nbe::term::PrimitiveType::Unit)),
 
         e => Err(CheckError::CannotInfer(format!(
             "cannot infer type of: {e:?}"
@@ -1507,6 +1533,112 @@ mod tests {
     #[test]
     fn check_unit_has_type_one() {
         check(&mut ctx(), &Exp::Unit, &Val::One).unwrap();
+    }
+
+    // ── D94 exact rationals: one carrier, `core:bigint` as a refinement ──
+
+    fn rat(n: i64, d: i64) -> Exp {
+        Exp::LitRat(crate::numeric::Rational::new(n.into(), d.into()).expect("admissible"))
+    }
+
+    /// A bare literal cannot know which of the two declared types it is meant to be, so it
+    /// answers the carrier. The same asymmetry `LitString` has to `Iri` (D88 §3).
+    #[test]
+    fn a_rational_literal_infers_to_rational_never_to_bigint() {
+        let t = check_infer(&mut ctx(), &rat(1, 2)).unwrap();
+        assert!(matches!(t, Val::EigonPrimitive(PrimitiveType::Rational)));
+
+        // Even one that IS an integer: inference does not look at the value.
+        let t = check_infer(&mut ctx(), &rat(4, 2)).unwrap();
+        assert!(matches!(t, Val::EigonPrimitive(PrimitiveType::Rational)));
+    }
+
+    /// D93 — the other arm the compiler does NOT flag. Without it a unit literal hits
+    /// `CannotInfer` and is untypeable.
+    #[test]
+    fn a_unit_literal_infers_to_the_unit_primitive() {
+        let u = Exp::LitUnit(crate::units::Unit::base(
+            crate::units::BaseDimension::Length,
+        ));
+        let t = check_infer(&mut ctx(), &u).unwrap();
+        assert!(matches!(t, Val::EigonPrimitive(PrimitiveType::Unit)));
+    }
+
+    /// One mapping between primitives and their chain DataTypes, in both directions. Five
+    /// hand-written copies preceded it, and D94 updated one of them.
+    #[test]
+    fn every_primitive_round_trips_through_its_datatype_iri() {
+        let mut seen = std::collections::BTreeSet::new();
+        for p in PrimitiveType::ALL {
+            let iri = p.datatype_iri();
+            assert!(
+                seen.insert(iri),
+                "{p:?} shares {iri} with another primitive"
+            );
+            assert_eq!(PrimitiveType::from_datatype_iri(iri), Some(p));
+        }
+        // The three D93/D94 carriers are the ones the stale copies lacked.
+        for (iri, p) in [
+            ("urn:eigenius:core:rational", PrimitiveType::Rational),
+            ("urn:eigenius:core:bigint", PrimitiveType::BigInt),
+            ("urn:eigenius:core:unit", PrimitiveType::Unit),
+        ] {
+            assert_eq!(PrimitiveType::from_datatype_iri(iri), Some(p));
+        }
+        assert_eq!(
+            PrimitiveType::from_datatype_iri("urn:eigenius:core:resource"),
+            None
+        );
+    }
+
+    /// `PrimitiveType::Unit` is a unit of MEASURE. It is not the unit type `One`, and not
+    /// confusable with any other carrier.
+    #[test]
+    fn the_unit_primitive_is_unrelated_to_every_other_carrier() {
+        for other in [
+            PrimitiveType::String,
+            PrimitiveType::Integer,
+            PrimitiveType::Float,
+            PrimitiveType::Rational,
+            PrimitiveType::BigInt,
+        ] {
+            assert!(!PrimitiveType::Unit.subtype_of(other));
+            assert!(!other.subtype_of(PrimitiveType::Unit));
+        }
+    }
+
+    /// `core:bigint` is reachable only in CHECK mode, where it VERIFIES `den == 1`.
+    #[test]
+    fn checking_against_bigint_verifies_the_refinement() {
+        // 4/2 reduces to 2, an integer — admitted.
+        check(
+            &mut ctx(),
+            &rat(4, 2),
+            &Val::EigonPrimitive(PrimitiveType::BigInt),
+        )
+        .unwrap();
+
+        // 1/2 is not. Refused, not truncated: an exact value silently adjusted is worse than none.
+        let e = check(
+            &mut ctx(),
+            &rat(1, 2),
+            &Val::EigonPrimitive(PrimitiveType::BigInt),
+        )
+        .unwrap_err();
+        assert!(
+            format!("{e:?}").contains("not an integer"),
+            "expected a refinement failure, got {e:?}"
+        );
+    }
+
+    /// The subtyping runs one way, as it does for `Iri <: String`.
+    #[test]
+    fn bigint_is_a_subtype_of_rational_and_not_the_converse() {
+        assert!(PrimitiveType::BigInt.subtype_of(PrimitiveType::Rational));
+        assert!(!PrimitiveType::Rational.subtype_of(PrimitiveType::BigInt));
+        // And neither is confusable with the approximating carriers.
+        assert!(!PrimitiveType::Rational.subtype_of(PrimitiveType::Float));
+        assert!(!PrimitiveType::BigInt.subtype_of(PrimitiveType::Integer));
     }
 
     // ── Exp::Ann — the bidirectional mode switch (D63 §8.2) ──────────────

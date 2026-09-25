@@ -545,6 +545,8 @@ fn walk_val(
         | Val::LitInt(_)
         | Val::LitFloat(_)
         | Val::LitBool(_)
+        | Val::LitRat(_)
+        | Val::LitUnit(_)
         // A `WitnessKey` — an IRI and a proposition hash. No variables.
         | Val::ChainWitness(_) => Some(()),
 

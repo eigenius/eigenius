@@ -70,6 +70,9 @@ pub enum EvalError {
         component_iri: String,
         message: String,
     },
+    /// A `units:mul` or `units:pow` whose result leaves the unit exponents' fixed width (D93) —
+    /// refused rather than wrapped, since a wrapped exponent is a different unit.
+    UnitOverflow(String),
 }
 
 impl std::fmt::Display for EvalError {
@@ -88,6 +91,7 @@ impl std::fmt::Display for EvalError {
                 component_iri,
                 message,
             } => write!(f, "component '{component_iri}' failed: {message}"),
+            Self::UnitOverflow(s) => write!(f, "unit exponent out of range: {s}"),
         }
     }
 }
@@ -225,6 +229,8 @@ pub(crate) fn eval_impl<T: Tracer>(
         Exp::LitInt(n) => Ok((Val::LitInt(*n), T::leaf())),
         Exp::LitFloat(f) => Ok((Val::LitFloat(*f), T::leaf())),
         Exp::LitBool(b) => Ok((Val::LitBool(*b), T::leaf())),
+        Exp::LitRat(r) => Ok((Val::LitRat(r.clone()), T::leaf())),
+        Exp::LitUnit(u) => Ok((Val::LitUnit(u.clone()), T::leaf())),
 
         Exp::Dec(d, e) => {
             // Branching on the *capability*, not on the environment (D76 Phase B):
@@ -898,6 +904,13 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
         (Val::LitInt(a), Val::LitInt(b)) => a == b,
         (Val::LitFloat(a), Val::LitFloat(b)) => a == b,
         (Val::LitBool(a), Val::LitBool(b)) => a == b,
+        // Canonical form is what makes this structural: two rationals are equal iff their
+        // components are, so `conv` does no arithmetic (D94).
+        (Val::LitRat(a), Val::LitRat(b)) => a == b,
+        // Same for units (D93): `units::Unit` is a fixed-order array of reduced exponents, canonical
+        // by construction, so `m·s^-1·m` and `m^2·s^-1` ARE the same value and compare equal without
+        // normalising here.
+        (Val::LitUnit(a), Val::LitUnit(b)) => a == b,
         (Val::ResourceVal(a), Val::ResourceVal(b)) => {
             // Compare resource contents for equality
             a.properties() == b.properties() && a.id() == b.id()
@@ -978,6 +991,57 @@ mod tests {
     fn eval_set() -> Result<(), EvalError> {
         let v = eval(&Exp::sort(1), &Rho::Nil)?;
         assert!(matches!(&v, Val::Sort(l) if l.is_nat(1)));
+        Ok(())
+    }
+
+    /// D94 — canonical form is what lets `conv` compare rationals structurally. Without the
+    /// `LitRat` arm in `ground_values_equal`, `DecEq(LitRat(1/2), LitRat(1/2))` falls through to
+    /// false, which is the bug eigenius#142 fixed for `LitInt`.
+    #[test]
+    fn equal_rationals_are_definitionally_equal_however_written() -> Result<(), EvalError> {
+        let rat = |n: i64, d: i64| {
+            Exp::LitRat(crate::numeric::Rational::new(n.into(), d.into()).expect("admissible"))
+        };
+        let half = eval(&rat(1, 2), &Rho::Nil)?;
+        let also_half = eval(&rat(50, 100), &Rho::Nil)?;
+        let third = eval(&rat(1, 3), &Rho::Nil)?;
+        assert!(ground_values_equal(&half, &also_half));
+        assert!(!ground_values_equal(&half, &third));
+        Ok(())
+    }
+
+    /// D93 — the arm the compiler does NOT flag. `units::Unit` canonicalises on construction, so
+    /// `m·s⁻¹·m` and `m²·s⁻¹` are one value and must compare equal; without the `LitUnit` arm in
+    /// `ground_values_equal` they fall through to `false`, which is eigenius#142's bug on a new
+    /// carrier.
+    #[test]
+    fn equal_units_are_definitionally_equal_however_written() -> Result<(), EvalError> {
+        use crate::units::{BaseDimension, Exponent, Unit};
+        let m = Unit::base(BaseDimension::Length);
+        let s_ = Unit::base(BaseDimension::Time);
+
+        // `m · s⁻¹ · m` against `m² · s⁻¹`.
+        let long = m.mul(&s_.recip().unwrap()).unwrap().mul(&m).unwrap();
+        let short = m
+            .pow(Exponent::integer(2))
+            .unwrap()
+            .mul(&s_.recip().unwrap())
+            .unwrap();
+
+        let a = eval(&Exp::LitUnit(long), &Rho::Nil)?;
+        let b = eval(&Exp::LitUnit(short), &Rho::Nil)?;
+        let c = eval(&Exp::LitUnit(m.clone()), &Rho::Nil)?;
+        assert!(ground_values_equal(&a, &b));
+        assert!(!ground_values_equal(&a, &c));
+        Ok(())
+    }
+
+    /// A literal normalises to itself: no reduction, no neutral substructure.
+    #[test]
+    fn a_rational_literal_normalises_to_itself() -> Result<(), EvalError> {
+        let r = crate::numeric::Rational::new(1.into(), 2.into()).unwrap();
+        let v = eval(&Exp::LitRat(r.clone()), &Rho::Nil)?;
+        assert!(matches!(&v, Val::LitRat(got) if got == &r));
         Ok(())
     }
 

@@ -43,6 +43,30 @@ impl Validator {
             wk::INTEGER => matches!(value, Value::Integer(_)),
             wk::FLOAT => matches!(value, Value::Float(_) | Value::Integer(_)),
             wk::BOOLEAN => matches!(value, Value::Boolean(_)),
+            // An exact rational is a STRING in canonical form, because a JSON number is an IEEE
+            // double and an exact value does not survive one (D94).
+            //
+            // The string has to PARSE, for the same reason `core:resource` below insists on it:
+            // accepting any string would leave a malformed rational detectable only by accident.
+            // Canonical form is stricter than parseable — `2/4` and `01` parse as numbers and are
+            // refused here, because two spellings of one value would hash differently.
+            wk::RATIONAL => {
+                matches!(value, Value::String(s)
+                    if crate::numeric::Rational::parse_canonical(s).is_ok())
+            }
+            // `core:bigint` refines `core:rational` by requiring `den == 1` — the shape `core:iri`
+            // has to `core:string`. Checking VERIFIES the refinement; it never truncates.
+            wk::BIGINT => {
+                matches!(value, Value::String(s)
+                    if crate::numeric::Rational::parse_canonical(s)
+                        .is_ok_and(|r| r.is_integer()))
+            }
+            // D93. Canonical unit form, for the same reason as `core:rational`: `m·s^-1·m` denotes
+            // `s^-1·m^2`, and accepting both spellings would put two hashes on one value.
+            wk::UNIT => {
+                matches!(value, Value::String(s)
+                    if crate::units::Unit::parse_canonical(s).is_ok())
+            }
             wk::RESOURCE => {
                 // A resource reference is an IRI-valued text. Rule 3 is the wire-level
                 // *shape* gate and must be invariant under persist/reload, so it accepts

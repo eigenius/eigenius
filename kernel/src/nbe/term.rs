@@ -208,6 +208,31 @@ pub enum Exp {
     /// `eigentt:Term`. Added so `program:Literal` booleans decode
     /// to their value rather than to `EigonPrimitive(Boolean)`.
     LitBool(bool),
+    /// Literal exact rational at the expression level (D94).
+    /// Type: `Exp::EigonPrimitive(PrimitiveType::Rational)`. The value
+    /// is always canonical — reduced, positive denominator, sign on the
+    /// numerator — because [`crate::numeric::Rational`]'s constructor
+    /// establishes that. So `conv` compares two of these structurally
+    /// and does no arithmetic.
+    ///
+    /// ONE carrier serves both `core:rational` and `core:bigint`, which
+    /// is a refinement checking `den == 1` — the relationship `Iri` has
+    /// to `String` (D88 §3). D94 left this open, noting that what would
+    /// decide it is "whether any slot wants an exact integer that is
+    /// not part of a rational"; nothing identified does.
+    LitRat(crate::numeric::Rational),
+    /// Literal unit of measure at the expression level (D93).
+    /// Type: `Exp::EigonPrimitive(PrimitiveType::Unit)`.
+    ///
+    /// NOT [`Exp::Unit`], which is `()`, the value of the unit TYPE
+    /// [`Exp::One`]. The `Lit` prefix is the disambiguator, as it is for
+    /// every other literal here. This one carries a
+    /// [`crate::units::Unit`] — a rational exponent vector over the seven
+    /// SI base dimensions.
+    ///
+    /// Always canonical: a fixed-order array of reduced exponents. So
+    /// `conv` compares two of these structurally.
+    LitUnit(crate::units::Unit),
     /// Property access on a resource: e.property
     PropAccess(Box<Exp>, Iri),
     /// Template literal with extracted property references.
@@ -418,15 +443,84 @@ pub enum PrimitiveType {
     Float,
     Boolean,
     Json,
+    /// A unit of measure (D93). Its values are `Exp::LitUnit`, always canonical.
+    ///
+    /// NOT the unit type: that is `Exp::One`, whose value is `Exp::Unit`. This is `m`, `kg·s^-2`,
+    /// `rad` — the index a `Quantity` is parameterised by.
+    Unit,
+    /// An exact rational (D94). Its values are `Exp::LitRat`, always in canonical form.
+    ///
+    /// Distinct from [`PrimitiveType::Float`], which is binary64 and approximates: `0.05` as a
+    /// float is 3602879701896397/2^56, and as a rational is 1/20. They are different numbers, so
+    /// this is a separate carrier rather than a refinement of `Float`.
+    Rational,
+    /// An exact integer of arbitrary size (D94). A REFINEMENT of [`PrimitiveType::Rational`], not
+    /// a separate carrier: its values are `Exp::LitRat` with `den == 1`, and the difference is
+    /// that checking one verifies that (D88 §3, the shape `Iri` has to `String`).
+    ///
+    /// `LitRat` INFERS to `Rational`, never to this — a bare literal cannot know which it is meant
+    /// to be. `BigInt` is reachable only in CHECK mode, where a declared type asks for it.
+    ///
+    /// Distinct from [`PrimitiveType::Integer`], which is `i64` sized to `core:integer`'s 53-bit
+    /// safe range. Eight of the 24 SI prefixes exceed `u64` (D93), so that range is not enough.
+    BigInt,
 }
 
 impl PrimitiveType {
+    /// Every primitive. [`PrimitiveType::from_datatype_iri`] searches this list, so a variant
+    /// missing from it is unreachable from the chain: add new variants HERE as well as to
+    /// [`PrimitiveType::datatype_iri`], which the compiler does check.
+    pub const ALL: [PrimitiveType; 9] = [
+        PrimitiveType::String,
+        PrimitiveType::Iri,
+        PrimitiveType::Integer,
+        PrimitiveType::Float,
+        PrimitiveType::Boolean,
+        PrimitiveType::Json,
+        PrimitiveType::Rational,
+        PrimitiveType::BigInt,
+        PrimitiveType::Unit,
+    ];
+
+    /// The `core:` DataType IRI this primitive is the chain image of.
+    pub fn datatype_iri(self) -> &'static str {
+        use crate::ontology::well_known as wk;
+        match self {
+            PrimitiveType::String => wk::STRING,
+            PrimitiveType::Iri => wk::IRI_TYPE,
+            PrimitiveType::Integer => wk::INTEGER,
+            PrimitiveType::Float => wk::FLOAT,
+            PrimitiveType::Boolean => wk::BOOLEAN,
+            PrimitiveType::Json => wk::JSON,
+            PrimitiveType::Rational => wk::RATIONAL,
+            PrimitiveType::BigInt => wk::BIGINT,
+            PrimitiveType::Unit => wk::UNIT,
+        }
+    }
+
+    /// The inverse of [`PrimitiveType::datatype_iri`]: `None` for any IRI that does not name a
+    /// primitive DataType.
+    ///
+    /// This replaced five hand-written string matches — one in the D47 mirror, four in
+    /// `program::ground` — each with a fallback arm, so none could be flagged when a primitive
+    /// was added. D94 added `core:rational` and `core:bigint` to one of them. In the other four a
+    /// rational-typed property grounded to `Sort 1`, and a rational-typed constructor argument was
+    /// read as a reference to an inductive NAMED `core:rational`.
+    pub fn from_datatype_iri(iri: &str) -> Option<PrimitiveType> {
+        PrimitiveType::ALL
+            .into_iter()
+            .find(|p| p.datatype_iri() == iri)
+    }
+
     /// Whether a value of `self` is admissible where `other` is expected.
     ///
-    /// Only `Iri <: String` holds — every IRI is a string. The converse does not: that is the
-    /// whole point of declaring the slot.
+    /// Two refinements hold: `Iri <: String` — every IRI is a string — and `BigInt <: Rational`,
+    /// since an integer is a rational with `den == 1`. Neither converse does: that is the whole
+    /// point of declaring the slot.
     pub fn subtype_of(self, other: PrimitiveType) -> bool {
-        self == other || (self == PrimitiveType::Iri && other == PrimitiveType::String)
+        self == other
+            || (self == PrimitiveType::Iri && other == PrimitiveType::String)
+            || (self == PrimitiveType::BigInt && other == PrimitiveType::Rational)
     }
 }
 
@@ -708,6 +802,9 @@ impl Exp {
                 iri.clone(),
                 levels.iter().map(|l| l.subst(ks, vs)).collect(),
             ),
+
+            Exp::LitRat(r) => Exp::LitRat(r.clone()),
+            Exp::LitUnit(u) => Exp::LitUnit(u.clone()),
 
             Exp::Lam(p, b) => Exp::Lam(p.clone(), bx(b)),
             Exp::Pi(p, a, b) => Exp::Pi(p.clone(), bx(a), bx(b)),

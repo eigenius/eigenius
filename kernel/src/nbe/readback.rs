@@ -211,6 +211,8 @@ pub fn try_readback_val(level: usize, val: &Val) -> Result<Exp, EvalError> {
         Val::LitInt(n) => Exp::LitInt(*n),
         Val::LitFloat(f) => Exp::LitFloat(*f),
         Val::LitBool(b) => Exp::LitBool(*b),
+        Val::LitRat(r) => Exp::LitRat(r.clone()),
+        Val::LitUnit(u) => Exp::LitUnit(u.clone()),
 
         // D49 §8 — `ChainWitness` values are opaque, kernel-internal
         // proof-of-existence markers admitted by the per-Layer witness

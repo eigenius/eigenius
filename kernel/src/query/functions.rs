@@ -26,6 +26,7 @@ pub fn call_function(name: &str, args: &[Value]) -> Result<Value, QueryError> {
         "LENGTH" => fn_length(args),
         "CONTAINS" => fn_contains(args),
         "CONCAT" => fn_concat(args),
+        "UNIT" => fn_unit(args),
         _ => Err(QueryError::evaluation(format!("unknown function: {name}"))),
     }
 }
@@ -73,6 +74,28 @@ fn fn_regex(args: &[Value]) -> Result<Value, QueryError> {
         .ok_or_else(|| QueryError::evaluation("REGEX argument must be a string"))?;
     regex::Regex::new(s).map_err(|e| QueryError::evaluation(format!("invalid regex: {e}")))?;
     Ok(Value::String(s.to_string()))
+}
+
+/// `UNIT(s)` — validates a canonical unit string and returns it.
+///
+/// D93 carries a unit as its canonical STRING rather than as an embedded resource, for three
+/// reasons recorded there: an embedded value adds a `core:mentions` edge per quantity occurrence,
+/// it costs term size, and a string keeps one carrier rule shared with `core:rational`. This
+/// function is what pays for that — the query layer decomposes the string, so
+/// nothing is lost by not storing it decomposed.
+///
+/// `DATE` above is the same shape: a composite value (year, month, day) carried as canonical text
+/// and given meaning by a function.
+fn fn_unit(args: &[Value]) -> Result<Value, QueryError> {
+    if args.len() != 1 {
+        return Err(QueryError::evaluation("UNIT requires 1 argument"));
+    }
+    let s = args[0]
+        .as_str()
+        .ok_or_else(|| QueryError::evaluation("UNIT argument must be a string"))?;
+    let u = crate::units::Unit::parse_canonical(s)
+        .map_err(|e| QueryError::evaluation(format!("UNIT: {e}")))?;
+    Ok(Value::String(u.to_canonical_string()))
 }
 
 fn fn_length(args: &[Value]) -> Result<Value, QueryError> {
@@ -285,5 +308,34 @@ mod tests {
             values_compare(&Value::Integer(1), &Value::Integer(2)),
             Some(std::cmp::Ordering::Less)
         );
+    }
+
+    fn call(name: &str, args: &[&str]) -> Result<Value, QueryError> {
+        let owned: Vec<Value> = args.iter().map(|a| Value::String(a.to_string())).collect();
+        call_function(name, &owned)
+    }
+
+    /// `UNIT` validates and returns the canonical form — the `DATE` shape, on a unit.
+    #[test]
+    fn unit_validates_a_canonical_string() {
+        assert_eq!(
+            call("UNIT", &["s^-1\u{b7}m^2"]).unwrap(),
+            Value::String("s^-1\u{b7}m^2".to_string())
+        );
+        assert_eq!(
+            call("UNIT", &["1"]).unwrap(),
+            Value::String("1".to_string())
+        );
+    }
+
+    /// A non-canonical spelling is an ERROR, not a silent normalisation — the query layer holds the
+    /// same line as the parser and the serde boundary.
+    #[test]
+    fn unit_refuses_a_non_canonical_string() {
+        for bad in ["m\u{b7}s^-1\u{b7}m", "m^1", "metre", "M"] {
+            assert!(call("UNIT", &[bad]).is_err(), "{bad:?} should have failed");
+        }
+        assert!(call_function("UNIT", &[Value::Integer(3)]).is_err());
+        assert!(call_function("UNIT", &[]).is_err());
     }
 }

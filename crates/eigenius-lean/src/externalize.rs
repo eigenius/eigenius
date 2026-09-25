@@ -468,6 +468,38 @@ fn go<'x, 't: 'x, 'p: 't>(
                     PrimitiveType::Integer => "Int",
                     PrimitiveType::Boolean => "Bool",
                     PrimitiveType::Float => "Float",
+                    // D86 §4 settled this target: Lean's `Rat` is
+                    // `structure Rat where mk' :: num : Int; den : Nat; den_nz; reduced`, and its
+                    // invariant — `den ≠ 0` and `num.natAbs.Coprime den` — is exactly what
+                    // `numeric::Rational`'s constructor establishes. So the comorphism asserts an
+                    // agreement that holds by construction on both sides, which is what makes it
+                    // a supportable TCB entry rather than a hopeful one.
+                    PrimitiveType::Rational => "Rat",
+                    // Lean's `Int` is arbitrary precision, so every `core:bigint` is one. The
+                    // 4096-bit bound is ours, for termination (D94), not a claim about which
+                    // integers exist — so the mapping is total in the direction that matters.
+                    //
+                    // `core:integer` maps here too. The two differ in chain-side REPRESENTATION,
+                    // i64 against arbitrary precision, and not in what they denote; Lean has one
+                    // integer type and both are subsets of it.
+                    PrimitiveType::BigInt => "Int",
+                    // D93 units. Lean's core has no units-of-measure type. A unit is seven
+                    // rational exponents, so a Lean structure of seven `Rat`s would be a faithful
+                    // image — `Rat` is canonical, so structural equality agrees — but no such
+                    // structure exists in the prelude this externalizer targets, and mapping to one
+                    // that is not declared there would emit a term Lean cannot check.
+                    //
+                    // What would lift the refusal: declaring that structure on the Lean side, at
+                    // which point this becomes a TCB entry reviewable on its merits, as the `Iri`
+                    // note below says of `Std.URI`.
+                    PrimitiveType::Unit => {
+                        return outside(
+                            "EigonPrimitive(Unit)",
+                            "a unit of measure; Lean core has no units-of-measure type, and the \
+                         seven-`Rat` structure that would be its image is not declared in the \
+                         prelude this externalizer targets",
+                        )
+                    }
                     // `Float` has the same problem `LitFloat` has, and `Json` is a chain-side
                     // carrier with no Lean image at all.
                     PrimitiveType::Json => {
@@ -644,6 +676,35 @@ fn go<'x, 't: 'x, 'p: 't>(
         // `3.141592653589793`, so this is a reproduction of the value rather than an
         // approximation of it — the distinction §5 turns on.
         Exp::LitFloat(f) => float_literal(*f, tc.ctx, cx),
+
+        // D86 §4 specifies the shape: a rational is emitted as the normalized STRUCTURE LITERAL
+        // `Rat.mk' num den _ _`, never as `num / den`. A division puts `HDiv.hDiv` in the term, so
+        // every `def_eq` against it drives `Rat.div → Rat.inv → Rat.mul → Rat.normalize → Nat.gcd`
+        // — the reduction that normalising exists to avoid, reintroduced on the exact type.
+        //
+        // What is not built yet is the two proof fields. `den_nz` and `reduced` are `by decide`,
+        // and discharging them from Rust means constructing `Decidable.decide` applications and
+        // `of_decide_eq_true` witnesses in nanoda. That is its own piece of work, and nothing on
+        // the chain needs it: the type mapping above is enough for a proposition that QUANTIFIES
+        // over rationals, and this refusal is reached only by one that contains a literal.
+        //
+        // The invariant itself is already free — `numeric::Rational`'s constructor establishes
+        // exactly `den ≠ 0` and `num.natAbs.Coprime den`, which is what the two fields assert.
+        // No Lean image for the type (see `PrimitiveType::Unit` below), so none for its values
+        // either. Refused rather than approximated: a unit erased to a bare number is a quantity
+        // whose dimension is gone, which is the silent mistyping D93 exists to prevent.
+        Exp::LitUnit(_) => outside(
+            "LitUnit",
+            "a unit-of-measure literal; its type has no Lean image, and erasing the unit would \
+             leave a dimensionless number",
+        ),
+
+        Exp::LitRat(_) => outside(
+            "LitRat",
+            "D86 §4's shape is `Rat.mk' num den _ _`, whose `den_nz` and `reduced` fields are \
+             `by decide` proofs this externalizer cannot yet construct. The type maps (Rat); the \
+             literal does not",
+        ),
 
         Exp::Data(_) => outside(
             "Data",

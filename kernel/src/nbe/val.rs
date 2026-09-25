@@ -95,6 +95,12 @@ pub enum Val {
     /// Literal boolean value (eigenius#142). Type:
     /// `Val::EigonPrimitive(PrimitiveType::Boolean)`.
     LitBool(bool),
+    /// `Exp::LitRat` at the value level (D94) — canonical, so two of
+    /// these compare structurally and `conv` does no arithmetic.
+    LitRat(crate::numeric::Rational),
+    /// `Exp::LitUnit` at the value level (D93) — canonical for the same
+    /// reason, and distinct from [`Val::Unit`], which is `()`.
+    LitUnit(crate::units::Unit),
     /// Template value with resolved property type requirements.
     /// Template("literal", [(iri, resolved_type)])
     TemplateVal(String, Vec<(Iri, Val)>),
@@ -449,7 +455,15 @@ impl Val {
                     arg_node,
                 ))
             }
-            Val::Nt(k) => Ok((Val::Nt(Neut::App(Box::new(k), Box::new(v))), arg_node)),
+            Val::Nt(k) => {
+                let n = Neut::App(Box::new(k), Box::new(v));
+                // D93: a complete `units:mul` / `units:pow` application reduces here — the place
+                // nanoda's `try_reduce_nat` sits relative to its `whnf`.
+                match crate::nbe::unit_ext::try_reduce_unit(&n)? {
+                    Some(reduced) => Ok((reduced, arg_node)),
+                    None => Ok((Val::Nt(n), arg_node)),
+                }
+            }
             other => Err(EvalError::NotAFunction(format!("{other:?}"))),
         }
     }

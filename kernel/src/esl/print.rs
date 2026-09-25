@@ -524,6 +524,13 @@ impl Printer<'_> {
             },
 
             "LitString" => Ok(format!("\"{}\"", escape(&str_arg(0)?))),
+            // The canonical form, which always reparses. The decimal suffix (`0.05r`) cannot
+            // express a rational whose reduced denominator is not 2^a·5^b — `37/180` is one — so
+            // the printer emits `r"num/den"` rather than choosing per value (D94).
+            "LitRat" => Ok(format!("r\"{}\"", str_arg(0)?)),
+            // D93. The canonical form in a `u"…"` string; it has no suffix form, so there is only
+            // one thing to emit.
+            "LitUnit" => Ok(format!("u\"{}\"", str_arg(0)?)),
             "LitInt" => args
                 .first()
                 .and_then(Value::as_i64)
@@ -818,6 +825,8 @@ const D47_CTORS: &[&str] = &[
     "Id",
     "LitString",
     "LitInt",
+    "LitRat",
+    "LitUnit",
     "LitFloat",
     "LitBool",
 ];

@@ -250,9 +250,11 @@ pub fn compile_file_with_context(
     institutions: Option<std::sync::Arc<crate::institution::registry::InstitutionIndex>>,
     external_ctors: CtorSeed,
     external_macros: BTreeMap<String, ast::MacroDecl>,
+    units: Option<crate::units::convert::Vocabulary>,
 ) -> Result<Vec<Resource>, Vec<EslError>> {
     let mut compiler = Compiler::new();
     compiler.institutions = institutions;
+    compiler.units = units;
     compiler.ctors_by_short_name = external_ctors.by_short_name;
     compiler.ctor_arg_names = external_ctors.arg_names;
     compiler.ctor_arg_types = external_ctors.arg_types;
@@ -560,6 +562,9 @@ struct Compiler {
     /// disappear at compile time (no resource is emitted); the table
     /// is purely an in-compiler expansion environment.
     macros: BTreeMap<String, ast::MacroDecl>,
+    /// The chain's units vocabulary (D93), for `units:quantity(v, "…")`. `None` when the chain
+    /// carries no units layer, and then the form is refused rather than guessed at.
+    units: Option<crate::units::convert::Vocabulary>,
     /// Optional institution index — when present, drives
     /// compile-time classification of function-call IRIs as a
     /// Decidable QueryClass call or a Comorphism invocation, emitting
@@ -795,6 +800,8 @@ fn expand_aliases(typ: &ast::Term, env: &BTreeMap<String, ast::Term>) -> ast::Te
         ast::Term::Sort { .. }
         | ast::Term::LitString { .. }
         | ast::Term::LitInt { .. }
+        | ast::Term::LitRat { .. }
+        | ast::Term::LitUnit { .. }
         | ast::Term::LitFloat { .. }
         | ast::Term::LitBool { .. } => typ.clone(),
     }
@@ -850,6 +857,7 @@ impl Compiler {
             codec_names: Default::default(),
             ctor_arg_types: BTreeMap::new(),
             macros: BTreeMap::new(),
+            units: None,
             institutions: None,
         }
     }
@@ -1609,6 +1617,8 @@ impl Compiler {
             )),
             ast::Term::LitString { pos, .. }
             | ast::Term::LitInt { pos, .. }
+            | ast::Term::LitRat { pos, .. }
+            | ast::Term::LitUnit { pos, .. }
             | ast::Term::LitFloat { pos, .. }
             | ast::Term::LitBool { pos, .. } => Err(EslError::compiler(
                 Some(pos.clone()),
@@ -1767,6 +1777,90 @@ impl Compiler {
         Ok(vec![r])
     }
 
+    /// `units:quantity(v, "stated")` — D93's ESL form for an authored quantity.
+    ///
+    /// Not a chain constant. It is resolved HERE, where the chain's units vocabulary is in hand,
+    /// into the annotated term `(X:mk_quantity(c, pi) : X:Quantity(dim))` — `X` being the author's
+    /// own prefix for the units namespace, so the names resolve however the file declares it — and
+    /// both lowering paths then see an ordinary term. The value must be an exact literal (`37`,
+    /// `0.05r`, `r"37/180"`): a float is not exact, and D94's point is that `0.05` is not 1/20.
+    fn desugar_quantity(&self, term: &ast::Term) -> Result<Option<ast::Term>, EslError> {
+        let ast::Term::Ref { name, args, pos } = term else {
+            return Ok(None);
+        };
+        if name.namespace.is_none()
+            || self.resolve(name).ok().as_deref() != Some(crate::units::convert::QUANTITY_FORM)
+        {
+            return Ok(None);
+        }
+        let err = |msg: String| EslError::compiler(Some(pos.clone()), msg);
+        let [value, stated] = args.as_slice() else {
+            return Err(err(format!(
+                "units:quantity takes a value and a stated unit, got {} argument(s)",
+                args.len()
+            )));
+        };
+        let value = match value {
+            ast::Term::LitRat { value, .. } => value.clone(),
+            ast::Term::LitInt { value, .. } => {
+                crate::numeric::Rational::from_integer((*value).into())
+                    .map_err(|e| err(format!("units:quantity: {e}")))?
+            }
+            _ => {
+                return Err(err(
+                    "units:quantity's value must be an exact literal — `37`, `0.05r` or \
+                     `r\"37/180\"`; a float is not exact"
+                        .to_string(),
+                ))
+            }
+        };
+        let ast::Term::LitString { value: stated, .. } = stated else {
+            return Err(err(
+                "units:quantity's stated unit must be a string, e.g. \"mg/kg\"".to_string(),
+            ));
+        };
+        let vocab = self.units.as_ref().ok_or_else(|| {
+            err(
+                "units:quantity needs the chain's units layer, and this compile has none"
+                    .to_string(),
+            )
+        })?;
+        let converted = vocab
+            .convert(&value, stated)
+            .map_err(|e| err(format!("units:quantity: {e}")))?;
+        let (coefficient, pi) = converted.magnitude.chain_pair();
+        let qualified = |local: &str| ast::QualifiedName {
+            namespace: name.namespace.clone(),
+            name: local.to_string(),
+            pos: pos.clone(),
+        };
+        Ok(Some(ast::Term::Ann {
+            expr: Box::new(ast::Term::Ref {
+                name: qualified("mk_quantity"),
+                args: vec![
+                    ast::Term::LitRat {
+                        value: coefficient,
+                        pos: pos.clone(),
+                    },
+                    ast::Term::LitInt {
+                        value: pi,
+                        pos: pos.clone(),
+                    },
+                ],
+                pos: pos.clone(),
+            }),
+            typ: Box::new(ast::Term::Ref {
+                name: qualified("Quantity"),
+                args: vec![ast::Term::LitUnit {
+                    value: converted.unit,
+                    pos: pos.clone(),
+                }],
+                pos: pos.clone(),
+            }),
+            pos: pos.clone(),
+        }))
+    }
+
     /// eigenius#72 — lower an ESL `Term` to a kernel `Exp`.
     ///
     /// Used by Layer 1's `axiom` declaration (statement encoding) and
@@ -1790,6 +1884,9 @@ impl Compiler {
         typ: &ast::Term,
         scope: &std::collections::HashSet<&str>,
     ) -> Result<Exp, EslError> {
+        if let Some(quantity) = self.desugar_quantity(typ)? {
+            return self.lower_type_expr_to_exp(&quantity, scope);
+        }
         // `alias` sugar — expand bindings into the body and recurse.
         if let ast::Term::Alias { .. } = typ {
             let expanded = expand_aliases(typ, &BTreeMap::new());
@@ -2021,6 +2118,8 @@ impl Compiler {
             // `Vec(3, A)`, etc.) inside `type_expr(...)`.
             ast::Term::LitString { value, .. } => Ok(Exp::LitString(value.clone())),
             ast::Term::LitInt { value, .. } => Ok(Exp::LitInt(*value)),
+            ast::Term::LitRat { value, .. } => Ok(Exp::LitRat(value.clone())),
+            ast::Term::LitUnit { value, .. } => Ok(Exp::LitUnit(value.clone())),
             ast::Term::LitFloat { value, .. } => Ok(Exp::LitFloat(*value)),
             ast::Term::LitBool { value, .. } => Ok(Exp::LitBool(*value)),
             // Eliminated by the early-return at the top of this fn.
@@ -2095,6 +2194,9 @@ impl Compiler {
         typ: &ast::Term,
         scope: &std::collections::HashSet<&str>,
     ) -> Result<Value, EslError> {
+        if let Some(quantity) = self.desugar_quantity(typ)? {
+            return self.encode_type_expr_to_value(&quantity, scope);
+        }
         // `alias` sugar — expand bindings into the body and recurse.
         if let ast::Term::Alias { .. } = typ {
             let expanded = expand_aliases(typ, &BTreeMap::new());
@@ -2287,6 +2389,8 @@ impl Compiler {
             ast::Term::Sort { .. }
             | ast::Term::LitString { .. }
             | ast::Term::LitInt { .. }
+            | ast::Term::LitRat { .. }
+            | ast::Term::LitUnit { .. }
             | ast::Term::LitFloat { .. }
             | ast::Term::LitBool { .. } => encode_leaf(self, typ),
             // Eliminated by the early-return at the top of this fn.

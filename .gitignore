@@ -108,3 +108,6 @@ experiments.tgz
 references.tgz
 umls-chain.tgz
 wordnet-chain.tgz
+
+# UAB Collaboration
+experiments/uab

@@ -439,6 +439,20 @@ pub const RESOURCE: &str = "urn:eigenius:core:resource";
 pub const RESOURCE_ARRAY: &str = "urn:eigenius:core:resource_array";
 pub const VALUE_ARRAY: &str = "urn:eigenius:core:value_array";
 pub const JSON: &str = "urn:eigenius:core:json";
+/// D94 exact numerics. `core:bigint` is a REFINEMENT of `core:rational` checking `den == 1`, not a
+/// separate carrier — both are `Exp::LitRat` (D88 §3, the shape `core:iri` has to `core:string`).
+pub const RATIONAL: &str = "urn:eigenius:core:rational";
+/// See [`RATIONAL`].
+pub const BIGINT: &str = "urn:eigenius:core:bigint";
+/// D93 units of measure. A rational exponent vector over the seven SI base dimensions — NOT the
+/// unit type, which is `One`.
+pub const UNIT: &str = "urn:eigenius:core:unit";
+/// D93 — the unit product and power. Declared as axioms in `units.esl`, and reduced by the kernel
+/// (`nbe::unit_ext`) the way nanoda's kernel reduces `Nat.add`: recognised by name, not by a term
+/// form of their own.
+pub const UNITS_MUL: &str = "urn:eigenius:units:mul";
+/// See [`UNITS_MUL`].
+pub const UNITS_POW: &str = "urn:eigenius:units:pow";
 
 /// **D79 §2.2 — the synthetic index predicate for term references.**
 ///

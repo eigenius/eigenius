@@ -28,6 +28,13 @@ humantime = "2"
 # Phase 14c). W-TinyLFU eviction outperforms LRU/ARC on skewed access
 # patterns and the crate is production-grade in Rust services.
 moka = { version = "0.12", features = ["sync"] }
+# D94 exact numerics — `core:rational` magnitudes. `num-rational`'s `Ratio` maintains the
+# reduced, positive-denominator form D94 requires as its canonical invariant, so the
+# constructor establishes it rather than checking it. Both are already in the lockfile.
+num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
+
 regex = "1"
 # D43 §2.3 / M3 — text tokenisation pipeline.
 # unicode-segmentation gives Unicode-correct word splitting; rust-stemmers

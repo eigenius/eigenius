@@ -1,0 +1,345 @@
+// Units of measure — D93.
+//
+// Two things live here: the type a quantity has, and the SI vocabulary an authored unit is
+// normalised through. Neither is in the trusted surface. The kernel's addition is the `Unit`
+// primitive alone — seven base dimensions, a kind vector, and a canonicalisation — and this layer
+// is chain data that can be reviewed and replaced without touching the checker (D93, "What is
+// trusted, and how little").
+//
+// **Every dimension is in base units.** A `core:unit` value never names `km`, `N` or `min`: those
+// are entries below, each carrying its base dimension and the exact factor that takes a magnitude
+// there. Conversion happens once, at ingest; the kernel only compares.
+//
+// **A unit is an element of a group over the seven base dimensions, and nothing else.** So several
+// named units share a value, as the SI says they do: rad, sr, °, ′ and ″ are all `1`; Hz and Bq are
+// both `s^-1`; Gy and Sv are both `s^-2·m^2`; lm is `cd`. What tells them apart is a KIND of
+// quantity — plane angle, solid angle — which this layer records as METADATA on the named unit
+// (`units:kind`) and which never enters a unit's value or type equality. v1 records the two angle
+// kinds; the others are for when something consumes them. (D93, "Kinds are metadata, not
+// algebra".) The prose keeps which unit the author wrote; the term does not.
+//
+// **An authored quantity is written `units:quantity(5, "mg/kg")`.** That is not a chain constant:
+// the ESL compiler resolves it against this layer's vocabulary into the annotated term
+// `(units:mk_quantity(c, pi) : units:Quantity(dim))` (`kernel/src/units/convert.rs`), and the Rust
+// API does the same with `Vocabulary::convert`.
+//
+// Placed after `core`, which supplies `core:unit` and `core:rational`, and after `prov`, since the
+// ESL compiler stamps `prov:was_attributed_to` on every declaration; before `statistics`, whose
+// quantities carry units. Not under `urn:eigenius:measurements`, which is the D52 statistics
+// institution: a measured length has a unit whether or not anyone runs a test on it.
+
+namespace core  = "urn:eigenius:core";
+namespace units = "urn:eigenius:units";
+
+// ── The quantity type ────────────────────────────────────────────────────────────────────────────
+
+data units:Quantity (u : core:unit) : Set {
+    description = "A quantity in unit `u`, which is always in base units. Its magnitude is the pair `coefficient × π^pi`: a reduced rational and an integer power of π, so `37°` is `mk_quantity(37/180, 1)` at `Quantity(angle)`. There is no separate magnitude carrier; the pair is canonical by construction, and equality is constructor-application equality on it. `u` is a PARAMETER, so the unit of a quantity term comes from its type, not from the term (D93, \"How a magnitude reaches a term\").";
+
+    mk_quantity : forall (u : core:unit) => core:rational -> core:integer -> units:Quantity(u)
+}
+
+// ── The unit operators ───────────────────────────────────────────────────────────────────────────
+// Declared constants, reduced by the kernel (`kernel/src/nbe/unit_ext.rs`) the way nanoda's kernel
+// reduces `Nat.add`: recognised by name, with no term form of their own. A product of literal units
+// reduces to a literal; a product with unit variables in it normalises, so `mul(u, v)` and
+// `mul(v, u)` are the same unit (D93, "Normalisation only; parameterisation instead of
+// unification"). Division is `mul(a, pow(b, r"-1"))`.
+
+axiom units:mul : core:unit -> core:unit -> core:unit
+axiom units:pow : core:unit -> core:rational -> core:unit
+
+// ── Vocabulary classes ───────────────────────────────────────────────────────────────────────────
+
+class units:NamedUnit {
+    description = "A unit with a symbol: a base unit, a named derived unit, or an SI-accepted non-SI unit. Carries the base dimension it normalises to and the exact factor that takes a magnitude there — `min` is `s` with factor 60. A unit that accepts SI prefixes says so; the prefixed form is computed at ingest, not declared.";
+    requires units:symbol, units:dimension, units:factor, units:factor_pi, units:prefixable;
+    recommends units:offset, units:factor_uncertainty, units:factor_source, units:kind;
+}
+
+class units:Kind {
+    description = "A kind of quantity in ISO 80000's sense — plane angle, solid angle — carried as METADATA on a named unit. Not part of a unit's value: rad, sr and the plain dimensionless unit are one element of the unit group, and a kind never enters type equality. An earlier design put kinds in the unit as an exponent vector dropped once the dimension was non-zero; that made m·rad = m while rad ≠ 1, which no group admits, and the product was not associative (D93, \"Kinds are metadata, not algebra\").";
+}
+
+class units:Prefix {
+    description = "One of the 24 SI prefixes: a symbol and an exact power of ten.";
+    requires units:symbol, units:factor;
+}
+
+property units:symbol : core:string {
+    description = "The SI symbol, in the code points the SI Brochure uses: μ is U+03BC (not U+00B5 MICRO SIGN), Ω is U+03A9 (not U+2126 OHM SIGN), ° is U+00B0. Surface variants are the lexicon's concern, not this layer's.";
+    domain units:NamedUnit, units:Prefix;
+}
+
+property units:dimension : core:unit {
+    description = "The base-unit dimension a magnitude in this unit is normalised to.";
+    domain units:NamedUnit;
+}
+
+property units:factor : core:rational {
+    description = "The exact rational coefficient a magnitude is multiplied by on normalisation. For a prefix, the power of ten it denotes.";
+    domain units:NamedUnit, units:Prefix;
+}
+
+property units:factor_pi : core:integer {
+    description = "The power of π in the conversion, 0 for all but the angular units. The degree is (1/180, 1): 1° = π/180 rad.";
+    domain units:NamedUnit;
+}
+
+property units:prefixable : core:boolean {
+    description = "Whether SI prefixes attach to this unit. Mass prefixes attach to the gram, never to the kilogram; `min`, `h`, `d`, `ha`, `au` and the angular units take none.";
+    domain units:NamedUnit;
+}
+
+property units:kind : core:resource {
+    description = "The kind of quantity a named unit measures, where its dimension alone does not say: the radian measures a plane angle and the steradian a solid angle, though both are the dimensionless unit.";
+    class_types units:Kind;
+    domain units:NamedUnit;
+}
+
+property units:offset : core:rational {
+    description = "An affine offset in base units, added after scaling. Only degree Celsius carries one. It encodes the POINT reading — 85 °C is 358.15 K — which v1 assumes for a bare °C; a temperature difference in °C lands in K with no offset, and the grammar that tells the two apart is D95's (D93, \"Affine units are an extension\").";
+    domain units:NamedUnit;
+}
+
+property units:factor_uncertainty : core:rational {
+    description = "The standard uncertainty of a MEASURED factor, in the same units as `units:factor`. Present only where the factor is a measurement rather than a definition — in v1, the dalton alone. A converted magnitude through such a factor is not exact, and this is what says so.";
+    domain units:NamedUnit;
+}
+
+property units:factor_source : core:string {
+    description = "The source and vintage of a measured factor, e.g. `CODATA 2022`. A measured constant carries a vintage as well as an uncertainty; D93 was itself written against the superseded CODATA 2018 dalton, which is the case in point.";
+    domain units:NamedUnit;
+}
+
+// ── Kinds ────────────────────────────────────────────────────────────────────────────────────────
+
+resource units:plane_angle : units:Kind {
+    core:description = "plane angle";
+}
+resource units:solid_angle : units:Kind {
+    core:description = "solid angle";
+}
+
+// ── The seven base units ─────────────────────────────────────────────────────────────────────────
+
+resource units:second : units:NamedUnit {
+    core:description = "second";
+    units:symbol = "s"; units:dimension = u"s"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:metre : units:NamedUnit {
+    core:description = "metre";
+    units:symbol = "m"; units:dimension = u"m"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:kilogram : units:NamedUnit {
+    core:description = "kilogram. The base unit of mass, and NOT prefixable: prefixes attach to the gram.";
+    units:symbol = "kg"; units:dimension = u"kg"; units:factor = 1r; units:factor_pi = 0; units:prefixable = false;
+}
+resource units:ampere : units:NamedUnit {
+    core:description = "ampere";
+    units:symbol = "A"; units:dimension = u"A"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:kelvin : units:NamedUnit {
+    core:description = "kelvin";
+    units:symbol = "K"; units:dimension = u"K"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:mole : units:NamedUnit {
+    core:description = "mole";
+    units:symbol = "mol"; units:dimension = u"mol"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:candela : units:NamedUnit {
+    core:description = "candela";
+    units:symbol = "cd"; units:dimension = u"cd"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+
+// The gram is not a base unit and not in D93's lists, but the SI forms every mass multiple and
+// submultiple by prefixing it — `mg`, `μg` — so the vocabulary cannot do without it.
+resource units:gram : units:NamedUnit {
+    core:description = "gram. The unit mass prefixes attach to.";
+    units:symbol = "g"; units:dimension = u"kg"; units:factor = 0.001r; units:factor_pi = 0; units:prefixable = true;
+}
+
+// ── The 22 named derived units ───────────────────────────────────────────────────────────────────
+// Factor 1 throughout: each is an abbreviation that normalises away (D93).
+
+resource units:radian : units:NamedUnit {
+    core:description = "radian. Dimensionless, as the SI defines it; a plane angle by kind.";
+    units:symbol = "rad"; units:dimension = u"1"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+    units:kind = units:plane_angle;
+}
+resource units:steradian : units:NamedUnit {
+    core:description = "steradian. Dimensionless, as the SI defines it; a solid angle by kind.";
+    units:symbol = "sr"; units:dimension = u"1"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+    units:kind = units:solid_angle;
+}
+resource units:hertz : units:NamedUnit {
+    core:description = "hertz. Same unit value as the becquerel.";
+    units:symbol = "Hz"; units:dimension = u"s^-1"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:newton : units:NamedUnit {
+    core:description = "newton, kg·m·s⁻²";
+    units:symbol = "N"; units:dimension = u"s^-2·m·kg"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:pascal : units:NamedUnit {
+    core:description = "pascal, N/m²";
+    units:symbol = "Pa"; units:dimension = u"s^-2·m^-1·kg"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:joule : units:NamedUnit {
+    core:description = "joule, N·m";
+    units:symbol = "J"; units:dimension = u"s^-2·m^2·kg"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:watt : units:NamedUnit {
+    core:description = "watt, J/s";
+    units:symbol = "W"; units:dimension = u"s^-3·m^2·kg"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:coulomb : units:NamedUnit {
+    core:description = "coulomb, A·s";
+    units:symbol = "C"; units:dimension = u"s·A"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:volt : units:NamedUnit {
+    core:description = "volt, W/A";
+    units:symbol = "V"; units:dimension = u"s^-3·m^2·kg·A^-1"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:farad : units:NamedUnit {
+    core:description = "farad, C/V";
+    units:symbol = "F"; units:dimension = u"s^4·m^-2·kg^-1·A^2"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:ohm : units:NamedUnit {
+    core:description = "ohm, V/A";
+    units:symbol = "Ω"; units:dimension = u"s^-3·m^2·kg·A^-2"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:siemens : units:NamedUnit {
+    core:description = "siemens, A/V";
+    units:symbol = "S"; units:dimension = u"s^3·m^-2·kg^-1·A^2"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:weber : units:NamedUnit {
+    core:description = "weber, V·s";
+    units:symbol = "Wb"; units:dimension = u"s^-2·m^2·kg·A^-1"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:tesla : units:NamedUnit {
+    core:description = "tesla, Wb/m²";
+    units:symbol = "T"; units:dimension = u"s^-2·kg·A^-1"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:henry : units:NamedUnit {
+    core:description = "henry, Wb/A";
+    units:symbol = "H"; units:dimension = u"s^-2·m^2·kg·A^-2"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+// The one affine unit. Not prefixable in v1: a prefix on an offset unit is well-defined only for a
+// difference, and v1 assumes the point reading.
+resource units:degree_celsius : units:NamedUnit {
+    core:description = "degree Celsius. Affine: normalised to K under the POINT reading, 85 °C → 358.15 K.";
+    units:symbol = "°C"; units:dimension = u"K"; units:factor = 1r; units:factor_pi = 0; units:prefixable = false;
+    units:offset = 273.15r;
+}
+resource units:lumen : units:NamedUnit {
+    core:description = "lumen, cd·sr. Same unit value as the candela, since the steradian is dimensionless.";
+    units:symbol = "lm"; units:dimension = u"cd"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:lux : units:NamedUnit {
+    core:description = "lux, lm/m²";
+    units:symbol = "lx"; units:dimension = u"m^-2·cd"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:becquerel : units:NamedUnit {
+    core:description = "becquerel. Same unit value as the hertz.";
+    units:symbol = "Bq"; units:dimension = u"s^-1"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:gray : units:NamedUnit {
+    core:description = "gray, J/kg. Same unit value as the sievert.";
+    units:symbol = "Gy"; units:dimension = u"s^-2·m^2"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:sievert : units:NamedUnit {
+    core:description = "sievert, J/kg. Same unit value as the gray.";
+    units:symbol = "Sv"; units:dimension = u"s^-2·m^2"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:katal : units:NamedUnit {
+    core:description = "katal, mol/s";
+    units:symbol = "kat"; units:dimension = u"s^-1·mol"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+}
+
+// ── SI-accepted non-SI units ─────────────────────────────────────────────────────────────────────
+// D93's list (min, h, d, ha, L, t, Da, eV, au) plus the plane angles °, ′ and ″. Those three are in
+// the SI Brochure's accepted table (Table 8) with the rest, and D93's π-carrying magnitude exists to
+// admit them. The logarithmic units in the same table (Np, B, dB) stay out, as D93 decides.
+
+resource units:minute : units:NamedUnit {
+    core:description = "minute (time)";
+    units:symbol = "min"; units:dimension = u"s"; units:factor = 60r; units:factor_pi = 0; units:prefixable = false;
+}
+resource units:hour : units:NamedUnit {
+    core:description = "hour";
+    units:symbol = "h"; units:dimension = u"s"; units:factor = 3600r; units:factor_pi = 0; units:prefixable = false;
+}
+resource units:day : units:NamedUnit {
+    core:description = "day";
+    units:symbol = "d"; units:dimension = u"s"; units:factor = 86400r; units:factor_pi = 0; units:prefixable = false;
+}
+resource units:degree : units:NamedUnit {
+    core:description = "degree (plane angle). π/180 rad.";
+    units:symbol = "°"; units:dimension = u"1"; units:factor = r"1/180"; units:factor_pi = 1; units:prefixable = false;
+    units:kind = units:plane_angle;
+}
+resource units:arcminute : units:NamedUnit {
+    core:description = "minute of arc. π/10800 rad.";
+    units:symbol = "′"; units:dimension = u"1"; units:factor = r"1/10800"; units:factor_pi = 1; units:prefixable = false;
+    units:kind = units:plane_angle;
+}
+resource units:arcsecond : units:NamedUnit {
+    core:description = "second of arc. π/648000 rad.";
+    units:symbol = "″"; units:dimension = u"1"; units:factor = r"1/648000"; units:factor_pi = 1; units:prefixable = false;
+    units:kind = units:plane_angle;
+}
+resource units:hectare : units:NamedUnit {
+    core:description = "hectare";
+    units:symbol = "ha"; units:dimension = u"m^2"; units:factor = 10000r; units:factor_pi = 0; units:prefixable = false;
+}
+resource units:litre : units:NamedUnit {
+    core:description = "litre. The SI also accepts lowercase `l`; that variant is a lexicon entry, not a second unit.";
+    units:symbol = "L"; units:dimension = u"m^3"; units:factor = 0.001r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:tonne : units:NamedUnit {
+    core:description = "tonne";
+    units:symbol = "t"; units:dimension = u"kg"; units:factor = 1000r; units:factor_pi = 0; units:prefixable = true;
+}
+// The one MEASURED factor in v1 (D93, "Decided: `Da` stays in v1 as a documented exception").
+resource units:dalton : units:NamedUnit {
+    core:description = "dalton. 1.660 539 068 92(52) × 10⁻²⁷ kg — a measurement, not a definition, so a magnitude converted through it is not exact.";
+    units:symbol = "Da"; units:dimension = u"kg"; units:factor = 1.66053906892e-27r; units:factor_pi = 0; units:prefixable = true;
+    units:factor_uncertainty = 5.2e-37r;
+    units:factor_source = "CODATA 2022";
+}
+resource units:electronvolt : units:NamedUnit {
+    core:description = "electronvolt. Exact since the 2019 SI fixed the elementary charge.";
+    units:symbol = "eV"; units:dimension = u"s^-2·m^2·kg"; units:factor = 1.602176634e-19r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:astronomical_unit : units:NamedUnit {
+    core:description = "astronomical unit. Exact by IAU 2012 Resolution B2.";
+    units:symbol = "au"; units:dimension = u"m"; units:factor = 149597870700r; units:factor_pi = 0; units:prefixable = false;
+}
+
+// ── The 24 SI prefixes ───────────────────────────────────────────────────────────────────────────
+// Eight exceed u64 (D93), which is why `core:rational` is arbitrary precision.
+
+resource units:quecto : units:Prefix { units:symbol = "q";  units:factor = 1e-30r; }
+resource units:ronto  : units:Prefix { units:symbol = "r";  units:factor = 1e-27r; }
+resource units:yocto  : units:Prefix { units:symbol = "y";  units:factor = 1e-24r; }
+resource units:zepto  : units:Prefix { units:symbol = "z";  units:factor = 1e-21r; }
+resource units:atto   : units:Prefix { units:symbol = "a";  units:factor = 1e-18r; }
+resource units:femto  : units:Prefix { units:symbol = "f";  units:factor = 1e-15r; }
+resource units:pico   : units:Prefix { units:symbol = "p";  units:factor = 1e-12r; }
+resource units:nano   : units:Prefix { units:symbol = "n";  units:factor = 1e-9r; }
+resource units:micro  : units:Prefix { units:symbol = "μ";  units:factor = 1e-6r; }
+resource units:milli  : units:Prefix { units:symbol = "m";  units:factor = 1e-3r; }
+resource units:centi  : units:Prefix { units:symbol = "c";  units:factor = 1e-2r; }
+resource units:deci   : units:Prefix { units:symbol = "d";  units:factor = 1e-1r; }
+resource units:deca   : units:Prefix { units:symbol = "da"; units:factor = 1e1r; }
+resource units:hecto  : units:Prefix { units:symbol = "h";  units:factor = 1e2r; }
+resource units:kilo   : units:Prefix { units:symbol = "k";  units:factor = 1e3r; }
+resource units:mega   : units:Prefix { units:symbol = "M";  units:factor = 1e6r; }
+resource units:giga   : units:Prefix { units:symbol = "G";  units:factor = 1e9r; }
+resource units:tera   : units:Prefix { units:symbol = "T";  units:factor = 1e12r; }
+resource units:peta   : units:Prefix { units:symbol = "P";  units:factor = 1e15r; }
+resource units:exa    : units:Prefix { units:symbol = "E";  units:factor = 1e18r; }
+resource units:zetta  : units:Prefix { units:symbol = "Z";  units:factor = 1e21r; }
+resource units:yotta  : units:Prefix { units:symbol = "Y";  units:factor = 1e24r; }
+resource units:ronna  : units:Prefix { units:symbol = "R";  units:factor = 1e27r; }
+resource units:quetta : units:Prefix { units:symbol = "Q";  units:factor = 1e30r; }
