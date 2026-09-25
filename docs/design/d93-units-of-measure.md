@@ -199,7 +199,7 @@ group is divisible rather than free, and Gaussian elimination over linear Diopha
 different algorithm from linear algebra over ℚ. This document says exactly that two sections below,
 and an earlier draft asserted the opposite here.
 
-**Implicit unit arguments are in, and they require a kernel change.** `mean {u} [x,y,z]` with `u`
+**Implicit unit arguments were in — deferred as of 2026-09-25, eigenius#261.** `mean {u} [x,y,z]` with `u`
 inferred is implicit-argument solving, and it stays first-order — `Quantity ?u ≡ Quantity m` is
 syntactic — precisely when **every implicit unit variable appears alone as the index of at least one
 explicit argument's type**. A signature violating that, such as `c : {u} -> Quantity (u * u)`,
@@ -213,6 +213,19 @@ today. Admitting them is a **general** kernel change — every Π type gains the
 unit-indexed ones — and it moves `eigentt:Term`'s `Pi` constructor and the D47 codec with it. Units
 motivate it; they are not the only beneficiary, and the blast radius is the whole type theory's
 binder.
+
+**Superseded: it is an elaboration feature, not a kernel change** (eigenius#261). nanoda's `Pi`
+carries a `binder_style` that its checker never consults — `def_eq_binder_aux`
+(`references/nanoda_lib/src/tc.rs:873`) compares binder types and bodies only — because in Lean the
+ELABORATOR inserts implicit arguments and the kernel checks fully explicit terms. Eigenius's own
+`InductiveCtorDecl::implicit` already works that way: only `term_mentions` reads it. So the binder,
+the codec and stored terms need not change; the work is making the ESL compiler infer argument types
+at application sites where implicit binders occur. And solving a unit unknown is simpler than the
+AG-unification exclusion above assumes: since "Kinds are metadata, not algebra", units form a vector
+space over ℚ, so one unknown `?u^k · A = B` has the unique solution `?u = (B · A⁻¹)^(1/k)` —
+`{u} -> Quantity(u * u)` against `Quantity(m²)` gives `u = m` — and several are a linear system.
+The exclusion comes from Kennedy's integer, Diophantine setting. Not yet verified beyond the
+argument.
 
 ## What is trusted, and how little
 
@@ -925,8 +938,8 @@ written down when it is reached.
 element and nothing else, with quantity kinds recorded as metadata in the units layer (see "Kinds
 are metadata, not algebra"); a declared constant set `{π}` with integer exponents; and
 canonicalisation over both. A **magnitude** of `q × Π cᵢ^{eᵢ}`.
-**Implicit Π** as a kernel change — not a unit feature but a general one that units motivate, moving
-`eigentt:Term`'s `Pi` constructor and the D47 codec with it;
+**Implicit Π was here and is deferred** (eigenius#261): an elaboration feature, per nanoda, not the
+kernel change this paragraph once said;
 `Quantity : Unit -> Set`; the SI content as chain ontology (7 base, 22 derived, 24 prefixes,
 SI-accepted non-SI units — min, h, d, ha, L, t, Da, eV, au); conversion factors as exact rationals
 (D94); a new `eigentt:Term` constructor carrying a unit value, `LitUnit`, with the codec arms it

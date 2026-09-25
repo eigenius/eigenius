@@ -288,10 +288,12 @@ Found while building: the stated form was first split at `/` before exponents we
 
 ## Deferred, with reasons
 
-- **Implicit Π.** D93 calls it a general kernel change where "the blast radius is the whole type
-  theory's binder" — every Π type gains the affordance, and it moves `eigentt:Term`'s `Pi`
-  constructor and the D47 codec with it. It buys `mean {u} [x,y,z]`, which is ergonomics: explicit
-  Π always works, so this is not a prerequisite for `Quantity : Unit -> Set`.
+- **Implicit Π — eigenius#261.** It buys `mean {u} [x,y,z]`, which is ergonomics: explicit Π always
+  works, and nothing built here needs it. D93 called it a general kernel change where "the blast
+  radius is the whole type theory's binder"; nanoda says otherwise — its checker never consults
+  `binder_style`, because Lean's elaborator inserts implicit arguments and the kernel checks
+  explicit terms. So the work is in the ESL compiler (inferring argument types at application
+  sites), not the binder, and solving a unit unknown is linear over ℚ. The issue has the detail.
 - **The Lean `Rat.mk'` literal proofs** (D94). The type maps; the literal refuses, pending
   `Decidable.decide` witnesses constructed in nanoda.
 - **All of D95** — the parser work is consequent, not concurrent.
