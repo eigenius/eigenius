@@ -903,9 +903,9 @@ fn ground_values_equal(x: &Val, y: &Val) -> bool {
         // Canonical form is what makes this structural: two rationals are equal iff their
         // components are, so `conv` does no arithmetic (D94).
         (Val::LitRat(a), Val::LitRat(b)) => a == b,
-        // Same for units (D93): `units::Unit` canonicalises on construction — exponents reduced,
-        // zeros dropped, kinds discarded once the dimension vector is non-zero — so `m·s^-1·m` and
-        // `m^2·s^-1` ARE the same value and compare equal without normalising here.
+        // Same for units (D93): `units::Unit` is a fixed-order array of reduced exponents, canonical
+        // by construction, so `m·s^-1·m` and `m^2·s^-1` ARE the same value and compare equal without
+        // normalising here.
         (Val::LitUnit(a), Val::LitUnit(b)) => a == b,
         (Val::ResourceVal(a), Val::ResourceVal(b)) => {
             // Compare resource contents for equality
@@ -1029,17 +1029,6 @@ mod tests {
         let c = eval(&Exp::LitUnit(m.clone()), &Rho::Nil)?;
         assert!(ground_values_equal(&a, &b));
         assert!(!ground_values_equal(&a, &c));
-        Ok(())
-    }
-
-    /// `rad` and the plain dimensionless unit share a dimension vector and must NOT be equal —
-    /// the whole reason the kind axis exists.
-    #[test]
-    fn rad_is_not_the_plain_dimensionless_unit() -> Result<(), EvalError> {
-        use crate::units::{Kind, Unit};
-        let rad = eval(&Exp::LitUnit(Unit::kind(Kind::Angle, 1)), &Rho::Nil)?;
-        let one = eval(&Exp::LitUnit(Unit::dimensionless()), &Rho::Nil)?;
-        assert!(!ground_values_equal(&rad, &one));
         Ok(())
     }
 

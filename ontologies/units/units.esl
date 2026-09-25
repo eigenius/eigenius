@@ -10,11 +10,13 @@
 // are entries below, each carrying its base dimension and the exact factor that takes a magnitude
 // there. Conversion happens once, at ingest; the kernel only compares.
 //
-// **Some named units share a unit value, and that is D93's rule, not an error here.** Hz and Bq
-// are both `s^-1`; Gy and Sv are both `s^-2·m^2`; lm is `cd`, because a kind is dropped once the
-// dimension vector is non-zero, so `cd·sr` canonicalises to `cd`. v1 declares one kind, `angle`,
-// and the SI's own distinctions between these pairs rest on quantity kinds it does not declare.
-// The prose keeps which one the author wrote; the term does not.
+// **A unit is an element of a group over the seven base dimensions, and nothing else.** So several
+// named units share a value, as the SI says they do: rad, sr, °, ′ and ″ are all `1`; Hz and Bq are
+// both `s^-1`; Gy and Sv are both `s^-2·m^2`; lm is `cd`. What tells them apart is a KIND of
+// quantity — plane angle, solid angle — which this layer records as METADATA on the named unit
+// (`units:kind`) and which never enters a unit's value or type equality. v1 records the two angle
+// kinds; the others are for when something consumes them. (D93, "Kinds are metadata, not
+// algebra".) The prose keeps which unit the author wrote; the term does not.
 //
 // Placed after `core`, which supplies `core:unit` and `core:rational`, and before `statistics`,
 // whose quantities carry units. Not under `urn:eigenius:measurements`, which is the D52 statistics
@@ -36,7 +38,11 @@ data units:Quantity (u : core:unit) : Set {
 class units:NamedUnit {
     description = "A unit with a symbol: a base unit, a named derived unit, or an SI-accepted non-SI unit. Carries the base dimension it normalises to and the exact factor that takes a magnitude there — `min` is `s` with factor 60. A unit that accepts SI prefixes says so; the prefixed form is computed at ingest, not declared.";
     requires units:symbol, units:dimension, units:factor, units:factor_pi, units:prefixable;
-    recommends units:offset, units:factor_uncertainty, units:factor_source;
+    recommends units:offset, units:factor_uncertainty, units:factor_source, units:kind;
+}
+
+class units:Kind {
+    description = "A kind of quantity in ISO 80000's sense — plane angle, solid angle — carried as METADATA on a named unit. Not part of a unit's value: rad, sr and the plain dimensionless unit are one element of the unit group, and a kind never enters type equality. An earlier design put kinds in the unit as an exponent vector dropped once the dimension was non-zero; that made m·rad = m while rad ≠ 1, which no group admits, and the product was not associative (D93, \"Kinds are metadata, not algebra\").";
 }
 
 class units:Prefix {
@@ -69,6 +75,12 @@ property units:prefixable : core:boolean {
     domain units:NamedUnit;
 }
 
+property units:kind : core:resource {
+    description = "The kind of quantity a named unit measures, where its dimension alone does not say: the radian measures a plane angle and the steradian a solid angle, though both are the dimensionless unit.";
+    class_types units:Kind;
+    domain units:NamedUnit;
+}
+
 property units:offset : core:rational {
     description = "An affine offset in base units, added after scaling. Only degree Celsius carries one. It encodes the POINT reading — 85 °C is 358.15 K — which v1 assumes for a bare °C; a temperature difference in °C lands in K with no offset, and the grammar that tells the two apart is D95's (D93, \"Affine units are an extension\").";
     domain units:NamedUnit;
@@ -82,6 +94,15 @@ property units:factor_uncertainty : core:rational {
 property units:factor_source : core:string {
     description = "The source and vintage of a measured factor, e.g. `CODATA 2022`. A measured constant carries a vintage as well as an uncertainty; D93 was itself written against the superseded CODATA 2018 dalton, which is the case in point.";
     domain units:NamedUnit;
+}
+
+// ── Kinds ────────────────────────────────────────────────────────────────────────────────────────
+
+resource units:plane_angle : units:Kind {
+    core:description = "plane angle";
+}
+resource units:solid_angle : units:Kind {
+    core:description = "solid angle";
 }
 
 // ── The seven base units ─────────────────────────────────────────────────────────────────────────
@@ -126,12 +147,14 @@ resource units:gram : units:NamedUnit {
 // Factor 1 throughout: each is an abbreviation that normalises away (D93).
 
 resource units:radian : units:NamedUnit {
-    core:description = "radian. `angle^1`: dimensionless, but not the plain dimensionless unit.";
-    units:symbol = "rad"; units:dimension = u"angle"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+    core:description = "radian. Dimensionless, as the SI defines it; a plane angle by kind.";
+    units:symbol = "rad"; units:dimension = u"1"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+    units:kind = units:plane_angle;
 }
 resource units:steradian : units:NamedUnit {
-    core:description = "steradian. `angle^2`, so sr = rad² follows rather than being asserted.";
-    units:symbol = "sr"; units:dimension = u"angle^2"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+    core:description = "steradian. Dimensionless, as the SI defines it; a solid angle by kind.";
+    units:symbol = "sr"; units:dimension = u"1"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
+    units:kind = units:solid_angle;
 }
 resource units:hertz : units:NamedUnit {
     core:description = "hertz. Same unit value as the becquerel.";
@@ -193,7 +216,7 @@ resource units:degree_celsius : units:NamedUnit {
     units:offset = 273.15r;
 }
 resource units:lumen : units:NamedUnit {
-    core:description = "lumen, cd·sr. Same unit value as the candela: the steradian's kind is dropped beside a dimension.";
+    core:description = "lumen, cd·sr. Same unit value as the candela, since the steradian is dimensionless.";
     units:symbol = "lm"; units:dimension = u"cd"; units:factor = 1r; units:factor_pi = 0; units:prefixable = true;
 }
 resource units:lux : units:NamedUnit {
@@ -236,15 +259,18 @@ resource units:day : units:NamedUnit {
 }
 resource units:degree : units:NamedUnit {
     core:description = "degree (plane angle). π/180 rad.";
-    units:symbol = "°"; units:dimension = u"angle"; units:factor = r"1/180"; units:factor_pi = 1; units:prefixable = false;
+    units:symbol = "°"; units:dimension = u"1"; units:factor = r"1/180"; units:factor_pi = 1; units:prefixable = false;
+    units:kind = units:plane_angle;
 }
 resource units:arcminute : units:NamedUnit {
     core:description = "minute of arc. π/10800 rad.";
-    units:symbol = "′"; units:dimension = u"angle"; units:factor = r"1/10800"; units:factor_pi = 1; units:prefixable = false;
+    units:symbol = "′"; units:dimension = u"1"; units:factor = r"1/10800"; units:factor_pi = 1; units:prefixable = false;
+    units:kind = units:plane_angle;
 }
 resource units:arcsecond : units:NamedUnit {
     core:description = "second of arc. π/648000 rad.";
-    units:symbol = "″"; units:dimension = u"angle"; units:factor = r"1/648000"; units:factor_pi = 1; units:prefixable = false;
+    units:symbol = "″"; units:dimension = u"1"; units:factor = r"1/648000"; units:factor_pi = 1; units:prefixable = false;
+    units:kind = units:plane_angle;
 }
 resource units:hectare : units:NamedUnit {
     core:description = "hectare";

@@ -607,7 +607,7 @@
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:DataType"
     ],
-    "urn:eigenius:core:description": "A unit of measure: a rational exponent vector over the seven SI base dimensions (s, m, kg, A, K, mol, cd), plus kind exponents carried only when every dimension exponent is zero. Represented as a JSON STRING in canonical form -- base symbols in that order, then kinds, joined by U+00B7, no explicit ^1, `1` for the dimensionless unit, e.g. `s^-1·m^2` or `angle` -- so string equality is value equality and the content hash is stable. Every other spelling of a value is refused, not normalised. Always in base units: `km` is not a value of this type; it is `m` with the factor moved into the magnitude at ingest. NOT the unit type `One`, whose value is `()` (D93).",
+    "urn:eigenius:core:description": "A unit of measure: a rational exponent vector over the seven SI base dimensions (s, m, kg, A, K, mol, cd) -- an element of the free Abelian group over them, so the product is associative and commutative and rad, sr and 1 are all its identity, as in the SI. Represented as a JSON STRING in canonical form -- base symbols in that order, joined by U+00B7, no explicit ^1, `1` for the dimensionless unit, e.g. `s^-1·m^2` -- so string equality is value equality and the content hash is stable. Every other spelling of a value is refused, not normalised. Always in base units: `km` is not a value of this type; it is `m` with the factor moved into the magnitude at ingest. A kind of quantity (plane angle, solid angle) is not part of this value; the units layer records it as metadata on the named unit. NOT the unit type `One`, whose value is `()` (D93).",
     "urn:eigenius:core:short_name": "unit"
   },
   {

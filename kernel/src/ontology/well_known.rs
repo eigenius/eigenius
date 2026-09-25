@@ -444,8 +444,8 @@ pub const JSON: &str = "urn:eigenius:core:json";
 pub const RATIONAL: &str = "urn:eigenius:core:rational";
 /// See [`RATIONAL`].
 pub const BIGINT: &str = "urn:eigenius:core:bigint";
-/// D93 units of measure. A rational exponent vector over the seven SI base dimensions plus kind
-/// exponents — NOT the unit type, which is `One`.
+/// D93 units of measure. A rational exponent vector over the seven SI base dimensions — NOT the
+/// unit type, which is `One`.
 pub const UNIT: &str = "urn:eigenius:core:unit";
 
 /// **D79 §2.2 — the synthetic index predicate for term references.**

@@ -1,13 +1,19 @@
 //! Units of measure — the `Unit` primitive's algebra (D93).
 //!
-//! Three exponent vectors and a coefficient, and no expressions anywhere. That is what keeps
-//! symbolic algebra out of the kernel: there is nothing to reorder, so equality is structural.
+//! An exponent vector and a coefficient, and no expressions anywhere. That is what keeps symbolic
+//! algebra out of the kernel: there is nothing to reorder, so equality is structural.
 //!
 //! | | structure | kernel operations |
 //! |---|---|---|
 //! | unit exponents | ℚ⁷ over the seven base dimensions | add, subtract, scalar-multiply, compare |
-//! | kind exponents | ℚᴷ over the quantity kinds | the same |
 //! | magnitude | ℚ × ℤ^C — a rational coefficient and integer powers of declared constants | **compare only** |
+//!
+//! **A unit is an element of a group, and nothing else.** Quantity KINDS — plane angle, solid
+//! angle — are not part of it. An earlier version carried a kind vector with a rule dropping it once
+//! the dimension vector was non-zero; that made `m·rad = m` while `rad ≠ 1`, which no group admits
+//! (cancel `m`), and the product was not associative: `(m·rad)·m⁻¹` gave `1` and `rad·(m·m⁻¹)`
+//! gave `rad`. Kinds are now metadata on the units layer's vocabulary, outside equality (D93,
+//! "Kinds are metadata, not algebra").
 //!
 //! The exponents are [`Exponent`], a fixed-width rational: 16 bits of numerator and denominator
 //! allows `m^32767`, and D94's arbitrary-precision [`crate::numeric::Rational`] is not needed here
@@ -21,7 +27,7 @@ use crate::numeric::Rational;
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// The seven SI base dimensions. `mol` stays one, against the grain of the kind axis (D93).
+/// The seven SI base dimensions. `mol` stays one (D93, "`mol` stays a base dimension").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BaseDimension {
     /// second
@@ -69,21 +75,6 @@ impl BaseDimension {
     pub fn from_symbol(sym: &str) -> Option<BaseDimension> {
         BaseDimension::ALL.into_iter().find(|d| d.symbol() == sym)
     }
-}
-
-/// A quantity kind — the axis that separates dimensionless quantities from each other.
-///
-/// It exists because a dimension vector alone unifies `rad`, `sr`, `°`, `%` and `ppm`, and unifying
-/// a plane angle with a solid angle is wrong. v1 declares one kind; admitting another is a
-/// vocabulary edit, not a checker change.
-///
-/// `%` and `ppm` are NOT kinds but **scales** on the plain dimensionless unit (D93).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Kind {
-    /// Plane angle. `rad` is `angle¹` and `sr` is `angle²`, so `sr = rad²` falls out rather than
-    /// being asserted — a deliberate step past QUDT, which classifies the two without relating
-    /// them.
-    Angle,
 }
 
 /// A declared constant a magnitude may carry integer powers of.
@@ -233,34 +224,27 @@ fn gcd(mut a: u32, mut b: u32) -> u32 {
     a
 }
 
-/// A unit: a rational exponent vector over the seven base dimensions, plus kind exponents.
+/// A unit: a rational exponent vector over the seven base dimensions.
 ///
-/// Always canonical. Canonicalisation drops zero exponents, and applies the rule that decides what
-/// a kind is for: **kind exponents are carried only when the dimension vector is zero.**
+/// An element of the free Abelian group over the base dimensions with rational exponents —
+/// Kennedy's group, with ℚ in place of ℤ. Multiplication adds exponents, so it is associative and
+/// commutative, every unit has an inverse, and the dimensionless unit is the identity. Canonical by
+/// construction: the exponents are a fixed-order array of reduced [`Exponent`]s, so structural
+/// equality is value equality.
 ///
-/// | | dimension | kind | result |
-/// |---|---|---|---|
-/// | `rad · rad` | 0 | `angle²` | `sr` — kept, dimension is zero |
-/// | `m · rad` (arc length) | `L¹` | discarded | a plain length |
-/// | `m / m` | 0 | none | dimensionless, and distinct from `rad` |
-///
-/// The rule is principled rather than a patch: the kind axis exists *because* dimension cannot
-/// separate dimensionless quantities. Once a quantity has a dimension, dimension does the
-/// separating and the kind has no work left. Without it a multiplicative kind vector re-breaks
-/// `s = rθ`, leaving arc length as a length carrying `angle¹` — which is why an eighth base
-/// dimension was rejected.
+/// `rad`, `sr`, `°` and `1` are all this group's identity, as in the SI, so `s = rθ` gives metres.
+/// What distinguishes a plane angle from a solid angle is a KIND, which the units layer records as
+/// metadata on the named unit and which never enters this value.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Unit {
     dimension: [Exponent; 7],
-    kinds: BTreeMap<Kind, Exponent>,
 }
 
 impl Unit {
-    /// The dimensionless unit with no kind — the multiplicative identity.
+    /// The dimensionless unit — the group's identity.
     pub fn dimensionless() -> Unit {
         Unit {
             dimension: [Exponent::ZERO; 7],
-            kinds: BTreeMap::new(),
         }
     }
 
@@ -268,23 +252,7 @@ impl Unit {
     pub fn base(d: BaseDimension) -> Unit {
         let mut dimension = [Exponent::ZERO; 7];
         dimension[d as usize] = Exponent::ONE;
-        Unit {
-            dimension,
-            kinds: BTreeMap::new(),
-        }
-    }
-
-    /// A dimensionless unit carrying one kind — `rad` is `Unit::kind(Kind::Angle, 1)`.
-    pub fn kind(k: Kind, power: i16) -> Unit {
-        let mut kinds = BTreeMap::new();
-        let e = Exponent::integer(power);
-        if !e.is_zero() {
-            kinds.insert(k, e);
-        }
-        Unit {
-            dimension: [Exponent::ZERO; 7],
-            kinds,
-        }
+        Unit { dimension }
     }
 
     /// The exponent of one base dimension.
@@ -292,17 +260,12 @@ impl Unit {
         self.dimension[d as usize]
     }
 
-    /// The exponent of one kind, zero when absent.
-    pub fn kind_exponent(&self, k: Kind) -> Exponent {
-        self.kinds.get(&k).copied().unwrap_or(Exponent::ZERO)
-    }
-
     /// Whether every base exponent is zero.
     pub fn is_dimensionless(&self) -> bool {
         self.dimension.iter().all(|e| e.is_zero())
     }
 
-    /// Multiplies two units: add the exponents, then canonicalise.
+    /// Multiplies two units: add the exponents.
     pub fn mul(&self, other: &Unit) -> Result<Unit, UnitError> {
         let mut dimension = [Exponent::ZERO; 7];
         for (out, (a, b)) in dimension
@@ -311,29 +274,16 @@ impl Unit {
         {
             *out = a.checked_add(*b)?;
         }
-        let mut kinds = self.kinds.clone();
-        for (k, e) in &other.kinds {
-            let sum = kinds
-                .get(k)
-                .copied()
-                .unwrap_or(Exponent::ZERO)
-                .checked_add(*e)?;
-            kinds.insert(*k, sum);
-        }
-        Ok(canonicalise(dimension, kinds))
+        Ok(Unit { dimension })
     }
 
-    /// Inverts a unit: negate every exponent.
+    /// The inverse: negate every exponent.
     pub fn recip(&self) -> Result<Unit, UnitError> {
         let mut dimension = [Exponent::ZERO; 7];
         for (out, e) in dimension.iter_mut().zip(self.dimension.iter()) {
             *out = e.checked_neg()?;
         }
-        let mut kinds = BTreeMap::new();
-        for (k, e) in &self.kinds {
-            kinds.insert(*k, e.checked_neg()?);
-        }
-        Ok(canonicalise(dimension, kinds))
+        Ok(Unit { dimension })
     }
 
     /// Divides: multiply by the reciprocal.
@@ -347,31 +297,19 @@ impl Unit {
         for (out, e) in dimension.iter_mut().zip(self.dimension.iter()) {
             *out = e.checked_mul(p)?;
         }
-        let mut kinds = BTreeMap::new();
-        for (k, e) in &self.kinds {
-            kinds.insert(*k, e.checked_mul(p)?);
-        }
-        Ok(canonicalise(dimension, kinds))
+        Ok(Unit { dimension })
     }
 
-    /// This unit with its kinds dropped, leaving the physical dimension alone.
-    ///
-    /// `rad` and the plain dimensionless unit both give `1` here, which is the point: the kind axis
-    /// separates them for EQUALITY, and this is the projection that deliberately does not.
-    pub fn dimension_only(&self) -> Unit {
-        canonicalise(self.dimension, BTreeMap::new())
-    }
-
-    /// Renders the canonical form: base symbols in [`BaseDimension::ALL`] order, then kinds, joined
-    /// by `·`, with `1` for the dimensionless unit and no explicit `^1`.
+    /// Renders the canonical form: base symbols in [`BaseDimension::ALL`] order joined by `·`, with
+    /// `1` for the dimensionless unit and no explicit `^1`.
     pub fn to_canonical_string(&self) -> String {
         self.to_string()
     }
 
     /// Parses the canonical form, refusing every other spelling of the same value.
     ///
-    /// `m·s^-1·m` is REFUSED even though it denotes `s^-1·m^2`, and so are `m^1`, `m^0`, a repeated
-    /// symbol, and a kind written beside a non-zero dimension. The reason is the one
+    /// `m·s^-1·m` is REFUSED even though it denotes `s^-1·m^2`, and so are `m^1`, `m^0` and a
+    /// repeated symbol. The reason is the one
     /// [`crate::numeric::Rational::parse_canonical`] gives: the content hash runs over the
     /// serialised resource, so two spellings of one value would hash differently, and a parser that
     /// accepted both would make that unobservable.
@@ -393,13 +331,10 @@ impl Unit {
                 Some((sym, e)) => (sym, parse_exponent(e).ok_or_else(bad)?),
                 None => (part, Exponent::ONE),
             };
-            let factor = if let Some(d) = BaseDimension::from_symbol(sym) {
-                Unit::base(d).pow(exp)?
-            } else if sym == "angle" {
-                Unit::kind(Kind::Angle, 1).pow(exp)?
-            } else {
+            let Some(d) = BaseDimension::from_symbol(sym) else {
                 return Err(bad());
             };
+            let factor = Unit::base(d).pow(exp)?;
             acc = acc.mul(&factor)?;
         }
         if acc.to_canonical_string() != s {
@@ -448,19 +383,8 @@ fn is_canonical_uint(s: &str) -> bool {
     }
 }
 
-/// Drops zero exponents, and drops every kind once the dimension vector is non-zero.
-fn canonicalise(dimension: [Exponent; 7], kinds: BTreeMap<Kind, Exponent>) -> Unit {
-    let dimensionless = dimension.iter().all(|e| e.is_zero());
-    let kinds = if dimensionless {
-        kinds.into_iter().filter(|(_, e)| !e.is_zero()).collect()
-    } else {
-        BTreeMap::new()
-    };
-    Unit { dimension, kinds }
-}
-
 /// The canonical form, not the exponent array. Type-mismatch errors print both sides with `{:?}`,
-/// and seven `Exponent { numer, denom }` structs per side made `angle ≠ m` unreadable.
+/// and seven `Exponent { numer, denom }` structs per side made `s ≠ m` unreadable.
 impl fmt::Debug for Unit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Unit({self})")
@@ -479,16 +403,6 @@ impl fmt::Display for Unit {
                     format!("{}^{}", d.symbol(), e)
                 });
             }
-        }
-        for (k, e) in &self.kinds {
-            let name = match k {
-                Kind::Angle => "angle",
-            };
-            parts.push(if *e == Exponent::ONE {
-                name.to_string()
-            } else {
-                format!("{name}^{e}")
-            });
         }
         if parts.is_empty() {
             f.write_str("1")
@@ -584,9 +498,6 @@ impl<'de> serde::Deserialize<'de> for Unit {
 mod tests {
     use super::*;
 
-    fn rad() -> Unit {
-        Unit::kind(Kind::Angle, 1)
-    }
     fn m() -> Unit {
         Unit::base(BaseDimension::Length)
     }
@@ -594,33 +505,62 @@ mod tests {
         Unit::base(BaseDimension::Time)
     }
 
-    // ── D93's kind table, the three rows that decide the rule ──────────
+    // ── The group laws ─────────────────────────────────────────────────
+    //
+    // An earlier canonical form dropped kinds once the dimension was non-zero, and failed the first
+    // of these: `(m·rad)·m⁻¹` gave `1` and `rad·(m·m⁻¹)` gave `rad`. Every open-expression
+    // normaliser built on this type assumes these laws, so they are pinned here.
 
-    #[test]
-    fn rad_times_rad_is_sr_because_the_dimension_is_zero() {
-        let sr = rad().mul(&rad()).unwrap();
-        assert!(sr.is_dimensionless());
-        assert_eq!(sr.kind_exponent(Kind::Angle), Exponent::integer(2));
-        // `sr = rad²` falls out rather than being asserted — the step past QUDT.
-        assert_eq!(sr, rad().pow(Exponent::integer(2)).unwrap());
+    fn samples() -> Vec<Unit> {
+        let kg = Unit::base(BaseDimension::Mass);
+        vec![
+            Unit::dimensionless(),
+            m(),
+            s(),
+            m().div(&s()).unwrap(),
+            kg.mul(&m())
+                .unwrap()
+                .div(&s().pow(Exponent::integer(2)).unwrap())
+                .unwrap(),
+            m().pow(Exponent::new(2, 3).unwrap()).unwrap(),
+        ]
     }
 
     #[test]
-    fn metre_times_rad_is_a_plain_length_with_the_kind_discarded() {
-        // Arc length: `s = rθ`. Without the discard rule this leaves a length carrying `angle¹`,
-        // which is exactly why an eighth base dimension was rejected.
-        let arc = m().mul(&rad()).unwrap();
-        assert_eq!(arc, m());
-        assert_eq!(arc.kind_exponent(Kind::Angle), Exponent::ZERO);
+    fn the_product_is_associative() {
+        for a in samples() {
+            for b in samples() {
+                for c in samples() {
+                    let left = a.mul(&b).unwrap().mul(&c).unwrap();
+                    let right = a.mul(&b.mul(&c).unwrap()).unwrap();
+                    assert_eq!(left, right, "({a}·{b})·{c} ≠ {a}·({b}·{c})");
+                }
+            }
+        }
     }
 
     #[test]
-    fn metre_over_metre_is_dimensionless_and_distinct_from_rad() {
-        let ratio = m().div(&m()).unwrap();
-        assert!(ratio.is_dimensionless());
-        assert_eq!(ratio, Unit::dimensionless());
-        // The whole reason the kind axis exists: a dimension vector alone would unify these.
-        assert_ne!(ratio, rad());
+    fn the_product_is_commutative() {
+        for a in samples() {
+            for b in samples() {
+                assert_eq!(a.mul(&b).unwrap(), b.mul(&a).unwrap(), "{a}·{b}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_unit_has_an_inverse_and_one_is_the_identity() {
+        for a in samples() {
+            assert_eq!(a.mul(&a.recip().unwrap()).unwrap(), Unit::dimensionless());
+            assert_eq!(a.mul(&Unit::dimensionless()).unwrap(), a);
+        }
+    }
+
+    /// Arc length, `s = rθ`: with angle the identity, a metre times an angle is a metre, and
+    /// a ratio of lengths is the dimensionless unit — the same value an angle is.
+    #[test]
+    fn a_ratio_of_lengths_is_the_identity() {
+        assert_eq!(m().div(&m()).unwrap(), Unit::dimensionless());
     }
 
     // ── The exponent vector ────────────────────────────────────────────
@@ -722,8 +662,6 @@ mod tests {
             Unit::dimensionless(),
             Unit::base(BaseDimension::Length),
             Unit::base(BaseDimension::Mass),
-            Unit::kind(Kind::Angle, 1),
-            Unit::kind(Kind::Angle, 2),
             Unit::base(BaseDimension::Length)
                 .pow(Exponent::integer(2))
                 .unwrap()
@@ -763,7 +701,7 @@ mod tests {
             "m^+2",                // leading `+`
             "m\u{b7}m",            // repeated symbol
             "m^2/0",               // zero denominator
-            "m\u{b7}angle",        // a kind beside a non-zero dimension: canonicalise drops it
+            "angle",               // not a base symbol: kinds are not part of a unit
             "s^-1\u{b7}m^2\u{b7}", // trailing separator
             "M",                   // wrong case
             "metre",               // not a symbol
@@ -797,18 +735,6 @@ mod tests {
             .unwrap();
         assert_eq!(m2_per_s.to_canonical_string(), "s^-1\u{b7}m^2");
         assert_eq!(m2_per_s, built_other_way);
-    }
-
-    /// `dimension_only` groups what the kind axis separates.
-    #[test]
-    fn dimension_only_drops_kinds() {
-        let rad = Unit::kind(Kind::Angle, 1);
-        assert_ne!(rad, Unit::dimensionless());
-        assert_eq!(rad.dimension_only(), Unit::dimensionless());
-
-        // On a dimensioned unit it is the identity, since canonicalise already dropped the kinds.
-        let m = Unit::base(BaseDimension::Length);
-        assert_eq!(m.dimension_only(), m);
     }
 
     /// serde carries the canonical string and nothing else, so a structural spelling cannot enter

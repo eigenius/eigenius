@@ -106,12 +106,11 @@ kernel.
 | | structure | kernel operations |
 |---|---|---|
 | unit exponents | ℚ⁷ — a vector space over the seven base dimensions | add, subtract, scalar-multiply, compare |
-| kind exponents | ℚᴷ, *if* kinds get an algebra (open) | the same |
 | magnitude | ℚ × ℤ^C — a rational coefficient and integer powers of declared constants | **compare only** |
 
-All three are exponent vectors over a symbol set; a magnitude is that plus a rational coefficient.
-One mechanism, three instances, and no expressions anywhere — which is why the kernel needs no
-symbolic algebra.
+Both are exponent vectors over a symbol set; a magnitude is that plus a rational coefficient. No
+expressions anywhere — which is why the kernel needs no symbolic algebra. (A third row, kind
+exponents, was here and is withdrawn: see "Kinds are metadata, not algebra".)
 
 **A magnitude is a canonical datum, not a formula.** `q × Π cᵢ^{eᵢ}`, canonicalised by reducing `q`,
 sorting the constants and dropping zero exponents; zero is `(0, [])`. So `37π/180` and `π·37/180`
@@ -227,22 +226,15 @@ additional primitives. The trusted surface is:
 
 - seven base-unit symbols (second, metre, kilogram, ampere, kelvin, mole, candela),
 - a rational exponent vector over them,
-- a rational exponent vector over the quantity kinds (see "Dimension is not the whole of a unit"),
 - a declared constant set — `{π}` in v1 — and integer exponents over it,
 - a canonicalisation: sort, reduce the fractions, drop zero exponents.
 
 That is the whole TCB addition. The SI *content* lives in chain ontology where it is authored,
 reviewed and replaceable without touching the checker.
 
-**An earlier draft called the kind axis a tag rather than an algebra.** That is superseded by
-"Dimension is not the whole of a unit" below, which gives kinds an exponent vector so that
-`sr = rad²` falls out instead of being asserted — a tag cannot express that relation, which is the
-whole reason for the step past QUDT. The two descriptions are recorded together because the tag
-reading is the weaker one and was chosen against.
-
-The kind SYMBOL set is what grows: one symbol in v1, `angle`, over which `rad` is `angle¹` and `sr`
-is `angle²`. Admitting a new kind is a vocabulary edit in the units layer, not a checker change,
-because the normaliser adds and compares kind exponents without interpreting the symbols.
+Quantity kinds are not in the trusted surface. An earlier version of this section put a kind
+exponent vector there; it is withdrawn, and kinds are metadata on the units layer's vocabulary
+(see "Kinds are metadata, not algebra").
 
 ## Dimension is not the whole of a unit
 
@@ -267,9 +259,11 @@ derivable from the 2019 printing's Table 4, which the current edition removed.
 | `%` | not a unit — notation for a number | 0.01 |
 | `ppm` | not a unit | 10⁻⁶ |
 
-**Decided.** A unit carries a **kind exponent vector** alongside its dimension vector — the same
-structure, over a set of quantity kinds rather than base dimensions (see "The algebra, stated
-once"). So `rad` is `angle¹`, `sr` is `angle²`, and `sr = rad²` falls out rather than being denied.
+**Withdrawn — see "Kinds are metadata, not algebra" below.** *What follows, down to the QUDT
+paragraph, was the decision and is kept as the record of what failed.* A unit carries a **kind
+exponent vector** alongside its dimension vector — the same structure, over a set of quantity kinds
+rather than base dimensions. So `rad` is `angle¹`, `sr` is `angle²`, and `sr = rad²` falls out
+rather than being denied.
 
 **And kind exponents are carried only when the dimension vector is zero, discarded otherwise.**
 Without that rule a multiplicative kind vector re-breaks `s = rθ`: arc length is a length times a
@@ -286,19 +280,47 @@ The rule is principled rather than a patch: the kind axis exists *because* dimen
 dimensionless quantities. Once a quantity has a dimension, dimension does the separating and the
 kind has no work left.
 
-**This is stronger than the QUDT precedent**, and the difference should be recorded. QUDT has
-`PlaneAngle` and `SolidAngle` as distinct `qudt:QuantityKind`s sharing one dimension vector
-(`A0E0L0I0M0H0T0D1`) — a *classification*. It does not say `SolidAngle = PlaneAngle²`. Giving kinds
-an algebra is a deliberate step past it, taken so the relation between the two falls out instead of
-being asserted.
+**This was stronger than the QUDT precedent.** QUDT has `PlaneAngle` and `SolidAngle` as distinct
+`qudt:QuantityKind`s sharing one dimension vector (`A0E0L0I0M0H0T0D1`) — a *classification*. It does
+not say `SolidAngle = PlaneAngle²`. Giving kinds an algebra was a deliberate step past it — and it is
+the step that failed.
 `%` and `ppm` are not kinds but **scales** on the plain dimensionless unit, which is what they
 actually are.
 
 **Angle as an eighth base dimension was considered and rejected.** It distinguishes `rad` from `sr`
 elegantly (`sr = rad²` falls out, though no edition states it) but breaks `s = rθ`: with angle dimensional, arc length would come
 out as metre·angle rather than metre, and recovering it requires introducing a constant θ₀ = 1 rad
-throughout. The SI keeps angle dimensionless for this reason, and the kind axis gets the same
-distinction without the cost.
+throughout. The SI keeps angle dimensionless for this reason, and it remains rejected.
+
+## Kinds are metadata, not algebra — decided
+
+**The kind vector could not work, and the reason is not a detail.** It made three commitments:
+
+1. units form a group — Kennedy's, and the basis of this whole document;
+2. `rad ≠ 1` — the reason the kind axis existed;
+3. `m·rad = m` — the discard rule, so that `s = rθ` gives metres.
+
+In a group, `m·rad = m` cancels to `rad = 1`. So no group holds all three. The implementation showed
+it concretely: `(m·rad)·m⁻¹` gave `1` while `rad·(m·m⁻¹)` gave `rad`, so the product was not
+associative and a unit's canonical form depended on how its expression happened to be grouped. It
+went unnoticed while nothing multiplied units at the term level, and it blocked open normalisation
+outright, since commuting and regrouping factors presupposes the group laws.
+
+**Decided: a unit is the group element alone, and a kind is metadata.** `core:unit` is the exponent
+vector over the seven base dimensions and nothing else — the free Abelian group, associative and
+commutative, with `rad`, `sr`, `°` and `1` all its identity, as the SI has them, so `s = rθ` gives
+metres. The units layer records a kind on the named units that need one — `units:kind` is
+`units:plane_angle` on rad, °, ′ and ″, and `units:solid_angle` on sr — and a kind never enters a
+unit's value or type equality.
+
+This is QUDT's model, a classification over a shared dimension vector, which the withdrawn decision
+set out to go past. The other consistent option — angle as an eighth base dimension, keeping
+`rad ≠ 1` by giving up `m·rad = m` — stays rejected for the `s = rθ` cost recorded above.
+
+**What is given up.** The type checker no longer refuses adding a plane angle to a solid angle, or a
+ratio of lengths to an angle: all are `Quantity(1)`. That distinction now lives where metadata is
+consulted — in the vocabulary, and in conversion, which returns a stated unit's kinds beside its
+group element — not in type checking. `sr = rad²` is no longer derived; it is two recorded kinds.
 
 ## `mol` stays a base dimension
 
@@ -344,10 +366,10 @@ The layer holds:
   them. The logarithmic units in the same table (Np, B, dB) stay out.
 - **The degree Celsius is not prefixable.** A prefix on an offset unit is well-defined only for a
   difference, and v1 assumes the point reading.
-- **Several named units share a unit value.** Hz and Bq are both `s^-1`; Gy and Sv are both
-  `s^-2·m^2`; lm is `cd`, because the steradian's kind is dropped beside a dimension. v1 declares one
-  kind, `angle`, and the SI's distinctions between these pairs rest on quantity kinds it does not
-  declare. The prose keeps which one the author wrote.
+- **Several named units share a unit value, as in the SI.** rad, sr, °, ′ and ″ are all `1`; Hz and
+  Bq are both `s^-1`; Gy and Sv are both `s^-2·m^2`; lm is `cd`. Kinds, recorded as metadata
+  (`units:kind`), distinguish the angles; v1 records only those two kinds. The prose keeps which
+  unit the author wrote.
 
 **Load order.** After `core`, which supplies the primitive types the magnitude rests on, and before
 `statistics`, whose quantities carry units. **Also after `prov`**, which this document originally
@@ -852,15 +874,14 @@ Two things make the exact readings better than they first look:
 mk_quantity : forall (u : core:unit) => core:rational -> core:integer -> units:Quantity(u)
 ```
 
-`37°` is `mk_quantity(r"37/180", 1)` at `Quantity(angle)`. Constructors live flat in their data
+`37°` is `mk_quantity(r"37/180", 1)` at `Quantity(1)` — an angle is dimensionless. Constructors live flat in their data
 type's namespace, so a bare `mk` would be `urn:eigenius:units:mk`, too generic for a namespace
 that will grow.
 
 **`u` is a parameter, so a quantity term does not carry its unit.** `mk_quantity(r"37/180", 1)`
 inhabits `Quantity(u)` for every `u`, as `nil` inhabits every `List A`. The unit is fixed by the
 type the term is checked against — a verb's signature, or an annotation. A quantity checked against
-the wrong unit is refused, and so is `rad` against the plain dimensionless unit, since the kind axis
-reaches `conv` on the chain path (`kernel/tests/units_layer.rs`). The type theory has no magnitude carrier: no `Exp`
+the wrong unit is refused on the chain path (`kernel/tests/units_layer.rs`). The type theory has no magnitude carrier: no `Exp`
 variant, no `PrimitiveType`, no DataType, no ESL literal. `units::Magnitude` is computed at ingest
 and lowered into these two arguments.
 
@@ -884,9 +905,10 @@ written down when it is reached.
 
 ## Scope
 
-**In.** The `Unit` kernel primitive: seven base symbols with a rational exponent vector; a **kind
-exponent vector** carried only when the dimension vector is zero; a declared constant set `{π}` with
-integer exponents; and canonicalisation over all three. A **magnitude** of `q × Π cᵢ^{eᵢ}`.
+**In.** The `Unit` kernel primitive: seven base symbols with a rational exponent vector — a group
+element and nothing else, with quantity kinds recorded as metadata in the units layer (see "Kinds
+are metadata, not algebra"); a declared constant set `{π}` with integer exponents; and
+canonicalisation over both. A **magnitude** of `q × Π cᵢ^{eᵢ}`.
 **Implicit Π** as a kernel change — not a unit feature but a general one that units motivate, moving
 `eigentt:Term`'s `Pi` constructor and the D47 codec with it;
 `Quantity : Unit -> Set`; the SI content as chain ontology (7 base, 22 derived, 24 prefixes,

@@ -54,9 +54,10 @@ constructs than by raw embedded fields, and the pattern is already in the system
 (`query/functions.rs:33-47`) takes a canonical STRING, validates its format, and returns it. A date
 is composite — year, month, day — carried as text and given meaning by a function.
 
-So `UNIT(u)` and `DIMENSION(u)` join the six functions `call_function` already dispatches. That is
-a better interface than filtering on a field named `dimension_2`, and it keeps the carrier
-consistent with D94's. `COMMENSURABLE(a, b)` is not added: it is `DIMENSION(a) = DIMENSION(b)`.
+So `UNIT(u)` joins the six functions `call_function` already dispatches. That is a better interface
+than filtering on a field named `dimension_2`, and it keeps the carrier consistent with D94's.
+`DIMENSION(u)`, which dropped kinds, was added and then removed with the kind vector (slice 5a);
+commensurability is equality of canonical units, so `COMMENSURABLE` is not added either.
 
 **A magnitude has no carrier of its own.** It reaches a term as the two arguments of
 `units:mk_quantity(coefficient : core:rational, pi : core:integer)` — see D93, "How a magnitude reaches a
@@ -99,7 +100,8 @@ Neither is a compile error. Add both arms and a test for each before moving on.
 ## Slice 2 — the `Unit` string carrier, and the EigenQL constructs
 
 Done (`24c09a5`). The canonical string form for `Unit` (parse and print, refusing non-canonical
-input, as `Rational` does), serde over it, and `UNIT` and `DIMENSION` in `call_function`.
+input, as `Rational` does), serde over it, and `UNIT` in `call_function` (`DIMENSION` was removed
+in slice 5a).
 
 ## Slice 3 — chain surface AND SI content, then ONE reseed
 
@@ -141,6 +143,116 @@ as that test requires, then `scripts/build-alignment-snapshot.sh`.
 The stated-unit record was designed through several rounds and then dropped with the query it
 served; see decision 3. What the author wrote stays in `enc:prose`, reachable from every claim
 through `enc:from_unit`.
+
+## Slices 5 and 6 — found missing after slice 3
+
+A check of D93's body against the code after slice 3 found two v1 obligations this plan never
+listed. Neither is in D93's scope paragraph; both are in its argument. Designing the first found a
+third problem, which comes first.
+
+## Slice 5a — kinds out of the unit
+
+D93's canonical form dropped every kind once the dimension vector was non-zero. That is not
+associative — `(m·rad)·m⁻¹` gave `1` and `rad·(m·m⁻¹)` gave `rad` — and no group admits it, since
+`m·rad = m` cancels to `rad = 1`. Open normalisation presupposes the group laws, so this blocked
+slice 5. D93, "Kinds are metadata, not algebra", records the decision: `units::Unit` is the exponent
+vector over the seven base dimensions alone, and kinds are metadata on the units layer (`units:kind`,
+with `units:plane_angle` and `units:solid_angle`).
+
+Removed with the kind vector: `Kind`, `Unit::kind`, `kind_exponent`, `dimension_only`, the `angle`
+symbol in canonical strings, and the `DIMENSION()` query function, which only ever dropped kinds and
+is now the identity. The group laws — associativity, commutativity, inverse, identity — are pinned as
+tests. `core:unit`'s description and five `units.esl` entries change, so `core` and `units` move.
+
+## Slice 5 — open unit expressions: `Quantity (u * v⁻¹)`
+
+**What D93 requires.** "Normalisation is sufficient because Kennedy's normal form covers OPEN terms —
+unit *variables* appear in it alongside base units. So a computed result type `Quantity (u * v⁻¹)`,
+with `u` and `v` still variables, has a canonical form, and equality of two such is syntactic."
+Today no function can return a ratio's unit.
+
+**D5.1 — operators are declared constants, nanoda's pattern.** `units:mul : core:unit -> core:unit ->
+core:unit` and `units:pow : core:unit -> core:rational -> core:unit`, axioms in `units.esl`. nanoda
+extends Lean's kernel the same way: `Nat.add` and its siblings are ordinary constants recognised by
+name (`tc.rs:395-458`), and the only new term nodes are the literals — here `LitUnit`, already built.
+So no new `Exp` variant, `eigentt:Term` constructor, codec or ESL arm. The reduction hooks where an
+axiom's application spine is built, `Val::app_impl`'s neutral arm (`nbe/val.rs`), which is where
+nanoda's `try_reduce_nat` sits relative to its `whnf`.
+
+**D5.2 — beyond nanoda: open products normalise.** nanoda reduces only closed literals —
+`try_reduce_nat` returns early on free variables — so `x + y ≡ y + x` is not decided in Lean's
+kernel. D93 requires the opposite for units, and commutativity is wanted wherever it applies. So a
+product is normalised to: the closed part (a `Unit`) and ATOMS, each with a rational exponent,
+merged when their read-back terms are equal and ordered by a deterministic key over that read-back.
+It reads back as one canonical spine — the closed part as a `LitUnit`, then each atom in key order,
+raised by `units:pow` when its exponent is not 1, right-nested under `units:mul` — so `eq_nf`
+(`nbe/check/conv.rs:42`), which compares read-back terms structurally, decides equality with no new
+comparison logic. With no atoms left the value IS a `LitUnit`. The rebuilt spine is constructed
+directly, not through `app_impl`, and re-normalising it gives it back: normalisation is idempotent.
+
+**D5.3 — an atom is any unit-valued neutral.** Not only a variable: an axiom application such as
+`units:of(x)` commutes too. `Neut` has no ordering, so atoms are keyed by their read-back term. Two
+atoms MERGE only when their read-back terms are equal — exactly `eq_nf`'s notion, so merging never
+equates different units. The ordering key is the read-back term's rendering; the worst a key
+collision can do is leave two equal products unrecognised, never make two different ones equal. The
+read-back for keys runs at a level above every free variable, so a binder inside an atom cannot
+take a free variable's name.
+
+**D5.4 — `units:pow`'s exponent.** Reduces only when the exponent is a literal whose numerator and
+denominator fit `Exponent`'s 16 bits; a larger literal is refused, not wrapped. A non-literal
+exponent leaves the application stuck, and a stuck `pow` is an ordinary atom of any product it
+enters.
+
+**D5.5 — surface: function style.** `units:mul(u, units:pow(v, r"-1"))`. Infix `*`, `/`, `^` would be
+ESL sugar desugaring to these calls, never kernel syntax; not built now.
+
+**Verify before relying on it:** that `mean m [x]`'s result type, `Quantity(u)[u := m]`, evaluates
+to `LitUnit(m)` — that instantiating a closure re-normalises — and that normalising a canonical
+spine returns it unchanged.
+
+`units.esl` gains the two axioms, so `units` moves again; one reseed covers 5a and 5.
+
+## Slice 6 — base conversion: authored units into base units
+
+**What D93 requires.** "An author writing `5 g`, or an API caller passing grams, goes through a helper
+that converts to base units … These live in the ESL elaborator and the Rust API." Nothing reads
+`units:factor` today. No manifest change, so no reseed.
+
+**D6.1 — where.** `units::convert` in the kernel crate, outside the checker, as D93 places it beside
+D86's literal normalisation. The vocabulary is read from the chain's units layer
+(`Vocabulary::from_layer`), not duplicated in Rust.
+
+**D6.2 — the stated form.** A strict grammar shared by the ESL surface and the Rust API: factors
+separated by `·` or a space, each a symbol with an optional prefix and an optional `^` exponent, and
+at most one `/` with UCUM's meaning (every factor after it inverted). No `µ` (U+00B5), no superscript
+digits, no `per`: D95's unit sub-parser normalises prose variants into this form and calls the same
+converter.
+
+**D6.3 — symbol resolution.** An exact symbol wins, then the LONGEST prefix plus a prefixable unit,
+else refuse: `min` is the minute, `cd` the candela, `Pa` the pascal, `dam` deca-metre, `ms`
+millisecond, `kDa` kilodalton, and `pH` — correctly, in ESL — picohenry.
+
+**D6.4 — the affine rule.** The °C offset applies only when the stated unit is exactly `°C¹`, the
+point reading D93 assumes. Inside a compound (`°C/min`) the reading is a difference and °C converts
+as K with no offset.
+
+**D6.5 — exactness.** A factor raised to a non-integer exponent must stay rational and give an integer
+power of π, else refuse: `km^(1/2)` needs √1000. Results are bounded by D94's 4096 bits.
+
+**D6.6 — kinds come back beside the unit.** Conversion factors the stated unit into its group element
+and the kinds of its factors, numerator and denominator separately: `rad/s` is `s^-1` with a plane
+angle in the numerator. The quantity term takes only the group element; the kinds are returned to
+the caller as metadata (D93, "Kinds are metadata, not algebra").
+
+**D6.7 — lowering.** `Magnitude` → `(coefficient, pi)` is total while `Constant` has one variant;
+raising a stored `pi` refuses a value outside `i16`. The output term is
+`(units:mk_quantity(r"c", pi) : units:Quantity(u"dim"))` — annotated, because `u` is a parameter.
+
+**D6.8 — the ESL surface: function style.** `units:quantity(5r, "mg/kg")`, elaborated in the compiler,
+which has the chain; it produces the annotated term above.
+
+**Verify:** a round trip for every entry in `units.esl`, and that `37 °C`, `5 mg/kg`, `50 kDa` and
+`37 °` produce the magnitudes D93 states.
 
 ## Deferred, with reasons
 

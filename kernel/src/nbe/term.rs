@@ -228,12 +228,10 @@ pub enum Exp {
     /// [`Exp::One`]. The `Lit` prefix is the disambiguator, as it is for
     /// every other literal here. This one carries a
     /// [`crate::units::Unit`] — a rational exponent vector over the seven
-    /// SI base dimensions, plus kind exponents.
+    /// SI base dimensions.
     ///
-    /// Always canonical, because `units::Unit` is only constructible
-    /// through operations that canonicalise: exponents reduced, zeros
-    /// dropped, and kinds discarded once the dimension vector is
-    /// non-zero. So `conv` compares two of these structurally.
+    /// Always canonical: a fixed-order array of reduced exponents. So
+    /// `conv` compares two of these structurally.
     LitUnit(crate::units::Unit),
     /// Property access on a resource: e.property
     PropAccess(Box<Exp>, Iri),

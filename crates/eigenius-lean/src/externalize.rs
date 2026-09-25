@@ -483,23 +483,23 @@ fn go<'x, 't: 'x, 'p: 't>(
                     // i64 against arbitrary precision, and not in what they denote; Lean has one
                     // integer type and both are subsets of it.
                     PrimitiveType::BigInt => "Int",
-                    // D93 units. Lean's core has no units-of-measure type, and the shape is not
-                    // one a comorphism can fake: a unit is a rational exponent vector over seven
-                    // base dimensions with kind exponents beside it, canonicalised by rules
-                    // (kinds discarded once the dimension vector is non-zero) that no Lean
-                    // structure carries. Mapping it to a `Nat`-indexed vector would assert an
-                    // agreement about CANONICAL FORM that nothing on the Lean side establishes.
+                    // D93 units. Lean's core has no units-of-measure type. A unit is seven
+                    // rational exponents, so a Lean structure of seven `Rat`s would be a faithful
+                    // image — `Rat` is canonical, so structural equality agrees — but no such
+                    // structure exists in the prelude this externalizer targets, and mapping to one
+                    // that is not declared there would emit a term Lean cannot check.
                     //
-                    // What would lift the refusal: a Lean development of the same algebra whose
-                    // normal form we can state agrees with `units::Unit`'s — at which point this
-                    // becomes a TCB entry reviewable on its merits, as the `Iri` note below says
-                    // of `Std.URI`.
-                    PrimitiveType::Unit => return outside(
-                        "EigonPrimitive(Unit)",
-                        "a unit of measure; Lean core has no units-of-measure type, and asserting \
-                         a canonical-form agreement with one we invented would be an unsupportable \
-                         TCB entry",
-                    ),
+                    // What would lift the refusal: declaring that structure on the Lean side, at
+                    // which point this becomes a TCB entry reviewable on its merits, as the `Iri`
+                    // note below says of `Std.URI`.
+                    PrimitiveType::Unit => {
+                        return outside(
+                            "EigonPrimitive(Unit)",
+                            "a unit of measure; Lean core has no units-of-measure type, and the \
+                         seven-`Rat` structure that would be its image is not declared in the \
+                         prelude this externalizer targets",
+                        )
+                    }
                     // `Float` has the same problem `LitFloat` has, and `Json` is a chain-side
                     // carrier with no Lean image at all.
                     PrimitiveType::Json => {

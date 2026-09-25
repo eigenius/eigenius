@@ -22,9 +22,9 @@ use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::program::eigentt_type_mirror::{decode_type, encode_type};
 use eigenius_kernel::units::Unit;
 
-/// A base unit, a compound with a negative exponent, a rational exponent, a kind, a kind power,
-/// and the dimensionless unit.
-const CASES: &[&str] = &["m", "s^-2\u{b7}m\u{b7}kg", "m^2/3", "angle", "angle^2", "1"];
+/// A base unit, a compound with a negative exponent, a rational exponent, and the dimensionless
+/// unit.
+const CASES: &[&str] = &["m", "s^-2\u{b7}m\u{b7}kg", "m^2/3", "1"];
 
 fn compile_term(body: &str) -> eigenius_kernel::ontology::resource::Value {
     let layer = eigenius_kernel::testing::term_chain();

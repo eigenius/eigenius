@@ -1124,7 +1124,6 @@ mod exact_literal_tests {
     #[test]
     fn a_unit_literal_lexes_in_canonical_form() {
         assert_eq!(kinds("u\"s^-1\u{b7}m^2\"")[0], unit("s^-1\u{b7}m^2"));
-        assert_eq!(kinds("u\"angle\"")[0], unit("angle"));
         assert_eq!(kinds("u\"1\"")[0], unit("1"));
     }
 
@@ -1132,7 +1131,14 @@ mod exact_literal_tests {
     /// would hash differently.
     #[test]
     fn a_non_canonical_unit_literal_is_refused() {
-        for bad in ["u\"m\u{b7}s^-1\u{b7}m\"", "u\"m^1\"", "u\"metre\"", "u\"\""] {
+        // `angle` was a kind symbol once; kinds are not part of a unit now (D93).
+        for bad in [
+            "u\"m\u{b7}s^-1\u{b7}m\"",
+            "u\"m^1\"",
+            "u\"metre\"",
+            "u\"\"",
+            "u\"angle\"",
+        ] {
             assert!(tokenize(bad).is_err(), "expected `{bad}` to be refused");
         }
     }

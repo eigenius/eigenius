@@ -25,7 +25,7 @@ use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::numeric::Rational;
 use eigenius_kernel::ontology::iri::Iri;
 use eigenius_kernel::ontology::resource::Resource;
-use eigenius_kernel::units::{BaseDimension as B, Exponent, Kind, Unit};
+use eigenius_kernel::units::{BaseDimension as B, Exponent, Unit};
 use eigenius_kernel::validation::{ValidationRule, Validator};
 use num_bigint::BigInt;
 use num_traits::Pow;
@@ -121,7 +121,9 @@ fn every_dimension_matches_its_si_definition() {
         b(B::Amount),
         b(B::LuminousIntensity),
     );
-    let rad = Unit::kind(Kind::Angle, 1);
+    // Angles are the group's identity (D93, "Kinds are metadata, not algebra"): what makes the
+    // radian a PLANE angle is its `units:kind`, checked separately below.
+    let rad = Unit::dimensionless();
     let sr = p(&rad, 2);
     let hz = s.recip().unwrap();
     let n = kg.mul(&m).unwrap().div(&p(&s, 2)).unwrap();
@@ -314,6 +316,42 @@ fn only_the_dalton_is_measured_and_only_celsius_is_affine() {
     );
 }
 
+/// Kinds are METADATA (D93, "Kinds are metadata, not algebra"): exactly the angular units carry
+/// one, and every unit carrying one has the dimensionless value — the kind is what says which
+/// dimensionless quantity it measures, and the value never does.
+#[test]
+fn kinds_annotate_exactly_the_angular_units() {
+    let units = instances("NamedUnit");
+    let kind_of = |r: &Resource| -> Option<String> {
+        r.get(&iri("kind"))
+            .and_then(|v| v.as_iri())
+            .map(|k| k.as_str().strip_prefix(UNITS).unwrap().to_string())
+    };
+    let kinded: BTreeMap<&str, String> = units
+        .iter()
+        .filter_map(|(n, r)| kind_of(r).map(|k| (n.as_str(), k)))
+        .collect();
+    let expected: BTreeMap<&str, String> = [
+        ("radian", "plane_angle"),
+        ("degree", "plane_angle"),
+        ("arcminute", "plane_angle"),
+        ("arcsecond", "plane_angle"),
+        ("steradian", "solid_angle"),
+    ]
+    .into_iter()
+    .map(|(n, k)| (n, k.to_string()))
+    .collect();
+    assert_eq!(kinded, expected);
+    for name in kinded.keys() {
+        assert_eq!(
+            dimension(&units[*name]),
+            Unit::dimensionless(),
+            "units:{name}"
+        );
+    }
+    assert_eq!(instances("Kind").len(), 2);
+}
+
 // ── `units:Quantity` on the commit path ──────────────────────────────────────────────────────────
 
 /// Compile ESL onto the real bootstrap chain — which now carries the units layer — and return the
@@ -344,7 +382,7 @@ namespace prov    = "urn:eigenius:prov";
 namespace units   = "urn:eigenius:units";
 namespace probe   = "urn:eigenius:probe";
 
-axiom probe:is_angle  : units:Quantity(u"angle") -> Prop
+axiom probe:is_dimensionless : units:Quantity(u"1") -> Prop
 axiom probe:is_length : units:Quantity(u"m") -> Prop
 axiom probe:is_speed  : units:Quantity(u"s^-1·m") -> Prop
 
@@ -370,27 +408,18 @@ fn assert_mismatch(prop: &str, needle: &str) {
 }
 
 /// `u` is a parameter, so the unit of a quantity term comes from the type it is checked against.
-/// `mk_quantity(37/180, 1)` is 37° only because `is_angle` expects an angle.
+/// `mk_quantity(37/180, 1)` is 37° — `37π/180`, a dimensionless magnitude, since an angle is the
+/// group's identity — only because `is_dimensionless` expects a dimensionless quantity.
 #[test]
 fn the_unit_comes_from_the_expected_type() {
-    assert_commits(r#"probe:is_angle(units:mk_quantity(r"37/180", 1))"#);
+    assert_commits(r#"probe:is_dimensionless(units:mk_quantity(r"37/180", 1))"#);
     assert_commits(r#"probe:is_speed((units:mk_quantity(r"3", 0) : units:Quantity(u"s^-1·m")))"#);
 }
 
 #[test]
 fn a_quantity_of_the_wrong_unit_is_refused() {
     assert_mismatch(
-        r#"probe:is_length((units:mk_quantity(r"37/180", 1) : units:Quantity(u"angle")))"#,
-        "Unit(angle)",
-    );
-}
-
-/// The kind axis on the chain path: `rad` and the plain dimensionless unit share a dimension
-/// vector and are still different types.
-#[test]
-fn a_dimensionless_quantity_is_not_an_angle() {
-    assert_mismatch(
-        r#"probe:is_angle((units:mk_quantity(r"1", 0) : units:Quantity(u"1")))"#,
+        r#"probe:is_length((units:mk_quantity(r"37/180", 1) : units:Quantity(u"1")))"#,
         "Unit(1)",
     );
 }
@@ -400,7 +429,7 @@ fn a_dimensionless_quantity_is_not_an_angle() {
 #[test]
 fn the_coefficient_must_be_rational() {
     assert_mismatch(
-        r#"probe:is_angle(units:mk_quantity(37, 0))"#,
+        r#"probe:is_dimensionless(units:mk_quantity(37, 0))"#,
         "EigonPrimitive(Rational)",
     );
 }
