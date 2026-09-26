@@ -120,7 +120,7 @@ So the unit vocabulary is not only what D93 needs for typing — it is what make
 decidable at all. Before units exist, `931g` is unanalysable.
 
 **A bare `g` splits into two readings** (D93, "A vocabulary hazard the same evidence surfaced",
-revised 2026-09-26). The prose surface `g` has two senses, gram and standard gravity (`g_n`), and a
+revised 2026-09-25). The prose surface `g` has two senses, gram and standard gravity (`g_n`), and a
 split yields one quantity per sense, competing in the chart as "Ambiguous unit symbols" describes.
 In the WRN methods, the only bare-`g` quantity is g-force:
 
@@ -840,7 +840,7 @@ D93 was built after this document was written (PR #262). What it settled, and on
 come into D95:
 
 - **`931g` — two senses.** D93 first decided that v1 refuses to split a `g`-suffixed numeral, and this
-  document was revised to that; the decision was then revised again (2026-09-26), because refusing
+  document was revised to that; the decision was then revised again (2026-09-25), because refusing
   costs the whole sentence. Standard gravity is admitted as `units:standard_gravity` (`g_n`), and the
   prose surface `g` carries two senses, gram and standard gravity, seeded as competing items. The
   unit-symbol lexical entries this document puts in scope are where those senses and the `RCF`

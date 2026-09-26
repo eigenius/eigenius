@@ -637,7 +637,7 @@ SI-accepted list, which contains **gram and not standard gravity**. D95's split 
 suffix that is a known unit", so against this vocabulary `931g` resolves to 931 grams — precisely
 the silent mistyping this paragraph warns about.
 
-**Decided (revised 2026-09-26): standard gravity is a unit, and `g` has two senses.**
+**Decided (revised 2026-09-25): standard gravity is a unit, and `g` has two senses.**
 
 - **The units layer gains `units:standard_gravity`**, symbol **`g_n`** — the symbol ISO 80000-3 and
   CODATA use for the standard acceleration of gravity — with dimension `s⁻²·m`, factor exactly

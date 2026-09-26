@@ -13,7 +13,7 @@ None can be worked around, and each changes what gets written.
 
 1. ~~**The embedded shape for `Unit` and `Magnitude`.**~~ **DECIDED — canonical string, not
    `Value::Embedded`.** See "The carrier for `Unit` and `Magnitude`" below.
-2. ~~**`931g`.**~~ **DECIDED — refuse; REVISED 2026-09-26 — two senses.** Standard gravity is admitted
+2. ~~**`931g`.**~~ **DECIDED — refuse; REVISED 2026-09-25 — two senses.** Standard gravity is admitted
    as `units:standard_gravity` (`g_n`), and the prose surface `g` carries two senses, gram and
    standard gravity, which D95's parser seeds as competing chart items. The refusal was withdrawn
    because it cost the whole sentence, not the token. D93 records both.

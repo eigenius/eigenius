@@ -1,6 +1,6 @@
 # D96 — JATS as the document model
 
-**Status: decided** (2026-09-26) — the model. Its realisation in the encoding vocabulary and the
+**Status: decided** (2026-09-25) — the model. Its realisation in the encoding vocabulary and the
 ingest routes below is design, not yet built.
 
 ## The gap
@@ -86,7 +86,7 @@ fallback rule in D95's preprocessor, but only there.
   1 title, 2 abstract, 16 introduction, 57 methods, 28 figure captions, 8 supplementary, 50
   references — the separation `extract-section.py` recovers from type sizes.
 - **BioC loses inline markup**: `(Fig. 2d)` arrives as plain text. The full JATS from Europe PMC's
-  `fullTextXML` returned a server error (HTTP 500) on 2026-09-26, so whether this paper's JATS marks
+  `fullTextXML` returned a server error (HTTP 500) on 2026-09-25, so whether this paper's JATS marks
   its figure references is not yet confirmed.
 - **The PMC text is the author manuscript and is not CC-licensed** (`license: NO-CC CODE`). It can be
   fetched and processed; it cannot be committed to this repository.
