@@ -804,6 +804,38 @@ question. Applied to what the corpus turned up: `Scale bar, 50 μm` and `pH 7.5`
 grammar work; `μg ml⁻¹` sits inside a clause and is already covered by the unit sub-grammar's
 rational powers.
 
+## Carried in from D93
+
+D93 was built after this document was written (PR #262). What it settled, and one piece of work,
+come into D95:
+
+- **Conflict to resolve first — `931g`.** "Ambiguous unit symbols are polysemy" above treats `931g`
+  as gram and g-force competing as chart edges for the ranker. D93 then decided that **v1 refuses to
+  split a `g`-suffixed numeral**: standard gravity is not in the vocabulary, and admitting it opens
+  "units science uses that the SI does not accept", with `rpm` in the same WRN sentence behind it
+  (D93, "A vocabulary hazard the same evidence surfaced"). The section above must be revised to the
+  refusal before the span recogniser is built.
+- **One converter.** The unit sub-parser normalises prose — `µ` (U+00B5), superscript exponents,
+  `per` — into D93's strict stated form and calls `units::convert::Vocabulary::convert`, which the
+  ESL form `units:quantity(v, "…")` also uses (D93 implementation plan, D6.2). Symbol resolution,
+  prefixes, the °C point-reading offset and exactness are decided there, not here.
+- **`%` and `ppm` are number notation**, a scale the parser applies, not units-layer vocabulary: D93
+  records `%` as "not a unit — notation for a number".
+- **What a quantity term is.** `(units:mk_quantity(coefficient, pi) : units:Quantity(unit))`, in
+  base units, with the unit a group element over the seven SI base dimensions — `rad`, `sr` and `°`
+  are all `1`. Quantity kinds (plane angle, solid angle) are metadata that conversion returns beside
+  the unit; nothing here consumes them yet (D93, "Kinds are metadata, not algebra").
+- **No stated-unit record.** What the author wrote stays in `enc:prose`, reached through
+  `enc:from_unit`; D93 dropped the per-occurrence record, so this work emits none.
+- **The WordNet importer's counts** (work item). `push_entry` holds the closed-class guard for all 19
+  emission sites but returns nothing, so every caller counts an entry it may not have written: the
+  2026-09-25 reseed reported 471,743 entries and wrote 471,655 — 88 withheld, 13 of them mass. The
+  UMLS importer checks at the call site and counts `grammatical_skipped`; the WordNet one should
+  report the same way, with `push_entry` returning whether it wrote. Separately, degree-noun entries
+  (`e_<adj>_d_<noun>`) are emitted once per adjective–noun link path — 5,534 duplicate declarations
+  with identical bodies, deduplicated at load — and should be emitted once. Neither changes the
+  loaded lexicon, so neither needs a reseed.
+
 ## Open questions
 
 - **Arithmetic over the statistics functionals.** Nothing in the `stats:` namespace combines them.
