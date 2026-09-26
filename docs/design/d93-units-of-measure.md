@@ -369,7 +369,7 @@ The layer holds:
 - the SI-accepted non-SI units (min, h, d, ha, L, t, Da, eV, au),
 - conversion factors between commensurable units.
 
-**As built (`ontologies/units/units.esl`), the vocabulary departs from that list in four ways:**
+**As built (`ontologies/units/units.esl`), the vocabulary departs from that list in five ways:**
 
 - **The gram is included.** It is not a base unit and is in none of the lists above, but the SI forms
   every mass multiple by prefixing the gram (`mg`, `μg`), never the kilogram. `units:gram` carries
@@ -381,7 +381,7 @@ The layer holds:
   under the criterion in "A vocabulary hazard the same evidence surfaced": exactly defined and
   attested in the corpus.
 - **The degree Celsius is not prefixable.** A prefix on an offset unit is well-defined only for a
-  difference, and v1 assumes the point reading.
+  difference, and the layer has one entry for both of °C's readings.
 - **Several named units share a unit value, as in the SI.** rad, sr, °, ′ and ″ are all `1`; Hz and
   Bq are both `s^-1`; Gy and Sv are both `s^-2·m^2`; lm is `cd`. Kinds, recorded as metadata
   (`units:kind`), distinguish the angles; v1 records only those two kinds. The prose keeps which
@@ -431,7 +431,7 @@ So `formulas:` keeps a role, but a later and smaller one: a **projection** so nu
 can receive quantities. Out of v1. Putting units there would also leave the kernel unable to check them,
 since the kernel checks `eigentt:Term`.
 
-## Affine units are an extension, not part of v1
+## Affine units: two readings, two types
 
 °C is the only affine unit in the SI — the other 21 named derived units are multiplicative and sit
 inside the group unchanged. Fahrenheit and Rankine are non-SI and out of scope.
@@ -439,8 +439,7 @@ inside the group unchanged. Fahrenheit and Rankine are non-SI and out of scope.
 Affine units are **outside Kennedy's theory**: the free Abelian group is multiplicative, and the
 paper addresses offsets nowhere. So °C needs its own construction.
 
-**v1 normalises °C to K at ingest, under an explicit assumption.** The assumption is necessary
-because °C is used for two different things, and the SI says so: a temperature *point*
+**°C is used for two different things, and the SI says so:** a temperature *value*
 (`heated to 85 °C` → 358.15 K) and a temperature *difference* (`rose by 5 °C` → 5 K, **not**
 278.15 K, because the degree Celsius is equal in magnitude to the kelvin). Nothing in the unit
 distinguishes them; the disambiguator is in the prose.
@@ -448,30 +447,31 @@ distinguishes them; the disambiguator is in the prose.
 **Not "to" versus "by", which this document assumed and D95 refuted.** `at` carries both readings
 (`incubated at 37 °C` is a point, `sampled at 5 °C intervals` a difference), and three constructions
 carry the difference reading with no preposition at all (`the temperature rose 5 °C`, `a 5 °C
-increase`, `5 °C warmer`). The measure phrase is neutral and its **consumer** supplies the reading —
+increase`, `5 °C warmer`). The quantity token is neutral and its **consumer** supplies the reading —
 prepositions by vector semantics, scalar-change verbs by the measure-of-change function, the
 comparative morpheme by arithmetic. D95 records the evidence and the mechanism.
 
-The general rule this fixes: when a consumer takes the **vector** reading of a measure phrase in an
-affine unit, the result carries the associated vector unit. °C is the only affine derived unit in the
-SI, so the rule has exactly one instance — °C difference lands in K.
+The general rule this fixes: when a consumer takes the **difference** reading of a measure phrase in
+an affine unit, the result carries the unit of the difference. °C is the only affine derived unit in
+the SI, so the rule has exactly one instance — a °C difference lands in K.
 
-So affine handling is partly a *grammar* concern, not purely a units one. v1:
+**Decided 2026-09-26, with D95: the two readings are two types.**
 
-- assumes the **point** reading for a bare °C, which dominates in methods prose (`85 °C`, `37 °C`),
-- records the **difference** reading as a known gap until the grammar can disambiguate — the
-  mechanism is now settled (D95, "The quantity is neutral"), the grammar work is not yet done,
-- **normalises the value but never loses the authored unit** — storing 358.15 K where the source
+- **`units:Quantity(u)` is the value** — VIM's quantity value. For a bare °C that is the point
+  reading, with the offset applied: `units:quantity(37, "°C")` is 310.15 K. This is what is built.
+- **`units:Difference(u)` is the difference**, beside it in the units layer with the same constructor
+  arguments, converted with no offset: `units:difference(5, "°C")` is 5 K. Built in D95's slice 4.
+- **The grammar selects the reading.** The measure phrase's category carries it, every quantity
+  token seeds a value item and a difference item, and each consumer takes one (D95 implementation
+  plan, decision 5).
+- **The value is normalised and the authored unit is not lost** — storing 358.15 K where the source
   span reads "85 °C" is acceptable only because `enc:from_unit` keeps the surface recoverable. "What
   the author wrote" is a separate proposition from "what the quantity is", and this system says so
   elsewhere.
 
-**Decided 2026-09-26 (D95): a difference is its own type.** `units:Quantity(u)` is the measured value
-— for a bare °C the point reading, as built. `units:Difference(u)` is added beside it, with the same
-constructor arguments, for the difference reading: converted with no offset, so `rose 5 °C` is a
-`Difference(K)` of 5, and written `units:difference(5, "°C")` in ESL. The measure phrase's category
-carries the reading and each consumer takes one, which closes the known gap above. Built in D95's
-slice 4 (D95 implementation plan, decision 5).
+*Withdrawn: "v1 normalises °C to K at ingest, under an explicit assumption" — that a bare °C is a
+point — and "records the difference reading as a known gap until the grammar can disambiguate". The
+assumption is now the value type's definition, and the gap is the difference type.*
 
 ## Conversion factors are exact rationals, which is a dependency on D94
 
@@ -532,17 +532,18 @@ The second and third categories are small but they are not edge cases to be disc
 conversion is common, and any unit defined by a measured constant falls in the third. A design that
 assumes every factor is a rational numeral is wrong about two of the three.
 
-## A quantity carries both a stated and a normalised unit
+## The type carries the normalised unit; the prose carries the stated one
 
-The A/B fork above is a false one. A quantity can carry **both** — a normalised unit that the type
-is indexed by, and a stated unit recording what the author wrote.
+The A/B fork above is a false one. Both units are kept: the normalised unit indexes the type, and
+the stated unit stays in the prose the normalisation read (see "Decided: no per-occurrence record"
+below).
 
 That resolves the two purposes without trading them off:
 
 - **The type is indexed by the normalised unit.** Dimensional errors are type errors, and `24 h`
   and `86400 s` have the *same* type and unify — which is what lets two papers' claims meet.
-- **The stated unit is data, not type.** It records `mg/kg`, and a stipulation about a unit is an
-  ordinary proposition over that datum rather than something the type system must encode.
+- **The stated unit is text, not type.** `mg/kg` stays in `enc:prose`, where the author wrote it,
+  and the type system does not encode it.
 
 Coercion disappears as a question: nothing converts at check time because everything already
 normalised at ingest, and the authored form was not discarded to achieve it.
@@ -574,7 +575,8 @@ are what EigenQL is good at. But one property cannot disambiguate **several quan
 proposition** — `lt(dose, threshold)` with the dose stated in mg/kg and the threshold in mg/dL has
 two stated units and one slot.
 
-**Decided: at the encoding level, on the source-span record — not in the term.**
+**Decided: at the encoding level, not in the term.** Refined below: the source span's prose is the
+record, and no separate record is kept.
 
 An earlier draft decided the opposite, putting the stated unit in the term. Its argument against a
 resource-level record was that one property cannot disambiguate **several quantities in one
@@ -598,8 +600,9 @@ layer that is already mandatory on every encoded claim.
 
 **What this avoids**, all of which the in-term decision had accepted as scope:
 
-- **Queryability.** Resource properties are what EigenQL is good at, so "which claims reported a
-  dose in mg/kg" becomes a query now rather than after terms become decodable.
+- **Undecodable data.** A datum inside a term is not reachable from EigenQL. (A record at the
+  encoding level would have made "which claims reported a dose in mg/kg" a field query; it was then
+  dropped as a query this system does not need, below.)
 - **Reference edges.** No unit IRIs inside terms, so `core:mentions` gains no edge per quantity
   occurrence and the justification well-foundedness closure does not grow.
 - **Term size.** No second full unit term per quantity, duplicated at every occurrence.
@@ -653,8 +656,8 @@ the silent mistyping this paragraph warns about.
 - **The ambiguity is lexical, not in the units layer**, where every symbol stays unique and the
   strict stated form and the converter are unchanged. The prose surface `g` carries two senses,
   gram and standard gravity, as a word carries two synsets, and `RCF` is a surface of standard
-  gravity alone. D95's parser seeds one chart item per sense; the ranker and the felicity gate choose,
-  and conversion runs on the reading they select.
+  gravity alone. D95's parser converts each sense when it seeds it, as a value item and a difference
+  item; the ranker and the felicity gate choose among the senses.
 - **Prefixes still settle the common case.** Gram takes the 24 prefixes and standard gravity none,
   so `mg`, `μg` and `kg` have one sense; only a bare `g` has two.
 
@@ -707,7 +710,7 @@ ingest, when the stated form is turned into the normalised one.
 Two consequences follow, and they answer a question that otherwise looks open:
 
 - **The type index carries no scale**, because it is always in base units. `Quantity(km)` is not a
-  type that arises; `Quantity(m)` with a magnitude of 1000 and a stated unit of `km` is.
+  type that arises; `Quantity(m)` with a magnitude of 1000, read from prose that says `km`, is.
 - **The kernel never multiplies a magnitude.** Scale is consumed before anything reaches it, so the
   "size-increasing magnitude arithmetic" D94 puts out of v1 is genuinely out, not smuggled in by
   prefix folding.
@@ -737,9 +740,10 @@ refused, `0.5r` accepted. The magnitude arithmetic lives in that module alone: `
 none, so the checker cannot multiply a magnitude, which keeps D94's line. Two rules are decided
 there:
 
-- **The °C offset applies only to a bare `°C`**, the point reading. Inside a compound — `°C/min` —
-  the reading is a difference, and °C converts as K with no offset: the rule above that a vector
-  reading carries the vector unit.
+- **The °C offset applies only to a bare `°C`**, in its value reading. Inside a compound —
+  `°C/min` — °C converts as K with no offset: the rule above that a difference reading carries the
+  difference's unit. The difference reading of a bare °C (`units:difference`, D95's slice 4) takes
+  the same path.
 - **Kinds come back beside the unit.** `rad/s` converts to `s⁻¹` with a plane angle in the
   numerator; `sr/rad` to `1` with a solid angle over a plane angle, which the unit, where both are
   `1`, cannot say (see "Kinds are metadata, not algebra").
@@ -747,7 +751,7 @@ there:
 ## Prefixes fold in the normalised form and survive in the stated one
 
 Whether `km` folds to `1000 m` looked like a standing question. The stated/normalised split answers
-it: **the normalised form folds, the stated form keeps `km`**, and the same answer covers °C and
+it: **the normalised form folds, and the stated form — the prose — keeps `km`**, and the same answer covers °C and
 every non-SI accepted unit. One rule, three cases, no special pleading.
 
 Two observations survive and belong to the implementation rather than the decision:
@@ -765,97 +769,88 @@ D93 is a kernel specification, but the reason it exists is that quantities in pr
 unrepresentable. The consuming side has obligations, and they start earlier than the grammar.
 **D95 works them out**; this section states them and the constraints D93 places on them.
 
-**Every numeral is routed out today.** `dcg::segment::is_nonprose` classifies a token as non-prose
-when it "starts with a digit or carries no letters", and only `prose` units enter the DCG
-(`enc:unit_kind`). So `37`, `0.56` and `931g` never reach the parser. Nothing about units can work
-until that changes.
+**Numerals reach the parser and seed nothing.** An earlier version of this section said every
+numeral is routed out: `dcg::segment::is_nonprose` classifies a token starting with a digit as
+non-prose, and only `prose` units enter the DCG. D95 measured otherwise. Both CKY drivers seed the
+full token stream, `is_nonprose` feeds only the widen gate's coverage probe, and the encoder marks
+every unit `prose`. A numeral seeds no chart item, so its span cannot be covered and its sentence
+cannot parse. Nothing about units can work until that changes.
 
-**Unit symbols are worse off than numerals — they are OOV, not routed out.** `ml`, `mM` and `°C`
-contain letters, so `is_nonprose` passes them through as lexemes, and the lexicon has no entry for
-any of them (`grep` over `ontologies/lexicon/` finds none). A unit symbol therefore presents as a
-word the lexicon does not know. That is not merely unhelpful: `missing_lexeme == 0` is a tracked
-gate, so admitting units without lexical entries breaks a measurement the project relies on. The
-CNL corpus passes today only because it avoids units entirely.
+**Unit symbols are OOV.** `ml`, `mM` and `°C` contain letters, so `is_nonprose` passes them through
+as lexemes, and the lexicon has no entry for any of them. `missing_lexeme == 0` is a tracked gate,
+and the CNL corpus passes it today only because it avoids units.
 
-**The tokenizer destroys unit syntax before the grammar sees it.** `tokenize` normalises
-"em/en-dashes, slashes, and brackets" to spaces. So `mg/dL` becomes two tokens `mg` `dL`, and the
-range `20–30%` becomes `20` `30%`. Compound units and ranges cannot survive tokenization as it
-stands. Quantity recognition therefore belongs at or before tokenization — a span pre-pass, which
-has precedent: the same function notes that "multiword forms are recovered by re-joining spans at
-lookup time".
+**The tokenizer destroys unit syntax before the grammar sees it.** `tokenize` turns em/en-dashes,
+slashes and brackets into spaces and trims punctuation off token edges, so `mg/dL` becomes `mg`
+`dL`, `20–30%` becomes `20` `30`, and `37 °C` becomes `37` `C`. *Withdrawn: "Quantity recognition
+therefore belongs at or before tokenization — a span pre-pass."* D95 separates a lexer that deletes
+nothing from a preprocessor that owns every token-stream decision, and recognises quantities there; a
+pre-pass over raw text leaves the lexer destructive for everything it does not protect (D95, "Why
+this beats protecting quantities from a destructive lexer").
 
-**The unit grammar is not the English grammar, and should not be made into one.** `mg/dL` is a
-unit expression with its own syntax — that is what UCUM specifies — and it is not English. Making
-the DCG parse it would be a category error, and would also mean enumerating prefix × unit
-combinations as lexemes (24 × 29 before compounds). The right shape is a **separate unit parser
-invoked on a recognised quantity span**, returning a `Unit` term; the DCG then sees the quantity as
-a single atom of type `Quantity u`.
+**The unit grammar is not the English grammar, and should not be made into one.** `mg/dL` is a unit
+expression with its own syntax — that is what UCUM specifies — and it is not English. Parsing it with
+the DCG would be a category error and would enumerate prefix × unit combinations as lexemes. A
+**separate unit reader** runs on the unit part of a recognised quantity, returns one reading per unit
+sense, and converts each through `units::convert` (D95 implementation plan, slice 3).
 
-**A quantity is a third argument sort.** The grammar's arguments are entity senses today, and its
-felicity gate gates to `Prop`. A quantity is neither: it is a term of type `Quantity u` appearing as
-a PP object (`at 37 °C`, `for 1 h`) or a nominal modifier (`a 24 h incubation`). PP adjuncts are
-already covered — the style guide lists `essential in MSI models` — so the extension is that a PP's
-object may be a quantity rather than an entity, which is a typing change more than a structural one.
+**A quantity is a third argument sort.** The grammar's arguments are entity senses today. A quantity
+is a term of type `Quantity u` or `Difference u`, appearing as a PP object (`at 37 °C`, `for 1 h`) or
+a nominal modifier (`a 24 h incubation`).
 
 ### How a quantity is represented in the grammar
 
-**No new category is needed.** `lexicon:Cat` is already type-indexed:
+**A measure phrase is its own category, indexed by its unit and its reading** (D95 implementation
+plan, decisions 1 and 5):
 
 ```
-cat_np : Set -> lexicon:Num -> lexicon:Cat        ⟦cat_np(T, _)⟧ = T
+cat_mp : core:unit -> lexicon:Reading -> lexicon:Cat
+⟦cat_mp(u, value)⟧      = units:Quantity(u)
+⟦cat_mp(u, difference)⟧ = units:Difference(u)
 ```
 
-An NP denotes a value of its index type. So a quantity is an NP at a quantity type —
-`cat_np(units:Quantity(u), n)`, denoting the `Quantity u` itself.
+A consumer that takes any unit binds it with `cat_unit_forall : (core:unit -> Cat) -> Cat`,
+`⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧`. A consumer that needs a dimension names it, so a
+dimension mismatch fails to compose. *Withdrawn: "No new category is needed … a quantity is an NP at
+a quantity type — `cat_np(units:Quantity(u), n)`." `rose 5 °C` and `a 5 °C increase` put a measure
+phrase where no NP goes (D95, "Its category is an open fork").*
 
-**The codomain must be `Set`, not `Type`, and this document said `Type` for several drafts.**
-`Set = Sort 1` and `Type n = Sort (n+1)` (`kernel/src/esl/compile.rs:78-81`), so
-`Quantity : Unit -> Type` would give `Quantity u : Sort 2`, which `cat_np : Set -> Num -> Cat`
-(`ontologies/lexicon/lexicon-ontology.esl:270`) rejects — cumulativity runs upward only. That
-`EigonPrimitive` infers to `Sort 1` establishes `Unit : Set`; it says nothing about the sort of
-`App(Quantity, u)`, which its codomain fixes.
+**`Quantity`'s codomain is `Set`, as built.** This section argued it from `cat_np : Set -> Num ->
+Cat`, which rejects a `Sort 2` index; that argument lapsed with the `cat_np` representation, and `Set`
+stands as the sort of an ordinary data type. `Set = Sort 1` and `Type n = Sort (n+1)`
+(`kernel/src/esl/compile.rs:78-81`).
 
-The alternative — widen `cat_np`'s index — is worse: `Cat` is "at Type 1, since `cat_n`/`cat_np`
-store a `Set`", so widening pushes `Cat` to `Type 2` and forces `denote_cat`'s `cat_forall` arm
-(`Π T : Sort 1`) to change with it.
+**The combinatory rules are unchanged; the lexicon and two PP denotations are not.**
 
-**The composition RULES are unchanged; the LEXICON and the PP denotations are not.** An earlier
-draft claimed the whole composition layer was unaffected. Three things in the code refute it:
-
-- **`denote_cat` hard-codes `Entity` into every PP denotation** — `⟦cat_pp_arg(prep)⟧ = Entity`,
-  `⟦cat_pp⟧ = Entity → Prop`, `⟦cat_measure⟧ = Entity → float`
-  (`kernel/src/dcg/category.rs:71-104`). Since the felicity gate kernel-checks `sem : ⟦cat⟧`,
-  `at 37 °C` as an argument PP fails there rather than composing. `cat_measure` is the exception
-  that stays as it is: it denotes an **ordinal** scale, which admits ordering and no arithmetic, so
-  measured quantities take a separate category rather than widening this one (D95, "Opaque scales
+- **Two PP categories denote their object.** `⟦cat_pp_arg(prep)⟧ = Entity` and `⟦cat_pp_than⟧ =
+  Entity`, because each marker is transparent. `⟦cat_pp⟧ = Entity → Prop` denotes the predicate over
+  the modified noun, so a quantity-taking `of` is `cat_pp / cat_mp(u, value)` with `cat_pp`
+  unchanged, and a VP adjunct is not a PP category at all. *An earlier version said all three fix
+  the object.* The two are type-indexed when a corpus sentence needs a measure phrase as a governed
+  argument or a comparison standard (D95 implementation plan, slice 6). `cat_measure` stays as it
+  is: it denotes an **ordinal** scale, which admits ordering and no arithmetic (D95, "Opaque scales
   and measured quantities are two sorts").
 - **Every preposition entry is monomorphic at `Entity`** — `lexicon:at_arg` is
   `cat_np(lexicon:Entity, num_any)` with `sem_type = Entity -> Entity`
-  (`ontologies/lexicon/closed-class.esl:1756-1763`), and `ontology:prep_at` is itself an
-  entity-typed relation. So the widening is not merely categorial: a quantity-taking `at` needs a
-  new relation, not a new index.
-- **`type_subsumes` cannot relate a quantity index to anything** — it handles
-  `(EigonClass, EigonClass)` through the subclass lattice and otherwise falls back to syntactic
-  equality (`kernel/src/dcg/category.rs:434-439`). `Quantity u` is neither.
+  (`ontologies/lexicon/closed-class.esl:1756-1763`), and `ontology:prep_at` is an entity-typed
+  relation. A quantity-taking entry needs a new relation, not a new index. `at` and `after` have no
+  VP-adjunct entry at all.
+- **Units are compared by equality.** `type_subsumes` relates `EigonClass` indices through the
+  subclass lattice (`kernel/src/dcg/category.rs:434-439`); a unit index has no subtyping, so a
+  consumer's unit and an item's unit unify or do not.
 
-What survives is the narrower claim: the **combinatory rules** (application, composition,
-type-raising) are untouched, because they are parametric in the category. The work is lexical and
-in the `cat_pp*` denotations, and it is in scope.
+**What is new:**
 
-What is genuinely new is narrower than it first appeared:
-
-- **Lexical entries for unit symbols**, each carrying a quantity-typed `sem`.
-- **Span recognition** before tokenization, since `mg/dL` and `37 °C` do not survive the current
-  tokenizer. The recognised span becomes **one chart item** carrying a magnitude and, where present,
-  a unit — a bare `0.56` is the same item with no unit, which is what keeps cardinality and
-  quantities on one path rather than two.
-- **The type-indexing of the PP categories.** `at 37 °C` and `at the promoter` are the same
-  preposition over different index types, and reading the lexicon settled it: `⟦cat_pp_arg(_)⟧ =
-  Entity`, `⟦cat_pp⟧ = Entity -> Prop` and `⟦cat_pp_than⟧ = Entity` all fix the object, so the
-  widening is required. D95 records it.
-- **`Num` is not a question.** A measure phrase is not a noun phrase: it is `MP`, and consumers
-  subcategorise for it directly, so no agreement feature is chosen lexically. The earlier framing
-  here, weighing `mass` against `name` (D70), does not apply. D95 records the mechanism.
+- **Prose unit spellings**, as `lexicon:UnitSurface` resources read by the quantity recogniser — `g`
+  as standard gravity, `l` as litre, `RCF`, `days`. Not lexical entries: a unit spelling has no
+  category and never stands in the chart alone (D95 implementation plan, decision 2).
+- **Quantity tokens.** The preprocessor merges `37` `°C` and splits `5mg`, each into one token;
+  seeding gives it a value item and a difference item per unit reading. A bare numeral seeds the
+  cardinal determiner items.
+- **Consumer entries**, one per preposition sense that takes a measure phrase, each declaring the
+  reading it takes.
+- **`Num` is not a question.** A measure phrase is not a noun phrase, so no agreement feature is
+  chosen lexically. The earlier framing here, weighing `mass` against `name` (D70), does not apply.
 
 **Unit symbols are ambiguous, and the existing machinery already handles that kind of problem.**
 `931g` is g-force; `10 g` is grams. `M` is molar or mega. This is **polysemy, not a special case**:
@@ -865,11 +860,11 @@ words — sense ranking, the felicity gate, and reading selection — rather tha
 disambiguation rule. A wrong unit sense should be refused or down-ranked by the same path that
 refuses a wrong noun sense.
 
-**The parser emits both forms.** Given the stated/normalised split, recognising `37 °C` produces a
-normalised magnitude and a stated unit, so the normaliser runs at parse time and not only at check
-time. The °C rule lands here too, and v1's version is the weaker one: a bare °C is **assumed** to be a
-point, and the difference reading is a recorded gap. Disambiguating `at` from `by` in the grammar is
-what would close that gap; it is not what v1 does. (An earlier draft asserted both in one document.)
+**The parser converts at seeding.** Each unit reading of a quantity token is converted when it is
+seeded, as a value and as a difference; the stated form stays in `enc:prose`. *Withdrawn: "The parser
+emits both forms … a bare °C is **assumed** to be a point, and the difference reading is a recorded
+gap."* There is no stated-unit record ("Decided: no per-occurrence record"), and the difference
+reading is its own type ("Affine units: two readings, two types").
 
 **The CNL style guide's first DON'T becomes wrong.** It currently instructs authors to drop inline
 numbers — "the parser routes non-prose out; numbers are dropped, so a numeric claim is lost… state
@@ -977,19 +972,21 @@ SI-accepted non-SI units — min, h, d, ha, L, t, Da, eV, au); conversion factor
 (D94); a new `eigentt:Term` constructor carrying a unit value, `LitUnit`, with the codec arms it
 obliges (the D47 mirror, `ontology::Value` as a canonical string — the rule `core:rational` follows,
 see the implementation plan's "The carrier for `Unit` and `Magnitude`" — Eigon-JSON, the ESL printer
-and compiler), a cost a primitive `Unit` pays and an inductive one would not; °C as a documented
-extension with the point assumption. No stated-unit record: the prose is the record of what the
+and compiler), a cost a primitive `Unit` pays and an inductive one would not; °C, with the offset applied to its
+value reading (the difference type is D95's slice 4). No stated-unit record: the prose is the record of what the
 author wrote (see "Decided: no per-occurrence record").
 
 An earlier draft put an **erased annotation node** in the term for the stated unit. That is out: a
 datum every semantic operation must ignore is provenance, not meaning, and the encoding layer that
 holds it is already required on every `enc:EncodedClaim`.
 
-**Consequent work, specified in D95.** Span recognition before tokenization, the unit sub-parser,
-quantity items in `seed_leaves`, unit-symbol lexical entries with senses, the measure-phrase category
-and the subcategorised preposition entries that take it, and a revision of
-`docs/method/controlled-english-style-guide.md` — whose first DON'T instructs authors to
-drop inline numbers and becomes wrong for quantities once they parse.
+**Consequent work, specified in D95** and its implementation plan: a lexer that deletes nothing and
+a preprocessor that owns every token-stream decision; the prose unit reader and the
+`lexicon:UnitSurface` spellings; the molar and the week in the units layer; `units:Difference`;
+quantity items in `seed_leaves`, a value and a difference per unit reading; the measure-phrase
+category `cat_mp(u, reading)` and the subcategorised entries that take it; and a revision of
+`docs/method/controlled-english-style-guide.md`, whose first DON'T instructs authors to drop inline
+numbers and becomes wrong for quantities once they parse.
 
 **Out of v1.** AG-unification and unit-variable inference — including **`sqrt`-shaped signatures**,
 since typing an application of `float<'u^2> -> float<'u>` requires solving `?u · ?u ≡ m²`. This costs
