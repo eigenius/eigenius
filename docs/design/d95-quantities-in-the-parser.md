@@ -107,7 +107,7 @@ not a search:
 | token | prefix | suffix | split? |
 |---|---|---|---|
 | `5mg` | `5` numeral | `mg` is a unit | **yes** |
-| `931g` | `931` numeral | a bare `g` | **no — refused in v1**, see below |
+| `931g` | `931` numeral | `g`: gram or standard gravity | **yes — two readings**, see below |
 | `53BP1` | `53` numeral | `BP1` is not a unit | no |
 | `HEK293T` | `HEK293` not a numeral | (`T` is tesla) | no |
 | `5-fold` | `5` numeral | `-fold` is not a unit | no |
@@ -119,26 +119,22 @@ tesla; without the unit-suffix test, `53BP1` would split on nothing.
 So the unit vocabulary is not only what D93 needs for typing — it is what makes this tokenization
 decidable at all. Before units exist, `931g` is unanalysable.
 
-**A bare `g` is not split in v1** (D93, "A vocabulary hazard the same evidence surfaced"). It has two
-readings, gram and standard gravity, and D93's vocabulary holds only the first: admitting standard
-gravity opens "units science uses that the SI does not accept", a category to be opened with a
-criterion rather than one symbol at a time. Splitting could therefore only produce grams, and in
-this corpus neither bare-`g` token is a mass:
+**A bare `g` splits into two readings** (D93, "A vocabulary hazard the same evidence surfaced",
+revised 2026-09-26). The prose surface `g` has two senses, gram and standard gravity (`g_n`), and a
+split yields one quantity per sense, competing in the chart as "Ambiguous unit symbols" describes.
+In the WRN methods, the only bare-`g` quantity is g-force:
 
 | token | in the WRN methods | what it is |
 |---|---|---|
-| `931g` | "the plates were spun at 931g for 2 h at 30 °C" | g-force |
-| `2g` | "(Fig. 2g)" | a figure panel |
+| `931g` | "the plates were spun at 931g for 2 h at 30 °C" | g-force; the PMC manuscript writes `931 RCF` |
+| `2g` | "(Fig. 2g)" | a figure panel — a reference, not a quantity; see below |
 
-So a numeral with a bare `g` suffix stays one token — the CNL guide's R2: *a faithful un-parsed claim
-beats a parsed distorted one*. **What that costs today is the whole sentence, not the token.** Being
-classed non-prose does not remove a token ("Numerals reach the parser and seed nothing", below): it
-reaches the chart, seeds nothing, and its span cannot be covered, so "the plates were spun at 931g
-for 2 h at 30 °C" does not parse at all — `2 h` and `30 °C` are lost with it. Whether the
-preprocessor should instead set an unsplittable token aside so the rest of the sentence parses is
-open (see "Open questions"). A PREFIXED gram splits: standard gravity takes no prefix, so `mg`,
-`μg` and `kg` are unambiguously mass. When standard gravity is admitted, `931g` splits into
-competing readings as "Ambiguous unit symbols" describes.
+**Why two senses and not a refusal.** D93 first decided that v1 would not split a bare `g`, as the
+fail-closed choice. It was withdrawn because of what refusing costs: being classed non-prose does not
+remove a token ("Numerals reach the parser and seed nothing", below) — it reaches the chart, seeds
+nothing, and its span cannot be covered, so "the plates were spun at 931g for 2 h at 30 °C" would not
+parse at all, and `2 h` and `30 °C` would be lost with the speed. A PREFIXED gram has one reading:
+standard gravity takes no prefix, so `mg`, `μg` and `kg` are unambiguously mass.
 
 **Figure panels are the same trap, wider than `g`.** The rule reads the unbracketed `Fig. 2d` in the
 WRN methods as two days, and would read `Fig. 2h` as two hours; panels `a`, `c`, `e` and `f` escape
@@ -154,7 +150,7 @@ questions".
 |---|---|---|
 | `53BP1` | **yes** | **no** — a gene, 12 occurrences in the Letter body |
 | `HEK293T` | no | yes — a cell line |
-| `931g` | yes | yes, and still in v1: a bare `g` suffix is not split, so its sentence does not parse |
+| `931g` | yes | yes today, no once quantities parse |
 | `5-fold` | yes | arguably not — a degree modifier |
 
 The rule's own docstring reasons about letter-initial gene symbols ("`mlh1`, `msh2`, `brca1`,
@@ -173,8 +169,8 @@ better for the truth, and is the right direction on this project's own terms.
 ## One chart item per candidate reading
 
 The recognised span becomes leaf items carrying a magnitude and, where present, a unit — **one per
-candidate unit sense**, as competing edges. An unambiguous symbol yields exactly one; a symbol with
-several senses yields one each and lets the ranker choose (see "Ambiguous unit symbols" below). A bare
+candidate unit sense**, as competing edges. An unambiguous symbol yields exactly one; `931g` yields
+gram and standard gravity and lets the ranker choose (see "Ambiguous unit symbols" below). A bare
 `0.56` is the same item shape with no unit, which keeps cardinality and quantities on one path
 rather than building two mechanisms that must later agree.
 
@@ -234,8 +230,8 @@ unrecoverable.
 - discard punctuation the grammar does not consume;
 - classify a token as non-prose — the `is_nonprose` rule, relocated from the consumer and revised
   so `53BP1` is a symbol rather than a numeral;
-- **merge quantity spans** — `37` `°` `C` into one item, `5mg` split on the numeral/unit boundary
-  (a bare `g` suffix, as in `931g`, is not split in v1),
+- **merge quantity spans** — `37` `°` `C` into one item, `5mg` and `931g` split on the numeral/unit
+  boundary,
   `<` `−1` into a comparison — which is the new work.
 
 **The aim is behaviour preservation, and it is a rewrite rather than something got "by
@@ -287,9 +283,9 @@ reaches the sub-parser intact by construction.
 `M` is molar or mega. `h` is hour, and in another register the Planck constant. `931g` is g-force
 where `10 g` is grams.
 
-**In v1 the `g` case does not arise.** Standard gravity is not in D93's vocabulary and a bare `g`
-suffix is not split, so `931g` never reaches seeding (see the split section above). What follows is
-the mechanism for a symbol with several senses — and for `g`, once standard gravity is admitted.
+**`g` is the case v1 has.** Gram and standard gravity are both in D93's vocabulary, as `g` and
+`g_n`; the prose surface `g` points at both, so `931g` seeds two items. `RCF` points at standard
+gravity alone.
 
 A unit symbol is a **lexeme carrying several senses**, exactly as a noun carries several synsets,
 and each sense denotes a different unit. It therefore routes through machinery that already exists:
@@ -315,10 +311,10 @@ Three consequences, which supersede what the sections above say:
   stated and the normalised form" is true of the *selected* reading, so the normaliser runs once the
   chart has committed, not while it is being seeded.
 
-This is how the `g` hazard is handled once standard gravity is admitted: gram and standard gravity
+This is what keeps the `g` hazard inside machinery that already exists: gram and standard gravity
 compete as chart edges, the ranker scores them in context, and the felicity gate refuses a reading
-that does not compose — rather than a pre-pass silently picking one. Until then v1 refuses the
-split, the fail-closed half of the same choice.
+that does not compose — rather than a pre-pass silently picking one, or a refusal losing the whole
+sentence.
 
 ## What the pipeline stages inherit
 
@@ -843,10 +839,12 @@ rational powers.
 D93 was built after this document was written (PR #262). What it settled, and one piece of work,
 come into D95:
 
-- **`931g` — resolved.** This document treated `931g` as gram and g-force competing in the chart; D93
-  then decided that **v1 refuses to split a `g`-suffixed numeral**, since standard gravity is not in
-  the vocabulary. The split rule, the preprocessor list and "Ambiguous unit symbols" are revised to
-  the refusal: a bare `g` suffix is not split, and a prefixed gram is.
+- **`931g` — two senses.** D93 first decided that v1 refuses to split a `g`-suffixed numeral, and this
+  document was revised to that; the decision was then revised again (2026-09-26), because refusing
+  costs the whole sentence. Standard gravity is admitted as `units:standard_gravity` (`g_n`), and the
+  prose surface `g` carries two senses, gram and standard gravity, seeded as competing items. The
+  unit-symbol lexical entries this document puts in scope are where those senses and the `RCF`
+  surface are declared.
 - **One converter.** The unit sub-parser normalises prose — `µ` (U+00B5), superscript exponents,
   `per` — into D93's strict stated form and calls `units::convert::Vocabulary::convert`, which the
   ESL form `units:quantity(v, "…")` also uses (D93 implementation plan, D6.2). Symbol resolution,
@@ -870,9 +868,10 @@ come into D95:
 
 ## Open questions
 
-- **What the preprocessor does with a token it will not interpret.** A numeral-initial token such as
-  an unsplit `931g` seeds nothing, so the sentence carrying it does not parse, and every other
-  quantity in that sentence is lost with it — in the WRN methods, `2 h` and `30 °C` beside `931g`.
+- **What the preprocessor does with a token it will not interpret.** A numeral-initial token no rule
+  interprets seeds nothing, so the sentence carrying it does not parse, and every other quantity in
+  that sentence is lost with it — which is what refusing to split `931g` would have cost the WRN
+  sentence it sits in, `2 h` and `30 °C` included.
   The preprocessor could instead set the token aside (dropping it from the token stream, recorded
   with its offset so the prose still shows it) and let the rest parse; the cost is a parse that
   silently omits a constituent, which R2 weighs against. Undecided.

@@ -377,6 +377,9 @@ The layer holds:
 - **The degree, arcminute and arcsecond are included.** They are in the SI Brochure's accepted table
   (Table 8) with min, h, d, ha, L, t, Da, eV and au, and the π-carrying magnitude exists to admit
   them. The logarithmic units in the same table (Np, B, dB) stay out.
+- **Standard gravity is admitted, outside the SI's accepted list** (`units:standard_gravity`, `g_n`),
+  under the criterion in "A vocabulary hazard the same evidence surfaced": exactly defined and
+  attested in the corpus.
 - **The degree Celsius is not prefixable.** A prefix on an offset unit is well-defined only for a
   difference, and v1 assumes the point reading.
 - **Several named units share a unit value, as in the SI.** rad, sr, °, ′ and ″ are all `1`; Hz and
@@ -634,32 +637,52 @@ SI-accepted list, which contains **gram and not standard gravity**. D95's split 
 suffix that is a known unit", so against this vocabulary `931g` resolves to 931 grams — precisely
 the silent mistyping this paragraph warns about.
 
-**Decided: v1 REFUSES to split a `g`-suffixed numeral.** `931g` stays unparsed rather than becoming
-931 grams — the CNL guide's R2, *a faithful un-parsed claim beats a parsed distorted one*.
+**Decided (revised 2026-09-26): standard gravity is a unit, and `g` has two senses.**
+
+- **The units layer gains `units:standard_gravity`**, symbol **`g_n`** — the symbol ISO 80000-3 and
+  CODATA use for the standard acceleration of gravity — with dimension `s⁻²·m`, factor exactly
+  `196133/20000` (9.80665 m/s², fixed by the 3rd CGPM, 1901) and no prefixes. Relative centrifugal
+  force is therefore recorded as an acceleration: `931g` is `931 × 9.80665 m·s⁻²`.
+- **The ambiguity is lexical, not in the units layer**, where every symbol stays unique and the
+  strict stated form and the converter are unchanged. The prose surface `g` carries two senses,
+  gram and standard gravity, as a word carries two synsets, and `RCF` is a surface of standard
+  gravity alone. D95's parser seeds one chart item per sense; the ranker and the felicity gate choose,
+  and conversion runs on the reading they select.
+- **Prefixes still settle the common case.** Gram takes the 24 prefixes and standard gravity none,
+  so `mg`, `μg` and `kg` have one sense; only a bare `g` has two.
+
+**Why the refusal was withdrawn.** It was chosen as fail-closed, costing "nothing but coverage". It
+costs more. A token the parser cannot interpret seeds nothing, so the sentence carrying it does not
+parse at all: "the plates were spun at 931g for 2 h at 30 °C" loses `2 h` and `30 °C` with the
+speed (D95). And the ambiguity is ordinary polysemy, which the chart already carries for nouns.
+
+**The category, opened with a criterion.** Standard gravity is not on the SI's accepted list, so
+admitting it opens "units science uses that the SI does not accept". It is opened by a rule rather
+than symbol by symbol: **a unit enters when it is exactly defined and attested in the corpus.**
+Standard gravity is both — defined by CGPM, and written `931g` in Nature's text of the WRN paper and
+`931 RCF` in its PubMed Central manuscript (D96). `rpm`, in the same methods section, also meets the
+rule and is the next candidate; °F, psi, mmHg and the calorie wait for attestation.
+
+*Withdrawn — the earlier decision, kept as the record: "v1 REFUSES to split a `g`-suffixed numeral.
+`931g` stays unparsed rather than becoming 931 grams." Its reasoning below still holds as fact; what
+failed was its estimate of the cost.*
 
 The two senses are not near-misses. Gram is a mass; standard gravity is an acceleration, `L T⁻²`,
 so a wrong resolution types the wrong DIMENSION rather than the wrong magnitude.
 
-**What admitting it would have cost, and why that is the real question.** The conversion is the
-cheap part: g₀ is *defined* by CGPM (1901) as exactly 9.80665 m/s², so it is `196133/20000` as a
-D94 rational — the clean side of this document's own distinction, unlike the dalton, which is
-measured and carries a CODATA vintage as a documented exception. Prefixes disambiguate for free,
-since gram takes the 24 and standard gravity takes none: `μg`, `mg` and `kg` stay unambiguously
-mass, and only a bare `g` is two-sensed.
+The conversion is the cheap part: g₀ is *defined*, not measured, so it is `196133/20000` as a D94
+rational — the clean side of this document's own distinction, unlike the dalton, which is measured
+and carries a CODATA vintage as a documented exception. Prefixes disambiguate for free, since gram
+takes the 24 and standard gravity takes none.
 
-What it really commits to is a CATEGORY. The v1 vocabulary is 7 base + 22 derived + 24 prefixes +
-the SI's own accepted non-SI list; standard gravity is not on that list. Admitting it opens "units
-science uses that the SI does not accept", and the corpus queues up more immediately — `rpm` appears
-in the same WRN methods section, with °F, psi, mmHg and the calorie behind it. Admitting `g` alone
-buys little while `rpm` in the same sentence stays unparseable.
+What it commits to is a CATEGORY, which the criterion above now governs. An earlier version of this
+paragraph also said "`rpm` in the same sentence"; it is in the same methods section, not the same
+sentence.
 
-So the category is worth opening deliberately, with a criterion for what enters it, rather than one
-symbol at a time. Until then, refusing is fail-closed and costs nothing but coverage.
-
-There is a second choice inside the admission, recorded so it is not rediscovered: RCF is
-conventionally reported as a dimensionless multiple of g₀, not as an acceleration in m/s². So `931g`
-could be `9131 m·s⁻²` or a scale on the plain dimensionless unit — which is how `%` and `ppm` are
-already handled.
+The second choice inside the admission is settled: RCF is conventionally reported as a
+dimensionless multiple of g₀, and could have been a scale on the plain dimensionless unit, as `%`
+and `ppm` are. It is recorded as an acceleration instead, because that is what a multiple of g₀
+denotes, and a scale would have made `931g` and `931` the same quantity.
 
 ## "Normalised" names two operations, and only one is the kernel's
 

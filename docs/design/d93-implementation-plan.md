@@ -13,11 +13,10 @@ None can be worked around, and each changes what gets written.
 
 1. ~~**The embedded shape for `Unit` and `Magnitude`.**~~ **DECIDED — canonical string, not
    `Value::Embedded`.** See "The carrier for `Unit` and `Magnitude`" below.
-2. ~~**`931g`.**~~ **DECIDED — refuse.** v1 does not split a `g`-suffixed numeral; `931g` stays
-   unparsed rather than becoming 931 grams. Admitting standard gravity would open "units science
-   uses that the SI does not accept", and `rpm` in the same corpus sentence queues up behind it, so
-   the category gets opened deliberately with a criterion rather than one symbol at a time. D93
-   records the full reasoning.
+2. ~~**`931g`.**~~ **DECIDED — refuse; REVISED 2026-09-26 — two senses.** Standard gravity is admitted
+   as `units:standard_gravity` (`g_n`), and the prose surface `g` carries two senses, gram and
+   standard gravity, which D95's parser seeds as competing chart items. The refusal was withdrawn
+   because it cost the whole sentence, not the token. D93 records both.
 3. ~~**Occurrence identity for the stated-unit record.**~~ **DROPPED — there is no record.** Its one
    addition over `enc:prose` was making "which claims reported a dose in mg/kg" a query, and that is
    not a query this system needs. See D93, "Decided: no per-occurrence record".

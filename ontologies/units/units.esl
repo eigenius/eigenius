@@ -2,7 +2,7 @@
 //
 // Two things live here: the type a quantity has, and the SI vocabulary an authored unit is
 // normalised through. Neither is in the trusted surface. The kernel's addition is the `Unit`
-// primitive alone — seven base dimensions, a kind vector, and a canonicalisation — and this layer
+// primitive alone — seven base dimensions and a canonicalisation — and this layer
 // is chain data that can be reviewed and replaced without touching the checker (D93, "What is
 // trusted, and how little").
 //
@@ -314,6 +314,16 @@ resource units:electronvolt : units:NamedUnit {
 resource units:astronomical_unit : units:NamedUnit {
     core:description = "astronomical unit. Exact by IAU 2012 Resolution B2.";
     units:symbol = "au"; units:dimension = u"m"; units:factor = 149597870700r; units:factor_pi = 0; units:prefixable = false;
+}
+
+// ── Units outside the SI's accepted list ─────────────────────────────────────────────────────────
+// A unit enters when it is exactly defined and attested in the corpus (D93, "A vocabulary hazard
+// the same evidence surfaced"). Symbols here stay unique; a prose surface with several senses, as
+// `g` has, is a lexicon matter (D95).
+
+resource units:standard_gravity : units:NamedUnit {
+    core:description = "standard acceleration of gravity. Exact by the 3rd CGPM (1901). Relative centrifugal force is recorded in it: `931g` in prose is 931 g_n. The symbol is `g_n` because `g` is the gram; the prose surface `g` carries both senses in the lexicon.";
+    units:symbol = "g_n"; units:dimension = u"s^-2·m"; units:factor = 9.80665r; units:factor_pi = 0; units:prefixable = false;
 }
 
 // ── The 24 SI prefixes ───────────────────────────────────────────────────────────────────────────

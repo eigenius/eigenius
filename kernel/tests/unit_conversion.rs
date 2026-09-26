@@ -71,6 +71,8 @@ fn d93s_worked_examples() {
     assert_converts(q(50, 1), "kDa", da, 0, "kg");
     // An angle is dimensionless, and 37° is 37π/180.
     assert_converts(q(37, 1), "°", q(37, 180), 1, "1");
+    // `931g` read as g-force: 931 × 9.80665 m·s⁻².
+    assert_converts(q(931, 1), "g_n", q(182_599_823, 20_000), 0, "s^-2·m");
 }
 
 /// Every named unit, converted from `1`, gives back its own declared factor, power of π and
@@ -80,7 +82,7 @@ fn every_named_unit_round_trips() {
     for symbol in [
         "s", "m", "kg", "A", "K", "mol", "cd", "g", "rad", "sr", "Hz", "N", "Pa", "J", "W", "C",
         "V", "F", "Ω", "S", "Wb", "T", "H", "lm", "lx", "Bq", "Gy", "Sv", "kat", "min", "h", "d",
-        "°", "′", "″", "ha", "L", "t", "Da", "eV", "au",
+        "°", "′", "″", "ha", "L", "t", "Da", "eV", "au", "g_n",
     ] {
         let u = vocab()
             .unit(symbol)
@@ -165,6 +167,10 @@ fn what_is_refused() {
         ConvertError::NotPrefixable { .. }
     ));
     assert!(matches!(refused("k°C"), ConvertError::NotPrefixable { .. }));
+    assert!(matches!(
+        refused("mg_n"),
+        ConvertError::NotPrefixable { .. }
+    ));
     assert!(matches!(refused("metre"), ConvertError::UnknownSymbol(_)));
     assert!(matches!(refused("µg"), ConvertError::UnknownSymbol(_))); // U+00B5, not U+03BC
     assert!(matches!(refused("m/s/s"), ConvertError::Malformed { .. }));
