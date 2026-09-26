@@ -70,9 +70,11 @@ works on plain text.
    is what `53BP1` becomes under D95's revised rule. The failure stays visible in the gate, where today
    it is invisible. Setting the token aside and parsing the rest was rejected: that parse omits a
    constituent.
-4. **Figure references in plain text.** Recommended: no numeral/unit split on a token directly after
-   `Fig.`, `Figs`, `Figure`, `Table` or `Extended Data Fig.`; a JATS `<xref>` span supersedes the rule
-   once D96 is built. The alternative is to leave `Fig. 2d` reading as two days until then.
+4. ~~**Figure references in plain text.**~~ **DEFERRED 2026-09-26 to D96's build.** D95 adds no
+   plain-text rule. Until JATS ingest exists, an unbracketed `Fig. 2d` reads as two days and `Fig. 2h`
+   as two hours; bracketed references are still removed as asides. The rule that was recommended —
+   no split directly after `Fig.`, `Figs`, `Figure`, `Table` or `Extended Data Fig.` — is decided
+   with D96, where an `<xref>` span makes it unnecessary for any source with markup.
 5. **°C in a neutral item.** D95 decides that the consumer supplies point-or-difference, and that a
    difference in °C is a magnitude in K. An item converted at seeding has already chosen: `37 °C` is
    310.15 K, and `sampled at 5 °C intervals` wants 5 K. Recommended: the item carries the linear
@@ -104,7 +106,6 @@ works on plain text.
   stays; after a space it is a gloss and is dropped, as today.
 - Comparison operators (`<`, `≤`, `>`, `≥`, `=`) survive as symbol tokens classed non-prose, so
   `< −1` reaches no parse rather than the number one. Comparison constructions stay out of v1.
-- The figure-reference guard (decision 4).
 - **Measure** with the current snapshot (no chain change): the parse-rate run over the CNL page and
   the methods, with every changed sentence listed.
 
@@ -119,7 +120,7 @@ works on plain text.
   (`5mg`, `931g`) into `TokenKind::Quantity { value, readings }`. `5-fold` and `53BP1` are not
   quantities.
 - **Tests** on D95's inventory: `931g` has two readings (grams, and 182599823/20000 m·s⁻²); `37 °C`,
-  `2 h`, `5 mg/kg`, `10 μg ml⁻¹`, `10%`; `53BP1`, `HEK293T`, `5-fold` and `Fig. 2d` are not quantities.
+  `2 h`, `5 mg/kg`, `10 μg ml⁻¹`, `10%`; `53BP1`, `HEK293T` and `5-fold` are not quantities.
 - Chain change: the surface vocabulary moves the bootstrap manifest. The reseed waits for slice 5.
 
 ## Slice 4 — `MP` in the grammar, and seeding

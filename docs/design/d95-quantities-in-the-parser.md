@@ -139,8 +139,8 @@ standard gravity takes no prefix, so `mg`, `μg` and `kg` are unambiguously mass
 **Figure panels are the same trap, wider than `g`.** The rule reads the unbracketed `Fig. 2d` in the
 WRN methods as two days, and would read `Fig. 2h` as two hours; panels `a`, `c`, `e` and `f` escape
 only because a prefix alone is not a unit. The nine bracketed references, `(Fig. 2g)` among them,
-are removed by the aside rule before the split runs; the unbracketed ones reach it. See "Open
-questions".
+are removed by the aside rule before the split runs; the unbracketed ones reach it. Deferred to D96;
+see "Decided while planning the implementation".
 
 ## An existing defect the same change repairs
 
@@ -876,16 +876,14 @@ come into D95:
   under the revised non-prose rule. Today such a token seeds nothing and the coverage probe does not
   count it, so the sentence fails with no gap reported. Setting the token aside and parsing the rest
   was the alternative; that parse omits a constituent, which R2 weighs against.
+- **Figure and table references in plain text are deferred to D96's build** (2026-09-26). D95 adds
+  no plain-text rule, so until JATS ingest exists the unbracketed `Fig. 2d` in the WRN methods reads
+  as two days and `Fig. 2h` would read as two hours; ten unbracketed `Fig. N<letter>` references occur
+  there. Bracketed references are still removed as asides. With JATS, a reference is an `<xref>` span
+  the preprocessor treats as one reference token, so the split never sees it; whether plain text
+  still needs a rule — no split directly after a reference word — is decided with that work.
 
 ## Open questions
-
-- **Figure and table references against the numeral/unit split — narrowed by D96.** The unbracketed
-  `Fig. 2d` in the WRN methods would split into two days, as `Fig. 2h` would into two hours; ten
-  unbracketed `Fig. N<letter>` references occur there. D96 adopts JATS as the document model, where
-  a reference is an `<xref>` span the preprocessor treats as one reference token — so for any source
-  with markup (JATS, or TEI from GROBID) the split never sees it. What stays open is plain text with
-  no markup, today's corpus among it: there the likeliest rule is not to split a token directly after
-  a figure or table reference word. Undecided.
 
 - **Arithmetic over the statistics functionals.** Nothing in the `stats:` namespace combines them.
   See "Dispersion splits in two" above; the agreement reading and `mean ± s.e.m.` both stop here.

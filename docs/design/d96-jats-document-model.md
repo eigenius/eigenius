@@ -74,7 +74,7 @@ has to guess.
 | PMC or publisher JATS, where licensed | read directly | marked (`<xref>`) |
 | BioC (NCBI's text-mining form of PMC) | typed passages with offsets | **dropped** — flattened to text |
 | a PDF with no JATS | GROBID → TEI, mapped onto the model | marked (`<ref type="figure">`) |
-| plain text, as today's corpus | none | none — D95's heuristic question remains |
+| plain text, as today's corpus | none | none — D95 defers its fallback rule to this work |
 
 GROBID is the established extractor for scientific PDFs; it would replace the geometric
 `extract-section.py`, which infers from type size what TEI states. Plain text keeps the need for a
@@ -113,3 +113,6 @@ format for fetched documents.
   a hash and offsets into a document fetched separately, or depends on the licence, is undecided.
 - **Which version is canonical** when a paper exists as both version of record and author
   manuscript and they differ in wording.
+- **A plain-text reference rule.** D95 deferred it here: whether text with no markup gets a rule
+  against splitting a token directly after `Fig.`, `Table` or another reference word. Until this is
+  built, the unbracketed `Fig. 2d` in the WRN methods reads as two days.
