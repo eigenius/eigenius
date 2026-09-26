@@ -134,61 +134,64 @@ D96 (JATS) is decided and not built, so every slice works on plain text.
 13. **The skeleton eraser folds long numerals.** A run of four or more digits becomes `§`
     (`dcg/skeleton.rs:44-72`), so two readings that differ only in such a magnitude share a skeleton.
 
-## Slice 1 — lexer and preprocessor, behaviour-preserving
+## Slice 1 — lexer and preprocessor, behaviour-preserving — built
 
 **New modules**
 
 - `dcg/lex.rs`: `pub fn lex(text: &str) -> Vec<Lexeme>`, `Lexeme { span: Range<usize>, class:
-  LexClass }` over byte offsets into `text`, `LexClass = Word | Space | Punct`. Every byte is in one
-  lexeme. A word is a maximal run of non-space, non-separator characters with its leading and
-  trailing non-alphanumerics split off as `Punct` lexemes — so `BRCA1.` is `BRCA1` + `.`, `°C` is `°`
-  + `C`, `0.56` and `WRN's` stay whole, and `-` stays inside a word. `—` `–` `‒` `―` `/`, brackets
-  and `,` are single `Punct` lexemes.
-- `dcg/preprocess.rs`: `pub fn preprocess(text: &str, lexemes: &[Lexeme]) -> Vec<Token>`,
-  `Token { surface: String, span: Range<usize>, kind: TokenKind }`, `TokenKind = Word | Comma |
-  NonProse` in this slice. It reproduces `tokenize` (`dcg/segment.rs:147-182`) decision by decision:
-  bracketed asides and paired em-dash appositives (`:192-217`, including `a(b)c` → `ac` and the
-  unclosed-opener drop, fixed in slice 2), separators, edge trimming, the comma token, dangling commas
-  (`:174-179`), comma runs (`:180`). `NonProse` is today's `is_nonprose` (`:125-128`).
-- `segment.rs` keeps `segment_sentences` (`:79-118`, unchanged by D95); `tokenize`, `is_nonprose`
-  and `strip_bracketed_asides` leave it. The re-export (`dcg/mod.rs:130`) exports `lex`,
-  `preprocess`, `Token`, `TokenKind`.
+  LexClass }` over byte offsets into `text`. `LexClass` is `Word` (a maximal run of
+  `char::is_alphanumeric`), `Space` (a maximal run of `char::is_whitespace`) or `Punct` (one character
+  that is neither). These are the classes the old edge trimming used, so `0.56` is three lexemes, `°C`
+  two, and the preprocessor rejoins them. The spans tile the input.
+- `dcg/preprocess.rs`: `pub fn preprocess(text: &str, lexemes: &[Lexeme]) -> Vec<Token>`, and
+  `pub fn tokenize(text: &str) -> Vec<Token>` composing the two — the entry point keeps its name and
+  now returns tokens.
+  - `Token` has private fields read through `surface()`, `span()` and `kind()`; `TokenKind` is
+    `Word | Comma | NonProse`.
+  - It makes the old tokenizer's five decisions in its order: asides (including `a(b)c` → `ac` and
+    the unclosed-opener drop, fixed in slice 2), paired em-dash appositives, separators, edge trimming,
+    commas. A run of non-separator lexemes becomes a token spanning its first `Word` lexeme to its last.
+  - `NonProse` is the old `is_nonprose` rule.
+  - `join_surfaces(&[Token]) -> String` replaces the `tokens[i..=j].join(" ")` joins.
+- `segment.rs` keeps only `segment_sentences`. `dcg/mod.rs` re-exports `lex`, `Lexeme`, `LexClass`,
+  `preprocess`, `tokenize`, `join_surfaces`, `Token` and `TokenKind`; `is_nonprose` is gone.
 
-**Consumers take `&[Token]`** and read `.surface` where they read text today:
+**Consumers take `&[Token]`** and read `surface()` where they read text:
 
 | consumer | anchor |
 |---|---|
 | `parse_packed_at_cap`, `parse_at_cap` | `dcg/parse/paths.rs:79`, `:256` |
 | `parse_scoped_open_traced`, `routes_packed`, `parse_needs_unpacked` | `dcg/parse/mod.rs:633`, `:690`, `:652` |
-| `recovery_ranks`, `all_prose_tokens_known`, `contextual_sense_ranks` | `dcg/parse/mod.rs:882`, `:954`, `:981` |
+| `recovery_ranks`, `contextual_sense_ranks` | `dcg/parse/mod.rs:882`, `:981` |
 | `seed_leaves`, `distribute_head`, `split_coord_conjuncts` | `dcg/parse/seed.rs:568`, `:758`, `:1231` |
 | `build_forest`, `drive_unpacked` | `dcg/chart/packed.rs:259`, `dcg/chart/unpacked.rs:42` |
 | `binary_sites` and its triggers, `RightContext::after` | `dcg/rules/registry.rs:119-381`, `dcg/rules/mod.rs:69-79` |
 | `ForestAttribution::attribute`, `forest_trace`, `attribution::record` | `dcg/chart/attribute.rs:115`, `dcg/chart/trace.rs:217`, `dcg/attribution.rs:55` |
 | `augment_document_only` (tokenizes the whole document) | `dcg/augment.rs:227` |
-| `unit_sense_names` | `dcg/verbalize.rs:66` |
+| `unit_sense_names` (now skips the comma token, which it used to look up as `""`) | `dcg/verbalize.rs:66` |
 
-`all_prose_tokens_known` filters on `TokenKind::Word` instead of `!is_nonprose`. Joined surfaces
-(`seed.rs:588`, `parse/mod.rs:888`, `:994`) and hole names (`hole_base(i, j)`, `dcg/holes.rs:34`)
-are unchanged, since positions and surfaces are.
+- **`Parser::unknown_words(text, lemmatizer)`** is the missing-lexeme signal, defined once: the word
+  tokens with no entry. `all_prose_tokens_known` is `unknown_words(…).is_empty()`. The twelve filters
+  in `db_backed_encoding.rs` (finding 10 counted ten) and `encoding_prototype.rs`'s `encode_unit` call
+  it instead of repeating `tokenize` + `is_nonprose` + `has_token`.
+- `split_coord_conjuncts` returns the conjuncts' joined surfaces, which its one caller joined anyway.
+- Joined surfaces and hole names (`hole_base(i, j)`, `dcg/holes.rs:34`) are unchanged, since
+  positions and surfaces are.
 
 **Tests**
 
-- The old `tokenize` moves into `preprocess.rs`'s test module as an oracle.
-  `preprocess(s, &lex(s))` surfaces equal the oracle's tokens over:
-  - `segment.rs`'s eight tests (`:222-328`);
-  - every sentence literal in `kernel/tests/closed_class_determiners.rs`;
-  - `methods.txt` and `letter-body.txt` when present, `#[ignore]`d since they are gitignored.
-- Lexer totality: the lexemes' spans tile the input.
-- Migrated callers: `crates/eigenius-wordnet/tests/encoding_prototype.rs` (`encode_unit` `:117`,
-  `encode_doc` `:151`, the non-ignored `prototype_classifies_a_text_document_into_the_four_outcomes`
-  `:353`); `db_backed_encoding.rs` `encode_unit` (`:904-917`) and the nine filters (finding 10);
-  `seed.rs` `rnr_tests` (`:1253-1298`); `attribution.rs:249`; `chart/trace.rs:314-486`.
-- Stale comments corrected: `segment.rs:120` ("lowercased"), `kernel/tests/lexicon_validates.rs:981-982`
-  ("the tokenizer lowercases").
+- `preprocess.rs` holds the old `tokenize` verbatim as an oracle. The preprocessed surfaces and kinds
+  equal it on every string of length ≤ 4 over a 22-character alphabet of every class the old code
+  treated differently (≈245,000 strings), on 20,000 random strings up to length 40, and on prose
+  covering asides, appositives, units and statistics. An `#[ignore]`d test runs it over `methods.txt`
+  and `letter-body.txt`, whole and sentence by sentence; it passes on this checkout.
+- `lex.rs`: the spans tile the input.
+- `segment.rs`'s tokenizer tests moved to `preprocess.rs`; `rnr_tests`, `attribution.rs` and
+  `chart/trace.rs` build their tokens with `tokenize`.
+- Stale comments corrected: `segment.rs`'s "lowercased", `kernel/tests/lexicon_validates.rs`'s
+  "the tokenizer lowercases".
 
-**Chain:** none. **Done when** the oracle tests and the kernel, `eigenius-wordnet` and
-`eigenius-encoding` test suites pass.
+**Chain:** none.
 
 ## Slice 2 — preprocessor rules that change behaviour
 

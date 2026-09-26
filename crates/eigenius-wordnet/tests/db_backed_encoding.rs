@@ -44,10 +44,10 @@ use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::{
     abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
-    is_nonprose, pretty_term, segment_sentences, tokenize, unit_sense_names, verbalize,
-    AbbreviationBinding, DiscourseRun, Identity, InProcessPipeline, Lemmatizer, LexicalIndex,
-    LexicalLookup, LexiconAugmentation, NoAbbreviationProposer, Parser, Pos, Proposal, ProposeCtx,
-    Proposer, SentenceOutcome, Vb,
+    pretty_term, segment_sentences, tokenize, unit_sense_names, verbalize, AbbreviationBinding,
+    DiscourseRun, Identity, InProcessPipeline, Lemmatizer, LexicalIndex, LexicalLookup,
+    LexiconAugmentation, NoAbbreviationProposer, Parser, Pos, Proposal, ProposeCtx, Proposer,
+    SentenceOutcome, Vb,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -903,11 +903,7 @@ const READING_BUCKETS: &[(&str, usize, usize)] = &[
 /// MISSING rather than ENCODED — measure-zero for this corpus, and the OOV signal is still right.)
 fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Layer>) -> Outcome {
     let toks = tokenize(text);
-    let unknown: Vec<String> = toks
-        .iter()
-        .filter(|t| !is_nonprose(t) && !index.has_token(t, lem))
-        .cloned()
-        .collect();
+    let unknown: Vec<String> = index.unknown_words(text, lem);
     if !unknown.is_empty() {
         return Outcome::MissingLexeme { unknown };
     }
@@ -1480,12 +1476,7 @@ fn diagnose_compound_pile() {
     // ROUTING-ONLY (fast: routes_packed does NOT parse; parsing the domain frames explodes/OOMs). The
     // fork — packed vs unpacked — is the Step-0 answer that picks Lever 1 (extend packing) vs Lever 2.
     let row = |idx: &Parser, s: &str| {
-        let toks = tokenize(s);
-        let unk: Vec<String> = toks
-            .iter()
-            .filter(|t| !is_nonprose(t) && !idx.has_token(t, &lem))
-            .cloned()
-            .collect();
+        let unk: Vec<String> = idx.unknown_words(s, &lem);
         let routed = if idx.routes_packed(s, &lem) {
             "PACKED"
         } else {
@@ -1584,12 +1575,7 @@ fn diagnose_residual_gaps() {
         }
     };
     let probe = |idx: &Parser, s: &str| -> String {
-        let toks = tokenize(s);
-        let unk: Vec<String> = toks
-            .iter()
-            .filter(|t| !is_nonprose(t) && !idx.has_token(t, &lem))
-            .cloned()
-            .collect();
+        let unk: Vec<String> = idx.unknown_words(s, &lem);
         if !unk.is_empty() {
             return format!("OOV {unk:?}");
         }
@@ -1691,12 +1677,7 @@ fn diagnose_project_achilles() {
         }
     };
     let probe = |idx: &Parser, s: &str| -> String {
-        let toks = tokenize(s);
-        let unk: Vec<String> = toks
-            .iter()
-            .filter(|t| !is_nonprose(t) && !idx.has_token(t, &lem))
-            .cloned()
-            .collect();
+        let unk: Vec<String> = idx.unknown_words(s, &lem);
         if !unk.is_empty() {
             return format!("OOV {unk:?}");
         }
@@ -2791,11 +2772,7 @@ fn diagnose_first_five_cnl() {
     eprintln!("EXTRAS (of-PP subj / 'alone' / bare-compound object)");
     for f in extras {
         let ft = tokenize(f);
-        let unk: Vec<String> = ft
-            .iter()
-            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
-            .cloned()
-            .collect();
+        let unk: Vec<String> = index.unknown_words(f, &lem);
         if !unk.is_empty() {
             eprintln!(
                 "    [{:>2}t] OOV         {f:?} (unknown: {unk:?})",
@@ -2851,20 +2828,12 @@ fn diagnose_first_five_cnl() {
         eprintln!("SENTENCE: {sentence:?}");
         // token-level OOV
         let toks = tokenize(sentence);
-        let oov: Vec<String> = toks
-            .iter()
-            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
-            .cloned()
-            .collect();
+        let oov: Vec<String> = index.unknown_words(sentence, &lem);
         eprintln!("  tokens: {} | OOV: {oov:?}", toks.len());
         eprintln!("  --- fragment ladder (small→large) ---");
         for f in *ladder {
             let ftoks = tokenize(f);
-            let unknown: Vec<String> = ftoks
-                .iter()
-                .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
-                .cloned()
-                .collect();
+            let unknown: Vec<String> = index.unknown_words(f, &lem);
             if !unknown.is_empty() {
                 eprintln!(
                     "    [{:>2}t] OOV         {f:?}  (unknown: {unknown:?})",
@@ -2962,11 +2931,7 @@ fn diagnose_grammar_gap_fragments() {
         // missed tokens so the genuine grammar gaps (fully-known, still no parse) are not conflated
         // with OOV (e.g. `WRN` is a gene-symbol OOV — its `—` is NOT a predicate-nominal gap, which
         // the small-lexicon `HeLa is a cell line` parse proves the grammar already covers).
-        let unknown: Vec<String> = toks
-            .iter()
-            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
-            .cloned()
-            .collect();
+        let unknown: Vec<String> = index.unknown_words(f, &lem);
         if !unknown.is_empty() {
             eprintln!(
                 "  [{ntok:>2} tok] OOV{:<7} {f:?}  (unknown: {unknown:?})",
@@ -4585,12 +4550,7 @@ fn probe_prep_verb_gap() {
     }
 
     let probe = |label: &str, s: &str| {
-        let toks = tokenize(s);
-        let unknown: Vec<String> = toks
-            .iter()
-            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
-            .cloned()
-            .collect();
+        let unknown: Vec<String> = index.unknown_words(s, &lem);
         if !unknown.is_empty() {
             eprintln!("  [{label:<20}] OOV {unknown:?} :: {s:?}");
             return;
@@ -4721,12 +4681,7 @@ fn probe_comparatives() {
     }
 
     let probe = |label: &str, s: &str| {
-        let toks = tokenize(s);
-        let unknown: Vec<String> = toks
-            .iter()
-            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
-            .cloned()
-            .collect();
+        let unknown: Vec<String> = index.unknown_words(s, &lem);
         if !unknown.is_empty() {
             eprintln!("  [{label:<22}] OOV {unknown:?} :: {s:?}");
             return;
@@ -4814,12 +4769,7 @@ fn probe_gap_tail() {
     }
 
     let probe = |label: &str, s: &str| {
-        let toks = tokenize(s);
-        let unknown: Vec<String> = toks
-            .iter()
-            .filter(|t| !is_nonprose(t) && !index.has_token(t, &lem))
-            .cloned()
-            .collect();
+        let unknown: Vec<String> = index.unknown_words(s, &lem);
         if !unknown.is_empty() {
             eprintln!("  [{label:<24}] OOV {unknown:?} :: {s:?}");
             return;
@@ -4921,12 +4871,7 @@ fn probe_beam_crowding() {
             "WRN dependency may require specific lineages or a stronger mutation phenotype",
         ),
     ] {
-        let toks = tokenize(s);
-        let unknown: Vec<String> = toks
-            .iter()
-            .filter(|t| !is_nonprose(t) && !def.has_token(t, &lem))
-            .cloned()
-            .collect();
+        let unknown: Vec<String> = def.unknown_words(s, &lem);
         if !unknown.is_empty() {
             eprintln!("  [{label:<20}] OOV {unknown:?} (can't test on subset) :: {s:?}");
             continue;

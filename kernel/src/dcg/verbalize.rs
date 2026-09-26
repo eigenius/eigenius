@@ -43,8 +43,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::dcg::preprocess::{tokenize, TokenKind};
 use crate::dcg::pretty::pretty_term;
-use crate::dcg::segment::tokenize;
 use crate::dcg::{Lemmatizer, Parser};
 use crate::layer::Layer;
 use crate::nbe::term::{Exp, Patt};
@@ -64,7 +64,10 @@ pub fn unit_sense_names(
 ) -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
     for tok in tokenize(text) {
-        let tok = tok.trim_matches(|c: char| !c.is_alphanumeric()); // shed attached commas/periods
+        if tok.kind() == TokenKind::Comma {
+            continue;
+        }
+        let tok = tok.surface();
         for (_closed, _cat, sense) in index.debug_form_entries(tok, lem) {
             // `wn:{lemma}.{tag}.{offset}` — split from the RIGHT: offset, tag, then the lemma (which
             // may itself contain '.').

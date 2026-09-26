@@ -36,6 +36,7 @@ use super::super::category::*;
 use super::super::grammar::Grammar;
 use super::super::holes::{freshen_anaphor, hole_base};
 use super::super::item::{Combinator, Item};
+use super::super::preprocess::Token;
 use super::super::reserved::ReservedKind;
 use super::constructions::*;
 
@@ -116,7 +117,7 @@ impl Grammar {
     /// [`Self::parse_needs_unpacked`]; Phase 3 (marker-category nodes) is what lets it join the
     /// registry. Also not here: the categorial rules ([`apply`]), which are sem-blind and need no
     /// token trigger, and the group/distributive rules ([`super::super::item::apply_group`]).
-    pub(crate) fn binary_sites(&self, tokens: &[String], i: usize, j: usize) -> Vec<BinSite> {
+    pub(crate) fn binary_sites(&self, tokens: &[Token], i: usize, j: usize) -> Vec<BinSite> {
         // Interpreter over the rule table (Phase 2c): each [`TokBinRule`] contributes its firing sites
         // via its own `trigger`. Site order across rules is not load-bearing — both drivers build ALL
         // sites, and the forest is a set of edges.
@@ -166,7 +167,7 @@ struct TokBinRule {
     reads_sem: bool,
 }
 
-type TriggerFn = fn(&Grammar, &[String], usize, usize, &mut Vec<BinSite>);
+type TriggerFn = fn(&Grammar, &[Token], usize, usize, &mut Vec<BinSite>);
 type BinBuild = fn(&Grammar, BinRule, &Item, &Item) -> Option<Item>;
 
 /// The discriminant of a [`BinRule`] — a [`BinRule`] carries per-firing data (the coordination
@@ -268,9 +269,9 @@ fn bin_rules() -> &'static [TokBinRule] {
 /// Restrictive relative `[noun] that/which [body]`: a relativizer BETWEEN the operands.
 // `c` is a split-point index used for both operand spans, not just to index `tokens`.
 #[allow(clippy::needless_range_loop)]
-fn trig_relativize(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+fn trig_relativize(g: &Grammar, tokens: &[Token], i: usize, j: usize, out: &mut Vec<BinSite>) {
     for c in (i + 1)..j {
-        if g.reserved.is_relativizer(tokens[c].as_str()) {
+        if g.reserved.is_relativizer(tokens[c].surface()) {
             out.push(BinSite::new((i, c - 1), (c + 1, j), BinRule::Relativize));
         }
     }
@@ -291,9 +292,9 @@ fn trig_relativize(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut
 /// [`super::constructions::complete_coord`] for what the fix requires instead.
 // `c` is a split-point index used for both operand spans, not just to index `tokens`.
 #[allow(clippy::needless_range_loop)]
-fn trig_coordinate(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+fn trig_coordinate(g: &Grammar, tokens: &[Token], i: usize, j: usize, out: &mut Vec<BinSite>) {
     for c in (i + 1)..j {
-        if let Some(op) = g.reserved.coord_connective(tokens[c].as_str()) {
+        if let Some(op) = g.reserved.coord_connective(tokens[c].surface()) {
             out.push(BinSite::new(
                 (i, c - 1),
                 (c + 1, j),
@@ -305,12 +306,13 @@ fn trig_coordinate(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut
 
 /// Contrastive `[O₁] but not [O₂]`: a TWO-token coordinator (`but` + `not`), so the right operand
 /// starts at `c + 2`.
-fn trig_but_not(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+fn trig_but_not(g: &Grammar, tokens: &[Token], i: usize, j: usize, out: &mut Vec<BinSite>) {
     for c in (i + 1)..j {
-        if g.reserved.is(&tokens[c], ReservedKind::ContrastiveBut)
+        if g.reserved
+            .is(tokens[c].surface(), ReservedKind::ContrastiveBut)
             && tokens
                 .get(c + 1)
-                .is_some_and(|t| g.reserved.is(t, ReservedKind::Negator))
+                .is_some_and(|t| g.reserved.is(t.surface(), ReservedKind::Negator))
             && c + 2 <= j
         {
             out.push(BinSite::new((i, c - 1), (c + 2, j), BinRule::ButNot));
@@ -323,16 +325,18 @@ fn trig_but_not(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Ve
 /// the subject- and object-position readings (each is its own rule with its own builder).
 fn appositive_spans(
     g: &Grammar,
-    tokens: &[String],
+    tokens: &[Token],
     i: usize,
     j: usize,
 ) -> Vec<((usize, usize), (usize, usize))> {
     let mut spans = Vec::new();
     for c in (i + 2)..=j {
-        if !g.reserved.is_relativizer(tokens[c].as_str()) || !g.reserved.is_comma(&tokens[c - 1]) {
+        if !g.reserved.is_relativizer(tokens[c].surface())
+            || !g.reserved.is_comma(tokens[c - 1].surface())
+        {
             continue;
         }
-        let body_end = if g.reserved.is_comma(&tokens[j]) {
+        let body_end = if g.reserved.is_comma(tokens[j].surface()) {
             j - 1
         } else {
             j
@@ -344,26 +348,20 @@ fn appositive_spans(
     spans
 }
 
-fn trig_appositive_subj(
-    g: &Grammar,
-    tokens: &[String],
-    i: usize,
-    j: usize,
-    out: &mut Vec<BinSite>,
-) {
+fn trig_appositive_subj(g: &Grammar, tokens: &[Token], i: usize, j: usize, out: &mut Vec<BinSite>) {
     for (ante, body) in appositive_spans(g, tokens, i, j) {
         out.push(BinSite::new(ante, body, BinRule::AppositiveSubj));
     }
 }
 
-fn trig_appositive_obj(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+fn trig_appositive_obj(g: &Grammar, tokens: &[Token], i: usize, j: usize, out: &mut Vec<BinSite>) {
     for (ante, body) in appositive_spans(g, tokens, i, j) {
         out.push(BinSite::new(ante, body, BinRule::AppositiveObj));
     }
 }
 
 /// Close nominal apposition `[head] [name-group]`: ADJACENT operands, every split a candidate.
-fn trig_appose_group(_g: &Grammar, _tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+fn trig_appose_group(_g: &Grammar, _tokens: &[Token], i: usize, j: usize, out: &mut Vec<BinSite>) {
     for m in i..j {
         out.push(BinSite::new((i, m), (m + 1, j), BinRule::ApposeGroup));
     }
@@ -371,17 +369,19 @@ fn trig_appose_group(_g: &Grammar, _tokens: &[String], i: usize, j: usize, out: 
 
 /// Modifier over a coordinated group `[cat_mod] [cat_group]`: ADJACENT operands, every split a
 /// candidate — the same shape as `trig_appose_group`, since both are plain adjacency.
-fn trig_modify_group(_g: &Grammar, _tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+fn trig_modify_group(_g: &Grammar, _tokens: &[Token], i: usize, j: usize, out: &mut Vec<BinSite>) {
     for m in i..j {
         out.push(BinSite::new((i, m), (m + 1, j), BinRule::ModifyGroup));
     }
 }
 
 /// Reciprocal `[group] <TV> each other`: keyed on the TRAILING reserved pair, verb `[s, j-2]`.
-fn trig_reciprocal(g: &Grammar, tokens: &[String], i: usize, j: usize, out: &mut Vec<BinSite>) {
+fn trig_reciprocal(g: &Grammar, tokens: &[Token], i: usize, j: usize, out: &mut Vec<BinSite>) {
     if j >= 3
-        && g.reserved.is(&tokens[j - 1], ReservedKind::ReciprocalEach)
-        && g.reserved.is(&tokens[j], ReservedKind::ReciprocalOther)
+        && g.reserved
+            .is(tokens[j - 1].surface(), ReservedKind::ReciprocalEach)
+        && g.reserved
+            .is(tokens[j].surface(), ReservedKind::ReciprocalOther)
     {
         for s in (i + 1)..=(j - 2) {
             out.push(BinSite::new((i, s - 1), (s, j - 2), BinRule::Reciprocal));

@@ -144,7 +144,7 @@ impl ReservedTable {
     /// lowercasing (2026-07-29) a sentence-initial `That`/`And` arrives capitalised. A reserved
     /// construct is grammar, not vocabulary — its casing carries nothing.
     ///
-    /// [`tokenize`]: super::segment::tokenize
+    /// [`tokenize`]: super::preprocess::tokenize
     pub fn kind(&self, token: &str) -> Option<ReservedKind> {
         self.by_form
             .get(token)

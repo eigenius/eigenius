@@ -567,7 +567,7 @@ impl Parser {
 
     pub(super) fn seed_leaves(
         &self,
-        tokens: &[String],
+        tokens: &[Token],
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
         cap: Option<usize>,
@@ -585,7 +585,7 @@ impl Parser {
         for i in 0..n {
             let last = (i + span_limit).min(n);
             for j in i..last {
-                let surface = tokens[i..=j].join(" ");
+                let surface = join_surfaces(&tokens[i..=j]);
                 for mut it in self.lookup_span(&surface, lemmatizer, scope, cap, ranks) {
                     // Referent-hole freshening (D64): the `lexicon:anaphor` placeholder becomes a
                     // fresh per-occurrence free var (typed `Entity` at felicity).
@@ -623,7 +623,7 @@ impl Parser {
                 }
                 // Degree-modified adverb (`more commonly`): a 2-token transparent sentence adverb.
                 if j == i + 1 {
-                    for it in self.degree_adverb_items(&tokens[i], &tokens[j]) {
+                    for it in self.degree_adverb_items(tokens[i].surface(), tokens[j].surface()) {
                         chart[i][j].push(it);
                     }
                 }
@@ -714,7 +714,7 @@ impl Parser {
             if debug {
                 eprintln!(
                     "  [parse-debug leaf] cell[{i}..{i}] tok={:?} | {}",
-                    tokens[i],
+                    tokens[i].surface(),
                     cell_histogram(&row[i])
                 );
             }
@@ -726,7 +726,7 @@ impl Parser {
                 if want == format!("{i}..{i}") {
                     eprintln!(
                         "  ===== DUMP leaf[{i}..{i}] tok={:?} ({} items, sample 20) =====",
-                        tokens[i],
+                        tokens[i].surface(),
                         row[i].len()
                     );
                     for it in row[i].iter().take(20) {
@@ -757,7 +757,7 @@ impl Parser {
     /// stands — coverage is never reduced.
     fn distribute_head(
         &self,
-        span: &[String],
+        span: &[Token],
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
         cap: Option<usize>,
@@ -767,7 +767,7 @@ impl Parser {
         let Some((head, mods)) = span.split_last() else {
             return Vec::new();
         };
-        let head = head.as_str();
+        let head = head.surface();
         let Some(conjuncts) = split_coord_conjuncts(mods, |t| {
             self.grammar.reserved.coord_connective(t).is_some()
         }) else {
@@ -792,7 +792,7 @@ impl Parser {
         // Bail unless EVERY conjunct yields ≥1 lexicalized concept (first-cut all-lexicalized gate).
         let mut per_conjunct: Vec<Vec<Item>> = Vec::with_capacity(conjuncts.len());
         for c in &conjuncts {
-            let surface = format!("{} {head}", c.join(" "));
+            let surface = format!("{c} {head}");
             let raw = self.lookup_span(&surface, lemmatizer, scope, cap, ranks);
             // The bare-kind NP of each looked-up common noun: `cat_np(C, num)` with sem `kind_of(C)`,
             // built directly — `bare_nominal_shifts` yields the RAISED subject/object forms, not the
@@ -826,10 +826,9 @@ impl Parser {
             per_conjunct.push(kinds);
         }
         // Connective: `or` anywhere → union; else `and` (a comma list finalizes to conjunction).
-        let op = if mods
-            .iter()
-            .any(|t| self.grammar.reserved.coord_connective(t) == Some("urn:eigenius:logic:Or"))
-        {
+        let op = if mods.iter().any(|t| {
+            self.grammar.reserved.coord_connective(t.surface()) == Some("urn:eigenius:logic:Or")
+        }) {
             "urn:eigenius:logic:Or"
         } else {
             "urn:eigenius:logic:And"
@@ -1225,51 +1224,51 @@ pub(super) fn with_noun_num(it: &Item, num_name: &str) -> Item {
 /// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md` §4) — split a candidate
 /// pre-nominal modifier-coordination slice on its connectives into the conjunct token-runs, so the
 /// caller can re-look-up each "conjunct + head" compound in isolation. `is_conn(t)` holds for a
-/// coordination connective (comma / `and` / `or`). Returns the conjunct surfaces ("colon",
-/// "microsatellite-stable"); `None` unless there are ≥2 non-empty conjuncts separated ONLY by
+/// coordination connective (comma / `and` / `or`). Returns the conjunct surfaces, each joined by single
+/// spaces ("colon", "double stranded"); `None` unless there are ≥2 non-empty conjuncts separated ONLY by
 /// connectives — a leading / trailing / doubled connective, or a single conjunct, is not a coordination.
-fn split_coord_conjuncts(
-    tokens: &[String],
-    is_conn: impl Fn(&str) -> bool,
-) -> Option<Vec<Vec<String>>> {
-    let mut conjuncts: Vec<Vec<String>> = vec![Vec::new()];
-    for t in tokens {
-        if is_conn(t) {
-            if conjuncts.last().unwrap().is_empty() {
+fn split_coord_conjuncts(tokens: &[Token], is_conn: impl Fn(&str) -> bool) -> Option<Vec<String>> {
+    let mut conjuncts: Vec<&[Token]> = Vec::new();
+    let mut start = 0;
+    for (k, t) in tokens.iter().enumerate() {
+        if is_conn(t.surface()) {
+            if k == start {
                 return None; // a leading or doubled connective — malformed
             }
-            conjuncts.push(Vec::new());
-        } else {
-            conjuncts.last_mut().unwrap().push(t.clone());
+            conjuncts.push(&tokens[start..k]);
+            start = k + 1;
         }
     }
-    if conjuncts.len() < 2 || conjuncts.last().unwrap().is_empty() {
+    if conjuncts.is_empty() || start == tokens.len() {
         return None; // a single conjunct, or a trailing connective
     }
-    Some(conjuncts)
+    conjuncts.push(&tokens[start..]);
+    Some(conjuncts.into_iter().map(join_surfaces).collect())
 }
 
 #[cfg(test)]
 mod rnr_tests {
     use super::split_coord_conjuncts;
+    use crate::dcg::preprocess::tokenize;
 
-    fn toks(s: &str) -> Vec<String> {
-        s.split_whitespace().map(str::to_string).collect()
-    }
-    // The parser tokenises the comma as its own token; connectives are `,` / `and` / `or`.
+    // The preprocessor makes the comma a token of its own; connectives are `,` / `and` / `or`.
     fn is_conn(t: &str) -> bool {
         matches!(t, "," | "and" | "or")
+    }
+
+    fn split(s: &str) -> Option<Vec<String>> {
+        split_coord_conjuncts(&tokenize(s), is_conn)
     }
 
     #[test]
     fn splits_a_four_way_comma_list() {
         assert_eq!(
-            split_coord_conjuncts(&toks("colon , gastric , endometrial and ovarian"), is_conn),
+            split("colon, gastric, endometrial and ovarian"),
             Some(vec![
-                toks("colon"),
-                toks("gastric"),
-                toks("endometrial"),
-                toks("ovarian")
+                "colon".into(),
+                "gastric".into(),
+                "endometrial".into(),
+                "ovarian".into()
             ])
         );
     }
@@ -1277,23 +1276,20 @@ mod rnr_tests {
     #[test]
     fn or_list_keeps_multitoken_conjuncts() {
         assert_eq!(
-            split_coord_conjuncts(&toks("insertion or deletion"), is_conn),
-            Some(vec![toks("insertion"), toks("deletion")])
+            split("insertion or deletion"),
+            Some(vec!["insertion".into(), "deletion".into()])
         );
         assert_eq!(
-            split_coord_conjuncts(&toks("double stranded or single stranded"), is_conn),
-            Some(vec![toks("double stranded"), toks("single stranded")])
+            split("double stranded or single stranded"),
+            Some(vec!["double stranded".into(), "single stranded".into()])
         );
     }
 
     #[test]
     fn rejects_non_coordinations() {
-        assert_eq!(split_coord_conjuncts(&toks("colon"), is_conn), None);
-        assert_eq!(split_coord_conjuncts(&toks("colon and"), is_conn), None);
-        assert_eq!(split_coord_conjuncts(&toks("and colon"), is_conn), None);
-        assert_eq!(
-            split_coord_conjuncts(&toks("colon and and gastric"), is_conn),
-            None
-        );
+        assert_eq!(split("colon"), None);
+        assert_eq!(split("colon and"), None);
+        assert_eq!(split("and colon"), None);
+        assert_eq!(split("colon and and gastric"), None);
     }
 }

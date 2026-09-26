@@ -35,7 +35,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::{
-    is_nonprose, pretty_term, segment_sentences, tokenize, Item, Lemmatizer, Parser, Pos,
+    pretty_term, segment_sentences, tokenize, Item, Lemmatizer, Parser, Pos, TokenKind,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -120,10 +120,7 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
         0 => {
             // Diagnose: missing lexeme (route S5a) vs grammar gap (route S5b). Non-prose
             // tokens (stats/figure-refs, S0) are routed out — not counted as missing lexemes.
-            let unknown: Vec<String> = tokenize(text)
-                .into_iter()
-                .filter(|t| !is_nonprose(t) && !index.has_token(t, lem))
-                .collect();
+            let unknown = index.unknown_words(text, lem);
             if unknown.is_empty() {
                 Outcome::GrammarGap
             } else {
@@ -233,6 +230,7 @@ fn prototype_over_wrn_first_page() {
     let seed_lem = morphy();
     let seeds: std::collections::BTreeSet<String> = tokenize(&page)
         .into_iter()
+        .map(|t| t.surface().to_string())
         .filter(|t| t.chars().all(|c| c.is_ascii_alphabetic()) && t.len() > 2)
         .flat_map(|t| {
             let mut forms = vec![t.clone()];
@@ -394,8 +392,8 @@ fn prototype_classifies_a_text_document_into_the_four_outcomes() {
 
 // ─── P1 — S0 verification on real WRN prose (uses the DCG engine's S0) ───────────────
 //
-// S0 is now in the engine: `dcg::segment_sentences` (segmentation) + `dcg::is_nonprose`
-// (routing) + the em-dash/slash/bracket splitting folded into `dcg::tokenize`. This test
+// S0 is now in the engine: `dcg::segment_sentences` (segmentation) + `dcg::tokenize` (the D95
+// lexer and preprocessor: em-dash/slash/bracket splitting, and `TokenKind::NonProse`). This test
 // confirms, on the cleaned WRN first page, that the engine S0 fixes the naive over-split
 // (4 paragraphs → 47 units) and routes stats/figure-refs out while keeping gene symbols.
 
@@ -421,12 +419,14 @@ fn p1_s0_cleans_wrn_page() {
     let mut lexset: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for u in &units {
         for t in tokenize(u) {
-            if is_nonprose(&t) {
-                non += 1;
-                routed.insert(t);
-            } else {
+            // Lowercased for the gene checks below: tokens keep the source's case.
+            let surface = t.surface().to_lowercase();
+            if t.kind() == TokenKind::Word {
                 lex += 1;
-                lexset.insert(t);
+                lexset.insert(surface);
+            } else {
+                non += 1;
+                routed.insert(surface);
             }
         }
     }

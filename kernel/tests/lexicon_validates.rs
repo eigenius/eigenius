@@ -978,8 +978,8 @@ fn bridge_composes_general_verb_via_subsumption() {
 #[test]
 fn bridge_is_case_insensitive() {
     let index = Parser::build(build_lexicon());
-    // Upper-cased input still resolves: the index is keyed by lowercased form and
-    // the tokenizer lowercases.
+    // Upper-cased input still resolves: the index is keyed by lowercased form, and lookup
+    // lowercases the surface (tokens keep the source's case).
     let forest = index.parse("HELA DEPENDS ON BRCA1", &Identity);
     assert_eq!(forest.len(), 1, "case-insensitive lookup must still parse");
 }

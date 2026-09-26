@@ -31,6 +31,7 @@ use crate::ontology::iri::Iri;
 use crate::ontology::resource::Value;
 
 use super::super::item::{Combinator, Item};
+use super::super::preprocess::{join_surfaces, Token};
 use super::super::pretty::pretty_term;
 use super::super::rules::registry::BinRule;
 use super::forest::{Edge, Forest, NodeId};
@@ -113,7 +114,7 @@ impl Forest {
     /// report reads `C0018905 "Hemagglutination test" [T059]` instead of an opaque CUI.
     pub(crate) fn attribute(
         &self,
-        tokens: &[String],
+        tokens: &[Token],
         top: &[NodeId],
         readings: &[Item],
         layer: &Layer,
@@ -271,10 +272,10 @@ impl UnitAttribution {
     }
 }
 
-fn span_text(tokens: &[String], i: usize, j: usize) -> String {
+fn span_text(tokens: &[Token], i: usize, j: usize) -> String {
     tokens
         .get(i..=j.min(tokens.len().saturating_sub(1)))
-        .map(|s| s.join(" "))
+        .map(join_surfaces)
         .unwrap_or_default()
 }
 
@@ -652,7 +653,7 @@ mod tests {
 
     #[test]
     fn span_text_joins_and_clamps() {
-        let toks: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
+        let toks = crate::dcg::preprocess::tokenize("a b c d");
         assert_eq!(span_text(&toks, 1, 2), "b c");
         assert_eq!(span_text(&toks, 3, 3), "d");
         assert_eq!(span_text(&toks, 2, 99), "c d"); // out-of-range j clamps, no panic

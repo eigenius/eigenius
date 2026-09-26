@@ -16,7 +16,7 @@
 //!
 //! Four stages, and the last one is the only one that decides anything:
 //!
-//! 1. **tokenize** the input ([`tokenize`]);
+//! 1. **tokenize** the input ([`tokenize`]: [`super::lex`], then [`super::preprocess`]);
 //! 2. **seed** the chart ([`seed`]) — for every token span (bounded by the longest multiword form),
 //!    reduce the surface to candidate lemmas via the [`Lemmatizer`] and look them up in the lexicon.
 //!    A multiword entry (`cell line`, `act on`) seeds its whole span *alongside* the single-token items
@@ -61,7 +61,7 @@ use seed::is_lexicalized_adverb;
 
 use super::grammar::{DetTemplates, Grammar};
 use super::lexicon::{read_description, FormEntries, LexEntry, LexicalIndex, LexicalLookup};
-use super::segment::tokenize;
+use super::preprocess::{join_surfaces, tokenize, Token, TokenKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -651,7 +651,7 @@ impl Parser {
     ///   express it yet.
     fn parse_needs_unpacked(
         &self,
-        tokens: &[String],
+        tokens: &[Token],
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> bool {
@@ -664,12 +664,12 @@ impl Parser {
             if !self
                 .grammar
                 .reserved
-                .is(&tokens[p], ReservedKind::WhRelativizer)
+                .is(tokens[p].surface(), ReservedKind::WhRelativizer)
             {
                 continue;
             }
             if self
-                .lookup_span(&tokens[p - 1], lemmatizer, scope, None, None)
+                .lookup_span(tokens[p - 1].surface(), lemmatizer, scope, None, None)
                 .iter()
                 .any(|it| is_vp_adjunct_prep(it.cat()))
             {
@@ -885,7 +885,7 @@ impl Parser {
         for i in 0..n {
             let last = (i + span_limit).min(n);
             for j in i..last {
-                let surface = tokens[i..=j].join(" ").to_lowercase();
+                let surface = join_surfaces(&tokens[i..=j]).to_lowercase();
                 let mut all: Vec<crate::dcg::lexicon::LexEntry> = Vec::new();
                 for cand in self.candidate_lemmas(&surface, lemmatizer) {
                     all.extend(self.scoped(self.lex.entries_for(&cand), scope));
@@ -949,13 +949,22 @@ impl Parser {
         Some((out, promoted))
     }
 
-    /// Whether every prose token (non-`is_nonprose`) of `text` is lexically known
-    /// ([`Self::has_token`]). Used to gate widen-on-failure: an OOV miss is not a cap miss.
+    /// Whether every word token of `text` is lexically known ([`Self::unknown_words`] is empty).
+    /// Used to gate widen-on-failure: an OOV miss is not a cap miss.
     fn all_prose_tokens_known(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
+        self.unknown_words(text, lemmatizer).is_empty()
+    }
+
+    /// The word tokens of `text` with no lexical entry ([`Self::has_token`]), in order — the
+    /// **missing-lexeme** signal, and the one definition of it: the widen gate reads it, and so do the
+    /// encoding harnesses. A comma or a [`TokenKind::NonProse`] token is not a word, so it is never
+    /// missing.
+    pub fn unknown_words(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<String> {
         tokenize(text)
-            .iter()
-            .filter(|t| !super::is_nonprose(t))
-            .all(|t| self.has_token(t, lemmatizer))
+            .into_iter()
+            .filter(|t| t.kind() == TokenKind::Word && !self.has_token(t.surface(), lemmatizer))
+            .map(|t| t.surface().to_string())
+            .collect()
     }
 
     /// The per-sentence **contextual sense ranking** (GH #97): for each content-word span with
@@ -991,7 +1000,7 @@ impl Parser {
         for i in 0..n {
             let last = (i + span_limit).min(n);
             for j in i..last {
-                let surface = tokens[i..=j].join(" ");
+                let surface = join_surfaces(&tokens[i..=j]);
                 let mut senses: Vec<SenseCandidate> = Vec::new();
                 let mut seen: BTreeSet<String> = BTreeSet::new();
                 // CASE-SENSITIVE ACRONYM MATCH — the SAME filter `lookup_span` applies, and it has to

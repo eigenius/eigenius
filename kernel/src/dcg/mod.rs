@@ -45,11 +45,13 @@ mod grammar;
 mod holes;
 pub mod item;
 pub mod lemmatizer;
+pub mod lex;
 pub mod lexicon;
 pub mod model_config;
 pub mod named_entity;
 pub mod parse;
 pub mod pipeline;
+pub mod preprocess;
 pub mod pretty;
 pub mod proposer_record;
 pub mod reading_ranker;
@@ -98,6 +100,7 @@ pub use glossary::{
 };
 pub use item::{Combinator, Cost, Item};
 pub use lemmatizer::{regular_plural_stem, Identity, Lemmatizer, Pos};
+pub use lex::{lex, LexClass, Lexeme};
 pub use lexicon::{
     entry_to_item, gate_entry, resolve_lexicon_profile, resolve_sem, resolve_sem_value, LexEntry,
     LexicalIndex, LexicalLookup,
@@ -111,6 +114,7 @@ pub use parse::{
 pub use pipeline::{
     DocumentEncoding, DocumentPipeline, InProcessPipeline, PipelineError, SentenceEncoding,
 };
+pub use preprocess::{join_surfaces, preprocess, tokenize, Token, TokenKind};
 pub use pretty::pretty_term;
 pub use proposer_record::{
     ProposalRecord, RecordedProposalCandidate, RecordingProposer, ReplayProposer,
@@ -127,7 +131,7 @@ pub use rules::constructions::{
     distribute_object, kind_subject, reciprocate, relativize, type_raise,
 };
 pub use rules::RightContext;
-pub use segment::{is_nonprose, segment_sentences, tokenize};
+pub use segment::segment_sentences;
 #[cfg(feature = "use-llm")]
 pub use sense_ranker::AnthropicSenseRanker;
 pub use sense_ranker::{
