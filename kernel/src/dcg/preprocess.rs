@@ -15,20 +15,28 @@
 //! D95 — the preprocessor: lexemes → the tokens the parser seeds from.
 //!
 //! [`super::lex`] deletes nothing, so every decision about the token stream is made here, in one
-//! place, where it used to be fused into the tokenizer. These are the decisions the fused tokenizer
-//! made (D62 S0), in its order:
+//! place, in this order:
 //!
-//! 1. **Bracketed asides.** `(…)`, `[…]` and `{…}`, depth-aware and brackets included, are dropped —
-//!    an abbreviation gloss (`microsatellite instability (MSI)`), a figure reference (`(Fig. 1a)`).
-//!    Nothing takes their place, so `a(b)c` is `ac`, and an unclosed opener drops the rest of the text.
+//! 1. **Brackets.** Each closer pairs with the latest open opener, whatever the bracket types.
+//!    - A pair whose opener follows a word lexeme directly is an **argument** — `log2(copy number)`,
+//!      `poly(ADP-ribose)`: its content stays, and its brackets become [`TokenKind::NonProse`]
+//!      tokens, so the sentence reaches no parse rather than a parse without the argument.
+//!    - Any other pair is a **gloss** — `microsatellite instability (MSI)`, `(Fig. 1a)` — and is
+//!      dropped with its content, leaving a separator (D62 S0).
+//!    - An unmatched opener or closer is a `NonProse` token, and the text around it stays.
 //! 2. **Paired em-dash appositives.** With an even number (at least two) of U+2014, the odd segments
 //!    and the dashes are dropped and the rest joined; a lone em-dash stays a separator.
 //! 3. **Separators.** Whitespace, `—`, `–`, `‒`, `―` and `/` end a token. A comma is a token of its
-//!    own, so list coordination can key on it.
+//!    own, so list coordination can key on it — except between a digit group and exactly three digits
+//!    (`1,200`), where it groups digits.
 //! 4. **Edge trimming.** Leading and trailing non-alphanumerics are dropped, and a token left empty is
-//!    dropped with them.
+//!    dropped with them, with two exceptions: an operator (`<`, `≤`, `=`, `±`, `×`, …) becomes a
+//!    `NonProse` token of its own, and a sign directly before a numeral joins it (`−1`).
 //! 5. **Commas.** Leading and trailing commas are dropped and a run collapses to one: a comma separates
 //!    content tokens, and a stray one would block a full-span parse.
+//! 6. **Kinds.** A numeral is [`TokenKind::Numeral`]. A token that starts with a digit and is not one
+//!    (`53BP1`, `5-fold`, `1a`) is a [`TokenKind::Word`], so a lexicon without it reports it missing
+//!    (D95, decision 3). A token with no ASCII letter is `NonProse`.
 //!
 //! **Case is preserved.** Consumers fold where they need a lowercase key ([`Parser::has_token`],
 //! `lookup_span`, the [`Lemmatizer`], `ReservedTable::kind`, `rank_key`); `all_caps_symbol` needs the
@@ -40,6 +48,7 @@
 use std::ops::Range;
 
 use super::lex::{lex, LexClass, Lexeme};
+use crate::numeric::Rational;
 
 /// One token of a sentence, as the parser sees it: a chart position.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,16 +59,18 @@ pub struct Token {
 }
 
 /// What a token is to the parser.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
-    /// A token the lexicon is asked about.
+    /// A token the lexicon is asked about. With no entry it is a missing lexeme.
     Word,
     /// The list separator `,`. It has no lexical entry; coordination, apposition and comma absorption
     /// key on its position.
     Comma,
-    /// A token that starts with a digit or carries no ASCII letter — `0.56`, `398`, `1a`, `10−13`: a
-    /// number, a statistic or a figure panel (D62 S0). It is not a missing lexeme when the lexicon does
-    /// not know it, and it still reaches the chart, where it seeds whatever the lexicon has for it.
+    /// A number, exactly: `37`, `0.56`, `−1`, `1,200`.
+    Numeral(Rational),
+    /// A token the grammar has no reading for and the lexicon is not expected to know: an operator
+    /// (`<`, `=`, `±`), a bracket kept around an argument or left unmatched, a token with no ASCII
+    /// letter (`μ`).
     NonProse,
 }
 
@@ -71,13 +82,21 @@ impl Token {
     }
 
     /// Byte offsets of the token in the text it was preprocessed from, from its first kept lexeme to
-    /// its last — so an aside dropped inside a token is inside its span.
+    /// its last.
     pub fn span(&self) -> Range<usize> {
         self.span.clone()
     }
 
-    pub fn kind(&self) -> TokenKind {
-        self.kind
+    pub fn kind(&self) -> &TokenKind {
+        &self.kind
+    }
+
+    pub fn is_word(&self) -> bool {
+        self.kind == TokenKind::Word
+    }
+
+    pub fn is_comma(&self) -> bool {
+        self.kind == TokenKind::Comma
     }
 }
 
@@ -101,22 +120,28 @@ pub fn tokenize(text: &str) -> Vec<Token> {
 
 /// Preprocess `lexemes`, which [`lex`] made from `text`.
 pub fn preprocess(text: &str, lexemes: &[Lexeme]) -> Vec<Token> {
-    let kept = drop_asides(text, lexemes);
-    let pieces = drop_appositives(text, &kept);
+    let pieces = drop_appositives(text, resolve_brackets(text, lexemes));
 
     let mut tokens: Vec<Token> = Vec::new();
     let mut run: Vec<&Lexeme> = Vec::new();
-    for piece in pieces {
+    for (k, piece) in pieces.iter().enumerate() {
         let lexeme = match piece {
             Piece::Break => {
                 flush(text, &mut run, &mut tokens);
                 continue;
             }
-            Piece::Lexeme(l) => l,
+            Piece::Symbol(l) => {
+                flush(text, &mut run, &mut tokens);
+                tokens.push(symbol(text, l));
+                continue;
+            }
+            Piece::Lexeme(l) => *l,
         };
         let s = lexeme.text(text);
         if lexeme.class == LexClass::Space || is_separator(s) {
             flush(text, &mut run, &mut tokens);
+        } else if s == "," && groups_digits(text, &run, pieces.get(k + 1)) {
+            run.push(lexeme);
         } else if s == "," {
             flush(text, &mut run, &mut tokens);
             tokens.push(Token {
@@ -131,95 +156,230 @@ pub fn preprocess(text: &str, lexemes: &[Lexeme]) -> Vec<Token> {
     flush(text, &mut run, &mut tokens);
 
     // Decision 5: a comma only separates content tokens.
-    let is_comma = |t: &Token| t.kind == TokenKind::Comma;
     let start = tokens
         .iter()
-        .position(|t| !is_comma(t))
+        .position(|t| !t.is_comma())
         .unwrap_or(tokens.len());
     tokens.drain(..start);
-    while tokens.last().is_some_and(is_comma) {
+    while tokens.last().is_some_and(Token::is_comma) {
         tokens.pop();
     }
-    tokens.dedup_by(|a, b| is_comma(a) && is_comma(b));
+    tokens.dedup_by(|a, b| a.is_comma() && b.is_comma());
     tokens
 }
 
-/// A kept lexeme, or the separator that joins the segments left by dropping an appositive.
+/// A lexeme to consider, a separator left where a gloss or appositive was dropped, or a lexeme that
+/// is a token of its own (a kept or unmatched bracket).
 enum Piece<'a> {
     Lexeme(&'a Lexeme),
     Break,
+    Symbol(&'a Lexeme),
 }
 
-/// Decision 1: drop every lexeme inside brackets, and the brackets.
-fn drop_asides<'a>(text: &str, lexemes: &'a [Lexeme]) -> Vec<&'a Lexeme> {
-    let mut depth = 0u32;
-    let mut kept = Vec::with_capacity(lexemes.len());
-    for l in lexemes {
-        match l.text(text) {
-            "(" | "[" | "{" => depth += 1,
-            ")" | "]" | "}" => depth = depth.saturating_sub(1),
-            _ if depth == 0 => kept.push(l),
-            _ => {}
+fn is_opener(s: &str) -> bool {
+    matches!(s, "(" | "[" | "{")
+}
+
+fn is_closer(s: &str) -> bool {
+    matches!(s, ")" | "]" | "}")
+}
+
+/// Decision 1.
+fn resolve_brackets<'a>(text: &str, lexemes: &'a [Lexeme]) -> Vec<Piece<'a>> {
+    let mut partner: Vec<Option<usize>> = vec![None; lexemes.len()];
+    let mut open: Vec<usize> = Vec::new();
+    for (i, l) in lexemes.iter().enumerate() {
+        let s = l.text(text);
+        if is_opener(s) {
+            open.push(i);
+        } else if is_closer(s) {
+            if let Some(o) = open.pop() {
+                partner[o] = Some(i);
+                partner[i] = Some(o);
+            }
         }
     }
-    kept
+    let mut out = Vec::with_capacity(lexemes.len());
+    let mut i = 0;
+    while i < lexemes.len() {
+        let l = &lexemes[i];
+        let s = l.text(text);
+        if is_opener(s) {
+            let argument = i > 0 && lexemes[i - 1].class == LexClass::Word;
+            match partner[i] {
+                Some(close) if !argument => {
+                    out.push(Piece::Break);
+                    i = close + 1;
+                    continue;
+                }
+                _ => out.push(Piece::Symbol(l)),
+            }
+        } else if is_closer(s) {
+            // A gloss's closer was skipped with it, so this closes an argument or nothing.
+            out.push(Piece::Symbol(l));
+        } else {
+            out.push(Piece::Lexeme(l));
+        }
+        i += 1;
+    }
+    out
 }
 
 const EM_DASH: &str = "\u{2014}";
 
 /// Decision 2: with an even number of em-dashes, drop the odd segments and the dashes.
-fn drop_appositives<'a>(text: &str, kept: &[&'a Lexeme]) -> Vec<Piece<'a>> {
-    let dashes = kept.iter().filter(|l| l.text(text) == EM_DASH).count();
+fn drop_appositives<'a>(text: &str, pieces: Vec<Piece<'a>>) -> Vec<Piece<'a>> {
+    let is_dash = |p: &Piece| matches!(p, Piece::Lexeme(l) if l.text(text) == EM_DASH);
+    let dashes = pieces.iter().filter(|p| is_dash(p)).count();
     if dashes < 2 || !dashes.is_multiple_of(2) {
-        return kept.iter().map(|l| Piece::Lexeme(l)).collect();
+        return pieces;
     }
-    let mut out = Vec::with_capacity(kept.len());
+    let mut out = Vec::with_capacity(pieces.len());
     let mut segment = 0usize;
-    for l in kept {
-        if l.text(text) == EM_DASH {
+    for p in pieces {
+        if is_dash(&p) {
             segment += 1;
             if segment.is_multiple_of(2) {
                 out.push(Piece::Break);
             }
         } else if segment.is_multiple_of(2) {
-            out.push(Piece::Lexeme(l));
+            out.push(p);
         }
     }
     out
 }
 
-/// Decision 3's separators other than whitespace and the comma. (Brackets are gone by decision 1.)
+/// Decision 3's separators other than whitespace and the comma.
 fn is_separator(s: &str) -> bool {
     matches!(s, "—" | "–" | "‒" | "―" | "/")
 }
 
-/// Close the current run as a token. Decision 4: it spans its first word lexeme to its last, so the
-/// non-alphanumeric lexemes at its edges are trimmed; a run with no word lexeme is dropped.
+fn is_digits(text: &str, l: &Lexeme) -> bool {
+    l.class == LexClass::Word && l.text(text).bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Whether a comma after `run` groups digits: the run from its first word lexeme is digit groups
+/// separated by commas — the first of one to three digits, the rest of three — and the next piece
+/// is exactly three digits.
+fn groups_digits(text: &str, run: &[&Lexeme], next: Option<&Piece>) -> bool {
+    let Some(Piece::Lexeme(next)) = next else {
+        return false;
+    };
+    if !is_digits(text, next) || next.text(text).len() != 3 {
+        return false;
+    }
+    let Some(first) = run.iter().position(|l| l.class == LexClass::Word) else {
+        return false;
+    };
+    let body = &run[first..];
+    body.iter().enumerate().all(|(k, l)| {
+        if k % 2 == 1 {
+            return l.text(text) == ",";
+        }
+        let n = l.text(text).len();
+        is_digits(text, l) && if k == 0 { (1..=3).contains(&n) } else { n == 3 }
+    }) && body.len() % 2 == 1
+}
+
+/// A symbol that states a relation or an operation, which edge trimming must not drop: dropping it
+/// turns `< −1` into the number `−1`.
+fn is_operator(s: &str) -> bool {
+    matches!(
+        s,
+        "<" | ">" | "≤" | "≥" | "=" | "≠" | "≈" | "~" | "±" | "×" | "\u{2212}"
+    )
+}
+
+fn is_sign(s: &str) -> bool {
+    matches!(s, "-" | "\u{2212}")
+}
+
+fn symbol(text: &str, l: &Lexeme) -> Token {
+    Token {
+        surface: l.text(text).to_string(),
+        span: l.span.clone(),
+        kind: TokenKind::NonProse,
+    }
+}
+
+/// Close the current run. Decision 4: the token spans its first word lexeme to its last, taking a
+/// sign directly before a numeral; operators at its edges become tokens of their own; the other
+/// non-alphanumerics at its edges are dropped, and a run with no word lexeme leaves only its operators.
 fn flush(text: &str, run: &mut Vec<&Lexeme>, tokens: &mut Vec<Token>) {
     let first = run.iter().position(|l| l.class == LexClass::Word);
     let last = run.iter().rposition(|l| l.class == LexClass::Word);
-    if let (Some(first), Some(last)) = (first, last) {
-        let kept = &run[first..=last];
-        let surface: String = kept.iter().map(|l| l.text(text)).collect();
-        let kind = if is_nonprose(&surface) {
-            TokenKind::NonProse
-        } else {
-            TokenKind::Word
-        };
-        tokens.push(Token {
-            span: kept[0].span.start..kept[kept.len() - 1].span.end,
-            surface,
-            kind,
-        });
+    let (Some(first), Some(last)) = (first, last) else {
+        for l in run.iter().filter(|l| is_operator(l.text(text))) {
+            tokens.push(symbol(text, l));
+        }
+        run.clear();
+        return;
+    };
+    let concat = |ls: &[&Lexeme]| -> String { ls.iter().map(|l| l.text(text)).collect() };
+    let signed = first > 0
+        && is_sign(run[first - 1].text(text))
+        && numeral_value(&concat(&run[first - 1..=last])).is_some();
+    let start = if signed { first - 1 } else { first };
+    for l in run[..start].iter().filter(|l| is_operator(l.text(text))) {
+        tokens.push(symbol(text, l));
+    }
+    let surface = concat(&run[start..=last]);
+    let kind = match numeral_value(&surface) {
+        Some(value) => TokenKind::Numeral(value),
+        None if surface.starts_with(|c: char| c.is_ascii_digit()) => TokenKind::Word,
+        None if !surface.chars().any(|c| c.is_ascii_alphabetic()) => TokenKind::NonProse,
+        None => TokenKind::Word,
+    };
+    tokens.push(Token {
+        span: run[start].span.start..run[last].span.end,
+        surface,
+        kind,
+    });
+    for l in run[last + 1..].iter().filter(|l| is_operator(l.text(text))) {
+        tokens.push(symbol(text, l));
     }
     run.clear();
 }
 
-/// A number, statistic or figure panel: it starts with a digit or carries no ASCII letter. Gene-like
-/// letter+digit symbols (`MLH1`, `BRCA1`) start with a letter and are words.
-fn is_nonprose(surface: &str) -> bool {
-    let first = surface.chars().next().unwrap_or(' ');
-    first.is_ascii_digit() || !surface.chars().any(|c| c.is_ascii_alphabetic())
+/// The value of a numeral: an optional sign (`-`, `−`), digits — plain, or grouped by commas in
+/// threes — and an optional decimal part. `None` for anything else, including a numeral too large to
+/// admit exactly.
+fn numeral_value(s: &str) -> Option<Rational> {
+    let (negative, body) = match s.strip_prefix('-').or_else(|| s.strip_prefix('\u{2212}')) {
+        Some(rest) => (true, rest),
+        None => (false, s),
+    };
+    let (int, frac) = match body.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (body, None),
+    };
+    let all_digits = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    let mut groups = int.split(',');
+    let head = groups.next()?;
+    let rest: Vec<&str> = groups.collect();
+    let grouped = !rest.is_empty();
+    if !all_digits(head)
+        || (grouped && head.len() > 3)
+        || !rest.iter().all(|g| all_digits(g) && g.len() == 3)
+    {
+        return None;
+    }
+    if frac.is_some_and(|f| !all_digits(f)) {
+        return None;
+    }
+    let mut normal = String::with_capacity(s.len());
+    if negative {
+        normal.push('-');
+    }
+    normal.push_str(head);
+    for g in rest {
+        normal.push_str(g);
+    }
+    if let Some(f) = frac {
+        normal.push('.');
+        normal.push_str(f);
+    }
+    Rational::parse_decimal(&normal).ok()
 }
 
 #[cfg(test)]
@@ -231,6 +391,10 @@ mod tests {
             .into_iter()
             .map(|t| t.surface().to_string())
             .collect()
+    }
+
+    fn rat(s: &str) -> Rational {
+        Rational::parse_decimal(s).unwrap()
     }
 
     #[test]
@@ -261,48 +425,139 @@ mod tests {
     }
 
     #[test]
-    fn drops_bracketed_asides() {
+    fn drops_glosses_and_appositives() {
         assert_eq!(
             surfaces("microsatellite instability (MSI) results"),
             ["microsatellite", "instability", "results"]
-        );
-        assert_eq!(
-            surfaces("poly(ADP(x)-ribose) polymerase"),
-            ["poly", "polymerase"]
         );
         assert_eq!(
             surfaces("lethality\u{2014}an interaction here\u{2014}can be exploited"),
             ["lethality", "can", "be", "exploited"]
         );
         assert_eq!(surfaces("not\u{2014}can"), ["not", "can"]);
+        // A dropped gloss leaves a separator.
+        assert_eq!(surfaces("x.(y)z"), ["x", "z"]);
     }
 
     #[test]
-    fn kinds_follow_the_nonprose_rule() {
-        for stat in ["10", "0.56", "1a", "398", "45", "10−13"] {
-            assert_eq!(tokenize(stat)[0].kind(), TokenKind::NonProse, "{stat}");
+    fn keeps_an_argument_and_its_brackets() {
+        let toks = tokenize("log2(copy number) < -1");
+        assert_eq!(
+            toks.iter().map(Token::surface).collect::<Vec<_>>(),
+            ["log2", "(", "copy", "number", ")", "<", "-1"]
+        );
+        assert_eq!(toks[1].kind(), &TokenKind::NonProse);
+        assert_eq!(toks[4].kind(), &TokenKind::NonProse);
+        assert_eq!(toks[5].kind(), &TokenKind::NonProse);
+        assert_eq!(toks[6].kind(), &TokenKind::Numeral(rat("-1")));
+        assert_eq!(
+            surfaces("poly(ADP-ribose) polymerase"),
+            ["poly", "(", "ADP-ribose", ")", "polymerase"]
+        );
+        // A gloss inside an argument is still dropped.
+        assert_eq!(
+            surfaces("log2(copy number (CN))"),
+            ["log2", "(", "copy", "number", ")"]
+        );
+    }
+
+    #[test]
+    fn an_unmatched_bracket_is_a_token_and_the_text_stays() {
+        assert_eq!(
+            surfaces("unclosed (aside runs on"),
+            ["unclosed", "(", "aside", "runs", "on"]
+        );
+        assert_eq!(surfaces("a stray ) closer"), ["a", "stray", ")", "closer"]);
+    }
+
+    #[test]
+    fn numerals() {
+        for (text, value) in [
+            ("37", "37"),
+            ("0.56", "0.56"),
+            ("-1", "-1"),
+            ("\u{2212}1", "-1"),
+            ("1,200", "1200"),
+            ("12,345,678.5", "12345678.5"),
+            ("at 30.", "30"),
+        ] {
+            let toks = tokenize(text);
+            let last = toks.last().unwrap();
+            assert_eq!(last.kind(), &TokenKind::Numeral(rat(value)), "{text:?}");
         }
-        for word in ["MLH1", "msh2", "BRCA1", "PARP", "WRN", "helicase"] {
-            assert_eq!(tokenize(word)[0].kind(), TokenKind::Word, "{word}");
+        // A comma that does not group digits separates.
+        assert_eq!(
+            surfaces("genes 1,2 and 3"),
+            ["genes", "1", ",", "2", "and", "3"]
+        );
+        assert_eq!(surfaces("1,2345"), ["1", ",", "2345"]);
+        assert_eq!(surfaces("1234,567"), ["1234", ",", "567"]);
+        // A hyphen inside a token is not a sign.
+        assert_eq!(tokenize("5-3")[0].kind(), &TokenKind::Word);
+    }
+
+    #[test]
+    fn a_digit_initial_token_that_is_not_a_numeral_is_a_word() {
+        for word in [
+            "53BP1",
+            "5-fold",
+            "1a",
+            "0.56-fold",
+            "10\u{207b}\u{b9}\u{b3}",
+            "45-60",
+        ] {
+            assert_eq!(tokenize(word)[0].kind(), &TokenKind::Word, "{word}");
         }
-        assert_eq!(tokenize("a, b")[1].kind(), TokenKind::Comma);
+        for word in ["MLH1", "BRCA1", "WRN", "HEK293T"] {
+            assert_eq!(tokenize(word)[0].kind(), &TokenKind::Word, "{word}");
+        }
+    }
+
+    #[test]
+    fn operators_are_tokens_of_their_own() {
+        let toks = tokenize("P = 4.2 × 10, n ≈ ~5 and 5 ± 1");
+        assert_eq!(
+            toks.iter().map(Token::surface).collect::<Vec<_>>(),
+            ["P", "=", "4.2", "×", "10", ",", "n", "≈", "~", "5", "and", "5", "±", "1"]
+        );
+        for i in [1, 3, 7, 8, 12] {
+            assert_eq!(
+                toks[i].kind(),
+                &TokenKind::NonProse,
+                "{}",
+                toks[i].surface()
+            );
+        }
+        // Inside a token an operator stays in it.
+        assert_eq!(surfaces("P<0.05"), ["P<0.05"]);
+        // `<−1`: the operator splits off and the sign joins the numeral.
+        let toks = tokenize("<\u{2212}1");
+        assert_eq!(toks[0].surface(), "<");
+        assert_eq!(toks[1].kind(), &TokenKind::Numeral(rat("-1")));
+    }
+
+    #[test]
+    fn kinds() {
+        assert_eq!(tokenize("μ")[0].kind(), &TokenKind::NonProse);
+        assert_eq!(tokenize("helicase")[0].kind(), &TokenKind::Word);
+        assert_eq!(tokenize("a, b")[1].kind(), &TokenKind::Comma);
     }
 
     #[test]
     fn a_span_reaches_back_into_the_text() {
-        let text = "Cells, at 37 °C (MSI) a(b)c";
+        let text = "Cells, at 37 °C (MSI) log(x)";
         let toks = tokenize(text);
         assert_eq!(
             toks.iter().map(|t| &text[t.span()]).collect::<Vec<_>>(),
-            ["Cells", ",", "at", "37", "C", "a(b)c"]
+            ["Cells", ",", "at", "37", "C", "log", "(", "x", ")"]
         );
-        assert_eq!(toks[5].surface(), "ac");
     }
 
-    // ── The differential oracle ─────────────────────────────────────────────────────────────────
-    // `legacy_tokenize` is `segment::tokenize` as it stood before D95 split lexing from preprocessing,
-    // verbatim. Slice 1 is behaviour-preserving, so the preprocessed surfaces must equal it on every
-    // input. Slice 2 changes behaviour and retires the oracle.
+    // ── The legacy tokenizer ────────────────────────────────────────────────────────────────────
+    // `segment::tokenize` as it stood before D95 split lexing from preprocessing, verbatim. Slice 1
+    // equalled it on every input. Slice 2 changes brackets, operators, signs, digit grouping and
+    // kinds, so it is an oracle only over text with none of those; over the WRN texts it is the
+    // reference the changes are listed against.
 
     fn legacy_tokenize(text: &str) -> Vec<String> {
         let mut spaced = String::with_capacity(text.len());
@@ -360,10 +615,13 @@ mod tests {
         }
     }
 
-    fn legacy_is_nonprose(token: &str) -> bool {
-        let first = token.chars().next().unwrap_or(' ');
-        first.is_ascii_digit() || !token.chars().any(|c| c.is_ascii_alphabetic())
-    }
+    /// Every character class the old tokenizer treated differently, less the ones slice 2 changes:
+    /// no digit, no bracket, no operator. (A combining mark and `μ` are letterless, so they exercise
+    /// `NonProse`.)
+    const ALPHABET: &[char] = &[
+        'a', 'B', ' ', '\u{a0}', ',', '\u{2014}', '–', '‒', '―', '/', '-', '.', '°', '\u{301}',
+        'μ', '\'',
+    ];
 
     fn assert_matches_legacy(text: &str) {
         let toks = tokenize(text);
@@ -372,25 +630,16 @@ mod tests {
         for t in &toks {
             let kind = match t.surface() {
                 "," => TokenKind::Comma,
-                s if legacy_is_nonprose(s) => TokenKind::NonProse,
+                s if !s.chars().any(|c| c.is_ascii_alphabetic()) => TokenKind::NonProse,
                 _ => TokenKind::Word,
             };
-            assert_eq!(t.kind(), kind, "{text:?}: {:?}", t.surface());
+            assert_eq!(t.kind(), &kind, "{text:?}: {:?}", t.surface());
         }
     }
 
-    /// Every character class the old tokenizer treated differently: letters, digits, whitespace
-    /// (including a no-break space), each separator, each bracket, the comma, edge punctuation, a
-    /// combining mark, and a non-ASCII letter and digit.
-    const ALPHABET: &[char] = &[
-        'a', 'B', '1', ' ', '\u{a0}', ',', '(', ')', '[', '}', '\u{2014}', '–', '‒', '―', '/', '-',
-        '.', '°', '\u{301}', 'μ', '¹', '\'',
-    ];
-
     #[test]
-    fn matches_the_legacy_tokenizer_on_every_string_up_to_length_four() {
+    fn matches_the_legacy_tokenizer_where_slice_2_changes_nothing() {
         let n = ALPHABET.len();
-        let mut total = 0usize;
         for len in 0..=4u32 {
             for mut code in 0..n.pow(len) {
                 let mut s = String::new();
@@ -399,15 +648,8 @@ mod tests {
                     code /= n;
                 }
                 assert_matches_legacy(&s);
-                total += 1;
             }
         }
-        assert_eq!(total, (0..=4u32).map(|l| n.pow(l)).sum::<usize>());
-    }
-
-    #[test]
-    fn matches_the_legacy_tokenizer_on_long_random_strings() {
-        // A fixed LCG, so a failure reproduces.
         let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
         let mut next = || {
             state = state
@@ -417,36 +659,16 @@ mod tests {
         };
         for _ in 0..20_000 {
             let len = next() % 40;
-            let s: String = (0..len)
-                .map(|_| ALPHABET[next() % ALPHABET.len()])
-                .collect();
+            let s: String = (0..len).map(|_| ALPHABET[next() % n]).collect();
             assert_matches_legacy(&s);
         }
     }
 
-    #[test]
-    fn matches_the_legacy_tokenizer_on_prose() {
-        for s in [
-            "HeLa depends on BRCA1.",
-            "These classifications were highly concordant with PCR-based MSI phenotyping and with predicted MMR deficiency.",
-            "Germline mutations in the MMR genes (MLH1, MSH2, MSH6 and PMS2) cause Lynch syndrome.",
-            "lethality\u{2014}an interaction in which the loss of either gene is tolerated\u{2014}can be exploited",
-            "…the plates were spun at 931g for 2 h at 30 °C (Fig. 2g).",
-            "a dose of 5 mg/dL, 20–30% and 0.56-fold; log2(copy number) < -1",
-            "P = 4.2 × 10⁻¹³, 45-60% of such cancers, 10 μg ml⁻¹ of gentamicin",
-            "unclosed (aside runs to the end",
-            "stray ) closer and {mixed] brackets",
-            "colon, gastric, endometrial and ovarian cancers",
-            "WRN , which is a helicase , affects HeLa",
-        ] {
-            assert_matches_legacy(s);
-        }
-    }
-
-    /// The gitignored WRN texts, sentence by sentence and whole, when a checkout has them.
+    /// Every WRN sentence whose token stream slice 2 changes, with the legacy stream beside it.
+    /// Run with `--ignored --nocapture`; it reads the gitignored texts under `references/`.
     #[test]
     #[ignore = "reads the gitignored WRN texts under references/"]
-    fn matches_the_legacy_tokenizer_on_the_wrn_texts() {
+    fn list_the_wrn_sentences_slice_2_changes() {
         let dir = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../references/publications/WRN-Helicase-Nature-OCR"
@@ -454,10 +676,36 @@ mod tests {
         for name in ["methods.txt", "letter-body.txt"] {
             let path = format!("{dir}/{name}");
             let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
-            assert_matches_legacy(&text);
-            for s in super::super::segment::segment_sentences(&text) {
-                assert_matches_legacy(&s);
+            let sentences = super::super::segment::segment_sentences(&text);
+            let mut changed = 0;
+            for s in &sentences {
+                let now = tokenize(s);
+                let was = legacy_tokenize(s);
+                if now
+                    .iter()
+                    .map(Token::surface)
+                    .ne(was.iter().map(String::as_str))
+                {
+                    changed += 1;
+                    println!("\n{name}: {s}");
+                    println!("  was: {}", was.join(" "));
+                    println!(
+                        "  now: {}",
+                        now.iter()
+                            .map(|t| match t.kind() {
+                                TokenKind::Numeral(_) => format!("#{}", t.surface()),
+                                TokenKind::NonProse => format!("!{}", t.surface()),
+                                _ => t.surface().to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    );
+                }
             }
+            println!(
+                "\n{name}: {changed} of {} sentences changed",
+                sentences.len()
+            );
         }
     }
 }

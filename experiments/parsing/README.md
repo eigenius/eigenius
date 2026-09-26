@@ -237,9 +237,10 @@ Each sentence unit is classified:
 | `OPEN` | parses, but a proposition is left open |
 | `GRAMMAR-GAP` | no parse: every word is known, but nothing composes (**a coverage failure**) |
 | `MISSING-LEXEME` | no parse: a word is out of vocabulary (**a lexicon failure**) |
+| `NON-PROSE` | no parse: every word is known, but a numeral or symbol seeds nothing (D95; until quantities seed, any unit with a number) |
 | `SCALE-BOUND` | skipped: beyond the length bound (>60 tok) |
 
-**Coverage gate:** `grammar-gap 0` and `missing-lexeme 0` — every sentence parses. NON-NEGOTIABLE.
+**Coverage gate:** `grammar-gap 0`, `missing-lexeme 0` and `non-prose 0` — every sentence parses. NON-NEGOTIABLE.
 **Faithfulness goal:** raise `encoded` (units at exactly one reading).
 **Multiplicity signal:** lower `total-readings` — the sum of closed readings over all units, the
 more sensitive over-generation signal (a single sentence dropping from 40 readings to 20 moves it

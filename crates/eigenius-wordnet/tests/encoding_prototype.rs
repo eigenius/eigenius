@@ -35,7 +35,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::{
-    pretty_term, segment_sentences, tokenize, Item, Lemmatizer, Parser, Pos, TokenKind,
+    pretty_term, segment_sentences, tokenize, Item, Lemmatizer, Parser, Pos,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -104,6 +104,8 @@ enum Outcome {
     },
     /// No parse, and ≥1 token has no lexical entry → lexical recovery target (S5a).
     MissingLexeme { unknown: Vec<String> },
+    /// No parse, every word known, but a numeral or symbol seeds nothing (D95).
+    NonProse { tokens: Vec<String> },
     /// No parse, but every token is known → grammar gap → reformulation target (S5b).
     GrammarGap,
 }
@@ -118,13 +120,16 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
     let forest: Vec<Item> = index.parse_scoped(text, lem, None);
     match forest.len() {
         0 => {
-            // Diagnose: missing lexeme (route S5a) vs grammar gap (route S5b). Non-prose
-            // tokens (stats/figure-refs, S0) are routed out — not counted as missing lexemes.
+            // Diagnose: missing lexeme (route S5a), a numeral or symbol that seeds nothing (D95), or
+            // a grammar gap (route S5b).
             let unknown = index.unknown_words(text, lem);
-            if unknown.is_empty() {
-                Outcome::GrammarGap
-            } else {
+            let unseedable = index.unseedable_tokens(text, lem);
+            if !unknown.is_empty() {
                 Outcome::MissingLexeme { unknown }
+            } else if !unseedable.is_empty() {
+                Outcome::NonProse { tokens: unseedable }
+            } else {
+                Outcome::GrammarGap
             }
         }
         1 => {
@@ -180,6 +185,9 @@ fn print_report(report: &[UnitReport]) {
             ),
             Outcome::MissingLexeme { unknown } => {
                 eprintln!("  [MISSING  {unknown:?}] {:?}", u.text)
+            }
+            Outcome::NonProse { tokens } => {
+                eprintln!("  [NON-PROSE {tokens:?}] {:?}", u.text)
             }
             Outcome::GrammarGap => eprintln!("  [GRAMMAR-GAP] {:?}", u.text),
         }
@@ -269,7 +277,7 @@ fn prototype_over_wrn_first_page() {
         report.push(UnitReport { text, outcome });
     }
 
-    let (mut enc, mut amb, mut miss, mut gap) = (0, 0, 0, 0);
+    let (mut enc, mut amb, mut miss, mut non_prose, mut gap) = (0, 0, 0, 0, 0);
     let mut oov: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for u in &report {
         match &u.outcome {
@@ -279,12 +287,13 @@ fn prototype_over_wrn_first_page() {
                 miss += 1;
                 oov.extend(unknown.iter().cloned());
             }
+            Outcome::NonProse { .. } => non_prose += 1,
             Outcome::GrammarGap => gap += 1,
         }
     }
     eprintln!(
         "\n=== WRN first page: {} parseable units (≤{MAX_UNIT_TOKENS} tok) → encoded {enc}, \
-         ambiguous {amb}, missing-lexeme {miss}, grammar-gap {gap}; \
+         ambiguous {amb}, missing-lexeme {miss}, non-prose {non_prose}, grammar-gap {gap}; \
          + {scale_bound} over-length units skipped (parsing-scale bound) ===",
         report.len()
     );
@@ -340,6 +349,7 @@ fn prototype_over_wrn_first_page() {
             Outcome::Encoded { .. } => "ENCODED",
             Outcome::Ambiguous { .. } => "AMBIG",
             Outcome::MissingLexeme { .. } => "MISSING",
+            Outcome::NonProse { .. } => "NON-PROSE",
             Outcome::GrammarGap => "GRAMMAR-GAP",
         };
         let t: String = u.text.chars().take(90).collect();
@@ -421,7 +431,7 @@ fn p1_s0_cleans_wrn_page() {
         for t in tokenize(u) {
             // Lowercased for the gene checks below: tokens keep the source's case.
             let surface = t.surface().to_lowercase();
-            if t.kind() == TokenKind::Word {
+            if t.is_word() {
                 lex += 1;
                 lexset.insert(surface);
             } else {

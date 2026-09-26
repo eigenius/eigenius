@@ -211,6 +211,26 @@ fn sense_cap_widens_on_failure_for_known_vocabulary() {
     );
 }
 
+/// D95 — **a numeral or a symbol seeds nothing, and is not a missing lexeme.** `unknown_words` reports
+/// only word tokens, and a digit-initial token that is not a numeral (`53BP1`) is one; the numerals and
+/// the operator are `unseedable_tokens`. The widen gate counts them: a sentence with a token that seeds
+/// nothing fails closed on its first attempt, where the gate used to skip non-prose tokens and widen
+/// through every rung of a parse that could not succeed.
+#[test]
+fn numerals_and_symbols_are_unseedable_not_missing() {
+    let index = index_with_zob(1);
+    let text = "zob affects 53BP1 at 37 < 5";
+    assert_eq!(index.unknown_words(text, &Identity), ["53BP1"]);
+    assert_eq!(index.unseedable_tokens(text, &Identity), ["37", "<", "5"]);
+
+    let (closed, open, trace) = index.parse_scoped_open_traced("zob affects 37", &Identity, None);
+    assert!(closed.is_empty() && open.is_empty());
+    assert_eq!(
+        trace.attempts, 1,
+        "no widening past a token that seeds nothing"
+    );
+}
+
 /// GH#97 / D64 — **widen-on-failure overrides a mis-ranking reranker** ("a bad rank costs a re-parse,
 /// never a missed parse" — the proposer-behind-oracle guarantee that makes the untrusted LLM reranker
 /// safe). `zworp`'s static order keeps the agreeing **singular** sense at `sense_cap(1)`, so a plain

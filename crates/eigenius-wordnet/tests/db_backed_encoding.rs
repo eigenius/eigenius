@@ -589,6 +589,12 @@ enum Outcome {
     MissingLexeme {
         unknown: Vec<String>,
     },
+    /// Every word known, but a numeral or symbol seeds nothing ([`Parser::unseedable_tokens`], D95):
+    /// the unit cannot parse at any cap or beam, and no lexicon entry is expected to fix it. Until
+    /// quantities seed, every unit with a numeral lands here.
+    NonProse {
+        tokens: Vec<String>,
+    },
     GrammarGap,
     /// All tokens known; no CLOSED parse but a felicitous OPEN parse (referent holes — `we`/`its`/
     /// pronouns, D64). NOT a grammar gap — it parses, awaiting reference resolution. Since an open sem
@@ -614,7 +620,7 @@ struct UnitReport {
 
 /// The reading-count of a classified unit — its number of CLOSED full-span parses (the multiplicity
 /// the `total_readings` metric sums). Encoded = 1, Ambiguous = its count; Open/GrammarGap/
-/// MissingLexeme/ScaleBound produce no closed reading, so 0.
+/// MissingLexeme/NonProse/ScaleBound produce no closed reading, so 0.
 fn unit_readings(o: &Outcome) -> usize {
     match o {
         Outcome::Encoded { .. } => 1,
@@ -906,6 +912,10 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
     let unknown: Vec<String> = index.unknown_words(text, lem);
     if !unknown.is_empty() {
         return Outcome::MissingLexeme { unknown };
+    }
+    let unseedable = index.unseedable_tokens(text, lem);
+    if !unseedable.is_empty() {
+        return Outcome::NonProse { tokens: unseedable };
     }
     // Fully known. Bound the (beam-less) parse so a long known unit doesn't OOM the chart.
     if toks.len() > PARSE_BUDGET {
@@ -4345,6 +4355,7 @@ fn tag(o: &Outcome) -> &'static str {
         Outcome::Encoded { .. } => "ENCODED",
         Outcome::Ambiguous { .. } => "AMBIG",
         Outcome::MissingLexeme { .. } => "MISSING",
+        Outcome::NonProse { .. } => "NON-PROSE",
         Outcome::GrammarGap => "GRAMMAR-GAP",
         Outcome::Open { .. } => "OPEN",
         Outcome::ScaleBound { .. } => "SCALE-BOUND",
@@ -4353,6 +4364,7 @@ fn tag(o: &Outcome) -> &'static str {
 
 fn summarize(report: &[UnitReport]) {
     let (mut enc, mut amb, mut miss, mut gap, mut scale, mut open) = (0, 0, 0, 0, 0, 0);
+    let mut non_prose = 0;
     let mut oov: BTreeSet<String> = BTreeSet::new();
     for u in report {
         match &u.outcome {
@@ -4368,6 +4380,10 @@ fn summarize(report: &[UnitReport]) {
                     "  open (referent holes={holes}, awaiting resolution): {:?}",
                     u.text
                 );
+            }
+            Outcome::NonProse { tokens } => {
+                non_prose += 1;
+                eprintln!("  non-prose (seeds nothing: {tokens:?}): {:?}", u.text);
             }
             Outcome::GrammarGap => {
                 gap += 1;
@@ -4436,7 +4452,7 @@ fn summarize(report: &[UnitReport]) {
     flush_sense_ranks();
     eprintln!(
         "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
-         open {open}, missing-lexeme {miss}, grammar-gap {gap}, \
+         open {open}, missing-lexeme {miss}, non-prose {non_prose}, grammar-gap {gap}, \
          scale-bound (known, >{PARSE_BUDGET} tok) {scale}, total-readings {total_readings}, \
          total-skeletons {total_skeletons} (sense× {:.2}), \
          expected-hits {exp_hits}, expected-curated {exp_total} ===",

@@ -61,7 +61,7 @@ use seed::is_lexicalized_adverb;
 
 use super::grammar::{DetTemplates, Grammar};
 use super::lexicon::{read_description, FormEntries, LexEntry, LexicalIndex, LexicalLookup};
-use super::preprocess::{join_surfaces, tokenize, Token, TokenKind};
+use super::preprocess::{join_surfaces, tokenize, Token};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -738,7 +738,7 @@ impl Parser {
             trace.pass = WidenPass::Ranked;
             return (closed, open, trace);
         }
-        if ranks.is_some() && self.all_prose_tokens_known(text, lemmatizer) {
+        if ranks.is_some() && self.every_token_seeds(text, lemmatizer) {
             // Pass 1b — TARGETED RECOVERY (D69 §7g). Pass 2 below rescues the sentence by throwing
             // the ranking away for EVERY word, and then every word takes its most frequent sense.
             // Measured cost of that: «We analysed data from large-scale silencing screens.» parsed
@@ -819,8 +819,8 @@ impl Parser {
                 trace.beam = beam;
                 return (closed, open);
             }
-            // Widen only if a pruning artifact could be the cause (no OOV token).
-            if !self.all_prose_tokens_known(text, lemmatizer) {
+            // Widen only if a pruning artifact could be the cause (every token seeds).
+            if !self.every_token_seeds(text, lemmatizer) {
                 return (closed, open);
             }
             let grew_beam = match beam {
@@ -949,20 +949,37 @@ impl Parser {
         Some((out, promoted))
     }
 
-    /// Whether every word token of `text` is lexically known ([`Self::unknown_words`] is empty).
-    /// Used to gate widen-on-failure: an OOV miss is not a cap miss.
-    fn all_prose_tokens_known(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
-        self.unknown_words(text, lemmatizer).is_empty()
+    /// Whether every token of `text` other than a comma has a lexical entry ([`Self::has_token`]) —
+    /// no missing lexeme ([`Self::unknown_words`]) and no numeral or symbol the lexicon does not know
+    /// ([`Self::unseedable_tokens`]). Gates widen-on-failure: a token that seeds nothing leaves its span
+    /// uncoverable at every cap and beam, so widening cannot help (D95, "Numerals reach the parser and
+    /// seed nothing").
+    fn every_token_seeds(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
+        tokenize(text)
+            .iter()
+            .filter(|t| !t.is_comma())
+            .all(|t| self.has_token(t.surface(), lemmatizer))
+    }
+
+    /// The tokens of `text` that are neither words nor commas — numerals and symbols — and have no
+    /// lexical entry, in order. Each seeds nothing, so its sentence cannot parse; unlike a missing
+    /// lexeme, no lexicon entry is expected to fix it.
+    pub fn unseedable_tokens(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<String> {
+        tokenize(text)
+            .into_iter()
+            .filter(|t| !t.is_word() && !t.is_comma() && !self.has_token(t.surface(), lemmatizer))
+            .map(|t| t.surface().to_string())
+            .collect()
     }
 
     /// The word tokens of `text` with no lexical entry ([`Self::has_token`]), in order — the
-    /// **missing-lexeme** signal, and the one definition of it: the widen gate reads it, and so do the
-    /// encoding harnesses. A comma or a [`TokenKind::NonProse`] token is not a word, so it is never
-    /// missing.
+    /// **missing-lexeme** signal, and the one definition of it, which the encoding harnesses read. A
+    /// comma, a numeral or a [`NonProse`](super::preprocess::TokenKind::NonProse) token is not a word,
+    /// so it is never missing ([`Self::unseedable_tokens`] reports the last two).
     pub fn unknown_words(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<String> {
         tokenize(text)
             .into_iter()
-            .filter(|t| t.kind() == TokenKind::Word && !self.has_token(t.surface(), lemmatizer))
+            .filter(|t| t.is_word() && !self.has_token(t.surface(), lemmatizer))
             .map(|t| t.surface().to_string())
             .collect()
     }

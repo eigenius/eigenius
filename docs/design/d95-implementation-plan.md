@@ -193,30 +193,61 @@ D96 (JATS) is decided and not built, so every slice works on plain text.
 
 **Chain:** none.
 
-## Slice 2 — preprocessor rules that change behaviour
+## Slice 2 — preprocessor rules that change behaviour — built
 
-- **Numerals.** The lexer gains `LexClass::Numeral`: digits with an optional decimal part, a sign
-  attached (`-1`, `−1` U+2212), and digit grouping (`1,200` — digits, comma, exactly three digits, no
-  space). The preprocessor makes it `TokenKind::Numeral(Rational)`; today `1,200` is `1` `,` `200`.
-- **Decision 3.** A digit-initial token that is not a numeral (`53BP1`) is a `Word`. `NonProse` is
-  left with letterless non-numerals: `<`, `≤`, `>`, `≥`, `=`, `×`, `±`, an unmatched bracket.
-- **Asides.** `(` directly after a word character is an argument (`log2(copy number)`): its content is
-  kept as tokens and the brackets become `NonProse` tokens, so the sentence reaches no parse rather than
-  a parse without the argument. `(` after a space is a gloss and is dropped, as today. Removing an aside
-  leaves a separator (`a(b)c` → `a c`). An unclosed opener is a `NonProse` token and the rest of the
-  sentence stays.
-- **The widen gate.** A `NonProse` or (until slice 4) `Numeral` token seeds nothing, so its sentence
-  cannot parse. `all_prose_tokens_known` (`dcg/parse/mod.rs:954-959`) returns `false` when one is
-  present, which stops `widen` (`:823-825`) instead of exhausting the ladder (D95, "Numerals reach the
-  parser and seed nothing").
-- **The harness** classifies a unit with such a token as a new outcome, `NON-PROSE`, beside
-  `MISSING-LEXEME` (`db_backed_encoding.rs:568-608`, `:904-983`). The summary line (`:4472-4480`), its
-  parser in `scripts/eval-parse-rate.sh` (`:83-103`) and `baseline.json`'s `expected` block (`:37-50`)
-  gain the count, informational. This is D95's requirement that a quantity gap and a syntax gap be
-  distinguishable.
-- **Measure** (needs the CNL page): the parse-rate run before and after, with every changed unit
-  listed. An `#[ignore]`d kernel test prints the token-stream diff over `methods.txt` and
-  `letter-body.txt`.
+All in `dcg/preprocess.rs`; the lexer is unchanged.
+
+- **Brackets.** Each closer pairs with the latest open opener, as before.
+  - A pair whose opener directly follows a `Word` lexeme is an **argument** (`log2(copy number)`,
+    `poly(ADP-ribose)`): its content is kept, and its brackets become `NonProse` tokens, so the
+    sentence reaches no parse rather than a parse without the argument.
+  - Any other pair is a **gloss** and is dropped, leaving a separator (`x.(y)z` → `x` `z`).
+  - An unmatched opener or closer is a `NonProse` token, and the text around it stays. The unclosed
+    opener used to drop the rest of the sentence.
+- **Numerals.** `TokenKind::Numeral(Rational)`: digits, grouped by commas in threes or not, an
+  optional decimal part, and a sign (`-`, `−` U+2212) directly before. A comma between a digit group
+  and exactly three digits groups them (`1,200`); any other comma separates, as before. Found in the
+  preprocessor rather than the lexer, since telling a grouping comma from a list comma is a decision.
+- **Operators.** `<`, `>`, `≤`, `≥`, `=`, `≠`, `≈`, `~`, `±`, `×` and `−` at the edge of a token, or
+  standing alone, become `NonProse` tokens instead of being trimmed away; inside a token they stay in it
+  (`P<0.05`).
+- **Kinds (decision 3).** A token that starts with a digit and is not a numeral (`53BP1`, `5-fold`,
+  `1a`, `10⁻¹³`, `45-60`) is a `Word`. A token with no ASCII letter is `NonProse`.
+- **The widen gate.** `every_token_seeds` (was `all_prose_tokens_known`) requires every non-comma
+  token to have an entry, so a numeral or symbol that seeds nothing stops `widen` on the first attempt.
+  `Parser::unseedable_tokens(text, lemmatizer)` lists those tokens; `unknown_words` still lists only
+  words.
+- **The harness.**
+  - `db_backed_encoding.rs` and `encoding_prototype.rs` gain the outcome `NON-PROSE`, checked after
+    `MISSING-LEXEME`, and the summary line a `non-prose` count.
+  - `scripts/eval-parse-rate.sh` reads it (0 on older logs) and puts it in the coverage gate:
+    `grammar-gap 0, missing-lexeme 0, non-prose 0`.
+  - `baseline.json` is unchanged: the gate is absolute in the script, and no run on the CNL page
+    backs a new number. `experiments/parsing/README.md`'s outcome table has the row.
+- **Augmentation** (`dcg/augment.rs`) looks only at word tokens for OOV gaps; it used to report every
+  number as a word to ground.
+
+**Tests.**
+- `preprocess.rs` has a test per rule.
+- The legacy tokenizer is an oracle over an alphabet with no digit, bracket or operator (every string
+  of length ≤ 4 and 20,000 random ones), where slice 2 changes nothing.
+- `kernel/tests/closed_class_determiners.rs` `numerals_and_symbols_are_unseedable_not_missing`:
+  `unknown_words` is `[53BP1]`, `unseedable_tokens` is `[37, <, 5]`, and a sentence with a numeral
+  fails on its first attempt, where the old gate widened through every rung.
+
+**Measured.** The CNL page is not in this checkout, so the parse-rate run is not done. The `#[ignore]`d
+`list_the_wrn_sentences_slice_2_changes` lists token-stream changes against the legacy tokenizer: 31
+of 296 methods sentences and 3 of 105 letter sentences change surface. Every sentence with a digit
+also changes kind, and until slice 4 seeds numerals it is `NON-PROSE`. The changes:
+- **Arguments kept.** `log(counts)`, `log(intensity)` ×2, `poly(ADP-ribose)`. Also `negative
+  control(s)`, where the plural marker now stops the parse, and the OCR'd `anti(Cell Signaling …)`.
+- **Signs and operators.** `protein levels <−1` was `levels 1`; now `<` and the numeral `−1`. `×` in
+  `1 × 10^6` and `63× magnification` is a token. The U+2212 in the OCR'd `annexin V− FITC` is an
+  operator token; as a marker (`CD8−`) trimming it was the distortion.
+- **Digit grouping.** `1,000`, `2,000`, `12,000` are numerals, not `1 , 000`.
+- **Unmatched brackets.** Sentences `segment_sentences` splits inside a parenthesis — at `(Chr.`, at
+  `Extended Data Figs.` and inside URLs — keep their text and carry a bracket token, where they used
+  to lose everything after the opener.
 
 **Chain:** none.
 
