@@ -236,6 +236,16 @@ impl Vocabulary {
         self.units.get(symbol)
     }
 
+    /// Every named unit, in symbol order.
+    pub fn units(&self) -> impl Iterator<Item = &NamedUnit> {
+        self.units.values()
+    }
+
+    /// Every prefix, in symbol order.
+    pub fn prefixes(&self) -> impl Iterator<Item = &Prefix> {
+        self.prefixes.values()
+    }
+
     /// Converts `value` in the `stated` unit to base units.
     ///
     /// The °C offset applies only when the stated unit is exactly `°C` — the point reading D93

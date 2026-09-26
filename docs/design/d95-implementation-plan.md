@@ -251,58 +251,77 @@ also changes kind, and until slice 4 seeds numerals it is `NON-PROSE`. The chang
 
 **Chain:** none.
 
-## Slice 3 — the unit vocabulary, unit spellings, the recogniser
+## Slice 3 — the unit vocabulary, unit spellings, the recogniser — built
 
-**Units layer** (`ontologies/units/units.esl`)
-- `units:molar` (`M`, dimension `m^-3·mol`, factor `1000r`, prefixable) and `units:week` (`wk`, `s`,
-  `604800r`, not prefixable), after `standard_gravity` (`:319-327`).
-- `kernel/tests/units_layer.rs`: count 43 → 45 (`:87`), dimension and factor tables (`:112`, `:197`).
-- `kernel/tests/unit_conversion.rs`: round-trip list (`:81`); `5 mM` → 5 mol·m⁻³; `2 wk` → 1209600 s.
-
-**Spellings**
-- `lexicon-ontology.esl`:
-  - gains `namespace units`;
-  - `class lexicon:UnitSurface { requires lexicon:unit_form, lexicon:unit; }`;
-  - `property lexicon:unit_form : core:string`;
-  - `property lexicon:unit : core:resource { class_types units:NamedUnit; domain lexicon:UnitSurface; }`.
-
-  They sit beside `ReservedConstruct` (`:551-562`); `in_lexicon` (`:484-488`) is the pattern for a
-  class-constrained resource property.
-- `closed-class.esl` gains `namespace units` and the resources, beside the reserved constructs
-  (`:2329-2361`). The methods need: `l`, `g`, `RCF`, `hour`/`hours`, `day`/`days`, `minute`/`minutes`,
-  `week`/`weeks`, `ºC` (U+00BA) and `˚C` (U+02DA) for °C.
-- The four partial-chain harnesses (finding 12) add the units layer before `lexicon-ontology.esl`.
+**Data**
+- `ontologies/units/units.esl`: `units:molar` (`M`, `m^-3·mol`, `1000r`, prefixable) and `units:week`
+  (`wk`, `s`, `604800r`, not prefixable), after `standard_gravity`.
+- `lexicon-ontology.esl` gains `namespace units`, `class lexicon:UnitSurface`, `lexicon:unit_form` and
+  `lexicon:unit` (`class_types units:NamedUnit`), beside `ReservedConstruct`.
+- `closed-class.esl` gains `namespace units` and 14 spellings: `l`; `g` and `RCF` for standard
+  gravity; `hour`, `hours`, `day`, `days`, `minute`, `minutes`, `week`, `weeks`; `ºC`, `˚C`, `℃`.
+- The four partial-chain harnesses (finding 12) pass unchanged: an unresolved `units:` reference is
+  not a compile error there.
 
 **Kernel**
-- `units/convert.rs` exposes prefix lookup (the `prefixes` map, `:78-81`) and the factor resolution
-  `resolve_symbol` performs (`:354-377`), returning every `(prefix, unit)` pair instead of the first.
+- `units/convert.rs`: `Vocabulary::units()` and `prefixes()`.
 - `dcg/quantity.rs`:
-  - **`ProseUnits::load(layer)`** reads `lexicon:UnitSurface` by type with `typed_resource_iris`
-    (`layer/index.rs:92`), the way `ReservedTable::load` does (`dcg/reserved.rs:115-139`), and joins
-    it to `Vocabulary::from_layer` (`units/convert.rs:186-232`).
-  - **`ProseUnits::read(&str) -> Vec<UnitReading>`** normalises `µ` (U+00B5) to `μ`, superscript
-    exponents (`ml⁻¹`), `per`, spaces and `·`, and resolves each factor to all its senses. For each
-    combination it restates the strict form and converts it. `%` is a dimensionless factor 1/100, not a
-    unit (D93).
-- `Parser::over` (`dcg/parse/mod.rs:310-318`) builds `ProseUnits` beside `ReservedTable::load`. The
-  preprocessor takes it as an argument, so `augment.rs` and `verbalize.rs` get it from the parser.
-- **The recogniser** in `preprocess.rs`:
-  - merges a numeral with the unit lexemes after it (`37` `°` `C`, `10` `μg` `ml⁻¹`), taking the
-    longest run that reads as a unit expression;
-  - splits an attached unit (`5mg`, `931g`), producing `TokenKind::Quantity { value, readings }`;
-  - `5-fold`, `53BP1` and `HEK293T` are not quantities. A numeral with no unit stays `Numeral`.
-- `has_token` (`dcg/parse/mod.rs:404-431`) and the harness treat `Quantity` as known.
+  - `ProseUnits::load(layer)` joins the strict symbols to the `UnitSurface` spellings,
+    case-sensitive; `ProseUnits::none()` reads no units.
+  - `ProseUnits::read(text, at, attached, value)` returns the longest unit expression with a
+    reading, and every reading as a `UnitReading { units, stated, value }`, restated in the strict
+    form and converted by `Vocabulary::convert`.
+  - What reads, with the reasons from the corpus:
+    - A factor is a run of letters (`°`, `˚`, `℃` included) with an optional exponent (`²`, `⁻¹`,
+      `^2`, `^(1/2)`), not followed by a letter or digit. It resolves exact-first, then longest
+      prefix on a prefixable spelling. `µ` reads as `μ`.
+    - Factors join by `·`, by `/` or ` per ` (once), or by whitespace only when the next factor has
+      an exponent (`μg ml⁻¹`). Otherwise `2 h at 37 °C` reads `h at` as hour·attotonne.
+    - A closed-class word is never a factor (`at`, `as`, `am`).
+    - `′` and `″` are not unit characters: after a numeral they write DNA ends (`5′`, `3′`).
+    - `%` alone is 1/100 (D93), stated `1`.
+- `dcg/preprocess.rs`, decision 7:
+  - A `Numeral` and the unit read after it, or a digit-initial `Word` whose digits carry the unit
+    (`931g`), become one `TokenKind::Quantity(Quantity { value, readings })`.
+  - The unit is read from the text through the tokens' spans, because edge trimming has dropped the
+    `°` and the `%`.
+  - The expression must end where a token ends, so `5′-UTR` stays a word.
+  - `Token` loses `Eq`, since `Converted` has none.
+- **Tokenizing is the parser's.** `Parser::over` builds `ProseUnits`, and `Parser::tokenize(text)` is
+  the tokenization every consumer reads: seeding, the widen gate, `unknown_words`,
+  `unseedable_tokens`, augmentation, verbalization and both harnesses. The free function is
+  `tokenize(text, &ProseUnits)`; tests that need no units pass `ProseUnits::none()`.
+- **A quantity token seeds nothing until slice 4**, so `unseedable_tokens` reports it and the harness
+  counts its unit `NON-PROSE`. *The plan said `has_token` treats `Quantity` as known here; that waits
+  for the seeding.*
 
-**Tests** (`kernel/tests/quantity_tokens.rs`, over `testing::bootstrap_context()` as
-`unit_conversion.rs:24-30` does):
-- `931g` has two readings (grams, and 182599823/20000 m·s⁻²);
-- `37 °C`, `2 h`, `5 mg/kg`, `10 μg ml⁻¹`, `5 mM`, `9 days` and `10%` each have one;
-- `53BP1`, `HEK293T` and `5-fold` are not quantities;
-- `Fig. 2d` is two days (decision 4, recorded as current behaviour).
+**Tests**
+- `kernel/tests/quantity_tokens.rs`:
+  - the centrifugation sentence (`931g` with two readings, `2 h`, `30 °C`);
+  - an inventory of 13 (`10 μg ml⁻¹`, `5 mg/kg`, `5 mg per kg`, `5 mM`, `10 µM`, `9 days`,
+    `2 weeks`, `10%`, `0.2 ml`, `37 ºC`, `−80 °C`, `931 RCF`, `2 °C/min`);
+  - eight non-quantities (`53BP1`, `HEK293T`, `5-fold`, `3′ end`, `5′-UTR`, `12 cells`,
+    `chromosomes 3 and 5`, `96-well`);
+  - `Fig. 2d` as two days (decision 4);
+  - the parser's tokenization, with the quantity unseedable.
+- `units_layer.rs` and `unit_conversion.rs` count and convert the molar and the week.
 
-**Chain:** `units`, `lexicon` and `closed-class` move; `EXPECTED`
-(`kernel/tests/bootstrap_manifest_pinned.rs:185-206`) is updated in the same commit. The reseed waits
-for slice 5.
+**Measured.** The `#[ignore]`d `list_the_quantities_in_the_wrn_texts` reads 69 quantities, 67 in the
+methods and 2 in the letter. By stated unit: `%` 18, `h` 11, `d` 11, `mL` 11, `min` 6, `°C` 3, `mm` 2,
+and one each of `g`/`g_n` (`931g`), `mM`, `mg`, `ng`, `s`, `wk` and `A`.
+- **Wrong.**
+  - `McCoy's 5A`, a culture medium, reads as 5 A.
+  - `2d` and `8d` are figure panels (decision 4).
+  - `6 s` comes from the OCR's letter-spaced `R P S 6 s h R NA`.
+  - So the attached form is right once of four in this corpus: `931g`.
+- **Missed.**
+  - Quantities inside parenthetical glosses — `(60 mM KCl)`, `(150 mM NaCl, …)`,
+    `(1,200 V, 20 ms, 2 pulses)` — are dropped with the gloss, as before.
+  - This OCR text has lost `μ` and superscripts (`10 ml of gentamicin` was `10 μg ml⁻¹`), so D95's
+    13 `μg ml⁻¹` are not in it.
+
+**Chain:** `units`, `lexicon` and `closed-class` moved; `EXPECTED` is updated. The reseed waits for
+slice 5.
 
 ## Slice 4 — `MP` in the grammar, and seeding
 

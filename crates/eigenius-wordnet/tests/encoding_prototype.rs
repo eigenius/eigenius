@@ -35,7 +35,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::{
-    pretty_term, segment_sentences, tokenize, Item, Lemmatizer, Parser, Pos,
+    pretty_term, segment_sentences, tokenize, Item, Lemmatizer, Parser, Pos, ProseUnits,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -236,7 +236,7 @@ fn prototype_over_wrn_first_page() {
     // seed its singular synset and the lemma is spuriously reported OOV (the same surface-vs-
     // lemma mismatch that bit the `Identity`-lemmatizer test artifacts).
     let seed_lem = morphy();
-    let seeds: std::collections::BTreeSet<String> = tokenize(&page)
+    let seeds: std::collections::BTreeSet<String> = tokenize(&page, &ProseUnits::none())
         .into_iter()
         .map(|t| t.surface().to_string())
         .filter(|t| t.chars().all(|c| c.is_ascii_alphabetic()) && t.len() > 2)
@@ -269,7 +269,7 @@ fn prototype_over_wrn_first_page() {
     let mut scale_bound = 0usize;
     let mut report: Vec<UnitReport> = Vec::new();
     for text in segment_sentences(&page) {
-        if tokenize(&text).len() > MAX_UNIT_TOKENS {
+        if index.tokenize(&text).len() > MAX_UNIT_TOKENS {
             scale_bound += 1;
             continue;
         }
@@ -428,7 +428,7 @@ fn p1_s0_cleans_wrn_page() {
     let mut routed: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut lexset: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for u in &units {
-        for t in tokenize(u) {
+        for t in tokenize(u, &ProseUnits::none()) {
             // Lowercased for the gene checks below: tokens keep the source's case.
             let surface = t.surface().to_lowercase();
             if t.is_word() {

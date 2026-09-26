@@ -1250,6 +1250,7 @@ fn split_coord_conjuncts(tokens: &[Token], is_conn: impl Fn(&str) -> bool) -> Op
 mod rnr_tests {
     use super::split_coord_conjuncts;
     use crate::dcg::preprocess::tokenize;
+    use crate::dcg::quantity::ProseUnits;
 
     // The preprocessor makes the comma a token of its own; connectives are `,` / `and` / `or`.
     fn is_conn(t: &str) -> bool {
@@ -1257,7 +1258,7 @@ mod rnr_tests {
     }
 
     fn split(s: &str) -> Option<Vec<String>> {
-        split_coord_conjuncts(&tokenize(s), is_conn)
+        split_coord_conjuncts(&tokenize(s, &ProseUnits::none()), is_conn)
     }
 
     #[test]

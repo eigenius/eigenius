@@ -21,7 +21,7 @@
 //! compiler insisted on: a driver is a pure grammar operation and can be handed to anyone; ORCHESTRATING
 //! one means touching the lexicon and the felicity gate, which is the bridge's job, not the chart's.
 
-use super::super::preprocess::{join_surfaces, tokenize};
+use super::super::preprocess::join_surfaces;
 use super::*;
 
 /// Collapse candidates carrying the **same sem term**, keeping the lowest-cost derivation of each.
@@ -76,7 +76,7 @@ impl Parser {
         cap: Option<usize>,
         ranks: Option<&BTreeMap<String, u32>>,
     ) -> (Vec<Item>, Vec<OpenParse>) {
-        let tokens = tokenize(text);
+        let tokens = self.tokenize(text);
         let n = tokens.len();
         if n == 0 {
             return (Vec::new(), Vec::new());
@@ -254,7 +254,7 @@ impl Parser {
         ranks: Option<&BTreeMap<String, u32>>,
         beam: Option<usize>,
     ) -> (Vec<Item>, Vec<OpenParse>) {
-        let tokens = tokenize(text);
+        let tokens = self.tokenize(text);
         let n = tokens.len();
         if n == 0 {
             return (Vec::new(), Vec::new());

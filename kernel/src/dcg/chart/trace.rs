@@ -314,7 +314,7 @@ mod tests {
     /// Build a 3-token forest: two leaves at `[0..0]` and `[1..2]` (a multiword `cat_n`), with a
     /// `Combine` node at `[0..2]`. `tokens = ["a", "cell", "line"]`.
     fn tiny_forest() -> (Forest, Vec<Token>) {
-        let tokens = crate::dcg::preprocess::tokenize("a cell line");
+        let tokens = crate::dcg::preprocess::tokenize("a cell line", &Default::default());
         let mut f = Forest::new(3);
         let det = leaf(ctor("cat_forall", vec![ctor("sg", vec![])]), Exp::Unit);
         let mw = leaf(
@@ -425,7 +425,7 @@ mod tests {
     #[test]
     fn derivation_dedups_a_reshared_node() {
         // A node whose two edges both reference the same child prints the child once, then `↑`.
-        let tokens = crate::dcg::preprocess::tokenize("x y");
+        let tokens = crate::dcg::preprocess::tokenize("x y", &Default::default());
         let mut f = Forest::new(2);
         let child = leaf(cat_n("urn:eigenius:umlscui:C9"), Exp::Unit);
         let cid = f.get_or_create(

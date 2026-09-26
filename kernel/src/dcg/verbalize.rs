@@ -43,7 +43,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::dcg::preprocess::tokenize;
 use crate::dcg::pretty::pretty_term;
 use crate::dcg::{Lemmatizer, Parser};
 use crate::layer::Layer;
@@ -63,7 +62,7 @@ pub fn unit_sense_names(
     layer: &Arc<Layer>,
 ) -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
-    for tok in tokenize(text) {
+    for tok in index.tokenize(text) {
         if tok.is_comma() {
             continue;
         }

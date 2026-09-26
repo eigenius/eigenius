@@ -44,10 +44,9 @@ use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::{
     abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
-    pretty_term, segment_sentences, tokenize, unit_sense_names, verbalize, AbbreviationBinding,
-    DiscourseRun, Identity, InProcessPipeline, Lemmatizer, LexicalIndex, LexicalLookup,
-    LexiconAugmentation, NoAbbreviationProposer, Parser, Pos, Proposal, ProposeCtx, Proposer,
-    SentenceOutcome, Vb,
+    pretty_term, segment_sentences, unit_sense_names, verbalize, AbbreviationBinding, DiscourseRun,
+    Identity, InProcessPipeline, Lemmatizer, LexicalIndex, LexicalLookup, LexiconAugmentation,
+    NoAbbreviationProposer, Parser, Pos, Proposal, ProposeCtx, Proposer, SentenceOutcome, Vb,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -908,7 +907,7 @@ const READING_BUCKETS: &[(&str, usize, usize)] = &[
 /// all subsumed by *multiword* entries that do seed, and which fully parses, would be bucketed
 /// MISSING rather than ENCODED — measure-zero for this corpus, and the OOV signal is still right.)
 fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Layer>) -> Outcome {
-    let toks = tokenize(text);
+    let toks = index.tokenize(text);
     let unknown: Vec<String> = index.unknown_words(text, lem);
     if !unknown.is_empty() {
         return Outcome::MissingLexeme { unknown };
@@ -2781,7 +2780,7 @@ fn diagnose_first_five_cnl() {
     eprintln!("\n════════════════════════════════════════════════════════════════");
     eprintln!("EXTRAS (of-PP subj / 'alone' / bare-compound object)");
     for f in extras {
-        let ft = tokenize(f);
+        let ft = index.tokenize(f);
         let unk: Vec<String> = index.unknown_words(f, &lem);
         if !unk.is_empty() {
             eprintln!(
@@ -2837,12 +2836,12 @@ fn diagnose_first_five_cnl() {
         eprintln!("\n════════════════════════════════════════════════════════════════");
         eprintln!("SENTENCE: {sentence:?}");
         // token-level OOV
-        let toks = tokenize(sentence);
+        let toks = index.tokenize(sentence);
         let oov: Vec<String> = index.unknown_words(sentence, &lem);
         eprintln!("  tokens: {} | OOV: {oov:?}", toks.len());
         eprintln!("  --- fragment ladder (small→large) ---");
         for f in *ladder {
-            let ftoks = tokenize(f);
+            let ftoks = index.tokenize(f);
             let unknown: Vec<String> = index.unknown_words(f, &lem);
             if !unknown.is_empty() {
                 eprintln!(
@@ -2935,7 +2934,7 @@ fn diagnose_grammar_gap_fragments() {
     ];
     eprintln!("\n=== fragment bisection (closed / open / — ; OOV split out) ===");
     for f in fragments {
-        let toks = tokenize(f);
+        let toks = index.tokenize(f);
         let ntok = toks.len();
         // OOV-FIRST: a `—` from an unknown lexeme is a VOCABULARY gap, not a grammar gap. Report the
         // missed tokens so the genuine grammar gaps (fully-known, still no parse) are not conflated
@@ -3201,7 +3200,7 @@ fn wrn_first_page_over_full_lexicon() {
 
     let mut report: Vec<UnitReport> = Vec::new();
     for (i, text) in segment_sentences(&page).into_iter().enumerate() {
-        let ntok = tokenize(&text).len();
+        let ntok = index.tokenize(&text).len();
         let t = std::time::Instant::now();
         let outcome = encode_unit(&text, &index, &lem, &head);
         eprintln!(

@@ -54,6 +54,7 @@ pub mod pipeline;
 pub mod preprocess;
 pub mod pretty;
 pub mod proposer_record;
+pub mod quantity;
 pub mod reading_ranker;
 mod reserved;
 mod rules;
@@ -119,6 +120,7 @@ pub use pretty::pretty_term;
 pub use proposer_record::{
     ProposalRecord, RecordedProposalCandidate, RecordingProposer, ReplayProposer,
 };
+pub use quantity::{ProseUnits, Quantity, UnitReading};
 #[cfg(feature = "use-llm")]
 pub use reading_ranker::AnthropicReadingRanker;
 pub use reading_ranker::{

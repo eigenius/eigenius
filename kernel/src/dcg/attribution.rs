@@ -247,8 +247,8 @@ mod tests {
             readings: 8,
             sites: vec![site(true, "lines", 4, 3), site(false, "adjective", 2, 2)],
         };
-        record(&tokenize("the lines"), &a);
-        record(&tokenize("the lines"), &a); // widen retry, same tokens → overwrite
+        record(&tokenize("the lines", &Default::default()), &a);
+        record(&tokenize("the lines", &Default::default()), &a); // widen retry, same tokens → overwrite
         let b = UnitAttribution {
             readings: 6,
             sites: vec![
@@ -259,7 +259,7 @@ mod tests {
                 site(false, "apply", 2, 2),
             ],
         };
-        record(&tokenize("two lines"), &b);
+        record(&tokenize("two lines", &Default::default()), &b);
 
         let out = take().expect("armed");
         // "lines" in 2 units, excess (3−1)+(3−1)=4 — felicitous counts, and the retry did not double.

@@ -369,7 +369,7 @@ The layer holds:
 - the SI-accepted non-SI units (min, h, d, ha, L, t, Da, eV, au),
 - conversion factors between commensurable units.
 
-**As built (`ontologies/units/units.esl`), the vocabulary departs from that list in five ways:**
+**As built (`ontologies/units/units.esl`), the vocabulary departs from that list in six ways:**
 
 - **The gram is included.** It is not a base unit and is in none of the lists above, but the SI forms
   every mass multiple by prefixing the gram (`mg`, `μg`), never the kilogram. `units:gram` carries
@@ -380,6 +380,10 @@ The layer holds:
 - **Standard gravity is admitted, outside the SI's accepted list** (`units:standard_gravity`, `g_n`),
   under the criterion in "A vocabulary hazard the same evidence surfaced": exactly defined and
   attested in the corpus.
+- **The molar and the week are admitted under the same criterion** (D95 slice 3): `units:molar`
+  (`M`, 1000 mol·m⁻³, prefixable — `mM` in the WRN methods) and `units:week` (`wk`, 604800 s, not
+  prefixable — `weeks`). `M` is also the mega prefix; the collision is across classes, and an exact
+  unit symbol wins.
 - **The degree Celsius is not prefixable.** A prefix on an offset unit is well-defined only for a
   difference, and the layer has one entry for both of °C's readings.
 - **Several named units share a unit value, as in the SI.** rad, sr, °, ′ and ″ are all `1`; Hz and

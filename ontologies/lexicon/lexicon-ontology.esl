@@ -20,6 +20,7 @@ namespace core       = "urn:eigenius:core";
 namespace normalizers = "urn:eigenius:core:normalizers";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace lexicon    = "urn:eigenius:lexicon";
+namespace units      = "urn:eigenius:units";
 
 // ── The entity top (D63 §8.3, decision ii) ────────────────────────────
 // The single foundational entity type — the universe a general predicate's
@@ -603,4 +604,27 @@ property lexicon:construct_kind : core:resource {
         lexicon:rk_relativizer, lexicon:rk_wh_relativizer, lexicon:rk_contrastive_but,
         lexicon:rk_negator, lexicon:rk_reciprocal_each, lexicon:rk_reciprocal_other;
     domain lexicon:ReservedConstruct;
+}
+
+// ── Unit spellings (D95) ──────────────────────────────────────────────
+// The prose spellings of units that the units layer's strict symbols do not cover: a second sense
+// for a symbol (`g` as standard gravity beside the gram), a spelling the SI also accepts (`l` for the
+// litre), a word form (`days`), a typographic variant (`ºC`). Every `units:symbol` is a spelling of
+// its own unit without an entry here. Read by TYPE (`typed_resource_iris`) by the quantity recogniser
+// only, never through the `lexicon:form` value index: a unit spelling has no category and never
+// stands in the chart alone, so it is not a lexical entry (D95 implementation plan, decision 2).
+class lexicon:UnitSurface {
+    description = "A prose spelling of a named unit, beside the units layer's strict symbol. Case-sensitive: `M` is the molar and `m` the metre. A prefix combines with the spelling when the unit is prefixable (`ml` and `μl` through `l`).";
+    requires lexicon:unit_form, lexicon:unit;
+}
+// A dedicated form property for the reason `construct_form` is one: `lexicon:form`'s domain is
+// `LexicalEntry`, and its value index is the lexicon's.
+property lexicon:unit_form : core:string {
+    description = "The spelling, case-sensitive (`g`, `l`, `RCF`, `days`).";
+    domain lexicon:UnitSurface;
+}
+property lexicon:unit : core:resource {
+    description = "The named unit the spelling denotes.";
+    class_types units:NamedUnit;
+    domain lexicon:UnitSurface;
 }

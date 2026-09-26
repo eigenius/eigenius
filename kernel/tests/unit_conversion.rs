@@ -73,6 +73,9 @@ fn d93s_worked_examples() {
     assert_converts(q(37, 1), "°", q(37, 180), 1, "1");
     // `931g` read as g-force: 931 × 9.80665 m·s⁻².
     assert_converts(q(931, 1), "g_n", q(182_599_823, 20_000), 0, "s^-2·m");
+    // The molar and the week, admitted with D95: 5 mM is 5 mol·m⁻³, 2 wk is 1209600 s.
+    assert_converts(q(5, 1), "mM", q(5, 1), 0, "m^-3·mol");
+    assert_converts(q(2, 1), "wk", q(1_209_600, 1), 0, "s");
 }
 
 /// Every named unit, converted from `1`, gives back its own declared factor, power of π and
@@ -82,7 +85,7 @@ fn every_named_unit_round_trips() {
     for symbol in [
         "s", "m", "kg", "A", "K", "mol", "cd", "g", "rad", "sr", "Hz", "N", "Pa", "J", "W", "C",
         "V", "F", "Ω", "S", "Wb", "T", "H", "lm", "lx", "Bq", "Gy", "Sv", "kat", "min", "h", "d",
-        "°", "′", "″", "ha", "L", "t", "Da", "eV", "au", "g_n",
+        "°", "′", "″", "ha", "L", "t", "Da", "eV", "au", "g_n", "M", "wk",
     ] {
         let u = vocab()
             .unit(symbol)

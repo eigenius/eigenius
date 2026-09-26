@@ -37,6 +37,11 @@
 //! 6. **Kinds.** A numeral is [`TokenKind::Numeral`]. A token that starts with a digit and is not one
 //!    (`53BP1`, `5-fold`, `1a`) is a [`TokenKind::Word`], so a lexicon without it reports it missing
 //!    (D95, decision 3). A token with no ASCII letter is `NonProse`.
+//! 7. **Quantities.** A numeral and the unit written after it — `37 °C`, `10 μg ml⁻¹`, `10%`, or a
+//!    unit attached to its digits, `931g` — are one [`TokenKind::Quantity`] token, carrying every
+//!    reading of the unit ([`super::quantity`]). The unit is read from the text, not the tokens, since
+//!    edge trimming has dropped the `°` and the `%`. The expression must end where a token ends:
+//!    `5′-UTR` is not five arcminutes and a suffix.
 //!
 //! **Case is preserved.** Consumers fold where they need a lowercase key ([`Parser::has_token`],
 //! `lookup_span`, the [`Lemmatizer`], `ReservedTable::kind`, `rank_key`); `all_caps_symbol` needs the
@@ -48,10 +53,11 @@
 use std::ops::Range;
 
 use super::lex::{lex, LexClass, Lexeme};
+use super::quantity::{ProseUnits, Quantity};
 use crate::numeric::Rational;
 
 /// One token of a sentence, as the parser sees it: a chart position.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     surface: String,
     span: Range<usize>,
@@ -59,7 +65,7 @@ pub struct Token {
 }
 
 /// What a token is to the parser.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     /// A token the lexicon is asked about. With no entry it is a missing lexeme.
     Word,
@@ -68,6 +74,8 @@ pub enum TokenKind {
     Comma,
     /// A number, exactly: `37`, `0.56`, `−1`, `1,200`.
     Numeral(Rational),
+    /// A numeral with its unit: `37 °C`, `931g` (two readings), `10%`.
+    Quantity(Quantity),
     /// A token the grammar has no reading for and the lexicon is not expected to know: an operator
     /// (`<`, `=`, `±`), a bracket kept around an argument or left unmatched, a token with no ASCII
     /// letter (`μ`).
@@ -113,13 +121,14 @@ pub fn join_surfaces(tokens: &[Token]) -> String {
     out
 }
 
-/// Lex and preprocess `text`.
-pub fn tokenize(text: &str) -> Vec<Token> {
-    preprocess(text, &lex(text))
+/// Lex and preprocess `text`, reading units against `units`. The parser's own tokenization is
+/// [`Parser::tokenize`](super::parse::Parser::tokenize), with the chain's vocabulary.
+pub fn tokenize(text: &str, units: &ProseUnits) -> Vec<Token> {
+    preprocess(text, &lex(text), units)
 }
 
 /// Preprocess `lexemes`, which [`lex`] made from `text`.
-pub fn preprocess(text: &str, lexemes: &[Lexeme]) -> Vec<Token> {
+pub fn preprocess(text: &str, lexemes: &[Lexeme], units: &ProseUnits) -> Vec<Token> {
     let pieces = drop_appositives(text, resolve_brackets(text, lexemes));
 
     let mut tokens: Vec<Token> = Vec::new();
@@ -165,7 +174,76 @@ pub fn preprocess(text: &str, lexemes: &[Lexeme]) -> Vec<Token> {
         tokens.pop();
     }
     tokens.dedup_by(|a, b| a.is_comma() && b.is_comma());
-    tokens
+    recognise_quantities(text, tokens, units)
+}
+
+/// Decision 7: a numeral and the unit written after it become one quantity token.
+fn recognise_quantities(text: &str, tokens: Vec<Token>, units: &ProseUnits) -> Vec<Token> {
+    let mut out = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        if let Some((end, quantity)) = quantity_at(text, &tokens[i], units) {
+            let mut j = i + 1;
+            while j < tokens.len() && tokens[j].span.start < end {
+                j += 1;
+            }
+            if tokens[i..j].iter().all(|t| t.span.end <= end) {
+                let start = tokens[i].span.start;
+                out.push(Token {
+                    surface: text[start..end].to_string(),
+                    span: start..end,
+                    kind: TokenKind::Quantity(quantity),
+                });
+                i = j;
+                continue;
+            }
+        }
+        out.push(tokens[i].clone());
+        i += 1;
+    }
+    out
+}
+
+/// The quantity a token starts, if a unit follows its numeral: a numeral token and the unit after
+/// it, or a word token whose leading digits carry the unit directly (`931g`, `5mg/kg`).
+fn quantity_at(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, Quantity)> {
+    match &t.kind {
+        TokenKind::Numeral(value) => {
+            let (end, readings) = units.read(text, t.span.end, false, value)?;
+            Some((
+                end,
+                Quantity {
+                    value: value.clone(),
+                    readings,
+                },
+            ))
+        }
+        // The surface must be the text itself: a dropped gloss inside it would misplace the unit.
+        TokenKind::Word
+            if t.surface.starts_with(|c: char| c.is_ascii_digit())
+                && text.get(t.span()) == Some(t.surface.as_str()) =>
+        {
+            let digits = numeral_prefix(&t.surface);
+            let value = numeral_value(&t.surface[..digits])?;
+            let (end, readings) = units.read(text, t.span.start + digits, true, &value)?;
+            Some((end, Quantity { value, readings }))
+        }
+        _ => None,
+    }
+}
+
+/// The byte length of the numeral that starts `s`: digits, and a decimal part if a digit follows the
+/// point.
+fn numeral_prefix(s: &str) -> usize {
+    let int = s.bytes().take_while(u8::is_ascii_digit).count();
+    let rest = &s.as_bytes()[int..];
+    if rest.first() == Some(&b'.') {
+        let frac = rest[1..].iter().take_while(|b| b.is_ascii_digit()).count();
+        if frac > 0 {
+            return int + 1 + frac;
+        }
+    }
+    int
 }
 
 /// A lexeme to consider, a separator left where a gloss or appositive was dropped, or a lexeme that
@@ -385,6 +463,11 @@ fn numeral_value(s: &str) -> Option<Rational> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No unit vocabulary: these tests are about everything but quantities.
+    fn tokenize(text: &str) -> Vec<Token> {
+        super::tokenize(text, &ProseUnits::none())
+    }
 
     fn surfaces(text: &str) -> Vec<String> {
         tokenize(text)

@@ -325,6 +325,14 @@ resource units:standard_gravity : units:NamedUnit {
     core:description = "standard acceleration of gravity. Exact by the 3rd CGPM (1901). Relative centrifugal force is recorded in it: `931g` in prose is 931 g_n. The symbol is `g_n` because `g` is the gram; the prose surface `g` carries both senses in the lexicon.";
     units:symbol = "g_n"; units:dimension = u"s^-2·m"; units:factor = 9.80665r; units:factor_pi = 0; units:prefixable = false;
 }
+resource units:molar : units:NamedUnit {
+    core:description = "molar: moles of solute per litre of solution, 1000 mol·m⁻³ exactly. Not SI-accepted; admitted under the criterion, as `mM` in the WRN methods. `M` is also the mega prefix: a unit symbol and a prefix symbol collide across classes by design, and an exact unit symbol wins.";
+    units:symbol = "M"; units:dimension = u"m^-3·mol"; units:factor = 1000r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:week : units:NamedUnit {
+    core:description = "week, 604800 s exactly. Not SI-accepted; admitted under the criterion, as `weeks` in the WRN methods. The SI has no symbol for it; `wk` is this layer's.";
+    units:symbol = "wk"; units:dimension = u"s"; units:factor = 604800r; units:factor_pi = 0; units:prefixable = false;
+}
 
 // ── The 24 SI prefixes ───────────────────────────────────────────────────────────────────────────
 // Eight exceed u64 (D93), which is why `core:rational` is arbitrary precision.

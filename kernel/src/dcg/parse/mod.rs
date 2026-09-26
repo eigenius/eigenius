@@ -61,7 +61,8 @@ use seed::is_lexicalized_adverb;
 
 use super::grammar::{DetTemplates, Grammar};
 use super::lexicon::{read_description, FormEntries, LexEntry, LexicalIndex, LexicalLookup};
-use super::preprocess::{join_surfaces, tokenize, Token};
+use super::preprocess::{join_surfaces, Token};
+use super::quantity::ProseUnits;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -278,6 +279,8 @@ pub struct Parser {
     /// The rules' world: the chain, the reserved-word triggers, and the resolved category templates.
     /// The rules are `impl Grammar` — they cannot see the lexicon at all.
     grammar: Grammar,
+    /// The unit vocabulary as prose spells it, which the preprocessor reads quantities against (D95).
+    units: ProseUnits,
     /// The processing parameters ([`ParseConfig`]).
     config: ParseConfig,
     /// The document this parser is reading, as sentences, for the reranker's CONTEXT WINDOW.
@@ -311,6 +314,7 @@ impl Parser {
         // The grammar is resolved ONCE, here: the reserved-word triggers from the ontology, and the
         // determiner category templates from the lexicon. This is the only moment the grammar reads the
         // lexicon; from here on the rules hold values, not a lookup.
+        let units = ProseUnits::load(&layer);
         let grammar = Grammar {
             reserved: ReservedTable::load(&layer),
             dets: DetTemplates::resolve(lex.as_ref()),
@@ -319,6 +323,7 @@ impl Parser {
         Parser {
             lex,
             grammar,
+            units,
             config: ParseConfig {
                 packing: true, // default ON (§11 3g.2 / B9)
                 ..ParseConfig::default()
@@ -392,6 +397,13 @@ impl Parser {
         self.document = Some(Arc::new(sentences));
         self.context_sentences = window;
         self
+    }
+
+    /// The tokens the parser seeds `text` from: [`super::lex`], then [`super::preprocess`] with the
+    /// chain's unit vocabulary, so `37 °C` is one quantity token. Every consumer of this parser's token
+    /// stream — seeding, the widen gate, the harnesses — reads it through here, so they agree on it.
+    pub fn tokenize(&self, text: &str) -> Vec<Token> {
+        super::preprocess::tokenize(text, &self.units)
     }
 
     /// Whether any lexical entry exists for `surface` — the raw lowercased surface, or
@@ -630,7 +642,7 @@ impl Parser {
         // and the fallback for the combinatory-core spike / pied-piping).
         if self.config.packing
             && !self.config.combinatory_core
-            && !self.parse_needs_unpacked(&tokenize(text), lemmatizer, scope)
+            && !self.parse_needs_unpacked(&self.tokenize(text), lemmatizer, scope)
         {
             return self.parse_packed(text, lemmatizer, scope);
         }
@@ -687,7 +699,7 @@ impl Parser {
     pub fn routes_packed(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
         self.config.packing
             && !self.config.combinatory_core
-            && !self.parse_needs_unpacked(&tokenize(text), lemmatizer, None)
+            && !self.parse_needs_unpacked(&self.tokenize(text), lemmatizer, None)
     }
 
     /// The **parse-attempt policy** shared by both chart paths (reorganization plan Phase 1) — the
@@ -879,7 +891,7 @@ impl Parser {
         // construction and the sentence could only be saved by Pass 2 discarding every word's
         // ranking. Measured on «Germline mutations in the MMR genes … cause Lynch syndrome.», whose
         // sole blocking word is that span (D69 §7k).
-        let tokens = tokenize(text);
+        let tokens = self.tokenize(text);
         let n = tokens.len();
         let span_limit = self.lex.span_limit(n);
         for i in 0..n {
@@ -955,7 +967,7 @@ impl Parser {
     /// uncoverable at every cap and beam, so widening cannot help (D95, "Numerals reach the parser and
     /// seed nothing").
     fn every_token_seeds(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
-        tokenize(text)
+        self.tokenize(text)
             .iter()
             .filter(|t| !t.is_comma())
             .all(|t| self.has_token(t.surface(), lemmatizer))
@@ -965,7 +977,7 @@ impl Parser {
     /// lexical entry, in order. Each seeds nothing, so its sentence cannot parse; unlike a missing
     /// lexeme, no lexicon entry is expected to fix it.
     pub fn unseedable_tokens(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<String> {
-        tokenize(text)
+        self.tokenize(text)
             .into_iter()
             .filter(|t| !t.is_word() && !t.is_comma() && !self.has_token(t.surface(), lemmatizer))
             .map(|t| t.surface().to_string())
@@ -977,7 +989,7 @@ impl Parser {
     /// comma, a numeral or a [`NonProse`](super::preprocess::TokenKind::NonProse) token is not a word,
     /// so it is never missing ([`Self::unseedable_tokens`] reports the last two).
     pub fn unknown_words(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<String> {
-        tokenize(text)
+        self.tokenize(text)
             .into_iter()
             .filter(|t| t.is_word() && !self.has_token(t.surface(), lemmatizer))
             .map(|t| t.surface().to_string())
@@ -1004,7 +1016,7 @@ impl Parser {
     ) -> Option<BTreeMap<String, u32>> {
         let ranker = self.config.sense_ranker.as_deref()?;
         let cap = self.config.sense_cap?; // ranking only matters when the cap can drop senses
-        let tokens = tokenize(text);
+        let tokens = self.tokenize(text);
         let n = tokens.len();
         if n == 0 {
             return None;

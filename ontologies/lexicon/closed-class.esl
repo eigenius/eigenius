@@ -16,6 +16,7 @@ namespace logic     = "urn:eigenius:logic";
 namespace ontology  = "urn:eigenius:ontology";
 namespace measurements = "urn:eigenius:measurements";
 namespace core         = "urn:eigenius:core";
+namespace units        = "urn:eigenius:units";
 
 // ── Quantifier cores (factored; D63 §8.3 Phase 1) ─────────────────────
 
@@ -2360,6 +2361,69 @@ resource lexicon:rc_each : lexicon:ReservedConstruct {
 resource lexicon:rc_other : lexicon:ReservedConstruct {
     lexicon:construct_form = "other";
     lexicon:construct_kind = lexicon:rk_reciprocal_other;
+}
+
+// ── Unit spellings (D95) ──────────────────────────────────────────────
+// The spellings the WRN methods write after a numeral that are not the units layer's own symbols
+// (D95 implementation plan, slice 3). `g` is the gram's symbol and here also standard gravity's:
+// `931g` is g-force, and the recogniser reads both. `RCF` is how the PMC manuscript writes it.
+resource lexicon:us_litre_l : lexicon:UnitSurface {
+    lexicon:unit_form = "l";
+    lexicon:unit      = units:litre;
+}
+resource lexicon:us_gravity_g : lexicon:UnitSurface {
+    lexicon:unit_form = "g";
+    lexicon:unit      = units:standard_gravity;
+}
+resource lexicon:us_gravity_rcf : lexicon:UnitSurface {
+    lexicon:unit_form = "RCF";
+    lexicon:unit      = units:standard_gravity;
+}
+resource lexicon:us_hour : lexicon:UnitSurface {
+    lexicon:unit_form = "hour";
+    lexicon:unit      = units:hour;
+}
+resource lexicon:us_hours : lexicon:UnitSurface {
+    lexicon:unit_form = "hours";
+    lexicon:unit      = units:hour;
+}
+resource lexicon:us_day : lexicon:UnitSurface {
+    lexicon:unit_form = "day";
+    lexicon:unit      = units:day;
+}
+resource lexicon:us_days : lexicon:UnitSurface {
+    lexicon:unit_form = "days";
+    lexicon:unit      = units:day;
+}
+resource lexicon:us_minute : lexicon:UnitSurface {
+    lexicon:unit_form = "minute";
+    lexicon:unit      = units:minute;
+}
+resource lexicon:us_minutes : lexicon:UnitSurface {
+    lexicon:unit_form = "minutes";
+    lexicon:unit      = units:minute;
+}
+resource lexicon:us_week : lexicon:UnitSurface {
+    lexicon:unit_form = "week";
+    lexicon:unit      = units:week;
+}
+resource lexicon:us_weeks : lexicon:UnitSurface {
+    lexicon:unit_form = "weeks";
+    lexicon:unit      = units:week;
+}
+// Typographic variants of °C: the masculine ordinal indicator (U+00BA), the ring above (U+02DA) and
+// the single-character degree Celsius sign (U+2103).
+resource lexicon:us_celsius_ordinal : lexicon:UnitSurface {
+    lexicon:unit_form = "ºC";
+    lexicon:unit      = units:degree_celsius;
+}
+resource lexicon:us_celsius_ring : lexicon:UnitSurface {
+    lexicon:unit_form = "˚C";
+    lexicon:unit      = units:degree_celsius;
+}
+resource lexicon:us_celsius_sign : lexicon:UnitSurface {
+    lexicon:unit_form = "℃";
+    lexicon:unit      = units:degree_celsius;
 }
 
 // ── Preposition coverage holes (2026-07-26) ──────────────────────────

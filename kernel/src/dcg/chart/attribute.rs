@@ -653,7 +653,7 @@ mod tests {
 
     #[test]
     fn span_text_joins_and_clamps() {
-        let toks = crate::dcg::preprocess::tokenize("a b c d");
+        let toks = crate::dcg::preprocess::tokenize("a b c d", &Default::default());
         assert_eq!(span_text(&toks, 1, 2), "b c");
         assert_eq!(span_text(&toks, 3, 3), "d");
         assert_eq!(span_text(&toks, 2, 99), "c d"); // out-of-range j clamps, no panic

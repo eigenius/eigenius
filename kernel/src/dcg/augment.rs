@@ -42,7 +42,6 @@ use super::glossary::{
 };
 use super::lemmatizer::Lemmatizer;
 use super::parse::Parser;
-use super::preprocess::tokenize;
 use super::segment::segment_sentences;
 
 const LEXICAL_ENTRY: &str = "urn:eigenius:lexicon:LexicalEntry";
@@ -225,7 +224,7 @@ pub fn augment_document_only(
     let sentences = segment_sentences(document);
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut missing_oov = Vec::new();
-    for tok in tokenize(document).into_iter().filter(|t| t.is_word()) {
+    for tok in index.tokenize(document).into_iter().filter(|t| t.is_word()) {
         let t = tok.surface().trim().to_lowercase();
         if t.is_empty() || known.contains(&t) || !seen.insert(t.clone()) {
             continue;
