@@ -130,11 +130,15 @@ this corpus neither bare-`g` token is a mass:
 | `931g` | "the plates were spun at 931g for 2 h at 30 °C" | g-force |
 | `2g` | "(Fig. 2g)" | a figure panel |
 
-So a numeral with a bare `g` suffix stays one token and is routed out as non-prose — today's
-behaviour, and the CNL guide's R2: *a faithful un-parsed claim beats a parsed distorted one*. A
-PREFIXED gram splits: standard gravity takes no prefix, so `mg`, `μg` and `kg` are unambiguously
-mass. When standard gravity is admitted, `931g` splits into competing readings as "Ambiguous unit
-symbols" describes.
+So a numeral with a bare `g` suffix stays one token — the CNL guide's R2: *a faithful un-parsed claim
+beats a parsed distorted one*. **What that costs today is the whole sentence, not the token.** Being
+classed non-prose does not remove a token ("Numerals reach the parser and seed nothing", below): it
+reaches the chart, seeds nothing, and its span cannot be covered, so "the plates were spun at 931g
+for 2 h at 30 °C" does not parse at all — `2 h` and `30 °C` are lost with it. Whether the
+preprocessor should instead set an unsplittable token aside so the rest of the sentence parses is
+open (see "Open questions"). A PREFIXED gram splits: standard gravity takes no prefix, so `mg`,
+`μg` and `kg` are unambiguously mass. When standard gravity is admitted, `931g` splits into
+competing readings as "Ambiguous unit symbols" describes.
 
 **Figure panels are the same trap, wider than `g`.** The rule reads the unbracketed `Fig. 2d` in the
 WRN methods as two days, and would read `Fig. 2h` as two hours; panels `a`, `c`, `e` and `f` escape
@@ -150,7 +154,7 @@ questions".
 |---|---|---|
 | `53BP1` | **yes** | **no** — a gene, 12 occurrences in the Letter body |
 | `HEK293T` | no | yes — a cell line |
-| `931g` | yes | yes, and still in v1: a bare `g` suffix is not split |
+| `931g` | yes | yes, and still in v1: a bare `g` suffix is not split, so its sentence does not parse |
 | `5-fold` | yes | arguably not — a degree modifier |
 
 The rule's own docstring reasons about letter-initial gene symbols ("`mlh1`, `msh2`, `brca1`,
@@ -865,6 +869,13 @@ come into D95:
   loaded lexicon, so neither needs a reseed.
 
 ## Open questions
+
+- **What the preprocessor does with a token it will not interpret.** A numeral-initial token such as
+  an unsplit `931g` seeds nothing, so the sentence carrying it does not parse, and every other
+  quantity in that sentence is lost with it — in the WRN methods, `2 h` and `30 °C` beside `931g`.
+  The preprocessor could instead set the token aside (dropping it from the token stream, recorded
+  with its offset so the prose still shows it) and let the rest parse; the cost is a parse that
+  silently omits a constituent, which R2 weighs against. Undecided.
 
 - **Figure and table references against the numeral/unit split.** The unbracketed `Fig. 2d` in the
   WRN methods would split into two days, as `Fig. 2h` would into two hours; ten unbracketed
