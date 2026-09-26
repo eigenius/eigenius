@@ -877,12 +877,13 @@ come into D95:
   with its offset so the prose still shows it) and let the rest parse; the cost is a parse that
   silently omits a constituent, which R2 weighs against. Undecided.
 
-- **Figure and table references against the numeral/unit split.** The unbracketed `Fig. 2d` in the
-  WRN methods would split into two days, as `Fig. 2h` would into two hours; ten unbracketed
-  `Fig. N<letter>` references occur there, and `Extended Data Fig.` and `Table` take the same form.
-  The likeliest rule is that the preprocessor does not split a token directly after a figure or
-  table reference word — the split is the preprocessor's decision, as the design section makes it.
-  Undecided.
+- **Figure and table references against the numeral/unit split — narrowed by D96.** The unbracketed
+  `Fig. 2d` in the WRN methods would split into two days, as `Fig. 2h` would into two hours; ten
+  unbracketed `Fig. N<letter>` references occur there. D96 adopts JATS as the document model, where
+  a reference is an `<xref>` span the preprocessor treats as one reference token — so for any source
+  with markup (JATS, or TEI from GROBID) the split never sees it. What stays open is plain text with
+  no markup, today's corpus among it: there the likeliest rule is not to split a token directly after
+  a figure or table reference word. Undecided.
 
 - **Arithmetic over the statistics functionals.** Nothing in the `stats:` namespace combines them.
   See "Dispersion splits in two" above; the agreement reading and `mean ± s.e.m.` both stop here.
