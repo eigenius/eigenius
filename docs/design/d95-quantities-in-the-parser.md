@@ -882,6 +882,11 @@ come into D95:
   there. Bracketed references are still removed as asides. With JATS, a reference is an `<xref>` span
   the preprocessor treats as one reference token, so the split never sees it; whether plain text
   still needs a rule — no split directly after a reference word — is decided with that work.
+- **A measure phrase's category carries its unit** (2026-09-26): `cat_mp(u)`, denoting
+  `units:Quantity(u)`, with a unit binder for consumers that take any unit. A consumer that needs a
+  dimension names it, so a dimension mismatch fails to compose. The unindexed alternative, a category
+  denoting `Σu. Quantity(u)`, was rejected: no category could select a dimension. Details in the
+  implementation plan, decision 1.
 
 ## Open questions
 

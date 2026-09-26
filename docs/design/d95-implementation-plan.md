@@ -51,14 +51,20 @@ works on plain text.
 
 ## Decisions that block coding
 
-1. **The `MP` category.** Recommended: `cat_mp : core:unit -> Cat` with
-   `⟦cat_mp(u)⟧ = units:Quantity(u)`, and a binder `cat_unit_forall : (core:unit -> Cat) -> Cat` with
-   `⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧` for consumers that take any unit — the
-   `cat_forall` pattern, where the binder is instantiated from the consumed item rather than erased.
-   `slot_is_concrete_nonentity` (`category.rs:468`) gains `cat_mp` with a literal unit, so a consumer
-   that selects a dimension forces the unpacked path. The alternative, an unindexed `cat_mp` denoting
-   `Σu. Quantity(u)`, needs no binder, and it puts dimension checking outside the type system, which
-   D93 exists to prevent.
+1. ~~**The `MP` category.**~~ **DECIDED 2026-09-26 — indexed by the unit.** `cat_mp : core:unit ->
+   Cat` with `⟦cat_mp(u)⟧ = units:Quantity(u)`, and a binder `cat_unit_forall : (core:unit -> Cat) ->
+   Cat` with `⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧` for consumers that take any unit — the
+   `cat_forall` pattern, where the binder is instantiated from the consumed item and the sem is
+   applied to the unit, rather than erased as the feature binders are. A consumer that needs a
+   dimension names it (`warmer : … / cat_mp(u"K")`), so `5 mg warmer` has no parse: dimension errors
+   are type errors, which is what D93 put unit types in the kernel for.
+   - **Packing.** The packed chart keys an item by `cat_shape`, which drops indices (`forest.rs:80`),
+     so `931g`'s two items share a node. `slot_is_concrete_nonentity` (`category.rs:468`) gains
+     `cat_mp` with a literal unit, and slice 4 establishes that a unit-selecting consumer is decided
+     against every unit in the node, not the representative's.
+   - **Rejected:** an unindexed `cat_mp` denoting `Σu. Quantity(u)`. It needs no binder and no
+     packing change, and no category could select a dimension; switching to the indexed form at
+     slice 7 would change the item shape and every `MP` entry written before it.
 2. ~~**Prose unit surfaces.**~~ **DECIDED 2026-09-26 — `lexicon:UnitSurface`.** A resource pairs a
    prose spelling (`lexicon:form`) with one `units:NamedUnit` (`lexicon:unit`), in a lexicon-side
    file. Every `units:symbol` is a spelling of its own unit implicitly; the resources add senses: `g`
