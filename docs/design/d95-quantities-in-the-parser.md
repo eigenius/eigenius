@@ -82,13 +82,13 @@ symbol**; the quantity is *constructed* at seed time from a recognised span.
 
 So the change is: recognise a quantity span, parse its unit sub-expression, build one item, seed it.
 
-## `931g` is the inverse of multiword seeding, and harder in one respect
+## A numeral-adjacent unit is the inverse of multiword seeding, and harder in one respect
 
 Multiword seeding **joins**: `cell line` is N surface tokens with a lexicon entry for the joined
 span, and `seed_leaves` emits the joined item *alongside* the split ones, "carried as competing
 chart edges, not resolved here."
 
-A numeral-adjacent unit **splits**: `931g` is one surface token that must yield two constituents.
+A numeral-adjacent unit **splits**: `5mg` is one surface token that must yield two constituents.
 Same lattice, opposite direction — but **not the same mechanism**, and an earlier draft claimed it
 was. The chart is `vec![vec![Vec::new(); n]; n]` with `n = tokens.len()`
 (`kernel/src/dcg/parse/seed.rs:568-581`). A joined span is a union of cells that already exist; a
@@ -98,7 +98,7 @@ own design diagram puts it — and not in seeding.
 
 **The asymmetry that makes splitting harder: the boundary is not given.** An MWE chooses among
 boundaries the tokenizer already produced. A split must *propose* one, and the proposal space is
-open — `931g` divides 3|1, `10x` 2|1, and `5-fold` and `53BP1` should not divide at all.
+open — `5mg` divides 1|2, `10x` 2|1, and `5-fold` and `53BP1` should not divide at all.
 
 **The unit vocabulary is what makes it decidable.** A quantity split is
 `⟨numeral⟩⟨known unit symbol⟩`, so the boundary is "the longest suffix that is a unit" — a lookup,
@@ -106,7 +106,8 @@ not a search:
 
 | token | prefix | suffix | split? |
 |---|---|---|---|
-| `931g` | `931` numeral | `g` is a unit | **yes** |
+| `5mg` | `5` numeral | `mg` is a unit | **yes** |
+| `931g` | `931` numeral | a bare `g` | **no — refused in v1**, see below |
 | `53BP1` | `53` numeral | `BP1` is not a unit | no |
 | `HEK293T` | `HEK293` not a numeral | (`T` is tesla) | no |
 | `5-fold` | `5` numeral | `-fold` is not a unit | no |
@@ -118,6 +119,29 @@ tesla; without the unit-suffix test, `53BP1` would split on nothing.
 So the unit vocabulary is not only what D93 needs for typing — it is what makes this tokenization
 decidable at all. Before units exist, `931g` is unanalysable.
 
+**A bare `g` is not split in v1** (D93, "A vocabulary hazard the same evidence surfaced"). It has two
+readings, gram and standard gravity, and D93's vocabulary holds only the first: admitting standard
+gravity opens "units science uses that the SI does not accept", a category to be opened with a
+criterion rather than one symbol at a time. Splitting could therefore only produce grams, and in
+this corpus neither bare-`g` token is a mass:
+
+| token | in the WRN methods | what it is |
+|---|---|---|
+| `931g` | "the plates were spun at 931g for 2 h at 30 °C" | g-force |
+| `2g` | "(Fig. 2g)" | a figure panel |
+
+So a numeral with a bare `g` suffix stays one token and is routed out as non-prose — today's
+behaviour, and the CNL guide's R2: *a faithful un-parsed claim beats a parsed distorted one*. A
+PREFIXED gram splits: standard gravity takes no prefix, so `mg`, `μg` and `kg` are unambiguously
+mass. When standard gravity is admitted, `931g` splits into competing readings as "Ambiguous unit
+symbols" describes.
+
+**Figure panels are the same trap, wider than `g`.** The rule reads the unbracketed `Fig. 2d` in the
+WRN methods as two days, and would read `Fig. 2h` as two hours; panels `a`, `c`, `e` and `f` escape
+only because a prefix alone is not a unit. The nine bracketed references, `(Fig. 2g)` among them,
+are removed by the aside rule before the split runs; the unbracketed ones reach it. See "Open
+questions".
+
 ## An existing defect the same change repairs
 
 `is_nonprose` routes out any token starting with a digit. Measured:
@@ -126,7 +150,7 @@ decidable at all. Before units exist, `931g` is unanalysable.
 |---|---|---|
 | `53BP1` | **yes** | **no** — a gene, 12 occurrences in the Letter body |
 | `HEK293T` | no | yes — a cell line |
-| `931g` | yes | yes today, no once quantities parse |
+| `931g` | yes | yes, and still in v1: a bare `g` suffix is not split |
 | `5-fold` | yes | arguably not — a degree modifier |
 
 The rule's own docstring reasons about letter-initial gene symbols ("`mlh1`, `msh2`, `brca1`,
@@ -145,8 +169,8 @@ better for the truth, and is the right direction on this project's own terms.
 ## One chart item per candidate reading
 
 The recognised span becomes leaf items carrying a magnitude and, where present, a unit — **one per
-candidate unit sense**, as competing edges. An unambiguous symbol yields exactly one; `931g` yields
-gram and standard gravity and lets the ranker choose (see "Ambiguous unit symbols" below). A bare
+candidate unit sense**, as competing edges. An unambiguous symbol yields exactly one; a symbol with
+several senses yields one each and lets the ranker choose (see "Ambiguous unit symbols" below). A bare
 `0.56` is the same item shape with no unit, which keeps cardinality and quantities on one path
 rather than building two mechanisms that must later agree.
 
@@ -206,7 +230,8 @@ unrecoverable.
 - discard punctuation the grammar does not consume;
 - classify a token as non-prose — the `is_nonprose` rule, relocated from the consumer and revised
   so `53BP1` is a symbol rather than a numeral;
-- **merge quantity spans** — `37` `°` `C` into one item, `931g` split on the numeral/unit boundary,
+- **merge quantity spans** — `37` `°` `C` into one item, `5mg` split on the numeral/unit boundary
+  (a bare `g` suffix, as in `931g`, is not split in v1),
   `<` `−1` into a comparison — which is the new work.
 
 **The aim is behaviour preservation, and it is a rewrite rather than something got "by
@@ -255,8 +280,12 @@ reaches the sub-parser intact by construction.
 
 ## Ambiguous unit symbols are polysemy, not a special case
 
-`931g` is g-force; `10 g` is grams. `M` is molar or mega. `h` is hour, and in another register the
-Planck constant.
+`M` is molar or mega. `h` is hour, and in another register the Planck constant. `931g` is g-force
+where `10 g` is grams.
+
+**In v1 the `g` case does not arise.** Standard gravity is not in D93's vocabulary and a bare `g`
+suffix is not split, so `931g` never reaches seeding (see the split section above). What follows is
+the mechanism for a symbol with several senses — and for `g`, once standard gravity is admitted.
 
 A unit symbol is a **lexeme carrying several senses**, exactly as a noun carries several synsets,
 and each sense denotes a different unit. It therefore routes through machinery that already exists:
@@ -274,17 +303,18 @@ MWE-versus-compositional ambiguity it carries rather than resolves.
 
 Three consequences, which supersede what the sections above say:
 
-- **The recogniser commits to a span, not to a unit.** It marks `931g` as a quantity span and
-  yields the candidate senses; it does not choose among them.
+- **The recogniser commits to a span, not to a unit.** It marks the quantity span and yields the
+  candidate senses; it does not choose among them.
 - **The unit sub-parser runs per sense**, producing one `Unit` term per candidate. For an
   unambiguous symbol that is a single item and nothing is lost.
 - **Normalisation happens after selection, not at recognition.** D93's "the parser emits both the
   stated and the normalised form" is true of the *selected* reading, so the normaliser runs once the
   chart has committed, not while it is being seeded.
 
-This is what keeps the `g` hazard inside machinery that already exists: gram and standard gravity
+This is how the `g` hazard is handled once standard gravity is admitted: gram and standard gravity
 compete as chart edges, the ranker scores them in context, and the felicity gate refuses a reading
-that does not compose — rather than a pre-pass silently picking one.
+that does not compose — rather than a pre-pass silently picking one. Until then v1 refuses the
+split, the fail-closed half of the same choice.
 
 ## What the pipeline stages inherit
 
@@ -809,12 +839,10 @@ rational powers.
 D93 was built after this document was written (PR #262). What it settled, and one piece of work,
 come into D95:
 
-- **Conflict to resolve first — `931g`.** "Ambiguous unit symbols are polysemy" above treats `931g`
-  as gram and g-force competing as chart edges for the ranker. D93 then decided that **v1 refuses to
-  split a `g`-suffixed numeral**: standard gravity is not in the vocabulary, and admitting it opens
-  "units science uses that the SI does not accept", with `rpm` in the same WRN sentence behind it
-  (D93, "A vocabulary hazard the same evidence surfaced"). The section above must be revised to the
-  refusal before the span recogniser is built.
+- **`931g` — resolved.** This document treated `931g` as gram and g-force competing in the chart; D93
+  then decided that **v1 refuses to split a `g`-suffixed numeral**, since standard gravity is not in
+  the vocabulary. The split rule, the preprocessor list and "Ambiguous unit symbols" are revised to
+  the refusal: a bare `g` suffix is not split, and a prefixed gram is.
 - **One converter.** The unit sub-parser normalises prose — `µ` (U+00B5), superscript exponents,
   `per` — into D93's strict stated form and calls `units::convert::Vocabulary::convert`, which the
   ESL form `units:quantity(v, "…")` also uses (D93 implementation plan, D6.2). Symbol resolution,
@@ -837,6 +865,13 @@ come into D95:
   loaded lexicon, so neither needs a reseed.
 
 ## Open questions
+
+- **Figure and table references against the numeral/unit split.** The unbracketed `Fig. 2d` in the
+  WRN methods would split into two days, as `Fig. 2h` would into two hours; ten unbracketed
+  `Fig. N<letter>` references occur there, and `Extended Data Fig.` and `Table` take the same form.
+  The likeliest rule is that the preprocessor does not split a token directly after a figure or
+  table reference word — the split is the preprocessor's decision, as the design section makes it.
+  Undecided.
 
 - **Arithmetic over the statistics functionals.** Nothing in the `stats:` namespace combines them.
   See "Dispersion splits in two" above; the agreement reading and `mean ± s.e.m.` both stop here.
