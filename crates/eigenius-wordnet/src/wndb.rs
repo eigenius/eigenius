@@ -24,7 +24,7 @@
 //! the pointer block — so the `+` that marks a frame is disambiguated from the `+`
 //! derivational-pointer symbol by position.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// Part of speech. WordNet's satellite-adjective `s` folds into `Adj`.
@@ -106,7 +106,12 @@ pub struct Synset {
     /// `+` **derivational** pointer targets `(offset, pos-char)` — morphosemantic links
     /// (adjective `dependent` → noun `dependence`). A gradable adjective's `deg` is projected
     /// onto its nominalization as a `cat_measure` reading (C2, d63-comparative-phrasal.md §5.3).
-    pub derivational: Vec<(Offset, String)>,
+    ///
+    /// A SET of target synsets. `+` is a lexical pointer, lemma to lemma, so a synset carries one
+    /// per linked lemma pair and can name the same target several times; the source/target lemma
+    /// numbers are not kept, and the projection is per synset. As a list, 1,085 WordNet 3.0
+    /// adjectives emitted their degree-noun entries once per pointer: 5,534 duplicates.
+    pub derivational: BTreeSet<(Offset, String)>,
 }
 
 /// Strip a WordNet **adjective syntactic marker** — `(a)` attributive, `(p)` predicative,
@@ -152,14 +157,16 @@ pub fn parse_data_line(line: &str) -> Option<Synset> {
     let mut hypernyms = Vec::new();
     let mut instance_of = Vec::new();
     let mut relational = false;
-    let mut derivational = Vec::new();
+    let mut derivational = BTreeSet::new();
     for _ in 0..p_cnt {
         match *tok.get(i)? {
             "@" => hypernyms.push(tok.get(i + 1)?.to_string()),
             "@i" => instance_of.push(tok.get(i + 1)?.to_string()),
             "\\" => relational = true, // pertainym → relational (non-gradable) adjective
             // `+` derivational: (target offset, target pos-char) — the nominalization link.
-            "+" => derivational.push((tok.get(i + 1)?.to_string(), tok.get(i + 2)?.to_string())),
+            "+" => {
+                derivational.insert((tok.get(i + 1)?.to_string(), tok.get(i + 2)?.to_string()));
+            }
             _ => {}
         }
         i += 4; // sym, offset, pos, source/target

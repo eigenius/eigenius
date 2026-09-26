@@ -857,14 +857,17 @@ come into D95:
   the unit; nothing here consumes them yet (D93, "Kinds are metadata, not algebra").
 - **No stated-unit record.** What the author wrote stays in `enc:prose`, reached through
   `enc:from_unit`; D93 dropped the per-occurrence record, so this work emits none.
-- **The WordNet importer's counts** (work item). `push_entry` holds the closed-class guard for all 19
-  emission sites but returns nothing, so every caller counts an entry it may not have written: the
-  2026-09-25 reseed reported 471,743 entries and wrote 471,655 — 88 withheld, 13 of them mass. The
-  UMLS importer checks at the call site and counts `grammatical_skipped`; the WordNet one should
-  report the same way, with `push_entry` returning whether it wrote. Separately, degree-noun entries
-  (`e_<adj>_d_<noun>`) are emitted once per adjective–noun link path — 5,534 duplicate declarations
-  with identical bodies, deduplicated at load — and should be emitted once. Neither changes the
-  loaded lexicon, so neither needs a reseed.
+- **The WordNet importer's counts** (done). `push_entry` held the closed-class guard for all 19
+  emission sites but returned nothing, so every caller counted an entry it may not have written: the
+  2026-09-25 reseed reported 471,743 entries and wrote 471,655 — 88 withheld, 13 of them mass. It now
+  counts `entries` itself, counts a withheld entry in `closed_class_skipped`, and returns whether it
+  wrote, for the callers' sub-counts. Separately, degree-noun entries were emitted more than once — 5,534
+  extra copies (4,845 `_d_`, 689 `_dr_`) with identical bodies: `+` is a lexical pointer, so an adjective whose
+  lemmas link to one noun synset carries that target once per lemma pair, and the projection ran once
+  per pointer. `Synset::derivational` is now a set of target synsets. Against WordNet 3.0 with the
+  countability list the importer reports and writes 466,121 entries, 43,474 of them mass, 88
+  withheld, no duplicate; the emitted blocks are the same 642,597 as before, so the loaded lexicon
+  does not change and no reseed follows from it.
 
 ## Open questions
 

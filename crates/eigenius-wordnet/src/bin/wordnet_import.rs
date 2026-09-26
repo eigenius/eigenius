@@ -183,8 +183,9 @@ fn main() -> ExitCode {
         rep.verbs_deferred,
     );
     eprintln!(
-        "  ({} additive mass-noun entries from the countability lexicon)",
-        rep.mass_entries
+        "  ({} additive mass-noun entries from the countability lexicon; \
+         {} entries withheld on closed-class surfaces)",
+        rep.mass_entries, rep.closed_class_skipped
     );
 
     if let Some(path) = &args.out {
@@ -297,8 +298,9 @@ fn emit_partitioned(
         rep.participle_entries,
     );
     eprintln!(
-        "  ({} additive mass-noun entries from the countability lexicon)",
-        rep.mass_entries
+        "  ({} additive mass-noun entries from the countability lexicon; \
+         {} entries withheld on closed-class surfaces)",
+        rep.mass_entries, rep.closed_class_skipped
     );
     eprintln!(
         "wrote {} files → {} (base + {} entry chunks; load in filename order as a chain)",

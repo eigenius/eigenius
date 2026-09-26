@@ -148,6 +148,10 @@ pub struct Report {
     /// `(S[adj]\NP)/cat_pp_arg(prep)` reading of a past participle whose verb's WordNet frames NAME a
     /// governed preposition (`associated WITH`, `linked WITH`).
     pub stative_entries: usize,
+    /// Entries withheld because their surface is closed-class ([`push_entry`]'s guard, the list
+    /// `eigenius_kernel::dcg::closed_class` shares with the UMLS importer): `As` arsenic, `In` indium.
+    /// Not in `entries`, nor in any of its sub-counts.
+    pub closed_class_skipped: usize,
 }
 
 /// The emittable categorial shapes a verb frame maps to. Higher-order shapes
@@ -318,11 +322,14 @@ fn sense_key(syn: &Synset, lemma: &str) -> String {
     )
 }
 
-/// Emit one `lexicon:LexicalEntry` block. `entry_id` and `sem` are local names
+/// Emit one `lexicon:LexicalEntry` block and count it in `rep.entries`, or withhold it and count it in
+/// `rep.closed_class_skipped`. Returns whether it was written, for the callers' sub-counts
+/// (`mass_entries`, `participle_entries`, `stative_entries`). `entry_id` and `sem` are local names
 /// (under `wn:`); `cat` / `sem_type` are `type_expr` bodies.
 #[allow(clippy::too_many_arguments)]
 fn push_entry(
     buf: &mut String,
+    rep: &mut Report,
     entry_id: &str,
     form: &str,
     cat: &str,
@@ -330,7 +337,7 @@ fn push_entry(
     sem_type: &str,
     sense: &str,
     ranks: &SenseRanks,
-) {
+) -> bool {
     // CLOSED-CLASS SURFACE: the bootstrap owns this word's grammatical reading, so WordNet must not
     // seed a content entry on it (`eigenius_kernel::dcg::closed_class`, the list both importers share).
     // WordNet's collisions here are element-symbol / acronym homonyms — `As` is BOTH arsenic
@@ -340,7 +347,8 @@ fn push_entry(
     // worst unit). The single choke point for all emission sites, so every POS is covered at once; the
     // synset's axioms still ship (only the ENTRY is withheld, mirroring the UMLS importer).
     if eigenius_kernel::dcg::closed_class::is_closed_class_surface(form) {
-        return;
+        rep.closed_class_skipped += 1;
+        return false;
     }
     // Sense-frequency rank (D63 §8.7 Stage B): emit `lexicon:sense_rank` only when it is
     // non-zero (rank 0 = the most-frequent sense, and the parser's default — so the
@@ -361,6 +369,8 @@ fn push_entry(
          }}\n\n",
         form = esc(form),
     ));
+    rep.entries += 1;
+    true
 }
 
 /// Noun synset → a `core:Class` (with `subclass_of` from `@`) + one `N` entry
@@ -407,6 +417,7 @@ fn push_noun(
     for (i, lemma) in syn.words.iter().enumerate() {
         push_entry(
             buf,
+            rep,
             &format!("e_{}_{i}", local(syn)),
             lemma,
             &cat,
@@ -415,10 +426,10 @@ fn push_noun(
             &sense_key(syn, lemma),
             ranks,
         );
-        rep.entries += 1;
-        if mass.contains(&norm_lemma(lemma)) {
-            push_entry(
+        if mass.contains(&norm_lemma(lemma))
+            && push_entry(
                 buf,
+                rep,
                 &format!("e_{}_{i}_mass", local(syn)),
                 lemma,
                 &mass_cat,
@@ -426,8 +437,8 @@ fn push_noun(
                 "Set",
                 &sense_key(syn, lemma),
                 ranks,
-            );
-            rep.entries += 1;
+            )
+        {
             rep.mass_entries += 1;
         }
     }
@@ -477,6 +488,7 @@ fn push_instance(
         for (li, lemma) in syn.words.iter().enumerate() {
             push_entry(
                 buf,
+                rep,
                 &format!("e_{}_{ci}_{li}", local(syn)),
                 lemma,
                 &cat,
@@ -485,7 +497,6 @@ fn push_instance(
                 &sense_key(syn, lemma),
                 ranks,
             );
-            rep.entries += 1;
         }
     }
 }
@@ -737,8 +748,9 @@ fn push_stative_relational(buf: &mut String, syn: &Synset, rep: &mut Report, ran
         }
         let sense = sense_key(syn, lemma);
         for (k, pp) in head_pps(lemma).iter().enumerate() {
-            push_entry(
+            if push_entry(
                 buf,
+                rep,
                 &format!("e_v{off}_rel_{i}_p{k}"),
                 pp,
                 &cat,
@@ -746,10 +758,10 @@ fn push_stative_relational(buf: &mut String, syn: &Synset, rep: &mut Report, ran
                 &arrow,
                 &sense,
                 ranks,
-            );
-            rep.entries += 1;
-            rep.participle_entries += 1;
-            rep.stative_entries += 1;
+            ) {
+                rep.participle_entries += 1;
+                rep.stative_entries += 1;
+            }
         }
     }
 }
@@ -819,6 +831,7 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
             // Base form — the lemma surface (do-support / modal complement; num_any).
             push_entry(
                 buf,
+                rep,
                 &format!("e_v{off}_{tag}_{i}_b"),
                 lemma,
                 &cat_bse,
@@ -827,11 +840,11 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
                 &sense,
                 ranks,
             );
-            rep.entries += 1;
             // Finite 3sg ("affects") — SINGULAR subject (D63 §8.10 6-agr).
             let fin = inflect_head(lemma, third_singular);
             push_entry(
                 buf,
+                rep,
                 &format!("e_v{off}_{tag}_{i}"),
                 &fin,
                 &cat_fin_sg,
@@ -840,11 +853,11 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
                 &sense,
                 ranks,
             );
-            rep.entries += 1;
             // Finite plural ("affect", = the lemma surface) — PLURAL subject (6-agr):
             // heads a clause with a plural/coordinated subject. Distinct from `bse`.
             push_entry(
                 buf,
+                rep,
                 &format!("e_v{off}_{tag}_{i}_fp"),
                 lemma,
                 &cat_fin_pl,
@@ -853,11 +866,11 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
                 &sense,
                 ranks,
             );
-            rep.entries += 1;
             // Present participle — progressive ("is affecting"); always regular.
             let ger = inflect_head(lemma, gerund);
-            push_entry(
+            if push_entry(
                 buf,
+                rep,
                 &format!("e_v{off}_{tag}_{i}_g"),
                 &ger,
                 &cat_ger,
@@ -865,15 +878,15 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
                 &arrow,
                 &sense,
                 ranks,
-            );
-            rep.entries += 1;
-            rep.participle_entries += 1;
+            ) {
+                rep.participle_entries += 1;
+            }
             // Past participle(s) — perfect/passive ("has/is affected"); table-or-regular.
             for (k, pp) in head_pps(lemma).iter().enumerate() {
                 let id = format!("e_v{off}_{tag}_{i}_p{k}");
-                push_entry(buf, &id, pp, &cat_pss, &sem, &arrow, &sense, ranks);
-                rep.entries += 1;
-                rep.participle_entries += 1;
+                if push_entry(buf, rep, &id, pp, &cat_pss, &sem, &arrow, &sense, ranks) {
+                    rep.participle_entries += 1;
+                }
             }
             // Finite SIMPLE PAST — the past-tense surface heading a declarative ("affected"). Reuses
             // the past-participle surface(s): correct for regular verbs and the many irregulars where
@@ -881,8 +894,17 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
             // is a known edge — its true past surface isn't emitted (a follow-on irregular-past table).
             for (k, pp) in head_pps(lemma).iter().enumerate() {
                 let id = format!("e_v{off}_{tag}_{i}_fpast{k}");
-                push_entry(buf, &id, pp, &cat_fin_past, &sem, &arrow, &sense, ranks);
-                rep.entries += 1;
+                push_entry(
+                    buf,
+                    rep,
+                    &id,
+                    pp,
+                    &cat_fin_past,
+                    &sem,
+                    &arrow,
+                    &sense,
+                    ranks,
+                );
             }
         }
     }
@@ -1072,6 +1094,7 @@ fn push_adj(
             }
             push_entry(
                 buf,
+                rep,
                 &format!("e_{loc}_{i}"),
                 lemma,
                 &cat,
@@ -1080,7 +1103,6 @@ fn push_adj(
                 &sense_key(syn, lemma),
                 ranks,
             );
-            rep.entries += 1;
         }
         return;
     }
@@ -1161,6 +1183,7 @@ fn push_adj(
         // Positive: gt(deg(x), std).
         push_entry(
             buf,
+            rep,
             &format!("e_{loc}_{i}"),
             lemma,
             &pos_cat,
@@ -1169,7 +1192,6 @@ fn push_adj(
             &sense,
             ranks,
         );
-        rep.entries += 1;
         // C1 (d63-comparative-phrasal.md §5.3): a bare `cat_measure` reading — the degree function
         // `deg_X : Entity → float` itself — so the closed-class `more`/`less` operators
         // (`((S[adj]\NP)/cat_pp_than)/cat_measure`) combine with a periphrastic-comparative adjective.
@@ -1178,6 +1200,7 @@ fn push_adj(
         // the C3 curated prep map; the synthetic `-er` below is the same operator pre-bundled.)
         push_entry(
             buf,
+            rep,
             &format!("e_{loc}_{i}_m"),
             lemma,
             "lexicon:cat_measure",
@@ -1186,12 +1209,12 @@ fn push_adj(
             &sense,
             ranks,
         );
-        rep.entries += 1;
         // C3: relational lemmas (gloss governs a prep) also get the ground-taking cat_measure/cat_pp_arg
         // reading — `deg_rel` (ground, subject); `on X` fills the ground → a cat_measure over the subject.
         if let Some(prep) = governed_preposition(&syn.gloss, lemma) {
             push_entry(
                 buf,
+                rep,
                 &format!("e_{loc}_{i}_r"),
                 lemma,
                 &format!(
@@ -1203,7 +1226,6 @@ fn push_adj(
                 &sense,
                 ranks,
             );
-            rep.entries += 1;
             // C3-positive (Fix A (c)): the POSITIVE relational predication `(S[adj]\NP)/cat_pp_arg(prep)`
             // — consume the governed PP (the ground), yield a predicative adjective comparing the
             // 2-place measure to the absolute standard. This is what lets "concordant WITH X" bind X as
@@ -1212,6 +1234,7 @@ fn push_adj(
             // comparative (`more concordant with X than …`).
             push_entry(
                 buf,
+                rep,
                 &format!("e_{loc}_{i}_rp"),
                 lemma,
                 &format!(
@@ -1224,7 +1247,6 @@ fn push_adj(
                 &sense,
                 ranks,
             );
-            rep.entries += 1;
         }
         // Synthetic `-er` comparative (`larger`); periphrastic "more X" now rides the `cat_measure`
         // reading above + the closed-class `more`/`less`.
@@ -1232,6 +1254,7 @@ fn push_adj(
             for (k, c) in comparative.iter().enumerate() {
                 push_entry(
                     buf,
+                    rep,
                     &format!("e_{loc}_{i}_c{k}"),
                     c,
                     &cmp_cat,
@@ -1240,11 +1263,11 @@ fn push_adj(
                     &sense,
                     ranks,
                 );
-                rep.entries += 1;
                 // Attributive / elided-`than` reading of the same synthetic comparative (bare `S[adj]\NP`,
                 // anaphoric standard) → `a stronger phenotype` refines the noun, opens the standard hole.
                 push_entry(
                     buf,
+                    rep,
                     &format!("e_{loc}_{i}_ca{k}"),
                     c,
                     &pos_cat,
@@ -1253,7 +1276,6 @@ fn push_adj(
                     &sense,
                     ranks,
                 );
-                rep.entries += 1;
             }
         }
     }
@@ -1270,6 +1292,7 @@ fn push_adj(
             for (j, nlemma) in noun.words.iter().enumerate() {
                 push_entry(
                     buf,
+                    rep,
                     &format!("e_{loc}_d_{}_{j}", local(noun)),
                     nlemma,
                     "lexicon:cat_measure",
@@ -1278,12 +1301,12 @@ fn push_adj(
                     &sense_key(noun, nlemma),
                     ranks,
                 );
-                rep.entries += 1;
                 // C3: relational projection — the nominalization (`dependence`) also gets the
                 // ground-taking `cat_measure/cat_pp_arg` reading, so `greater dependence ON WRN` threads.
                 if let Some(prep) = &syn_prep {
                     push_entry(
                         buf,
+                        rep,
                         &format!("e_{loc}_dr_{}_{j}", local(noun)),
                         nlemma,
                         &format!(
@@ -1295,7 +1318,6 @@ fn push_adj(
                         &sense_key(noun, nlemma),
                         ranks,
                     );
-                    rep.entries += 1;
                 }
             }
         }
@@ -2079,7 +2101,7 @@ mod tests {
         let lethality = syn("00000002 00 n 01 lethality 0 000 | the quality of being lethal");
         assert_eq!(
             lethal.derivational,
-            vec![("00000002".to_string(), "n".to_string())]
+            [("00000002".to_string(), "n".to_string())].into()
         );
         let noun_index: BTreeMap<_, _> = [(lethality.offset.clone(), &lethality)]
             .into_iter()
@@ -2097,6 +2119,55 @@ mod tests {
             "sem = the adjective's deg:\n{buf}"
         );
         assert!(buf.contains("lexicon:cat      = type_expr( lexicon:cat_measure );"));
+    }
+
+    /// `+` is lexical: two lemmas of one adjective linked to the same noun synset are two pointers.
+    /// The projection is per synset, so each noun lemma gets one `_d_` entry, not one per pointer.
+    #[test]
+    fn a_repeated_derivational_target_projects_once() {
+        let lethal = syn(
+            "00000001 00 a 02 lethal 0 deadly 0 002 + 00000002 n 0101 + 00000002 n 0201 | causing death",
+        );
+        assert_eq!(lethal.derivational.len(), 1);
+        let lethality = syn("00000002 00 n 01 lethality 0 000 | the quality of being lethal");
+        let noun_index: BTreeMap<_, _> = [(lethality.offset.clone(), &lethality)]
+            .into_iter()
+            .collect();
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_adj(&mut buf, &lethal, &mut rep, &noun_index, &SenseRanks::new());
+        assert_eq!(
+            buf.matches("resource wn:e_a00000001_d_n00000002_0 :")
+                .count(),
+            1
+        );
+        assert_eq!(buf.matches(": lexicon:LexicalEntry {").count(), rep.entries);
+    }
+
+    /// An entry `push_entry` withholds for a closed-class surface is counted as skipped, and in none of
+    /// `entries` or its sub-counts. `As` is arsenic's element symbol and the preposition `as`.
+    #[test]
+    fn a_closed_class_surface_is_withheld_and_counted() {
+        let arsenic =
+            syn("14629149 27 n 02 arsenic 0 As 0 001 @ 14622893 n 0000 | a very poisonous element");
+        let mut mass = MassNouns::new();
+        mass.insert("arsenic".into());
+        mass.insert("as".into());
+        let mut rep = Report::default();
+        let mut buf = String::new();
+        push_noun(
+            &mut buf,
+            &arsenic,
+            &mut rep,
+            &BTreeMap::new(),
+            &SenseRanks::new(),
+            &mass,
+        );
+        assert!(!buf.contains("lexicon:form     = \"As\";"));
+        assert_eq!(rep.entries, 2); // arsenic, arsenic-mass
+        assert_eq!(rep.mass_entries, 1);
+        assert_eq!(rep.closed_class_skipped, 2); // As, As-mass
+        assert_eq!(buf.matches(": lexicon:LexicalEntry {").count(), rep.entries);
     }
 
     #[test]
