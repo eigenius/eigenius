@@ -404,8 +404,13 @@ in the quantity, because no marker was present to carry it. The consumer is not 
 rows has a head that is independently a scalar-change verb (`rose`), a nominalised scalar change
 (`increase`) or a comparative (`warmer`).
 
-One item follows, and °C needs no second quantity type: the difference reading is `m^Δ`'s derived scale,
-not a distinct primitive.
+**Revised 2026-09-26: two items, and a second type.** A quantity token seeds a value item
+(`units:Quantity(u)`) and a difference item (`units:Difference(u)`), and the consumer's category
+selects one — the consumer still supplies the reading, by subcategorisation. A scalar-change verb
+still reaches its difference through `m^Δ`. *Withdrawn: "One item follows, and °C needs no second
+quantity type: the difference reading is `m^Δ`'s derived scale, not a distinct primitive." An item
+converted at seeding has already chosen between 310.15 K and 37 K for `37 °C`.* (Implementation plan,
+decision 5.)
 
 ### Bare numerals and quantities share a carrier, not a category — decided
 
@@ -469,6 +474,8 @@ instance today.
 
 Schwarzschild base-generates a measure phrase as a predicate over sets of degrees (`⟨d,t⟩`). The item
 denotes a property of an interval and the consumer resolves it. One underlying quantity item is safe.
+*Revised 2026-09-26: the token is neutral and seeds a value item and a difference item; the consumer's
+category selects one (see "The quantity is neutral").*
 
 Schwarzschild reaches the consumer by lexically governed type-shift; this document takes
 subcategorisation instead, for the reason given under "Consumers subcategorise". That changes the
@@ -544,8 +551,12 @@ collected on a verb where both objects are independently plausible so the semant
 the syntax. An earlier draft of this section proposed a test set that repeated the preposition in
 both conjuncts; that set is withdrawn, since it tests the configuration where the two analyses agree.
 
-Target types are unchanged by the mechanism: a point-denoting preposition takes an affine coordinate,
-a differential modifier takes a vector magnitude, and only the second admits arithmetic.
+Target types are unchanged by the mechanism: a point-denoting preposition takes a value
+(`units:Quantity(u)`), a differential modifier takes a difference (`units:Difference(u)`). *An earlier
+version said "only the second admits arithmetic". Whether two values add depends on the kind of
+quantity — masses do, temperatures do not, even in K — which the type does not record; the typed
+operations are value − value → difference, value + difference → value, difference ± difference →
+difference.*
 
 ### The tolerance derivation, repaired — decided
 
@@ -887,6 +898,11 @@ come into D95:
   dimension names it, so a dimension mismatch fails to compose. The unindexed alternative, a category
   denoting `Σu. Quantity(u)`, was rejected: no category could select a dimension. Details in the
   implementation plan, decision 1.
+- **A difference is its own type** (2026-09-26). `units:Quantity(u)` stays the measured value, as
+  D93 built it; `units:Difference(u)` is new, converted with no °C offset. The measure phrase's
+  category carries the reading (`value | difference`), every quantity token seeds both, and each
+  consumer takes one: `at 37 °C` a value of 310.15 K, `rose 5 °C` a difference of 5 K. Details in
+  the implementation plan, decision 5.
 
 ## Open questions
 

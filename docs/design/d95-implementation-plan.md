@@ -47,12 +47,15 @@ works on plain text.
    selection" assumed a stated-unit record carried through the chart. D93 dropped the record, and an
    item's sem must already have type `Quantity(u)` for the felicity gate, so each candidate reading is
    converted when it is seeded. Selection among candidates still belongs to the chart and ranker.
-   **°C is the exception**, and decision 5 is about it.
+   A bare °C is converted twice, once per reading (decision 5).
 
 ## Decisions that block coding
 
+**All five are closed** (2026-09-26): 1, 2, 3 and 5 decided, 4 deferred to D96's build.
+
 1. ~~**The `MP` category.**~~ **DECIDED 2026-09-26 — indexed by the unit.** `cat_mp : core:unit ->
-   Cat` with `⟦cat_mp(u)⟧ = units:Quantity(u)`, and a binder `cat_unit_forall : (core:unit -> Cat) ->
+   lexicon:Reading -> Cat`, with `⟦cat_mp(u, value)⟧ = units:Quantity(u)` and
+   `⟦cat_mp(u, difference)⟧ = units:Difference(u)` (the reading is decision 5), and a binder `cat_unit_forall : (core:unit -> Cat) ->
    Cat` with `⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧` for consumers that take any unit — the
    `cat_forall` pattern, where the binder is instantiated from the consumed item and the sem is
    applied to the unit, rather than erased as the feature binders are. A consumer that needs a
@@ -92,13 +95,35 @@ works on plain text.
    as two hours; bracketed references are still removed as asides. The rule that was recommended —
    no split directly after `Fig.`, `Figs`, `Figure`, `Table` or `Extended Data Fig.` — is decided
    with D96, where an `<xref>` span makes it unnecessary for any source with markup.
-5. **°C in a neutral item.** D95 decides that the consumer supplies point-or-difference, and that a
-   difference in °C is a magnitude in K. An item converted at seeding has already chosen: `37 °C` is
-   310.15 K, and `sampled at 5 °C intervals` wants 5 K. Recommended: the item carries the linear
-   magnitude (`37 K`) and `cat_mp` carries the unit's origin (273.15 K for °C, zero for every other
-   unit); a point consumer adds the origin. This needs `units:add` over quantities of one unit. The
-   alternative, seeding °C quantities as two competing items (point and difference), makes the
-   ranker choose what the consumer's category already determines.
+5. ~~**°C in a neutral item.**~~ **DECIDED 2026-09-26 — a difference is its own type.** An item
+   converted at seeding has already chosen between `37 °C` as 310.15 K and as 37 K, and D95 decides
+   the consumer supplies the reading.
+   - **`units:Quantity(u)` is the measured value**, as built: `at 37 °C` is 310.15 K, `a dose of 5 mg`
+     is 5 mg, `for 2 h` is 7200 s. D93's type, converter, ESL form and tests are unchanged. This is
+     VIM's quantity value; ISO 80000-5 has Celsius temperature as a quantity and temperature difference
+     as its own notion.
+   - **`units:Difference(u)` is new**, an ESL `data` in the units layer with the same pair of
+     arguments. `5 °C warmer`, `rose 5 °C` and `5 °C intervals` are 5 K. The converter gains a
+     difference reading that never applies the °C offset — the path it already takes for °C inside a
+     compound (`°C/min`) — and ESL gains `units:difference(5, "°C")`. Not `Interval`, which D95 uses
+     for ranges.
+   - **The reading is a category feature**, `lexicon:Reading` = `value | difference`. Like `Mood` it
+     changes the denotation, so it is not erased and has no wildcard.
+   - **Every quantity token seeds both items.** They differ in value only for a bare °C, and otherwise
+     only in type. `931g` seeds four.
+   - **Every consumer declares one reading.** `value`: `at`, `for`, `in`, `of`, `after`, `with`, the
+     prenominal modifier — every construction in the WRN methods. `difference`: `warmer`, the
+     differential `by`, `rose`, `increase`, `intervals`, from slice 7. The grammar selects, not the
+     ranker. A test checks that no entry takes both, which would parse every non-°C quantity twice, and
+     each consumer gets a °C test, since only °C shows a wrong reading.
+   - **Arithmetic, in slice 7, is typed:** value − value → difference, value + difference → value,
+     difference ± difference → difference. Whether two values add depends on the kind of quantity —
+     masses do, temperatures do not, even in K — and kinds are metadata (D93), so value + value is
+     slice 7's question.
+   - **Rejected.** The unit's origin in the category, which needs `units:add` in the kernel and a
+     second index every consumer binds. One item carrying both readings as a pair of `Quantity(u)`s,
+     which leaves point and difference the same type. Two items in one category, which makes the
+     ranker choose what the consumer determines.
 
 ## Slice 1 — lexer and preprocessor, behaviour-preserving
 
@@ -144,10 +169,12 @@ works on plain text.
 
 ## Slice 4 — `MP` in the grammar, and seeding
 
-- `cat_mp`, `cat_unit_forall` and their `denote_cat` arms (decision 1); the origin (decision 5), and
-  `units:add` if decision 5 goes that way.
-- `seed_leaves`: a quantity token seeds one `cat_mp(u)` item per reading, sem the converted term; a
-  positive-integer numeral seeds the cardinal determiner items the word forms have.
+- `cat_mp`, `lexicon:Reading`, `cat_unit_forall` and their `denote_cat` arms (decisions 1 and 5).
+- `units:Difference(u)` in the units layer, the converter's difference reading, and the ESL form
+  `units:difference(v, "…")`.
+- `seed_leaves`: a quantity token seeds a value item and a difference item per unit reading, each
+  sem its converted term; a positive-integer numeral seeds the cardinal determiner items the word
+  forms have.
 - **Tests:** `931g` seeds two items with units `kg` and `s⁻²·m`; the N-N kind compound rule does not
   read `5 °C` as a compound (D95, "Two facts recorded").
 
@@ -174,7 +201,8 @@ measure phrase as a governed argument or a comparison standard; none of D95's ex
 
 The interval-arithmetic category, distinct from `cat_measure`; differential comparatives
 (`5 °C warmer`) with exact-degree templates; the adjective-adjunct `by`; scalar-change verbs
-(`rose 5 °C`) through `m^Δ`; the verb's scale orientation. These consume decision 5's origin.
+(`rose 5 °C`) through `m^Δ`; the verb's scale orientation. These take difference items, and the typed
+arithmetic of decision 5 lands here.
 
 ## Out, as D95 decides
 

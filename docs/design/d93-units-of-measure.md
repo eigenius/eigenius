@@ -466,6 +466,13 @@ So affine handling is partly a *grammar* concern, not purely a units one. v1:
   the author wrote" is a separate proposition from "what the quantity is", and this system says so
   elsewhere.
 
+**Decided 2026-09-26 (D95): a difference is its own type.** `units:Quantity(u)` is the measured value
+— for a bare °C the point reading, as built. `units:Difference(u)` is added beside it, with the same
+constructor arguments, for the difference reading: converted with no offset, so `rose 5 °C` is a
+`Difference(K)` of 5, and written `units:difference(5, "°C")` in ESL. The measure phrase's category
+carries the reading and each consumer takes one, which closes the known gap above. Built in D95's
+slice 4 (D95 implementation plan, decision 5).
+
 ## Conversion factors are exact rationals, which is a dependency on D94
 
 A conversion factor between commensurable units is an **exact rational**, held as chain data in the
