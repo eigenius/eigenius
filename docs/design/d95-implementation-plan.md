@@ -59,12 +59,23 @@ works on plain text.
    that selects a dimension forces the unpacked path. The alternative, an unindexed `cat_mp` denoting
    `Σu. Quantity(u)`, needs no binder, and it puts dimension checking outside the type system, which
    D93 exists to prevent.
-2. **Prose unit surfaces.** Recommended: a `lexicon:UnitSurface` class — a prose symbol and the
-   `units:NamedUnit` it names — in a lexicon-side file, with prefixability inherited from the unit.
-   The strict `units:symbol`s are surfaces implicitly; entries add senses: `g` → standard gravity,
-   `l` → litre, `RCF` → standard gravity, `h`/`hr`/`hrs`/`hour`/`hours` → hour. A factor resolves
-   exact-then-longest-prefix to every sense, so `mg` stays one reading (standard gravity takes no
-   prefix) and `g` gets two. The units layer keeps one symbol per unit.
+2. ~~**Prose unit surfaces.**~~ **DECIDED 2026-09-26 — `lexicon:UnitSurface`.** A resource pairs a
+   prose spelling (`lexicon:form`) with one `units:NamedUnit` (`lexicon:unit`), in a lexicon-side
+   file. Every `units:symbol` is a spelling of its own unit implicitly; the resources add senses: `g`
+   → standard gravity, `l` → litre, `RCF` → standard gravity, `days` → day. Prefixability comes from
+   the unit's `units:prefixable`.
+   - **Read by the quantity recogniser only**, into a case-sensitive table (`M` and `m` differ; the
+     lexical index is lowercase-keyed). A factor resolves exact-then-longest-prefix to every sense, so
+     `mg` has one reading (standard gravity takes no prefix) and `g` has two. Each reading is restated
+     in strict symbols (`g_n`, `mL`) and converted by `Vocabulary::convert`, so ESL's
+     `units:quantity(…)` keeps one reading per string. A reading's sense key is its named unit.
+   - **Not a `lexicon:LexicalEntry`**: a unit spelling has no category and never stands in the chart
+     alone, and as an entry `h`, `g`, `l` and `min` would seed items with no numeral before them.
+   - **Not in the units layer**, which keeps one symbol per unit.
+   - **Two units the WRN methods need enter the units layer** under D93's criterion: the molar
+     (`M` = 1000 mol·m⁻³, prefixable; `mM` 5 times) and the week (`wk` = 604800 s, not prefixable;
+     `weeks` once).
+   - **No spellings for prefix names** (`milligrams`) in v1: none occur in the methods.
 3. ~~**A numeral-initial token no rule interprets.**~~ **DECIDED 2026-09-26 — it is a word.** It
    becomes a word token and is counted as a missing lexeme when the lexicon has no entry for it, which
    is what `53BP1` becomes under D95's revised rule. The failure stays visible in the gate, where today
@@ -111,7 +122,9 @@ works on plain text.
 
 ## Slice 3 — unit surfaces, the prose unit reader, the quantity recogniser
 
-- The `lexicon:UnitSurface` vocabulary (decision 2).
+- The `lexicon:UnitSurface` class and its resources (decision 2), and the molar and the week in
+  the units layer. The spellings the WRN methods use after a numeral: `%` 23, `ml` 15, `h` 10,
+  `days` 9, `min` 6, `ng` 5, `mM` 5, `°C` 3, `g` 2, `mm` 2, `mg`, `V`, `ms`, `weeks` 1 each.
 - `dcg::quantity`: reads a prose unit — normalises `µ` (U+00B5) to `μ`, superscript exponents
   (`ml⁻¹`), `per`, spaces and `·` — resolves each factor to all its senses, forms the product of
   candidates, and converts each through `Vocabulary::convert`. `%` is a dimensionless factor 1/100

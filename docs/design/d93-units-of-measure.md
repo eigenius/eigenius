@@ -661,7 +661,9 @@ admitting it opens "units science uses that the SI does not accept". It is opene
 than symbol by symbol: **a unit enters when it is exactly defined and attested in the corpus.**
 Standard gravity is both — defined by CGPM, and written `931g` in Nature's text of the WRN paper and
 `931 RCF` in its PubMed Central manuscript (D96). `rpm`, in the same methods section, also meets the
-rule and is the next candidate; °F, psi, mmHg and the calorie wait for attestation.
+rule and is the next candidate; °F, psi, mmHg and the calorie wait for attestation. The molar
+(`mM`, five times in the WRN methods) and the week (`weeks`, once) meet it, and enter with D95's
+slice 3 (D95 implementation plan, decision 2).
 
 *Withdrawn — the earlier decision, kept as the record: "v1 REFUSES to split a `g`-suffixed numeral.
 `931g` stays unparsed rather than becoming 931 grams." Its reasoning below still holds as fact; what
