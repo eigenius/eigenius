@@ -65,11 +65,11 @@ works on plain text.
    `l` → litre, `RCF` → standard gravity, `h`/`hr`/`hrs`/`hour`/`hours` → hour. A factor resolves
    exact-then-longest-prefix to every sense, so `mg` stays one reading (standard gravity takes no
    prefix) and `g` gets two. The units layer keeps one symbol per unit.
-3. **A numeral-initial token no rule interprets.** Recommended: it becomes a word token and is
-   counted as a missing lexeme when the lexicon has no entry for it, which is what `53BP1` becomes
-   under D95's revised rule. The failure stays visible in the gate, where today it is invisible. The
-   alternative D95 records — setting the token aside and parsing the rest — yields a parse that omits
-   a constituent.
+3. ~~**A numeral-initial token no rule interprets.**~~ **DECIDED 2026-09-26 — it is a word.** It
+   becomes a word token and is counted as a missing lexeme when the lexicon has no entry for it, which
+   is what `53BP1` becomes under D95's revised rule. The failure stays visible in the gate, where today
+   it is invisible. Setting the token aside and parsing the rest was rejected: that parse omits a
+   constituent.
 4. **Figure references in plain text.** Recommended: no numeral/unit split on a token directly after
    `Fig.`, `Figs`, `Figure`, `Table` or `Extended Data Fig.`; a JATS `<xref>` span supersedes the rule
    once D96 is built. The alternative is to leave `Fig. 2d` reading as two days until then.

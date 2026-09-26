@@ -869,15 +869,15 @@ come into D95:
   withheld, no duplicate; the emitted blocks are the same 642,597 as before, so the loaded lexicon
   does not change and no reseed follows from it.
 
-## Open questions
+## Decided while planning the implementation
 
-- **What the preprocessor does with a token it will not interpret.** A numeral-initial token no rule
-  interprets seeds nothing, so the sentence carrying it does not parse, and every other quantity in
-  that sentence is lost with it — which is what refusing to split `931g` would have cost the WRN
-  sentence it sits in, `2 h` and `30 °C` included.
-  The preprocessor could instead set the token aside (dropping it from the token stream, recorded
-  with its offset so the prose still shows it) and let the rest parse; the cost is a parse that
-  silently omits a constituent, which R2 weighs against. Undecided.
+- **A numeral-initial token no rule interprets is a word** (2026-09-26). It seeds whatever the
+  lexicon has for it, and with no entry it is counted as a missing lexeme — what `53BP1` becomes
+  under the revised non-prose rule. Today such a token seeds nothing and the coverage probe does not
+  count it, so the sentence fails with no gap reported. Setting the token aside and parsing the rest
+  was the alternative; that parse omits a constituent, which R2 weighs against.
+
+## Open questions
 
 - **Figure and table references against the numeral/unit split — narrowed by D96.** The unbracketed
   `Fig. 2d` in the WRN methods would split into two days, as `Fig. 2h` would into two hours; ten
