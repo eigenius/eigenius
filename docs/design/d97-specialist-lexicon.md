@@ -1,7 +1,7 @@
 # D97 — The SPECIALIST Lexicon as the lexicon's syntactic authority
 
 **Status: proposed** (2026-09-27). Measured against the imported lexicon at the lexicon level; the
-parse-level measurement is slice 1. Decisions 2 and 4 are taken (2026-09-27); 1, 3 and 5 are open.
+parse-level measurement is slice 1. Decisions 2, 3 and 4 are taken (2026-09-27); 1 and 5 are open.
 
 ## The gap
 
@@ -15,8 +15,8 @@ The imported lexicon takes its syntax from sources that do not record it for thi
   has their procedures as concepts (`electroporation`, C0206691), which the UMLS importer emits as
   nouns.
 - **Governed prepositions.** WordNet's PP frames 4 and 22 name no preposition, and 12 and 27 name
-  only `to`; the importer maps all four to `cat_pp_arg(prep_any)`. An adjective's governed preposition is read from
-  its gloss, by WordNet's "(usually) followed by" convention and a lemma-in-gloss heuristic that
+  only `to`; the importer maps all four to `cat_pp_arg(prep_any)`. An adjective's governed
+  preposition is read from its gloss, by WordNet's "(usually) followed by" convention and a lemma-in-gloss heuristic that
   eigenius#263 shows reads prose, not governance.
 - **Object + PP.** Frames 20 and 21 (`Somebody ----s somebody/something PP`) are classified as plain
   transitives and their PP is dropped (`crates/eigenius-wordnet/src/convert.rs`, `classify`), so
@@ -179,7 +179,8 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    PP-oblique `prep_any` beside SPECIALIST's named preposition), SPECIALIST's frame joins it. Both
    entries carry the sense's axiom, so they yield the same sem wherever both apply; slice 1 measures
    the readings that remain.
-3. **The preposition inventory.** `lexicon:Prep` names 13. Over verbs, adjectives and nouns,
+3. **The preposition inventory — decided: every preposition SPECIALIST names.** `lexicon:Prep`
+   names 13. Over verbs, adjectives and nouns,
    SPECIALIST records 30,950 governed prepositions (a record × a preposition), 14,174 of them on a
    WordNet lemma; 4,963 (2,717 on WordNet) name one of 53 prepositions outside the enum:
 
@@ -200,6 +201,30 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
      SPECIALIST says it governs 253 times; 246 are inside the enum. The other 7: `by` 4 (`activation
      by`, `analysed by`, `caused by`, `study by`), `between` 2 (`interaction between`,
      `relationship between`), `than` 1 (`more than`, which the comparative reads).
+
+   **Decided.** `lexicon:Prep` gains a constructor for every preposition a SPECIALIST frame names,
+   and the closed class an argument entry for each, shaped as `at_arg` is (`cat_pp_arg(prep_p) /
+   NP`, sem `argmarker_sem`): 52 of each, 37 single prepositions and 15 multiword forms (`out of`,
+   `due to`), which multiword seeding reads. Every frame is then emitted with the preposition it
+   attests. Two exceptions:
+   - **`by` on a noun is not emitted as an argument.** Its 3,921 cases are the agent of a
+     nominalization (`activation by X`), which `by_nmod` already reads as `prep_by(x, X)`; an
+     argument entry would add a second reading of the same relation. The 83 adjectives (`abolishable
+     by`, which no passive reads) and the 66 verb frames (`abide by`, `multiply X by Y`) are emitted,
+     as `prep_by`.
+   - **`than`** stays the comparative's, read through `cat_pp_than`.
+
+   *Rejected:* mapping a preposition with no closed-class entry to `prep_any`. `argue over X` would
+   still not parse, since `over X` cannot become an argument PP, and the wildcard slot would accept
+   `argue on X` or `argue at X` as arguments — readings no source attests, bought by discarding the
+   preposition SPECIALIST records.
+
+   An argument entry does not put a word on the importers' closed-class list
+   (`PREPOSITIONS_AND_CONJUNCTIONS`): `one` has closed-class entries and keeps WordNet's senses.
+   Whether `over`, `through` or `off` lose their content senses (`an over` in cricket, `a through
+   train`) is decided per word, as it was for `after`. The kernel's single preposition list
+   (`GOVERNED_PREPOSITIONS`, on the `governed-prepositions` branch) is extended with the enum, and its
+   test keeps the two equal.
 4. **Countability — decided: both.** A lemma either source flags uncountable gets the additive
    `cat_n(C, mass)` entry. Today 27,207 WordNet lemmas carry 43,474 mass entries; SPECIALIST adds
    12,863 lemmas and about 14,665 entries (one per existing count entry). The UMLS importer takes the
@@ -216,8 +241,9 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    parses the records. The WordNet importer gains the union behind a flag, and a reseed with it on
    is measured against the `2026-09-27` snapshot on the CNL page and the quantity corpus: readings,
    gaps, pins. Decision 1 is taken on that; for 2 and 4 it measures the cost of what is decided.
-2. **Verbs.** Objects, named PP prepositions, clausal complements; decision 3 and the kernel's
-   single preposition list. Frame 13 moves to the PP-oblique kind, as `on`.
+2. **Verbs.** Objects, named PP prepositions, clausal complements. The 52 `lexicon:Prep`
+   constructors and closed-class argument entries (decision 3), and the kernel's single preposition
+   list. Frame 13 moves to the PP-oblique kind, as `on`.
 3. **Adjectives and nouns**: eigenius#263's attested set.
 4. **Object + PP**: the `((S\NP)/cat_pp_arg(p))/NP` category, its passive (`were treated with
    etoposide`), and the importer's frames 20/21.
