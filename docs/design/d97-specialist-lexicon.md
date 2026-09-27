@@ -1,7 +1,7 @@
 # D97 — The SPECIALIST Lexicon as the lexicon's syntactic authority
 
 **Status: proposed** (2026-09-27). Measured against the imported lexicon at the lexicon level; the
-parse-level measurement is slice 1. Decisions 1–5 are open.
+parse-level measurement is slice 1. Decisions 2 and 4 are taken (2026-09-27); 1, 3 and 5 are open.
 
 ## The gap
 
@@ -113,17 +113,27 @@ that is slice 1.
 
 ## The proposal
 
-### SPECIALIST decides syntax; WordNet and UMLS keep the senses
+### No source is comprehensive, so none replaces another
+
+WordNet lists `incubate` as intransitive only; SPECIALIST has no senses; Wiktionary's uncountable
+nouns and SPECIALIST's `uncount` agree on 19,949 lemmas and differ on 25,520. Each misses what
+another attests. So a syntactic fact attested by any source is kept, and a source adds to the others
+without overriding them: frames join (decision 2), countability is the union (decision 4), and an
+adjective's governed prepositions are every attested one (eigenius#263). Where sources disagree, the
+parse sees both readings, and the ranker and the felicity gate choose between them, as they do
+between senses.
+
+### SPECIALIST adds syntax; WordNet and UMLS keep the senses
 
 A lexical entry needs a `sem`, and a SPECIALIST record has none to give. So SPECIALIST does not
 become a third sense lexicon beside WordNet and UMLS. It is read at conversion by both importers, as
-the countability list is now, and decides the syntactic facts of the entries they already emit:
+the countability list is now, and adds syntactic facts to the entries they already emit:
 
 | SPECIALIST | The importer's entry |
 |---|---|
-| `tran=np`, `ditran=np` | an object-taking category, where WordNet's frames give none |
-| `tran=pphr(p,np)` | `cat_pp_arg(p)` in place of `prep_any` |
-| `ditran=np,pphr(p,np)` | `((S\NP)/cat_pp_arg(p))/NP`, where frames 20/21 drop the PP |
+| `tran=np`, `ditran=np` | an object-taking category, beside WordNet's frames |
+| `tran=pphr(p,np)` | `cat_pp_arg(p)`, beside WordNet's `prep_any` |
+| `ditran=np,pphr(p,np)` | `((S\NP)/cat_pp_arg(p))/NP`, beside frames 20/21's transitive |
 | `compl=pphr(p,np)` on an adjective or noun | the governed preposition (eigenius#263's attested set) |
 | `tran=fincomp` | `cat_cp`, as frame 26 is now |
 | `uncount` | the additive `cat_n(C, mass)` entry (decision 4) |
@@ -159,22 +169,24 @@ attested = WordNet's "followed by" convention ∪ SPECIALIST's `compl=pphr` ∪ 
 gloss heuristic only where none speaks, never `as`. The `governed-prepositions` branch's single
 kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
 
-## Decisions (open)
+## Decisions
 
 1. **Lemma or sense.** SPECIALIST speaks for a lemma; WordNet's frames are per sense. Giving
    SPECIALIST's frames to every sense of the lemma is determinate and adds the entries counted above
    (+3,936 for objects alone); choosing senses needs evidence SPECIALIST does not have. *Proposed:*
    the union, accepted or refused on slice 1's parse measurement.
-2. **Union or authority.** Where WordNet has a frame SPECIALIST does not (a PP-oblique `prep_any`
-   beside SPECIALIST's named preposition), does SPECIALIST's frame replace it or join it? Replacing
-   removes readings the grammar has today.
+2. **Union or authority — decided: union.** Where WordNet has a frame SPECIALIST does not (a
+   PP-oblique `prep_any` beside SPECIALIST's named preposition), SPECIALIST's frame joins it. Both
+   entries carry the sense's axiom, so they yield the same sem wherever both apply; slice 1 measures
+   the readings that remain.
 3. **The preposition inventory.** `lexicon:Prep` names 13; SPECIALIST's frames name 57. Extend the
    enum to the prepositions the closed class has entries for (`by`, `between`, `after`, `among`,
    `onto`, `through`, …) and map the rest to `prep_any`, or extend it to all 57. `by` needs care: the
    closed class's `by_agent` already reads the passive agent.
-4. **Countability.** Wiktionary and SPECIALIST agree on 19,949 lemmas and differ on 25,520. Union,
-   SPECIALIST alone, or Wiktionary alone. Mass entries are additive, so the union costs readings, not
-   coverage.
+4. **Countability — decided: both.** A lemma either source flags uncountable gets the additive
+   `cat_n(C, mass)` entry. Today 27,207 WordNet lemmas carry 43,474 mass entries; SPECIALIST adds
+   12,863 lemmas and about 14,665 entries (one per existing count entry). The UMLS importer takes the
+   same list, through head inheritance, so its mass entries move too; not yet measured.
 5. **The sense-less predicate.** What `electroporate` denotes: a predicate of its own, linked to the
    UMLS procedure through the nominalization, or an existential over the procedure concept. The first
    is what the grammar consumes today.
@@ -186,14 +198,14 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    `provision-countability.sh` does; the reseed's `PROVENANCE` records it. A reader in a small crate
    parses the records. The WordNet importer gains the union behind a flag, and a reseed with it on
    is measured against the `2026-09-27` snapshot on the CNL page and the quantity corpus: readings,
-   gaps, pins. Decisions 1, 2 and 4 are taken on that.
+   gaps, pins. Decision 1 is taken on that; for 2 and 4 it measures the cost of what is decided.
 2. **Verbs.** Objects, named PP prepositions, clausal complements; decision 3 and the kernel's
    single preposition list. Frame 13 moves to the PP-oblique kind, as `on`.
 3. **Adjectives and nouns**: eigenius#263's attested set.
 4. **Object + PP**: the `((S\NP)/cat_pp_arg(p))/NP` category, its passive (`were treated with
    etoposide`), and the importer's frames 20/21.
 5. **The SPECIALIST importer** for lemmas no other source has, and the nominalization link.
-6. **Countability**, per decision 4.
+6. **Countability**: the union of Wiktionary and SPECIALIST (decision 4).
 
 Slices 2–6 change the imported lexicon; they share one reseed and one re-adjudication of the pins
 that move.
