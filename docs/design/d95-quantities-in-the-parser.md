@@ -170,7 +170,8 @@ better for the truth, and is the right direction on this project's own terms.
 
 The recognised span becomes leaf items carrying a magnitude and, where present, a unit — **one per
 candidate unit sense**, as competing edges. An unambiguous symbol yields exactly one; `931g` yields
-gram and standard gravity and lets the ranker choose (see "Ambiguous unit symbols" below). A bare
+gram and standard gravity, and the grammar and the reading choice decide (see "Ambiguous unit
+symbols" below). A bare
 `0.56` is the same item shape with no unit, which keeps cardinality and quantities on one path
 rather than building two mechanisms that must later agree.
 
@@ -288,14 +289,17 @@ where `10 g` is grams.
 gravity alone.
 
 A unit symbol is a **lexeme carrying several senses**, exactly as a noun carries several synsets,
-and each sense denotes a different unit. It therefore routes through machinery that already exists:
-the sense cap and contextual `SenseRanker`, the felicity gate, and reading selection. A wrong unit
-sense is refused or down-ranked by the same path that refuses a wrong noun sense.
+and each sense denotes a different unit. Each sense is an item of its own: the grammar and the
+felicity gate refuse a reading that does not compose, and the reading choice (`enc:DecisionPoint`)
+records the one kept. *Corrected 2026-09-26: an earlier version routed unit senses through the sense
+cap and the contextual `SenseRanker`. Both act on lexical entries, and a quantity item is built
+outside one and carries no sense (`dcg/lexicon.rs:272-273`), so neither sees it (implementation
+plan, finding 4).*
 
 **Resolved: one item per candidate sense.** An earlier draft contradicted itself — one section had
 the sub-parser "return a `Unit` term" at recognition time, another said resolving early "would put
 unit disambiguation outside the ranker". Both cannot hold, since a `Unit` returned at recognition
-decides gram-versus-g-force before the `SenseRanker` ever runs.
+decides gram-versus-g-force before the chart sees the alternatives.
 
 A quantity span therefore seeds **one item per candidate unit sense**, as competing chart edges —
 the same shape as a polysemous noun, and the same shape `seed_leaves` already uses for the
@@ -307,25 +311,27 @@ Three consequences, which supersede what the sections above say:
   candidate senses; it does not choose among them.
 - **The unit sub-parser runs per sense**, producing one `Unit` term per candidate. For an
   unambiguous symbol that is a single item and nothing is lost.
-- **Normalisation happens after selection, not at recognition.** D93's "the parser emits both the
-  stated and the normalised form" is true of the *selected* reading, so the normaliser runs once the
-  chart has committed, not while it is being seeded.
+- **Conversion happens at seeding, once per reading.** An item's sem must have type `Quantity(u)`
+  for the felicity gate, and D93 dropped the stated-unit record, so each reading is converted when it
+  is seeded (implementation plan, finding 3). *Withdrawn: "Normalisation happens after selection, not
+  at recognition … the normaliser runs once the chart has committed."*
 
 This is what keeps the `g` hazard inside machinery that already exists: gram and standard gravity
-compete as chart edges, the ranker scores them in context, and the felicity gate refuses a reading
-that does not compose — rather than a pre-pass silently picking one, or a refusal losing the whole
-sentence.
+compete as chart edges, the felicity gate refuses a reading that does not compose, and the reading
+choice records the one kept — rather than a pre-pass silently picking one, or a refusal losing the
+whole sentence.
 
 ## What the pipeline stages inherit
 
 - **Stage A (preprocess / glossary).** Unchanged. Unit symbols are not document-scoped
   abbreviations; they belong to the base lexicon.
-- **Stage B (parse).** Seeding gains quantity items; the unit sub-parser is invoked here; the
-  sense ranker sees unit senses alongside word senses.
+- **Stage B (parse).** Seeding gains quantity items; the unit reader runs in the preprocessor.
+  Quantity items carry no sense, so the sense ranker does not see them; their alternatives reach the
+  reading choice.
 - **Stage C (resolve).** Unchanged — a quantity carries no referent hole.
 - **The felicity gate.** Unchanged in mechanism: it checks the assembled sem against `⟦cat⟧`, and a
-  quantity NP's `⟦cat⟧` is `units:Quantity(u)`. A mis-composed quantity fails there like anything
-  else.
+  measure phrase's `⟦cat_mp(u, value)⟧` is `units:Quantity(u)`, its difference reading's
+  `units:Difference(u)`. A mis-composed quantity fails there like anything else.
 
 ## Consequences for the measurement
 
@@ -338,16 +344,20 @@ The methods material is the natural corpus: of 240 sentences, nine carry two dis
 carries three (D93). It is also where the parser is weakest, so the two should not be conflated —
 a quantity gap and a syntax gap must be distinguishable in the report.
 
-## The CNL guide needs revising, not extending
+## The CNL guide: revised in #262, current once quantities parse
 
-`docs/method/controlled-english-style-guide.md`'s first DON'T instructs authors to drop inline
-numbers: "the parser routes non-prose out; numbers are dropped, so a numeric claim is lost… state
-the qualitative claim". Once quantities parse, that is wrong for quantities while remaining correct
-for test statistics (`P = 4.2 × 10⁻¹³` routes to a D52 record, not into the claim).
+`docs/method/controlled-english-style-guide.md` already distinguishes a *test statistic* from a
+*measured quantity*. #262 replaced the rule this section used to quote ("numbers are dropped, so a
+numeric claim is lost… state the qualitative claim"):
 
-The guide anticipates this — "expected to drift as the grammar grows; check a claim against the
-baseline before relying on it" — but the fix is a rewritten rule that distinguishes a *measured
-quantity* (now in the claim) from a *test statistic* (still out of it), not a new bullet.
+- test statistics stay out of the claim (`:84`) — `P = 4.2 × 10⁻¹³` routes to a D52 record;
+- measured quantities are marked 🔜 (`:85`): dropped today like statistics, part of the claim under
+  D93/D95;
+- a 🔜 section on measured quantities (`:98-127`), and a note that a quantity-bearing corpus with a
+  re-established baseline is part of landing them (`:199-204`).
+
+What remains is slice 5's: make the 🔜 rows current once quantities parse (implementation plan,
+finding 7).
 
 ## Settled: the category of a quantity and its consumers
 
@@ -680,6 +690,9 @@ en-dash/hyphen distinction.
 - **The `Prep` enum and its importer have drifted.** `governed_preposition`
   (`crates/eigenius-wordnet/src/convert.rs:988`) extracts 11 prepositions and maps them at 1025-1037 with
   `_ => prep_any`; the enum declares 14, with `of` (dated 2026-07-26), `as` and `any` added by hand.
+  Filed as eigenius#263, with the parked branch `governed-prepositions`: one kernel list checked
+  against the enum, and every preposition WordNet names. The heuristic displaces valid prepositions
+  when `of` joins it, so it waits on a broader attested source (the UMLS SPECIALIST Lexicon).
 - **`5 °C` is exposed to the N-N kind compound rule.** Measure-phrase parsers are reported to mistake
   units for noun-noun compounds, and `closed-class.esl:941-942` names that rule as shipped. Seeding needs
   a regression test against it.

@@ -661,7 +661,8 @@ the silent mistyping this paragraph warns about.
   strict stated form and the converter are unchanged. The prose surface `g` carries two senses,
   gram and standard gravity, as a word carries two synsets, and `RCF` is a surface of standard
   gravity alone. D95's parser converts each sense when it seeds it, as a value item and a difference
-  item; the ranker and the felicity gate choose among the senses.
+  item; the grammar and the felicity gate choose among the senses, and the reading choice records
+  the one kept.
 - **Prefixes still settle the common case.** Gram takes the 24 prefixes and standard gravity none,
   so `mg`, `μg` and `kg` have one sense; only a bare `g` has two.
 
@@ -859,10 +860,10 @@ stands as the sort of an ordinary data type. `Set = Sort 1` and `Type n = Sort (
 **Unit symbols are ambiguous, and the existing machinery already handles that kind of problem.**
 `931g` is g-force; `10 g` is grams. `M` is molar or mega. This is **polysemy, not a special case**:
 a unit symbol is a lexeme carrying several senses, exactly as a noun carries several synsets, and
-each sense is a different unit. It therefore routes through the machinery that already exists for
-words — sense ranking, the felicity gate, and reading selection — rather than a bespoke
-disambiguation rule. A wrong unit sense should be refused or down-ranked by the same path that
-refuses a wrong noun sense.
+each sense is a different unit. Each sense is a chart item of its own: the grammar and the felicity
+gate refuse a reading that does not compose, and reading selection records the one kept, rather than
+a bespoke disambiguation rule. *Sense ranking does not see them: a quantity item carries no sense
+(D95 implementation plan, finding 4). An earlier version routed unit senses through it.*
 
 **The parser converts at seeding.** Each unit reading of a quantity token is converted when it is
 seeded, as a value and as a difference; the stated form stays in `enc:prose`. *Withdrawn: "The parser

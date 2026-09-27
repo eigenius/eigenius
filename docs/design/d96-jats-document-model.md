@@ -63,6 +63,11 @@ has to guess.
 - **Offsets.** `enc:span_start`/`span_end` are offsets "in the source document", which today means
   the extracted text. With JATS they need a defined base — the document's text content in document
   order is the natural one, and it has to be fixed before anything records offsets against it.
+  - **Today's offsets are not reliable either.** The encoder computes a sentence's span as
+    `doc.find(text)` (`crates/eigenius-encoding/src/formalize.rs:89-93`, `:216-220`): byte offsets of
+    the first occurrence, so a repeated sentence maps to its first, and 0 when the text is not
+    found. `encoding.esl:61-69` documents them as character offsets. Tokens now carry byte spans
+    within their sentence (D95 slice 1), which a defined base could extend to the document.
 - **Version.** `reference:Reference` gains the manifestation read: a PMCID beside the DOI and PMID,
   and whether the text is the version of record or an accepted manuscript. JATS carries this in
   `<article-meta>`.
