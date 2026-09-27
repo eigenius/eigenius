@@ -77,6 +77,9 @@ enum SemRecipe {
     DetRefine { cat: Exp, t: Exp },
     /// Application: category `cat`; sem `L R` (forward) or `R L` (backward).
     Apply { cat: Exp, order: AppOrder },
+    /// Unit-polymorphic application: category `cat`; sem `L unit R` — the functor's sem applied to the
+    /// unit it binds, then to the measure phrase.
+    UnitApply { cat: Exp, unit: Exp },
     /// Forward composition: category `cat`; sem `λz. L(R z)`.
     FwdComp { cat: Exp },
     /// A **datafied grammar rule** matched (Phase 1–2): a `combine_*` group matched a [`CatRule`] and
@@ -148,6 +151,11 @@ enum CombKind {
     /// `cat_forall(det_num, λT. body)` consuming `cat_n(T, noun_num)` by INSTANTIATING `T` (not slot
     /// unification) — feature-gated by `feat_meets`, with a Fst-projecting refined-noun branch.
     DepApply,
+    /// Unit-polymorphic application (D95, decision 1): a `cat_unit_forall(λu. A/B)` consuming the
+    /// measure phrase `cat_mp(U, r)` on its right by INSTANTIATING `u := U`, then unifying `B[u := U]`
+    /// with it — the determiner's pattern for a unit. The unit is an explicit argument of the sem
+    /// because implicit Π is deferred (eigenius#261).
+    UnitApply,
 }
 
 /// An Eisner normal-form provenance guard on the left operand (D63 §8.2 item 4).
@@ -286,13 +294,32 @@ impl CombKind {
                     order: AppOrder::Fwd,
                 })
             }
+            CombKind::UnitApply => {
+                let [Exp::Lam(Patt::Var(uvar), body)] = is_ctor(&left.cat, "cat_unit_forall")?
+                else {
+                    return None;
+                };
+                let [unit @ Exp::LitUnit(_), _reading] = is_ctor(&right.cat, "cat_mp")? else {
+                    return None;
+                };
+                let mut bind = CatSubst::new();
+                bind.insert(uvar.clone(), unit.clone());
+                let body = subst_cat(body, &bind);
+                let (_mode, res, slot) = slash_parts(&body, "fwd")?;
+                let subst = unify_cat(slot, &right.cat, layer)?;
+                Some(SemRecipe::UnitApply {
+                    cat: subst_cat(res, &subst),
+                    unit: unit.clone(),
+                })
+            }
         }
     }
 }
 
 /// The universal-combinator table (built once). Priority = order, mirroring the former arm order:
-/// dependent determiner (its `cat_forall` trigger is disjoint from the rest, so its first position is
-/// not load-bearing), then forward application, backward application, forward (harmonic) composition.
+/// dependent determiner and unit application (their `cat_forall` / `cat_unit_forall` triggers are
+/// disjoint from the rest, so their first positions are not load-bearing), then forward application,
+/// backward application, forward (harmonic) composition.
 /// Eisner NF is enforced per rule by `prov_guards`.
 fn comb_rules() -> &'static [CombRule] {
     static RULES: LazyLock<Vec<CombRule>> = LazyLock::new(|| {
@@ -300,6 +327,11 @@ fn comb_rules() -> &'static [CombRule] {
             CombRule {
                 name: "dependent_determiner",
                 kind: CombKind::DepApply,
+                prov_guards: &[],
+            },
+            CombRule {
+                name: "unit_application",
+                kind: CombKind::UnitApply,
                 prov_guards: &[],
             },
             CombRule {
@@ -509,6 +541,13 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
                 }
             }
             Item::from_parts(cat, sem, prov, Cost::ZERO)
+        }
+        SemRecipe::UnitApply { cat, unit } => {
+            let sem = Exp::App(
+                Box::new(Exp::App(Box::new(left.sem().clone()), Box::new(unit))),
+                Box::new(right.sem().clone()),
+            );
+            Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
         }
         SemRecipe::FwdComp { cat } => {
             let z = "__comp_z";

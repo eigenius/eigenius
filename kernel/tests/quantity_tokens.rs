@@ -187,18 +187,17 @@ fn an_unbracketed_figure_panel_reads_as_a_quantity() {
     );
 }
 
-/// The parser tokenizes with the chain's vocabulary, and until quantities seed (slice 4) a quantity
-/// token seeds nothing.
+/// The parser tokenizes with the chain's vocabulary, and a quantity token seeds its own items
+/// (slice 4), so it is never unseedable.
 #[test]
-fn the_parser_reads_quantities_and_they_do_not_seed_yet() {
+fn the_parser_reads_quantities_and_they_seed() {
     let ctx = eigenius_kernel::testing::bootstrap_context();
     let parser = Parser::build(Arc::clone(ctx.head()));
     let tokens = parser.tokenize("incubated at 37 °C");
     assert!(matches!(tokens[2].kind(), TokenKind::Quantity(_)));
-    assert_eq!(
-        parser.unseedable_tokens("incubated at 37 °C", &Identity),
-        ["37 °C"]
-    );
+    assert!(parser
+        .unseedable_tokens("incubated at 37 °C", &Identity)
+        .is_empty());
 }
 
 /// Every quantity the recogniser reads in the WRN texts, with its readings, and a count by stated

@@ -1777,26 +1777,35 @@ impl Compiler {
         Ok(vec![r])
     }
 
-    /// `units:quantity(v, "stated")` — D93's ESL form for an authored quantity.
+    /// `units:quantity(v, "stated")` — D93's ESL form for an authored measured value — and
+    /// `units:difference(v, "stated")`, a difference (D95, decision 5).
     ///
-    /// Not a chain constant. It is resolved HERE, where the chain's units vocabulary is in hand,
-    /// into the annotated term `(X:mk_quantity(c, pi) : X:Quantity(dim))` — `X` being the author's
-    /// own prefix for the units namespace, so the names resolve however the file declares it — and
-    /// both lowering paths then see an ordinary term. The value must be an exact literal (`37`,
-    /// `0.05r`, `r"37/180"`): a float is not exact, and D94's point is that `0.05` is not 1/20.
+    /// Not chain constants. They are resolved HERE, where the chain's units vocabulary is in hand,
+    /// into the annotated term `(X:mk_quantity(c, pi) : X:Quantity(dim))` or
+    /// `(X:mk_difference(c, pi) : X:Difference(dim))` — `X` being the author's own prefix for the
+    /// units namespace, so the names resolve however the file declares it — and both lowering paths
+    /// then see an ordinary term. The value must be an exact literal (`37`, `0.05r`, `r"37/180"`): a
+    /// float is not exact, and D94's point is that `0.05` is not 1/20.
     fn desugar_quantity(&self, term: &ast::Term) -> Result<Option<ast::Term>, EslError> {
+        use crate::units::convert::Reading;
         let ast::Term::Ref { name, args, pos } = term else {
             return Ok(None);
         };
-        if name.namespace.is_none()
-            || self.resolve(name).ok().as_deref() != Some(crate::units::convert::QUANTITY_FORM)
-        {
+        if name.namespace.is_none() {
             return Ok(None);
         }
+        let resolved = self.resolve(name).ok();
+        let Some(reading) = [Reading::Value, Reading::Difference]
+            .into_iter()
+            .find(|r| resolved.as_deref() == Some(r.form()))
+        else {
+            return Ok(None);
+        };
+        let form = format!("units:{}", name.name);
         let err = |msg: String| EslError::compiler(Some(pos.clone()), msg);
         let [value, stated] = args.as_slice() else {
             return Err(err(format!(
-                "units:quantity takes a value and a stated unit, got {} argument(s)",
+                "{form} takes a value and a stated unit, got {} argument(s)",
                 args.len()
             )));
         };
@@ -1804,31 +1813,31 @@ impl Compiler {
             ast::Term::LitRat { value, .. } => value.clone(),
             ast::Term::LitInt { value, .. } => {
                 crate::numeric::Rational::from_integer((*value).into())
-                    .map_err(|e| err(format!("units:quantity: {e}")))?
+                    .map_err(|e| err(format!("{form}: {e}")))?
             }
             _ => {
-                return Err(err(
-                    "units:quantity's value must be an exact literal — `37`, `0.05r` or \
-                     `r\"37/180\"`; a float is not exact"
-                        .to_string(),
-                ))
+                return Err(err(format!(
+                    "{form}'s value must be an exact literal — `37`, `0.05r` or `r\"37/180\"`; a \
+                     float is not exact"
+                )))
             }
         };
         let ast::Term::LitString { value: stated, .. } = stated else {
-            return Err(err(
-                "units:quantity's stated unit must be a string, e.g. \"mg/kg\"".to_string(),
-            ));
+            return Err(err(format!(
+                "{form}'s stated unit must be a string, e.g. \"mg/kg\""
+            )));
         };
         let vocab = self.units.as_ref().ok_or_else(|| {
-            err(
-                "units:quantity needs the chain's units layer, and this compile has none"
-                    .to_string(),
-            )
+            err(format!(
+                "{form} needs the chain's units layer, and this compile has none"
+            ))
         })?;
         let converted = vocab
-            .convert(&value, stated)
-            .map_err(|e| err(format!("units:quantity: {e}")))?;
+            .convert_as(&value, stated, reading)
+            .map_err(|e| err(format!("{form}: {e}")))?;
         let (coefficient, pi) = converted.magnitude.chain_pair();
+        let (inductive, ctor) = reading.inductive();
+        let type_name = inductive.rsplit(':').next().unwrap_or(inductive);
         let qualified = |local: &str| ast::QualifiedName {
             namespace: name.namespace.clone(),
             name: local.to_string(),
@@ -1836,7 +1845,7 @@ impl Compiler {
         };
         Ok(Some(ast::Term::Ann {
             expr: Box::new(ast::Term::Ref {
-                name: qualified("mk_quantity"),
+                name: qualified(ctor),
                 args: vec![
                     ast::Term::LitRat {
                         value: coefficient,
@@ -1850,7 +1859,7 @@ impl Compiler {
                 pos: pos.clone(),
             }),
             typ: Box::new(ast::Term::Ref {
-                name: qualified("Quantity"),
+                name: qualified(type_name),
                 args: vec![ast::Term::LitUnit {
                     value: converted.unit,
                     pos: pos.clone(),

@@ -338,70 +338,73 @@ and one each of `g`/`g_n` (`931g`), `mM`, `mg`, `ng`, `s`, `wk` and `A`.
 **Chain:** `units`, `lexicon` and `closed-class` moved; `EXPECTED` is updated. The reseed waits for
 slice 5.
 
-## Slice 4 — `MP` in the grammar, and seeding
+## Slice 4 — `MP` in the grammar, and seeding — built
 
 **The difference type**
-- `units.esl`: `data units:Difference (u : core:unit) : Set { mk_difference : forall (u : core:unit)
-  => core:rational -> core:integer -> units:Difference(u) }`, beside `Quantity` (`:36-40`).
+- `units.esl`: `data units:Difference (u : core:unit) : Set { mk_difference : … }`, beside `Quantity`.
 - `units/convert.rs`:
   - `pub enum Reading { Value, Difference }`;
-  - `convert_as(value, stated, reading)`, with the offset rule (`:272-278`) applied only for `Value`;
-    `convert` stays `convert_as(…, Value)`;
-  - `Converted::term(reading)` beside `quantity_term` (`:158-173`);
-  - constants `DIFFERENCE`, `DIFFERENCE_FORM` beside `QUANTITY`, `QUANTITY_FORM` (`:48-51`).
-- `esl/compile.rs`: `desugar_quantity` (`:1787-1862`) accepts `units:difference(v, "…")`.
-- Tests: `unit_conversion.rs` gains `5 °C` → 5 K as a difference and 278.15 K as a value; ESL commits
-  a `Difference(K)`.
+  - `convert_as(value, stated, reading)`, applying the °C offset only to a `Value`; `convert` is
+    `convert_as(…, Value)`;
+  - `Converted` gains `reading`, and `term()` builds `mk_quantity : Quantity(u)` or
+    `mk_difference : Difference(u)`, replacing `quantity_term()`;
+  - `DIFFERENCE`, `DIFFERENCE_FORM`.
+- `esl/compile.rs`: `desugar_quantity` resolves `units:difference(v, "…")` beside `units:quantity`.
+- `dcg/quantity.rs`: each `UnitReading` carries both conversions, `value` and `difference`.
 
-**Categories** (`lexicon-ontology.esl`, `data lexicon:Cat` `:260-365`)
+**Categories** (`lexicon-ontology.esl`)
 - `data lexicon:Reading { value, difference }`;
 - `cat_mp : core:unit -> lexicon:Reading -> lexicon:Cat`;
 - `cat_unit_forall : (core:unit -> lexicon:Cat) -> lexicon:Cat`.
+- `Mood`'s comment and description, "the only feature that alters ⟦·⟧", now name `Reading` as the
+  other.
 
 **Kernel**
-- `denote_cat` (`dcg/category.rs:34-154`):
-  - `cat_mp(u, value)` → `Quantity(u)`;
-  - `cat_mp(u, difference)` → `Difference(u)`;
-  - `cat_unit_forall(λu. R)` → `Π u : EigonPrimitive(Unit). ⟦R⟧`, as the `cat_forall` arm (`:121-134`)
-    builds `Π T : Set`.
-- `unify_into` (`dcg/category.rs:292-354`) gains a `cat_mp` arm: a `Var` unit binds, a literal unit
-  compares by equality, the reading compares by equality.
-- `slot_is_concrete_nonentity` (`dcg/category.rs:468-475`) is true for `cat_mp` with a `LitUnit`, so a
-  unit-selecting functor gets a `sel:` key.
-- `cat_shape` and `cat_key` (`dcg/chart/forest.rs:229-358`) render `LitUnit` canonically (finding 5).
-- A combinator `CombKind::UnitApply` (`dcg/rules/combinators.rs`):
-  - modelled on `DepApply` (`:147-150`, `:258-288`, registered first in `comb_rules` `:297-335`);
-  - left `cat_unit_forall(λu. body)`, where `body`'s argument slot unifies with the right item's
-    `cat_mp(U, r)`, binding `u := U`;
-  - sem `App(App(left.sem, LitUnit(U)), right.sem)`. The unit is applied explicitly because implicit Π
-    is deferred (eigenius#261).
+- `denote_cat`: `cat_mp(u, value)` → `Quantity(u)`, `cat_mp(u, difference)` → `Difference(u)`,
+  `cat_unit_forall(λu. R)` → `Π u : unit. ⟦R⟧`.
+- `unify_into` gains a `cat_mp` arm: a unit variable binds occurs-consistently (`unify_unit`), a
+  literal unit matches only itself, the reading matches exactly.
+- `measure_phrase_cat(layer, unit, reading)` builds the category seeding uses.
+- `cat_shape` and `cat_key` render `LitUnit` (`u"K"`). *`slot_is_concrete_nonentity` is unchanged:
+  with the unit in the ordinary key, functors whose slots name different units already fall into
+  different nodes, so the `sel:` key adds nothing for units.*
+- `CombKind::UnitApply`, second in `comb_rules`: `cat_unit_forall(λu. A/B)` with `cat_mp(U, r)` on its
+  right binds `u := U`, unifies `B`, and builds `L U R`.
 
-**Seeding** (`seed_leaves`, `dcg/parse/seed.rs:568-713`)
-- A `Quantity` token's single-token span gets two items per reading, `Item::new(cat_mp(U, value),
-  quantity term)` and `Item::new(cat_mp(U, difference), difference term)`.
-- A `Numeral` token gets the same two items at the dimensionless unit `1`. A positive integer also gets
-  the cardinal determiner items. Their templates are resolved from `lexicon:two_subj` and
-  `lexicon:two_obj` (`closed-class.esl:2177-2192`) in `Parser::over`, the way `DetTemplates::resolve`
-  (`dcg/grammar.rs:54-66`) resolves `a` and `these`; the count stays dropped, as for `two`..`ten`.
-- The widen gate from slice 2 counts `Numeral` and `Quantity` as seedable.
-- A `Quantity` token's surface is still looked up in the lexicon, as `lookup_span` does for every span,
-  so an attached quantity keeps its word reading (decision 6); a spaced one (`37 °C`) has none by
-  construction. A test pins it: a fixture entry for a digit-initial identifier seeds beside its
-  quantity items.
+**Seeding** (`seed_leaves` → `measure_items`)
+- A `Quantity` token seeds, per unit reading, `cat_mp(U, value)` with the value term and
+  `cat_mp(U, difference)` with the difference term. `931g` seeds four.
+- A `Numeral` seeds the same pair at the dimensionless unit. An integer of 2 or more also seeds the
+  cardinal determiner items of the closed-class `two` (`in_lexicon` none, sense `two`), resolved once
+  in `Parser::over`, so `3 genes` reads as `three genes` does. `1` gets none, `two`..`ten` having no
+  singular.
+- `seeds_itself` makes `Numeral` and `Quantity` tokens seeding for the widen gate and
+  `unseedable_tokens`. A sentence with a number is no longer `NON-PROSE`; it parses or is a grammar
+  gap, by its consumers.
+- Decision 6 needs no code: `lookup_span` looks up the quantity token's surface, as every span's.
 
-**Tests** (`kernel/tests/quantities_in_the_parser.rs`, fixture pattern of
-`kernel/tests/comparative_than.rs:39-144`):
-- `931g` seeds four items (two units × two readings) in four packed nodes; `forest.rs`'s node-key
-  test (`:383-392`) gains the unit case;
-- `unify_cat` binds a unit variable and refuses a literal mismatch;
-- a fixture consumer at `cat_unit_forall(λu. …/cat_mp(u, value))` composes with `37 °C`;
-- one at `cat_mp(u"K", difference)` composes with `5 °C` and refuses `5 mg`;
-- packed equals unpacked on those sentences, as `packed_forest_equals_unpacked_on_core_grammar` does
-  (`closed_class_determiners.rs:1804-1859`);
-- `5 °C intervals` is not read by `kind_compound` (`dcg/rules/combinators.rs:742-760`), which takes two
-  `cat_n` operands.
+**Tests**
+- `kernel/tests/quantities_in_the_parser.rs`, over a fixture with a unit-polymorphic VP-adjunct `at`
+  (value), a verb `rose` taking `cat_mp(u"K", difference)`, and `5A` as a known name:
+  - `HeLa incubated at 37 °C` has one reading, at 6203/20;
+  - `at 931g` has two, 931/1000 and 182599823/20000;
+  - `HeLa rose 5 °C` is a difference of 5, without the offset, and `HeLa rose 5 mg` has no parse;
+  - `5A incubated` reads the name (decision 6);
+  - packed equals unpacked on five sentences.
+- `category.rs`: a unit variable binds, a literal mismatch or reading mismatch is refused, and
+  `denote_cat` gives `Quantity` and `Difference`.
+- `forest.rs`: two measure phrases of different units have different node signatures.
+- `closed_class_determiners.rs`: `2 genes affect HeLa` and `HeLa affects 3 genes` read as their word
+  forms do. The gate test now uses a symbol, since a numeral seeds.
+- `unit_conversion.rs`: `units:difference(5, "°C")` commits as a `Difference(K)` and a value in that
+  slot is refused; a difference never takes the offset; the difference term type-checks.
+- The N-N kind compound cannot see a quantity: it combines two `cat_n`, and a quantity seeds only
+  `cat_mp`. The value test asserts no `compound_kind`.
 
-**Chain:** `units` and `lexicon` move.
+`pretty_term` prints literals as `<term>`, and normalisation erases the term's annotation, so the
+tests read magnitudes from the sem's debug form; the unit is carried by the category.
+
+**Chain:** `units` and `lexicon` moved; `EXPECTED` is updated. The reseed waits for slice 5.
 
 ## Slice 5 — consumers, the corpus, one reseed
 

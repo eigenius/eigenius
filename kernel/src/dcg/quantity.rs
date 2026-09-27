@@ -41,7 +41,7 @@ use std::collections::BTreeMap;
 use crate::layer::Layer;
 use crate::numeric::Rational;
 use crate::ontology::iri::Iri;
-use crate::units::convert::{Converted, Vocabulary};
+use crate::units::convert::{Converted, Reading, Vocabulary};
 use crate::units::Exponent;
 
 use super::closed_class::is_closed_class_surface;
@@ -64,6 +64,8 @@ pub struct UnitReading {
     pub stated: String,
     /// The quantity in base units, as a measured value — a bare °C with its offset (D93).
     pub value: Converted,
+    /// The same, as a difference — never with the offset (D95, decision 5).
+    pub difference: Converted,
 }
 
 /// A unit a spelling can denote.
@@ -159,13 +161,17 @@ impl ProseUnits {
                 value.denom() * num_bigint::BigInt::from(100),
             )
             .ok()?;
-            let converted = vocabulary.convert(&scaled, "1").ok()?;
+            let value = vocabulary.convert_as(&scaled, "1", Reading::Value).ok()?;
+            let difference = vocabulary
+                .convert_as(&scaled, "1", Reading::Difference)
+                .ok()?;
             return Some((
                 start + '%'.len_utf8(),
                 vec![UnitReading {
                     units: Vec::new(),
                     stated: "1".to_string(),
-                    value: converted,
+                    value,
+                    difference,
                 }],
             ));
         }
@@ -226,11 +232,15 @@ impl ProseUnits {
             .into_iter()
             .filter_map(|(strict, units)| {
                 let stated = strict.join("·");
-                let converted = vocabulary.convert(value, &stated).ok()?;
+                let converted = vocabulary.convert_as(value, &stated, Reading::Value).ok()?;
+                let difference = vocabulary
+                    .convert_as(value, &stated, Reading::Difference)
+                    .ok()?;
                 Some(UnitReading {
                     units,
                     stated,
                     value: converted,
+                    difference,
                 })
             })
             .collect()

@@ -69,11 +69,12 @@ class lexicon:Entity {
 // stored category a CLOSED, kernel-checked `lexicon:Cat` value — a free-variable
 // open term would be rejected by the commit-time felicity check (Rule 21). The
 // reflexive constructor is strictly positive, hence sound.
-// Mood — the clause type of a sentence. The ONLY feature that alters ⟦·⟧:
+// Mood — the clause type of a sentence. One of the two features that alter ⟦·⟧ (the other is
+// `Reading`, D95):
 // declaratives denote a `Prop`; questions / imperatives denote distinct things
 // (deferred to D63 Slice 5, where ⟦·⟧ fails closed rather than denoting `Prop`).
 data lexicon:Mood {
-    description = "Clause mood — a SYNTACTIC feature of `cat_s`, and the one place where the categorial denotation branches: ⟦S[dcl,_]⟧ = Prop, while the interrogative and imperative moods denote their own shapes. Unlike Num/Fin/Prep/Mode it is therefore not erased by ⟦·⟧.";
+    description = "Clause mood — a SYNTACTIC feature of `cat_s`, and one of the two places where the categorial denotation branches (a measure phrase's `Reading` is the other): ⟦S[dcl,_]⟧ = Prop, while the interrogative and imperative moods denote their own shapes. Unlike Num/Fin/Prep/Mode it is therefore not erased by ⟦·⟧.";
 
     dcl,   // declarative — "a gene affects a cell line" (⟦S[dcl,_]⟧ = Prop)
     q,     // interrogative — "does a gene affect a cell line?" (Slice 5)
@@ -197,6 +198,17 @@ data lexicon:Prep {
     prep_as,      // essive / object-predicative "as": "identify X as Y", "regard X as Y" (D63 §5.3)
     prep_any,     // underspecified ⊤: meets any specific prep. Prep-agnostic verb frames
                   // carry this; a specific marker refines it at composition.
+}
+
+// Reading — how a measure phrase is read (D95 implementation plan, decision 5): a measured VALUE
+// (`incubated at 37 °C`, `for 2 h`) or a DIFFERENCE between two (`5 °C warmer`, `rose 5 °C`). Unlike
+// Num/Fin/Prep it changes the denotation — ⟦cat_mp(u, value)⟧ = units:Quantity(u),
+// ⟦cat_mp(u, difference)⟧ = units:Difference(u) — so, like Mood, it is not erased and has no wildcard:
+// every consumer takes one.
+data lexicon:Reading {
+    description = "How a measure phrase is read: a measured value or a difference. It changes the denotation, so it is not erased and has no wildcard.";
+    value,
+    difference,
 }
 
 // Mode — the SLASH MODALITY of multimodal CCG (Baldridge 2002 ch. 5, Figure 5.1
@@ -363,6 +375,18 @@ data lexicon:Cat : Type 1 {
     // has no parse) and builds `λμ.λV.λy.λx. gt(μ(x), μ(y))` over `measurements:gt`. Distinct from
     // `cat_pp` (⟦·⟧ = Entity → Prop) — a measure is a scalar, not a truth-value.
     cat_measure : lexicon:Cat,
+    // MP[u, reading] — a MEASURE PHRASE (D95): `37 °C`, `10 μg ml⁻¹`, `931g`. Indexed by its unit, a
+    // `core:unit` in base units, so a consumer that needs a dimension names it and a mismatch fails to
+    // compose; and by its reading. ⟦cat_mp(u, value)⟧ = units:Quantity(u), ⟦cat_mp(u, difference)⟧ =
+    // units:Difference(u). Not seeded from lexical entries: the preprocessor recognises the quantity and
+    // seeding builds its items (D95 implementation plan, decisions 1 and 5). Distinct from `cat_measure`,
+    // which is an opaque ordinal scale over entities.
+    cat_mp : core:unit -> lexicon:Reading -> lexicon:Cat,
+    // ∀u:unit. R[u] — a UNIT-polymorphic functor: a consumer that takes a measure phrase of any unit
+    // (`at 37 °C`, `for 2 h`). Like `cat_forall` and unlike the feature binders, it is instantiated from
+    // the consumed item — `u := U` from its `cat_mp(U, r)` — and its sem is applied to the unit, since
+    // the unit appears in the denotation: ⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧.
+    cat_unit_forall : (core:unit -> lexicon:Cat) -> lexicon:Cat,
 }
 
 // ── The lexical-entry record ──────────────────────────────────────────

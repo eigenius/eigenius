@@ -43,13 +43,47 @@ use std::fmt;
 
 const UNITS_NS: &str = "urn:eigenius:units:";
 
-/// The ESL elaboration form `units:quantity(value, "stated")`. NOT a chain constant: the compiler
-/// resolves it where the chain's vocabulary is in hand, into [`Converted::quantity_term`]'s term.
+/// The ESL elaboration form `units:quantity(value, "stated")`, a measured value. NOT a chain
+/// constant: the compiler resolves it where the chain's vocabulary is in hand, into
+/// [`Converted::term`]'s term.
 pub const QUANTITY_FORM: &str = "urn:eigenius:units:quantity";
 
-/// The inductive a quantity term inhabits, and its one constructor.
+/// The ESL elaboration form `units:difference(value, "stated")`, a difference; resolved like
+/// [`QUANTITY_FORM`].
+pub const DIFFERENCE_FORM: &str = "urn:eigenius:units:difference";
+
+/// The inductive a measured value inhabits.
 pub const QUANTITY: &str = "urn:eigenius:units:Quantity";
-const MK_QUANTITY: &str = "mk_quantity";
+
+/// The inductive a difference inhabits.
+pub const DIFFERENCE: &str = "urn:eigenius:units:Difference";
+
+/// How a stated quantity is read (D95, decision 5): a measured value, or a difference between two.
+/// They convert differently only for an affine unit: `5 °C` is 278.15 K as a value and 5 K as a
+/// difference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Reading {
+    Value,
+    Difference,
+}
+
+impl Reading {
+    /// The inductive a term of this reading inhabits, and its constructor.
+    pub fn inductive(self) -> (&'static str, &'static str) {
+        match self {
+            Reading::Value => (QUANTITY, "mk_quantity"),
+            Reading::Difference => (DIFFERENCE, "mk_difference"),
+        }
+    }
+
+    /// The ESL elaboration form for this reading.
+    pub fn form(self) -> &'static str {
+        match self {
+            Reading::Value => QUANTITY_FORM,
+            Reading::Difference => DIFFERENCE_FORM,
+        }
+    }
+}
 
 /// A named unit, as the units layer declares it.
 #[derive(Debug, Clone)]
@@ -147,25 +181,29 @@ pub struct Converted {
     pub magnitude: Magnitude,
     pub unit: Unit,
     pub kinds: Kinds,
+    /// Whether this is a measured value or a difference.
+    pub reading: Reading,
 }
 
 impl Converted {
-    /// The quantity term: `(units:mk_quantity(c, pi) : units:Quantity(unit))`.
+    /// The term: `(units:mk_quantity(c, pi) : units:Quantity(unit))` for a value,
+    /// `(units:mk_difference(c, pi) : units:Difference(unit))` for a difference.
     ///
-    /// Annotated, because `u` is `Quantity`'s parameter and the constructor's arguments do not
-    /// carry it: without the annotation the term would inhabit `Quantity(u)` for every `u`. This is
-    /// the term `units:quantity(v, "…")` elaborates to in ESL.
-    pub fn quantity_term(&self) -> Exp {
+    /// Annotated, because `u` is the type's parameter and the constructor's arguments do not carry
+    /// it: without the annotation the term would inhabit `Quantity(u)` for every `u`. This is the
+    /// term `units:quantity(v, "…")` or `units:difference(v, "…")` elaborates to in ESL.
+    pub fn term(&self) -> Exp {
         let (coefficient, pi) = self.magnitude.chain_pair();
-        let quantity = crate::ontology::well_known::iri(QUANTITY);
+        let (inductive, ctor) = self.reading.inductive();
+        let inductive = crate::ontology::well_known::iri(inductive);
         Exp::Ann(
             Box::new(Exp::InductiveCtor(
-                quantity.clone(),
-                MK_QUANTITY.to_string(),
+                inductive.clone(),
+                ctor.to_string(),
                 vec![Exp::LitRat(coefficient), Exp::LitInt(pi)],
             )),
             Box::new(Exp::const_applied(
-                quantity,
+                inductive,
                 Vec::new(),
                 vec![Exp::LitUnit(self.unit.clone())],
             )),
@@ -246,12 +284,22 @@ impl Vocabulary {
         self.prefixes.values()
     }
 
-    /// Converts `value` in the `stated` unit to base units.
-    ///
-    /// The °C offset applies only when the stated unit is exactly `°C` — the point reading D93
-    /// assumes for a bare °C. Inside a compound (`°C/min`) the reading is a difference, and °C
-    /// converts as K with no offset: a vector reading carries the vector unit.
+    /// Converts `value` in the `stated` unit to base units, as a measured value.
     pub fn convert(&self, value: &Rational, stated: &str) -> Result<Converted, ConvertError> {
+        self.convert_as(value, stated, Reading::Value)
+    }
+
+    /// Converts `value` in the `stated` unit to base units, as `reading`.
+    ///
+    /// The °C offset applies only to a value stated in exactly `°C`. A difference never takes it,
+    /// and inside a compound (`°C/min`) °C converts as K with no offset: a difference reading carries
+    /// the unit of the difference.
+    pub fn convert_as(
+        &self,
+        value: &Rational,
+        stated: &str,
+        reading: Reading,
+    ) -> Result<Converted, ConvertError> {
         let factors = self.parse(stated)?;
         let mut coefficient = value.clone();
         let mut pi = 0i64;
@@ -279,7 +327,7 @@ impl Vocabulary {
                 }
             }
         }
-        if let [only] = factors.as_slice() {
+        if let (Reading::Value, [only]) = (reading, factors.as_slice()) {
             if only.prefix.is_none() && only.exp == Exponent::ONE {
                 if let Some(offset) = &only.unit.offset {
                     coefficient = add(&coefficient, offset)?;
@@ -291,6 +339,7 @@ impl Vocabulary {
             magnitude: Magnitude::rational(coefficient).with_constant(Constant::Pi, pi),
             unit,
             kinds,
+            reading,
         })
     }
 

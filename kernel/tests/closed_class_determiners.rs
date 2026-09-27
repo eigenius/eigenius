@@ -211,19 +211,21 @@ fn sense_cap_widens_on_failure_for_known_vocabulary() {
     );
 }
 
-/// D95 — **a numeral or a symbol seeds nothing, and is not a missing lexeme.** `unknown_words` reports
-/// only word tokens, and a digit-initial token that is not a numeral (`53BP1`) is one; the numerals and
-/// the operator are `unseedable_tokens`. The widen gate counts them: a sentence with a token that seeds
-/// nothing fails closed on its first attempt, where the gate used to skip non-prose tokens and widen
-/// through every rung of a parse that could not succeed.
+/// D95 — **a symbol seeds nothing, and is not a missing lexeme.** `unknown_words` reports only word
+/// tokens, and a digit-initial token that is not a numeral (`53BP1`) is one. A numeral seeds its own
+/// measure-phrase and cardinal items (slice 4), so only the operator is an `unseedable_token`. The
+/// widen gate counts it: a sentence with a token that seeds nothing fails closed on its first
+/// attempt, where the gate used to skip non-prose tokens and widen through every rung of a parse that
+/// could not succeed.
 #[test]
-fn numerals_and_symbols_are_unseedable_not_missing() {
+fn symbols_are_unseedable_not_missing() {
     let index = index_with_zob(1);
     let text = "zob affects 53BP1 at 37 < 5";
     assert_eq!(index.unknown_words(text, &Identity), ["53BP1"]);
-    assert_eq!(index.unseedable_tokens(text, &Identity), ["37", "<", "5"]);
+    assert_eq!(index.unseedable_tokens(text, &Identity), ["<"]);
 
-    let (closed, open, trace) = index.parse_scoped_open_traced("zob affects 37", &Identity, None);
+    let (closed, open, trace) =
+        index.parse_scoped_open_traced("zob affects HeLa <", &Identity, None);
     assert!(closed.is_empty() && open.is_empty());
     assert_eq!(
         trace.attempts, 1,
@@ -1530,6 +1532,23 @@ fn cardinal_numerals_are_plural_determiners() {
         !index.parse("four genes affect HeLa", &PluralS).is_empty(),
         "another cardinal (`four`) parses"
     );
+    // D95: a digit numeral seeds the cardinal determiner items of `two`, with the same readings.
+    let sems = |text: &str| {
+        let mut s: Vec<String> = index
+            .parse(text, &PluralS)
+            .iter()
+            .map(|it| pretty_term(it.sem()))
+            .collect();
+        s.sort();
+        s
+    };
+    for (digits, words) in [
+        ("2 genes affect HeLa", "two genes affect HeLa"),
+        ("HeLa affects 3 genes", "HeLa affects three genes"),
+    ] {
+        assert!(!sems(digits).is_empty(), "{digits}");
+        assert_eq!(sems(digits), sems(words), "{digits}");
+    }
 }
 
 #[test]

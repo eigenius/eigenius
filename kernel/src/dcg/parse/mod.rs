@@ -281,6 +281,10 @@ pub struct Parser {
     grammar: Grammar,
     /// The unit vocabulary as prose spells it, which the preprocessor reads quantities against (D95).
     units: ProseUnits,
+    /// The cardinal determiner items a digit numeral seeds (`3 cells`): those of the closed-class word
+    /// `two`, resolved once here, as [`DetTemplates`] resolves `a` and `these`. The count is dropped,
+    /// as it is for `two`..`ten` (`closed-class.esl`, "Cardinal numerals as plural determiners").
+    cardinals: Vec<Item>,
     /// The processing parameters ([`ParseConfig`]).
     config: ParseConfig,
     /// The document this parser is reading, as sentences, for the reranker's CONTEXT WINDOW.
@@ -292,6 +296,15 @@ pub struct Parser {
     /// The context window CHANGES the reranker's answer (and is unproven), so it is opt-in: set it
     /// (with a document) via [`Parser::with_document`], driven by the `--context-window` measurement arm.
     context_sentences: usize,
+}
+
+/// Whether a token seeds items of its own, whatever the lexicon holds: a numeral or a quantity, whose
+/// measure-phrase items seeding builds (D95).
+fn seeds_itself(t: &Token) -> bool {
+    matches!(
+        t.kind(),
+        super::preprocess::TokenKind::Numeral(_) | super::preprocess::TokenKind::Quantity(_)
+    )
 }
 
 /// The default context-window size the `--context-window` arm turns on. A passage, not a corpus:
@@ -315,6 +328,12 @@ impl Parser {
         // determiner category templates from the lexicon. This is the only moment the grammar reads the
         // lexicon; from here on the rules hold values, not a lookup.
         let units = ProseUnits::load(&layer);
+        let cardinals: Vec<Item> = lex
+            .entries_for("two")
+            .into_iter()
+            .filter(|e| e.in_lexicon.is_none() && e.sense.as_deref() == Some("two"))
+            .map(|e| e.item)
+            .collect();
         let grammar = Grammar {
             reserved: ReservedTable::load(&layer),
             dets: DetTemplates::resolve(lex.as_ref()),
@@ -324,6 +343,7 @@ impl Parser {
             lex,
             grammar,
             units,
+            cardinals,
             config: ParseConfig {
                 packing: true, // default ON (§11 3g.2 / B9)
                 ..ParseConfig::default()
@@ -969,7 +989,7 @@ impl Parser {
     fn every_token_seeds(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
         self.tokenize(text)
             .iter()
-            .filter(|t| !t.is_comma())
+            .filter(|t| !t.is_comma() && !seeds_itself(t))
             .all(|t| self.has_token(t.surface(), lemmatizer))
     }
 
@@ -979,7 +999,12 @@ impl Parser {
     pub fn unseedable_tokens(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<String> {
         self.tokenize(text)
             .into_iter()
-            .filter(|t| !t.is_word() && !t.is_comma() && !self.has_token(t.surface(), lemmatizer))
+            .filter(|t| {
+                !t.is_word()
+                    && !t.is_comma()
+                    && !seeds_itself(t)
+                    && !self.has_token(t.surface(), lemmatizer)
+            })
             .map(|t| t.surface().to_string())
             .collect()
     }

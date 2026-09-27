@@ -102,6 +102,40 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
             )),
             Box::new(Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::Float)),
         )),
+        // ⟦MP[u, value]⟧ = units:Quantity(u), ⟦MP[u, difference]⟧ = units:Difference(u) — a measure
+        // phrase denotes its quantity, read as a measured value or a difference (D95, decisions 1, 5).
+        ("cat_mp", [unit, reading]) => {
+            let ty = match reading {
+                Exp::InductiveCtor(_, r, _) if r == "value" => crate::units::convert::QUANTITY,
+                Exp::InductiveCtor(_, r, _) if r == "difference" => {
+                    crate::units::convert::DIFFERENCE
+                }
+                other => {
+                    return Err(format!(
+                        "denote_cat: a cat_mp reading is `value` or `difference`, got {other:?}"
+                    ))
+                }
+            };
+            Ok(Exp::const_applied(
+                crate::ontology::well_known::iri(ty),
+                Vec::new(),
+                vec![unit.clone()],
+            ))
+        }
+        // ⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧ — as `cat_forall`, the bound variable appears in
+        // ⟦R⟧ (`cat_mp(u, _)` denotes `Quantity(u)`), so the binder is a Π, not erased.
+        ("cat_unit_forall", [body]) => {
+            let Exp::Lam(patt, r) = body else {
+                return Err(format!(
+                    "denote_cat: cat_unit_forall body must be a λ (unit -> Cat), got {body:?}"
+                ));
+            };
+            Ok(Exp::Pi(
+                patt.clone(),
+                Box::new(Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::Unit)),
+                Box::new(denote_cat(r)?),
+            ))
+        }
         // ⟦A/ₘB⟧ = ⟦A\ₘB⟧ = ⟦B⟧→⟦A⟧. The slash MODALITY `_m` is denotation-transparent: it
         // restricts which combinatory rules may consume the slash, never what it denotes.
         ("fwd", [_m, a, b]) | ("bwd", [_m, a, b]) => Ok(Exp::Arrow(
@@ -329,6 +363,11 @@ fn unify_into(slot: &Exp, arg: &Exp, layer: &Arc<Layer>, subst: &mut CatSubst) -
             return unify_feat(&s[0], &a[0], subst);
         }
     }
+    // cat_mp(u, reading) (D95): a unit variable binds occurs-consistently, a literal unit matches only
+    // itself — units have no subtyping — and the reading matches exactly, having no wildcard.
+    if let (Some([su, sr]), Some([au, ar])) = (is_ctor(slot, "cat_mp"), is_ctor(arg, "cat_mp")) {
+        return sr == ar && unify_unit(su, au, subst);
+    }
     // Higher-order functors `A/B` (`fwd`) and `A\B` (`bwd`), D63 §8.2 item 4:
     // structural subsumption with the standard function variance — the **result**
     // `A` is covariant, the **argument** `B` is contravariant. So an `S\NP_Entity`
@@ -368,6 +407,44 @@ fn unify_type(slot: &Exp, arg: &Exp, layer: &Arc<Layer>, subst: &mut CatSubst) -
     } else {
         type_subsumes(slot, arg, layer)
     }
+}
+
+/// Unify a measure phrase's unit position: a slot `Exp::Var` binds to the argument's unit (a repeated
+/// variable must bind the same unit); a literal unit must equal the argument's.
+fn unify_unit(slot: &Exp, arg: &Exp, subst: &mut CatSubst) -> bool {
+    match slot {
+        Exp::Var(name) => match subst.get(name) {
+            Some(bound) => bound == arg,
+            None => {
+                subst.insert(name.clone(), arg.clone());
+                true
+            }
+        },
+        _ => slot == arg,
+    }
+}
+
+/// A measure phrase's category `cat_mp(unit, reading)` (D95), for the items seeding builds from a
+/// quantity token. `None` if `lexicon:Cat` or `lexicon:Reading` does not resolve.
+pub fn measure_phrase_cat(
+    layer: &Arc<Layer>,
+    unit: &crate::units::Unit,
+    reading: crate::units::convert::Reading,
+) -> Option<Exp> {
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    let readings = inductive_iri(layer, "urn:eigenius:lexicon:Reading")?;
+    let reading = match reading {
+        crate::units::convert::Reading::Value => "value",
+        crate::units::convert::Reading::Difference => "difference",
+    };
+    Some(Exp::InductiveCtor(
+        cat,
+        "cat_mp".to_string(),
+        vec![
+            Exp::LitUnit(unit.clone()),
+            Exp::InductiveCtor(readings, reading.to_string(), vec![]),
+        ],
+    ))
 }
 
 /// Substitute schematic category type-variables (`Exp::Var`) throughout a
@@ -1099,6 +1176,56 @@ mod tests {
                  type-checks a Cat term (today only `⟦·⟧`'s erasure hides it)"
             );
         }
+    }
+
+    /// D95: a measure phrase's unit variable binds; a literal unit matches only itself; the reading
+    /// matches exactly.
+    #[test]
+    fn a_measure_phrase_unit_binds_or_matches() {
+        let ctx = crate::testing::bootstrap_context();
+        let layer = ctx.head();
+        let unit = |s: &str| Exp::LitUnit(crate::units::Unit::parse_canonical(s).unwrap());
+        let cat = |u: Exp, r: &str| {
+            Exp::InductiveCtor(
+                Iri::parse("urn:eigenius:lexicon:Cat").unwrap(),
+                "cat_mp".into(),
+                vec![
+                    u,
+                    Exp::InductiveCtor(
+                        Iri::parse("urn:eigenius:lexicon:Reading").unwrap(),
+                        r.into(),
+                        vec![],
+                    ),
+                ],
+            )
+        };
+        let bound = unify_cat(
+            &cat(Exp::Var("u".into()), "value"),
+            &cat(unit("K"), "value"),
+            layer,
+        )
+        .expect("a unit variable binds");
+        assert_eq!(bound.get("u"), Some(&unit("K")));
+        assert!(unify_cat(&cat(unit("K"), "value"), &cat(unit("K"), "value"), layer).is_some());
+        assert!(unify_cat(&cat(unit("K"), "value"), &cat(unit("kg"), "value"), layer).is_none());
+        assert!(unify_cat(
+            &cat(unit("K"), "value"),
+            &cat(unit("K"), "difference"),
+            layer
+        )
+        .is_none());
+        // ⟦·⟧: a value is a Quantity, a difference a Difference.
+        let shown = |r| format!("{:?}", denote_cat(&cat(unit("K"), r)).unwrap());
+        assert!(
+            shown("value").contains("units:Quantity"),
+            "{}",
+            shown("value")
+        );
+        assert!(
+            shown("difference").contains("units:Difference"),
+            "{}",
+            shown("difference")
+        );
     }
 
     /// An adverb must hand back the clause feature it consumed.

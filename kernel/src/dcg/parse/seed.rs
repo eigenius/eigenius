@@ -595,6 +595,11 @@ impl Parser {
                 // Derived `-ly` adverbs (D62 Phase 3): transparent modifier items for a single `-ly`
                 // token whose adjective base is known. Single-token spans; identity sem, no holes.
                 if i == j {
+                    // Quantities and numerals (D95): items built here, not looked up — a measure
+                    // phrase for each reading, value and difference, and a numeral's cardinal
+                    // determiner. An attached quantity's surface was looked up above like any
+                    // token's, so a word it spells keeps its entries (decision 6).
+                    chart[i][j].extend(self.measure_items(&tokens[i]));
                     for it in self.adverb_items(&surface) {
                         chart[i][j].push(it);
                     }
@@ -741,6 +746,48 @@ impl Parser {
             }
         }
         (chart, beam_drops)
+    }
+
+    /// The items a quantity or numeral token seeds (D95, decisions 1 and 5): a measure phrase for each
+    /// unit reading, once as a value (`cat_mp(u, value)`, sem `Quantity(u)`) and once as a difference
+    /// (`cat_mp(u, difference)`, sem `Difference(u)`) — for `931g`, four. A numeral is the same pair at
+    /// the dimensionless unit, and an integer of 2 or more also seeds the cardinal determiner items the
+    /// word forms `two`..`ten` have, their count dropped as theirs is. Any other token seeds nothing
+    /// here.
+    fn measure_items(&self, token: &Token) -> Vec<Item> {
+        use super::super::preprocess::TokenKind;
+        use crate::units::convert::{Converted, Kinds, Reading};
+        let layer = &self.grammar.layer;
+        let mp = |c: &Converted| {
+            super::super::category::measure_phrase_cat(layer, &c.unit, c.reading)
+                .map(|cat| Item::new(cat, c.term()))
+        };
+        match token.kind() {
+            TokenKind::Quantity(q) => q
+                .readings
+                .iter()
+                .flat_map(|r| [mp(&r.value), mp(&r.difference)])
+                .flatten()
+                .collect(),
+            TokenKind::Numeral(value) => {
+                let dimensionless = |reading| Converted {
+                    magnitude: crate::units::Magnitude::rational(value.clone()),
+                    unit: crate::units::Unit::dimensionless(),
+                    kinds: Kinds::default(),
+                    reading,
+                };
+                let mut items: Vec<Item> = [Reading::Value, Reading::Difference]
+                    .into_iter()
+                    .filter_map(|r| mp(&dimensionless(r)))
+                    .collect();
+                let two = num_bigint::BigInt::from(2);
+                if value.is_integer() && value.numer() >= &two {
+                    items.extend(self.cardinals.iter().cloned());
+                }
+                items
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md`) — a SEED-time rule (it

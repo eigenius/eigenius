@@ -220,6 +220,7 @@ namespace probe   = "urn:eigenius:probe";
 axiom probe:is_speed       : u:Quantity(u"s^-1·m") -> Prop
 axiom probe:is_temperature : u:Quantity(u"K") -> Prop
 axiom probe:is_ratio       : u:Quantity(u"1") -> Prop
+axiom probe:is_warming     : u:Difference(u"K") -> Prop
 "#;
 
 /// Compile `prop` as a claim beside [`PROBES`] and validate it on the bootstrap chain.
@@ -262,6 +263,43 @@ fn an_authored_quantity_commits_at_its_base_unit() {
         let errs = commit(prop).unwrap_or_else(|e| panic!("{prop} should compile: {e}"));
         assert!(errs.is_empty(), "{prop} should commit: {errs:#?}");
     }
+}
+
+/// `units:difference` (D95, decision 5) elaborates to a `Difference`, converted with no °C offset, and
+/// a value is not a difference: the types differ.
+#[test]
+fn an_authored_difference_commits_as_a_difference() {
+    for prop in [
+        r#"probe:is_warming(u:difference(5, "°C"))"#,
+        r#"probe:is_warming(u:difference(5, "K"))"#,
+    ] {
+        let errs = commit(prop).unwrap_or_else(|e| panic!("{prop} should compile: {e}"));
+        assert!(errs.is_empty(), "{prop} should commit: {errs:#?}");
+    }
+    let errs = commit(r#"probe:is_warming(u:quantity(5, "°C"))"#).expect("compiles");
+    assert!(
+        errs.iter()
+            .any(|(rule, _)| *rule == ValidationRule::TermIllTyped),
+        "a value in a difference slot is refused: {errs:#?}"
+    );
+}
+
+/// A value and a difference differ in magnitude only where the unit has an offset.
+#[test]
+fn a_difference_never_takes_the_offset() {
+    use eigenius_kernel::units::convert::Reading;
+    let as_ = |stated: &str, reading| {
+        vocab()
+            .convert_as(&q(5, 1), stated, reading)
+            .unwrap()
+            .magnitude
+            .coefficient()
+            .clone()
+    };
+    assert_eq!(as_("°C", Reading::Value), q(5563, 20));
+    assert_eq!(as_("°C", Reading::Difference), q(5, 1));
+    assert_eq!(as_("K", Reading::Value), as_("K", Reading::Difference));
+    assert_eq!(as_("mg", Reading::Value), as_("mg", Reading::Difference));
 }
 
 #[test]
@@ -308,9 +346,22 @@ fn the_rust_api_term_type_checks() {
     let ctx = eigenius_kernel::testing::bootstrap_context();
     let c = convert(q(3, 1), "m/s");
     let mut check = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(ctx.head()));
-    let ty = check_infer(&mut check, &c.quantity_term()).expect("the quantity term type-checks");
+    let ty = check_infer(&mut check, &c.term()).expect("the quantity term type-checks");
     let printed = format!("{:?}", readback_val(0, &ty));
     assert!(printed.contains("Unit(s^-1·m)"), "{printed}");
+    let d = vocab()
+        .convert_as(
+            &q(5, 1),
+            "°C",
+            eigenius_kernel::units::convert::Reading::Difference,
+        )
+        .unwrap();
+    let ty = check_infer(&mut check, &d.term()).expect("the difference term type-checks");
+    let printed = format!("{:?}", readback_val(0, &ty));
+    assert!(
+        printed.contains("Difference") && printed.contains("Unit(K)"),
+        "{printed}"
+    );
 }
 
 #[test]

@@ -39,6 +39,12 @@ data units:Quantity (u : core:unit) : Set {
     mk_quantity : forall (u : core:unit) => core:rational -> core:integer -> units:Quantity(u)
 }
 
+data units:Difference (u : core:unit) : Set {
+    description = "A difference between two quantities in unit `u`, in base units, with the same magnitude pair as `Quantity`. A separate type because a measured value and a difference are converted differently for an affine unit: `5 °C` is 278.15 K as a value and 5 K as a difference. `units:quantity(5, \"°C\")` is the value, `units:difference(5, \"°C\")` the difference (D95 implementation plan, decision 5). Value − value is a difference, value + difference a value; that arithmetic is not declared yet.";
+
+    mk_difference : forall (u : core:unit) => core:rational -> core:integer -> units:Difference(u)
+}
+
 // ── The unit operators ───────────────────────────────────────────────────────────────────────────
 // Declared constants, reduced by the kernel (`kernel/src/nbe/unit_ext.rs`) the way nanoda's kernel
 // reduces `Nat.add`: recognised by name, with no term form of their own. A product of literal units
