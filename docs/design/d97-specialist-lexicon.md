@@ -2,7 +2,7 @@
 
 **Status: proposed** (2026-09-27). Measured against the imported lexicon at the lexicon level; the
 parse-level measurement is slice 1. Decisions 2, 3 and 4 are taken (2026-09-27), and 5 for verbs
-whose noun names a UMLS concept; 1 and the rest of 5 are open.
+whose noun names a concept; 1 and the rest of 5 are open.
 
 ## The gap
 
@@ -155,6 +155,10 @@ concepts gives the verb two senses, as a WordNet verb has one per synset, and th
 The UMLS importer emits these, reading SPECIALIST at conversion as it reads the countability list,
 with `in_lexicon = lexicon:umls`: the sense is UMLS's, the syntax SPECIALIST's.
 
+Where the noun is no UMLS atom but a WordNet noun, the verb senses are the WordNet synsets', by the
+same rule, and the WordNet importer emits them: one per synset of the noun, with the synset's sense
+key and `in_lexicon = lexicon:wordnet`.
+
 How the 4,390 verbs only SPECIALIST has resolve, through their nouns and those nouns' spelling
 variants, against the concepts the UMLS importer emitted:
 
@@ -162,7 +166,7 @@ variants, against the concepts the UMLS importer emitted:
 |---|---|---|
 | names one UMLS concept | 428 | `transfect` (C0040669), `downregulate`, `upregulate`, `alkylate` |
 | names several (median 2, max 5) | 92 | `electroporate`, `lyse`, `phosphorylate` (2 each) |
-| names no UMLS concept, but is a WordNet noun | 80 | `calcinate`, `cajole` |
+| names no UMLS concept, but is a WordNet noun | 80, with 112 synsets (57 have one, 23 more) | `calcinate` (`calcination`), `cajole` (`cajolery`) |
 | names no concept in either source | 2,345 | `absolutise`, `acetoacetylate`, `acetolyse` |
 | — the verb has no nominalization | 1,445 | `counterstain`, `acidize`, `afterload` |
 
@@ -250,11 +254,11 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    `cat_n(C, mass)` entry. Today 27,207 WordNet lemmas carry 43,474 mass entries; SPECIALIST adds
    12,863 lemmas and about 14,665 entries (one per existing count entry). The UMLS importer takes the
    same list, through head inheritance, so its mass entries move too; not yet measured.
-5. **What a verb only SPECIALIST has denotes — decided where its noun names a UMLS concept: a verb
-   sense of that concept** (520 verbs; "A verb no other source has is the verb sense of its
-   concept"). **Open for the other 3,870**: the 80 whose noun is a WordNet noun and no UMLS atom
-   (the verb sense of the WordNet synset, by the same rule?), and the 3,790 with no concept to
-   attach to (no entry, or a sense-less predicate that records SPECIALIST's syntax alone).
+5. **What a verb only SPECIALIST has denotes — decided where its noun names a concept: a verb sense
+   of that concept.** A UMLS concept where the noun is a UMLS atom (520 verbs); otherwise a WordNet
+   synset where it is a WordNet noun (80 verbs, 112 senses). See "A verb no other source has is the
+   verb sense of its concept". **Open for the 3,790 with no concept to attach to**: no entry, or a
+   sense-less predicate that records SPECIALIST's syntax alone.
 
 ## Slices
 
@@ -270,9 +274,9 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
 3. **Adjectives and nouns**: eigenius#263's attested set.
 4. **Object + PP**: the `((S\NP)/cat_pp_arg(p))/NP` category, its passive (`were treated with
    etoposide`), and the importer's frames 20/21.
-5. **Verb senses of concepts**: the UMLS importer emits them through SPECIALIST's nominalizations
-   (decision 5), and verbalization recognises a verb by its category or entry rather than its atom
-   name.
+5. **Verb senses of concepts**: the UMLS importer emits them through SPECIALIST's nominalizations,
+   and the WordNet importer where the noun is only a WordNet noun (decision 5); verbalization
+   recognises a verb by its category or entry rather than its atom name.
 6. **Countability**: the union of Wiktionary and SPECIALIST (decision 4).
 
 Slices 2–6 change the imported lexicon; they share one reseed and one re-adjudication of the pins
