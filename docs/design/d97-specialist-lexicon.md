@@ -1,8 +1,8 @@
 # D97 — The SPECIALIST Lexicon as the lexicon's syntactic authority
 
 **Status: proposed** (2026-09-27). Measured against the imported lexicon at the lexicon level; the
-parse-level measurement is slice 1. Decisions 2, 3 and 4 are taken (2026-09-27), and 5 for verbs
-whose noun names a concept; 1 and the rest of 5 are open.
+parse-level measurement is slice 1. Decisions 1–4 are taken (2026-09-27), and 5 for verbs whose
+noun names a concept; the rest of 5 is open.
 
 ## The gap
 
@@ -196,10 +196,55 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
 
 ## Decisions
 
-1. **Lemma or sense.** SPECIALIST speaks for a lemma; WordNet's frames are per sense. Giving
-   SPECIALIST's frames to every sense of the lemma is determinate and adds the entries counted above
-   (+3,936 for objects alone); choosing senses needs evidence SPECIALIST does not have. *Proposed:*
-   the union, accepted or refused on slice 1's parse measurement.
+1. **Lemma or sense — decided: the senses the evidence picks, and an LLM judge where it picks
+   none.** SPECIALIST speaks for a lemma (`incubate` takes an object); WordNet's frames are per
+   sense, and every added frame is an entry per sense and form. So the importer must choose the
+   senses a frame goes on. Counted from the WordNet dict files:
+
+   | Frame SPECIALIST adds | Verbs | One sense | Several senses |
+   |---|---|---|---|
+   | an object | 409 | 301 | 108 |
+   | a named PP preposition | 743 | 124 | 619 |
+   | an object and a PP | 1,305 | 321 | 984 |
+
+   **The evidence.** WordNet's derivational pointers (`+`) link a verb sense to noun senses, and
+   SPECIALIST names the verb's noun (`incubate` → `incubation`). A sense whose pointer reaches that
+   noun is evidence the frame is its. Over the several-sense verbs:
+
+   | | object | named PP | object + PP |
+   |---|---|---|---|
+   | the pointers pick some senses, not all | 12 | 205 | 360 |
+   | every sense points to the noun | 13 | 71 | 127 |
+   | no sense points to it | 1 | 23 | 34 |
+   | the verb has no nominalization | 82 | 320 | 463 |
+
+   **Decided:**
+   - One sense: the frame is its.
+   - Where the pointers pick some senses and not all: those senses.
+   - The open cases — every sense points, none does, or there is no nominalization — go to an LLM
+     judge: 999 verbs, 1,804 items (a verb and a frame: 96 objects, 757 named PPs, 951 object +
+     PP), 10,473 sense judgements, 5.8 senses per item. The pointers decide 1,050 items.
+
+   **The judge** follows the WordNet–UMLS concept alignment's protocol
+   (`experiments/lexicon-align/README.md`), whose 81,305 verdicts cost about $90:
+   - It sees the lemma, the frame with an example built from it (`X incubated Y`, `treat X with
+     Y`), and each sense's gloss, examples and WordNet frames; it answers per sense whether the
+     frame fits, with a confidence, and may answer that no sense fits.
+   - **Validated before it is trusted**, on a gold set WordNet supplies: verbs whose senses differ
+     in WordNet's own frames (some take an object, some do not). With those frames hidden, the judge
+     must recover which senses take the object. A recall or precision below the threshold the
+     alignment used stops the run.
+   - A verdict is accepted at the confidence threshold the validation sets; the verdicts are
+     committed, since they are not reproducible, and the run is resumable and fails closed.
+   - **No frame is dropped.** Where the judge accepts no sense, every sense gets the frame, as the
+     union would. A "no sense fits" verdict is also recorded: it marks a sense WordNet lacks, as
+     SPECIALIST's transitive `mediate` (`WRN mediates repair`) is not WordNet's "act between
+     parties".
+
+   *Rejected:* every sense for every frame, which gives wrong-sense readings where the evidence
+   says otherwise (`mediate`'s "occupy an intermediate position X"); and the evidenced senses only,
+   which drops the frame wherever a several-sense verb has no evidence: 923 cases over the three
+   kinds, 865 with no nominalization and 58 where no sense points to it.
 2. **Union or authority — decided: union.** Where WordNet has a frame SPECIALIST does not (a
    PP-oblique `prep_any` beside SPECIALIST's named preposition), SPECIALIST's frame joins it. Both
    entries carry the sense's axiom, so they yield the same sem wherever both apply; slice 1 measures
@@ -265,9 +310,10 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
 1. **Provision and measure.** `scripts/provision-specialist.sh` fetches `LEX_DOC/LEXICON` for a pinned
    release with a checksum into `references/specialist/` (gitignored), as
    `provision-countability.sh` does; the reseed's `PROVENANCE` records it. A reader in a small crate
-   parses the records. The WordNet importer gains the union behind a flag, and a reseed with it on
-   is measured against the `2026-09-27` snapshot on the CNL page and the quantity corpus: readings,
-   gaps, pins. Decision 1 is taken on that; for 2 and 4 it measures the cost of what is decided.
+   parses the records. The sense judge (decision 1) runs, validated first, and its verdicts are
+   committed. The WordNet importer gains SPECIALIST's frames on the senses decision 1 picks, behind a
+   flag, and a reseed with it on is measured against the `2026-09-27` snapshot on the CNL page and
+   the quantity corpus: readings, gaps, pins — the cost of decisions 1–4.
 2. **Verbs.** Objects, named PP prepositions, clausal complements. The 52 `lexicon:Prep`
    constructors and closed-class argument entries (decision 3), and the kernel's single preposition
    list. Frame 13 moves to the PP-oblique kind, as `on`.
