@@ -91,6 +91,13 @@ The paper's per-figure Source Data, from `static-content.springer.com/esm/art%3A
 |---|---|---|---|
 | `ccle_phase2_suppl_table_7_msi.xlsx` | **Ghandi et al. 2019**, *Nature* 569:503 (DOI 10.1038/s41586-019-1186-3; PMC6697103), **Supplementary Table 7** — fetched via `static-content.springer.com/…/41586_2019_1186_MOESM10_ESM.xlsx` (the PMC `bin/` URL is JS-gated) | `ad26cb44…c03eb8` | Upstream raw indel counts for the MSI classification. 3 sheets: `Descriptions`, `MSI calls` (1331 cell lines; `CCLE.hc/wes/wgs.*` + `GDSC.*` `msi_del`/`total_del` + MSI calls), `Thresholds used for MSI annot.` (the calling cutoffs, e.g. CCLE-WES `P_MS_del_1/2 = 70/80`, `N_MS_del = 750`). `process_CCLE_MSI_data.R` normalizes these → the `CCLE_MSI`/`ms_deletions_normed` already in Supp Table 1. **Caveat:** this is the *final published* table; the WRN code used a pre-publication "early version" — correct table, possibly not byte-identical. Needed only to recompute the MSI *classification* from scratch (the calls are already vendored downstream in Supp Table 1).
 
+### The paper's text (PMC author manuscript, fetched 2026-09-27)
+
+| File (in `slices/`) | Source | sha256 | Used for |
+|---|---|---|---|
+| `PMC6580861.xml` | PubMed Central **PMC6580861** (NIHMS1522798), JATS, via NCBI efetch (`db=pmc&id=6580861&rettype=xml`) | `92a908a2…` (see `sources.tsv`) | The author manuscript this study's line references cite: abstract, the Letter's body, methods, all 14 figure legends, data availability, references. |
+| `PMC6580861.txt` | Derived by [`extract/jats_to_text.py`](../extract/jats_to_text.py) | see `sources.tsv` | One paragraph per line with a locator (`[body.p4]`, `[methods/mmr-status.p0]`, `[ed-fig6 p1]`); the text [`../docs/06-opaque-predicates-to-propositions.md`](../docs/06-opaque-predicates-to-propositions.md) cites. |
+
 ## Data-acquisition status (2026-06-13) — complete
 
 Every dataset the encoding needs is now **secured** (vendored + checksummed, or trivially fetchable):
