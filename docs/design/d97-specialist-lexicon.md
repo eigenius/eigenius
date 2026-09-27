@@ -2,7 +2,7 @@
 
 **Status: proposed** (2026-09-27). Measured against the imported lexicon at the lexicon level; the
 parse-level measurement is slice 1. Decisions 1–4 are taken (2026-09-27), and 5 for verbs whose
-noun names a concept; the rest of 5 is open.
+noun names a concept; the rest of 5 and decisions 6–10 are open.
 
 ## The gap
 
@@ -304,6 +304,37 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    synset where it is a WordNet noun (80 verbs, 112 senses). See "A verb no other source has is the
    verb sense of its concept". **Open for the 3,790 with no concept to attach to**: no entry, or a
    sense-less predicate that records SPECIALIST's syntax alone.
+6. **Whether a governed preposition reaches the meaning.** `lexicon:Prep` is syntactic, erased by
+   ⟦·⟧: a sense's PP-oblique reading is one relation, `v{offset}_p`, and on the
+   `governed-prepositions` branch an adjective's relational readings share one `deg_{loc}_rel`
+   whatever the preposition (`crates/eigenius-wordnet/src/convert.rs`). While WordNet named no
+   preposition that was one reading. With SPECIALIST naming several, a word gets one entry per
+   preposition and the same meaning from each: `changed from A` and `changed into A` are one claim,
+   and so are `treat X with Y` (the instrument) and `treat X for Y` (the purpose).
+   - Reach, over WordNet lemmas: 485 verbs whose PP argument names two or more prepositions
+     (`account for`/`to`, `abound in`/`with`), 435 whose object + PP frames do (`acquit of`/`on`,
+     `adapt for`/`to`), 130 adjectives, 2,404 nouns.
+   - *Proposed:* one relation per sense and preposition (`v{offset}_p_from`, `v{offset}_p_into`), so
+     the preposition is part of the predicate. It changes the axiom and entry shape of every
+     governed-PP reading, eigenius#263's adjectives with them. Keeping one relation conflates the
+     claims, which R2 of the style guide forbids.
+7. **Decision 1 for adjectives and nouns.** Decision 1 chooses the senses a verb frame goes on.
+   SPECIALIST's governed prepositions on adjectives and nouns are per lemma as well: 590 WordNet
+   adjectives, 354 with several senses; 6,425 WordNet nouns, 3,329 with several senses. Does the
+   same rule apply — derivational pointers where they discriminate, the judge otherwise? For nouns
+   that multiplies the judge's work several times over, so it is a budget question as well.
+8. **What a "no sense fits" verdict leads to.** The judge will name frames whose sense WordNet
+   lacks (`mediate` as in `WRN mediates repair`). Decision 1 keeps such a frame on every sense. Open:
+   whether it also yields a new sense — the verb sense of the concept its noun names, by decision
+   5's rule (`mediate` → `mediation`) — or stays a recorded gap.
+9. **SPECIALIST's facts for UMLS entries.** The proposal applies SPECIALIST to the UMLS importer for
+   countability and for verbs defined by their nouns (decision 5). Open: whether it also gives UMLS
+   concepts their governed prepositions (`dependence on`), spelling variants (`tumour`/`tumor`) and
+   irregular plurals, as it does WordNet's lemmas.
+10. **The closed-class list for the new prepositions.** Decision 3 gives 47 prepositions argument
+   entries without putting them on the importers' closed-class list; whether `over`, `through` or
+   `off` lose their content senses is decided per word, with no rule yet. *Proposed:* off the list
+   unless a measurement shows their content senses harm parses, as `As` = arsenic showed for `as`.
 
 ## Slices
 
