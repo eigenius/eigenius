@@ -187,8 +187,8 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    |---|---|---|---|
    | `by` | 4,070 | 2,077 | `by_agent`, `by_nmod` |
    | `between`, `after`, `among`, `without`, `within` | 252 | 134 | yes |
-   | `over`, `onto`, `through`, `per`, `around`, `off`, `towards`, `under`, … (32) | 625 | 494 | none |
-   | multiword: `out of`, `due to`, `according to`, `as to`, `in terms of`, … (16) | 97 | 58 | none |
+   | `over`, `onto`, `through`, `per`, `around`, `off`, `towards`, `under`, … (32) | 552 | 441 | none |
+   | multiword: `out of`, `due to`, `according to`, `as to`, `in terms of`, … (15) | 89 | 65 | none |
 
    - `by` is 82% of them, and 3,921 of its 4,070 are noun complements — the agent of a
      nominalization (`abolition by`, `activation by`), the relation `by_agent` reads on a passive.
