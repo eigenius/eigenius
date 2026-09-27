@@ -16,7 +16,7 @@ D96 (JATS) is decided and not built, so every slice works on plain text.
 
 ## Decisions
 
-**All five are closed** (2026-09-26): 1, 2, 3 and 5 decided, 4 deferred to D96's build.
+**All six are closed** (2026-09-26): 1, 2, 3, 5 and 6 decided, 4 deferred to D96's build.
 
 1. **The `MP` category is indexed by its unit.** `cat_mp : core:unit -> lexicon:Reading -> Cat`, with
    `⟦cat_mp(u, value)⟧ = units:Quantity(u)` and `⟦cat_mp(u, difference)⟧ = units:Difference(u)`, and
@@ -74,6 +74,21 @@ D96 (JATS) is decided and not built, so every slice works on plain text.
    - **Rejected:** the unit's origin in the category (needs `units:add` in the kernel and a second
      index); one item carrying a pair of `Quantity(u)`s (point and difference share a type); two items
      in one category (the ranker would choose what the consumer determines).
+6. **An attached quantity keeps its word reading** (decided 2026-09-26, after slice 3 measured the
+   attached form). A token whose digits carry its unit — `931g`, `5A`, `2d` — is a quantity *and* the
+   word it spells: seeding looks its surface up in the lexicon, as for any token, beside its quantity
+   items, and the grammar and the felicity gate choose. The grammar refuses a quantity where no
+   measure phrase composes, so a known identifier survives (`293T cells`, `2D` for two-dimensional,
+   `McCoy's 5A` as a multiword form). Figure panels are D96's (decision 4).
+   - **Evidence.** Of the 107 digit-initial tokens with letters in the WRN texts, one is an attached
+     quantity (`931g`); the rest are figure panels, ordinals and names. Slice 3 read four as
+     quantities: `931g`, and wrongly `McCoy's 5A`, `2d`, `8d`.
+   - **Accepted costs.** A quantity token always seeds, so an unknown attached identifier (`5A`) is
+     not reported as a missing word, augmentation does not try to ground it, and a sentence it
+     blocks is counted a grammar gap. Where the quantity is its only reading and a measure phrase
+     composes, the wrong reading can win.
+   - **Rejected:** refusing an attached single uppercase letter (`5A`, `293T`, `12V`) by rule. It
+     keeps a failure visible, and it drops the word-or-quantity choice for the chart to make.
 
 ## What the code says that D95 does not
 
@@ -368,7 +383,11 @@ slice 5.
   the cardinal determiner items. Their templates are resolved from `lexicon:two_subj` and
   `lexicon:two_obj` (`closed-class.esl:2177-2192`) in `Parser::over`, the way `DetTemplates::resolve`
   (`dcg/grammar.rs:54-66`) resolves `a` and `these`; the count stays dropped, as for `two`..`ten`.
-- The widen gate from slice 2 counts `Numeral` as seedable.
+- The widen gate from slice 2 counts `Numeral` and `Quantity` as seedable.
+- A `Quantity` token's surface is still looked up in the lexicon, as `lookup_span` does for every span,
+  so an attached quantity keeps its word reading (decision 6); a spaced one (`37 °C`) has none by
+  construction. A test pins it: a fixture entry for a digit-initial identifier seeds beside its
+  quantity items.
 
 **Tests** (`kernel/tests/quantities_in_the_parser.rs`, fixture pattern of
 `kernel/tests/comparative_than.rs:39-144`):

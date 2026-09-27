@@ -903,6 +903,12 @@ come into D95:
   category carries the reading (`value | difference`), every quantity token seeds both, and each
   consumer takes one: `at 37 °C` a value of 310.15 K, `rose 5 °C` a difference of 5 K. Details in
   the implementation plan, decision 5.
+- **A unit attached to its digits keeps the word reading** (2026-09-26). `931g`, `5A` and `2d` are
+  quantities and the words they spell; seeding offers both and the grammar chooses. Slice 3
+  measured the attached form right once (`931g`) and wrong three times (`McCoy's 5A`, and the panels
+  `2d`, `8d`). An unknown attached identifier is then not reported missing. A rule refusing an
+  attached capital letter was rejected: it takes the choice away from the chart. Implementation
+  plan, decision 6.
 
 ## Open questions
 
