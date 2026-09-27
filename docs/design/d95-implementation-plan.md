@@ -436,6 +436,14 @@ slice 5.
 - A kernel test parses them over the bootstrap lexicon and a fixture of their content words, so grammar
   coverage is checked without a database.
 
+**Sentence splitting inside parentheses**
+- `segment_sentences` (`dcg/segment.rs:74-113`) ends a sentence at a `.` inside a parenthesis when the
+  word before it is not in `ABBREV` (`:32-57`): `(Chr.`, `Extended Data Figs.`, inside URLs. Since
+  slice 2 the halves carry an unmatched-bracket `NonProse` token and do not parse; before, the first
+  half lost everything after the opener. Fixed here, where the CNL page and the quantity corpus measure
+  the effect: a `.` inside an open parenthesis does not end a sentence, or the abbreviations join
+  `ABBREV` — whichever the measurement favours.
+
 **One reseed** for slices 3–5 (`scripts/reseed-lexicon-db.sh --umls-all`, the prerequisites in the
 reseed memory), then:
 - `scripts/build-alignment-snapshot.sh`;
