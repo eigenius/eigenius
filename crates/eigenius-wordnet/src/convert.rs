@@ -28,6 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::inflect::{comparison, gerund, past_participles, third_singular, Comparison};
 use crate::wndb::{Offset, Pos, Synset};
+use eigenius_kernel::dcg::category::prep_constructor;
 
 /// Sense-frequency ranks keyed by the entry's `sense` key (`wn:{lemma}.{tag}.{offset}`,
 /// as [`sense_key`] forms it) → 0-based rank (sense 1 → 0). Built by
@@ -706,7 +707,7 @@ fn stative_prep(frame: u8) -> Option<&'static str> {
 /// WHY IT IS NEEDED. [`classify`] collapses 14|15|16|17|18|19|31 into one preposition-less
 /// [`FrameKind::Ditransitive`] `((S\NP)/NP)/NP` and DISCARDS the preposition the frame names, so the
 /// relatum could only ever attach as a free ADJUNCT — `And(associated(x), prep_with(x, r))` rather
-/// than one saturated predication. The adjectival route cannot cover it either: [`governed_preposition`]
+/// than one saturated predication. The adjectival route cannot cover it either: [`governed_prepositions`]
 /// is reached only from [`push_adj`], over the words of ADJECTIVE synsets, and `associated` is not a
 /// WordNet adjective lemma (`index.adj` 0, unlike `dependent`/`essential`/`concordant`, all 1), so the
 /// `associated<TAB>with` row in `adjective-frames.tsv` never fires.
@@ -933,7 +934,7 @@ fn adj_cat() -> String {
 }
 
 /// Curated adjective **subcategorization frames** (lemma → governed preposition) — the frame-acquisition
-/// source for [`governed_preposition`] when WordNet's gloss yields none (low-recall: it needs the lemma
+/// source for [`governed_prepositions`] when WordNet's gloss yields none (low-recall: it needs the lemma
 /// followed by its prep in its OWN gloss, missing e.g. "dependent" → "on"). Embedded at compile time
 /// (`include_str!`) and parsed once; the high-confidence output an LLM proposer gives for a gradable
 /// adjective's frame (offline generation is the scale path). Crate-local (`crates/eigenius-wordnet/
@@ -992,32 +993,59 @@ fn restates_governed_frame(lemma: &str) -> bool {
         .is_some_and(|p| p.eq_ignore_ascii_case(prep))
 }
 
-/// The preposition governed by a relational gradable adjective, derived from its WordNet **gloss**
-/// (C3, d63-comparative-phrasal.md §5.3 — WordNet has no structured subcat frame, so the gloss is the
-/// only WordNet-internal signal). Two patterns, most-confident first:
-///   1. WordNet's explicit ``followed by `PREP'`` convention (67 adj synsets — `proportional`:
-///      *"usually followed by `to'"*).
-///   2. the **lemma itself** immediately followed by a preposition in the gloss/examples
-///      (`proportional to the crime`, `she is addicted to chocolate`). Keying on the lemma (not any
-///      word) avoids the verb+prep noise of examples (`spoke in`, `came to`) and gives the right
-///      per-lemma preposition within one synset (`addicted`→`to`, `dependent`→`on`).
+/// The prepositions a relational gradable adjective governs (C3, d63-comparative-phrasal.md §5.3).
+/// WordNet has no structured subcategorization frame for adjectives, so the evidence is its gloss and
+/// the curated frames:
 ///
-/// `None` ⇒ no governance signal → a NON-relational bare measure (C1). Drives the relational emission
-/// in `push_adj` (a 2-place `deg_rel` + a `cat_measure/cat_pp_arg` reading; the bare 1-place forms stay
-/// for the ground-less reading — two independent measures, no optional-ground shift needed).
-fn governed_preposition(gloss: &str, lemma: &str) -> Option<String> {
-    const PREPS: &[&str] = &[
-        "to", "on", "in", "with", "from", "for", "at", "upon", "about", "against", "into",
-    ];
-    // (1) explicit ``followed by `PREP'``.
-    if let Some(rest) = gloss.split("followed by `").nth(1) {
-        if let Some(p) = rest.split('\'').next() {
-            if PREPS.contains(&p.trim()) {
-                return Some(p.trim().to_string());
+///   1. **Authoritative**: WordNet's explicit ``followed by `PREP'`` convention, every preposition it
+///      names (`susceptible`: *"often followed by `of' or `to'"* → both), and the curated frame
+///      ([`adjective_frames`]).
+///   2. **Only when those give nothing**: the lemma itself immediately followed by a preposition in
+///      the gloss or its examples (`proportional to the crime`, `she is addicted to chocolate`), the
+///      first match. Keying on the lemma avoids the verb+prep noise of examples (`spoke in`). This is
+///      a heuristic over prose, so it never yields `as`: the matches it finds for `as` are equatives
+///      (`as black as`) and definition wording (`accompanying as a consequence`), and WordNet's own
+///      convention never names `as` for an adjective.
+///
+/// Every preposition returned names a `lexicon:Prep` ([`prep_constructor`]), in the order found.
+/// Empty ⇒ no governance signal → a NON-relational bare measure (C1). Drives the relational emission
+/// in `push_adj`, one reading per preposition: the `Prep` feature on the sentence's own preposition
+/// selects among them, so a second preposition adds a reading and displaces none.
+fn governed_prepositions(gloss: &str, lemma: &str) -> Vec<String> {
+    let authoritative = attested_prepositions(gloss, lemma);
+    if !authoritative.is_empty() {
+        return authoritative;
+    }
+    heuristic_preposition(gloss, lemma).into_iter().collect()
+}
+
+/// Step 1 of [`governed_prepositions`]: what WordNet's ``followed by `PREP'`` convention and the
+/// curated frame name for `lemma`.
+fn attested_prepositions(gloss: &str, lemma: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |p: &str| {
+        if prep_constructor(p).is_some() && !out.iter().any(|q| q == p) {
+            out.push(p.to_string());
+        }
+    };
+    // (1) every ``followed by `PREP'``, up to the end of its clause.
+    for rest in gloss.split("followed by ").skip(1) {
+        let clause = rest.split([')', ';']).next().unwrap_or("");
+        for quoted in clause.split('`').skip(1) {
+            if let Some(p) = quoted.split('\'').next() {
+                add(p.trim());
             }
         }
     }
-    // (2) `<lemma> <prep>` in the gloss (lemma-keyed).
+    if let Some(p) = adjective_frames().get(&lemma.to_lowercase()) {
+        add(p);
+    }
+    out
+}
+
+/// Step 2 of [`governed_prepositions`]: `<lemma> <prep>` in the gloss (lemma-keyed), the first match
+/// other than `as`.
+fn heuristic_preposition(gloss: &str, lemma: &str) -> Option<String> {
     let g = gloss.to_lowercase();
     let key = format!("{} ", lemma.to_lowercase());
     let mut from = 0;
@@ -1027,37 +1055,19 @@ fn governed_preposition(gloss: &str, lemma: &str) -> Option<String> {
             .next()
             .unwrap_or("")
             .trim_end_matches(|c: char| !c.is_ascii_alphabetic());
-        if PREPS.contains(&next) {
+        if next != "as" && prep_constructor(next).is_some() {
             return Some(next.to_string());
         }
         from += i + key.len();
     }
-    // (3) Curated / LLM frame fallback — the gloss heuristic is low-recall (misses "dependent" → "on",
-    // whose gloss says "contingent on"). A frame is admitted only if its preposition is in `PREPS`.
-    adjective_frames()
-        .get(&lemma.to_lowercase())
-        .filter(|p| PREPS.contains(&p.as_str()))
-        .cloned()
+    None
 }
 
-/// Map a `governed_preposition` result to its `lexicon:Prep` feature constructor (D63 §5.3
-/// C3-precision). The domain is exactly `governed_preposition`'s `PREPS`; anything else falls back
-/// to the `prep_any` wildcard (defensive — the closed set makes the fallback unreachable).
-fn prep_ctor(prep: &str) -> &'static str {
-    match prep {
-        "to" => "lexicon:prep_to",
-        "on" => "lexicon:prep_on",
-        "in" => "lexicon:prep_in",
-        "with" => "lexicon:prep_with",
-        "from" => "lexicon:prep_from",
-        "for" => "lexicon:prep_for",
-        "at" => "lexicon:prep_at",
-        "upon" => "lexicon:prep_upon",
-        "about" => "lexicon:prep_about",
-        "against" => "lexicon:prep_against",
-        "into" => "lexicon:prep_into",
-        _ => "lexicon:prep_any",
-    }
+/// Map a governed preposition to its `lexicon:Prep` feature constructor (D63 §5.3 C3-precision),
+/// through the kernel's list. Anything it does not name is the `prep_any` wildcard;
+/// `governed_prepositions` returns only what it names.
+fn prep_ctor(prep: &str) -> String {
+    format!("lexicon:{}", prep_constructor(prep).unwrap_or("prep_any"))
 }
 
 /// Adjective synset → predicative entries. **Relational** (pertainym) adjectives are
@@ -1116,20 +1126,35 @@ fn push_adj(
     buf.push_str(&format!("axiom wn:std_{loc} : core:float\n\n"));
     rep.adj_axioms += 1;
     // C3 (d63-comparative-phrasal.md §5.3): a RELATIONAL gradable adjective — one whose gloss governs a
-    // preposition (`governed_preposition`) — ALSO gets a 2-place measure `deg_{loc}_rel : Entity(ground)
+    // preposition (`governed_prepositions`) — ALSO gets a 2-place measure `deg_{loc}_rel : Entity(ground)
     // → Entity(subject) → float` and a `cat_measure/cat_pp_arg` reading (below), so `more dependent ON
     // WRN` / `greater dependence ON WRN` thread the ground faithfully. The bare 1-place `deg_{loc}` forms
     // (positive + C1 measure) STAY for the ground-less reading (`more dependent than Y`) — two
     // independent opaque measures (the `∃g` relation between them is deferred, §7; an `∃`-close would be
     // ill-typed over a float).
-    // C3-precision: the synset's governed preposition (the first lemma that governs one) tags the
-    // nominalization projection's `cat_pp_arg(prep)`. A per-adjective-lemma prep (which may differ
-    // within one synset — `addicted`→to vs a co-lemma→on) is taken separately in the lemma loop.
-    let syn_prep: Option<String> = syn
-        .words
-        .iter()
-        .find_map(|l| governed_preposition(&syn.gloss, l));
-    let relational = syn_prep.is_some();
+    // C3-precision: the synset's governed prepositions tag the nominalization projection's
+    // `cat_pp_arg(prep)`, one reading each — the same shape as per lemma: every preposition attested
+    // for any lemma (WordNet's convention, the curated frames), or else the heuristic's for the first
+    // lemma it finds one for. The heuristic is not unioned across lemmas: an infinitive in another
+    // lemma's example (`awkward to handle`) would reach every nominalization. A per-adjective-lemma set
+    // (which may differ within one synset — `addicted`→to vs a co-lemma→on) is taken separately in the
+    // lemma loop.
+    let mut syn_preps: Vec<String> = Vec::new();
+    for l in &syn.words {
+        for p in attested_prepositions(&syn.gloss, l) {
+            if !syn_preps.contains(&p) {
+                syn_preps.push(p);
+            }
+        }
+    }
+    if syn_preps.is_empty() {
+        syn_preps.extend(
+            syn.words
+                .iter()
+                .find_map(|l| heuristic_preposition(&syn.gloss, l)),
+        );
+    }
+    let relational = !syn_preps.is_empty();
     if relational {
         buf.push_str(&format!(
             "axiom wn:deg_{loc}_rel : {ENTITY_TOP} -> {ENTITY_TOP} -> core:float\n\n"
@@ -1211,11 +1236,12 @@ fn push_adj(
         );
         // C3: relational lemmas (gloss governs a prep) also get the ground-taking cat_measure/cat_pp_arg
         // reading — `deg_rel` (ground, subject); `on X` fills the ground → a cat_measure over the subject.
-        if let Some(prep) = governed_preposition(&syn.gloss, lemma) {
+        // One reading per governed preposition.
+        for prep in governed_prepositions(&syn.gloss, lemma) {
             push_entry(
                 buf,
                 rep,
-                &format!("e_{loc}_{i}_r"),
+                &format!("e_{loc}_{i}_r_{prep}"),
                 lemma,
                 &format!(
                     "lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg({}))",
@@ -1235,7 +1261,7 @@ fn push_adj(
             push_entry(
                 buf,
                 rep,
-                &format!("e_{loc}_{i}_rp"),
+                &format!("e_{loc}_{i}_rp_{prep}"),
                 lemma,
                 &format!(
                     "lexicon:fwd(lexicon:m_all, {}, lexicon:cat_pp_arg({}))",
@@ -1303,11 +1329,11 @@ fn push_adj(
                 );
                 // C3: relational projection — the nominalization (`dependence`) also gets the
                 // ground-taking `cat_measure/cat_pp_arg` reading, so `greater dependence ON WRN` threads.
-                if let Some(prep) = &syn_prep {
+                for prep in &syn_preps {
                     push_entry(
                         buf,
                         rep,
-                        &format!("e_{loc}_dr_{}_{j}", local(noun)),
+                        &format!("e_{loc}_dr_{}_{j}_{prep}", local(noun)),
                         nlemma,
                         &format!(
                             "lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg({}))",
@@ -2170,49 +2196,71 @@ mod tests {
         assert_eq!(buf.matches(": lexicon:LexicalEntry {").count(), rep.entries);
     }
 
-    #[test]
-    fn governed_preposition_from_gloss() {
-        // (1) WordNet's explicit `followed by `to'` convention (`proportional`).
-        assert_eq!(
-            governed_preposition(
-                "properly related in size or degree; usually followed by `to'",
-                "proportional"
-            ),
-            Some("to".to_string())
-        );
-        // (2) lemma in the gloss/example → its preposition, PER-LEMMA within one synset.
-        let g = "compulsively or physiologically dependent on something; \"she is addicted to chocolate\"";
-        assert_eq!(governed_preposition(g, "addicted"), Some("to".to_string()));
-        assert_eq!(governed_preposition(g, "dependent"), Some("on".to_string()));
-        // non-relational: no governance signal.
-        assert_eq!(governed_preposition("of great size", "large"), None);
-        // lemma-keyed avoids verb+prep noise (the prep follows a VERB, not the lemma).
-        assert_eq!(
-            governed_preposition("\"she walked with a limp\"", "temperate"),
-            None
-        );
+    fn govern(gloss: &str, lemma: &str) -> Vec<&'static str> {
+        governed_prepositions(gloss, lemma)
+            .into_iter()
+            .map(|p| prep_constructor(&p).unwrap().trim_start_matches("prep_"))
+            .collect()
     }
 
     #[test]
-    fn governed_preposition_falls_back_to_curated_frames() {
+    fn governed_prepositions_from_gloss() {
+        // (1) WordNet's explicit `followed by `to'` convention (`proportional`).
+        assert_eq!(
+            govern(
+                "properly related in size or degree; usually followed by `to'",
+                "proportional"
+            ),
+            ["to"]
+        );
+        // Every preposition the convention names, not the first: `susceptible` governs both.
+        assert_eq!(
+            govern(
+                "(often followed by `of' or `to') yielding readily to or capable of",
+                "susceptible"
+            ),
+            ["of", "to"]
+        );
+        // (2) lemma in the gloss/example → its preposition, PER-LEMMA within one synset.
+        let g = "compulsively or physiologically dependent on something; \"she is addicted to chocolate\"";
+        assert_eq!(govern(g, "addicted"), ["to"]);
+        assert_eq!(govern(g, "dependent"), ["on"]);
+        // non-relational: no governance signal.
+        assert!(govern("of great size", "large").is_empty());
+        // lemma-keyed avoids verb+prep noise (the prep follows a VERB, not the lemma).
+        assert!(govern("\"she walked with a limp\"", "temperate").is_empty());
+    }
+
+    /// The heuristic never yields `as`: its `as` matches are equatives and definition wording. Measured
+    /// on WordNet 3.0: `as` from it gave 375 lemmas, and displaced 40 prepositions WordNet supports
+    /// (`concomitant to` → `as`).
+    #[test]
+    fn the_heuristic_never_yields_as() {
+        assert!(govern("\"as black as coal\"", "black").is_empty());
+        assert_eq!(
+            govern(
+                "following or accompanying as a consequence; \"snags incidental to the changeover\"",
+                "incidental"
+            ),
+            ["to"]
+        );
+        assert!(govern("following or accompanying as a consequence", "accompanying").is_empty());
+    }
+
+    #[test]
+    fn governed_prepositions_take_the_curated_frames() {
         // Fix A piece (a): the REAL "dependent" synset glosses are "addicted to a drug" / "contingent on
         // something else" — no "dependent on", so the gloss heuristic yields NONE. The curated frame file
         // (adjective-frames.tsv) supplies the governed preposition.
+        assert_eq!(govern("contingent on something else", "dependent"), ["on"]);
         assert_eq!(
-            governed_preposition("contingent on something else", "dependent"),
-            Some("on".to_string())
+            govern("absolutely necessary; vitally necessary", "essential"),
+            ["for"]
         );
-        assert_eq!(
-            governed_preposition("absolutely necessary; vitally necessary", "essential"),
-            Some("for".to_string())
-        );
-        // A gloss-derived prep still wins (the fallback only fires when the gloss yields none).
-        assert_eq!(
-            governed_preposition("usually followed by `to'", "proportional"),
-            Some("to".to_string())
-        );
+        // WordNet's convention and the curated frame are both authoritative.
+        assert_eq!(govern("usually followed by `to'", "proportional"), ["to"]);
         // An adjective in neither the gloss nor the frame file stays non-relational.
-        assert_eq!(governed_preposition("of great size", "large"), None);
+        assert!(govern("of great size", "large").is_empty());
     }
 
     #[test]
