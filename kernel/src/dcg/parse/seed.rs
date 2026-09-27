@@ -751,9 +751,9 @@ impl Parser {
     /// The items a quantity or numeral token seeds (D95, decisions 1 and 5): a measure phrase for each
     /// unit reading, once as a value (`cat_mp(u, value)`, sem `Quantity(u)`) and once as a difference
     /// (`cat_mp(u, difference)`, sem `Difference(u)`) — for `931g`, four. A numeral is the same pair at
-    /// the dimensionless unit, and an integer of 2 or more also seeds the cardinal determiner items the
-    /// word forms `two`..`ten` have, their count dropped as theirs is. Any other token seeds nothing
-    /// here.
+    /// the dimensionless unit; `1` also seeds the cardinal determiner items of `one` and an integer of
+    /// 2 or more those of `two`, their count dropped as the word forms' is. Any other token seeds
+    /// nothing here.
     fn measure_items(&self, token: &Token) -> Vec<Item> {
         use super::super::preprocess::TokenKind;
         use crate::units::convert::{Converted, Kinds, Reading};
@@ -780,9 +780,13 @@ impl Parser {
                     .into_iter()
                     .filter_map(|r| mp(&dimensionless(r)))
                     .collect();
-                let two = num_bigint::BigInt::from(2);
-                if value.is_integer() && value.numer() >= &two {
-                    items.extend(self.cardinals.iter().cloned());
+                if value.is_integer() {
+                    let one = num_bigint::BigInt::from(1);
+                    if value.numer() == &one {
+                        items.extend(self.cardinal_one.iter().cloned());
+                    } else if value.numer() > &one {
+                        items.extend(self.cardinal_many.iter().cloned());
+                    }
                 }
                 items
             }

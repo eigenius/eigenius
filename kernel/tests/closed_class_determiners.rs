@@ -1532,7 +1532,11 @@ fn cardinal_numerals_are_plural_determiners() {
         !index.parse("four genes affect HeLa", &PluralS).is_empty(),
         "another cardinal (`four`) parses"
     );
-    // D95: a digit numeral seeds the cardinal determiner items of `two`, with the same readings.
+    // `one` is the singular cardinal: `one gene` parses, `one genes` does not.
+    assert!(!index.parse("one gene affects HeLa", &PluralS).is_empty());
+    assert!(index.parse("one genes affect HeLa", &PluralS).is_empty());
+    // D95: a digit numeral seeds the cardinal determiner items of `one` or `two`, with the same
+    // readings; `0` seeds no determiner.
     let sems = |text: &str| {
         let mut s: Vec<String> = index
             .parse(text, &PluralS)
@@ -1545,10 +1549,13 @@ fn cardinal_numerals_are_plural_determiners() {
     for (digits, words) in [
         ("2 genes affect HeLa", "two genes affect HeLa"),
         ("HeLa affects 3 genes", "HeLa affects three genes"),
+        ("1 gene affects HeLa", "one gene affects HeLa"),
+        ("HeLa affects 1 gene", "HeLa affects one gene"),
     ] {
         assert!(!sems(digits).is_empty(), "{digits}");
         assert_eq!(sems(digits), sems(words), "{digits}");
     }
+    assert!(sems("0 genes affect HeLa").is_empty(), "`0` is not ∃");
 }
 
 #[test]

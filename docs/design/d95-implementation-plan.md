@@ -374,10 +374,13 @@ slice 5.
 **Seeding** (`seed_leaves` → `measure_items`)
 - A `Quantity` token seeds, per unit reading, `cat_mp(U, value)` with the value term and
   `cat_mp(U, difference)` with the difference term. `931g` seeds four.
-- A `Numeral` seeds the same pair at the dimensionless unit. An integer of 2 or more also seeds the
-  cardinal determiner items of the closed-class `two` (`in_lexicon` none, sense `two`), resolved once
-  in `Parser::over`, so `3 genes` reads as `three genes` does. `1` gets none, `two`..`ten` having no
-  singular.
+- A `Numeral` seeds the same pair at the dimensionless unit. `1` also seeds the cardinal determiner
+  items of the closed-class `one`, and an integer of 2 or more those of `two` (`in_lexicon` none, sense
+  `one`/`two`), resolved once in `Parser::over`, so `3 genes` reads as `three genes` does and `1 gene`
+  as `one gene`. `0` seeds no determiner: `∃` would misread `0 genes`.
+- `closed-class.esl` gains `one_subj` and `one_obj`, the singular cardinal, shaped like `a_subj` and
+  `a_obj` — `one gene affects HeLa` had no determiner reading before. Like `two`..`ten`, `one` is not
+  on the importers' closed-class list, so WordNet's noun and adjective senses of it stay.
 - `seeds_itself` makes `Numeral` and `Quantity` tokens seeding for the widen gate and
   `unseedable_tokens`. A sentence with a number is no longer `NON-PROSE`; it parses or is a grammar
   gap, by its consumers.
@@ -394,8 +397,9 @@ slice 5.
 - `category.rs`: a unit variable binds, a literal mismatch or reading mismatch is refused, and
   `denote_cat` gives `Quantity` and `Difference`.
 - `forest.rs`: two measure phrases of different units have different node signatures.
-- `closed_class_determiners.rs`: `2 genes affect HeLa` and `HeLa affects 3 genes` read as their word
-  forms do. The gate test now uses a symbol, since a numeral seeds.
+- `closed_class_determiners.rs`: `2 genes`, `3 genes` and `1 gene`, as subject and object, read as their
+  word forms do; `one gene` parses and `one genes` does not; `0 genes` has no reading. The gate test
+  now uses a symbol, since a numeral seeds.
 - `unit_conversion.rs`: `units:difference(5, "°C")` commits as a `Difference(K)` and a value in that
   slot is refused; a difference never takes the offset; the difference term type-checks.
 - The N-N kind compound cannot see a quantity: it combines two `cat_n`, and a quantity seeds only
@@ -404,7 +408,8 @@ slice 5.
 `pretty_term` prints literals as `<term>`, and normalisation erases the term's annotation, so the
 tests read magnitudes from the sem's debug form; the unit is carried by the category.
 
-**Chain:** `units` and `lexicon` moved; `EXPECTED` is updated. The reseed waits for slice 5.
+**Chain:** `units`, `lexicon` and `closed-class` moved; `EXPECTED` is updated. The reseed waits for
+slice 5.
 
 ## Slice 5 — consumers, the corpus, one reseed
 

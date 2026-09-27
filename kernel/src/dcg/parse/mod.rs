@@ -281,10 +281,12 @@ pub struct Parser {
     grammar: Grammar,
     /// The unit vocabulary as prose spells it, which the preprocessor reads quantities against (D95).
     units: ProseUnits,
-    /// The cardinal determiner items a digit numeral seeds (`3 cells`): those of the closed-class word
-    /// `two`, resolved once here, as [`DetTemplates`] resolves `a` and `these`. The count is dropped,
-    /// as it is for `two`..`ten` (`closed-class.esl`, "Cardinal numerals as plural determiners").
-    cardinals: Vec<Item>,
+    /// The cardinal determiner items a digit numeral seeds: `1` those of the closed-class word `one`
+    /// (singular), an integer of 2 or more those of `two` (plural) — resolved once here, as
+    /// [`DetTemplates`] resolves `a` and `these`. The count is dropped, as it is for the word forms
+    /// (`closed-class.esl`, "Cardinal numerals as determiners").
+    cardinal_one: Vec<Item>,
+    cardinal_many: Vec<Item>,
     /// The processing parameters ([`ParseConfig`]).
     config: ParseConfig,
     /// The document this parser is reading, as sentences, for the reranker's CONTEXT WINDOW.
@@ -328,12 +330,14 @@ impl Parser {
         // determiner category templates from the lexicon. This is the only moment the grammar reads the
         // lexicon; from here on the rules hold values, not a lookup.
         let units = ProseUnits::load(&layer);
-        let cardinals: Vec<Item> = lex
-            .entries_for("two")
-            .into_iter()
-            .filter(|e| e.in_lexicon.is_none() && e.sense.as_deref() == Some("two"))
-            .map(|e| e.item)
-            .collect();
+        let cardinal = |word: &str| -> Vec<Item> {
+            lex.entries_for(word)
+                .into_iter()
+                .filter(|e| e.in_lexicon.is_none() && e.sense.as_deref() == Some(word))
+                .map(|e| e.item)
+                .collect()
+        };
+        let (cardinal_one, cardinal_many) = (cardinal("one"), cardinal("two"));
         let grammar = Grammar {
             reserved: ReservedTable::load(&layer),
             dets: DetTemplates::resolve(lex.as_ref()),
@@ -343,7 +347,8 @@ impl Parser {
             lex,
             grammar,
             units,
-            cardinals,
+            cardinal_one,
+            cardinal_many,
             config: ParseConfig {
                 packing: true, // default ON (§11 3g.2 / B9)
                 ..ParseConfig::default()
