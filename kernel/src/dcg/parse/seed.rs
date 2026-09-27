@@ -750,10 +750,12 @@ impl Parser {
 
     /// The items a quantity or numeral token seeds (D95, decisions 1 and 5): a measure phrase for each
     /// unit reading, once as a value (`cat_mp(u, value)`, sem `Quantity(u)`) and once as a difference
-    /// (`cat_mp(u, difference)`, sem `Difference(u)`) — for `931g`, four. A numeral is the same pair at
-    /// the dimensionless unit; `1` also seeds the cardinal determiner items of `one` and an integer of
-    /// 2 or more those of `two`, their count dropped as the word forms' is. Any other token seeds
-    /// nothing here.
+    /// (`cat_mp(u, difference)`, sem `Difference(u)`) — for `931g`, four. A quantity's value also
+    /// seeds a predicative adjective `S[adj]\NP`, sem `λx. has_quantity(x, u, q)`: the leaf modifier
+    /// lift makes it prenominal (`10 μM etoposide`), and the copula takes it (`the temperature was
+    /// 37 °C`). A numeral is the measure-phrase pair at the dimensionless unit; `1` also seeds the
+    /// cardinal determiner items of `one` and an integer of 2 or more those of `two`, their count
+    /// dropped as the word forms' is. Any other token seeds nothing here.
     fn measure_items(&self, token: &Token) -> Vec<Item> {
         use super::super::preprocess::TokenKind;
         use crate::units::convert::{Converted, Kinds, Reading};
@@ -762,11 +764,29 @@ impl Parser {
             super::super::category::measure_phrase_cat(layer, &c.unit, c.reading)
                 .map(|cat| Item::new(cat, c.term()))
         };
+        let measured = |c: &Converted| {
+            let cat = predicative_adjective_cat(layer)?;
+            let rel = Iri::parse(HAS_QUANTITY).ok()?;
+            layer.resolve(&rel)?;
+            let x = "MP#x";
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let body = app(
+                app(
+                    app(Exp::EigonAxiom(rel), Exp::Var(x.to_string())),
+                    Exp::LitUnit(c.unit.clone()),
+                ),
+                c.term(),
+            );
+            Some(Item::new(
+                cat,
+                Exp::Lam(Patt::Var(x.to_string()), Box::new(body)),
+            ))
+        };
         match token.kind() {
             TokenKind::Quantity(q) => q
                 .readings
                 .iter()
-                .flat_map(|r| [mp(&r.value), mp(&r.difference)])
+                .flat_map(|r| [mp(&r.value), mp(&r.difference), measured(&r.value)])
                 .flatten()
                 .collect(),
             TokenKind::Numeral(value) => {
@@ -1016,6 +1036,10 @@ pub(super) fn is_lexicalized_adverb(surface: &str) -> bool {
     ];
     LEXICALIZED_ADVERBS.contains(&surface)
 }
+
+/// The relation a measured value predicates of an entity (`ontology.esl`), which a quantity's
+/// predicative-adjective item applies ([`Parser::measure_items`]).
+const HAS_QUANTITY: &str = "urn:eigenius:ontology:has_quantity";
 
 /// The productive denominal-adjective suffixes (D63 compound morphology §3b, generalized from the
 /// shipped `-based` slice). Each row is `(suffix_tail, relation_lemma, theta_is_object)`:

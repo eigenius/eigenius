@@ -1,0 +1,379 @@
+// Content words for the D95 quantity corpus (corpus.tsv): the nouns and verbs around its quantities,
+// in the shapes the WordNet importer emits — a singular, plural or mass noun; a transitive past
+// participle `(S[pss]\NP)/NP`, which the short passive `be` takes; a finite transitive verb. A verb
+// is named as the importer names it, `v{offset}_{frame}` with sense `wn:{lemma}.v.{offset}`, so it
+// verbalizes; the offsets are made up. The closed class supplies everything else. Loaded by
+// kernel/tests/quantity_corpus.rs.
+
+namespace lexicon = "urn:eigenius:lexicon";
+namespace corpus  = "urn:eigenius:quantity-corpus";
+
+class corpus:Flask : lexicon:Entity { }
+resource corpus:flask_n : lexicon:LexicalEntry {
+    lexicon:form     = "flask";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Flask, lexicon:sg) );
+    lexicon:sem      = corpus:Flask;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "flask";
+}
+class corpus:Plate : lexicon:Entity { }
+resource corpus:plates_n : lexicon:LexicalEntry {
+    lexicon:form     = "plates";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Plate, lexicon:pl) );
+    lexicon:sem      = corpus:Plate;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "plates";
+}
+class corpus:Cell : lexicon:Entity { }
+resource corpus:cells_n : lexicon:LexicalEntry {
+    lexicon:form     = "cells";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Cell, lexicon:pl) );
+    lexicon:sem      = corpus:Cell;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "cells";
+}
+class corpus:Sample : lexicon:Entity { }
+resource corpus:samples_n : lexicon:LexicalEntry {
+    lexicon:form     = "samples";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Sample, lexicon:pl) );
+    lexicon:sem      = corpus:Sample;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "samples";
+}
+class corpus:Slide : lexicon:Entity { }
+resource corpus:slides_n : lexicon:LexicalEntry {
+    lexicon:form     = "slides";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Slide, lexicon:pl) );
+    lexicon:sem      = corpus:Slide;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "slides";
+}
+class corpus:Colony : lexicon:Entity { }
+resource corpus:colonies_n : lexicon:LexicalEntry {
+    lexicon:form     = "colonies";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Colony, lexicon:pl) );
+    lexicon:sem      = corpus:Colony;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "colonies";
+}
+class corpus:Mouse : lexicon:Entity { }
+resource corpus:mice_n : lexicon:LexicalEntry {
+    lexicon:form     = "mice";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Mouse, lexicon:pl) );
+    lexicon:sem      = corpus:Mouse;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "mice";
+}
+class corpus:Medium : lexicon:Entity { }
+resource corpus:medium_n : lexicon:LexicalEntry {
+    lexicon:form     = "medium";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Medium, lexicon:sg) );
+    lexicon:sem      = corpus:Medium;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "medium";
+}
+class corpus:Temperature : lexicon:Entity { }
+resource corpus:temperature_n : lexicon:LexicalEntry {
+    lexicon:form     = "temperature";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Temperature, lexicon:sg) );
+    lexicon:sem      = corpus:Temperature;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "temperature";
+}
+class corpus:Concentration : lexicon:Entity { }
+resource corpus:concentration_n : lexicon:LexicalEntry {
+    lexicon:form     = "concentration";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Concentration, lexicon:sg) );
+    lexicon:sem      = corpus:Concentration;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "concentration";
+}
+class corpus:Dose : lexicon:Entity { }
+resource corpus:dose_n : lexicon:LexicalEntry {
+    lexicon:form     = "dose";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Dose, lexicon:sg) );
+    lexicon:sem      = corpus:Dose;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "dose";
+}
+class corpus:Tumour : lexicon:Entity { }
+resource corpus:tumours_n : lexicon:LexicalEntry {
+    lexicon:form     = "tumours";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Tumour, lexicon:pl) );
+    lexicon:sem      = corpus:Tumour;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "tumours";
+}
+class corpus:Volume : lexicon:Entity { }
+resource corpus:volume_n : lexicon:LexicalEntry {
+    lexicon:form     = "volume";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Volume, lexicon:sg) );
+    lexicon:sem      = corpus:Volume;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "volume";
+}
+class corpus:Diet : lexicon:Entity { }
+resource corpus:diet_n : lexicon:LexicalEntry {
+    lexicon:form     = "diet";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Diet, lexicon:sg) );
+    lexicon:sem      = corpus:Diet;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "diet";
+}
+class corpus:Rna : lexicon:Entity { }
+resource corpus:rna_n : lexicon:LexicalEntry {
+    lexicon:form     = "RNA";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Rna, lexicon:sg) );
+    lexicon:sem      = corpus:Rna;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "rna";
+}
+class corpus:Lysate : lexicon:Entity { }
+resource corpus:lysates_n : lexicon:LexicalEntry {
+    lexicon:form     = "lysates";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Lysate, lexicon:pl) );
+    lexicon:sem      = corpus:Lysate;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "lysates";
+}
+class corpus:Gel : lexicon:Entity { }
+resource corpus:gels_n : lexicon:LexicalEntry {
+    lexicon:form     = "gels";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Gel, lexicon:pl) );
+    lexicon:sem      = corpus:Gel;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "gels";
+}
+class corpus:Etoposide : lexicon:Entity { }
+resource corpus:etoposide_n : lexicon:LexicalEntry {
+    lexicon:form     = "etoposide";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Etoposide, lexicon:mass) );
+    lexicon:sem      = corpus:Etoposide;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "etoposide";
+}
+class corpus:Hydroxyurea : lexicon:Entity { }
+resource corpus:hydroxyurea_n : lexicon:LexicalEntry {
+    lexicon:form     = "hydroxyurea";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Hydroxyurea, lexicon:mass) );
+    lexicon:sem      = corpus:Hydroxyurea;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "hydroxyurea";
+}
+class corpus:Fbs : lexicon:Entity { }
+resource corpus:fbs_n : lexicon:LexicalEntry {
+    lexicon:form     = "FBS";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Fbs, lexicon:mass) );
+    lexicon:sem      = corpus:Fbs;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "fbs";
+}
+class corpus:Formalin : lexicon:Entity { }
+resource corpus:formalin_n : lexicon:LexicalEntry {
+    lexicon:form     = "formalin";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Formalin, lexicon:mass) );
+    lexicon:sem      = corpus:Formalin;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "formalin";
+}
+class corpus:Puromycin : lexicon:Entity { }
+resource corpus:puromycin_n : lexicon:LexicalEntry {
+    lexicon:form     = "puromycin";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Puromycin, lexicon:mass) );
+    lexicon:sem      = corpus:Puromycin;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "puromycin";
+}
+class corpus:Doxycycline : lexicon:Entity { }
+resource corpus:doxycycline_n : lexicon:LexicalEntry {
+    lexicon:form     = "doxycycline";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Doxycycline, lexicon:mass) );
+    lexicon:sem      = corpus:Doxycycline;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "doxycycline";
+}
+class corpus:Plasmid : lexicon:Entity { }
+resource corpus:plasmid_n : lexicon:LexicalEntry {
+    lexicon:form     = "plasmid";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Plasmid, lexicon:mass) );
+    lexicon:sem      = corpus:Plasmid;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "plasmid";
+}
+class corpus:Colcemid : lexicon:Entity { }
+resource corpus:colcemid_n : lexicon:LexicalEntry {
+    lexicon:form     = "colcemid";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Colcemid, lexicon:mass) );
+    lexicon:sem      = corpus:Colcemid;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "colcemid";
+}
+class corpus:Transduction : lexicon:Entity { }
+resource corpus:transduction_n : lexicon:LexicalEntry {
+    lexicon:form     = "transduction";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Transduction, lexicon:mass) );
+    lexicon:sem      = corpus:Transduction;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "transduction";
+}
+
+axiom corpus:v90000001_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:incubated_v : lexicon:LexicalEntry {
+    lexicon:form     = "incubated";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000001_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:incubate.v.90000001";
+}
+axiom corpus:v90000002_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:spun_v : lexicon:LexicalEntry {
+    lexicon:form     = "spun";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000002_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:spin.v.90000002";
+}
+axiom corpus:v90000003_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:centrifuged_v : lexicon:LexicalEntry {
+    lexicon:form     = "centrifuged";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000003_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:centrifuge.v.90000003";
+}
+axiom corpus:v90000004_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:stored_v : lexicon:LexicalEntry {
+    lexicon:form     = "stored";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000004_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:store.v.90000004";
+}
+axiom corpus:v90000005_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:denatured_v : lexicon:LexicalEntry {
+    lexicon:form     = "denatured";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000005_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:denature.v.90000005";
+}
+axiom corpus:v90000006_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:propagated_v : lexicon:LexicalEntry {
+    lexicon:form     = "propagated";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000006_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:propagate.v.90000006";
+}
+axiom corpus:v90000007_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:harvested_v : lexicon:LexicalEntry {
+    lexicon:form     = "harvested";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000007_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:harvest.v.90000007";
+}
+axiom corpus:v90000008_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:counted_v : lexicon:LexicalEntry {
+    lexicon:form     = "counted";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000008_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:count.v.90000008";
+}
+axiom corpus:v90000009_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:resuspended_v : lexicon:LexicalEntry {
+    lexicon:form     = "resuspended";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000009_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:resuspend.v.90000009";
+}
+axiom corpus:v90000010_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:treated_v : lexicon:LexicalEntry {
+    lexicon:form     = "treated";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000010_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:treat.v.90000010";
+}
+axiom corpus:v90000011_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:supplemented_v : lexicon:LexicalEntry {
+    lexicon:form     = "supplemented";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000011_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:supplement.v.90000011";
+}
+axiom corpus:v90000012_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:fixed_v : lexicon:LexicalEntry {
+    lexicon:form     = "fixed";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000012_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:fix.v.90000012";
+}
+axiom corpus:v90000013_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:electroporated_v : lexicon:LexicalEntry {
+    lexicon:form     = "electroporated";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000013_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:electroporate.v.90000013";
+}
+axiom corpus:v90000014_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:replaced_v : lexicon:LexicalEntry {
+    lexicon:form     = "replaced";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000014_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:replace.v.90000014";
+}
+axiom corpus:v90000015_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:purified_v : lexicon:LexicalEntry {
+    lexicon:form     = "purified";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000015_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:purify.v.90000015";
+}
+axiom corpus:v90000016_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:changed_v : lexicon:LexicalEntry {
+    lexicon:form     = "changed";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000016_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:change.v.90000016";
+}
+axiom corpus:v90000017_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:fractionated_v : lexicon:LexicalEntry {
+    lexicon:form     = "fractionated";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000017_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:fractionate.v.90000017";
+}
+axiom corpus:v90000018_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:received_v : lexicon:LexicalEntry {
+    lexicon:form     = "received";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000018_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:receive.v.90000018";
+}
+axiom corpus:v90000019_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:reached_v : lexicon:LexicalEntry {
+    lexicon:form     = "reached";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000019_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:reach.v.90000019";
+}
+axiom corpus:v90000020_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:contained_v : lexicon:LexicalEntry {
+    lexicon:form     = "contained";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000020_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:contain.v.90000020";
+}

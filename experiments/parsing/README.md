@@ -237,7 +237,7 @@ Each sentence unit is classified:
 | `OPEN` | parses, but a proposition is left open |
 | `GRAMMAR-GAP` | no parse: every word is known, but nothing composes (**a coverage failure**) |
 | `MISSING-LEXEME` | no parse: a word is out of vocabulary (**a lexicon failure**) |
-| `NON-PROSE` | no parse: every word is known, but a numeral or symbol seeds nothing (D95; until quantities seed, any unit with a number) |
+| `NON-PROSE` | no parse: every word is known, but a token seeds nothing — an operator, a kept or unmatched bracket, a range (`4–12%`, out of D95 v1) |
 | `SCALE-BOUND` | skipped: beyond the length bound (>60 tok) |
 
 **Coverage gate:** `grammar-gap 0`, `missing-lexeme 0` and `non-prose 0` — every sentence parses. NON-NEGOTIABLE.

@@ -92,6 +92,17 @@ fn the_centrifugation_sentence() {
     );
     assert_eq!(tokens[7].1, one("h", q(7200, 1), "s"));
     assert_eq!(tokens[9].1, one("°C", q(6063, 20), "K"));
+    // Digit groups before an attached unit.
+    assert_eq!(
+        the_quantity("centrifuged at 1,000g"),
+        (
+            "1,000g".to_string(),
+            vec![
+                ("g".to_string(), q(1, 1), "kg".to_string()),
+                ("g_n".to_string(), q(196_133, 20), "s^-2·m".to_string()),
+            ]
+        )
+    );
 }
 
 #[test]

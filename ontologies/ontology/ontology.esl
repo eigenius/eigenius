@@ -19,6 +19,8 @@
 
 namespace ontology = "urn:eigenius:ontology";
 namespace lexicon  = "urn:eigenius:lexicon";
+namespace core     = "urn:eigenius:core";
+namespace units    = "urn:eigenius:units";
 
 // x is_a C — instance membership: the entity x is a member of class C.
 // "HeLa is a cell line" → is_a(hela, CellLine).
@@ -87,6 +89,26 @@ axiom ontology:prep_by      : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_without : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_among   : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_beyond  : lexicon:Entity -> lexicon:Entity -> Prop
+// `after` joined the closed class in D95 slice 5, with its measured-value sibling below.
+axiom ontology:prep_after   : lexicon:Entity -> lexicon:Entity -> Prop
+
+// ── Prepositions over a measured value (D95 slice 5) ──────────────────────────
+// `prep_X_value(s, u, q)`: the predication or entity s stands in the prepositional relation to the
+// measured value q, in base unit u — "incubated at 37 °C" → … ∧ prep_at_value(s, K, 310.15 K). The
+// unit is an explicit argument because the relation is unit-polymorphic and implicit Π is deferred
+// (eigenius#261). The `prep_` family, as the entity-object relations are: a noun refined by one is
+// PP-refined, and verbalization renders it as "at 6203/20 K". A VP adjunct and a noun modifier share
+// the relation, as `in_prep` and `in_nmod` share `prep_in`.
+axiom ontology:prep_at_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_for_value   : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_in_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_with_value  : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_after_value : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_of_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `has_quantity(x, u, q)`: the entity x has the measured value q — the prenominal measure phrase
+// ("10 μM etoposide" → Σx:etoposide. has_quantity(x, …)) and the predicative one ("the temperature
+// was 37 °C"). Which quantity of x it is (a concentration, a temperature) the parse does not say.
+axiom ontology:has_quantity     : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
 
 // ── Naming apposition (D63 §5.3, close apposition of a sortal + a proper name) ────────
 // `named(x, n)`: the individual `x` bears the proper name whose token is `n` — the coining

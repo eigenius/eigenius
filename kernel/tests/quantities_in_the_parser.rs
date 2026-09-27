@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D95 slice 4 — measure phrases in the grammar. The categories (`cat_mp`, `cat_unit_forall`,
-//! `lexicon:Reading`), the `Difference` type, the unit-polymorphic application and the seeding are
-//! committed; the fixture adds consumers shaped as slice 5's will be — a VP-adjunct `at` that takes a
-//! measured value of any unit, and a verb that takes only a difference in kelvin — plus the words
-//! around them. No DB, no reseed.
+//! D95 slices 4 and 5 — measure phrases in the grammar and their consumers. The categories
+//! (`cat_mp`, `cat_unit_forall`, `lexicon:Reading`), the `Difference` type, the unit-polymorphic
+//! application, the seeding and the prepositions over a measured value (`closed-class.esl`) are in
+//! the bootstrap chain; the fixture adds the content words around them, and a verb that takes only a
+//! difference in kelvin, which slice 7's consumers will be shaped as. No DB, no reseed.
 
 use std::sync::Arc;
 
-use eigenius_kernel::dcg::{pretty_term, Identity, Parser};
+use eigenius_kernel::dcg::{entry_to_item, is_ctor, pretty_term, Identity, Parser};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
+use eigenius_kernel::nbe::term::Exp;
+use eigenius_kernel::ontology::iri::Iri;
 
 const FIXTURE: &str = r#"
 namespace lexicon = "urn:eigenius:lexicon";
@@ -56,23 +58,6 @@ resource lexicon:incubated_v : lexicon:LexicalEntry {
     lexicon:sense    = "incubated";
 }
 
-// `at` + a measured value of any unit: ((S\NP)\(S\NP))/MP[u, value] under the unit binder.
-axiom lexicon:at_value : forall (u : core:unit) => lexicon:Entity -> units:Quantity(u) -> Prop
-resource lexicon:at_value_sem : lexicon:SemTerm {
-    lexicon:term = type_expr(
-        ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), lexicon:at_value(u, s, q))
-          : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
-    );
-}
-resource lexicon:at_value_adjunct : lexicon:LexicalEntry {
-    lexicon:form     = "at";
-    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
-    lexicon:sem      = lexicon:at_value_sem;
-    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
-    lexicon:sense    = "at.value";
-}
-
 // `rose` + a DIFFERENCE in kelvin: a consumer that names its dimension and its reading.
 axiom lexicon:rose_by : lexicon:Entity -> units:Difference(u"K") -> Prop
 resource lexicon:rose_sem : lexicon:SemTerm {
@@ -87,6 +72,40 @@ resource lexicon:rose_v : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:rose_sem;
     lexicon:sem_type = type_expr( units:Difference(u"K") -> lexicon:Entity -> Prop );
     lexicon:sense    = "rose";
+}
+
+axiom lexicon:received : lexicon:Entity -> lexicon:Entity -> Prop
+resource lexicon:received_v : lexicon:LexicalEntry {
+    lexicon:form     = "received";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:received;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "received";
+}
+
+class lexicon:Dose : lexicon:Entity { }
+resource lexicon:dose_n : lexicon:LexicalEntry {
+    lexicon:form     = "dose";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Dose, lexicon:num_any) );
+    lexicon:sem      = lexicon:Dose;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "dose";
+}
+class lexicon:Etoposide : lexicon:Entity { }
+resource lexicon:etoposide_n : lexicon:LexicalEntry {
+    lexicon:form     = "etoposide";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Etoposide, lexicon:mass) );
+    lexicon:sem      = lexicon:Etoposide;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "etoposide";
+}
+class lexicon:Temperature : lexicon:Entity { }
+resource lexicon:temperature_n : lexicon:LexicalEntry {
+    lexicon:form     = "temperature";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Temperature, lexicon:num_any) );
+    lexicon:sem      = lexicon:Temperature;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "temperature";
 }
 "#;
 
@@ -120,10 +139,100 @@ fn a_value_consumer_takes_the_value_reading() {
     let r = readings(&parser, "HeLa incubated at 37 °C");
     assert_eq!(r.len(), 1, "{r:#?}");
     assert!(
-        r[0].contains("at_value") && r[0].contains("numer: 6203") && r[0].contains("denom: 20"),
+        r[0].contains("ontology:prep_at_value")
+            && r[0].contains("numer: 6203")
+            && r[0].contains("denom: 20"),
         "{r:#?}"
     );
     assert!(!r[0].contains("compound_kind"), "{r:#?}");
+}
+
+/// Each VP-adjunct preposition over a measured value, on a sentence of the WRN methods' shape: the
+/// relation, and the value in base units (`2 h` is 7200 s, `50 μl` is 1/20000 m³).
+#[test]
+fn each_preposition_takes_a_measured_value() {
+    let parser = Parser::build(layer());
+    for (text, relation, magnitude) in [
+        (
+            "HeLa incubated for 2 h",
+            "prep_for_value",
+            "numer: 7200, denom: 1",
+        ),
+        (
+            "HeLa incubated after 72 h",
+            "prep_after_value",
+            "numer: 259200, denom: 1",
+        ),
+        (
+            "HeLa incubated in 50 μl",
+            "prep_in_value",
+            "numer: 1, denom: 20000000",
+        ),
+        (
+            "HeLa incubated with 10%",
+            "prep_with_value",
+            "numer: 1, denom: 10",
+        ),
+        (
+            "HeLa incubated at 37 °C for 2 h",
+            "prep_for_value",
+            "numer: 7200, denom: 1",
+        ),
+    ] {
+        let r = readings(&parser, text);
+        assert_eq!(r.len(), 1, "{text}: {r:#?}");
+        assert!(
+            r[0].contains(&format!("ontology:{relation}")) && r[0].contains(magnitude),
+            "{text}: {r:#?}"
+        );
+    }
+}
+
+/// `after` is a closed-class preposition over an NP as well as over a measured value.
+#[test]
+fn after_takes_an_np() {
+    let parser = Parser::build(layer());
+    let r = readings(&parser, "HeLa incubated after the dose");
+    assert_eq!(r.len(), 1, "{r:#?}");
+    assert!(
+        r[0].contains("ontology:prep_after\"") && r[0].contains("lexicon:Dose"),
+        "{r:#?}"
+    );
+}
+
+/// A noun takes a measured value post-nominally: `a dose of 5 mg/kg`.
+#[test]
+fn a_noun_takes_a_measured_value() {
+    let parser = Parser::build(layer());
+    let r = readings(&parser, "HeLa received a dose of 5 mg/kg");
+    assert!(!r.is_empty());
+    assert!(
+        r.iter()
+            .all(|s| s.contains("ontology:prep_of_value") && s.contains("numer: 1, denom: 200000")),
+        "{r:#?}"
+    );
+}
+
+/// A quantity before a noun modifies it, and after the copula it is predicated:
+/// `has_quantity(x, u, q)` either way.
+#[test]
+fn a_prenominal_and_a_predicative_measure_phrase() {
+    let parser = Parser::build(layer());
+    let r = readings(&parser, "HeLa incubated with 10 μM etoposide");
+    assert!(!r.is_empty());
+    assert!(
+        r.iter().all(|s| s.contains("ontology:has_quantity")
+            && s.contains("lexicon:Etoposide")
+            && s.contains("numer: 1, denom: 100")),
+        "{r:#?}"
+    );
+    let r = readings(&parser, "the temperature was 37 °C");
+    assert!(!r.is_empty());
+    assert!(
+        r.iter()
+            .all(|s| s.contains("ontology:has_quantity") && s.contains("numer: 6203")),
+        "{r:#?}"
+    );
 }
 
 /// `931g` seeds gram and standard gravity; a unit-polymorphic consumer takes both, and the reading
@@ -181,7 +290,60 @@ fn packed_equals_unpacked_on_quantities() {
         "HeLa rose 5 °C",
         "HeLa rose 5 mg",
         "HeLa incubated at 2 h",
+        "HeLa incubated at 37 °C for 2 h",
+        "HeLa incubated with 10 μM etoposide",
+        "HeLa received a dose of 5 mg/kg",
+        "the temperature was 37 °C",
     ] {
         assert_eq!(readings(&packed, text), readings(&unpacked, text), "{text}");
     }
+}
+
+/// Every `cat_mp(unit, reading)` inside a category.
+fn measure_phrases<'e>(cat: &'e Exp, out: &mut Vec<&'e [Exp]>) {
+    if let Some(args) = is_ctor(cat, "cat_mp") {
+        out.push(args);
+    }
+    match cat {
+        Exp::InductiveCtor(_, _, args) => args.iter().for_each(|a| measure_phrases(a, out)),
+        Exp::Lam(_, body) => measure_phrases(body, out),
+        Exp::App(f, a) => {
+            measure_phrases(f, out);
+            measure_phrases(a, out);
+        }
+        _ => {}
+    }
+}
+
+/// Decision 5: every closed-class consumer of a measure phrase names the reading it takes. One
+/// whose reading were a variable would take the value and the difference items alike, and
+/// `at 37 °C` would be 310.15 K and 37 K at once. The 33 prepositions of slice 5 take values.
+#[test]
+fn every_consumer_names_its_reading() {
+    let ctx = eigenius_kernel::testing::bootstrap_context();
+    let head = ctx.head();
+    let mut layer = head;
+    while layer.name() != "closed-class" {
+        layer = layer.parent().expect("closed-class is in the chain");
+    }
+    let entry = Iri::parse("urn:eigenius:lexicon:LexicalEntry").unwrap();
+    let mut readings: Vec<String> = Vec::new();
+    for (iri, r) in layer.iter_resources() {
+        if !r.is_instance_of(&entry) {
+            continue;
+        }
+        let item = entry_to_item(head, &r).unwrap_or_else(|e| panic!("{iri}: {e}"));
+        let mut mps = Vec::new();
+        measure_phrases(item.cat(), &mut mps);
+        for args in mps {
+            match &args[1] {
+                Exp::InductiveCtor(_, reading, rest) if rest.is_empty() => {
+                    readings.push(reading.clone())
+                }
+                other => panic!("{iri} takes a measure phrase at reading {other:?}"),
+            }
+        }
+    }
+    assert_eq!(readings.len(), 33, "{readings:?}");
+    assert!(readings.iter().all(|r| r == "value"), "{readings:?}");
 }

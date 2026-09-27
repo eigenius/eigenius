@@ -542,6 +542,17 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     format!("{o}'s {n}")
                 };
             }
+            // A measured value predicated (D95): `has_quantity(x, u, q)` → "x is q". The subject is
+            // a bound restrictor variable when the value modifies a noun, giving just "q".
+            ("has_quantity", 3) => {
+                let subj = verbalize(args[0], vb);
+                let q = quantity_text(args[2], args[1]);
+                return if subj.is_empty() {
+                    q
+                } else {
+                    format!("{subj} is {q}")
+                };
+            }
             ("Possible" | "modal", 1) => return format!("possibly, {}", verbalize(args[0], vb)),
             ("speaker", _) => return "we".to_string(),
             ("anaphor", _) => return "it".to_string(),
@@ -551,16 +562,13 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
         // `And(V(subj), prep(subj, obj))` shape into a single clause, but a PP conjunct it cannot
         // merge — a distributed coordination, or a clausal complement — reached the ⟦…⟧ bracket.
         // The subject is usually a bound restrictor variable (verbalising to ""), giving "in X".
-        if let Some(p) = local.strip_prefix("prep_") {
-            if args.len() == 2 {
-                let subj = verbalize(args[0], vb);
-                let obj = verbalize(args[1], vb);
-                return if subj.is_empty() {
-                    format!("{p} {obj}")
-                } else {
-                    format!("{subj} {p} {obj}")
-                };
-            }
+        if let Some((p, subj, obj)) = prep_parts(local, &args, vb) {
+            let subj = verbalize(subj, vb);
+            return if subj.is_empty() {
+                format!("{p} {obj}")
+            } else {
+                format!("{subj} {p} {obj}")
+            };
         }
         // Verb: `v{offset}_{frame}(obj, subj)` transitive / `(subj)` intransitive (category
         // `(S\NP)/NP` — object first; the WordNet importer's verb-atom convention,
@@ -603,24 +611,57 @@ fn verb_pp(left: &Exp, right: &Exp, vb: &Vb) -> Option<String> {
     let (rh, ra) = app_spine(right);
     let ll = axiom_local(lh)?;
     let rl = axiom_local(rh)?;
-    if !(ll.starts_with('v') && ll.contains('_') && rl.starts_with("prep_") && ra.len() == 2) {
+    if !(ll.starts_with('v') && ll.contains('_')) {
         return None;
     }
+    let (p, pp_subj, obj) = prep_parts(rl, &ra, vb)?;
     // Intransitive/PP verb: its sole arg is the subject; it must match the PP's first arg.
     let subj = match la.as_slice() {
         [s] => s,
         _ => return None,
     };
-    if pretty_term(subj) != pretty_term(ra[0]) {
+    if pretty_term(subj) != pretty_term(pp_subj) {
         return None;
     }
     Some(format!(
-        "{} {} {} {}",
+        "{} {} {p} {obj}",
         verbalize(subj, vb),
         name_atom(ll, vb),
-        &rl[5..],
-        verbalize(ra[1], vb)
     ))
+}
+
+/// A PP relation's preposition, subject and rendered object: `prep_X(subj, obj)`, or a quantity
+/// relation `prep_X_value(subj, unit, quantity)` (D95), whose object is the quantity with its unit.
+/// `None` for anything else.
+fn prep_parts<'e>(local: &'e str, args: &[&'e Exp], vb: &Vb) -> Option<(&'e str, &'e Exp, String)> {
+    let p = local.strip_prefix("prep_")?;
+    match (p.strip_suffix("_value"), args) {
+        (Some(p), [subj, unit, quantity]) => Some((p, subj, quantity_text(quantity, unit))),
+        (None, [subj, obj]) => Some((p, subj, verbalize(obj, vb))),
+        _ => None,
+    }
+}
+
+/// A quantity or difference term with its unit, as `6203/20 K` — the base-unit value the chain
+/// holds, not the unit the author wrote, which is in `enc:prose` (D93). `π` powers are shown.
+fn quantity_text(quantity: &Exp, unit: &Exp) -> String {
+    if let Exp::Ann(inner, _) = quantity {
+        return quantity_text(inner, unit);
+    }
+    let Exp::InductiveCtor(_, _, parts) = quantity else {
+        return pretty_term(quantity);
+    };
+    let [Exp::LitRat(c), Exp::LitInt(pi)] = parts.as_slice() else {
+        return pretty_term(quantity);
+    };
+    let mut text = c.to_canonical_string();
+    if *pi != 0 {
+        text.push_str(&format!("·π^{pi}"));
+    }
+    match unit {
+        Exp::LitUnit(u) if !u.is_dimensionless() => format!("{text} {}", u.to_canonical_string()),
+        _ => text,
+    }
 }
 
 /// A quantifier's body over the bound entity: "{NP}, {predicate}" with the bound variable (already
@@ -762,10 +803,12 @@ fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
                 }
             }
             Some(p) if p.starts_with("prep_") => {
-                if let Some(x) = a.get(1) {
-                    post.push(format!("{} {}", &p[5..], verbalize(x, vb)));
+                if let Some((p, _, obj)) = prep_parts(p, &a, vb) {
+                    post.push(format!("{p} {obj}"));
                 }
             }
+            // A prenominal measure phrase (D95): "10 μM etoposide" → "a 1/100 m^-3·mol etoposide".
+            Some("has_quantity") if a.len() == 3 => pre.push(quantity_text(a[2], a[1])),
             Some("is_a") if a.len() == 2 => post.push(format!("that is {}", indefinite(a[1], vb))),
             Some("named") if a.len() == 2 => post.push(format!("named {}", verbalize(a[1], vb))),
             // A possessive restrictor — `Σx:N. poss_of(N, x, owner)`, "their MSS counterparts".
@@ -840,9 +883,12 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
                 bare_np(a[1], vb)
             )),
             Some(p) if p.starts_with("prep_") => {
-                if let Some(x) = a.get(1) {
-                    parts.push(format!("{} {}", &p[5..], verbalize(x, vb)));
+                if let Some((p, _, obj)) = prep_parts(p, &a, vb) {
+                    parts.push(format!("{p} {obj}"));
                 }
+            }
+            Some("has_quantity") if a.len() == 3 => {
+                parts.push(format!("has-quantity {}", quantity_text(a[2], a[1])))
             }
             Some("is_a") if a.len() == 2 => parts.push(format!("is-a {}", bare_np(a[1], vb))),
             Some("named") if a.len() == 2 => parts.push(format!("named {}", verbalize(a[1], vb))),
@@ -987,6 +1033,54 @@ mod register_tests {
         assert!(
             e_compound.contains("compound-with") && e_compound.contains("relation unspecified"),
             "the compound's unspecified relation is stated: {e_compound}"
+        );
+    }
+
+    /// A measured value (D95) renders in base units: predicated, before its noun, after a
+    /// preposition, and in the expanded register as a named commitment.
+    #[test]
+    fn a_measured_value_renders_with_its_unit() {
+        let l = layer();
+        let names = BTreeMap::new();
+        let kelvin = Exp::LitUnit(crate::units::Unit::parse_canonical("K").expect("unit"));
+        let q = Exp::InductiveCtor(
+            Iri::parse("urn:eigenius:units:Quantity").expect("iri"),
+            "mk_quantity".to_string(),
+            vec![
+                Exp::LitRat(crate::numeric::Rational::new(6203.into(), 20.into()).expect("q")),
+                Exp::LitInt(0),
+            ],
+        );
+        let app3 = |axiom: &str, a: Exp| {
+            Exp::App(
+                Box::new(app2(axiom, a, kelvin.clone())),
+                Box::new(q.clone()),
+            )
+        };
+        let hela = || Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:hela").expect("iri"));
+        let surface = Vb::surface(&names, &l);
+        assert_eq!(
+            verbalize(
+                &app3("urn:eigenius:ontology:has_quantity", hela()),
+                &surface
+            ),
+            "hela is 6203/20 K"
+        );
+        assert_eq!(
+            verbalize(
+                &app3("urn:eigenius:ontology:prep_at_value", hela()),
+                &surface
+            ),
+            "hela at 6203/20 K"
+        );
+        let medium = sig(
+            cls("urn:eigenius:lexicon:Medium"),
+            app3("urn:eigenius:ontology:has_quantity", Exp::Var("x0".into())),
+        );
+        assert_eq!(verbalize(&medium, &surface), "a 6203/20 K Medium");
+        assert_eq!(
+            verbalize(&medium, &Vb::expanded(&names, &l)),
+            "a [Medium] + has-quantity 6203/20 K"
         );
     }
 

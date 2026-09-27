@@ -35,7 +35,7 @@
 /// Prepositions and conjunctions (D63 §5.3).
 const PREPOSITIONS_AND_CONJUNCTIONS: &[&str] = &[
     "for", "from", "into", "as", "with", "on", "at", "by", "of", "in", "then", "than", "within",
-    "upon", "onto", "unto", // prepositions
+    "upon", "onto", "unto", "after", // prepositions
     "and", "or", "but", "nor", // coordinating conjunctions
 ];
 
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn owns_function_words_determiners_and_the_copula() {
-        for f in ["as", "As", "AS", "in", "at", "of", "and", "than"] {
+        for f in ["as", "As", "AS", "in", "at", "of", "and", "than", "after"] {
             assert!(is_closed_class_surface(f), "{f} is closed-class");
         }
         for f in ["some", "each", "no", "both"] {

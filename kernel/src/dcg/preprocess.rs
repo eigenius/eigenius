@@ -26,9 +26,10 @@
 //!    - An unmatched opener or closer is a `NonProse` token, and the text around it stays.
 //! 2. **Paired em-dash appositives.** With an even number (at least two) of U+2014, the odd segments
 //!    and the dashes are dropped and the rest joined; a lone em-dash stays a separator.
-//! 3. **Separators.** Whitespace, `—`, `–`, `‒`, `―` and `/` end a token. A comma is a token of its
-//!    own, so list coordination can key on it — except between a digit group and exactly three digits
-//!    (`1,200`), where it groups digits.
+//! 3. **Separators.** Whitespace, `—`, `–`, `‒`, `―` and `/` end a token, except an en-dash between
+//!    digits, which joins a range (`4–12`). A comma is a token of its own, so list coordination can
+//!    key on it — except between a digit group and exactly three digits (`1,200`, `1,000g`), where it
+//!    groups digits.
 //! 4. **Edge trimming.** Leading and trailing non-alphanumerics are dropped, and a token left empty is
 //!    dropped with them, with two exceptions: an operator (`<`, `≤`, `=`, `±`, `×`, …) becomes a
 //!    `NonProse` token of its own, and a sign directly before a numeral joins it (`−1`).
@@ -36,7 +37,8 @@
 //!    content tokens, and a stray one would block a full-span parse.
 //! 6. **Kinds.** A numeral is [`TokenKind::Numeral`]. A token that starts with a digit and is not one
 //!    (`53BP1`, `5-fold`, `1a`) is a [`TokenKind::Word`], so a lexicon without it reports it missing
-//!    (D95, decision 3). A token with no ASCII letter is `NonProse`.
+//!    (D95, decision 3). A range (`4–12`) and a token with no ASCII letter are `NonProse`: D95 keeps
+//!    ranges out of v1, and read as a numeral and a quantity `4–12% gels` would be four gels of 12%.
 //! 7. **Quantities.** A numeral and the unit written after it — `37 °C`, `10 μg ml⁻¹`, `10%`, or a
 //!    unit attached to its digits, `931g` — are one [`TokenKind::Quantity`] token, carrying every
 //!    reading of the unit ([`super::quantity`]). The unit is read from the text, not the tokens, since
@@ -147,7 +149,9 @@ pub fn preprocess(text: &str, lexemes: &[Lexeme], units: &ProseUnits) -> Vec<Tok
             Piece::Lexeme(l) => *l,
         };
         let s = lexeme.text(text);
-        if lexeme.class == LexClass::Space || is_separator(s) {
+        if s == EN_DASH && joins_range(text, &run, pieces.get(k + 1)) {
+            run.push(lexeme);
+        } else if lexeme.class == LexClass::Space || is_separator(s) {
             flush(text, &mut run, &mut tokens);
         } else if s == "," && groups_digits(text, &run, pieces.get(k + 1)) {
             run.push(lexeme);
@@ -232,10 +236,13 @@ fn quantity_at(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, Quan
     }
 }
 
-/// The byte length of the numeral that starts `s`: digits, and a decimal part if a digit follows the
-/// point.
+/// The byte length of the numeral that starts `s`: digits, grouped by commas in threes or not, and a
+/// decimal part if a digit follows the point.
 fn numeral_prefix(s: &str) -> usize {
-    let int = s.bytes().take_while(u8::is_ascii_digit).count();
+    let mut int = leading_digits(s);
+    while s[int..].starts_with(',') && leading_digits(&s[int + 1..]) == 3 {
+        int += 4;
+    }
     let rest = &s.as_bytes()[int..];
     if rest.first() == Some(&b'.') {
         let frac = rest[1..].iter().take_while(|b| b.is_ascii_digit()).count();
@@ -332,18 +339,39 @@ fn is_separator(s: &str) -> bool {
     matches!(s, "—" | "–" | "‒" | "―" | "/")
 }
 
+const EN_DASH: &str = "\u{2013}";
+
+/// Whether an en-dash after `run` joins a range: digits directly before it and after it (`4–12%`,
+/// `2–3 days`, `0.1–0.5`).
+fn joins_range(text: &str, run: &[&Lexeme], next: Option<&Piece>) -> bool {
+    matches!(next, Some(Piece::Lexeme(n)) if is_digits(text, n))
+        && run.last().is_some_and(|l| is_digits(text, l))
+}
+
+/// Whether `s` is a range, two numerals joined by an en-dash. D95 keeps ranges out of v1: the
+/// interval type they need is deferred with D93's, so a range is non-prose rather than a numeral and
+/// a quantity (`4–12% gels` is not four gels of 12%).
+fn is_range(s: &str) -> bool {
+    s.split_once(EN_DASH)
+        .is_some_and(|(a, b)| numeral_value(a).is_some() && numeral_value(b).is_some())
+}
+
 fn is_digits(text: &str, l: &Lexeme) -> bool {
     l.class == LexClass::Word && l.text(text).bytes().all(|b| b.is_ascii_digit())
 }
 
+fn leading_digits(s: &str) -> usize {
+    s.bytes().take_while(u8::is_ascii_digit).count()
+}
+
 /// Whether a comma after `run` groups digits: the run from its first word lexeme is digit groups
 /// separated by commas — the first of one to three digits, the rest of three — and the next piece
-/// is exactly three digits.
+/// starts with exactly three digits, alone or with a unit attached (`1,200`, `1,000g`).
 fn groups_digits(text: &str, run: &[&Lexeme], next: Option<&Piece>) -> bool {
     let Some(Piece::Lexeme(next)) = next else {
         return false;
     };
-    if !is_digits(text, next) || next.text(text).len() != 3 {
+    if next.class != LexClass::Word || leading_digits(next.text(text)) != 3 {
         return false;
     }
     let Some(first) = run.iter().position(|l| l.class == LexClass::Word) else {
@@ -404,6 +432,7 @@ fn flush(text: &str, run: &mut Vec<&Lexeme>, tokens: &mut Vec<Token>) {
     let surface = concat(&run[start..=last]);
     let kind = match numeral_value(&surface) {
         Some(value) => TokenKind::Numeral(value),
+        None if is_range(&surface) => TokenKind::NonProse,
         None if surface.starts_with(|c: char| c.is_ascii_digit()) => TokenKind::Word,
         None if !surface.chars().any(|c| c.is_ascii_alphabetic()) => TokenKind::NonProse,
         None => TokenKind::Word,
@@ -577,6 +606,26 @@ mod tests {
         assert_eq!(surfaces("1234,567"), ["1234", ",", "567"]);
         // A hyphen inside a token is not a sign.
         assert_eq!(tokenize("5-3")[0].kind(), &TokenKind::Word);
+        // A group before an attached unit still groups: `1,000g` is one token.
+        assert_eq!(surfaces("spun at 1,000g"), ["spun", "at", "1,000g"]);
+        assert_eq!(surfaces("genes 1,23a"), ["genes", "1", ",", "23a"]);
+    }
+
+    /// Two numerals joined by an en-dash are a range, one non-prose token; letters on either side
+    /// leave the en-dash a separator.
+    #[test]
+    fn a_range_is_non_prose() {
+        for (text, range) in [
+            ("in 4\u{2013}12% gels", "4\u{2013}12"),
+            ("every 2\u{2013}3 days", "2\u{2013}3"),
+            ("at 0.1\u{2013}0.5", "0.1\u{2013}0.5"),
+        ] {
+            let toks = tokenize(text);
+            let t = toks.iter().find(|t| t.surface() == range).expect(text);
+            assert_eq!(t.kind(), &TokenKind::NonProse, "{text:?}");
+        }
+        assert_eq!(surfaces("Fig. 10a\u{2013}d"), ["Fig", "10a", "d"]);
+        assert_eq!(surfaces("exon\u{2013}intron"), ["exon", "intron"]);
     }
 
     #[test]

@@ -31,6 +31,14 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
+//! (`docs/design/d95-implementation-plan.md`, slice 5): `units` (standard gravity, `molar`, `week`,
+//! `units:Difference`), `lexicon` (`lexicon:Reading`, `cat_mp`, `cat_unit_forall`,
+//! `lexicon:UnitSurface`), `closed-class` (the unit spellings, `one`'s subject and object entries,
+//! the prepositions over a measured value, `after` over an NP) and `ontology` (`prep_*_value`,
+//! `has_quantity`, `prep_after`). `after` joining the closed class also moves the imported lexicon:
+//! the importers stop seeding its content homonyms.
+//!
 //! IT FIRED FOR THE PROVENANCE MIGRATION (`2026-08-30`), on TEN layers, which is the whole
 //! provenance axis moving off `reflection` onto `prov` plus the grade classes going away.
 //! `reflection` and `prov`'s consumers (`obo`, `justification`, `statistics`, `ingest`,
@@ -200,8 +208,8 @@ ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
 lexicon:b5b9a458ac5088d4750d525dc93e8dfbb60a65bd660bfc8fb29f4790b5a1b8a1
-ontology:7fb72a75946ca50e84df1aa1ae9207dc57676b96ef3c53879e82e4421f1aef43
-closed-class:e654c50e4be22b7241104f70acaeb5012420d8f5205f2123c43010f028a34469
+ontology:4c90a71407c97e847597e8b55329c106a4071c4af41fe172ced12c3afdc539cd
+closed-class:d3d02ebcc90b5b1478c0cf33723f4b2b7d8dd60d3266f0350e107c58d854c706
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 

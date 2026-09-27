@@ -411,52 +411,93 @@ tests read magnitudes from the sem's debug form; the unit is carried by the cate
 **Chain:** `units`, `lexicon` and `closed-class` moved; `EXPECTED` is updated. The reseed waits for
 slice 5.
 
-## Slice 5 — consumers, the corpus, one reseed
+## Slice 5 — consumers, the corpus, one reseed — code built, reseed owed
 
 **Relations** (`ontologies/ontology/ontology.esl`)
-- One opaque relation per preposition that takes a value:
-  `lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop`, beside `prep_at` and the
-  others (`:68-89`).
-- Six Rust sites match the `urn:eigenius:ontology:prep_` prefix and assume `Entity` arguments:
-  `dcg/chart/attribute.rs:364`, `dcg/rules/constructions.rs:1220`, `dcg/verbalize.rs:552`, `:604`,
-  `:762`, `:840`. The new relations take a prefix outside it, or each site is taught the quantity
-  arity.
+- `prep_{at,for,in,with,after,of}_value : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop`,
+  one per preposition that takes a value. The unit is an explicit argument because implicit Π is
+  deferred (#261).
+- `has_quantity`, same type, for the prenominal and predicative measure phrase. Which quantity of the
+  entity it is (a concentration, a temperature) the parse does not say.
+- `prep_after : Entity -> Entity -> Prop`, for `after` over an NP.
+- The six Rust sites that match the `prep_` prefix: `is_pp_refined` and `attribute.rs`'s
+  `axiom_class` classify by name only, so a `_value` relation counts as a PP there, which it is.
+  `verbalize.rs`'s four sites go through `prep_parts`, which reads `prep_X(subj, obj)` and
+  `prep_X_value(subj, unit, quantity)` and renders the quantity as `6203/20 K` (`quantity_text`).
+  `has_quantity` renders as `x is q` predicated, before its noun in a restrictor, and as
+  `has-quantity q` in the expanded register.
 
 **Entries** (`closed-class.esl`)
-- **VP adjuncts** at `cat_unit_forall(λu. ((S\NP)\(S\NP)) / cat_mp(u, value))` for `at`, `for`, `in`,
-  `with` and `after`. Each has the six finiteness variants the NP adjuncts have (`in_prep`
-  `:1126-1166`), sem `λu.λq.λV.λs. And(V(s), R(s, u, q))`.
-- **Noun modifiers** at `cat_unit_forall(λu. cat_pp / cat_mp(u, value))` for `of`, `with` and `at`, as
-  `in_nmod` (`:1468-1475`), sem `λu.λq.λx. R(x, u, q)`.
-- `after` joins `PREPOSITIONS_AND_CONJUNCTIONS` (`dcg/closed_class.rs:36-40`), so the importers stop
-  emitting content entries on it; that moves the imported lexicon, inside this slice's reseed.
-- **The prenominal measure phrase** (`10 μM etoposide`, `0.1% crystal violet`), 40 occurrences:
-  - a value item also seeds a predicative-adjective item, `S[dcl,adj]\NP`
-    (`predicative_adjective_cat`, `dcg/category.rs:585`), with sem `λx. R_measured(x, U, q)`;
-  - the leaf `mod_lifts` (`dcg/parse/seed.rs:679-705`) make it a prenominal modifier, and the copula
-    takes it predicatively (`the temperature was 37 °C`).
-- **Tests:** no entry takes both readings (a scan over closed-class entries whose category mentions
-  `cat_mp`); a °C sentence per consumer.
+- 30 VP adjuncts, `at`, `for`, `in`, `with` and `after` in the six finiteness variants, at
+  `cat_unit_forall(λu. ((S\NP)\(S\NP)) / cat_mp(u, value))`, sem `λu.λq.λV.λs. And(V(s), R(s, u, q))`.
+- 3 noun modifiers, `of`, `with` and `at`, at `cat_unit_forall(λu. cat_pp / cat_mp(u, value))`, sem
+  `λu.λq.λx. R(x, u, q)`.
+- 8 SemTerms serve them.
+- `after` joins `PREPOSITIONS_AND_CONJUNCTIONS`, so the importers stop seeding its content homonyms.
+  Nothing gave `after` an NP reading, so it also gets the six VP adjuncts and the noun modifier over
+  an NP that `within` has, over `prep_after`.
+- *`at` still has no VP adjunct over an NP (`stored at the core facility`); unchanged here.*
 
-**The corpus**
-- `experiments/parsing/quantities/`: CNL-register sentences derived from the WRN methods, each annotated
-  with its expected consumer. The methods text itself is gitignored and not CC-licensed.
-- A kernel test parses them over the bootstrap lexicon and a fixture of their content words, so grammar
-  coverage is checked without a database.
+**The prenominal and predicative measure phrase** (`measure_items`)
+- Each value reading of a quantity token also seeds `S[dcl,adj]\NP` with sem
+  `λx. has_quantity(x, U, q)`. The leaf `mod_lifts` make it prenominal (`10 μM etoposide`), and the
+  copula takes it (`the temperature was 37 °C`).
+- A numeral seeds no such item: `5 cells` stays a cardinal.
 
-**Sentence splitting inside parentheses**
-- `segment_sentences` (`dcg/segment.rs:74-113`) ends a sentence at a `.` inside a parenthesis when the
-  word before it is not in `ABBREV` (`:32-57`): `(Chr.`, `Extended Data Figs.`, inside URLs. Since
-  slice 2 the halves carry an unmatched-bracket `NonProse` token and do not parse; before, the first
-  half lost everything after the opener. Fixed here, where the CNL page and the quantity corpus measure
-  the effect: a `.` inside an open parenthesis does not end a sentence, or the abbreviations join
-  `ABBREV` — whichever the measurement favours.
+**The tokenizer, corrected on the corpus**
+- *A range read wrong.* Slice 4's numeral seeding turned `4–12% gels` into the cardinal `4` over
+  `12% gels`. An en-dash between digits now joins a range, one `NonProse` token (`is_range`), so the
+  sentence has no parse until ranges are in.
+- *`1,000g` split at the comma.* `groups_digits` required the next lexeme to be three digits;
+  it now requires it to start with exactly three, and `numeral_prefix` reads digit groups, so an
+  attached unit after a grouped numeral reads.
 
-**One reseed** for slices 3–5 (`scripts/reseed-lexicon-db.sh --umls-all`, the prerequisites in the
-reseed memory), then:
+**Sentence splitting** (`segment_sentences`), measured on the WRN methods and letter
+- Before: 401 segments, 12 with unbalanced brackets (six splits inside parentheses: three URLs,
+  two `Figs.`, one `Chr.`).
+- A `.`, `!` or `?` inside an open parenthesis or bracket does not end a sentence: −10 segments.
+- A `.` directly followed by a letter or digit is word-internal (`DepMap.org`, `pLKO.1`,
+  `Chr.2-2`, the DOI), and an initialism (`r.p.m.`, `s.e.m.`: every dot-separated part one letter)
+  is an abbreviation unless an uppercase start follows, generalizing the single-letter rule: −31.
+- `figs` joins `ABBREV`: −4.
+- After: 356 segments, 0 unbalanced. Every merge in the diff is a false boundary.
+- The `#[ignore]`d `list_the_wrn_segments_with_unbalanced_brackets` reruns the count.
+
+**Tests**
+- `quantities_in_the_parser.rs` uses the bootstrap entries (the fixture's own `at` is gone):
+  - one relation per preposition (`for 2 h`, `after 72 h`, `in 50 μl`, `with 10%`, stacked
+    `at 37 °C for 2 h`);
+  - `a dose of 5 mg/kg`;
+  - `10 μM etoposide` prenominal and `the temperature was 37 °C` predicative;
+  - `after the dose`;
+  - no closed-class entry takes a measure phrase at a reading variable: 33 take `value`;
+  - packed equals unpacked on nine sentences.
+- `verbalize.rs`: a measured value predicated, after a preposition, before its noun, and expanded.
+- `segment.rs`: a parenthetical, a host name, an initialism, `Figs.`.
+- `preprocess.rs`: ranges are non-prose; `1,000g` is one token. `quantity_tokens.rs`: `1,000g` has the
+  two `g` readings.
+
+**The corpus** (`experiments/parsing/quantities/`)
+- `corpus.tsv`: 28 CNL-register sentences derived from the WRN methods and D95's examples. A covered
+  row names the relations every reading contains and the values every reading renders; a gap row
+  names the missing construction and its owner.
+- `content-words.esl`: the nouns and verbs around them, in the importer's shapes and naming.
+- `kernel/tests/quantity_corpus.rs` checks it without a database: every word is known, 22 covered
+  rows pass (one reading each, two for the two `g` rows), and 6 gap rows still have no parse.
+- Gaps: a measure phrase modifying a PP (`72 h after transduction`), a pseudo-partitive
+  (`10 μg ml⁻¹ of colcemid`), `every N unit`, a range. And two that are not D95's: a fronted PP adjunct
+  and NP coordination as a preposition's object, neither of which parses without quantities.
+
+**Chain:** `ontology` and `closed-class` moved; `EXPECTED` is updated, with one history entry for
+D95's four layers.
+
+**Owed, with the user** — one reseed for slices 3–5 (`scripts/reseed-lexicon-db.sh --umls-all`, the
+prerequisites in the reseed memory), then:
 - `scripts/build-alignment-snapshot.sh`;
-- re-record the sense ranks and selections (finding 11; `experiments/parsing/README.md:12-176`);
-- the parse-rate run on the CNL page and the quantity corpus, and the re-established `baseline.json`;
+- re-record the sense ranks and selections (finding 11; `experiments/parsing/README.md:12-176`).
+  Segmentation changed, so recorded draws keyed by sentence text can miss;
+- the parse-rate run on the CNL page and on the quantity corpus (its README gives the command), and
+  the re-established `baseline.json`. The CNL page (`first-page-cnl-v3.txt`) is not on this machine;
 - the style guide's 🔜 quantity rows made current (finding 7).
 
 ## Slice 6 — arguments and standards, on evidence
