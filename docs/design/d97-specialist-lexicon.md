@@ -1,7 +1,8 @@
 # D97 — The SPECIALIST Lexicon as the lexicon's syntactic authority
 
 **Status: proposed** (2026-09-27). Measured against the imported lexicon at the lexicon level; the
-parse-level measurement is slice 1. Decisions 2, 3 and 4 are taken (2026-09-27); 1 and 5 are open.
+parse-level measurement is slice 1. Decisions 2, 3 and 4 are taken (2026-09-27), and 5 for verbs
+whose noun names a UMLS concept; 1 and the rest of 5 are open.
 
 ## The gap
 
@@ -141,15 +142,35 @@ the countability list is now, and adds syntactic facts to the entries they alrea
 
 `infcomp` and `ingcomp` stay deferred, as WordNet's control and raising frames are.
 
-### The lemmas no other source has: a small importer
+### A verb no other source has is the verb sense of its concept
 
-For a verb (or adjective) SPECIALIST has in a category neither WordNet nor UMLS has it in —
-`electroporate` — a new importer mints one sense-less predicate per lemma and frame
-(`specialist:electroporate_t : Entity -> Entity -> Prop`), with entries `in_lexicon =
-lexicon:specialist`, a `lexicon:Lexicon` resource carrying the release, and a place in the
-`LexiconProfile`. Where the verb's `nominalization` names a noun that is a UMLS atom
-(`electroporation` → C0206691), the predicate is linked to that concept; the link is recorded, not
-used as the `sem` (decision 5).
+For a verb SPECIALIST has and WordNet does not — `electroporate` — the entries are **verb senses of
+the UMLS concept its nominalization names** (decision 5). SPECIALIST links the verb to its noun by
+entry id (`nominalization=electroporation|noun|E0218332`), and the noun, in any of its spellings, is
+an atom of the concepts that carry it: `electroporation` of C0206691 (the procedure) and C0678054
+(Electroporation Therapy). Each concept gets one verb sense per frame, a predicate
+`Entity -> Entity -> Prop` whose sense key is the concept's (`umls:C0206691`). A noun that names two
+concepts gives the verb two senses, as a WordNet verb has one per synset, and the ranker chooses.
+
+The UMLS importer emits these, reading SPECIALIST at conversion as it reads the countability list,
+with `in_lexicon = lexicon:umls`: the sense is UMLS's, the syntax SPECIALIST's.
+
+How the 4,390 verbs only SPECIALIST has resolve, through their nouns and those nouns' spelling
+variants, against the concepts the UMLS importer emitted:
+
+| The verb's noun | Verbs | Examples |
+|---|---|---|
+| names one UMLS concept | 428 | `transfect` (C0040669), `downregulate`, `upregulate`, `alkylate` |
+| names several (median 2, max 5) | 92 | `electroporate`, `lyse`, `phosphorylate` (2 each) |
+| names no UMLS concept, but is a WordNet noun | 80 | `calcinate`, `cajole` |
+| names no concept in either source | 2,345 | `absolutise`, `acetoacetylate`, `acetolyse` |
+| — the verb has no nominalization | 1,445 | `counterstain`, `acidize`, `afterload` |
+
+Of the WRN texts' seven verbs WordNet lacks, six resolve; `counterstain` has no nominalization.
+
+Verbalization recognises a verb by the WordNet importer's atom name (`v{offset}_{frame}`,
+`dcg/verbalize.rs`), so a verb sense of a UMLS concept needs it to recognise a verb by its category
+or its entry instead; slice 5 changes that.
 
 ### The join is deterministic; the concept alignment is unchanged
 
@@ -229,9 +250,11 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    `cat_n(C, mass)` entry. Today 27,207 WordNet lemmas carry 43,474 mass entries; SPECIALIST adds
    12,863 lemmas and about 14,665 entries (one per existing count entry). The UMLS importer takes the
    same list, through head inheritance, so its mass entries move too; not yet measured.
-5. **The sense-less predicate.** What `electroporate` denotes: a predicate of its own, linked to the
-   UMLS procedure through the nominalization, or an existential over the procedure concept. The first
-   is what the grammar consumes today.
+5. **What a verb only SPECIALIST has denotes — decided where its noun names a UMLS concept: a verb
+   sense of that concept** (520 verbs; "A verb no other source has is the verb sense of its
+   concept"). **Open for the other 3,870**: the 80 whose noun is a WordNet noun and no UMLS atom
+   (the verb sense of the WordNet synset, by the same rule?), and the 3,790 with no concept to
+   attach to (no entry, or a sense-less predicate that records SPECIALIST's syntax alone).
 
 ## Slices
 
@@ -247,7 +270,9 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
 3. **Adjectives and nouns**: eigenius#263's attested set.
 4. **Object + PP**: the `((S\NP)/cat_pp_arg(p))/NP` category, its passive (`were treated with
    etoposide`), and the importer's frames 20/21.
-5. **The SPECIALIST importer** for lemmas no other source has, and the nominalization link.
+5. **Verb senses of concepts**: the UMLS importer emits them through SPECIALIST's nominalizations
+   (decision 5), and verbalization recognises a verb by its category or entry rather than its atom
+   name.
 6. **Countability**: the union of Wiktionary and SPECIALIST (decision 4).
 
 Slices 2–6 change the imported lexicon; they share one reseed and one re-adjudication of the pins
