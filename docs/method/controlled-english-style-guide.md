@@ -11,10 +11,11 @@ carried is superseded — the corpus now parses 62/62 with `grammar-gap 0` and `
 exists. **Corrections applied in the same pass are marked ⚠ below.** This is an authoring guide, so it
 is expected to drift as the grammar grows; check a claim against the baseline before relying on it.*
 
-*Revised `2026-09-20` for measured quantities. **Those rules are marked 🔜 and are NOT yet live** —
-D93 (units of measure) and D95 (quantities in the parser) are specifications, not implementations,
-and this guide does not state aspiration as capability. Until they land, the 🔜 rules describe how to
-author for the parser that is coming; the ⚠ and unmarked rules describe the one that exists.*
+*Revised `2026-09-20` for measured quantities, and `2026-09-27` when D93 (units of measure) and D95
+slices 1–5 (quantities in the parser) made them parse. The claims about them were measured over the
+full lexicon (`wordnet-umls-aligned-2026-09-27`, cap-only). **What is still marked 🔜 is NOT live**: a
+temperature or any other difference needs D95 slice 7. This guide does not state aspiration as
+capability.*
 
 ## Purpose & posture
 
@@ -43,7 +44,8 @@ Two rules sit above everything else:
    apoptosis.` Present tense (`affects`/`affect`) or simple past (`affected`, `was`/`were`).
 2. **Predicate nominals & adjectives.** `WRN is a vulnerability.` `WRN is a drug target.` `The
    dependency is selective.` Copula present/past: `is`/`are`/`was`/`were`.
-3. **Determiners.** `a`/`an`/`the`/`every`/`each`/`all`/`some`/`no`, and the cardinals `two`…`ten`.
+3. **Determiners.** `a`/`an`/`the`/`every`/`each`/`all`/`some`/`no`, the cardinals `one`…`ten`, and
+   digits (`1 gene`, `3 genes`), which read as the word forms do.
    - ⚠ **Bare plurals and bare mass nouns now CLOSE, not open.** `Cancers exhibit defects.` composes as
      a kind predication (`kind_of`), not as a deferred quantifier. Prefer the bare form for
      kind-level claims — it is the shorter and the closed one.
@@ -76,14 +78,16 @@ Two rules sit above everything else:
 11. **Transitional adverbs** (sentence-initial): `Thus,` `Therefore,` `Hence,` `Moreover,`
     `Similarly,` `Notably,` — transparent (they don't change the claim).
 12. **Light verbs** that exist in the lexicon, e.g. `gives rise to`.
+13. **Measured quantities** after a preposition, before a noun, or after the copula: `kept at
+    37 °C for 1 h`, `10 μM etoposide`, `The incubation was 1 h.` See "Measured quantities" below.
 
 ## DON'T — and how to rewrite it
 
 | Avoid (journal style) | Why | Rewrite recipe |
 |---|---|---|
 | **Test statistics** (`n = 37`, `P = 4.2 × 10⁻¹³`, `Q = 4.8 × 10⁻²⁴`) | Out of the claim **by design** — a statistic qualifies a claim, it is not one. Routed to a D52 record. | State the **qualitative** claim; the statistic lives elsewhere. `… showed greater dependence …`, not `(n = 37; P = …)`. Unchanged by D93/D95. |
-| **Measured quantities** (`37 °C`, `1 h`, `5 ml`, `0.2 mg`, `15%`) | 🔜 Today these are dropped like statistics, so the claim loses them. Under D93/D95 they become part of the claim. | **Today:** state qualitatively, or keep the quantity and record the gap (R2 — a faithful un-parsed claim beats a parsed distorted one). **Once D95 lands:** write the quantity; see "Measured quantities" below. |
-| **Ranges and intervals** (`20–30%`, `15–18`, `45–60%`) | Deferred in D95; the en-dash/hyphen distinction that separates a range from a catalogue number is not built. | Keep the range and record the gap. Do **not** collapse it to one endpoint or to a midpoint — that changes the claim, which R2 forbids. |
+| **A quantity with nothing to take it** (`purified 72 h after transduction`, `contained 4 μg`, `10 μg ml⁻¹ of colcemid`, `every 3 days`) | A quantity is not a noun phrase. It composes only after a preposition that takes one, before a noun, or after the copula (DO §13). A quantity modifying a PP, a verb's object, a pseudo-partitive and `every N unit` have no entry (D95). | Put it where it composes: `treated with 10 μg ml⁻¹ colcemid` (dropping the `of` changes nothing). Where that changes the claim — `72 h after transduction`, `every 3 days` — keep it and record the gap (R2). |
+| **Ranges and intervals** (`20–30%`, `15–18`, `45–60%`) | Deferred in D95, with the interval type they need. Two numerals joined by an en-dash are read as one non-prose token, so the sentence reports NON-PROSE rather than a parse of one endpoint. A hyphen (`926-68021`, a catalogue number) is not a range. | Keep the range and record the gap. Do **not** collapse it to one endpoint or to a midpoint — that changes the claim, which R2 forbids. |
 | **Parenthetical asides / inline abbreviations** (`(MSI)`, `(PARP-1)`, `(Fig. 1a)`) | Asides are dropped; the parenthetical can't be a claim. | Introduce an abbreviation in its **own** sentence, or just use one form consistently. Drop figure/citation refs. |
 | **Telegraphic caption annotations** (`Scale bar, 50 μm`; `pH 7.5`; `(1,200 V, 20 ms, 2 pulses)`) | Not sentences — a label and its value, with no verb. Figure legends and instrument settings are written in an elliptical register the sentence grammar does not cover. | Expand to the sentence it abbreviates: `The scale bar is 50 μm.` A parameter list becomes one sentence per parameter. This is **register**, not content — nothing is added or dropped, so R2 is satisfied. |
 | **Em-dash appositives** (`—an interaction…—`) | Not covered; the dash content is dropped. | Split into separate sentences: `Synthetic lethality is an interaction between two genetic events. …` |
@@ -95,31 +99,41 @@ Two rules sit above everything else:
 | **Possessive ellipsis / heavy gapping**, fronted reduced clauses with complex complements | Limited; gapping beyond same-type `but not` isn't covered. | Use an explicit subject and a full verb in each clause. |
 | **`and/or`** | Not a token; collapsing it to `and` overstates (requires *both*). | Write **`or`** — `logic:Or` is **inclusive** (true if either or both), which is exactly what `and/or` means. (Faithfulness rule, not just style — `and/or → and` is a meaning change; `and/or → or` is meaning-preserving.) |
 
-## 🔜 Measured quantities (D93 / D95 — not yet live)
+## Measured quantities (D93 / D95)
 
-A measured quantity is `⟨numeral⟩ ⟨unit symbol⟩`, and under D95 it becomes one chart item denoting a
-value, so it composes as an ordinary noun phrase: a preposition's object (`at 37 °C`, `for 1 h`), a
-nominal modifier (`a 24 h incubation`), or a predicate (`The incubation was 1 h.`).
+A measured quantity is `⟨numeral⟩ ⟨unit symbol⟩`. It is read as one token and converted to base units
+(D93): `37 °C` is 310.15 K, `1 h` is 3600 s. It is **not a noun phrase**, so it composes only where
+something takes it:
+
+- **after a preposition**: `at`, `for`, `in`, `with` and `after` as verb adjuncts (`kept at
+  37 °C for 1 h`, `resuspended in 50 μl`, `harvested after 72 h`), and `of`, `with` and `at` after a
+  noun (`a dose of 5 mg/kg`, `a volume of 2,000 mm³`);
+- **before a noun**: `10 μM etoposide`, `a 24 h incubation`, `10% FBS`;
+- **after the copula**: `The incubation was 1 h.`, `The temperature was 37 °C.`
+
+It cannot be a subject or a verb's object: `The cells contained 4 μg.` has no parse; `The medium
+contained 2 μg ml⁻¹ puromycin.` does.
 
 1. **Write the symbol, not the spelled-out unit.** `5 ml`, not `5 millilitres`. The symbol is what
    the unit parser reads; the spelled form is ordinary English words and parses as a different
    thing entirely.
 2. **Put a space between the numeral and the symbol.** `37 °C`, `5 ml`, `625 mg`. This is the SI's
    own convention, and it makes the span unambiguous. The exceptions the SI itself makes are `%`
-   and the angle symbols (`50%`, `90°`), which close up.
-3. **Write compound units with a slash, one solidus only.** `mg/dL`, `ml/min`. Not `mg/ml/h` —
-   more than one solidus is ambiguous without brackets, and the SI says so. For anything deeper,
-   use negative powers: `mg ml⁻¹ h⁻¹`.
-4. **Express a temperature DIFFERENCE in kelvin, never in °C.** `rose by 5 K`, not `rose by 5 °C`.
-   The degree Celsius is equal in magnitude to the kelvin, so this is exact and loses nothing — and
-   it sidesteps the one genuine ambiguity in the unit system: a bare °C is read as a *point*
-   (D93), so `by 5 °C` would be mis-normalised by 273.15. Use °C for a temperature, K for a change
-   in temperature.
-5. **Disambiguate `g`.** The symbol is both the gram and standard gravity, and only context
-   separates them. Write `931 × g` or `931g` for centrifugal force and `931 g` for mass — and
-   prefer rephrasing to `931 times gravity` where the sentence allows, since the ranker resolving
-   this correctly is not something to rely on in authored text.
-6. **One quantity per role.** `incubated at 37 °C for 1 h` is fine — two quantities filling two
+   and the angle symbols (`50%`, `90°`), which close up. A closed-up form (`931g`) is read too, but
+   a word with the same spelling competes with it (`5A`, a culture medium, is also 5 A).
+3. **Write compound units with a slash, `per`, or negative powers.** `mg/dL`, `mg per kg`,
+   `μg ml⁻¹`. One solidus only: `mg/ml/h` is ambiguous without brackets, and the SI says so; write
+   `mg ml⁻¹ h⁻¹`. A factor after a space needs its exponent: `μg ml⁻¹`, not `μg ml`.
+4. 🔜 **A difference has no consumer yet.** What takes a quantity decides whether it is a value or a
+   difference (D95): `at 37 °C` is the temperature 310.15 K, and a difference in °C is read without
+   the 273.15 offset, so `5 °C` and `5 K` state the same change. But nothing takes a difference until
+   D95 slice 7: `The temperature rose by 5 K.` has no parse. Keep a change as written and record the
+   gap.
+5. **Write `RCF` for centrifugal force.** `931g` and `931 g` are each read two ways, as the gram and
+   as standard gravity, and the reading choice is left open (D93). `931 RCF` is standard gravity
+   only. Do not write `931 × g` (`×` is an operator, so the sentence is non-prose) or `931 times
+   gravity` (no parse: `at` has no noun-phrase adjunct entry).
+6. **One quantity per role.** `kept at 37 °C for 1 h` is fine — two quantities filling two
    different roles. `between 37 °C and 39 °C` is a range, which is deferred (see the DON'T table).
 
 **What this does not change.** A statistic is still not a quantity. `n = 37` counts samples and
@@ -158,6 +172,11 @@ import provides them. ⚠ Named *conditions* (`Lynch syndrome`, `MMR deficiency`
 D70 gave them `lexicon:Num::name`, which grants bare standing without claiming they are mass nouns —
 so write them as they appear in prose, without a determiner.
 
+⚠ **A verb the lexicon has only as intransitive has no passive.** WordNet lists both senses of
+`incubate` as intransitive, so `The cells were incubated.` has no parse, with or without `at 37 °C`;
+`electroporate` is not a WordNet verb at all. Until the lexicon records these verbs' objects, write a
+verb it has as transitive: `The cells were kept at 37 °C for 1 h.` parses.
+
 ## Worked example (one WRN sentence)
 
 **Original (journal):** *"MSI cancer models required the helicase activity of WRN, but not its
@@ -169,7 +188,7 @@ exonuclease activity."*
 
 Two same-shape SVO clauses; the contrast is preserved as an explicit negation; both compose.
 
-## 🔜 Worked example (one WRN methods sentence)
+## Worked example (one WRN methods sentence)
 
 **Original (journal):** *"Experiments were performed in triplicate by adding the appropriate volume
 of lentivirus to integrate vectors that encoded the desired sgRNA and the plates were spun at 931g
@@ -180,12 +199,13 @@ Two claims, a relative clause, a coordination, and three quantities — one of t
 **Controlled:**
 > Experiments were performed in triplicate.
 > The vectors encoded the desired sgRNA.
-> The plates were spun at 931 times gravity for 2 h at 30 °C.
+> The plates were spun at 931 RCF for 2 h at 30 °C.
 
-R1 splits the compound sentence; the relative clause becomes its own claim; `931g` is rephrased
+R1 splits the compound sentence; the relative clause becomes its own claim; `931g` becomes `931 RCF`
 because the symbol is ambiguous between the gram and standard gravity (rule 5). The two unambiguous
 quantities stay as written, filling two roles of one event — which is the case the methods register
-produces constantly and the results register almost never does.
+produces constantly and the results register almost never does. All three sentences parse; the
+third has 6 readings, against 12 with `931g`.
 
 **What is still lost:** *"in triplicate"* is a replication count, which is D52's, not a quantity.
 Do not rewrite it as `3 replicates` to make it look like one.
@@ -196,9 +216,9 @@ A passage is "parser-faithful" when every sentence yields a **closed or open** k
 (no GRAMMAR-GAP), and the set of parses captures the passage's factual claims. The experiment measures
 the closed/open/gap distribution on the rewritten WRN page against the original.
 
-🔜 **The tracked corpus does not exercise quantities.** The CNL page is results prose and contains
-one unit in 2,738 words; the methods material contains 35 in 4,912. So the current gates certify a
-register that excludes the very thing D93/D95 add, and a quantity-bearing corpus with a
-re-established baseline is part of landing them (D95). A quantity gap and a syntax gap must be
-distinguishable in that report — the methods register is where the parser is weakest, and
-conflating the two would make the measurement useless.
+**Quantities have their own corpus.** The CNL page is results prose and contains one unit in 2,738
+words; the methods material contains 35 in 4,912. `experiments/parsing/quantities/` holds 28
+sentences derived from the WRN methods. Each names the relations its readings must contain, or, for
+a gap, the construction it lacks; `kernel/tests/quantity_corpus.rs` checks them without a database,
+and its README records the full-lexicon run. A range reports NON-PROSE and each gap row names its
+construction, so a quantity gap stays distinguishable from a syntax gap.

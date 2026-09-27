@@ -33,7 +33,7 @@ exception, with two readings each, gram and standard gravity (D93). The 6 gap ro
 | `every N unit` | out of v1 (D95 Scope) |
 | a range, `4–12% gels` (one non-prose token) | out of v1 (D95 Scope) |
 | a fronted PP adjunct, `After 24 h, …` | pre-existing: `After the dose, …` has no parse either |
-| NP coordination as a preposition's object | pre-existing: `with the etoposide and the hydroxyurea` has no parse either |
+| a coordinated NP as an adjunct preposition's object | pre-existing: `treated with the dose and the diet` has no parse either; a verb that governs its `with` takes the group |
 
 ## Over the full lexicon
 
@@ -46,3 +46,14 @@ scripts/measure-parse-rate.sh --page /tmp/quantity-page.txt
 
 The WordNet and UMLS senses of the content words replace the fixture's single sense, so the reading
 counts there measure sense ambiguity, not the grammar.
+
+Measured `2026-09-27`, cap-only, at `6a3eabf` on `wordnet-umls-aligned-2026-09-27`: of 28 units,
+3 encoded, 17 ambiguous (2 to 12 readings, and 200 for the `and with` row), 7 grammar gaps, 1
+non-prose (the range).
+
+- The grammar gaps are 4 of the gap rows and 3 covered rows whose verbs the lexicon lacks in the
+  passive. WordNet lists `incubate` as intransitive only (both senses, frames 1 and 2), so
+  `The cells were incubated.` has no parse; it has no verb `electroporate`. `The cells were kept at
+  37 °C for 1 h.` parses (9 readings).
+- The coordination gap row parses (2 readings): the imported `treat` governs `with`, and a governed
+  argument takes a coordinated group where an adjunct does not.

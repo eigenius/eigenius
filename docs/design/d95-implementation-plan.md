@@ -411,7 +411,7 @@ tests read magnitudes from the sem's debug form; the unit is carried by the cate
 **Chain:** `units`, `lexicon` and `closed-class` moved; `EXPECTED` is updated. The reseed waits for
 slice 5.
 
-## Slice 5 — consumers, the corpus, one reseed — code built, reseed owed
+## Slice 5 — consumers, the corpus, one reseed — built and reseeded; baselines owed
 
 **Relations** (`ontologies/ontology/ontology.esl`)
 - `prep_{at,for,in,with,after,of}_value : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop`,
@@ -486,19 +486,28 @@ slice 5.
   rows pass (one reading each, two for the two `g` rows), and 6 gap rows still have no parse.
 - Gaps: a measure phrase modifying a PP (`72 h after transduction`), a pseudo-partitive
   (`10 μg ml⁻¹ of colcemid`), `every N unit`, a range. And two that are not D95's: a fronted PP adjunct
-  and NP coordination as a preposition's object, neither of which parses without quantities.
+  and a coordinated NP as an adjunct preposition's object, neither of which parses without quantities.
 
 **Chain:** `ontology` and `closed-class` moved; `EXPECTED` is updated, with one history entry for
 D95's four layers.
 
-**Owed, with the user** — one reseed for slices 3–5 (`scripts/reseed-lexicon-db.sh --umls-all`, the
-prerequisites in the reseed memory), then:
-- `scripts/build-alignment-snapshot.sh`;
+**Reseeded** (`2026-09-27`, at `6a3eabf`): `wordnet-umls-2026-09-27` and
+`wordnet-umls-aligned-2026-09-27`. WordNet: 466,117 entries, 43,474 of them mass entries from the
+countability lexicon, 92 withheld on closed-class surfaces.
+
+**Measured over the full lexicon**, cap-only:
+- The quantity corpus: 3 encoded, 17 ambiguous, 7 grammar gaps, 1 non-prose. Three of the grammar
+  gaps are covered rows whose verbs the lexicon lacks in the passive: WordNet has `incubate` only as
+  intransitive, and no verb `electroporate`. One gap row parses, because the imported `treat` governs
+  `with`. The corpus README has the breakdown.
+- The style guide's quantity rules, checked sentence by sentence and made current (finding 7); only
+  differences stay 🔜, for slice 7.
+
+**Still owed, with the user:**
 - re-record the sense ranks and selections (finding 11; `experiments/parsing/README.md:12-176`).
   Segmentation changed, so recorded draws keyed by sentence text can miss;
-- the parse-rate run on the CNL page and on the quantity corpus (its README gives the command), and
-  the re-established `baseline.json`. The CNL page (`first-page-cnl-v3.txt`) is not on this machine;
-- the style guide's 🔜 quantity rows made current (finding 7).
+- the parse-rate run on the CNL page and the re-established `baseline.json`. The CNL page
+  (`first-page-cnl-v3.txt`) is not on this machine.
 
 ## Slice 6 — arguments and standards, on evidence
 

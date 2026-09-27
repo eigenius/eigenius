@@ -19,7 +19,7 @@ The mice received a dose of 5 mg/kg.	prep_of_value	1/200000	D95: a dose of 5 mg/
 The tumours reached a volume of 2,000 mm³.	prep_of_value	1/500000 m^3	methods: maximal tumour volumes of 2,000 mm³
 The cells were treated with 10 μM etoposide.	prep_with has_quantity	1/100 m^-3·mol	methods: treated with 10 μM etoposide
 The cells were treated with 10 μM etoposide and with 1 mM hydroxyurea.	prep_with has_quantity	1/100 m^-3·mol;1 m^-3·mol	methods: with 10 μM etoposide and 1 mM hydroxyurea, the preposition repeated
-The cells were treated with 10 μM etoposide and 1 mM hydroxyurea.	gap	NP coordination as a preposition's object: no parse without quantities either (`with the etoposide and the hydroxyurea`); not D95	methods: with 10 μM etoposide and 1 mM hydroxyurea
+The cells were treated with 10 μM etoposide and 1 mM hydroxyurea.	gap	a coordinated NP as an adjunct preposition's object: no parse without quantities either (`treated with the dose and the diet`); over the full lexicon `treat` governs `with` and it parses; not D95	methods: with 10 μM etoposide and 1 mM hydroxyurea
 The medium was supplemented with 10% FBS.	prep_with has_quantity	1/10	methods: medium supplemented with 10% fetal bovine serum
 The cells were fixed with 3% formalin for 30 min.	prep_with has_quantity prep_for_value	3/100;1800 s	methods: fixed with 10% formalin for 30 min
 The medium contained 2 μg ml⁻¹ puromycin.	has_quantity	1/500 m^-3·kg	methods: medium containing 2 μg ml⁻¹ puromycin

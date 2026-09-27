@@ -356,8 +356,8 @@ numeric claim is lost… state the qualitative claim"):
 - a 🔜 section on measured quantities (`:98-127`), and a note that a quantity-bearing corpus with a
   re-established baseline is part of landing them (`:199-204`).
 
-What remains is slice 5's: make the 🔜 rows current once quantities parse (implementation plan,
-finding 7).
+Slice 5 made the rows current (`2026-09-27`), measured over the full lexicon. Only differences stay
+🔜, for slice 7.
 
 ## Settled: the category of a quantity and its consumers
 
