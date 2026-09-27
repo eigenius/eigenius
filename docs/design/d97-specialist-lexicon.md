@@ -179,10 +179,27 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    PP-oblique `prep_any` beside SPECIALIST's named preposition), SPECIALIST's frame joins it. Both
    entries carry the sense's axiom, so they yield the same sem wherever both apply; slice 1 measures
    the readings that remain.
-3. **The preposition inventory.** `lexicon:Prep` names 13; SPECIALIST's frames name 57. Extend the
-   enum to the prepositions the closed class has entries for (`by`, `between`, `after`, `among`,
-   `onto`, `through`, …) and map the rest to `prep_any`, or extend it to all 57. `by` needs care: the
-   closed class's `by_agent` already reads the passive agent.
+3. **The preposition inventory.** `lexicon:Prep` names 13. Over verbs, adjectives and nouns,
+   SPECIALIST records 30,950 governed prepositions (a record × a preposition), 14,174 of them on a
+   WordNet lemma; 4,963 (2,717 on WordNet) name one of 53 prepositions outside the enum:
+
+   | Outside the enum | Cases | On WordNet | Closed-class entry |
+   |---|---|---|---|
+   | `by` | 4,070 | 2,077 | `by_agent`, `by_nmod` |
+   | `between`, `after`, `among`, `without`, `within` | 252 | 134 | yes |
+   | `over`, `onto`, `through`, `per`, `around`, `off`, `towards`, `under`, … (32) | 625 | 494 | none |
+   | multiword: `out of`, `due to`, `according to`, `as to`, `in terms of`, … (16) | 97 | 58 | none |
+
+   - `by` is 82% of them, and 3,921 of its 4,070 are noun complements — the agent of a
+     nominalization (`abolition by`, `activation by`), the relation `by_agent` reads on a passive.
+     Only 26 verbs take a `by` argument (`abide by`) and 40 an object and a `by` PP (`multiply X by
+     Y`).
+   - A preposition with no closed-class entry parses in no role today, so naming it in the enum
+     alone changes no parse.
+   - In the WRN texts and the quantity corpus, a word is directly followed by a preposition
+     SPECIALIST says it governs 253 times; 246 are inside the enum. The other 7: `by` 4 (`activation
+     by`, `analysed by`, `caused by`, `study by`), `between` 2 (`interaction between`,
+     `relationship between`), `than` 1 (`more than`, which the comparative reads).
 4. **Countability — decided: both.** A lemma either source flags uncountable gets the additive
    `cat_n(C, mass)` entry. Today 27,207 WordNet lemmas carry 43,474 mass entries; SPECIALIST adds
    12,863 lemmas and about 14,665 entries (one per existing count entry). The UMLS importer takes the
