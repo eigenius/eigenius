@@ -1,8 +1,8 @@
 # D98 — Qualifiers as logical operators
 
 **Status: proposed** (2026-09-28). Supersedes the inert/measurement split of
-`docs/notes/d62-adverb-semantics-decision.md` for the qualifiers below. Decisions 1–4 are open, their
-proposals revised 2026-09-29; decision 5 is decided (2026-09-29).
+`docs/notes/d62-adverb-semantics-decision.md` for the qualifiers below. Decisions 1–4 and 6 are open,
+revised 2026-09-29; decision 5 is decided (2026-09-29).
 
 ## The gap
 
@@ -36,7 +36,7 @@ Counted in the PMC author manuscript (`data/slices/PMC6580861.txt`), whole words
 | `respectively` | 29 | distributive pairing |
 | `preferentially` | 8 | contrastive |
 | `alone` | 4 | exclusive |
-| `only` | 3 | exclusive |
+| `only` | 3 | restrictive: domain, quantity (not causal) |
 | `selectively` | 3 | contrastive |
 | `specifically` | 3 | discourse (all three open a methods elaboration) |
 | `significantly` | 2 | statistical |
@@ -60,48 +60,83 @@ Notation: `P` a predicate, `a` the entity the qualifier is about, `=` propositio
 `Id(A, y, a)` at the domain `A` of `P` (decision 5 — `lexicon:Entity` for the paper's relations),
 `≻` "stronger than" on a scale, `d(·)` a degree.
 
-### Exclusives: `only`, `solely`, `alone`; scalar `merely`, `just`, `simply`
+### Causal exclusives: `solely`, `alone`, `not fully`, `not merely / just / simply` a result of
 
-An exclusive has two parts (Horn 1969): what it **presupposes** — `a` has the property — and what it
-**asserts** — nothing else does.
+Every exclusive the paper uses qualifies a causal or explanatory predicate — `responsible for`,
+`lead to`, `account for`, `explain`, `a result` or `a consequence of`. They are one construction, and
+what they exclude is not another individual but another way for the outcome to come about.
 
-- `only a P` / `a solely P` / `a alone P`:
-  presupposes `P(a)`; asserts `∀y. P(y) → y = a`.
-- **Negation targets the assertion; the presupposition survives.** `a is not solely P` is
-  `P(a) ∧ ¬∀y. (P(y) → y = a)`, that is **`P(a) ∧ ∃y. P(y) ∧ ¬(y = a)`**.
-  - `p53 activity … is not solely responsible for WRN dependence` (`body.p8`) =
-    `responsible(p53 activity, WRN dependence) ∧ ∃y. responsible(y, WRN dependence) ∧ ¬(y = p53
-    activity)`: p53 activity is one of the causes, and there is another. That is what `contributes
-    to` in the same sentence says.
-- The scalar exclusives rank alternatives rather than individuals: `a is merely Q` presupposes `Q(a)`
-  and asserts `¬∃R ≻ Q. R(a)` — nothing stronger than `Q` holds of `a`.
-  - `DSBs … are not merely a consequence of cell death` (`body.p10`) = `consequence(DSBs, cell death)
-    ∧ ∃R ≻ consequence. R(DSBs)`. The paper names the stronger alternative in the same sentence:
-    `DSBs precipitate the lethal effects of WRN loss` — a cause.
-  - `not just a consequence of CRISPR/Cas9 activity` (`body.p9`) and `not simply a result of dMMR`
-    (`body.p3`) have the same form.
-- **`alone` restricts to one contributor, without the others.** `one event alone does not [lead to
-  cell death]` (`abstract.p0`) and `hypermutability alone cannot account for WRN dependency`
-  (`body.p12`) say that `a`, with the alternatives absent, does not suffice. Its alternatives are the
-  co-occurring factors the sentence or its context names (the two genetic events; dMMR and the other
-  genomic lesions). The chain's opaque `ontology:sole(x)` stands for this today.
+Write `R(C, B)` for "the factors in the condition `C`, jointly, `R` the outcome `B`", where `R` is the
+sentence's causal predicate. A condition is a set of factors (decision 6).
+
+- `A is solely responsible for B` **presupposes** that `A` contributes to `B` — `A` belongs to some
+  condition that suffices — and **asserts** that `A` is the whole cause: `A` suffices alone, and
+  every condition that suffices includes `A`.
+
+  ```
+  presupposed:   ∃C. A ∈ C ∧ R(C, B)                     -- A contributes to B
+  asserted:      R({A}, B) ∧ ∀C. R(C, B) → A ∈ C          -- A is the whole cause
+  ```
+
+- **Negation targets the assertion, and its negation has exactly two disjuncts** — the two ways for
+  `A` not to be the whole cause:
+
+  ```
+  not solely:    ¬R({A}, B)   ∨   ∃C. R(C, B) ∧ A ∉ C
+                 └ joint ─┘       └─ alternative ─┘
+  ```
+
+  - **Joint cause:** `A` alone does not suffice; `A` together with other factors does.
+  - **Alternative cause:** some condition that does not involve `A` suffices on its own.
+
+  This is one meaning, not two readings. `not solely` asserts that one of the two holds; the paper
+  then says which — in the same sentence, or by the experiment — and the parse carries that as a
+  further conjunct. Nothing is left for the parser or the ranker to choose.
+- **`alone` asserts the joint disjunct directly**, without the disjunction: `A alone does not lead to
+  B` is `¬R({A}, B)`.
+- **`not fully explain` is `not solely`.** An explanation is full when it is the whole cause.
+- **`not merely / just / simply a result (consequence) of X` is `X is not solely responsible`,** with
+  the arguments in the other order. The paper does not use the scalar reading (*nothing stronger than
+  `Q` holds*) that an earlier draft of this document gave these.
+
+The paper's uses (Nature text):
+
+| The paper says | Disjunct | How the paper says which |
+|---|---|---|
+| synthetic lethality: *the co-occurrence of these two genetic events leads to cell death, but each event alone does not* | joint | by definition |
+| *p53 activity contributes to, but is not solely responsible for, WRN dependence* | joint | `contributes to` |
+| *WRN dependency is not simply a result of MMR deficiency but may require specific lineages and/or a stronger mutation phenotype* | joint | co-factors named |
+| *hypermutability alone cannot account for WRN dependency* | joint | `alone` |
+| *MMR deficiency alone contributes to … although it does not fully explain this interaction, suggesting that genomic lesions that accumulate with MSI promote WRN dependence* | joint | co-factor named |
+| *DSBs are not just a consequence of CRISPR–Cas9 activity* | alternative | shRNA against WRN, with no CRISPR, also raises ɣH2AX |
+| *DSBs cause the lethal effects of WRN loss and are not merely a consequence of cell death* | alternative | DSBs arise upstream of death |
+
+Where the sentence names the co-factor or the alternative, it fills `C`; where it does not, `C` stays
+existential. That is the contrast class's situation (decision 3). The chain's opaque
+`ontology:sole(x)` stands for this whole construction today.
+
+**Not causal: `only`.** The paper's three uses restrict a domain — *within common-MSI lineages only*,
+*MSI cell lines from lineages in which MSI were common only* — or a quantity — *only a few DSBs*. The
+first is `∀y. P(y) → X(y)` over the domain the sentence ranges over; the second is scalar over a count.
+Neither is the individual exclusive (*only John came*: `∀y. P(y) → Id(A, y, a)`, decision 5), which
+the paper does not use.
 
 **What the kernel lacks:** equality in lexicon meanings. The kernel has propositional equality
 (`Exp::Id`, in Prop since D46) and the type-expression encoding has an `Id` constructor, but the ESL
 term encoder (`esl/compile.rs`, `encode_type_expr_to_value`) produces only `Lam`, `Sig`, `Pi` and
 `App`: no closed-class meaning can say `y = a`. Measured: a SemTerm containing `Id(lexicon:Entity,
-y, x)` compiles and is rejected by the felicity gate.
+y, x)` compiles and is rejected by the felicity gate. In the paper's exclusives equality enters only
+through the alternative disjunct: `A ∉ C` compares factors. The joint disjunct and `alone` need none.
 
-### Completeness and degree: `fully`, `partially`, `substantially`
+### Degree: `partially`, `substantially`, and `fully` with a non-causal predicate
 
-These say how far along a scale a predicate holds (Kennedy & McNally 2005).
+These say how far along a scale a predicate holds (Kennedy & McNally 2005). With a causal or
+explanatory predicate `fully` is not a degree: `does not fully explain` is the causal exclusive above.
 
 - A **closed-scale** predicate holds to an extent `d ∈ [0, 1]`.
-  - `fully P`: `d(P) = 1`. `partially P`: `0 < d(P) < 1`. `not fully P`: `d(P) < 1`.
-  - `dMMR alone contributes to but does not fully explain this synthetic lethal interaction`
-    (`body.p14`) = `0 < d(explain, dMMR, the interaction) < 1`: the first conjunct is `contributes
-    to`, the second `does not fully explain`, and `alone` restricts the extent to dMMR's own.
-  - `Ch3+5 transfer … partially rescued viability from shWRN` (`body.p13`) = `0 < d(rescue) < 1`.
+  - `fully P`: `d(P) = 1`. `partially P`: `0 < d(P) < 1`.
+  - `Ch3+5 transfer … partially rescued viability from shWRN` (`body.p13`) = `0 < d(rescue) < 1`: the
+    degree of the result — viability came partly back.
 - A **relative-standard** degree compares to a contextual threshold, as a gradable adjective does
   today (`gt(deg_X(x), std_X)`).
   - `WRN silencing … substantially increased ɣH2AX and 53BP1 foci` (`body.p9`) = `d(increase) >
@@ -110,7 +145,7 @@ These say how far along a scale a predicate holds (Kennedy & McNally 2005).
     the comparative: the difference exceeds the standard.
 
 **What the grammar lacks:** a degree on verbs. Adjectives carry one (`deg_X`, `measurements:gt`);
-`explain`, `rescue` and `increase` do not.
+`rescue` and `increase` do not.
 
 ### Contrastive: `selectively`, `preferentially`
 
@@ -171,24 +206,28 @@ and for manner in a protocol (`foci … were scored similarly`).
 
 ## Decisions
 
-1. **How a presupposition is carried.** `not solely P` needs the negation to reach the assertion and
-   leave `P(a)` standing.
+1. **How a presupposition is carried.** `not solely` needs the negation to reach the assertion and
+   leave the presupposition standing. For the causal exclusives, what is presupposed is that `A`
+   contributes to `B`, and what is asserted is that `A` is the whole cause; the negation of the
+   assertion is the two disjuncts, joint cause or alternative cause (see *Causal exclusives*).
    - *Proof obligations* — the project's existing design for presupposition
      (`docs/notes/d62-subordinator-design-findings.md` §5, confirmed by the expert review in §7). A
-     presupposition is a free proof variable. `solely A P a` introduces `h : P(a)` free in the context
-     and asserts `∀(y : A). P y → Id(A, y, a)`. Projection is ordinary variable scoping: negation
-     (`¬X := X → False`) and modals do not bind `h`, so it projects, and `not solely` comes out as
-     `P(a) ∧ ¬∀(y : A). P y → Id(A, y, a)` with no rule specific to negation; a conditional whose
-     antecedent supplies it binds it by `→`-introduction, which filters it. The obligation rides the open-parse carrier
+     presupposition is a free proof variable. `solely` introduces `h : ∃C. A ∈ C ∧ R(C, B)` free in
+     the context and asserts `R({A}, B) ∧ ∀C. R(C, B) → A ∈ C`. Projection is ordinary variable
+     scoping: negation (`¬X := X → False`) and modals do not bind `h`, so it projects, and `not solely`
+     comes out as *`A` contributes to `B`, and either `A` alone does not suffice or something without
+     `A` does* — with no rule specific to negation. That is the paper's own `contributes to, but is not
+     solely responsible for`. A conditional whose antecedent supplies the obligation binds it by
+     `→`-introduction, which filters it. The obligation rides the open-parse carrier
      (`docs/notes/d62-d64-open-parse-carrier.md`) as a `ProofObligation` hole, discharged by a
      grounding verdict (`Holds` / `Open` / `Fails`) and failing closed. The same mechanism serves
      factives (`found that`), definites and `again`.
-   - *Σ-conjunction*, `Σ(h : P(a)). …` — rejected. It puts the presupposition inside the
+   - *Σ-conjunction*, `Σ(h : ∃C. A ∈ C ∧ R(C, B)). …` — rejected. It puts the presupposition inside the
      proposition, so a negation over the meaning negates it too; getting `not solely` right then
      requires placing the negation inside by hand, which is the lexicalized form below.
    - *Lexicalized negated forms* — `not solely`, `not merely`, `not just`, `not simply` as their own
-     operators, `λP.λa. P(a) ∧ ∃y. P(y) ∧ ¬(y = a)` — rejected. Exact for the paper's five uses;
-     wrong wherever `only` meets any other operator, or `not` stands apart from the particle.
+     operators — rejected. They fix the paper's five uses and are wrong wherever the particle meets
+     any other operator, or `not` stands apart from it.
    - *Proposed:* proof obligations.
    - *Depends on the `ProofObligation` arm, which is not built.* The carrier was built to take it —
      `HoleInfo` carries a `kind` for that purpose — but `HoleKind`
@@ -197,7 +236,7 @@ and for manner in a protocol (`foci … were scored similarly`).
    - *Inherited gap: plugs.* An attitude or report verb must bind the obligations its complement
      emits (findings §7). An opaque report axiom (`Prop → Entity → Prop`) acts as a hole instead, so
      the obligation projects to the author. `These observations suggest that WRN dependency is not
-     simply a result of MMR deficiency.`, a curated unit, puts a scalar exclusive under `suggest`.
+     simply a result of MMR deficiency.`, a curated unit, puts a causal exclusive under `suggest`.
      Whether its presupposition should project there is itself open — the suggesting subject is the
      authors' own data — and the plug fix is what makes either answer expressible.
 2. **The degree of a verb.**
@@ -207,9 +246,9 @@ and for manner in a protocol (`foci … were scored similarly`).
      extent : Π(A : Set). (A → Prop) → A → Degree
      ```
 
-     A degree qualifier attaches to the verb phrase — `dMMR [does not fully [explain this
-     interaction]]` — and a verb phrase is a unary predicate whatever the verb's arity, so arity is
-     not a parameter, and `A` comes from the verb phrase as in decision 5.
+     A degree qualifier attaches to the verb phrase — `Ch3+5 transfer [partially [rescued viability
+     from shWRN]]` — and a verb phrase is a unary predicate whatever the verb's arity, so arity is not
+     a parameter, and `A` comes from the verb phrase as in decision 5.
    - *A degree function minted per verb sense*, as `deg_X` is per adjective — rejected: it multiplies
      the importers' output by every verb sense.
    - *Proposed:* the single operator.
@@ -222,7 +261,8 @@ and for manner in a protocol (`foci … were scored similarly`).
    - *Scales are declared, and no source records them.* `fully` and `partially` presuppose a closed
      scale, so they apply only to predicates declared with one — a restriction in the type, or `fully
      carry` type-checks. WordNet, UMLS and SPECIALIST do not record a predicate's scale; the paper's
-     three verbs (`explain`, `rescue`, `increase`) would be declared by hand.
+     two verbs (`rescue`, `increase`) would be declared by hand. `explain` is not among them: `does not
+     fully explain` is a causal exclusive.
    - *What `Degree` is — open.* Relative standards (`substantially`, the comparatives) only order
      degrees, which `measurements:gt` over `core:float` already does. A closed scale's endpoint —
      `fully` as `d = 1` — needs every closed scale normalised to `[0, 1]`. That normalisation is a
@@ -288,6 +328,10 @@ and for manner in a protocol (`foci … were scored similarly`).
      type. Common nouns as setoids, each carrying its own identity criterion (Chatzikyriakidis & Luo
      2018, 2020) — `Id` is the equality. Distinctness is written `¬Id(A, y, a)` directly, with no
      intermediate definition standing in for it.
+   - *How this reaches the paper.* The formula above is the individual exclusive, which the paper does
+     not use; its exclusives are causal. There this decision applies at the factor type: `A ∉ C`
+     compares factors, which range over the causal predicate's domain — so dMMR, a deficiency, can be
+     a co-factor of p53 activity.
    - *Consequence, not addressed here:* `¬Id` between named individuals has no rule in the kernel.
      `DecEq` reduces to `Refl` on equal ground values and to a neutral otherwise, so it confirms
      equality and never proves distinctness. An exclusive claim can therefore be represented and
@@ -296,24 +340,46 @@ and for manner in a protocol (`foci … were scored similarly`).
      unsound: WordNet and UMLS name the same concepts, and alignment resolves that only for the
      surfaces it merges, at parse time, so an unmerged alias of `a` would pass as another witness.
 
+6. **What the causal relation `R` is.** Open.
+   - **Not logical implication.** Written with `→`, both disjuncts of `not solely` go wrong once `B`
+     holds: `∃C. C → B` is inhabited by `C := Unit`, and `¬(A → B)` is refuted, because `A → B` is
+     inhabited by `λ_. b`. The paper asserts its outcomes — WRN dependence, cell death — so the joint
+     disjunct would contradict it and the alternative disjunct would say nothing. `R` has to be a
+     causal or explanatory relation, not entailment.
+   - **Lifted to conditions.** `R` takes a condition — a set of factors, jointly — where the verb takes
+     a single subject today. A list of entities is the natural carrier (`core:List` is chain-declared
+     since D79). Membership, `A ∈ C`, needs equality of factors, which is where decision 5's `Id`
+     enters.
+   - **Which predicates are causal.** `responsible for`, `lead to`, `account for`, `explain`, `cause`,
+     and `a result` or `consequence of` (arguments reversed) are causal; `contribute to` and `promote`
+     state the presupposition, `∃C. A ∈ C ∧ R(C, B)`. Each is its own WordNet or UMLS predicate today,
+     and no source marks them causal; the paper's handful would be declared by hand, as decision 2's
+     scales are.
+   - *One relation, or each verb its own?* A single `R` that every causal verb maps to is simplest,
+     and loses that `explain` and `lead to` are not the same claim. Keeping each verb's own relation,
+     lifted to conditions, with the exclusive polymorphic in `R` — as decision 5 has it take `A` from
+     the predicate rather than choose it — keeps the difference.
+   - *Proposed:* each causal verb's own relation, lifted to conditions; the exclusive polymorphic in
+     `R`.
+
 ## Slices
 
 1. **Equality in ESL**: a surface form that encodes to the kernel's `Id`, so a meaning can say `y = a`.
-2. **Exclusives** — `only`, `solely`, `alone`, and the scalar `merely`, `just`, `simply` — with
-   decision 1's presupposition mechanism, replacing the opaque `ontology:sole`. Written in the
-   determiners' shape (decision 5): polymorphic in `A`, instantiated at the modified predicate's
-   domain, with distinctness `¬Id(A, y, a)`.
-   - `only`, `solely` quantify over all of `A`.
-   - `alone` quantifies over the co-occurring alternatives the sentence or its context names — still
-     at type `A`; a discourse hole (D64) where they are not stated.
-   - The scalar exclusives quantify over predicates ranked by `≻`, not over individuals, and use no
-     `Id`.
-   - Acceptance: `p53 activity … is not solely responsible for WRN dependence` admits a witness whose
-     noun type differs from `a`'s. A version that takes `A` from `a` instead of from `P` fails it.
-   - Depends on the carrier's `ProofObligation` arm (decision 1), which is not built. The `suggest`
-     sentence in decision 1 is its plug test.
-3. **Completeness and degree** — `fully`, `partially`, `substantially` — with decision 2's degree,
-   and closed scales declared by hand for `explain`, `rescue` and `increase`.
+2. **Causal exclusives** — `solely`, `alone`, `not fully`, `not merely / just / simply` a result of —
+   with decision 1's presupposition mechanism and decision 6's relation, replacing the opaque
+   `ontology:sole`. `solely` presupposes that `A` contributes and asserts that `A` is the whole cause;
+   `not solely` is then the joint-or-alternative disjunction; `alone` asserts the joint disjunct.
+   - Acceptance: the seven sentences in the table under *Causal exclusives*, each with the disjunct
+     the paper states. `MMR deficiency … does not fully explain this interaction, suggesting that
+     genomic lesions … promote WRN dependence` names a co-factor whose type differs from `A`'s; a
+     version that ranges factors over `A`'s noun type fails it.
+   - Depends on the carrier's `ProofObligation` arm (decision 1), which is not built, and on the
+     paper's causal predicates being declared (decision 6). The `suggest` sentence in decision 1 is
+     the plug test.
+   - The restrictive `only` (*within common-MSI lineages only*) and the individual exclusive
+     (decision 5) are separate; the paper uses the first and not the second.
+3. **Degree** — `partially`, `substantially`, and `fully` with a non-causal predicate — with
+   decision 2's degree, and closed scales declared by hand for `rescue` and `increase`.
 4. **Contrastive** — `selectively`, `preferentially` and the adjective `preferential` — with decision
    3's contrast class. The unstated path needs only D64's hole; the stated path needs `compared to`
    attached to the right constituent, which the parser does not do today.
