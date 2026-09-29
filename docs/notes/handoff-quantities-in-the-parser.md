@@ -17,6 +17,8 @@ design and the ordering; what follows corrects the rest.
 | "older snapshots are gone" | the second machine holds them back to `2026-07-11` |
 | "disk is the constraint; `cargo test --workspace` fills the volume" | true of the first machine only: 524 GB free here, the full workspace suite runs |
 | SPECIALIST "curl from NLM (D97 gives the URL)" | D97 gave only the *terms* page. The URL is now recorded in D97 and scripted as `scripts/provision-specialist.sh`, which verifies the release by content |
+| step 3's D98 decisions, "1 … 4" | all six are taken (2026-09-29); 5 and 6 were added since. D97's 5–10 remain open; D97 slice 1 measures only 1–4 |
+| step 4: slice 1 "needs no decision, and blocks every exclusive" | the paper's exclusives are causal (D98 decision 6), so equality enters only through the alternative disjunct's `A ∉ C`. Slice 2 also waits on the carrier's `ProofObligation` arm, the causal verbs declared and lifted to conditions, and — for the definition's first half only — a group as an entity (D68 §5) |
 
 **Done since:**
 
@@ -49,7 +51,7 @@ base's commit, so the pair silently disagreed. Both are renamed now
 script should refuse an existing target or suffix it — the same failure the alignment script was
 fused to prevent ("nothing failed; the wrong thing succeeded").
 
-**Where step 2 now stops, and it needs the owner.** The live run left **one decision
+**Where step 2 stopped, for the owner.** The live run left **one decision
 unadjudicated**, so the selection gate cannot score:
 
 > READING-UNADJUDICATED: «The MSI relationship compared favourably to other strong biomarkers for
@@ -66,9 +68,9 @@ Adjudicating that decision is a ground-truth judgement and is the owner's, not t
 it recorded as wrong (and 19 correct), the tally is 30 correct / 11 wrong / 0 unadjudicated —
 matching `selection-baseline.json`'s committed 30.
 
-**The ordered next steps below therefore resume at:** adjudicate that one decision → replay the
-recorded draw and confirm it reproduces the live run exactly → write the new `baseline.json`. Then
-step 3 onward as written, with step 5's provisioning already done.
+**Step 2 finished at `5fb85cf`:** the owner adjudicated the reading wrong, the recorded draw
+replayed with every figure equal to the live run, and `baseline.json` was rewritten from the
+replay. Step 3's D98 part and step 5's provisioning are done; step 4 is amended in the table above.
 
 ## Where the branch stands
 
@@ -92,7 +94,7 @@ step 3 onward as written, with step 5's provisioning already done.
 | [`docs/design/d95-quantities-in-the-parser.md`](../design/d95-quantities-in-the-parser.md) | Quantities in the tokenizer and parser: the design |
 | [`docs/design/d95-implementation-plan.md`](../design/d95-implementation-plan.md) | D95's slices, each marked built or owed, with what was measured |
 | [`docs/design/d97-specialist-lexicon.md`](../design/d97-specialist-lexicon.md) | The SPECIALIST Lexicon as the lexicon's syntactic authority: proposed |
-| [`docs/design/d98-qualifiers-as-operators.md`](../design/d98-qualifiers-as-operators.md) | Qualifiers (`not solely`, `partially`, …) as logical operators: proposed |
+| [`docs/design/d98-qualifiers-as-operators.md`](../design/d98-qualifiers-as-operators.md) | Qualifiers (`not solely`, `partially`, …) as logical operators: decided, no slice built |
 | [`experiments/publications/wrn-helicase/docs/06-opaque-predicates-to-propositions.md`](../../experiments/publications/wrn-helicase/docs/06-opaque-predicates-to-propositions.md) | Where the WRN paper states each result the hand-built chain encodes as an opaque predicate |
 | [`experiments/publications/wrn-helicase/claims/README.md`](../../experiments/publications/wrn-helicase/claims/README.md) | The WRN claims in controlled English, measured |
 | [`experiments/parsing/quantities/README.md`](../../experiments/parsing/quantities/README.md) | The quantity corpus, measured |

@@ -1,8 +1,8 @@
 # D98 — Qualifiers as logical operators
 
-**Status: proposed** (2026-09-28). Supersedes the inert/measurement split of
-`docs/notes/d62-adverb-semantics-decision.md` for the qualifiers below. Decisions 1–4 and 6 are open,
-revised 2026-09-29; decision 5 is decided (2026-09-29).
+**Status: decided** (2026-09-29) — all six decisions; no slice is built. Proposed 2026-09-28.
+Supersedes the inert/measurement split of `docs/notes/d62-adverb-semantics-decision.md` for the
+qualifiers below.
 
 ## The gap
 
@@ -240,7 +240,7 @@ and for manner in a protocol (`foci … were scored similarly`).
    - *Lexicalized negated forms* — `not solely`, `not merely`, `not just`, `not simply` as their own
      operators — rejected. They fix the paper's five uses and are wrong wherever the particle meets
      any other operator, or `not` stands apart from it.
-   - *Proposed:* proof obligations.
+   - *Decided (2026-09-29):* proof obligations.
    - *Depends on the `ProofObligation` arm, which is not built.* The carrier was built to take it —
      `HoleInfo` carries a `kind` for that purpose — but `HoleKind`
      (`kernel/src/dcg/parse/felicity.rs`) has only `EntityRef`, and the arm is documented as
@@ -274,7 +274,7 @@ and for manner in a protocol (`foci … were scored similarly`).
      function per sense.
    - *What `Degree` is:* whatever the measure is — the opaque float of `cat_measure`, a count, or a
      D95 quantity with its unit. No new type.
-   - *Proposed:* verbs of change on the adjectival machinery.
+   - *Decided (2026-09-29):* verbs of change on the adjectival machinery.
    - *Rejected:* a new operator over any predicate, `extent : Π(A : Set). (A → Prop) → A → Degree`,
      which an earlier draft of this decision proposed (first as `(Entity → Entity → Prop) → Entity →
      Entity → float`). It duplicates the machinery above, and needs a scale declared per predicate
@@ -283,8 +283,8 @@ and for manner in a protocol (`foci … were scored similarly`).
      the importers' output by every verb sense.
    - `explain` is not a degree verb: `does not fully explain` is a causal exclusive.
 3. **The contrast class.** Taken from `compared to B` where the sentence states it; otherwise a hole
-   the discourse resolver fills (D64), as for demonstratives. *Proposed:* both, the hole only when
-   unstated.
+   the discourse resolver fills (D64), as for demonstratives. *Decided (2026-09-29):* both, the hole
+   only when unstated.
    - *The hole is typed at the target's type.* The contrast class is an alternative to the target —
      to `MSI cell lines`, so a kind of cell line — the principle decision 5 applies to exclusives.
      Demonstrative holes are already typed by their restrictor (`these findings` resolves only to
@@ -308,8 +308,8 @@ and for manner in a protocol (`foci … were scored similarly`).
      lines, which would demand that every MSI line depend on WRN and no MSS line do.
 4. **Where `significantly` and `independently` live.** In the claim, since the paper asserts them and
    the claims corpus measures what the proposition says; or at the justification layer only, beside
-   the claim. *Proposed:* in the claim, **defined over what each is about**, so that each is checkable
-   rather than a bare predicate as opaque as the `ontology:sole` this document replaces.
+   the claim. *Decided (2026-09-29):* in the claim, **defined over what each is about**, so that each
+   is checkable rather than a bare predicate as opaque as the `ontology:sole` this document replaces.
    - `significantly(e)`: `e`'s D52 record rejects its null at the record's alpha. The record already
      carries what this needs: `ontologies/statistics/statistics.esl` records the alpha, its test uses
      only `p < alpha`, and a one-sided test requires a witness.
@@ -369,7 +369,7 @@ and for manner in a protocol (`foci … were scored similarly`).
    - *Verification, not representation.* None of this blocks representing an exclusive claim, which
      is what the claims corpus measures. It blocks checking one.
 
-6. **What the causal relation `R` is.** Open.
+6. **What the causal relation `R` is.**
    - **Not logical implication.** Written with `→`, both disjuncts of `not solely` go wrong once `B`
      holds: `∃C. C → B` is inhabited by `C := Unit`, and `¬(A → B)` is refuted, because `A → B` is
      inhabited by `λ_. b`. The paper asserts its outcomes — WRN dependence, cell death — so the joint
@@ -379,6 +379,17 @@ and for manner in a protocol (`foci … were scored similarly`).
      a single subject today. A list of entities is the natural carrier (`core:List` is chain-declared
      since D79). Membership, `A ∈ C`, needs equality of factors, which is where decision 5's `Id`
      enters.
+   - **The grammar has the lifted shape.** A collective verb takes a coordinated group as its
+     subject: category `S\Group(Entity)`, meaning `List Entity → Prop` (`form a complex`, D63 §8.4
+     Phase 6). A lifted causal verb is a collective verb, so a condition stated as an `and`-group
+     reaches it. A group slot accepts only a group (`unify_into` in `kernel/src/dcg/category.rs`),
+     so a singular subject — every one of the paper's — needs its singleton formed on the way to
+     `R({A}, B)`; slice 2 builds that.
+   - **A group as an entity does not exist.** The definition of synthetic lethality states its
+     condition as a noun: `the co-occurrence of these two events leads to cell death` needs the
+     group as an entity. D68 §5 (`docs/notes/d68-claim-kinds.md`) defers that to its own design
+     (Link's sum, Landman's group), with the number feature its plural demonstrative needs. Where a
+     sentence leaves `C` unstated, the meaning quantifies over it and no group is formed.
    - **Which predicates are causal.** `responsible for`, `lead to`, `account for`, `explain`, `cause`,
      and `a result` or `consequence of` (arguments reversed) are causal; `contribute to` and `promote`
      state the presupposition, `∃C. A ∈ C ∧ R(C, B)`. Each is its own WordNet or UMLS predicate today,
@@ -399,9 +410,9 @@ and for manner in a protocol (`foci … were scored similarly`).
    - The construction is Mackie's INUS analysis (Mackie 1965): a cause is an insufficient but
      non-redundant part of an unnecessary but sufficient condition. The joint disjunct is `A` being
      insufficient; the alternative disjunct is the condition being unnecessary.
-   - *Proposed:* a class of causal relations, each verb keeping its own relation lifted to conditions,
-     the class carrying upward closure and not transitivity; the exclusive polymorphic over the
-     class.
+   - *Decided (2026-09-29):* a class of causal relations, each verb keeping its own relation lifted
+     to conditions, the class carrying upward closure and not transitivity; the exclusive
+     polymorphic over the class.
 
 ## Slices
 
@@ -418,6 +429,9 @@ and for manner in a protocol (`foci … were scored similarly`).
    - Depends on the carrier's `ProofObligation` arm (decision 1), which is not built, and on the
      paper's causal predicates being declared (decision 6). The `suggest` sentence in decision 1 is
      the plug test.
+   - The definition's first half, `the co-occurrence of these two events leads to cell death`, also
+     needs a group as an entity (decision 6), which D68 §5 defers; its second half, `each event alone
+     does not lead to cell death`, does not.
    - The restrictive `only` (*within common-MSI lineages only*) and the individual exclusive
      (decision 5) are separate; the paper uses the first and not the second.
 3. **Degree** — `partially`, `substantially`, and `fully` with a non-causal predicate — on the
