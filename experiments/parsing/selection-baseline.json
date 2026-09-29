@@ -1,11 +1,11 @@
 {
   "_comment": "The reading-SELECTION baseline -- a SEPARATE experiment from the parse baseline (baseline.json). The parse baseline gates the GRAMMAR + lexicon: what forest is produced (the pins ask whether the correct STRUCTURE survives). THIS file gates the RANKER: which reading gets chosen from that forest, scored READING-level (structure + word senses) against the adjudication ledger. Different re-baselining triggers: grammar work re-draws the parse baseline without touching this file; a new selection draw, a prompt change, or a ledger revision re-derives THIS baseline without touching the parse numbers. Update deliberately, never to make a red run go green.",
   "provenance": {
-    "date": "2026-09-29 (re-baselined with baseline.json; see its 2026-09-29 note)",
-    "snapshot": "wordnet-umls-aligned-2026-09-29",
-    "forest": "ranks experiments/parsing/ranks/2026-08-22-productiontrace.json, replayed — 62 hits / 0 misses against the reseeded store",
-    "selections": "experiments/parsing/selections/2026-08-22-productiontrace-live.json, replayed — 41 hits / 0 misses",
-    "commit": "c39b8d6 (D93 + D94)"
+    "date": "2026-09-29 (D95 slices 1-5, branch quantities-in-the-parser)",
+    "snapshot": "wordnet-umls-aligned-2026-09-29-quantities",
+    "forest": "ranks experiments/parsing/ranks/2026-09-29-d95-quantities.json, RE-RECORDED live on this snapshot — the prior draw (2026-08-22-productiontrace) keys by sentence text and sentence splitting changed",
+    "selections": "experiments/parsing/selections/2026-09-29-d95-quantities.json; replay 41 hits, 0 misses",
+    "commit": "34e4fef"
   },
   "expected": {
     "eligible": 41,
@@ -24,5 +24,6 @@
     "structure_correct": "diagnostic only -- reported, never gated; the pins belong to the parse baseline's faithfulness gate."
   },
   "_provenance_note_2026-08-22b-production-trace": "RE-MEASURED after the #210/#205 close-out (2026-08-22, commit a05cfa1, snapshot wordnet-umls-aligned-2026-08-22c). Tracked draw: ranks/2026-08-22-productiontrace.json, selections/2026-08-22-productiontrace-live.json. Live and replay AGREE. Coverage: grammar-gap 0, expected-hits 62/62, miss-set unchanged, skeletons 170 (unchanged). Selection: 41 eligible, 30 correct, 0 unadjudicated, 0 invalid-selected — reading-correct 30/40 -> 30/41, holds. total-readings 613 -> 674, ungated and inside the 700 ceiling. ONE ADJUDICATION was needed to reach 0 unadjudicated: «The MSI relationship compared favourably…» chose a reading structurally IDENTICAL to two rows already ruled `wrong` for that unit (the conjunction split, hanging «for vulnerabilities» on the subject), and wrong on both contested sense axes besides. Recorded `wrong`. METHOD, after getting it wrong earlier the same day: a single live run is a DRAW, not a measurement. Draw until clean (up to 3), PROMOTE the clean draw to ranks/, replay it to confirm live and replay agree, and only then read the numbers. Four earlier draws that day reported 61 hits twice on DIFFERENT sentences; two of them carried malformed sense-ranker replies (eigenius#212), and none had been promoted. Check `grep -c 'malformed reply'` before attributing any delta to code.",
-  "_provenance_note_2026-09-29": "The eligible set grew 40 -> 41 because one unit stopped being single-reading (baseline.json encoded 2 -> 1), which makes it ambiguous and therefore a decision the ranker has to take. That happened in SEPTEMBER, not at this commit: the 2026-09-09 run already recorded reading-correct 30/41. reading_correct is unchanged at 30 and reading_unadjudicated is 0, so the extra decision was already adjudicated — the ranker is choosing on one more unit and getting the same number right, which is a wider denominator rather than a regression."
+  "_provenance_note_2026-09-29": "The eligible set grew 40 -> 41 because one unit stopped being single-reading (baseline.json encoded 2 -> 1), which makes it ambiguous and therefore a decision the ranker has to take. That happened in SEPTEMBER, not at this commit: the 2026-09-09 run already recorded reading-correct 30/41. reading_correct is unchanged at 30 and reading_unadjudicated is 0, so the extra decision was already adjudicated — the ranker is choosing on one more unit and getting the same number right, which is a wider denominator rather than a regression.",
+  "_provenance_note_2026-09-29-d95-quantities": "Every gated figure holds across the quantity work: eligible 41, chose 41, reading-correct 30, reading-unadjudicated 0, invalid-selected 0, structure-correct 33. The one decision this run left unadjudicated was adjudicated WRONG (the MSI-relationship PP attachment; see baseline.json's note and eigenius#264), which moved it from unadjudicated to wrong and left reading-correct at 30 — the ranker is choosing on the same number of units and getting the same number right."
 }
