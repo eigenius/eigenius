@@ -138,19 +138,24 @@ through the alternative disjunct: `A ∉ C` compares factors. The joint disjunct
 These say how far along a scale a predicate holds (Kennedy & McNally 2005). With a causal or
 explanatory predicate `fully` is not a degree: `does not fully explain` is the causal exclusive above.
 
-- A **closed-scale** predicate holds to an extent `d ∈ [0, 1]`.
-  - `fully P`: `d(P) = 1`. `partially P`: `0 < d(P) < 1`.
-  - `Ch3+5 transfer … partially rescued viability from shWRN` (`body.p13`) = `0 < d(rescue) < 1`: the
-    degree of the result — viability came partly back.
-- A **relative-standard** degree compares to a contextual threshold, as a gradable adjective does
-  today (`gt(deg_X(x), std_X)`).
-  - `WRN silencing … substantially increased ɣH2AX and 53BP1 foci` (`body.p9`) = `d(increase) >
-    std_substantial`.
+The paper's two degree verbs are verbs of change, and a verb of change takes its degree from the
+measure it changes (Kennedy & Levin 2008): the degree is the difference on that measure.
+
+- A **closed-scale** change has an endpoint: `fully` reaches it, `partially` moves toward it without
+  reaching it.
+  - `Ch3+5 transfer … partially rescued viability from shWRN` (`body.p13`): the viability regained is
+    more than none and less than the gap back to the untreated level. The endpoint is the reference
+    state the verb names.
+- A **relative-standard** degree compares with a contextual threshold, as a gradable adjective's
+  positive form does (`gt(deg_X(x), std_X)`).
+  - `WRN silencing … substantially increased ɣH2AX and 53BP1 foci` (`body.p9`): the difference in the
+    count of foci exceeds the standard.
   - `substantially weaker changes in phospho-p53 intensity in WRN-depleted MSS models` (`body.p8`) is
     the comparative: the difference exceeds the standard.
 
-**What the grammar lacks:** a degree on verbs. Adjectives carry one (`deg_X`, `measurements:gt`);
-`rescue` and `increase` do not.
+**What the grammar lacks:** not degree machinery — adjectives, measure nouns and D95's measure phrases
+have it (decision 2) — but the link from a verb of change to the measure it changes: nothing says that
+`increase` moves a count or that `rescue` moves viability back toward a reference.
 
 ### Contrastive: `selectively`, `preferentially`
 
@@ -245,33 +250,34 @@ and for manner in a protocol (`foci … were scored similarly`).
      Whether its presupposition should project there is itself open — the suggesting subject is the
      authors' own data — and the plug fix is what makes either answer expressible.
 2. **The degree of a verb.**
-   - *One operator over the predicate the qualifier modifies:*
-
-     ```
-     extent : Π(A : Set). (A → Prop) → A → Degree
-     ```
-
-     A degree qualifier attaches to the verb phrase — `Ch3+5 transfer [partially [rescued viability
-     from shWRN]]` — and a verb phrase is a unary predicate whatever the verb's arity, so arity is not
-     a parameter, and `A` comes from the verb phrase as in decision 5.
-   - *A degree function minted per verb sense*, as `deg_X` is per adjective — rejected: it multiplies
+   - *Build on the gradability adjectives already have.* The grammar has degree machinery: an
+     adjective supplies a measure (`cat_measure`, ⟦·⟧ = `Entity → core:float` — its `deg_A`), the
+     positive form compares it with a standard (`gt(deg_A(x), std_A)`), `more` / `less` compare two
+     measures (`more_deg`), `more` / `fewer` compare counts through `lexicon:card` (`more_card`), and
+     D95's measure phrases carry a difference reading for a change — its own example is `the
+     temperature rose 5 °C`. A verb of change is a degree achievement (Kennedy & Levin 2008): its
+     degree is the difference on the measure it changes, so it needs no degree of its own — it needs
+     the link to the measure.
+     - `substantially increased ɣH2AX and 53BP1 foci`: the difference in the count of foci exceeds the
+       standard — the positive form, over a difference.
+     - `partially rescued viability from WRN shRNA`: the viability regained is more than none and less
+       than the gap back to the untreated level. The closed endpoint is the reference state the verb
+       names, not a scale declared for the verb.
+   - *What a verb of change declares:* the measure it changes — for both of the paper's verbs, its
+     object (`viability`; the count of `foci`) — and its direction: up for `increase`, down for
+     `reduce` or `impair`, back toward a reference for `rescue`. No source records these; the paper's
+     two verbs would be declared by hand. That is one small declaration per verb, not a degree
+     function per sense.
+   - *What `Degree` is:* whatever the measure is — the opaque float of `cat_measure`, a count, or a
+     D95 quantity with its unit. No new type.
+   - *Proposed:* verbs of change on the adjectival machinery.
+   - *Rejected:* a new operator over any predicate, `extent : Π(A : Set). (A → Prop) → A → Degree`,
+     which an earlier draft of this decision proposed (first as `(Entity → Entity → Prop) → Entity →
+     Entity → float`). It duplicates the machinery above, and needs a scale declared per predicate
+     that the measure already supplies.
+   - *Rejected:* a degree function minted per verb sense, as `deg_X` is per adjective — it multiplies
      the importers' output by every verb sense.
-   - *Proposed:* the single operator.
-   - An earlier draft of this decision wrote `extent : (Entity → Entity → Prop) → Entity → Entity →
-     float`, fixing the type at `Entity` and the arity at two; decision 5 applies to both.
-   - Adjectives are unary predicates too, and the argument against per-sense minting applies to them:
-     the WordNet importer mints `deg_{loc} : Entity -> core:float` per adjective sense
-     (`crates/eigenius-wordnet/src/convert.rs`). The polymorphic `extent` covers both; retiring
-     `deg_X` is the direction, not part of this decision.
-   - *Scales are declared, and no source records them.* `fully` and `partially` presuppose a closed
-     scale, so they apply only to predicates declared with one — a restriction in the type, or `fully
-     carry` type-checks. WordNet, UMLS and SPECIALIST do not record a predicate's scale; the paper's
-     two verbs (`rescue`, `increase`) would be declared by hand. `explain` is not among them: `does not
-     fully explain` is a causal exclusive.
-   - *What `Degree` is — open.* Relative standards (`substantially`, the comparatives) only order
-     degrees, which `measurements:gt` over `core:float` already does. A closed scale's endpoint —
-     `fully` as `d = 1` — needs every closed scale normalised to `[0, 1]`. That normalisation is a
-     choice to state, not to assume.
+   - `explain` is not a degree verb: `does not fully explain` is a causal exclusive.
 3. **The contrast class.** Taken from `compared to B` where the sentence states it; otherwise a hole
    the discourse resolver fills (D64), as for demonstratives. *Proposed:* both, the hole only when
    unstated.
@@ -384,8 +390,9 @@ and for manner in a protocol (`foci … were scored similarly`).
      the plug test.
    - The restrictive `only` (*within common-MSI lineages only*) and the individual exclusive
      (decision 5) are separate; the paper uses the first and not the second.
-3. **Degree** — `partially`, `substantially`, and `fully` with a non-causal predicate — with
-   decision 2's degree, and closed scales declared by hand for `rescue` and `increase`.
+3. **Degree** — `partially`, `substantially`, and `fully` with a non-causal predicate — on the
+   existing measure machinery (decision 2), with `rescue` and `increase` declared with the measure
+   they change and its direction.
 4. **Contrastive** — `selectively`, `preferentially` and the adjective `preferential` — with decision
    3's contrast class. The unstated path needs only D64's hole; the stated path needs `compared to`
    attached to the right constituent, which the parser does not do today.
