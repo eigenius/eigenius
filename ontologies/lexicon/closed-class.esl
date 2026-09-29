@@ -3204,3 +3204,226 @@ resource lexicon:at_value_nmod : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
     lexicon:sense    = "at";
 }
+
+// ── Bounds on a measured value (D95 slice 6) ──────────────────────────────────────
+// A bound constrains a measured value instead of stating one (D95, "Ranges need no new semantics"):
+// `less than 37 °C` is `λq. units:lt(u, q, 310.15 K)`, a `cat_mpc` that a consumer of the measure
+// phrase takes through the `unit_constraint` combinator, which quantifies the value the consumer
+// would have taken (D95 implementation plan, slice 6, decisions 1–5). Each marker carries two
+// entries: the constraint, and the predicate the copula takes and `mod_lifts` makes prenominal
+// (`the temperature was less than 37 °C`, `>90% infection efficiency`). Direction is argument
+// order, so `more than b` is `lt(b, q)`. Every entry takes the VALUE reading, as the consumers do.
+resource lexicon:lt_bound_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (b : units:Quantity(u)) => fun (q : units:Quantity(u)) =>
+            units:lt(u, q, b)
+          : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop )
+    );
+}
+resource lexicon:lt_bound_pred_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (b : units:Quantity(u)) => fun (x : lexicon:Entity) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u)) => (logic:And(units:lt(u, q, b), ontology:has_quantity(x, u, q)) -> P)) -> P
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:gt_bound_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (b : units:Quantity(u)) => fun (q : units:Quantity(u)) =>
+            units:lt(u, b, q)
+          : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop )
+    );
+}
+resource lexicon:gt_bound_pred_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (b : units:Quantity(u)) => fun (x : lexicon:Entity) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u)) => (logic:And(units:lt(u, b, q), ontology:has_quantity(x, u, q)) -> P)) -> P
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:ge_bound_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (b : units:Quantity(u)) => fun (q : units:Quantity(u)) =>
+            units:le(u, b, q)
+          : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop )
+    );
+}
+resource lexicon:ge_bound_pred_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (b : units:Quantity(u)) => fun (x : lexicon:Entity) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u)) => (logic:And(units:le(u, b, q), ontology:has_quantity(x, u, q)) -> P)) -> P
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:le_bound_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (b : units:Quantity(u)) => fun (q : units:Quantity(u)) =>
+            units:le(u, q, b)
+          : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop )
+    );
+}
+resource lexicon:le_bound_pred_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (b : units:Quantity(u)) => fun (x : lexicon:Entity) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u)) => (logic:And(units:le(u, q, b), ontology:has_quantity(x, u, q)) -> P)) -> P
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:approx_bound_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (b : units:Quantity(u)) => fun (q : units:Quantity(u)) =>
+            units:approx(u, q, b)
+          : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop )
+    );
+}
+resource lexicon:approx_bound_pred_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (b : units:Quantity(u)) => fun (x : lexicon:Entity) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u)) => (logic:And(units:approx(u, q, b), ontology:has_quantity(x, u, q)) -> P)) -> P
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:less_than_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value ('at less than 37 °C').";
+    lexicon:form     = "less than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:lt_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "less than";
+}
+resource lexicon:less_than_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, predicated ('was less than 37 °C').";
+    lexicon:form     = "less than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:lt_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "less than";
+}
+resource lexicon:more_than_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value ('for more than 2 h').";
+    lexicon:form     = "more than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "more than";
+}
+resource lexicon:more_than_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, predicated ('was more than 37 °C').";
+    lexicon:form     = "more than";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "more than";
+}
+resource lexicon:at_least_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value ('for at least 2 h').";
+    lexicon:form     = "at least";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:ge_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "at least";
+}
+resource lexicon:at_least_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, predicated ('was at least 37 °C').";
+    lexicon:form     = "at least";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:ge_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "at least";
+}
+resource lexicon:at_most_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value ('with at most 10%').";
+    lexicon:form     = "at most";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "at most";
+}
+resource lexicon:at_most_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, predicated ('was at most 37 °C').";
+    lexicon:form     = "at most";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "at most";
+}
+resource lexicon:up_to_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value ('for up to 2 h').";
+    lexicon:form     = "up to";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "up to";
+}
+resource lexicon:up_to_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, predicated ('was up to 37 °C').";
+    lexicon:form     = "up to";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "up to";
+}
+resource lexicon:approximately_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value ('at approximately 37 °C').";
+    lexicon:form     = "approximately";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "approximately";
+}
+resource lexicon:approximately_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, predicated ('was approximately 37 °C').";
+    lexicon:form     = "approximately";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "approximately";
+}
+resource lexicon:about_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value ('for about 2 h').";
+    lexicon:form     = "about";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "about";
+}
+resource lexicon:about_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, predicated ('was about 37 °C').";
+    lexicon:form     = "about";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "about";
+}
+resource lexicon:around_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value ('reached around 100 mm3').";
+    lexicon:form     = "around";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "around";
+}
+resource lexicon:around_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, predicated ('was around 37 °C').";
+    lexicon:form     = "around";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "around";
+}
+resource lexicon:roughly_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value ('for roughly 2 h').";
+    lexicon:form     = "roughly";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "roughly";
+}
+resource lexicon:roughly_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, predicated ('was roughly 37 °C').";
+    lexicon:form     = "roughly";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "roughly";
+}

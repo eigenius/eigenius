@@ -355,6 +355,11 @@ fn atom_label(key: &str, vb: &Vb) -> Option<String> {
 }
 
 pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
+    // A bound on a measured value (D95 slice 6) reads back as an existential over the value; render
+    // the value as its constraint, `less than 6203/20 K`, wherever the quantity would have rendered.
+    if has_bound(sem) {
+        return verbalize(&render_bounds(sem), vb);
+    }
     match sem {
         Exp::Ann(inner, _) | Exp::Fst(inner) | Exp::Snd(inner) => return verbalize(inner, vb),
         Exp::Lam(_, body) => return verbalize(body, vb),
@@ -648,6 +653,10 @@ fn quantity_text(quantity: &Exp, unit: &Exp) -> String {
     if let Exp::Ann(inner, _) = quantity {
         return quantity_text(inner, unit);
     }
+    // A bounded value, already rendered as its constraint by [`render_bounds`].
+    if let Exp::LitString(constraint) = quantity {
+        return constraint.clone();
+    }
     let Exp::InductiveCtor(_, _, parts) = quantity else {
         return pretty_term(quantity);
     };
@@ -661,6 +670,117 @@ fn quantity_text(quantity: &Exp, unit: &Exp) -> String {
     match unit {
         Exp::LitUnit(u) if !u.is_dimensionless() => format!("{text} {}", u.to_canonical_string()),
         _ => text,
+    }
+}
+
+/// A bounded value as the `unit_constraint` combinator builds it and the gate reads it back (D95
+/// slice 6): `∀P:Prop. (∀q:Quantity(u). And(C, body) → P) → P`. Returns `q`, the constraint `C` and
+/// the consumer's `body`.
+fn bounded_exists(sem: &Exp) -> Option<(&str, &Exp, &Exp)> {
+    let Exp::Pi(Patt::Var(p), prop, cod) = sem else {
+        return None;
+    };
+    if !matches!(prop.as_ref(), Exp::Sort(l) if l.as_nat() == Some(0)) {
+        return None;
+    }
+    let (Exp::Pi(Patt::Var(q), ty, arr), Exp::Var(p2)) = as_arrow(cod)? else {
+        return None;
+    };
+    let (conjunction, Exp::Var(p3)) = as_arrow(arr)? else {
+        return None;
+    };
+    let (head, _, ty_args) = ty.as_const_spine()?;
+    if p2 != p || p3 != p || !head.as_str().ends_with("units:Quantity") || ty_args.len() != 1 {
+        return None;
+    }
+    let (and, _, parts) = conjunction.as_const_spine()?;
+    match parts.as_slice() {
+        [c, body] if and.as_str().ends_with("logic:And") => Some((q.as_str(), c, body)),
+        _ => None,
+    }
+}
+
+/// The words for a constraint on the value `q`: `units:lt(u, q, b)` is "less than b",
+/// `units:lt(u, b, q)` "more than b", `le` "at most" / "at least", `approx` "about". A bound on a
+/// bound (`less than about 2 h`) is the constraint relating `q` to an inner value, then that value's
+/// own constraint.
+fn bound_text(c: &Exp, q: &str) -> Option<String> {
+    if let Some((inner, c2, rel)) = bounded_exists(c) {
+        let (words, other) = bound_words(rel, q)?;
+        if !matches!(other, Exp::Var(v) if v == inner) {
+            return None;
+        }
+        return Some(format!("{words} {}", bound_text(c2, inner)?));
+    }
+    let (words, other) = bound_words(c, q)?;
+    let (_, args) = app_spine(c);
+    Some(format!("{words} {}", quantity_text(other, args[0])))
+}
+
+/// A `units:` order relation over `q` and one other argument, as the words that say it with `q` as
+/// the subject, and that other argument.
+fn bound_words<'e>(rel: &'e Exp, q: &str) -> Option<(&'static str, &'e Exp)> {
+    let (Exp::EigonAxiom(head), args) = app_spine(rel) else {
+        return None;
+    };
+    let [_unit, x, y] = args.as_slice() else {
+        return None;
+    };
+    let local = head.as_str().strip_prefix("urn:eigenius:units:")?;
+    let is_q = |e: &Exp| matches!(e, Exp::Var(v) if v == q);
+    match (local, is_q(x), is_q(y)) {
+        ("lt", true, false) => Some(("less than", y)),
+        ("lt", false, true) => Some(("more than", x)),
+        ("le", true, false) => Some(("at most", y)),
+        ("le", false, true) => Some(("at least", x)),
+        ("approx", true, false) => Some(("about", y)),
+        _ => None,
+    }
+}
+
+/// Whether `sem` contains a bounded value [`render_bounds`] can render.
+fn has_bound(sem: &Exp) -> bool {
+    if let Some((q, c, _)) = bounded_exists(sem) {
+        if bound_text(c, q).is_some() {
+            return true;
+        }
+    }
+    match sem {
+        Exp::App(f, x) => has_bound(f) || has_bound(x),
+        Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) | Exp::Ann(b, _) => has_bound(b),
+        Exp::Pi(_, a, b) | Exp::Sig(_, a, b) | Exp::Arrow(a, b) | Exp::Pair(a, b) => {
+            has_bound(a) || has_bound(b)
+        }
+        Exp::InductiveCtor(_, _, args) => args.iter().any(has_bound),
+        _ => false,
+    }
+}
+
+/// `sem` with each bounded value replaced by its body, the value rendered as its constraint — a
+/// string literal [`quantity_text`] prints as is.
+fn render_bounds(sem: &Exp) -> Exp {
+    if let Some((q, c, body)) = bounded_exists(sem) {
+        if let Some(text) = bound_text(c, q) {
+            return render_bounds(&subst_var(body, q, &Exp::LitString(text)));
+        }
+    }
+    let go = |x: &Exp| Box::new(render_bounds(x));
+    match sem {
+        Exp::App(f, x) => Exp::App(go(f), go(x)),
+        Exp::Lam(p, b) => Exp::Lam(p.clone(), go(b)),
+        Exp::Pi(p, a, b) => Exp::Pi(p.clone(), go(a), go(b)),
+        Exp::Sig(p, a, b) => Exp::Sig(p.clone(), go(a), go(b)),
+        Exp::Arrow(a, b) => Exp::Arrow(go(a), go(b)),
+        Exp::Pair(a, b) => Exp::Pair(go(a), go(b)),
+        Exp::Fst(x) => Exp::Fst(go(x)),
+        Exp::Snd(x) => Exp::Snd(go(x)),
+        Exp::Ann(x, t) => Exp::Ann(go(x), t.clone()),
+        Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
+            d.clone(),
+            n.clone(),
+            args.iter().map(render_bounds).collect(),
+        ),
+        other => other.clone(),
     }
 }
 

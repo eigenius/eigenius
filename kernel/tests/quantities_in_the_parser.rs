@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D95 slices 4 and 5 — measure phrases in the grammar and their consumers. The categories
+//! D95 slices 4 to 6 — measure phrases in the grammar, their consumers, and bounds on them. The categories
 //! (`cat_mp`, `cat_unit_forall`, `lexicon:Reading`), the `Difference` type, the unit-polymorphic
 //! application, the seeding and the prepositions over a measured value (`closed-class.esl`) are in
 //! the bootstrap chain; the fixture adds the content words around them, and a verb that takes only a
@@ -20,7 +20,9 @@
 
 use std::sync::Arc;
 
-use eigenius_kernel::dcg::{entry_to_item, is_ctor, pretty_term, Identity, Parser};
+use eigenius_kernel::dcg::{
+    apply, entry_to_item, is_ctor, pretty_term, Identity, Item, Parser, RightContext,
+};
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::term::Exp;
@@ -294,6 +296,11 @@ fn packed_equals_unpacked_on_quantities() {
         "HeLa incubated with 10 μM etoposide",
         "HeLa received a dose of 5 mg/kg",
         "the temperature was 37 °C",
+        "HeLa incubated at less than 37 °C",
+        "HeLa received a dose of at least 5 mg/kg",
+        "the temperature was less than 37 °C",
+        "HeLa incubated with less than 10 μM etoposide",
+        "HeLa incubated for less than about 2 h",
     ] {
         assert_eq!(readings(&packed, text), readings(&unpacked, text), "{text}");
     }
@@ -317,7 +324,8 @@ fn measure_phrases<'e>(cat: &'e Exp, out: &mut Vec<&'e [Exp]>) {
 
 /// Decision 5: every closed-class consumer of a measure phrase names the reading it takes. One
 /// whose reading were a variable would take the value and the difference items alike, and
-/// `at 37 °C` would be 310.15 K and 37 K at once. The 33 prepositions of slice 5 take values.
+/// `at 37 °C` would be 310.15 K and 37 K at once. The 33 prepositions of slice 5 and the 18 bound
+/// entries of slice 6 take values.
 #[test]
 fn every_consumer_names_its_reading() {
     let ctx = eigenius_kernel::testing::bootstrap_context();
@@ -344,6 +352,270 @@ fn every_consumer_names_its_reading() {
             }
         }
     }
-    assert_eq!(readings.len(), 33, "{readings:?}");
+    assert_eq!(readings.len(), 51, "{readings:?}");
     assert!(readings.iter().all(|r| r == "value"), "{readings:?}");
+}
+
+/// Whether a bound's constraint `rel` puts the quantified value first (`lt(u, q, b)`: below the
+/// bound) or the bound first (`lt(u, b, q)`: above it), read off the pretty form, where the value is
+/// a bound variable `G#n` and the bound a literal `mk_quantity(…)`.
+fn value_first(pretty: &str, rel: &str) -> Option<bool> {
+    let at = pretty.find(&format!("{rel}(<term>, "))? + rel.len() + "(<term>, ".len();
+    Some(pretty[at..].starts_with("G#"))
+}
+
+/// Slice 6a: a bound constrains the value a consumer takes (D95 implementation plan, slice 6). The
+/// value is quantified, `∃q. C(q) ∧ …`, and the constraint's direction is its argument order:
+/// `less than b` is `lt(q, b)`, `more than b` is `lt(b, q)`. `37 °C` is still the value 310.15 K.
+#[test]
+fn a_bound_constrains_the_value_a_consumer_takes() {
+    let parser = Parser::build(layer());
+    for (text, relation, constraint, value_first_expected, magnitude) in [
+        (
+            "HeLa incubated at less than 37 °C",
+            "prep_at_value",
+            "lt",
+            true,
+            "numer: 6203, denom: 20",
+        ),
+        (
+            "HeLa incubated for more than 2 h",
+            "prep_for_value",
+            "lt",
+            false,
+            "numer: 7200, denom: 1",
+        ),
+        (
+            "HeLa incubated for at least 2 h",
+            "prep_for_value",
+            "le",
+            false,
+            "numer: 7200, denom: 1",
+        ),
+        (
+            "HeLa incubated for at most 2 h",
+            "prep_for_value",
+            "le",
+            true,
+            "numer: 7200, denom: 1",
+        ),
+        (
+            "HeLa incubated for up to 2 h",
+            "prep_for_value",
+            "le",
+            true,
+            "numer: 7200, denom: 1",
+        ),
+        (
+            "HeLa incubated at approximately 37 °C",
+            "prep_at_value",
+            "approx",
+            true,
+            "numer: 6203, denom: 20",
+        ),
+        (
+            "HeLa incubated for about 2 h",
+            "prep_for_value",
+            "approx",
+            true,
+            "numer: 7200, denom: 1",
+        ),
+        (
+            "HeLa incubated for around 2 h",
+            "prep_for_value",
+            "approx",
+            true,
+            "numer: 7200, denom: 1",
+        ),
+        (
+            "HeLa incubated for roughly 2 h",
+            "prep_for_value",
+            "approx",
+            true,
+            "numer: 7200, denom: 1",
+        ),
+        (
+            "HeLa incubated with more than 10%",
+            "prep_with_value",
+            "lt",
+            false,
+            "numer: 1, denom: 10",
+        ),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        let pretty = pretty_term(parsed[0].sem());
+        assert!(
+            debug.contains(&format!("ontology:{relation}")),
+            "{text}: {pretty}"
+        );
+        assert!(
+            debug.contains(&format!("units:{constraint}")),
+            "{text}: {pretty}"
+        );
+        assert!(debug.contains(magnitude), "{text}: {debug}");
+        assert_eq!(
+            value_first(&pretty, constraint),
+            Some(value_first_expected),
+            "{text}: {pretty}"
+        );
+    }
+}
+
+/// Slice 6a: a noun modifier, the copula and a prenominal modifier take a bound as they take a
+/// measured value — the marker's predicate entry is `λx. ∃q. C(q) ∧ has_quantity(x, u, q)`.
+#[test]
+fn a_bound_in_each_position() {
+    let parser = Parser::build(layer());
+    for (text, relation, constraint, value_first_expected, noun) in [
+        (
+            "HeLa received a dose of at least 5 mg/kg",
+            "prep_of_value",
+            "le",
+            false,
+            "lexicon:Dose",
+        ),
+        (
+            "the temperature was less than 37 °C",
+            "has_quantity",
+            "lt",
+            true,
+            "lexicon:Temperature",
+        ),
+        (
+            "HeLa incubated with less than 10 μM etoposide",
+            "has_quantity",
+            "lt",
+            true,
+            "lexicon:Etoposide",
+        ),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        let pretty = pretty_term(parsed[0].sem());
+        assert!(
+            debug.contains(&format!("ontology:{relation}"))
+                && debug.contains(&format!("units:{constraint}"))
+                && debug.contains(noun),
+            "{text}: {pretty}"
+        );
+        assert_eq!(
+            value_first(&pretty, constraint),
+            Some(value_first_expected),
+            "{text}: {pretty}"
+        );
+    }
+}
+
+/// A marker is a consumer too: `less than about 2 h` is a value below one of about 2 h.
+#[test]
+fn a_bound_takes_a_bound() {
+    let parser = Parser::build(layer());
+    let parsed = parser.parse("HeLa incubated for less than about 2 h", &Identity);
+    assert_eq!(parsed.len(), 1);
+    let debug = format!("{:?}", parsed[0].sem());
+    assert!(
+        debug.contains("units:approx")
+            && debug.contains("units:lt")
+            && debug.contains("prep_for_value"),
+        "{}",
+        pretty_term(parsed[0].sem())
+    );
+}
+
+/// Every marker takes a value (decision 2), so a consumer of a difference takes no bound: `rose`
+/// takes a difference in kelvin and `rose less than 5 °C` has no parse. Bounds on differences wait
+/// for an attested one.
+#[test]
+fn a_bound_on_a_difference_is_not_built() {
+    let parser = Parser::build(layer());
+    assert!(readings(&parser, "HeLa rose less than 5 °C").is_empty());
+    assert_eq!(readings(&parser, "HeLa rose 5 °C").len(), 1);
+}
+
+/// Decision 3: one rule serves every consumer. Each closed-class entry that takes a measure phrase
+/// in kelvin also takes a constraint in kelvin through `unit_constraint`, and yields the category it
+/// yields for the measure phrase.
+#[test]
+fn every_measure_consumer_takes_a_constraint() {
+    let ctx = eigenius_kernel::testing::bootstrap_context();
+    let head = ctx.head();
+    let mut layer = head;
+    while layer.name() != "closed-class" {
+        layer = layer.parent().expect("closed-class is in the chain");
+    }
+    let cat_iri = Iri::parse("urn:eigenius:lexicon:Cat").unwrap();
+    let reading_iri = Iri::parse("urn:eigenius:lexicon:Reading").unwrap();
+    let kelvin = Exp::LitUnit(eigenius_kernel::units::Unit::parse_canonical("K").unwrap());
+    let measure = |ctor: &str| {
+        Exp::InductiveCtor(
+            cat_iri.clone(),
+            ctor.into(),
+            vec![
+                kelvin.clone(),
+                Exp::InductiveCtor(reading_iri.clone(), "value".into(), vec![]),
+            ],
+        )
+    };
+    let point = Item::new(measure("cat_mp"), Exp::Var("q".into()));
+    let bound = Item::new(measure("cat_mpc"), Exp::Var("c".into()));
+    let entry = Iri::parse("urn:eigenius:lexicon:LexicalEntry").unwrap();
+    let mut consumers = 0;
+    for (iri, r) in layer.iter_resources() {
+        if !r.is_instance_of(&entry) {
+            continue;
+        }
+        let consumer = entry_to_item(head, &r).unwrap_or_else(|e| panic!("{iri}: {e}"));
+        let Some(with_point) = apply(&consumer, &point, head, RightContext::Other) else {
+            continue;
+        };
+        let with_bound = apply(&consumer, &bound, head, RightContext::Other)
+            .unwrap_or_else(|| panic!("{iri} takes 37 K and no bound in K"));
+        assert_eq!(with_bound.cat(), with_point.cat(), "{iri}");
+        consumers += 1;
+    }
+    assert_eq!(consumers, 51);
+}
+
+/// Slice 6a: a bound verbalizes as its words where the quantity would have rendered — after a
+/// preposition, predicated, and nested — not as the existential it reads back as.
+#[test]
+fn a_bound_verbalizes_as_its_words() {
+    use eigenius_kernel::dcg::{verbalize, Vb};
+    let layer = layer();
+    let parser = Parser::build(Arc::clone(&layer));
+    let names = std::collections::BTreeMap::new();
+    for (text, words) in [
+        (
+            "HeLa incubated at less than 37 °C",
+            "at less than 6203/20 K",
+        ),
+        ("HeLa incubated for more than 2 h", "for more than 7200 s"),
+        ("HeLa incubated for at least 2 h", "for at least 7200 s"),
+        ("HeLa incubated for up to 2 h", "for at most 7200 s"),
+        (
+            "HeLa incubated at approximately 37 °C",
+            "at about 6203/20 K",
+        ),
+        (
+            "the temperature was less than 37 °C",
+            "is less than 6203/20 K",
+        ),
+        (
+            "HeLa received a dose of at least 5 mg/kg",
+            "of at least 1/200000",
+        ),
+        (
+            "HeLa incubated for less than about 2 h",
+            "for less than about 7200 s",
+        ),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}");
+        let surface = verbalize(parsed[0].sem(), &Vb::surface(&names, &layer));
+        assert!(surface.contains(words), "{text}: {surface}");
+        assert!(!surface.contains("Quantity("), "{text}: {surface}");
+    }
 }

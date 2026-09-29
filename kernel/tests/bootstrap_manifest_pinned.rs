@@ -31,6 +31,11 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED FOR D95 SLICE 6 (`2026-09-29`), on three layers: `units` (`units:lt`, `le`, `approx`,
+//! the order a bound states), `lexicon` (`cat_mpc`, the measure constraint) and `closed-class` (the
+//! bound markers `less than` … `roughly`). Slices 6–8 each move these layers and pay ONE reseed
+//! together, after slice 8 (`docs/design/d95-implementation-plan.md`, slice 6).
+//!
 //! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
 //! (`docs/design/d95-implementation-plan.md`, slice 5): `units` (standard gravity, `molar`, `week`,
 //! `units:Difference`), `lexicon` (`lexicon:Reading`, `cat_mp`, `cat_unit_forall`,
@@ -201,15 +206,15 @@ formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:3a4cd1b1a75a5032fda484dea529bcf79678ec4d4fd060e13c6ef00d782e5fc2
 justification:3544a09a5fa235332df6bfb40bc0c68ce266b72704d86d85a08d6a63f785ae2f
-units:b6719d01d5394f7e1edf25ae1764515539ce69addc42d1618d7d201b1e715a84
+units:f125f3ca24c57533565d17dac682640fe0f4ec8963c166c83950946a0559cbe8
 statistics:8c955279b691648a948061c47cd8ff2ada4c9edd9a05c756b373a5aa83c3b466
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
-lexicon:b5b9a458ac5088d4750d525dc93e8dfbb60a65bd660bfc8fb29f4790b5a1b8a1
+lexicon:1c6e18802c72de1f28b7b7469f93862259ee9324fea31a82e2a5214d2a418352
 ontology:4c90a71407c97e847597e8b55329c106a4071c4af41fe172ced12c3afdc539cd
-closed-class:d3d02ebcc90b5b1478c0cf33723f4b2b7d8dd60d3266f0350e107c58d854c706
+closed-class:cdf8e3e83ae82fc456dd7c5f791a5f120ce31e55bd24378d7edab19f5599d12f
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 

@@ -606,6 +606,27 @@ consumer then quantifies over its value slot.
 every consumer position: the VP adjuncts across their finiteness variants, the noun modifiers,
 predicative and prenominal. 6b: the symbols, the comparison clause, scientific notation. 6c: ranges.
 
+**6a — built** (2026-09-29).
+- `units:lt`, `le` and `approx` (`units.esl`); `cat_mpc` (`lexicon-ontology.esl`), its
+  denotation and unification (`dcg/category.rs`); the `unit_constraint` combinator
+  (`CombKind::UnitConstrain`, `constrained_sem`, `prop_arity` in `dcg/rules/combinators.rs`); nine
+  word markers with two entries each, 18 entries over ten sems (`closed-class.esl`).
+- A bound reads back as `∀P:Prop. (∀q:Quantity(u). And(C(q), body) → P) → P`. `verbalize` renders
+  the value as its constraint wherever the quantity renders: `hela at less than 6203/20 K`, `the
+  Temperature is less than 6203/20 K`, `some Dose of at least 1/200000`.
+- `quantities_in_the_parser.rs`: every marker after a VP adjunct, with the constraint's direction
+  and `37 °C` read as 310.15 K; a noun modifier, the copula and a prenominal modifier; a bound on a
+  bound (`less than about 2 h`); no bound on a difference (`rose less than 5 °C` has no parse); the
+  verbalization; packed equals unpacked on five bound sentences. `every_measure_consumer_takes_a_constraint`
+  applies each closed-class entry that takes a measure phrase in kelvin to a constraint in kelvin:
+  all 51 (33 prepositions, 18 bound entries) yield the category they yield for the value, so the
+  finiteness variants are covered by category, not by sentence.
+- Decision 3 changed while building: a marker is a consumer too, so `less than about 2 h` composes
+  (a value below one of about 2 h). The first cut refused a constraint to a marker; that refused
+  sound English.
+- The bootstrap manifest moved on `units`, `lexicon` and `closed-class`; `EXPECTED` is updated. No
+  persisted store resumes until the reseed after slice 8.
+
 **Acceptance.** Tests in `quantities_in_the_parser.rs` for each position and marker, with a °C case
 wherever the value reading matters (decision 5 above). The attested sentences join
 `experiments/parsing/quantities/corpus.tsv`; a row whose host is slice 7's or 8's is a gap row naming

@@ -382,6 +382,12 @@ data lexicon:Cat : Type 1 {
     // seeding builds its items (D95 implementation plan, decisions 1 and 5). Distinct from `cat_measure`,
     // which is an opaque ordinal scale over entities.
     cat_mp : core:unit -> lexicon:Reading -> lexicon:Cat,
+    // MPC[u, reading] — a MEASURE CONSTRAINT (D95 slice 6): `less than 37 °C`, `~100 mm3`. A bound
+    // constrains a measure phrase's value instead of stating one, so it denotes a predicate over the
+    // quantity: ⟦cat_mpc(u, value)⟧ = units:Quantity(u) → Prop, ⟦cat_mpc(u, difference)⟧ =
+    // units:Difference(u) → Prop. Indexed as `cat_mp` is. A consumer of `cat_mp(u, r)` takes it through
+    // the `unit_constraint` combinator, which quantifies the value the consumer would have taken.
+    cat_mpc : core:unit -> lexicon:Reading -> lexicon:Cat,
     // ∀u:unit. R[u] — a UNIT-polymorphic functor: a consumer that takes a measure phrase of any unit
     // (`at 37 °C`, `for 2 h`). Like `cat_forall` and unlike the feature binders, it is instantiated from
     // the consumed item — `u := U` from its `cat_mp(U, r)` — and its sem is applied to the unit, since

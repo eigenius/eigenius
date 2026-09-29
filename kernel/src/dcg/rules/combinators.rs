@@ -28,6 +28,7 @@ use std::sync::{Arc, LazyLock};
 
 use crate::layer::Layer;
 use crate::nbe::term::{Exp, Patt};
+use crate::ontology::iri::Iri;
 
 use super::super::category::{
     cat_subsumes, feat_meets, is_ctor, match_cat, slash_parts, subst_cat, unify_cat, CatPat,
@@ -80,6 +81,16 @@ enum SemRecipe {
     /// Unit-polymorphic application: category `cat`; sem `L unit R` — the functor's sem applied to the
     /// unit it binds, then to the measure phrase.
     UnitApply { cat: Exp, unit: Exp },
+    /// A consumer applied to a measure constraint: category `cat`; sem [`constrained_sem`] over the
+    /// value type `value_ty` and the consumer's `arity`, the unit applied first when the consumer
+    /// binds one. `and` is `logic:And`, resolved when the combination was decided.
+    UnitConstrain {
+        cat: Exp,
+        unit: Option<Exp>,
+        value_ty: Exp,
+        arity: usize,
+        and: Iri,
+    },
     /// Forward composition: category `cat`; sem `λz. L(R z)`.
     FwdComp { cat: Exp },
     /// A **datafied grammar rule** matched (Phase 1–2): a `combine_*` group matched a [`CatRule`] and
@@ -156,6 +167,13 @@ enum CombKind {
     /// with it — the determiner's pattern for a unit. The unit is an explicit argument of the sem
     /// because implicit Π is deferred (eigenius#261).
     UnitApply,
+    /// A measure consumer taking a constraint (D95 slice 6, decision 3): a consumer of
+    /// `cat_mp(U, r)` — unit-polymorphic or not — meets `cat_mpc(U, r)` (`less than 37 °C`) on its
+    /// right and yields its own result, with the value it would have taken quantified:
+    /// `λa₁…aₙ. ∃q. C(q) ∧ f [U] q a₁…aₙ`. The quantifier scopes over the consumer's slot as
+    /// `gq_prep_vpadjunct` scopes a quantified noun phrase over a preposition's, generalised to the
+    /// consumer's arity, so one rule serves every consumer of a measure phrase.
+    UnitConstrain,
 }
 
 /// An Eisner normal-form provenance guard on the left operand (D63 §8.2 item 4).
@@ -312,8 +330,111 @@ impl CombKind {
                     unit: unit.clone(),
                 })
             }
+            CombKind::UnitConstrain => {
+                let Exp::InductiveCtor(decl, name, args) = &right.cat else {
+                    return None;
+                };
+                let (true, [unit @ Exp::LitUnit(_), reading]) =
+                    (name == "cat_mpc", args.as_slice())
+                else {
+                    return None;
+                };
+                // A unit-polymorphic consumer is instantiated from the constraint's unit, as
+                // `UnitApply` instantiates it from the measure phrase's; its sem then takes the unit.
+                let (functor, unit_arg) = match is_ctor(&left.cat, "cat_unit_forall") {
+                    Some([Exp::Lam(Patt::Var(uvar), body)]) => {
+                        let mut bind = CatSubst::new();
+                        bind.insert(uvar.clone(), unit.clone());
+                        (subst_cat(body, &bind), Some(unit.clone()))
+                    }
+                    Some(_) => return None,
+                    None => (left.cat.clone(), None),
+                };
+                let (_mode, res, slot) = slash_parts(&functor, "fwd")?;
+                // The slot must take the measure phrase the constraint bounds.
+                let point = Exp::InductiveCtor(
+                    decl.clone(),
+                    "cat_mp".into(),
+                    vec![unit.clone(), reading.clone()],
+                );
+                let subst = unify_cat(slot, &point, layer)?;
+                // A marker is a consumer too: `less than about 2 h` is a value below one of about 2 h.
+                let cat = subst_cat(res, &subst);
+                let value_ty = super::super::category::denote_cat(&point).ok()?;
+                let arity = prop_arity(&super::super::category::denote_cat(&cat).ok()?)?;
+                let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+                Some(SemRecipe::UnitConstrain {
+                    cat,
+                    unit: unit_arg,
+                    value_ty,
+                    arity,
+                    and,
+                })
+            }
         }
     }
+}
+
+/// How many arguments a denotation takes before it is a `Prop` — `n` in `A₁ → … → Aₙ → Prop`, or
+/// `None` when it does not end in `Prop`, since a quantifier can only close over a proposition.
+fn prop_arity(ty: &Exp) -> Option<usize> {
+    let mut n = 0;
+    let mut t = ty;
+    loop {
+        match t {
+            Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) => {
+                n += 1;
+                t = cod;
+            }
+            Exp::Sort(level) if level.as_nat() == Some(0) => return Some(n),
+            _ => return None,
+        }
+    }
+}
+
+/// The sem of a consumer `f` applied to a constraint `c` (D95 slice 6, decision 3):
+/// `λa₁…aₙ. ∀P:Prop. (∀q:T. And(c q, f [u] q a₁…aₙ) → P) → P` — an existential over the value, in
+/// the encoding the determiners use (`exists_sem`, `closed-class.esl:31-37`).
+fn constrained_sem(
+    f: &Exp,
+    unit: Option<&Exp>,
+    c: &Exp,
+    value_ty: &Exp,
+    arity: usize,
+    and: &Iri,
+) -> Exp {
+    let (q, p) = ("__mpc_q", "__mpc_P");
+    let args: Vec<String> = (0..arity).map(|i| format!("__mpc_a{i}")).collect();
+    let app = |f: Exp, x: Exp| Exp::App(Box::new(f), Box::new(x));
+    let mut consumer = f.clone();
+    if let Some(u) = unit {
+        consumer = app(consumer, u.clone());
+    }
+    consumer = app(consumer, Exp::Var(q.into()));
+    for a in &args {
+        consumer = app(consumer, Exp::Var(a.clone()));
+    }
+    let conjunction = Exp::const_applied(
+        and.clone(),
+        Vec::new(),
+        vec![app(c.clone(), Exp::Var(q.into())), consumer],
+    );
+    let witness = Exp::Pi(
+        Patt::Var(q.into()),
+        Box::new(value_ty.clone()),
+        Box::new(Exp::Arrow(
+            Box::new(conjunction),
+            Box::new(Exp::Var(p.into())),
+        )),
+    );
+    let exists = Exp::Pi(
+        Patt::Var(p.into()),
+        Box::new(Exp::sort(0)),
+        Box::new(Exp::Arrow(Box::new(witness), Box::new(Exp::Var(p.into())))),
+    );
+    args.iter().rev().fold(exists, |body, a| {
+        Exp::Lam(Patt::Var(a.clone()), Box::new(body))
+    })
 }
 
 /// The universal-combinator table (built once). Priority = order, mirroring the former arm order:
@@ -332,6 +453,11 @@ fn comb_rules() -> &'static [CombRule] {
             CombRule {
                 name: "unit_application",
                 kind: CombKind::UnitApply,
+                prov_guards: &[],
+            },
+            CombRule {
+                name: "unit_constraint",
+                kind: CombKind::UnitConstrain,
                 prov_guards: &[],
             },
             CombRule {
@@ -546,6 +672,23 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
             let sem = Exp::App(
                 Box::new(Exp::App(Box::new(left.sem().clone()), Box::new(unit))),
                 Box::new(right.sem().clone()),
+            );
+            Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
+        }
+        SemRecipe::UnitConstrain {
+            cat,
+            unit,
+            value_ty,
+            arity,
+            and,
+        } => {
+            let sem = constrained_sem(
+                left.sem(),
+                unit.as_ref(),
+                right.sem(),
+                &value_ty,
+                arity,
+                &and,
             );
             Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
         }

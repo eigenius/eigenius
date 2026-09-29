@@ -104,24 +104,13 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         )),
         // ⟦MP[u, value]⟧ = units:Quantity(u), ⟦MP[u, difference]⟧ = units:Difference(u) — a measure
         // phrase denotes its quantity, read as a measured value or a difference (D95, decisions 1, 5).
-        ("cat_mp", [unit, reading]) => {
-            let ty = match reading {
-                Exp::InductiveCtor(_, r, _) if r == "value" => crate::units::convert::QUANTITY,
-                Exp::InductiveCtor(_, r, _) if r == "difference" => {
-                    crate::units::convert::DIFFERENCE
-                }
-                other => {
-                    return Err(format!(
-                        "denote_cat: a cat_mp reading is `value` or `difference`, got {other:?}"
-                    ))
-                }
-            };
-            Ok(Exp::const_applied(
-                crate::ontology::well_known::iri(ty),
-                Vec::new(),
-                vec![unit.clone()],
-            ))
-        }
+        ("cat_mp", [unit, reading]) => measure_type(unit, reading),
+        // ⟦MPC[u, r]⟧ = ⟦MP[u, r]⟧ → Prop — a measure constraint (`less than 37 °C`) is a predicate over
+        // the quantity it bounds (D95 slice 6, decision 1).
+        ("cat_mpc", [unit, reading]) => Ok(Exp::Arrow(
+            Box::new(measure_type(unit, reading)?),
+            Box::new(Exp::sort(0)),
+        )),
         // ⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧ — as `cat_forall`, the bound variable appears in
         // ⟦R⟧ (`cat_mp(u, _)` denotes `Quantity(u)`), so the binder is a Π, not erased.
         ("cat_unit_forall", [body]) => {
@@ -368,6 +357,10 @@ fn unify_into(slot: &Exp, arg: &Exp, layer: &Arc<Layer>, subst: &mut CatSubst) -
     if let (Some([su, sr]), Some([au, ar])) = (is_ctor(slot, "cat_mp"), is_ctor(arg, "cat_mp")) {
         return sr == ar && unify_unit(su, au, subst);
     }
+    // cat_mpc(u, reading) (D95 slice 6): a measure constraint unifies as the measure phrase it bounds.
+    if let (Some([su, sr]), Some([au, ar])) = (is_ctor(slot, "cat_mpc"), is_ctor(arg, "cat_mpc")) {
+        return sr == ar && unify_unit(su, au, subst);
+    }
     // Higher-order functors `A/B` (`fwd`) and `A\B` (`bwd`), D63 §8.2 item 4:
     // structural subsumption with the standard function variance — the **result**
     // `A` is covariant, the **argument** `B` is contravariant. So an `S\NP_Entity`
@@ -407,6 +400,25 @@ fn unify_type(slot: &Exp, arg: &Exp, layer: &Arc<Layer>, subst: &mut CatSubst) -
     } else {
         type_subsumes(slot, arg, layer)
     }
+}
+
+/// The type a measure phrase's quantity has: `units:Quantity(u)` read as a value, `units:Difference(u)`
+/// read as a difference (D95, decisions 1 and 5). Shared by `cat_mp` and `cat_mpc`.
+fn measure_type(unit: &Exp, reading: &Exp) -> Result<Exp, String> {
+    let ty = match reading {
+        Exp::InductiveCtor(_, r, _) if r == "value" => crate::units::convert::QUANTITY,
+        Exp::InductiveCtor(_, r, _) if r == "difference" => crate::units::convert::DIFFERENCE,
+        other => {
+            return Err(format!(
+                "denote_cat: a measure phrase's reading is `value` or `difference`, got {other:?}"
+            ))
+        }
+    };
+    Ok(Exp::const_applied(
+        crate::ontology::well_known::iri(ty),
+        Vec::new(),
+        vec![unit.clone()],
+    ))
 }
 
 /// Unify a measure phrase's unit position: a slot `Exp::Var` binds to the argument's unit (a repeated

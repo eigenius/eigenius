@@ -55,6 +55,19 @@ data units:Difference (u : core:unit) : Set {
 axiom units:mul : core:unit -> core:unit -> core:unit
 axiom units:pow : core:unit -> core:rational -> core:unit
 
+// ── Order over quantities ────────────────────────────────────────────────────────────────────────
+// A bound on a measure phrase constrains its value rather than stating one (D95, "Ranges need no new
+// semantics"): `less than 37 °C` is `λq. lt(u, q, 37 °C)`. Two relations and argument order cover
+// the four directions, so `more than b` and `> b` are the one proposition `lt(u, b, q)`. Declared,
+// not reduced: the parser needs them to state a bound, and deciding one on literals is checking work
+// (D95 implementation plan, slice 6, decision 2). The unit is explicit, as in `prep_at_value`,
+// because implicit Π is deferred (eigenius#261).
+
+axiom units:lt : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop
+axiom units:le : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop
+// `approximately b`: opaque, because the text states no tolerance.
+axiom units:approx : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop
+
 // ── Vocabulary classes ───────────────────────────────────────────────────────────────────────────
 
 class units:NamedUnit {
