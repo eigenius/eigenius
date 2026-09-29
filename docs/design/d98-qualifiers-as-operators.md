@@ -78,8 +78,8 @@ sentence's causal predicate. A condition is a set of factors (decision 6).
   asserted:      R({A}, B) ∧ ∀C. R(C, B) → A ∈ C          -- A is the whole cause
   ```
 
-- **Negation targets the assertion, and its negation has exactly two disjuncts** — the two ways for
-  `A` not to be the whole cause:
+- **Negation targets the assertion, and its negation has two disjuncts** — the two ways for `A` not
+  to be the whole cause:
 
   ```
   not solely:    ¬R({A}, B)   ∨   ∃C. R(C, B) ∧ A ∉ C
@@ -89,9 +89,11 @@ sentence's causal predicate. A condition is a set of factors (decision 6).
   - **Joint cause:** `A` alone does not suffice; `A` together with other factors does.
   - **Alternative cause:** some condition that does not involve `A` suffices on its own.
 
-  This is one meaning, not two readings. `not solely` asserts that one of the two holds; the paper
-  then says which — in the same sentence, or by the experiment — and the parse carries that as a
-  further conjunct. Nothing is left for the parser or the ranker to choose.
+  This is one meaning, not two readings, and **the disjunction is inclusive: both can hold**. `A`
+  may need co-factors *and* the outcome may have a route that does not involve `A`; `not solely`
+  commits only to at least one. Where the paper establishes one — in the same sentence, or by the
+  experiment — the parse carries it as a further conjunct, which says that disjunct holds and says
+  nothing against the other. Nothing is left for the parser or the ranker to choose.
 - **`alone` has two uses.** Negated, it asserts the joint disjunct directly, without the
   disjunction: `each event alone does not lead to cell death` is `¬R({A}, B)`. Affirmative, it
   isolates a factor: `MMR deficiency alone contributes to the synthetic lethal interaction` — shown by
@@ -104,7 +106,7 @@ sentence's causal predicate. A condition is a set of factors (decision 6).
 
 The paper's uses (Nature text):
 
-| The paper says | Disjunct | How the paper says which |
+| The paper says | Disjunct the paper establishes | How |
 |---|---|---|
 | synthetic lethality: *the co-occurrence of these two genetic events leads to cell death, but each event alone does not* | joint | by definition |
 | *p53 activity contributes to, but is not solely responsible for, WRN dependence* | joint | `contributes to` |
