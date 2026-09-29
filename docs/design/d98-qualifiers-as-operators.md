@@ -92,8 +92,11 @@ sentence's causal predicate. A condition is a set of factors (decision 6).
   This is one meaning, not two readings. `not solely` asserts that one of the two holds; the paper
   then says which — in the same sentence, or by the experiment — and the parse carries that as a
   further conjunct. Nothing is left for the parser or the ranker to choose.
-- **`alone` asserts the joint disjunct directly**, without the disjunction: `A alone does not lead to
-  B` is `¬R({A}, B)`.
+- **`alone` has two uses.** Negated, it asserts the joint disjunct directly, without the
+  disjunction: `each event alone does not lead to cell death` is `¬R({A}, B)`. Affirmative, it
+  isolates a factor: `MMR deficiency alone contributes to the synthetic lethal interaction` — shown by
+  restoring MMR on its own, through chromosome transfer — asserts that `A` contributes, which is the
+  presupposition of `not solely` stated as a claim.
 - **`not fully explain` is `not solely`.** An explanation is full when it is the whole cause.
 - **`not merely / just / simply a result (consequence) of X` is `X is not solely responsible`,** with
   the arguments in the other order. The paper does not use the scalar reading (*nothing stronger than
@@ -368,7 +371,8 @@ and for manner in a protocol (`foci … were scored similarly`).
 2. **Causal exclusives** — `solely`, `alone`, `not fully`, `not merely / just / simply` a result of —
    with decision 1's presupposition mechanism and decision 6's relation, replacing the opaque
    `ontology:sole`. `solely` presupposes that `A` contributes and asserts that `A` is the whole cause;
-   `not solely` is then the joint-or-alternative disjunction; `alone` asserts the joint disjunct.
+   `not solely` is then the joint-or-alternative disjunction; a negated `alone` asserts the joint
+   disjunct, and an affirmative one asserts that `A` contributes.
    - Acceptance: the seven sentences in the table under *Causal exclusives*, each with the disjunct
      the paper states. `MMR deficiency … does not fully explain this interaction, suggesting that
      genomic lesions … promote WRN dependence` names a co-factor whose type differs from `A`'s; a
