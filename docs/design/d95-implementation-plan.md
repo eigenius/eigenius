@@ -503,33 +503,159 @@ countability lexicon, 92 withheld on closed-class surfaces.
 - The style guide's quantity rules, checked sentence by sentence and made current (finding 7); only
   differences stay 🔜, for slice 7.
 
-**Still owed, with the user:**
-- re-record the sense ranks and selections (finding 11; `experiments/parsing/README.md:12-176`).
-  Segmentation changed, so recorded draws keyed by sentence text can miss;
-- the parse-rate run on the CNL page and the re-established `baseline.json`. The CNL page
-  (`first-page-cnl-v3.txt`) is not on this machine.
+**Measured and re-baselined** (`5fb85cf`, 2026-09-29): the sense ranks and selections re-recorded
+against `wordnet-umls-aligned-2026-09-29-quantities`, the live draw replayed with every figure equal,
+and `baseline.json` rewritten from the replay: 62/62 expected hits, 0 grammar gaps, 626 readings
+(674 before), 175 skeletons.
 
-## Slice 6 — arguments and standards, on evidence
+## Slices 6–9 — what the paper attests (rewritten 2026-09-29)
 
-Type-indexing `cat_pp_arg` and `cat_pp_than` (finding 1), when a corpus sentence needs a measure
-phrase as a governed argument or a comparison standard; none of D95's examples does.
-- `cat_pp_arg` is emitted at six sites in the WordNet importer (`crates/eigenius-wordnet/src/convert.rs:250`,
-  `:260`, `:740`, `:1221`, `:1241`, `:1313`) and none in UMLS, so the change moves the imported lexicon.
-- `unify_into`'s `cat_pp_arg` arm (`dcg/category.rs:327-331`) and the two `denote_cat` arms change
-  with it.
+The first slices 6 and 7 built what D95's examples anticipated: a measure phrase as a governed
+argument or a comparison standard, and unit differences (`rose 5 °C`, `5 °C warmer`). Neither version
+of the paper has either. It has other constructions, and the owner's rule applies: a construction
+the paper uses once will recur in the next paper, so it is built. Counts from
+`experiments/parsing/measure-quantities.py --shapes` over the Nature text, the author manuscript in
+brackets, figure references removed. Slices 6–9 cite `2abed42`.
 
-## Slice 7 — degree semantics
+| Shape | Nature [AM] | Examples | Slice |
+|---|---|---|---|
+| a bound in words | 7 [3] | `less than one count per million`, `at least 1,000 cells`, `more than one MMR gene`, `more than half of the samples` | 6; hosts in 7, 8 |
+| a bound in symbols, running text | 11 [7] | `P < 2 × 10⁻¹⁶`, `>90% infection efficiency`, `≥ 8 foci` | 6 |
+| a bound in symbols, in parentheses | 9 [9] | `(P < 2 × 10⁻¹⁶, …)`, `(log2(mRNA expression in transcripts per million) < 1)`, `(<85%)` | 6 |
+| an approximation | 7 [3] | `around 100 mm3`, `~100 mm3`, `approximately 8-week-old`, `~5 minutes` | 6 |
+| a range with a unit or `%` | 7 [6] | `20–30%`, `45-60%`, `80–90% confluence`, `every 2–3 days`, `4–12% gels` | 6 |
+| a measure phrase + `of` + noun | 5 [12] | `300 µl of CellTiter-Glo` (pseudo-partitive), `15% of colon cancers` (proportion) | 8, 7 |
+| a measure phrase before a PP | 20 [8] | `9 days after shRNA induction`, `6 h before collection` | 8 |
+| `every` + number | 5 [5] | `every 3 days`, `every 2–3 days` | 8 |
+| `per` + noun | 42 [20] | `2 × 10³ cells per well`, `count per million`, `cells per sample` | 8 |
+| `N-fold` | 1 [1] | `a median 0.56-fold fewer deletion mutations … compared to typical-lineage MSI models` | 9 |
 
-- The interval-arithmetic category, distinct from `cat_measure` (`dcg/category.rs:99-104`).
-- Differential comparatives (`5 °C warmer`) with exact-degree templates, over the comparative
-  machinery in `kernel/tests/comparative_than.rs`.
-- The adjective-adjunct `by`, beside `by_agent` (`closed-class.esl:577`) and `by_nmod` (`:2449`).
-- Scalar-change verbs (`rose 5 °C`) through `m^Δ`, and the verb's scale orientation.
+The patterns approximate. `--shapes --verbose` prints every instance; read the bucket before citing
+its count. Most `per` hits are seeding densities and figure-axis labels; most parenthesized symbols
+are P values, but not all — `(log2(…) < 1)` defines a threshold the argument depends on.
 
-These take difference items. The typed arithmetic of decision 5 lands here, as axioms reduced on
-literals in the way `units:mul` is (`nbe/unit_ext.rs`).
+**Not built, on evidence: the first slices 6 and 7.** Type-indexing `cat_pp_arg` and `cat_pp_than`
+for a governed or standard measure phrase (finding 1); the interval-arithmetic category, differential
+comparatives, the adjective-adjunct `by`, and scalar-change verbs over differences. None occurs in
+either version of the paper. D95's design for them stands for when one does.
+
+## Slice 6 — bounds, approximations and ranges
+
+A bound is a constraint on a measure phrase's value, not a value (D95, "Ranges need no new
+semantics"): `less than 37 °C` denotes `λq. lt(q, 37 °C)`. Each construction here builds one, and a
+consumer then quantifies over its value slot.
+
+**Decisions**
+
+1. **A constraint category, indexed like `cat_mp`.** `cat_mpc : core:unit -> lexicon:Reading -> Cat`,
+   with `⟦cat_mpc(u, value)⟧ = units:Quantity(u) -> Prop` and
+   `⟦cat_mpc(u, difference)⟧ = units:Difference(u) -> Prop`. The unit index keeps a unit error a type
+   error, and packing keys it exactly (finding 5), as for `cat_mp`.
+   - *Rejected:* an interval type. Every consumer relation would need an interval-valued twin, and an
+     approximation is not an interval.
+   - *Rejected:* a third `Reading`. A bound constrains a value or a difference, so it is orthogonal to
+     the reading.
+2. **Three relations, declared in the units layer.** `units:lt`, `units:le` and `units:approx`, each
+   `forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop`. `more than b` is
+   `lt(b, q)` and `at least b` is `le(b, q)`: direction is argument order, so a bound written
+   `more than` and one written `>` are one proposition. `approx` is opaque, since the paper states no
+   tolerance. None is reduced on literals: the parser needs the relations to state a bound, and
+   deciding one is checking work, beside the typed arithmetic. Differences get relations when a bound
+   on a difference is attested.
+   - *Rejected:* `stats:lt` and `stats:le` (`statistics.esl:327-330`), which take `core:float`; a
+     quantity is an exact rational with a unit.
+3. **One rule lets every consumer take a constraint.** `[Πu. X / cat_mp(u, r)] [cat_mpc(U, r)] →
+   X[u := U]` — `UnitApply` (`combinators.rs:297-310`) with a constraint in place of the value. The
+   sem quantifies the value: for a consumer `f`, `λa₁…aₙ. ∃q. C(q) ∧ f(U)(q)(a₁)…(aₙ)`, n the arity of
+   `⟦X⟧`. The grammar already scopes a quantified object over a preposition's slot this way
+   (`gq_prep_vpadjunct`, `combinators.rs:1353-1375`); this generalizes it to the consumer's arity. The
+   ∃ is the determiners' (`exists_sem`, `closed-class.esl:31-37`), which verbalization reads as `a`.
+   - One rule reaches the 33 consumers built and each one slices 7 and 8 add.
+   - *Rejected:* a constraint-taking sibling of every consumer — 33 entries now, and each later
+     consumer twice. D95's "consumers subcategorise" decides between a measure phrase and a noun phrase
+     as a preposition's object; a constraint is a quantifier over the slot, which the grammar handles
+     by rule for noun phrases.
+4. **A bound marker carries two entries.** The constraint,
+   `cat_unit_forall(λu. cat_mpc(u, value) / cat_mp(u, value))`, and the predicate,
+   `cat_unit_forall(λu. (S[dcl,adj]\NP) / cat_mp(u, value))`, sem
+   `λu.λb.λx. ∃q. C(q) ∧ has_quantity(x, u, q)` — the phrase-level counterpart of the predicative item
+   a quantity token seeds. The copula takes it (`the temperature was less than 37 °C`), and
+   `mod_lifts`, which also fires on composed cells (`combinators.rs:855-872`), makes it prenominal
+   (`>90% infection efficiency`).
+5. **The markers.** Words: `less than`, `more than`, `at least`, `at most`, `up to`, and the
+   approximations `approximately`, `about`, `around`, `roughly`. Symbols: `<`, `≤`, `>`, `≥`, `~`, `≈`,
+   which the preprocessor already keeps as tokens (its decision 4, `preprocess.rs:390-397`) and which
+   seeding looks up by surface like any token (`seed.rs:587-594`). `fewer than` bounds a count and
+   waits for slice 7. `over`, `under`, `above` and `below` are not added: they are spatial
+   prepositions, with no bound use attested.
+6. **A symbol between a noun phrase and a value is a comparison clause**: `P < 2 × 10⁻¹⁶`,
+   `log2(copy number) < −1`. The symbol takes a third entry, `(S[dcl,fin]\NP) / cat_mp(u, value)`,
+   with the predicate's sem.
+7. **Scientific notation is one numeral.** `2 × 10⁻¹⁶`, `2 × 10³` and `1.5 x 10³` lex today as a
+   numeral, an operator and a word (`10⁻¹⁶`). The preprocessor joins mantissa, `×` or `x`, `10` and a
+   superscript or `^` exponent into one `Numeral`. Seeding densities (`2 × 10³ cells per well`) need it
+   as much as P values do.
+8. **A range is a digit pair with a unit or `%` after it.** `2–3 days` and `80–90%` (en-dash) and
+   `45-60%` (hyphen) become one range token whose readings carry both endpoints in the unit. It seeds
+   `cat_mpc(u, value)` with `λq. le(lo, q) ∧ le(q, hi)`, and the predicate item, as a quantity token
+   seeds its value and predicate. A digit pair with no unit is not a range (`926-68021`, a catalogue
+   number), and `4–7 foci` is a count range (slice 7). This is the lexical rule D95 said ranges waited
+   on.
+
+**Order.** 6a: decisions 1–5 — the category, the relations, the rule and the word markers — tested in
+every consumer position: the VP adjuncts across their finiteness variants, the noun modifiers,
+predicative and prenominal. 6b: the symbols, the comparison clause, scientific notation. 6c: ranges.
+
+**Acceptance.** Tests in `quantities_in_the_parser.rs` for each position and marker, with a °C case
+wherever the value reading matters (decision 5 above). The attested sentences join
+`experiments/parsing/quantities/corpus.tsv`; a row whose host is slice 7's or 8's is a gap row naming
+that slice, and turns covered when it lands.
+
+**What changes.** `units.esl` (the relations), `lexicon-ontology.esl` (`cat_mpc`), `closed-class.esl`
+(the markers), `dcg/category.rs` (`denote_cat`, `unify_into`, the packing keys), `dcg/rules/` (the
+rule), `dcg/preprocess.rs` (scientific notation, ranges), `dcg/verbalize.rs` (a bound renders as its
+words, `at less than 37 °C`). The three ontologies move the bootstrap manifest; one reseed after slice
+8 measures slices 6–8 together.
+
+## Slice 7 — counts
+
+A cardinal drops its number today: `two genes`, `5 cells` and `1,000 cells` all read `∃x`
+(`closed-class.esl:2170-2178`). No bound on a count can be stated over a number that is not there.
+- **The count**: a numeric cardinality of a predicate, beside `lexicon:card` (`closed-class.esl:1611`),
+  which is per entity and a float.
+- **Bounded cardinals**: `at least 1,000 cells`, `more than one MMR gene`, `≥ 8 foci`, `fewer than`;
+  count ranges, `4–7 foci`.
+- **Proportions**: `more than half of the samples`, `15% of colon cancers`, `20–30% of endometrial
+  cancers`.
+- **For the owner: what a bare cardinal asserts** — exactly two, at least two, or an existential as
+  today. D95 took the exact reading for differential comparatives ("a paper reporting that a
+  temperature rose 5 °C is not reporting that it rose at least 5 °C"); a count in a methods section
+  (`two biological replicates`) is exact, and one in a claim can be a lower bound.
+
+## Slice 8 — positions a measure phrase takes
+
+- **Before a PP** (20 [8]): `9 days after shRNA induction`, `6 h before collection`. Fronted, as in
+  `2 days after lentiviral transduction, cells were seeded`, it also needs the fronted PP adjunct,
+  a gap without quantities (`After the dose, …`).
+- **A verb's object**: `reached ~100 mm3`, `reached 80–90% confluence`, `used 0.2 µg/mL of
+  doxycycline`, `genes that had less than one count per million`.
+- **Pseudo-partitive** (5 [12]): `300 µl of CellTiter-Glo`, `0.2 µg/mL of doxycycline`.
+- **`every N unit`** (5 [5]): D95's category and opaque `every_period` sem ("`every N unit` —
+  category decided").
+- **Rates**: `per` before a count noun distributes (`2 × 10³ cells per well`: for each well), and
+  `count per million` is number notation like `ppm`, which D93 records as 10⁻⁶ at the dimensionless
+  unit and nothing reads yet.
+
+## Slice 9 — ratios
+
+`a median 0.56-fold fewer deletion mutations in microsatellite regions compared to typical-lineage
+MSI models (P = 1.7 × 10⁻⁹)`: `N-fold` as a factor on a comparative over counts, `compared to` as the
+standard's marker, `a median` as the statistic the ratio is. The ratio has
+`stats:EffectSize::Relative`'s shape (D95, "The tolerance derivation"); the parse states it, and the
+statistics institution can later ground it.
 
 ## Out, as D95 decides
 
-Ranges and intervals; `every N unit`; the tolerance construction and the vector-denoting PP;
-statistic routing to D52; the precision reading of dispersion.
+The tolerance construction and the vector-denoting PP — its one attested variant, `within 1.5× the IQR
+from the box`, describes how a plot was drawn; statistic routing to D52 records, which the design for
+the study's argument takes up; the precision reading of dispersion.

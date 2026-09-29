@@ -9,9 +9,31 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **The stack is drained (`2026-09-15`).** Every entry below is DONE, entry 0 included —
-> the next piece of work is a choice, not a resume. Do not read the topmost entry as
-> active; when work starts, push a new entry and mark it ACTIVE.
+> **entry 1 (`2026-09-29`). D95 — quantities in the parser, on `quantities-in-the-parser`. ACTIVE.**
+>
+> **The goal:** numerical quantities and measurements with units as part of the propositions.
+> Slices 1–5 are built and re-baselined (`5fb85cf`: 62/62 expected hits, 0 grammar gaps, 626
+> readings). Slices 6 and 7 were rewritten on `2026-09-29` around the constructions the WRN paper
+> attests, not the ones the first plan anticipated: slice 6 is bounds and ranges (`less than one
+> count per million`, `at least 1,000 cells per sample`, `P < 2 × 10⁻¹⁶`, `every 2–3 days`), slice 7
+> is ratios (`0.56-fold fewer … compared to …`). The owner's rule: a construction the paper uses
+> once will recur in the next paper, so it is built.
+>
+> **Exit gate:** slices 6 and 7 built, the quantity corpus extended with the attested sentences,
+> then the branch's PR.
+>
+> **Parked on the way (not on this entry's path):** D96 (JATS, decided, unbuilt), D97 (SPECIALIST,
+> proposed; motivated by D95's lexicon gaps `incubate` and `electroporate`), D98 (qualifiers,
+> decided then parked: the direction moved to representing the study's argument).
+>
+> **Next, after this entry pops:** a design for the argument of a study, informed by EXPO
+> (Soldatova & King 2006): hypotheses (research, null, alternative), results that support or reject
+> them, the experimental model (factor, levels, target), assumptions and conclusions, carried in
+> the CNL and linked through the justification layer. It takes over D98's decision 4, its causal
+> vocabulary, and the reading of the exclusives as rejected hypotheses, and the statistic routing
+> to D52 that D95 left out.
+
+> **The stack was drained on `2026-09-15`.** Every entry below is DONE, entry 0 included.
 
 > **entry −4d (`2026-09-15`). Query-processing workplan, item D — vector-index lifecycle
 > (#133, #132). DONE, merged as `37149af` (#255).** Both issues closed.

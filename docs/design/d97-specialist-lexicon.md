@@ -1,8 +1,9 @@
 # D97 — The SPECIALIST Lexicon as the lexicon's syntactic authority
 
-**Status: proposed** (2026-09-27). Measured against the imported lexicon at the lexicon level; the
-parse-level measurement is slice 1. Decisions 1–4 are taken (2026-09-27), and 5 for verbs whose
-noun names a concept; the rest of 5 and decisions 6–10 are open.
+**Status: proposed** (2026-09-27), **parked** (2026-09-29) while the branch finishes D95; provisioning
+is done (`scripts/provision-specialist.sh`). Measured against the imported lexicon at the lexicon
+level; the parse-level measurement is slice 1. Decisions 1–4 are taken (2026-09-27), and 5 for verbs
+whose noun names a concept; the rest of 5 and decisions 6–10 are open.
 
 ## The gap
 

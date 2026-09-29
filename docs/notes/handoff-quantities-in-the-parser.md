@@ -72,6 +72,12 @@ matching `selection-baseline.json`'s committed 30.
 replayed with every figure equal to the live run, and `baseline.json` was rewritten from the
 replay. Step 3's D98 part and step 5's provisioning are done; step 4 is amended in the table above.
 
+**Re-scoped the same day: the branch returns to D95.** D96, D97 and D98 grew out of testing D95 on
+the paper; they are parked, not on the branch's path. Steps 3–6 below no longer apply as written.
+D95's slices 6 and 7 are rewritten around the constructions the paper attests — bounds and ranges,
+then ratios — and after them comes the branch's PR. The argument of the study (EXPO's roles)
+replaces D98's direction and is designed after D95. `docs/notes/work-stack.md` entry 1 is current.
+
 ## Where the branch stands
 
 - **Base:** `c39b8d6`, the merge of #262 (exact numerics D94, units of measure D93) into `main`.

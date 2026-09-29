@@ -685,6 +685,10 @@ is the `⟨d,t⟩` typing applied directly. They stay out of v1 for the reason S
 is lexical rather than semantic — separating a range from a catalogue number (`926-68021`) needs the
 en-dash/hyphen distinction.
 
+*Revised 2026-09-29: in scope, as slice 6 of the implementation plan.* The lexical rule is that a
+digit pair is a range when a unit or `%` follows it, whichever dash joins it; a catalogue number
+carries no unit. Bounds (`less than`, `<`) and approximations (`~`) are the same constraint.
+
 ### Two facts recorded, not yet acted on
 
 - **The `Prep` enum and its importer have drifted.** `governed_preposition`
@@ -792,6 +796,9 @@ interprets, the measure phrase is its second argument, and no event machinery is
 **Not built in v1.** Three of the five instances carry ranges (`every 2–3 days`, `every 3–4 days`),
 which are already deferred, so two are reachable. The category and the semantic shape are recorded;
 whether two occurrences earn an entry is a coverage-target call.
+
+*Revised 2026-09-29: built, in slice 8 of the implementation plan.* The owner's rule decides the
+coverage call: a construction the paper attests is built.
 
 ### Dispersion splits in two, and only one half is a vocabulary gap
 
@@ -951,6 +958,10 @@ to separate a range from a catalogue number (`926-68021`, a LI-COR part number) 
 D93 also defers; statistic routing to D52 records, which is separate existing work; the tolerance
 construction (`within 2 °C of the setpoint`) and the fourth, vector-denoting PP category it needs,
 deferred on zero corpus attestations.
+
+*Revised 2026-09-29:* ranges, bounds, `every N unit`, counts and ratios are in, as slices 6–9 of the
+implementation plan, because the paper attests them. Ranges need no interval type ("Ranges need no
+new semantics"). Statistic routing and the tolerance construction stay out.
 
 An earlier draft also placed "any change to the composition rules" out of scope, on the grounds that
 D93 showed them unaffected. That is false and the reason is recorded above: `cat_pp_arg`, `cat_pp`

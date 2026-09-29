@@ -1,8 +1,12 @@
 # D98 — Qualifiers as logical operators
 
-**Status: decided** (2026-09-29) — all six decisions; no slice is built. Proposed 2026-09-28.
-Supersedes the inert/measurement split of `docs/notes/d62-adverb-semantics-decision.md` for the
-qualifiers below.
+**Status: parked** (2026-09-29). All six decisions were taken on 2026-09-29, for qualifiers as
+operators inside propositions; no slice is built. The direction has since moved: the study's
+argument — hypotheses, the results that support or reject them, conclusions — is to be represented
+explicitly, informed by EXPO (Soldatova & King 2006), in a later design that takes over decision 4,
+the causal vocabulary, and the reading of the exclusives as rejected hypotheses
+(`docs/notes/work-stack.md`, entry 1). Proposed 2026-09-28. Supersedes the inert/measurement split
+of `docs/notes/d62-adverb-semantics-decision.md` for the qualifiers below.
 
 ## The gap
 
