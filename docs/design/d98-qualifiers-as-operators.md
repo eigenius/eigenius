@@ -1,7 +1,8 @@
 # D98 — Qualifiers as logical operators
 
 **Status: proposed** (2026-09-28). Supersedes the inert/measurement split of
-`docs/notes/d62-adverb-semantics-decision.md` for the qualifiers below. Decisions 1–4 are open.
+`docs/notes/d62-adverb-semantics-decision.md` for the qualifiers below. Decisions 1–4 are open;
+decision 5 is decided (2026-09-29).
 
 ## The gap
 
@@ -56,7 +57,8 @@ Five are negated: `not solely`, `not merely`, `not just`, `not simply` (`body.p8
 ## The meanings
 
 Notation: `P` a predicate, `a` the entity the qualifier is about, `=` propositional equality
-(`Id(Entity, y, a)`), `≻` "stronger than" on a scale, `d(·)` a degree.
+`Id(A, y, a)` at the domain `A` of `P` (decision 5 — `lexicon:Entity` for the paper's relations),
+`≻` "stronger than" on a scale, `d(·)` a degree.
 
 ### Exclusives: `only`, `solely`, `alone`; scalar `merely`, `just`, `simply`
 
@@ -167,7 +169,7 @@ counts or proportions.
 sentence to its neighbour and add nothing to its truth conditions. Transparent is right for these,
 and for manner in a protocol (`foci … were scored similarly`).
 
-## Decisions (open)
+## Decisions
 
 1. **How a presupposition is carried.** `not solely P` needs the negation to reach the assertion and
    leave `P(a)` standing.
@@ -189,12 +191,55 @@ and for manner in a protocol (`foci … were scored similarly`).
 4. **Where `significantly` and `independently` live.** As predicates in the claim over a statistics
    record or over the two warrants; or at the justification layer only, beside the claim. *Proposed:*
    in the claim, pointing at the record — the paper asserts them.
+5. **What `Id` is taken at.** *Decided (2026-09-29).* `Id(A, x, y)` is the kernel's identity type at
+   any type `A`; nothing about it is specific to `lexicon:Entity`. An exclusive is polymorphic in `A`,
+   and `A` is the domain of the predicate it modifies — the exclusive never chooses a type:
+
+   ```
+   solely : Π(A : Set). (A → Prop) → A → Prop
+   solely A P a  =  P a  ∧  ∀(y : A). P y → Id(A, y, a)
+   ```
+
+   This is the determiners' shape: `lexicon:forall_sem` is `fun (A : Set) => fun (V : A -> Prop) =>
+   forall (x : A) => V(x)`, and every determiner in `closed-class.esl` is polymorphic in `T : Set` the
+   same way.
+   - **The alternatives range over `P`'s domain, not over `a`'s noun type.** They are whatever else
+     `P` could hold of. In `p53 activity is not solely responsible for WRN dependence`, restricting `y`
+     to activities excludes dMMR, a deficiency — the other contributor this document names — and
+     leaves the paper's claim without its witness.
+   - For the paper's verbs `A` is `lexicon:Entity`, because relations are typed over the entity top
+     and specific types reach argument slots by coercion. That is `P`'s domain, not a property of
+     equality; a predicate typed over something narrower gets a narrower `A`.
+   - `a` reaches `A` by subtyping coercion, which is the identity on terms, so `Id` at `A` agrees with
+     `Id` at `a`'s own type. The overgeneration *Types and the Structure of Meaning* §3.3.2 reports
+     for equality under coercion comes from non-injective coercions into dot-types, which this
+     lexicon does not have.
+   - *Rejected:* equality fixed at `lexicon:Entity` whatever `P` is — `Id` is a type former at every
+     type. Common nouns as setoids, each carrying its own identity criterion (Chatzikyriakidis & Luo
+     2018, 2020) — `Id` is the equality. Distinctness is written `¬Id(A, y, a)` directly, with no
+     intermediate definition standing in for it.
+   - *Consequence, not addressed here:* `¬Id` between named individuals has no rule in the kernel.
+     `DecEq` reduces to `Refl` on equal ground values and to a neutral otherwise, so it confirms
+     equality and never proves distinctness. An exclusive claim can therefore be represented and
+     Declared, as the paper does, but not checked. The sound route to checking is discrimination — a
+     property one has and the other lacks, turned into `¬Id` by `J`. A unique-name assumption would be
+     unsound: WordNet and UMLS name the same concepts, and alignment resolves that only for the
+     surfaces it merges, at parse time, so an unmerged alias of `a` would pass as another witness.
 
 ## Slices
 
 1. **Equality in ESL**: a surface form that encodes to the kernel's `Id`, so a meaning can say `y = a`.
 2. **Exclusives** — `only`, `solely`, `alone`, and the scalar `merely`, `just`, `simply` — with
-   decision 1's presupposition mechanism, replacing the opaque `ontology:sole`.
+   decision 1's presupposition mechanism, replacing the opaque `ontology:sole`. Written in the
+   determiners' shape (decision 5): polymorphic in `A`, instantiated at the modified predicate's
+   domain, with distinctness `¬Id(A, y, a)`.
+   - `only`, `solely` quantify over all of `A`.
+   - `alone` quantifies over the co-occurring alternatives the sentence or its context names — still
+     at type `A`; a discourse hole (D64) where they are not stated.
+   - The scalar exclusives quantify over predicates ranked by `≻`, not over individuals, and use no
+     `Id`.
+   - Acceptance: `p53 activity … is not solely responsible for WRN dependence` admits a witness whose
+     noun type differs from `a`'s. A version that takes `A` from `a` instead of from `P` fails it.
 3. **Completeness and degree** — `fully`, `partially`, `substantially` — with decision 2's degree.
 4. **Contrastive** — `selectively`, `preferentially` — with decision 3's contrast class.
 5. **Frequency and proportion** — `commonly`, `typically`, `predominantly`, `most commonly`.
