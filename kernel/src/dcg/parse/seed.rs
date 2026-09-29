@@ -755,7 +755,8 @@ impl Parser {
     /// lift makes it prenominal (`10 μM etoposide`), and the copula takes it (`the temperature was
     /// 37 °C`). A numeral is the measure-phrase pair at the dimensionless unit; `1` also seeds the
     /// cardinal determiner items of `one` and an integer of 2 or more those of `two`, their count
-    /// dropped as the word forms' is. Any other token seeds nothing here.
+    /// dropped as the word forms' is. A range seeds a constraint and a predicate ([`Self::range_items`]).
+    /// Any other token seeds nothing here.
     fn measure_items(&self, token: &Token) -> Vec<Item> {
         use super::super::preprocess::TokenKind;
         use crate::units::convert::{Converted, Kinds, Reading};
@@ -810,8 +811,93 @@ impl Parser {
                 }
                 items
             }
+            // A range (D95 slice 6c): the constraint `lo ≤ q ≤ hi` a consumer takes through
+            // `unit_constraint`, and the predicate the copula takes and `mod_lifts` makes prenominal.
+            TokenKind::Range(r) => r
+                .low
+                .readings
+                .iter()
+                .zip(&r.high.readings)
+                .flat_map(|(lo, hi)| self.range_items(&lo.value, &hi.value))
+                .collect(),
             _ => Vec::new(),
         }
+    }
+
+    /// A range's two items (D95 slice 6, decision 8): `cat_mpc(u, value)` with sem
+    /// `λq. And(le(u, lo, q), le(u, q, hi))`, and `S[adj]\NP` with sem
+    /// `λx. ∃q. And(le(u, lo, q), le(u, q, hi)) ∧ has_quantity(x, u, q)`. Empty when the endpoints'
+    /// units differ or the chain lacks the vocabulary.
+    fn range_items(
+        &self,
+        lo: &crate::units::convert::Converted,
+        hi: &crate::units::convert::Converted,
+    ) -> Vec<Item> {
+        use crate::units::convert::Reading;
+        let layer = &self.grammar.layer;
+        let build = || -> Option<Vec<Item>> {
+            if lo.unit != hi.unit {
+                return None;
+            }
+            let point =
+                super::super::category::measure_phrase_cat(layer, &lo.unit, Reading::Value)?;
+            let constraint_cat =
+                super::super::category::measure_constraint_cat(layer, &lo.unit, Reading::Value)?;
+            let predicate_cat = predicative_adjective_cat(layer)?;
+            let value_ty = super::super::category::denote_cat(&point).ok()?;
+            let le = Iri::parse(UNITS_LE).ok()?;
+            layer.resolve(&le)?;
+            let has_quantity = Iri::parse(HAS_QUANTITY).ok()?;
+            layer.resolve(&has_quantity)?;
+            let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+            let unit = Exp::LitUnit(lo.unit.clone());
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let le_app =
+                |a: Exp, b: Exp| app(app(app(Exp::EigonAxiom(le.clone()), unit.clone()), a), b);
+            let (q, u, x) = ("MP#q", "MP#u", "MP#x");
+            let constraint = Exp::Lam(
+                Patt::Var(q.into()),
+                Box::new(Exp::const_applied(
+                    and.clone(),
+                    Vec::new(),
+                    vec![
+                        le_app(lo.term(), Exp::Var(q.into())),
+                        le_app(Exp::Var(q.into()), hi.term()),
+                    ],
+                )),
+            );
+            // `λu.λq.λx. has_quantity(x, u, q)` — the consumer the predicate quantifies, as a marker's
+            // predicate entry does.
+            let has = Exp::Lam(
+                Patt::Var(u.into()),
+                Box::new(Exp::Lam(
+                    Patt::Var(q.into()),
+                    Box::new(Exp::Lam(
+                        Patt::Var(x.into()),
+                        Box::new(app(
+                            app(
+                                app(Exp::EigonAxiom(has_quantity), Exp::Var(x.into())),
+                                Exp::Var(u.into()),
+                            ),
+                            Exp::Var(q.into()),
+                        )),
+                    )),
+                )),
+            );
+            let predicate = super::super::rules::combinators::constrained_sem(
+                &has,
+                Some(&unit),
+                &constraint,
+                &value_ty,
+                1,
+                &and,
+            );
+            Some(vec![
+                Item::new(constraint_cat, constraint),
+                Item::new(predicate_cat, predicate),
+            ])
+        };
+        build().unwrap_or_default()
     }
 
     /// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md`) — a SEED-time rule (it
@@ -1040,6 +1126,8 @@ pub(super) fn is_lexicalized_adverb(surface: &str) -> bool {
 /// The relation a measured value predicates of an entity (`ontology.esl`), which a quantity's
 /// predicative-adjective item applies ([`Parser::measure_items`]).
 const HAS_QUANTITY: &str = "urn:eigenius:ontology:has_quantity";
+/// `units:le` — a range's endpoints bound its value (D95 slice 6c).
+const UNITS_LE: &str = "urn:eigenius:units:le";
 
 /// The productive denominal-adjective suffixes (D63 compound morphology §3b, generalized from the
 /// shipped `-based` slice). Each row is `(suffix_tail, relation_lemma, theta_is_object)`:

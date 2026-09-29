@@ -37,13 +37,21 @@
 //!    content tokens, and a stray one would block a full-span parse.
 //! 6. **Kinds.** A numeral is [`TokenKind::Numeral`]. A token that starts with a digit and is not one
 //!    (`53BP1`, `5-fold`, `1a`) is a [`TokenKind::Word`], so a lexicon without it reports it missing
-//!    (D95, decision 3). A range (`4–12`) and a token with no ASCII letter are `NonProse`: D95 keeps
-//!    ranges out of v1, and read as a numeral and a quantity `4–12% gels` would be four gels of 12%.
-//! 7. **Quantities.** A numeral and the unit written after it — `37 °C`, `10 μg ml⁻¹`, `10%`, or a
+//!    (D95, decision 3). A digit pair joined by an en-dash (`4–12`) and a token with no ASCII letter
+//!    are `NonProse`; step 9 makes the pair a range when a unit follows it.
+//! 7. **Scientific notation.** A mantissa, `×` or `x`, and a power of ten — `2 × 10⁻¹⁶`, `1.5 x 10³`,
+//!    `2.2× 10-16` — are one numeral, and so is a power of ten written with a superscript or a caret
+//!    (`10³`, `10^6`). After `×` the exponent may be written with a plain minus, as extracted text
+//!    writes it (`10-16`, `10−16`); alone, `10-16` is not a power.
+//! 8. **Quantities.** A numeral and the unit written after it — `37 °C`, `10 μg ml⁻¹`, `10%`, or a
 //!    unit attached to its digits, `931g` — are one [`TokenKind::Quantity`] token, carrying every
 //!    reading of the unit ([`super::quantity`]). The unit is read from the text, not the tokens, since
 //!    edge trimming has dropped the `°` and the `%`. The expression must end where a token ends:
 //!    `5′-UTR` is not five arcminutes and a suffix.
+//! 9. **Ranges.** A digit pair joined by an en-dash or a hyphen, with a unit or `%` after it — `2–3
+//!    days`, `80–90%`, `45-60%` — is one [`TokenKind::Range`] token, both endpoints read in that unit.
+//!    A pair with no unit is not a range: `926-68021` is a catalogue number, and `4–7 foci` counts
+//!    (D95 implementation plan, slice 6, decision 8).
 //!
 //! **Case is preserved.** Consumers fold where they need a lowercase key ([`Parser::has_token`],
 //! `lookup_span`, the [`Lemmatizer`], `ReservedTable::kind`, `rank_key`); `all_caps_symbol` needs the
@@ -66,6 +74,13 @@ pub struct Token {
     kind: TokenKind,
 }
 
+/// A range's endpoints, each a [`Quantity`] read in the unit written after the pair.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuantityRange {
+    pub low: Quantity,
+    pub high: Quantity,
+}
+
 /// What a token is to the parser.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -78,6 +93,9 @@ pub enum TokenKind {
     Numeral(Rational),
     /// A numeral with its unit: `37 °C`, `931g` (two readings), `10%`.
     Quantity(Quantity),
+    /// Two numerals with the unit written once after them: `2–3 days`, `80–90%`, `45-60%`. The
+    /// endpoints carry the same readings, in the same order.
+    Range(QuantityRange),
     /// A token the grammar has no reading for and the lexicon is not expected to know: an operator
     /// (`<`, `=`, `±`), a bracket kept around an argument or left unmatched, a token with no ASCII
     /// letter (`μ`).
@@ -178,14 +196,132 @@ pub fn preprocess(text: &str, lexemes: &[Lexeme], units: &ProseUnits) -> Vec<Tok
         tokens.pop();
     }
     tokens.dedup_by(|a, b| a.is_comma() && b.is_comma());
+    let tokens = join_scientific(text, tokens);
     recognise_quantities(text, tokens, units)
 }
 
-/// Decision 7: a numeral and the unit written after it become one quantity token.
+/// Decision 7: scientific notation is one numeral — a mantissa, `×` or `x`, and a power of ten, or a
+/// power of ten alone written with a superscript or a caret.
+fn join_scientific(text: &str, tokens: Vec<Token>) -> Vec<Token> {
+    let mut out: Vec<Token> = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        if let (TokenKind::Numeral(mantissa), Some(times), Some(power)) =
+            (&tokens[i].kind, tokens.get(i + 1), tokens.get(i + 2))
+        {
+            let value = matches!(times.surface.as_str(), "×" | "x" | "X")
+                .then(|| power_of_ten(&power.surface, true))
+                .flatten()
+                .and_then(|k| scaled(mantissa, k));
+            if let Some(value) = value {
+                let span = tokens[i].span.start..power.span.end;
+                out.push(Token {
+                    surface: text[span.clone()].to_string(),
+                    span,
+                    kind: TokenKind::Numeral(value),
+                });
+                i += 3;
+                continue;
+            }
+        }
+        let alone = (tokens[i].kind == TokenKind::Word)
+            .then(|| power_of_ten(&tokens[i].surface, false))
+            .flatten()
+            .and_then(|k| scaled(&Rational::from_integer(1.into()).ok()?, k));
+        match alone {
+            Some(value) => out.push(Token {
+                kind: TokenKind::Numeral(value),
+                ..tokens[i].clone()
+            }),
+            None => out.push(tokens[i].clone()),
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The exponent `k` of a power of ten written `10` and then a superscript exponent (`10⁻¹⁶`, `10³`) or
+/// a caret (`10^-16`), or — when `after_times`, where nothing else can be meant — a plain minus
+/// (`10-16`, `10−16`). Exponents beyond ±400 are refused, since the value is admitted exactly.
+fn power_of_ten(surface: &str, after_times: bool) -> Option<i32> {
+    let rest = surface.strip_prefix("10")?;
+    let (negative, digits): (bool, String) = if let Some(r) = rest.strip_prefix('^') {
+        let (negative, r) = match r.strip_prefix(['-', '\u{2212}']) {
+            Some(r) => (true, r),
+            None => (false, r.strip_prefix('+').unwrap_or(r)),
+        };
+        (negative, r.to_string())
+    } else if rest.starts_with(|c: char| superscript_digit(c).is_some() || c == '⁻' || c == '⁺')
+    {
+        let negative = rest.starts_with('⁻');
+        let r = rest.trim_start_matches(['⁻', '⁺']);
+        let mut digits = String::new();
+        for c in r.chars() {
+            digits.push(superscript_digit(c)?);
+        }
+        (negative, digits)
+    } else if after_times {
+        let r = rest.strip_prefix(['-', '\u{2212}'])?;
+        (true, r.to_string())
+    } else {
+        return None;
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) || digits.len() > 3 {
+        return None;
+    }
+    let k: i32 = digits.parse().ok()?;
+    (k <= 400).then_some(if negative { -k } else { k })
+}
+
+/// The ASCII digit a superscript digit writes.
+fn superscript_digit(c: char) -> Option<char> {
+    Some(match c {
+        '⁰' => '0',
+        '¹' => '1',
+        '²' => '2',
+        '³' => '3',
+        '⁴' => '4',
+        '⁵' => '5',
+        '⁶' => '6',
+        '⁷' => '7',
+        '⁸' => '8',
+        '⁹' => '9',
+        _ => return None,
+    })
+}
+
+/// `mantissa × 10^k`, exactly.
+fn scaled(mantissa: &Rational, k: i32) -> Option<Rational> {
+    let power = num_bigint::BigInt::from(10).pow(k.unsigned_abs());
+    if k >= 0 {
+        Rational::new(mantissa.numer() * power, mantissa.denom().clone()).ok()
+    } else {
+        Rational::new(mantissa.numer().clone(), mantissa.denom() * power).ok()
+    }
+}
+
+/// Decisions 8 and 9: a numeral and the unit written after it become one quantity token, and a digit
+/// pair with a unit after it one range token.
 fn recognise_quantities(text: &str, tokens: Vec<Token>, units: &ProseUnits) -> Vec<Token> {
     let mut out = Vec::with_capacity(tokens.len());
     let mut i = 0;
     while i < tokens.len() {
+        if let Some((end, range)) = range_at(text, &tokens[i], units) {
+            let mut j = i + 1;
+            while j < tokens.len() && tokens[j].span.start < end {
+                j += 1;
+            }
+            if tokens[i..j].iter().all(|t| t.span.end <= end) {
+                let start = tokens[i].span.start;
+                out.push(Token {
+                    surface: text[start..end].to_string(),
+                    span: start..end,
+                    kind: TokenKind::Range(range),
+                });
+                i = j;
+                continue;
+            }
+        }
         if let Some((end, quantity)) = quantity_at(text, &tokens[i], units) {
             let mut j = i + 1;
             while j < tokens.len() && tokens[j].span.start < end {
@@ -206,6 +342,37 @@ fn recognise_quantities(text: &str, tokens: Vec<Token>, units: &ProseUnits) -> V
         i += 1;
     }
     out
+}
+
+/// The range a token is, if it is a digit pair joined by an en-dash or a hyphen and a unit follows
+/// it: both endpoints read in that unit, with their readings in the same order.
+fn range_at(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, QuantityRange)> {
+    if matches!(t.kind, TokenKind::Numeral(_) | TokenKind::Comma) {
+        return None;
+    }
+    let (low, high) = t
+        .surface
+        .split_once(EN_DASH)
+        .or_else(|| t.surface.split_once('-'))?;
+    let (low, high) = (numeral_value(low)?, numeral_value(high)?);
+    let (end, high_readings) = units.read(text, t.span.end, false, &high)?;
+    let (low_end, low_readings) = units.read(text, t.span.end, false, &low)?;
+    if low_end != end || low_readings.len() != high_readings.len() {
+        return None;
+    }
+    Some((
+        end,
+        QuantityRange {
+            low: Quantity {
+                value: low,
+                readings: low_readings,
+            },
+            high: Quantity {
+                value: high,
+                readings: high_readings,
+            },
+        },
+    ))
 }
 
 /// The quantity a token starts, if a unit follows its numeral: a numeral token and the unit after
@@ -348,9 +515,8 @@ fn joins_range(text: &str, run: &[&Lexeme], next: Option<&Piece>) -> bool {
         && run.last().is_some_and(|l| is_digits(text, l))
 }
 
-/// Whether `s` is a range, two numerals joined by an en-dash. D95 keeps ranges out of v1: the
-/// interval type they need is deferred with D93's, so a range is non-prose rather than a numeral and
-/// a quantity (`4–12% gels` is not four gels of 12%).
+/// Whether `s` is two numerals joined by an en-dash. Such a pair is non-prose rather than a numeral and
+/// a quantity (`4–12% gels` is not four gels of 12%); with a unit after it, it is a range (decision 9).
 fn is_range(s: &str) -> bool {
     s.split_once(EN_DASH)
         .is_some_and(|(a, b)| numeral_value(a).is_some() && numeral_value(b).is_some())
@@ -498,6 +664,37 @@ mod tests {
         super::tokenize(text, &ProseUnits::none())
     }
 
+    /// Decision 7: scientific notation is one numeral; a power of ten alone needs a superscript or a
+    /// caret, and after `×` a plain minus writes the exponent. `4.2 × 10` is a product, not a power.
+    #[test]
+    fn scientific_notation_is_one_numeral() {
+        let rat = |s: &str| Rational::parse_canonical(s).unwrap();
+        let tokens = tokenize("P < 2 × 10⁻¹⁶");
+        assert_eq!(surfaces_of(&tokens), ["P", "<", "2 × 10⁻¹⁶"]);
+        assert_eq!(
+            tokens[2].kind(),
+            &TokenKind::Numeral(rat("1/5000000000000000"))
+        );
+        assert_eq!(
+            tokenize("2.2× 10-16")[0].kind(),
+            &TokenKind::Numeral(rat("11/50000000000000000"))
+        );
+        assert_eq!(
+            tokenize("10³ cells")[0].kind(),
+            &TokenKind::Numeral(rat("1000"))
+        );
+        assert_eq!(
+            tokenize("10^6 cells")[0].kind(),
+            &TokenKind::Numeral(rat("1000000"))
+        );
+        assert!(tokenize("10-16 cells")[0].is_word());
+        assert_eq!(surfaces_of(&tokenize("4.2 × 10")), ["4.2", "×", "10"]);
+    }
+
+    fn surfaces_of(tokens: &[Token]) -> Vec<&str> {
+        tokens.iter().map(Token::surface).collect()
+    }
+
     fn surfaces(text: &str) -> Vec<String> {
         tokenize(text)
             .into_iter()
@@ -630,16 +827,14 @@ mod tests {
 
     #[test]
     fn a_digit_initial_token_that_is_not_a_numeral_is_a_word() {
-        for word in [
-            "53BP1",
-            "5-fold",
-            "1a",
-            "0.56-fold",
-            "10\u{207b}\u{b9}\u{b3}",
-            "45-60",
-        ] {
+        for word in ["53BP1", "5-fold", "1a", "0.56-fold", "45-60"] {
             assert_eq!(tokenize(word)[0].kind(), &TokenKind::Word, "{word}");
         }
+        // A power of ten written with a superscript is a numeral (decision 7), no longer a word.
+        assert!(matches!(
+            tokenize("10\u{207b}\u{b9}\u{b3}")[0].kind(),
+            TokenKind::Numeral(_)
+        ));
         for word in ["MLH1", "BRCA1", "WRN", "HEK293T"] {
             assert_eq!(tokenize(word)[0].kind(), &TokenKind::Word, "{word}");
         }

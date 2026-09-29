@@ -189,6 +189,102 @@ fn what_is_not_a_quantity() {
     assert_eq!(surfaces, ["incubated", "for", "2 h", "at", "37 °C"]);
 }
 
+/// Slice 6b: scientific notation is one numeral — a mantissa, `×` or `x`, and a power of ten, or a
+/// power of ten alone with a superscript or caret. Extracted text writes the exponent with a plain
+/// minus (`10-16`), which after `×` can only be an exponent.
+#[test]
+fn scientific_notation_is_one_numeral() {
+    for (text, surface, value) in [
+        ("P < 2 × 10⁻¹⁶", "2 × 10⁻¹⁶", q(1, 5_000_000_000_000_000)),
+        ("P <2.2× 10-16", "2.2× 10-16", q(11, 50_000_000_000_000_000)),
+        (
+            "P = 4.2 × 10^-13",
+            "4.2 × 10^-13",
+            q(21, 50_000_000_000_000),
+        ),
+        ("1.5 x 10³ cells per well", "1.5 x 10³", q(1500, 1)),
+        ("seeded at 10⁶ cells", "10⁶", q(1_000_000, 1)),
+    ] {
+        let tokens = tokenize(text, units());
+        let numeral = tokens
+            .iter()
+            .find(|t| matches!(t.kind(), TokenKind::Numeral(_)))
+            .unwrap_or_else(|| panic!("{text:?}: no numeral in {tokens:?}"));
+        assert_eq!(numeral.surface(), surface, "{text:?}");
+        assert_eq!(numeral.kind(), &TokenKind::Numeral(value), "{text:?}");
+    }
+    // Without `×`, `10-16` is not a power: it could be a range or a catalogue number.
+    let tokens = tokenize("10-16 cells", units());
+    assert!(tokens[0].is_word(), "{tokens:?}");
+}
+
+/// Slice 6c: a digit pair with a unit or `%` after it, joined by an en-dash or a hyphen, is one range
+/// token, both endpoints read in that unit — `30–37 °C` is 303.15 K to 310.15 K. A pair with no unit is
+/// not a range: a catalogue number, or a count (`4–7 foci`, slice 7).
+#[test]
+fn a_range_is_one_token() {
+    for (text, surface, low, high, unit) in [
+        (
+            "every 2–3 days",
+            "2–3 days",
+            q(172_800, 1),
+            q(259_200, 1),
+            "s",
+        ),
+        (
+            "every 2-3 days",
+            "2-3 days",
+            q(172_800, 1),
+            q(259_200, 1),
+            "s",
+        ),
+        (
+            "reached 80–90% confluence",
+            "80–90%",
+            q(4, 5),
+            q(9, 10),
+            "1",
+        ),
+        ("45-60% of such cancers", "45-60%", q(9, 20), q(3, 5), "1"),
+        ("in 4–12% gels", "4–12%", q(1, 25), q(3, 25), "1"),
+        ("at 30–37 °C", "30–37 °C", q(6063, 20), q(6203, 20), "K"),
+    ] {
+        let tokens = tokenize(text, units());
+        let range = tokens
+            .iter()
+            .find_map(|t| match t.kind() {
+                TokenKind::Range(r) => Some((t.surface().to_string(), r.clone())),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{text:?}: no range in {tokens:?}"));
+        assert_eq!(range.0, surface, "{text:?}");
+        let (lo, hi) = (
+            &range.1.low.readings[0].value,
+            &range.1.high.readings[0].value,
+        );
+        assert_eq!(
+            (lo.magnitude.coefficient(), hi.magnitude.coefficient()),
+            (&low, &high),
+            "{text:?}"
+        );
+        assert_eq!(lo.unit.to_canonical_string(), unit, "{text:?}");
+        assert_eq!(hi.unit, lo.unit, "{text:?}");
+    }
+    for text in [
+        "catalogue number 926-68021",
+        "4–7 foci",
+        "96-well plates",
+        "a 5-fold change",
+    ] {
+        assert!(
+            tokenize(text, units())
+                .iter()
+                .all(|t| !matches!(t.kind(), TokenKind::Range(_))),
+            "{text:?}"
+        );
+    }
+}
+
 /// Decision 4, deferred to D96: in plain text an unbracketed figure panel reads as a quantity.
 #[test]
 fn an_unbracketed_figure_panel_reads_as_a_quantity() {

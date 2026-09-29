@@ -459,6 +459,19 @@ pub fn measure_phrase_cat(
     ))
 }
 
+/// A measure constraint's category `cat_mpc(unit, reading)` (D95 slice 6), for the items seeding
+/// builds from a range token. `None` if `lexicon:Cat` or `lexicon:Reading` does not resolve.
+pub fn measure_constraint_cat(
+    layer: &Arc<Layer>,
+    unit: &crate::units::Unit,
+    reading: crate::units::convert::Reading,
+) -> Option<Exp> {
+    let Exp::InductiveCtor(cat, _, args) = measure_phrase_cat(layer, unit, reading)? else {
+        return None;
+    };
+    Some(Exp::InductiveCtor(cat, "cat_mpc".to_string(), args))
+}
+
 /// Substitute schematic category type-variables (`Exp::Var`) throughout a
 /// category term — applied to the *result* category after [`unify_cat`] binds the
 /// slot's variables (so the determiner's `T` flows into the produced category).

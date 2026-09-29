@@ -627,6 +627,33 @@ predicative and prenominal. 6b: the symbols, the comparison clause, scientific n
 - The bootstrap manifest moved on `units`, `lexicon` and `closed-class`; `EXPECTED` is updated. No
   persisted store resumes until the reseed after slice 8.
 
+**6b — built** (2026-09-29).
+- The symbols `<`, `≤`, `>`, `≥`, `~` and `≈` are closed-class entries: the constraint and the
+  predicate the words carry (`>90% infection efficiency`), and the comparison clause
+  `(S[dcl,fin]\NP) / cat_mp(u, value)` (`the temperature < 37 °C`). `=` has only the clause, over
+  `has_quantity` (`P = 0.02`): decision 6's construction, which the paper writes 59 times as `P =`
+  and 37 as `n =`. 19 entries.
+- Scientific notation (`preprocess.rs`, its decision 7): a mantissa, `×` or `x`, and a power of ten
+  are one numeral — `2 × 10⁻¹⁶`, `4.2 × 10^-13`, `1.5 x 10³`, and `2.2× 10-16`, where extracted text
+  lost the superscript and the plain minus is read as the exponent only after `×`. A power of ten alone
+  needs a superscript or caret (`10³`, `10^6`); `10⁻¹³` alone had been pinned as a word.
+- A symbol with no entry (`±`) still seeds nothing; `symbols_are_unseedable_not_missing` uses it now.
+
+**6c — built** (2026-09-29).
+- `TokenKind::Range(QuantityRange)` (`preprocess.rs`, its decision 9): a digit pair joined by an
+  en-dash or a hyphen, with a unit or `%` after it, both endpoints read in that unit and their
+  readings paired in order. `926-68021`, `96-well`, `5-fold` and `4–7 foci` are not ranges.
+- Seeding gives a range two items (`seed.rs`, `range_items`): `cat_mpc(u, value)` with
+  `λq. And(le(u, lo, q), le(u, q, hi))`, and the predicate over `has_quantity`, built by the
+  combinator's `constrained_sem`. `verbalize` renders it `from 7200 s to 10800 s`.
+
+**Tests and corpus, slice 6.** `quantities_in_the_parser.rs`, 20 tests: 6a's, and symbols as bounds,
+comparison clauses, scientific notation and ranges; `every_measure_consumer_takes_a_constraint` finds
+70 consumers. `quantity_tokens.rs`: scientific notation and ranges read against the units layer, and
+what is not a range. `quantity_corpus.rs`: 27 covered rows, five of them slice 6's, from sentences of
+the paper — `4–12% gels`, a gap until now; `80–90% confluence`; `approximately 100 mm³`;
+`less than 2 × 10⁻¹⁶`; `>90%` — and `every 2–3 days` a gap for slice 8.
+
 **Acceptance.** Tests in `quantities_in_the_parser.rs` for each position and marker, with a °C case
 wherever the value reading matters (decision 5 above). The attested sentences join
 `experiments/parsing/quantities/corpus.tsv`; a row whose host is slice 7's or 8's is a gap row naming

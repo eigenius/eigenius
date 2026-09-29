@@ -23,15 +23,18 @@ cargo test -p eigenius-kernel --test quantity_corpus
 - a covered row parses, and every reading contains its relations and renders its values;
 - a gap row still does not parse. When one does, its construction has arrived: update the row.
 
-As committed: 22 covered rows, all passing, each with one reading. The two `g` rows are the
-exception, with two readings each, gram and standard gravity (D93). The 6 gap rows:
+As committed: 27 covered rows, all passing. The two `g` rows have two readings each, gram and
+standard gravity (D93). Slice 6 (D95 implementation plan) added five, each from a sentence of the
+paper: a range (`4–12% gels`, `80–90% confluence`), an approximation (`approximately 100 mm³`), a
+bound in words over scientific notation (`less than 2 × 10⁻¹⁶`) and a bound symbol
+(`>90%`). The 6 gap rows:
 
 | Gap | Owner |
 |---|---|
-| a measure phrase modifying a PP, `72 h after transduction` | not in D95's slices |
-| a pseudo-partitive, `10 μg ml⁻¹ of colcemid` | not in D95's slices |
-| `every N unit` | out of v1 (D95 Scope) |
-| a range, `4–12% gels` (one non-prose token) | out of v1 (D95 Scope) |
+| a measure phrase modifying a PP, `72 h after transduction` | slice 8 |
+| a pseudo-partitive, `10 μg ml⁻¹ of colcemid` | slice 8 |
+| `every N unit`, `every 3 days` | slice 8 |
+| `every N unit` over a range, `every 2–3 days` | slice 8 |
 | a fronted PP adjunct, `After 24 h, …` | pre-existing: `After the dose, …` has no parse either |
 | a coordinated NP as an adjunct preposition's object | pre-existing: `treated with the dose and the diet` has no parse either; a verb that governs its `with` takes the group |
 

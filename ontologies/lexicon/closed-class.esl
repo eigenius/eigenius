@@ -3427,3 +3427,169 @@ resource lexicon:roughly_bound_pred : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
     lexicon:sense    = "roughly";
 }
+
+// ── Symbols as bounds, and the comparison clause (D95 slice 6b) ───────────────────
+// The preprocessor keeps `<`, `≤`, `>`, `≥`, `~`, `≈` and `=` as tokens of their own, and seeding looks
+// them up by surface. Each bound symbol carries the word markers' two entries (`>90% infection
+// efficiency`, `(<85%)`), and a third: between a noun phrase and a value it is a comparison clause,
+// the predicate without a copula (`P < 2 × 10⁻¹⁶`, `log2(copy number) < −1`). `=` states the value
+// itself (`P = 0.02`), so it has only the clause, over `has_quantity`.
+resource lexicon:eq_clause_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (x : lexicon:Entity) =>
+            ontology:has_quantity(x, u, q)
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:less_symbol_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol ('P < 0.05').";
+    lexicon:form     = "<";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:lt_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "<";
+}
+resource lexicon:less_symbol_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol, predicated ('P < 0.05').";
+    lexicon:form     = "<";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:lt_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "<";
+}
+resource lexicon:less_symbol_clause : lexicon:LexicalEntry {
+    core:description = "grammatical: comparison of a quantity with a value, as a symbol ('the temperature < 37 °C').";
+    lexicon:form     = "<";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:lt_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "<";
+}
+resource lexicon:le_symbol_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol ('≤ 2 °C').";
+    lexicon:form     = "≤";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "≤";
+}
+resource lexicon:le_symbol_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol, predicated ('≤ 2 °C').";
+    lexicon:form     = "≤";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "≤";
+}
+resource lexicon:le_symbol_clause : lexicon:LexicalEntry {
+    core:description = "grammatical: comparison of a quantity with a value, as a symbol ('the temperature ≤ 37 °C').";
+    lexicon:form     = "≤";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "≤";
+}
+resource lexicon:greater_symbol_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol ('>90% infection efficiency').";
+    lexicon:form     = ">";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = ">";
+}
+resource lexicon:greater_symbol_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol, predicated ('>90% infection efficiency').";
+    lexicon:form     = ">";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = ">";
+}
+resource lexicon:greater_symbol_clause : lexicon:LexicalEntry {
+    core:description = "grammatical: comparison of a quantity with a value, as a symbol ('the temperature > 37 °C').";
+    lexicon:form     = ">";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:gt_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = ">";
+}
+resource lexicon:ge_symbol_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol ('≥ 8 foci').";
+    lexicon:form     = "≥";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:ge_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "≥";
+}
+resource lexicon:ge_symbol_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol, predicated ('≥ 8 foci').";
+    lexicon:form     = "≥";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:ge_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "≥";
+}
+resource lexicon:ge_symbol_clause : lexicon:LexicalEntry {
+    core:description = "grammatical: comparison of a quantity with a value, as a symbol ('the temperature ≥ 37 °C').";
+    lexicon:form     = "≥";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:ge_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "≥";
+}
+resource lexicon:tilde_symbol_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol ('~100 mm3').";
+    lexicon:form     = "~";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "~";
+}
+resource lexicon:tilde_symbol_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol, predicated ('~100 mm3').";
+    lexicon:form     = "~";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "~";
+}
+resource lexicon:tilde_symbol_clause : lexicon:LexicalEntry {
+    core:description = "grammatical: comparison of a quantity with a value, as a symbol ('the temperature ~ 37 °C').";
+    lexicon:form     = "~";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "~";
+}
+resource lexicon:approx_symbol_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol ('≈ 5 min').";
+    lexicon:form     = "≈";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "≈";
+}
+resource lexicon:approx_symbol_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, as a symbol, predicated ('≈ 5 min').";
+    lexicon:form     = "≈";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "≈";
+}
+resource lexicon:approx_symbol_clause : lexicon:LexicalEntry {
+    core:description = "grammatical: comparison of a quantity with a value, as a symbol ('the temperature ≈ 37 °C').";
+    lexicon:form     = "≈";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:approx_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "≈";
+}
+resource lexicon:equals_symbol_clause : lexicon:LexicalEntry {
+    core:description = "grammatical: a quantity's value, as a symbol ('P = 0.02').";
+    lexicon:form     = "=";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:eq_clause_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "=";
+}

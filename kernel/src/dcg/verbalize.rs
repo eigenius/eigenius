@@ -705,6 +705,21 @@ fn bounded_exists(sem: &Exp) -> Option<(&str, &Exp, &Exp)> {
 /// bound (`less than about 2 h`) is the constraint relating `q` to an inner value, then that value's
 /// own constraint.
 fn bound_text(c: &Exp, q: &str) -> Option<String> {
+    // A range: `And(le(u, lo, q), le(u, q, hi))` is "from lo to hi" (D95 slice 6c).
+    if let Some((and, _, parts)) = c.as_const_spine() {
+        if let ([low, high], true) = (parts.as_slice(), and.as_str().ends_with("logic:And")) {
+            let (("at least", lo), ("at most", hi)) = (bound_words(low, q)?, bound_words(high, q)?)
+            else {
+                return None;
+            };
+            let (_, args) = app_spine(low);
+            return Some(format!(
+                "from {} to {}",
+                quantity_text(lo, args[0]),
+                quantity_text(hi, args[0])
+            ));
+        }
+    }
     if let Some((inner, c2, rel)) = bounded_exists(c) {
         let (words, other) = bound_words(rel, q)?;
         if !matches!(other, Exp::Var(v) if v == inner) {

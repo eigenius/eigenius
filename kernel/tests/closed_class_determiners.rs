@@ -211,21 +211,21 @@ fn sense_cap_widens_on_failure_for_known_vocabulary() {
     );
 }
 
-/// D95 — **a symbol seeds nothing, and is not a missing lexeme.** `unknown_words` reports only word
-/// tokens, and a digit-initial token that is not a numeral (`53BP1`) is one. A numeral seeds its own
-/// measure-phrase and cardinal items (slice 4), so only the operator is an `unseedable_token`. The
-/// widen gate counts it: a sentence with a token that seeds nothing fails closed on its first
-/// attempt, where the gate used to skip non-prose tokens and widen through every rung of a parse that
-/// could not succeed.
+/// D95 — **a symbol with no entry seeds nothing, and is not a missing lexeme.** `unknown_words`
+/// reports only word tokens, and a digit-initial token that is not a numeral (`53BP1`) is one. A
+/// numeral seeds its own measure-phrase and cardinal items (slice 4), and the bound symbols (`<`,
+/// `≥`, `~`) have closed-class entries (slice 6b), so only `±` is an `unseedable_token`. The widen gate
+/// counts it: a sentence with a token that seeds nothing fails closed on its first attempt, where the
+/// gate used to skip non-prose tokens and widen through every rung of a parse that could not succeed.
 #[test]
 fn symbols_are_unseedable_not_missing() {
     let index = index_with_zob(1);
-    let text = "zob affects 53BP1 at 37 < 5";
+    let text = "zob affects 53BP1 at 37 < 5 ± 1";
     assert_eq!(index.unknown_words(text, &Identity), ["53BP1"]);
-    assert_eq!(index.unseedable_tokens(text, &Identity), ["<"]);
+    assert_eq!(index.unseedable_tokens(text, &Identity), ["±"]);
 
     let (closed, open, trace) =
-        index.parse_scoped_open_traced("zob affects HeLa <", &Identity, None);
+        index.parse_scoped_open_traced("zob affects HeLa ±", &Identity, None);
     assert!(closed.is_empty() && open.is_empty());
     assert_eq!(
         trace.attempts, 1,

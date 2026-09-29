@@ -300,12 +300,14 @@ pub struct Parser {
     context_sentences: usize,
 }
 
-/// Whether a token seeds items of its own, whatever the lexicon holds: a numeral or a quantity, whose
-/// measure-phrase items seeding builds (D95).
+/// Whether a token seeds items of its own, whatever the lexicon holds: a numeral, a quantity or a
+/// range, whose measure-phrase items seeding builds (D95).
 fn seeds_itself(t: &Token) -> bool {
     matches!(
         t.kind(),
-        super::preprocess::TokenKind::Numeral(_) | super::preprocess::TokenKind::Quantity(_)
+        super::preprocess::TokenKind::Numeral(_)
+            | super::preprocess::TokenKind::Quantity(_)
+            | super::preprocess::TokenKind::Range(_)
     )
 }
 

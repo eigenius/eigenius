@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D95 slices 4 to 6 — measure phrases in the grammar, their consumers, and bounds on them. The categories
+//! D95 slices 4 to 6 — measure phrases in the grammar, their consumers, and bounds and ranges on
+//! them. The categories
 //! (`cat_mp`, `cat_unit_forall`, `lexicon:Reading`), the `Difference` type, the unit-polymorphic
 //! application, the seeding and the prepositions over a measured value (`closed-class.esl`) are in
 //! the bootstrap chain; the fixture adds the content words around them, and a verb that takes only a
@@ -301,6 +302,11 @@ fn packed_equals_unpacked_on_quantities() {
         "the temperature was less than 37 °C",
         "HeLa incubated with less than 10 μM etoposide",
         "HeLa incubated for less than about 2 h",
+        "HeLa incubated with >90% etoposide",
+        "the temperature < 37 °C",
+        "the temperature = 3.1 × 10² K",
+        "HeLa incubated for 2–3 h",
+        "HeLa incubated with 80–90% etoposide",
     ] {
         assert_eq!(readings(&packed, text), readings(&unpacked, text), "{text}");
     }
@@ -324,8 +330,8 @@ fn measure_phrases<'e>(cat: &'e Exp, out: &mut Vec<&'e [Exp]>) {
 
 /// Decision 5: every closed-class consumer of a measure phrase names the reading it takes. One
 /// whose reading were a variable would take the value and the difference items alike, and
-/// `at 37 °C` would be 310.15 K and 37 K at once. The 33 prepositions of slice 5 and the 18 bound
-/// entries of slice 6 take values.
+/// `at 37 °C` would be 310.15 K and 37 K at once. The 33 prepositions of slice 5, the 18 word-marker
+/// entries of slice 6a and the 19 symbol entries of 6b take values.
 #[test]
 fn every_consumer_names_its_reading() {
     let ctx = eigenius_kernel::testing::bootstrap_context();
@@ -352,7 +358,7 @@ fn every_consumer_names_its_reading() {
             }
         }
     }
-    assert_eq!(readings.len(), 51, "{readings:?}");
+    assert_eq!(readings.len(), 70, "{readings:?}");
     assert!(readings.iter().all(|r| r == "value"), "{readings:?}");
 }
 
@@ -576,7 +582,7 @@ fn every_measure_consumer_takes_a_constraint() {
         assert_eq!(with_bound.cat(), with_point.cat(), "{iri}");
         consumers += 1;
     }
-    assert_eq!(consumers, 51);
+    assert_eq!(consumers, 70);
 }
 
 /// Slice 6a: a bound verbalizes as its words where the quantity would have rendered — after a
@@ -617,5 +623,161 @@ fn a_bound_verbalizes_as_its_words() {
         let surface = verbalize(parsed[0].sem(), &Vb::surface(&names, &layer));
         assert!(surface.contains(words), "{text}: {surface}");
         assert!(!surface.contains("Quantity("), "{text}: {surface}");
+    }
+}
+
+/// Slice 6b: a symbol is a bound, as its words are — before a noun (`>90% infection efficiency`) and
+/// after a preposition.
+#[test]
+fn a_symbol_is_a_bound() {
+    let parser = Parser::build(layer());
+    for (text, relation, constraint, value_first_expected) in [
+        (
+            "HeLa incubated with >90% etoposide",
+            "has_quantity",
+            "lt",
+            false,
+        ),
+        ("HeLa incubated at < 37 °C", "prep_at_value", "lt", true),
+        ("HeLa incubated at ≤ 37 °C", "prep_at_value", "le", true),
+        ("HeLa incubated at ≥ 37 °C", "prep_at_value", "le", false),
+        ("HeLa incubated for ~ 2 h", "prep_for_value", "approx", true),
+        ("HeLa incubated for ≈ 2 h", "prep_for_value", "approx", true),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        let pretty = pretty_term(parsed[0].sem());
+        assert!(
+            debug.contains(&format!("ontology:{relation}"))
+                && debug.contains(&format!("units:{constraint}")),
+            "{text}: {pretty}"
+        );
+        assert_eq!(
+            value_first(&pretty, constraint),
+            Some(value_first_expected),
+            "{text}: {pretty}"
+        );
+    }
+}
+
+/// Slice 6b: a symbol between a noun phrase and a value is a comparison clause, the predicate without
+/// a copula; `=` states the value itself.
+#[test]
+fn a_symbol_between_a_noun_phrase_and_a_value_is_a_comparison() {
+    let parser = Parser::build(layer());
+    for (text, constraint, value_first_expected) in [
+        ("the temperature < 37 °C", Some("lt"), true),
+        ("the temperature > 37 °C", Some("lt"), false),
+        ("the temperature ≥ 37 °C", Some("le"), false),
+        ("the temperature ~ 37 °C", Some("approx"), true),
+        ("the temperature = 37 °C", None, true),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        let pretty = pretty_term(parsed[0].sem());
+        assert!(
+            debug.contains("ontology:has_quantity") && debug.contains("lexicon:Temperature"),
+            "{text}: {pretty}"
+        );
+        assert!(debug.contains("numer: 6203, denom: 20"), "{text}: {debug}");
+        match constraint {
+            Some(c) => assert_eq!(
+                value_first(&pretty, c),
+                Some(value_first_expected),
+                "{text}: {pretty}"
+            ),
+            None => assert!(
+                ["lt", "le", "approx"]
+                    .iter()
+                    .all(|r| !debug.contains(&format!("urn:eigenius:units:{r}\""))),
+                "{text}: {pretty}"
+            ),
+        }
+    }
+}
+
+/// Slice 6b: scientific notation is one numeral, and a unit after it makes it a quantity:
+/// `3.1 × 10² K` is 310 K, `2 × 10⁻³ mg/kg` is 2 × 10⁻⁹, `2 × 10⁻¹⁶` a bound in a comparison.
+#[test]
+fn scientific_notation_is_one_numeral() {
+    let parser = Parser::build(layer());
+    for (text, magnitude) in [
+        ("the temperature = 3.1 × 10² K", "numer: 310, denom: 1"),
+        ("the temperature = 3.1 x 10² K", "numer: 310, denom: 1"),
+        (
+            "HeLa incubated with 2 × 10⁻³ mg/kg",
+            "numer: 1, denom: 500000000",
+        ),
+        (
+            "the temperature < 2 × 10⁻¹⁶ K",
+            "numer: 1, denom: 5000000000000000",
+        ),
+        (
+            "the temperature < 2.2× 10-16 K",
+            "numer: 11, denom: 50000000000000000",
+        ),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        assert!(debug.contains(magnitude), "{text}: {debug}");
+    }
+}
+
+/// Slice 6c: a range is a constraint, `lo ≤ q ≤ hi`, both endpoints in the unit written once after
+/// the pair — after a preposition, before a noun and after the copula; an en-dash or a hyphen joins
+/// it, and `37 °C` is still the value 310.15 K at either end.
+#[test]
+fn a_range_is_a_constraint() {
+    let parser = Parser::build(layer());
+    for (text, relation, low, high) in [
+        (
+            "HeLa incubated for 2–3 h",
+            "prep_for_value",
+            "numer: 7200, denom: 1",
+            "numer: 10800, denom: 1",
+        ),
+        (
+            "HeLa incubated for 2-3 h",
+            "prep_for_value",
+            "numer: 7200, denom: 1",
+            "numer: 10800, denom: 1",
+        ),
+        (
+            "HeLa incubated with 80–90% etoposide",
+            "has_quantity",
+            "numer: 4, denom: 5",
+            "numer: 9, denom: 10",
+        ),
+        (
+            "HeLa incubated with 45-60% etoposide",
+            "has_quantity",
+            "numer: 9, denom: 20",
+            "numer: 3, denom: 5",
+        ),
+        (
+            "the temperature was 30–37 °C",
+            "has_quantity",
+            "numer: 6063, denom: 20",
+            "numer: 6203, denom: 20",
+        ),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        let pretty = pretty_term(parsed[0].sem());
+        assert!(
+            debug.contains(&format!("ontology:{relation}")),
+            "{text}: {pretty}"
+        );
+        assert_eq!(
+            debug.matches("urn:eigenius:units:le").count(),
+            2,
+            "{text}: {pretty}"
+        );
+        let (l, h) = (debug.find(low), debug.find(high));
+        assert!(l.is_some() && h.is_some() && l < h, "{text}: {debug}");
     }
 }

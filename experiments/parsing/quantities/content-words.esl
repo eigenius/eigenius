@@ -377,3 +377,37 @@ resource corpus:contained_v : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:contain.v.90000020";
 }
+
+// Slice 6 rows (D95 implementation plan): the nouns around a bound, a range and scientific notation.
+class corpus:Confluence : lexicon:Entity { }
+resource corpus:confluence_n : lexicon:LexicalEntry {
+    lexicon:form     = "confluence";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Confluence, lexicon:mass) );
+    lexicon:sem      = corpus:Confluence;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "confluence";
+}
+class corpus:Probability : lexicon:Entity { }
+resource corpus:probability_n : lexicon:LexicalEntry {
+    lexicon:form     = "probability";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Probability, lexicon:sg) );
+    lexicon:sem      = corpus:Probability;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "probability";
+}
+class corpus:Infection : lexicon:Entity { }
+resource corpus:infection_n : lexicon:LexicalEntry {
+    lexicon:form     = "infection";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Infection, lexicon:sg) );
+    lexicon:sem      = corpus:Infection;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "infection";
+}
+class corpus:Efficiency : lexicon:Entity { }
+resource corpus:efficiency_n : lexicon:LexicalEntry {
+    lexicon:form     = "efficiency";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Efficiency, lexicon:sg) );
+    lexicon:sem      = corpus:Efficiency;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "efficiency";
+}

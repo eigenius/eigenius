@@ -395,7 +395,7 @@ fn prop_arity(ty: &Exp) -> Option<usize> {
 /// The sem of a consumer `f` applied to a constraint `c` (D95 slice 6, decision 3):
 /// `λa₁…aₙ. ∀P:Prop. (∀q:T. And(c q, f [u] q a₁…aₙ) → P) → P` — an existential over the value, in
 /// the encoding the determiners use (`exists_sem`, `closed-class.esl:31-37`).
-fn constrained_sem(
+pub(crate) fn constrained_sem(
     f: &Exp,
     unit: Option<&Exp>,
     c: &Exp,
