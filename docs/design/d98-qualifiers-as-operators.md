@@ -442,7 +442,9 @@ and for manner in a protocol (`foci … were scored similarly`).
    3's contrast class. The unstated path needs only D64's hole; the stated path needs `compared to`
    attached to the right constituent, which the parser does not do today.
 5. **Frequency and proportion** — `commonly`, `typically`, `predominantly`, `most commonly`.
-6. **Statistical and evidential** — `significantly`, `independently` — per decision 4.
+6. **Statistical, evidential and evaluative** — `significantly`, `independently` per decision 4, and
+   `favorably` in decision 4's pattern: defined over the measures the methods name, PPV and
+   sensitivity (`methods/dependency-and-biomarker-analysis`), not a bare predicate.
 7. **`respectively`**, a coordination construction.
 
 Each slice re-runs the WRN claims corpus; the 14 qualifier rows are its measure.
