@@ -1,8 +1,8 @@
 # D98 — Qualifiers as logical operators
 
 **Status: proposed** (2026-09-28). Supersedes the inert/measurement split of
-`docs/notes/d62-adverb-semantics-decision.md` for the qualifiers below. Decisions 1–4 are open;
-decision 5 is decided (2026-09-29).
+`docs/notes/d62-adverb-semantics-decision.md` for the qualifiers below. Decisions 1–4 are open, their
+proposals revised 2026-09-29; decision 5 is decided (2026-09-29).
 
 ## The gap
 
@@ -173,24 +173,94 @@ and for manner in a protocol (`foci … were scored similarly`).
 
 1. **How a presupposition is carried.** `not solely P` needs the negation to reach the assertion and
    leave `P(a)` standing.
-   - *Two dimensions:* a meaning is an at-issue proposition plus presupposed content; negation and
-     the other operators act on the at-issue part, and the presupposition projects to the claim.
-     This is the general mechanism — the same projection serves factives (`found that`), definites
-     and `again` — and it is the presupposition arm D64's open-parse carrier left deferred.
-   - *Lexicalized negated forms:* `not solely`, `not merely`, `not just`, `not simply` as their own
-     operators, `λP.λa. P(a) ∧ ∃y. P(y) ∧ ¬(y = a)`. Exact for the paper's five uses; wrong wherever
-     `only` meets any other operator, or `not` stands apart from the particle.
-   - *Proposed:* two dimensions. The lexicalized forms get the paper's five sentences right and
-     every other placement wrong.
-2. **The degree of a verb.** A single operator `extent : (Entity → Entity → Prop) → Entity → Entity
-   → float` over any relation, with the scale's bounds a property of the relation; or a degree
-   function minted per verb sense, as `deg_X` is per adjective. *Proposed:* the single operator; a
-   per-sense function would multiply the importers' output by every verb sense.
-3. **The contrast class.** Taken from `compared to B` where stated; otherwise a hole the discourse
-   resolver fills (D64), as for demonstratives. *Proposed:* both, the hole only when unstated.
-4. **Where `significantly` and `independently` live.** As predicates in the claim over a statistics
-   record or over the two warrants; or at the justification layer only, beside the claim. *Proposed:*
-   in the claim, pointing at the record — the paper asserts them.
+   - *Proof obligations* — the project's existing design for presupposition
+     (`docs/notes/d62-subordinator-design-findings.md` §5, confirmed by the expert review in §7). A
+     presupposition is a free proof variable. `solely A P a` introduces `h : P(a)` free in the context
+     and asserts `∀(y : A). P y → Id(A, y, a)`. Projection is ordinary variable scoping: negation
+     (`¬X := X → False`) and modals do not bind `h`, so it projects, and `not solely` comes out as
+     `P(a) ∧ ¬∀(y : A). P y → Id(A, y, a)` with no rule specific to negation; a conditional whose
+     antecedent supplies it binds it by `→`-introduction, which filters it. The obligation rides the open-parse carrier
+     (`docs/notes/d62-d64-open-parse-carrier.md`) as a `ProofObligation` hole, discharged by a
+     grounding verdict (`Holds` / `Open` / `Fails`) and failing closed. The same mechanism serves
+     factives (`found that`), definites and `again`.
+   - *Σ-conjunction*, `Σ(h : P(a)). …` — rejected. It puts the presupposition inside the
+     proposition, so a negation over the meaning negates it too; getting `not solely` right then
+     requires placing the negation inside by hand, which is the lexicalized form below.
+   - *Lexicalized negated forms* — `not solely`, `not merely`, `not just`, `not simply` as their own
+     operators, `λP.λa. P(a) ∧ ∃y. P(y) ∧ ¬(y = a)` — rejected. Exact for the paper's five uses;
+     wrong wherever `only` meets any other operator, or `not` stands apart from the particle.
+   - *Proposed:* proof obligations.
+   - *Depends on the `ProofObligation` arm, which is not built.* The carrier was built to take it —
+     `HoleInfo` carries a `kind` for that purpose — but `HoleKind`
+     (`kernel/src/dcg/parse/felicity.rs`) has only `EntityRef`, and the arm is documented as
+     planned. Exclusives would be its second client, after factives.
+   - *Inherited gap: plugs.* An attitude or report verb must bind the obligations its complement
+     emits (findings §7). An opaque report axiom (`Prop → Entity → Prop`) acts as a hole instead, so
+     the obligation projects to the author. `These observations suggest that WRN dependency is not
+     simply a result of MMR deficiency.`, a curated unit, puts a scalar exclusive under `suggest`.
+     Whether its presupposition should project there is itself open — the suggesting subject is the
+     authors' own data — and the plug fix is what makes either answer expressible.
+2. **The degree of a verb.**
+   - *One operator over the predicate the qualifier modifies:*
+
+     ```
+     extent : Π(A : Set). (A → Prop) → A → Degree
+     ```
+
+     A degree qualifier attaches to the verb phrase — `dMMR [does not fully [explain this
+     interaction]]` — and a verb phrase is a unary predicate whatever the verb's arity, so arity is
+     not a parameter, and `A` comes from the verb phrase as in decision 5.
+   - *A degree function minted per verb sense*, as `deg_X` is per adjective — rejected: it multiplies
+     the importers' output by every verb sense.
+   - *Proposed:* the single operator.
+   - An earlier draft of this decision wrote `extent : (Entity → Entity → Prop) → Entity → Entity →
+     float`, fixing the type at `Entity` and the arity at two; decision 5 applies to both.
+   - Adjectives are unary predicates too, and the argument against per-sense minting applies to them:
+     the WordNet importer mints `deg_{loc} : Entity -> core:float` per adjective sense
+     (`crates/eigenius-wordnet/src/convert.rs`). The polymorphic `extent` covers both; retiring
+     `deg_X` is the direction, not part of this decision.
+   - *Scales are declared, and no source records them.* `fully` and `partially` presuppose a closed
+     scale, so they apply only to predicates declared with one — a restriction in the type, or `fully
+     carry` type-checks. WordNet, UMLS and SPECIALIST do not record a predicate's scale; the paper's
+     three verbs (`explain`, `rescue`, `increase`) would be declared by hand.
+   - *What `Degree` is — open.* Relative standards (`substantially`, the comparatives) only order
+     degrees, which `measurements:gt` over `core:float` already does. A closed scale's endpoint —
+     `fully` as `d = 1` — needs every closed scale normalised to `[0, 1]`. That normalisation is a
+     choice to state, not to assume.
+3. **The contrast class.** Taken from `compared to B` where the sentence states it; otherwise a hole
+   the discourse resolver fills (D64), as for demonstratives. *Proposed:* both, the hole only when
+   unstated.
+   - *The hole is typed at the target's type.* The contrast class is an alternative to the target —
+     to `MSI cell lines`, so a kind of cell line — the principle decision 5 applies to exclusives.
+     Demonstrative holes are already typed by their restrictor (`these findings` resolves only to
+     findings).
+   - *Adjective and adverb.* The contrastive occurs as an adjective as well: `the top preferential
+     dependency in MSI cell lines compared to MSS cell lines` (the CNL page). The table above counts
+     the adverbs only. Written polymorphically, the adjective is the same operator restricting a
+     noun.
+   - *The stated path needs PP attachment first.* No construction handles `compared to`, and the one
+     stated instance in the corpus — the sentence above — had its expected-reading pin removed on
+     2026-07-25: the parser attaches the MSI context and the MSS contrast to the identifying event
+     rather than to the dependency, and the correct reading is not derivable. It is the seam
+     eigenius#264 records for the reading ranker.
+   - *How `P` is lifted to classes is unstated.* `P(A) ∧ ¬P(B)` applies a predicate of individuals to
+     classes without saying how — every member, generically, or on average — and the paper's methods
+     define `preferentially` as a difference in mean dependency. A check of either half has to
+     compute whichever it is.
+4. **Where `significantly` and `independently` live.** In the claim, since the paper asserts them and
+   the claims corpus measures what the proposition says; or at the justification layer only, beside
+   the claim. *Proposed:* in the claim, **defined over what each is about**, so that each is checkable
+   rather than a bare predicate as opaque as the `ontology:sole` this document replaces.
+   - `significantly(e)`: `e`'s D52 record rejects its null at the record's alpha. The record already
+     carries what this needs: `ontologies/statistics/statistics.esl` records the alpha, its test uses
+     only `p < alpha`, and a one-sided test requires a witness.
+   - `independently(f₁, f₂)`: over the two findings — chain resources, in the claim's domain — each
+     finding's certificate has a support set citing none of the other's evidence. The justification
+     layer computes this: `support` returns a certificate's alternative support sets, which
+     `cited_iris` and `survives_without` read. The claim stays about findings, with the warrant
+     structure as its definition, rather than quantifying over justification terms.
+   - *Rejected:* the justification layer only — the paper's assertion would be missing from the
+     proposition.
 5. **What `Id` is taken at.** *Decided (2026-09-29).* `Id(A, x, y)` is the kernel's identity type at
    any type `A`; nothing about it is specific to `lexicon:Entity`. An exclusive is polymorphic in `A`,
    and `A` is the domain of the predicate it modifies — the exclusive never chooses a type:
@@ -240,8 +310,13 @@ and for manner in a protocol (`foci … were scored similarly`).
      `Id`.
    - Acceptance: `p53 activity … is not solely responsible for WRN dependence` admits a witness whose
      noun type differs from `a`'s. A version that takes `A` from `a` instead of from `P` fails it.
-3. **Completeness and degree** — `fully`, `partially`, `substantially` — with decision 2's degree.
-4. **Contrastive** — `selectively`, `preferentially` — with decision 3's contrast class.
+   - Depends on the carrier's `ProofObligation` arm (decision 1), which is not built. The `suggest`
+     sentence in decision 1 is its plug test.
+3. **Completeness and degree** — `fully`, `partially`, `substantially` — with decision 2's degree,
+   and closed scales declared by hand for `explain`, `rescue` and `increase`.
+4. **Contrastive** — `selectively`, `preferentially` and the adjective `preferential` — with decision
+   3's contrast class. The unstated path needs only D64's hole; the stated path needs `compared to`
+   attached to the right constituent, which the parser does not do today.
 5. **Frequency and proportion** — `commonly`, `typically`, `predominantly`, `most commonly`.
 6. **Statistical and evidential** — `significantly`, `independently` — per decision 4.
 7. **`respectively`**, a coordination construction.
