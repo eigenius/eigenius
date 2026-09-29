@@ -62,14 +62,21 @@ entry=E0034095                  entry=E0300046                    entry=E0061964
 **Provisioning.** One file, no licence gate, no UTS account:
 
 ```
-curl -o references/specialist/LEXICON \
-  https://data.lhncbc.nlm.nih.gov/public/lsg/lexicon/2026/release/LEX_DOC/LEXICON
+scripts/provision-specialist.sh            # fetch if absent, then verify
+scripts/provision-specialist.sh --check    # verify what is on disk, fetch nothing
 ```
 
+which is `curl -o references/specialist/LEXICON
+https://data.lhncbc.nlm.nih.gov/public/lsg/lexicon/2026/release/LEX_DOC/LEXICON` plus the checks
+below.
+
 56 012 657 bytes, sha256 `259d0283ebe7b027be730538d2c77c10f13f09bb824106306fbf5838d0a629f5`,
-534 345 records. Verify a fetch against the counts this document measures — `nominalization=`
-16 534, `acronym_of` 67 675, `abbreviation_of` 23 989 — which identify the release more precisely
-than its name does.
+534 345 records. The script verifies against the counts this document measures —
+`nominalization=` 16 534, `acronym_of` 67 675, `abbreviation_of` 23 989 — which identify the
+release more precisely than its name does, and refuses a file that does not match rather than
+letting a different lexicon move every number below without anything failing. It downloads to a
+temporary file and moves it into place, so a truncated or error-page body never lands looking like
+a lexicon.
 
 It is served from `data.lhncbc.nlm.nih.gov/public/`, **not** from the `lhncbc.nlm.nih.gov/LSG/` or
 `lsg3.nlm.nih.gov/LexSysGroup/` paths the project pages link to; those redirect to directory
