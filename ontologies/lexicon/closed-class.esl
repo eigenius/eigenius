@@ -3593,3 +3593,73 @@ resource lexicon:equals_symbol_clause : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
     lexicon:sense    = "=";
 }
+
+// ── Postfix bounds (D95 slice 6d) ─────────────────────────────────────────────────
+// A plain number is exact (D95 implementation plan, slice 7), so a bound is written out. After the
+// value it is `or more` / `or higher` (at least) and `or less` / `or lower` (at most) — the CNL guide's
+// forms — taking the measure phrase on their left through backward unit application. Two entries
+// each, the constraint and the predicate, over the prefix markers' sems.
+resource lexicon:or_more_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, after it ('10% or more').";
+    lexicon:form     = "or more";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:ge_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "or more";
+}
+resource lexicon:or_more_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, after it, predicated ('was 10% or more').";
+    lexicon:form     = "or more";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:ge_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "or more";
+}
+resource lexicon:or_higher_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, after it ('37 °C or higher').";
+    lexicon:form     = "or higher";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:ge_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "or higher";
+}
+resource lexicon:or_higher_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, after it, predicated ('was 37 °C or higher').";
+    lexicon:form     = "or higher";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:ge_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "or higher";
+}
+resource lexicon:or_less_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, after it ('2 h or less').";
+    lexicon:form     = "or less";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "or less";
+}
+resource lexicon:or_less_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, after it, predicated ('was 2 h or less').";
+    lexicon:form     = "or less";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "or less";
+}
+resource lexicon:or_lower_bound : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, after it ('4 °C or lower').";
+    lexicon:form     = "or lower";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:cat_mpc(u, lexicon:value), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop );
+    lexicon:sense    = "or lower";
+}
+resource lexicon:or_lower_bound_pred : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a measured value, after it, predicated ('was 4 °C or lower').";
+    lexicon:form     = "or lower";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:le_bound_pred_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "or lower";
+}

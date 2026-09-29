@@ -17,6 +17,11 @@ full lexicon (`wordnet-umls-aligned-2026-09-27`, cap-only). **What is still mark
 temperature or any other difference needs D95 slice 7. This guide does not state aspiration as
 capability.*
 
+*Revised `2026-09-29` for D95 slice 6 — bounds, approximations, ranges, bound symbols and scientific
+notation parse — and for the owner's decision that **a plain number is exact**: a bound is written
+out (Measured quantities, rules 7–9). The slice-6 claims are checked by `kernel/tests/` over the
+bootstrap chain; the full-lexicon run waits for the reseed after D95 slice 8.*
+
 ## Purpose & posture
 
 The parser is the oracle: a sentence either composes into a kernel-checked typed tree or it does not.
@@ -46,6 +51,10 @@ Two rules sit above everything else:
    dependency is selective.` Copula present/past: `is`/`are`/`was`/`were`.
 3. **Determiners.** `a`/`an`/`the`/`every`/`each`/`all`/`some`/`no`, the cardinals `one`…`ten`, and
    digits (`1 gene`, `3 genes`), which read as the word forms do.
+   - 🔜 **A plain count is exact** — `5 MSI cell lines` states five (decided `2026-09-29`; every plain
+     count in the WRN paper is exact). Until D95 slice 7 the parser still reads a cardinal as `some`
+     and drops the number. Write a lower bound out: `at least 1,000 cells`, `5 or more cell lines`
+     (rule 7 under Measured quantities); for counts these parse once slice 7 lands.
    - ⚠ **Bare plurals and bare mass nouns now CLOSE, not open.** `Cancers exhibit defects.` composes as
      a kind predication (`kind_of`), not as a deferred quantifier. Prefer the bare form for
      kind-level claims — it is the shorter and the closed one.
@@ -79,7 +88,9 @@ Two rules sit above everything else:
     `Similarly,` `Notably,` — transparent (they don't change the claim).
 12. **Light verbs** that exist in the lexicon, e.g. `gives rise to`.
 13. **Measured quantities** after a preposition, before a noun, or after the copula: `kept at
-    37 °C for 1 h`, `10 μM etoposide`, `The incubation was 1 h.` See "Measured quantities" below.
+    37 °C for 1 h`, `10 μM etoposide`, `The incubation was 1 h.` — and bounded or ranged in the same
+    places: `at less than 37 °C`, `at 37 °C or higher`, `>90% infection efficiency`, `for 2–3 h`. See
+    "Measured quantities" below.
 
 ## DON'T — and how to rewrite it
 
@@ -87,7 +98,8 @@ Two rules sit above everything else:
 |---|---|---|
 | **Test statistics** (`n = 37`, `P = 4.2 × 10⁻¹³`, `Q = 4.8 × 10⁻²⁴`) | Out of the claim **by design** — a statistic qualifies a claim, it is not one. Routed to a D52 record. | State the **qualitative** claim; the statistic lives elsewhere. `… showed greater dependence …`, not `(n = 37; P = …)`. Unchanged by D93/D95. |
 | **A quantity with nothing to take it** (`purified 72 h after transduction`, `contained 4 μg`, `10 μg ml⁻¹ of colcemid`, `every 3 days`) | A quantity is not a noun phrase. It composes only after a preposition that takes one, before a noun, or after the copula (DO §13). A quantity modifying a PP, a verb's object, a pseudo-partitive and `every N unit` have no entry (D95). | Put it where it composes: `treated with 10 μg ml⁻¹ colcemid` (dropping the `of` changes nothing). Where that changes the claim — `72 h after transduction`, `every 3 days` — keep it and record the gap (R2). |
-| **Ranges and intervals** (`20–30%`, `15–18`, `45–60%`) | Deferred in D95, with the interval type they need. Two numerals joined by an en-dash are read as one non-prose token, so the sentence reports NON-PROSE rather than a parse of one endpoint. A hyphen (`926-68021`, a catalogue number) is not a range. | Keep the range and record the gap. Do **not** collapse it to one endpoint or to a midpoint — that changes the claim, which R2 forbids. |
+| **A range with the unit twice, or in words** (`37 °C–39 °C`, `between 37 °C and 39 °C`), or with no unit (`15–18`) | The range grammar reads a digit pair with one unit or `%` after it (D95 slice 6). A pair without a unit is non-prose, since it may be a catalogue number or a count. | Write the pair with the unit once, after it: `37–39 °C`, `20–30%`. Do **not** collapse a range to one endpoint or to a midpoint — that changes the claim, which R2 forbids. A count range (`4–7 foci`) waits for D95 slice 7: keep it and record the gap. |
+| **A plain number meant as a bound** (`5 cell lines` for "five or more", `37 °C` for "37 °C or above") | A plain number is exact (Measured quantities, rule 7). | Write the bound: `at least 5 cell lines`, `37 °C or higher`. |
 | **Parenthetical asides / inline abbreviations** (`(MSI)`, `(PARP-1)`, `(Fig. 1a)`) | Asides are dropped; the parenthetical can't be a claim. | Introduce an abbreviation in its **own** sentence, or just use one form consistently. Drop figure/citation refs. |
 | **Telegraphic caption annotations** (`Scale bar, 50 μm`; `pH 7.5`; `(1,200 V, 20 ms, 2 pulses)`) | Not sentences — a label and its value, with no verb. Figure legends and instrument settings are written in an elliptical register the sentence grammar does not cover. | Expand to the sentence it abbreviates: `The scale bar is 50 μm.` A parameter list becomes one sentence per parameter. This is **register**, not content — nothing is added or dropped, so R2 is satisfied. |
 | **Em-dash appositives** (`—an interaction…—`) | Not covered; the dash content is dropped. | Split into separate sentences: `Synthetic lethality is an interaction between two genetic events. …` |
@@ -134,7 +146,31 @@ contained 2 μg ml⁻¹ puromycin.` does.
    only. Do not write `931 × g` (`×` is an operator, so the sentence is non-prose) or `931 times
    gravity` (no parse: `at` has no noun-phrase adjunct entry).
 6. **One quantity per role.** `kept at 37 °C for 1 h` is fine — two quantities filling two
-   different roles. `between 37 °C and 39 °C` is a range, which is deferred (see the DON'T table).
+   different roles. A range is one quantity: write it as rule 8 says, not `between 37 °C and 39 °C`.
+7. **A plain value is exact; write a bound out.** `37 °C`, `2 h` and `5 cell lines` state exactly
+   that value. Where a bound is meant, say so:
+
+   | Meaning | Write | Also read |
+   |---|---|---|
+   | at least N | `at least N`, `N or more`, `N or higher` | `≥ N` |
+   | at most N | `at most N`, `up to N`, `N or less`, `N or lower` | `≤ N` |
+   | more than N | `more than N` | `> N` |
+   | less than N | `less than N` | `< N` |
+   | about N | `approximately N`, `about N`, `around N`, `roughly N` | `~N`, `≈ N` |
+
+   A bound goes wherever the value goes: `incubated at 37 °C or higher`, `a dose of at least
+   5 mg/kg`, `The temperature was less than 37 °C.` A symbol between a noun phrase and a value is a
+   comparison without the copula (`the temperature < 37 °C`), but in a sentence of prose write the
+   copula and the words. 🔜 For counts (`at least 1,000 cells`) the same forms parse once D95 slice 7
+   lands; a bound on a difference (`rose by more than 5 °C`) waits for slice 7's differences.
+8. **A range is the pair with the unit once, after it**: `2–3 days`, `80–90% confluence`,
+   `30–37 °C`. Both ends are read in that unit and the range means `from … to …`, both ends included.
+   Prefer the en-dash; a hyphen with a unit after it (`45-60%`) reads the same. Without a unit a pair
+   is not a range — `926-68021` is a catalogue number — and `37 °C–39 °C` or `between 37 °C and
+   39 °C` has no parse.
+9. **Scientific notation is one number**: `2 × 10⁻¹⁶`, `1.5 × 10³ cells`, `10³`. Write `×` (or `x`)
+   and a superscript or caret exponent; a unit after it applies to the whole number
+   (`2 × 10⁻³ mg/kg`).
 
 **What this does not change.** A statistic is still not a quantity. `n = 37` counts samples and
 `P = 4.2 × 10⁻¹³` qualifies an inference; neither is a measured value of a physical quantity, and
@@ -217,8 +253,8 @@ A passage is "parser-faithful" when every sentence yields a **closed or open** k
 the closed/open/gap distribution on the rewritten WRN page against the original.
 
 **Quantities have their own corpus.** The CNL page is results prose and contains one unit in 2,738
-words; the methods material contains 35 in 4,912. `experiments/parsing/quantities/` holds 28
-sentences derived from the WRN methods. Each names the relations its readings must contain, or, for
-a gap, the construction it lacks; `kernel/tests/quantity_corpus.rs` checks them without a database,
-and its README records the full-lexicon run. A range reports NON-PROSE and each gap row names its
-construction, so a quantity gap stays distinguishable from a syntax gap.
+words; the methods material contains 35 in 4,912. `experiments/parsing/quantities/` holds 33
+sentences derived from the WRN paper. Each names the relations its readings must contain, or, for
+a gap, the construction it lacks and the D95 slice that owns it; `kernel/tests/quantity_corpus.rs`
+checks them without a database, and its README records the full-lexicon run. A quantity gap stays
+distinguishable from a syntax gap.

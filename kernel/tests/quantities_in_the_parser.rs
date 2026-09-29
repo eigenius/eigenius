@@ -307,6 +307,8 @@ fn packed_equals_unpacked_on_quantities() {
         "the temperature = 3.1 × 10² K",
         "HeLa incubated for 2–3 h",
         "HeLa incubated with 80–90% etoposide",
+        "HeLa incubated at 37 °C or higher",
+        "the temperature was 4 °C or lower",
     ] {
         assert_eq!(readings(&packed, text), readings(&unpacked, text), "{text}");
     }
@@ -331,7 +333,7 @@ fn measure_phrases<'e>(cat: &'e Exp, out: &mut Vec<&'e [Exp]>) {
 /// Decision 5: every closed-class consumer of a measure phrase names the reading it takes. One
 /// whose reading were a variable would take the value and the difference items alike, and
 /// `at 37 °C` would be 310.15 K and 37 K at once. The 33 prepositions of slice 5, the 18 word-marker
-/// entries of slice 6a and the 19 symbol entries of 6b take values.
+/// entries of slice 6a, the 19 symbol entries of 6b and the 8 postfix entries of 6d take values.
 #[test]
 fn every_consumer_names_its_reading() {
     let ctx = eigenius_kernel::testing::bootstrap_context();
@@ -358,7 +360,7 @@ fn every_consumer_names_its_reading() {
             }
         }
     }
-    assert_eq!(readings.len(), 70, "{readings:?}");
+    assert_eq!(readings.len(), 78, "{readings:?}");
     assert!(readings.iter().all(|r| r == "value"), "{readings:?}");
 }
 
@@ -542,8 +544,9 @@ fn a_bound_on_a_difference_is_not_built() {
 }
 
 /// Decision 3: one rule serves every consumer. Each closed-class entry that takes a measure phrase
-/// in kelvin also takes a constraint in kelvin through `unit_constraint`, and yields the category it
-/// yields for the measure phrase.
+/// in kelvin on its right also takes a constraint in kelvin through `unit_constraint`, and yields the
+/// category it yields for the measure phrase. (A postfix bound takes its value on the left; it makes a
+/// constraint and takes none.)
 #[test]
 fn every_measure_consumer_takes_a_constraint() {
     let ctx = eigenius_kernel::testing::bootstrap_context();
@@ -779,5 +782,67 @@ fn a_range_is_a_constraint() {
         );
         let (l, h) = (debug.find(low), debug.find(high));
         assert!(l.is_some() && h.is_some() && l < h, "{text}: {debug}");
+    }
+}
+
+/// Slice 6d: a plain value is exact (slice 7's decision), so a bound is written out, before the value
+/// or after it. `or more` and `or higher` are at least, `or less` and `or lower` at most; a postfix
+/// bound takes its value on the left, through backward unit application, in every position a bound
+/// takes.
+#[test]
+fn a_bound_can_follow_the_value() {
+    let parser = Parser::build(layer());
+    for (text, relation, value_first_expected, magnitude) in [
+        (
+            "HeLa incubated at 37 °C or higher",
+            "prep_at_value",
+            false,
+            "numer: 6203, denom: 20",
+        ),
+        (
+            "HeLa incubated with 10% or more",
+            "prep_with_value",
+            false,
+            "numer: 1, denom: 10",
+        ),
+        (
+            "HeLa incubated for 2 h or less",
+            "prep_for_value",
+            true,
+            "numer: 7200, denom: 1",
+        ),
+        (
+            "the temperature was 4 °C or lower",
+            "has_quantity",
+            true,
+            "numer: 5543, denom: 20",
+        ),
+        (
+            "the temperature was 37 °C or higher",
+            "has_quantity",
+            false,
+            "numer: 6203, denom: 20",
+        ),
+        (
+            "HeLa incubated with 10% or more etoposide",
+            "has_quantity",
+            false,
+            "numer: 1, denom: 10",
+        ),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        let pretty = pretty_term(parsed[0].sem());
+        assert!(
+            debug.contains(&format!("ontology:{relation}")) && debug.contains("units:le"),
+            "{text}: {pretty}"
+        );
+        assert!(debug.contains(magnitude), "{text}: {debug}");
+        assert_eq!(
+            value_first(&pretty, "le"),
+            Some(value_first_expected),
+            "{text}: {pretty}"
+        );
     }
 }

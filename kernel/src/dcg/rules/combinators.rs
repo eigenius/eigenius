@@ -81,6 +81,9 @@ enum SemRecipe {
     /// Unit-polymorphic application: category `cat`; sem `L unit R` — the functor's sem applied to the
     /// unit it binds, then to the measure phrase.
     UnitApply { cat: Exp, unit: Exp },
+    /// Backward unit-polymorphic application: category `cat`; sem `R unit L` — the right operand's
+    /// sem applied to the unit it binds, then to the measure phrase on its left.
+    UnitApplyBwd { cat: Exp, unit: Exp },
     /// A consumer applied to a measure constraint: category `cat`; sem [`constrained_sem`] over the
     /// value type `value_ty` and the consumer's `arity`, the unit applied first when the consumer
     /// binds one. `and` is `logic:And`, resolved when the combination was decided.
@@ -174,6 +177,11 @@ enum CombKind {
     /// `gq_prep_vpadjunct` scopes a quantified noun phrase over a preposition's, generalised to the
     /// consumer's arity, so one rule serves every consumer of a measure phrase.
     UnitConstrain,
+    /// Backward unit-polymorphic application (D95 slice 6d): the measure phrase `cat_mp(U, r)` on the
+    /// left, a `cat_unit_forall(λu. A\B)` on its right instantiated `u := U` — a postfix bound
+    /// (`37 °C or higher`). `UnitApply` mirrored; the sem applies the right operand to the unit, then
+    /// to the measure phrase.
+    UnitApplyBwd,
 }
 
 /// An Eisner normal-form provenance guard on the left operand (D63 §8.2 item 4).
@@ -330,6 +338,24 @@ impl CombKind {
                     unit: unit.clone(),
                 })
             }
+            CombKind::UnitApplyBwd => {
+                let [Exp::Lam(Patt::Var(uvar), body)] = is_ctor(&right.cat, "cat_unit_forall")?
+                else {
+                    return None;
+                };
+                let [unit @ Exp::LitUnit(_), _reading] = is_ctor(&left.cat, "cat_mp")? else {
+                    return None;
+                };
+                let mut bind = CatSubst::new();
+                bind.insert(uvar.clone(), unit.clone());
+                let body = subst_cat(body, &bind);
+                let (_mode, res, slot) = slash_parts(&body, "bwd")?;
+                let subst = unify_cat(slot, &left.cat, layer)?;
+                Some(SemRecipe::UnitApplyBwd {
+                    cat: subst_cat(res, &subst),
+                    unit: unit.clone(),
+                })
+            }
             CombKind::UnitConstrain => {
                 let Exp::InductiveCtor(decl, name, args) = &right.cat else {
                     return None;
@@ -458,6 +484,11 @@ fn comb_rules() -> &'static [CombRule] {
             CombRule {
                 name: "unit_constraint",
                 kind: CombKind::UnitConstrain,
+                prov_guards: &[],
+            },
+            CombRule {
+                name: "unit_application_backward",
+                kind: CombKind::UnitApplyBwd,
                 prov_guards: &[],
             },
             CombRule {
@@ -674,6 +705,13 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
                 Box::new(right.sem().clone()),
             );
             Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
+        }
+        SemRecipe::UnitApplyBwd { cat, unit } => {
+            let sem = Exp::App(
+                Box::new(Exp::App(Box::new(right.sem().clone()), Box::new(unit))),
+                Box::new(left.sem().clone()),
+            );
+            Item::from_parts(cat, sem, Combinator::BackwardApp, Cost::ZERO)
         }
         SemRecipe::UnitConstrain {
             cat,

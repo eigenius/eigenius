@@ -647,8 +647,18 @@ predicative and prenominal. 6b: the symbols, the comparison clause, scientific n
   `λq. And(le(u, lo, q), le(u, q, hi))`, and the predicate over `has_quantity`, built by the
   combinator's `constrained_sem`. `verbalize` renders it `from 7200 s to 10800 s`.
 
-**Tests and corpus, slice 6.** `quantities_in_the_parser.rs`, 20 tests: 6a's, and symbols as bounds,
-comparison clauses, scientific notation and ranges; `every_measure_consumer_takes_a_constraint` finds
+**6d — built** (2026-09-29), with slice 7's decision that a plain value is exact.
+- The CNL guide's postfix forms: `or more` and `or higher` (at least), `or less` and `or lower` (at
+  most), each with the constraint and predicate entries, over the prefix markers' sems.
+- `unit_application_backward` (`CombKind::UnitApplyBwd`): the measure phrase on the left, a
+  `cat_unit_forall(λu. A\B)` on its right — `UnitApply` mirrored. `at 37 °C or higher` is
+  `∃q. le(310.15 K, q) ∧ prep_at_value(…, q)`.
+- The CNL guide (`docs/method/controlled-english-style-guide.md`): a plain value is exact, and the
+  table of bound forms (rule 7); ranges written with the unit once (rule 8); scientific notation
+  (rule 9); the range DON'T row replaced.
+
+**Tests and corpus, slice 6.** `quantities_in_the_parser.rs`, 21 tests: 6a's, and symbols as bounds,
+comparison clauses, scientific notation, ranges and postfix bounds; `every_measure_consumer_takes_a_constraint` finds
 70 consumers. `quantity_tokens.rs`: scientific notation and ranges read against the units layer, and
 what is not a range. `quantity_corpus.rs`: 27 covered rows, five of them slice 6's, from sentences of
 the paper — `4–12% gels`, a gap until now; `80–90% confluence`; `approximately 100 mm³`;
@@ -675,10 +685,19 @@ A cardinal drops its number today: `two genes`, `5 cells` and `1,000 cells` all 
   count ranges, `4–7 foci`.
 - **Proportions**: `more than half of the samples`, `15% of colon cancers`, `20–30% of endometrial
   cancers`.
-- **For the owner: what a bare cardinal asserts** — exactly two, at least two, or an existential as
-  today. D95 took the exact reading for differential comparatives ("a paper reporting that a
-  temperature rose 5 °C is not reporting that it rose at least 5 °C"); a count in a methods section
-  (`two biological replicates`) is exact, and one in a claim can be a lower bound.
+- **Decided (2026-09-29): a plain count is exact.** `5 MSI cell lines` states five. Every plain
+  count in the WRN paper is exact — the study's inventory (`Project Achilles screened 517 cell
+  lines`), its replicates (`three technical replicates each from two biological replicates`), a
+  defined set (`these four lineages`, `the four other RecQ DNA helicases`), a definition (`the
+  co-occurrence of two genetic events`) — and where the paper means a bound it writes one (`at least
+  1,000 cells`, `>17,000 genes`). The exact count is of the set the sentence defines (`evaluated WRN
+  knockout in 5 MSI cell lines`), not of everything the predicate holds of. A lower bound is written
+  out, and the CNL guide says how (Measured quantities, rule 7): `at least N`, `N or more`, `N or
+  higher`. Rejected: the at-least reading, which the paper never uses for a plain count; and the
+  existential, which drops the number.
+- **Also needed, from the same survey**: a determiner before a numeral (`these four lineages`, `the
+  four other RecQ DNA helicases`), which no rule builds today; right-node sharing in `5 MSS and 5 MSI
+  cell lines`; a breakdown that sums to its whole (`14 MSI cell lines … (6 leukemia, 2 prostate, …)`).
 
 ## Slice 8 — positions a measure phrase takes
 

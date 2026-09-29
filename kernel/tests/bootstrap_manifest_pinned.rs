@@ -33,7 +33,8 @@
 //!
 //! IT FIRED FOR D95 SLICE 6 (`2026-09-29`), on three layers: `units` (`units:lt`, `le`, `approx`,
 //! the order a bound states), `lexicon` (`cat_mpc`, the measure constraint) and `closed-class` (the
-//! bound markers `less than` … `roughly`; then, in 6b, the symbols `<` … `≈` and `=`). Slices 6–8 each
+//! bound markers `less than` … `roughly`; then the symbols `<` … `≈` and `=`, and the postfix `or more`
+//! … `or lower`). Slices 6–8 each
 //! move these layers and pay ONE reseed together, after slice 8
 //! (`docs/design/d95-implementation-plan.md`, slice 6).
 //!
@@ -215,7 +216,7 @@ reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
 lexicon:1c6e18802c72de1f28b7b7469f93862259ee9324fea31a82e2a5214d2a418352
 ontology:4c90a71407c97e847597e8b55329c106a4071c4af41fe172ced12c3afdc539cd
-closed-class:03420dadda565d3efb70019784c74f5438059cf1a030f31287987c9a2e736fc8
+closed-class:e6c5dd20040ea2825cded56d1ab2d138350facebb9926e0d9394bb0fdd6259e1
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 
