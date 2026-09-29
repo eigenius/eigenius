@@ -144,8 +144,10 @@ measure it changes (Kennedy & Levin 2008): the degree is the difference on that 
 - A **closed-scale** change has an endpoint: `fully` reaches it, `partially` moves toward it without
   reaching it.
   - `Ch3+5 transfer … partially rescued viability from shWRN` (`body.p13`): the viability regained is
-    more than none and less than the gap back to the untreated level. The endpoint is the reference
-    state the verb names.
+    more than none and less than the gap back to the untreated level. That level is the endpoint,
+    and the sentence does not name it: `from shRNA` names what viability was rescued *from*, and the
+    level it returns toward — untreated viability — is implied. It is a hole filled from context, as
+    an unstated contrast class is (decision 3).
 - A **relative-standard** degree compares with a contextual threshold, as a gradable adjective's
   positive form does (`gt(deg_X(x), std_X)`).
   - `WRN silencing … substantially increased ɣH2AX and 53BP1 foci` (`body.p9`): the difference in the
@@ -261,8 +263,10 @@ and for manner in a protocol (`foci … were scored similarly`).
      - `substantially increased ɣH2AX and 53BP1 foci`: the difference in the count of foci exceeds the
        standard — the positive form, over a difference.
      - `partially rescued viability from WRN shRNA`: the viability regained is more than none and less
-       than the gap back to the untreated level. The closed endpoint is the reference state the verb
-       names, not a scale declared for the verb.
+       than the gap back to the untreated level. The closed endpoint is that reference level, not a
+       scale declared for the verb — and the sentence implies it without naming it (`from WRN
+       shRNA` names what viability was rescued from), so it is a hole the discourse resolver fills,
+       the same mechanism as an unstated contrast class (decision 3).
    - *What a verb of change declares:* the measure it changes — for both of the paper's verbs, its
      object (`viability`; the count of `foci`) — and its direction: up for `increase`, down for
      `reduce` or `impair`, back toward a reference for `rescue`. No source records these; the paper's
@@ -294,10 +298,14 @@ and for manner in a protocol (`foci … were scored similarly`).
      2026-07-25: the parser attaches the MSI context and the MSS contrast to the identifying event
      rather than to the dependency, and the correct reading is not derivable. It is the seam
      eigenius#264 records for the reading ranker.
-   - *How `P` is lifted to classes is unstated.* `P(A) ∧ ¬P(B)` applies a predicate of individuals to
-     classes without saying how — every member, generically, or on average — and the paper's methods
-     define `preferentially` as a difference in mean dependency. A check of either half has to
-     compute whichever it is.
+   - *How `P` is lifted to classes — statistical, for the paper's uses.* `P(A) ∧ ¬P(B)` applies a
+     predicate of individuals to classes without saying how: every member, generically, or on
+     average. The paper's methods answer it for `preferentially`: *genes that were preferentially
+     dependent in MSI compared to MSS cell lines were identified using linear modeling … the
+     difference in mean dependency* (`methods/differential-dependency-analysis`). So the class-level
+     comparison is a claim about that analysis, and is defined over its statistics record — as
+     decision 4 defines `significantly` over the D52 record — not as a filter on individual cell
+     lines, which would demand that every MSI line depend on WRN and no MSS line do.
 4. **Where `significantly` and `independently` live.** In the claim, since the paper asserts them and
    the claims corpus measures what the proposition says; or at the justification layer only, beside
    the claim. *Proposed:* in the claim, **defined over what each is about**, so that each is checkable
@@ -350,6 +358,16 @@ and for manner in a protocol (`foci … were scored similarly`).
      property one has and the other lacks, turned into `¬Id` by `J`. A unique-name assumption would be
      unsound: WordNet and UMLS name the same concepts, and alignment resolves that only for the
      surfaces it merges, at parse time, so an unmerged alias of `a` would pass as another witness.
+   - *A sound source of distinctness exists for the pairs where aliasing is the risk.* The alignment
+     judge records negative verdicts as well as merges: 47,972 pairs judged `same: false`, each with a
+     confidence and a reason, against 33,333 judged the same
+     (`experiments/lexicon-align/alignment.jsonl`). These are judgements about specific pairs, not an
+     assumption about all names, and can enter the justification layer as declared grounds for `¬Id`.
+     They cover exactly the pairs aliasing threatens — a UMLS concept and a WordNet synset sharing a
+     surface — and not the paper's own alternatives: CRISPR–Cas9 activity and WRN loss share no
+     surface, so no verdict exists for them, and their distinctness still needs discrimination.
+   - *Verification, not representation.* None of this blocks representing an exclusive claim, which
+     is what the claims corpus measures. It blocks checking one.
 
 6. **What the causal relation `R` is.** Open.
    - **Not logical implication.** Written with `→`, both disjuncts of `not solely` go wrong once `B`
@@ -366,12 +384,24 @@ and for manner in a protocol (`foci … were scored similarly`).
      state the presupposition, `∃C. A ∈ C ∧ R(C, B)`. Each is its own WordNet or UMLS predicate today,
      and no source marks them causal; the paper's handful would be declared by hand, as decision 2's
      scales are.
-   - *One relation, or each verb its own?* A single `R` that every causal verb maps to is simplest,
-     and loses that `explain` and `lead to` are not the same claim. Keeping each verb's own relation,
-     lifted to conditions, with the exclusive polymorphic in `R` — as decision 5 has it take `A` from
-     the predicate rather than choose it — keeps the difference.
-   - *Proposed:* each causal verb's own relation, lifted to conditions; the exclusive polymorphic in
-     `R`.
+   - *One relation, each verb its own, or a class?* A single `R` that every causal verb maps to is
+     simplest, and loses that `explain` and `lead to` are not the same claim. Each verb's own relation
+     keeps the difference and loses shared inference: nothing learned about `lead to` carries to
+     `responsible for`. A **class of causal relations** keeps both — each verb keeps its own relation,
+     and the class carries the laws every member satisfies, as a record of the relation and proofs of
+     its laws (the kernel's Σ-types carry that). The exclusive is polymorphic over the class, as
+     decision 5 has it take `A` from the predicate rather than choose it.
+   - *Which laws the class carries matters more than having one.* **Upward closure** holds for every
+     member — adding factors to a condition that suffices keeps it sufficient — and is what the
+     joint/alternative analysis relies on. **Transitivity** does not belong in it: `A` leads to `B` and
+     `B` leads to `D` may give `A` leads to `D`, but responsibility and explanation do not chain that
+     way, so a class-wide transitivity law would license false inferences for them.
+   - The construction is Mackie's INUS analysis (Mackie 1965): a cause is an insufficient but
+     non-redundant part of an unnecessary but sufficient condition. The joint disjunct is `A` being
+     insufficient; the alternative disjunct is the condition being unnecessary.
+   - *Proposed:* a class of causal relations, each verb keeping its own relation lifted to conditions,
+     the class carrying upward closure and not transitivity; the exclusive polymorphic over the
+     class.
 
 ## Slices
 
@@ -392,7 +422,8 @@ and for manner in a protocol (`foci … were scored similarly`).
      (decision 5) are separate; the paper uses the first and not the second.
 3. **Degree** — `partially`, `substantially`, and `fully` with a non-causal predicate — on the
    existing measure machinery (decision 2), with `rescue` and `increase` declared with the measure
-   they change and its direction.
+   they change and its direction. `rescue`'s reference level is a discourse hole (D64), as decision
+   3's unstated contrast class is.
 4. **Contrastive** — `selectively`, `preferentially` and the adjective `preferential` — with decision
    3's contrast class. The unstated path needs only D64's hole; the stated path needs `compared to`
    attached to the right constituent, which the parser does not do today.
