@@ -2,6 +2,74 @@
 
 *2026-09-29. For the developer taking this branch over.*
 
+## Status `2026-09-29`, second machine — read this before the sections below
+
+This note was written on a different machine from the one it was next picked up on, and several
+of its statements are machine-specific or have since been overtaken. What is still true is the
+design and the ordering; what follows corrects the rest.
+
+**Overtaken:**
+
+| The note says | Now |
+|---|---|
+| "the last 15 commits are not pushed; push them before anything else" (step 1) | pushed; `origin/quantities-in-the-parser` holds all 39 including the note itself |
+| "the CNL page is not on this machine; obtain it first" (step 2) | present at `references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt`; the parse-rate run below used it |
+| "older snapshots are gone" | the second machine holds them back to `2026-07-11` |
+| "disk is the constraint; `cargo test --workspace` fills the volume" | true of the first machine only: 524 GB free here, the full workspace suite runs |
+| SPECIALIST "curl from NLM (D97 gives the URL)" | D97 gave only the *terms* page. The URL is now recorded in D97 and scripted as `scripts/provision-specialist.sh`, which verifies the release by content |
+
+**Done since:**
+
+- `e594545` merged `main`'s parse-gate re-baseline (`74da878`). The branch was cut from `c39b8d6`
+  and carried figures from 2026-08-17 that two September reseeds had already superseded; measuring
+  this branch against those would have credited it with movement earned before it existed.
+- `dc15e6e`, `34e4fef` — D97's provisioning: the URL, and a script that checks size, sha256 and
+  the three field counts D97 measured, so a *different release* fails loudly rather than shifting
+  every D97 number silently.
+- **Step 2's measurement is run.** Reseeded and realigned at `34e4fef` into
+  `wordnet-umls-2026-09-29-quantities` and `wordnet-umls-aligned-2026-09-29-quantities`
+  (`umls_scope: all`). Live reranked run, reranker confirmed engaged, new draw recorded at
+  `experiments/parsing/results/2026-09-29-0748-34e4fef-first-page-cnl-v3-reranked/`:
+
+  | | baseline | this branch |
+  |---|---|---|
+  | units | 62 | 62 |
+  | grammar-gap / missing-lexeme | 0 / 0 | **0 / 0** |
+  | expected-hits | 62/62 | **62/62**, miss-set unchanged |
+  | total-readings | 674 | **626** — improved |
+  | total-skeletons | 171 | **175** (ceiling 250) |
+
+  D95 slices 1–5 cost no coverage and shrink the forest by 48 readings while adding 4 skeletons.
+
+**A trap this run found.** `reseed-lexicon-db.sh` names its snapshot from the date alone and
+**overwrites a same-day snapshot without warning**. The morning's `main` reseed was replaced in
+place by the branch reseed; the aligned store beside it survived, still stamped with the old
+base's commit, so the pair silently disagreed. Both are renamed now
+(`…-quantities`, `…-main-c39b8d6`) and the survivor's `PROVENANCE` records what happened. The
+script should refuse an existing target or suffix it — the same failure the alignment script was
+fused to prevent ("nothing failed; the wrong thing succeeded").
+
+**Where step 2 now stops, and it needs the owner.** The live run left **one decision
+unadjudicated**, so the selection gate cannot score:
+
+> READING-UNADJUDICATED: «The MSI relationship compared favourably to other strong biomarkers for
+> vulnerabilities.» chose a reading with no ledger verdict
+
+The selected reading attaches `for vulnerabilities` to *the relationship*; the correct reading,
+which the ranker placed first among the runners-up, attaches it inside the biomarker NP. Both use
+identical concept sets — the sentence's 36 candidates reduce to 2 skeletons, so this was a binary
+structural choice, and the ranker's rationale argues five sense choices that are the same on both
+sides. Filed as **eigenius#264** (rework the ranker: prompt, rendering, and the model — TypeSafe.ai
+models to be tested; the client is coupled to one provider today).
+
+Adjudicating that decision is a ground-truth judgement and is the owner's, not the measurer's. With
+it recorded as wrong (and 19 correct), the tally is 30 correct / 11 wrong / 0 unadjudicated —
+matching `selection-baseline.json`'s committed 30.
+
+**The ordered next steps below therefore resume at:** adjudicate that one decision → replay the
+recorded draw and confirm it reproduces the live run exactly → write the new `baseline.json`. Then
+step 3 onward as written, with step 5's provisioning already done.
+
 ## Where the branch stands
 
 - **Base:** `c39b8d6`, the merge of #262 (exact numerics D94, units of measure D93) into `main`.
