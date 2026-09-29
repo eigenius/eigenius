@@ -59,6 +59,30 @@ entry=E0034095                  entry=E0300046                    entry=E0061964
 | `nominalization=` | 16,534 | the verb's noun (`electroporate` ↔ `electroporation`) |
 | `acronym_of`, `abbreviation_of` | 67,675, 23,989 | expansions |
 
+**Provisioning.** One file, no licence gate, no UTS account:
+
+```
+curl -o references/specialist/LEXICON \
+  https://data.lhncbc.nlm.nih.gov/public/lsg/lexicon/2026/release/LEX_DOC/LEXICON
+```
+
+56 012 657 bytes, sha256 `259d0283ebe7b027be730538d2c77c10f13f09bb824106306fbf5838d0a629f5`,
+534 345 records. Verify a fetch against the counts this document measures — `nominalization=`
+16 534, `acronym_of` 67 675, `abbreviation_of` 23 989 — which identify the release more precisely
+than its name does.
+
+It is served from `data.lhncbc.nlm.nih.gov/public/`, **not** from the `lhncbc.nlm.nih.gov/LSG/` or
+`lsg3.nlm.nih.gov/LexSysGroup/` paths the project pages link to; those redirect to directory
+listings that answer 403. The URL is recorded here because it is not derivable from the web pages,
+and a hand-off that said "D97 gives the URL" cost an afternoon's probing when D97 gave only the
+terms page below.
+
+**SPECIALIST also ships inside the UMLS Full Release** (`umls-<release>-full.zip` →
+`<release>aa-otherks.nlm` → `LEX/`), alongside the Semantic Network `provision-umls.sh` already
+extracts from there. That route needs a UTS licence and a 30 GB download; the direct fetch above
+needs neither. Note the Metathesaurus archives are a different download — a
+`-metathesaurus-*.zip` contains `<RELEASE>/META/` and nothing else.
+
 **Terms.** The SPECIALIST NLP Tools are "available to all requesters … at no charge". Redistribution
 is allowed with the terms included; a distribution must attribute the source "as the SPECIALIST NLP
 Tools with the release number and date" and "state any modifications … along with a complete
