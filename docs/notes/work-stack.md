@@ -13,14 +13,18 @@ any detour.
 >
 > **The goal:** numerical quantities and measurements with units as part of the propositions.
 > Slices 1–5 are built and re-baselined (`5fb85cf`: 62/62 expected hits, 0 grammar gaps, 626
-> readings). Slices 6 and 7 were rewritten on `2026-09-29` around the constructions the WRN paper
-> attests, not the ones the first plan anticipated: slice 6 is bounds and ranges (`less than one
-> count per million`, `at least 1,000 cells per sample`, `P < 2 × 10⁻¹⁶`, `every 2–3 days`), slice 7
-> is ratios (`0.56-fold fewer … compared to …`). The owner's rule: a construction the paper uses
-> once will recur in the next paper, so it is built.
+> readings). Slices 6–9 were rewritten on `2026-09-29` around the constructions the WRN paper
+> attests (`docs/design/d95-implementation-plan.md`, "Slices 6–9"). The owner's rule: a
+> construction the paper uses once will recur in the next paper, so it is built.
 >
-> **Exit gate:** slices 6 and 7 built, the quantity corpus extended with the attested sentences,
-> then the branch's PR.
+> **Built:** slice 6 (bounds, approximations, ranges, bound symbols, scientific notation) and slice 7
+> (counts; proportions; number words; a determiner before a numeral; counted conjuncts and
+> proportions sharing a head). **Next:** slice 8 (a measure phrase before a PP, as a verb's object,
+> in a pseudo-partitive, `every N unit`, rates, two values sharing a unit, `by` + a measure phrase),
+> then one reseed and the parse-gate measurement over the aligned snapshot, then slice 9 (ratios).
+>
+> **Exit gate:** slices 6–9 built, the quantity corpus extended with the attested sentences, the
+> reseed measured, then the branch's PR.
 >
 > **Parked on the way (not on this entry's path):** D96 (JATS, decided, unbuilt), D97 (SPECIALIST,
 > proposed; motivated by D95's lexicon gaps `incubate` and `electroporate`), D98 (qualifiers,

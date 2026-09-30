@@ -685,6 +685,14 @@ impl Parser {
                 .iter()
                 .flat_map(super::super::rules::combinators::mod_lifts)
                 .collect();
+            // The determiner lift (D95 slice 7d): a determiner that meets a noun modifier before the
+            // head it shares with a coordinated one (`five MSS and five MSI cell lines`).
+            mods.extend(
+                row[i]
+                    .iter()
+                    .flat_map(super::super::rules::combinators::det_premod_lifts)
+                    .collect::<Vec<_>>(),
+            );
             // Attributive past-participle lift, GATED: only when this surface has NO lexical adjective
             // (else the WordNet adjective already covers the attributive use, and the rule's
             // reduced-passive reading would just double-seed — "reduced"/"increased"). Where there is
@@ -805,7 +813,7 @@ impl Parser {
                     .into_iter()
                     .collect();
                 // A whole number is also a cardinal determiner stating its exact count (D95 slice 7):
-                // `1` with `one`'s singular categories, any other with `two`'s plural ones, `0`
+                // `1` in `a`'s singular categories, any other in `these`'s plural ones, `0`
                 // included — `has_count(…, 0)` reads `0 genes`, where an existential could not.
                 if value.is_integer() && value.numer() >= &num_bigint::BigInt::from(0) {
                     let one = num_bigint::BigInt::from(1);
@@ -818,7 +826,7 @@ impl Parser {
                     items.extend(
                         templates
                             .iter()
-                            .filter_map(|t| self.count_determiner(t.cat(), &count)),
+                            .filter_map(|cat| self.count_determiner(cat, &count)),
                     );
                 }
                 items
@@ -883,8 +891,8 @@ impl Parser {
         Some(Item::new(cat.clone(), sem))
     }
 
-    /// A count range's cardinal determiners (D95 slice 7, decision 5), in the plural categories `two`
-    /// has: `λT.λV. ∃q. lo ≤ q ≤ hi ∧ has_count(T, λx. V(x), q)`, and its object counterpart.
+    /// A count range's cardinal determiners (D95 slice 7, decision 5), in the plural categories of
+    /// `these`: `λT.λV. ∃q. lo ≤ q ≤ hi ∧ has_count(T, λx. V(x), q)`, and its object counterpart.
     fn count_range_determiners(
         &self,
         lo: &crate::units::convert::Converted,
@@ -925,7 +933,7 @@ impl Parser {
             let mut out = Vec::new();
             for template in &self.cardinal_many {
                 let [_num, Exp::Lam(_, body)] =
-                    super::super::category::is_ctor(template.cat(), "cat_forall")?
+                    super::super::category::is_ctor(template, "cat_forall")?
                 else {
                     continue;
                 };
@@ -948,7 +956,7 @@ impl Parser {
                     arity,
                     &and,
                 );
-                out.push(Item::new(template.cat().clone(), sem));
+                out.push(Item::new(template.clone(), sem));
             }
             Some(out)
         };

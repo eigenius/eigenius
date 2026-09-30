@@ -20,7 +20,9 @@ capability.*
 *Revised `2026-09-29` for D95 slice 6 — bounds, approximations, ranges, bound symbols and scientific
 notation parse — and for the owner's decision that **a plain number is exact**: a bound is written
 out (Measured quantities, rules 7–9). The slice-6 claims are checked by `kernel/tests/` over the
-bootstrap chain; the full-lexicon run waits for the reseed after D95 slice 8.*
+bootstrap chain; the full-lexicon run waits for the reseed after D95 slice 8. Revised again the same
+day for D95 slice 7: counts, proportions, number words, a determiner before a numeral, and counted
+conjuncts sharing a head (DO item 3; Measured quantities, rule 10).*
 
 ## Purpose & posture
 
@@ -49,8 +51,15 @@ Two rules sit above everything else:
    apoptosis.` Present tense (`affects`/`affect`) or simple past (`affected`, `was`/`were`).
 2. **Predicate nominals & adjectives.** `WRN is a vulnerability.` `WRN is a drug target.` `The
    dependency is selective.` Copula present/past: `is`/`are`/`was`/`were`.
-3. **Determiners.** `a`/`an`/`the`/`every`/`each`/`all`/`some`/`no`, the cardinals `one`…`ten`, and
-   digits (`1 gene`, `3 genes`), which read as the word forms do.
+3. **Determiners.** `a`/`an`/`the`/`every`/`each`/`all`/`some`/`no`, and numbers — `one` … `ten` in
+   words, any number in digits (`three genes`, `3 genes`, `1,000 cells`), which read alike.
+   - **A determiner before a number**: `the four other RecQ helicases` states the four; `these two
+     genetic events` points back at exactly two earlier referents. Today the only set a demonstrative
+     resolves to is a run of findings of one kind (D68), so `these four lineages` after four named
+     kinds stays open — write the NP out (`the four lineages`) where no such run precedes it.
+   - **Counted conjuncts may share their head**: `five MSS and five MSI cell lines` is five of each,
+     and `15% of colon, 22% of gastric and 12% of ovarian cancers` a proportion of each. Each conjunct
+     is a number or a proportion with the modifiers of its own kind; the head is written once.
    - **A plain count is exact** — `5 MSI cell lines` states five (decided `2026-09-29`; every plain
      count in the WRN paper is exact), as `has_count(…, 5)`. Write a bound out: `at least 1,000
      cells`, `more than one MMR gene`, `5 or more cell lines`, `fewer than 5 cells`, and a count range
@@ -177,6 +186,11 @@ contained 2 μg ml⁻¹ puromycin.` does.
 9. **Scientific notation is one number**: `2 × 10⁻¹⁶`, `1.5 × 10³ cells`, `10³`. Write `×` (or `x`)
    and a superscript or caret exponent; a unit after it applies to the whole number
    (`2 × 10⁻³ mg/kg`).
+10. **A number word takes a unit as digits do**: `nine days` is `9 days`, for `one` … `ten`. Before a
+    noun, join the number to the unit's NAME with a hyphen: `an eight-day viability assay`, `a
+    10-minute incubation`. A unit SYMBOL takes no hyphen (`a 2 h incubation`, not `a 2-h incubation`,
+    which is read as a word): the SI writes it so, and a hyphen before letters that spell a symbol
+    names a compound (`5-mC`, `3-MA`).
 
 **What this does not change.** A statistic is still not a quantity. `n = 37` counts samples and
 `P = 4.2 × 10⁻¹³` qualifies an inference; neither is a measured value of a physical quantity, and

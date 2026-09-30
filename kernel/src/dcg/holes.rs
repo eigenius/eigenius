@@ -73,6 +73,32 @@ pub(super) fn freshen_anaphor(exp: &Exp, fresh: &str) -> Exp {
 /// is freshened by the felicity gate, where β-reduction has made the restrictor concrete.
 const ANAPHOR_OF_IRI: &str = "urn:eigenius:lexicon:anaphor_of";
 
+/// The counted sibling, `lexicon:anaphor_of_count : ∀(A:Set) → Quantity(u"1") → A` — a demonstrative
+/// before a numeral (`these two genetic events`, D95 slice 7d, decision 13). Freshened like
+/// `anaphor_of(A)`, with its count recorded on the hole.
+const ANAPHOR_OF_COUNT_IRI: &str = "urn:eigenius:lexicon:anaphor_of_count";
+
+/// The whole number a count term states — `mk_quantity(n, 0)` at the dimensionless unit, as a
+/// numeral seeds it — or `None` for any other term.
+pub(crate) fn count_value(q: &Exp) -> Option<usize> {
+    match q {
+        Exp::Ann(inner, _) => count_value(inner),
+        Exp::InductiveCtor(_, ctor, parts) if ctor == "mk_quantity" => match parts.as_slice() {
+            [Exp::LitRat(n), Exp::LitInt(0)] if n.is_integer() => usize::try_from(n.numer()).ok(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A demonstrative's referent hole, as [`freshen_anaphor_of`] finds it: the fresh variable, the
+/// restrictor type it stands at, and the count a numeral after the demonstrative states.
+pub(super) struct DemonstrativeHole {
+    pub(super) var: String,
+    pub(super) ty: Exp,
+    pub(super) count: Option<Exp>,
+}
+
 /// Freshen every `lexicon:anaphor_of(A)` application in a NORMAL FORM into a typed referent hole:
 /// each occurrence is replaced by a fresh variable (`$demref$<k>_0`, traversal order — the
 /// skeleton normalizer α-normalizes the `$name$digits_digits` shape, so the naming is
@@ -81,13 +107,30 @@ const ANAPHOR_OF_IRI: &str = "urn:eigenius:lexicon:anaphor_of";
 /// findings). Two occurrences in one reading are two distinct subterm sites → two distinct holes
 /// (independent referents, resolved independently). Runs post-readback, so a partially-applied
 /// `anaphor_of` head cannot occur in a well-typed nf; a bare un-applied constant is left alone
-/// (nothing to type the hole with) and the gate's closed `check` rejects the candidate.
-pub(super) fn freshen_anaphor_of(exp: &Exp) -> (Exp, Vec<(String, Exp)>) {
-    fn walk(e: &Exp, holes: &mut Vec<(String, Exp)>) -> Exp {
+/// (nothing to type the hole with) and the gate's closed `check` rejects the candidate. A counted
+/// occurrence, `anaphor_of_count(A, q)`, returns its count `q` beside the type.
+pub(super) fn freshen_anaphor_of(exp: &Exp) -> (Exp, Vec<DemonstrativeHole>) {
+    fn walk(e: &Exp, holes: &mut Vec<DemonstrativeHole>) -> Exp {
         if let Exp::App(f, a) = e {
-            if matches!(f.as_ref(), Exp::EigonAxiom(i) if i.as_str() == ANAPHOR_OF_IRI) {
+            let head = |g: &Exp, iri: &str| matches!(g, Exp::EigonAxiom(i) if i.as_str() == iri);
+            let (ty, count) = if head(f, ANAPHOR_OF_IRI) {
+                (Some(a.as_ref().clone()), None)
+            } else if let Exp::App(g, t) = f.as_ref() {
+                if head(g, ANAPHOR_OF_COUNT_IRI) {
+                    (Some(t.as_ref().clone()), Some(a.as_ref().clone()))
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+            if let Some(ty) = ty {
                 let var = format!("$demref${}_0", holes.len());
-                holes.push((var.clone(), a.as_ref().clone()));
+                holes.push(DemonstrativeHole {
+                    var: var.clone(),
+                    ty,
+                    count,
+                });
                 return Exp::Var(var);
             }
         }

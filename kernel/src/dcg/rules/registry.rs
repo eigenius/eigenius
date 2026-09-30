@@ -903,6 +903,11 @@ pub(crate) enum UnaryKind {
     /// `cat_mod` (`mod_lifts`), so modifiers can coordinate before meeting the head noun. Fires on
     /// composed cells; leaves are lifted at seed time (mirroring `BareNp`).
     ModLift,
+    /// Determiner lift (D95 slice 7d, decision 14): a quantifier determiner or a partitive →
+    /// `cat_det_premod`, which composes with a noun modifier before the head (`det_premod_lifts`).
+    /// Fires on composed cells (`the four`, `at least 1,000`, `15% of`); leaves are lifted at seed
+    /// time.
+    DetPremod,
     /// Elided-`than` standard defaulting (D63 §8.12): a comparative awaiting its `than` complement,
     /// `X / cat_pp_than` → `X` with the standard bound to the anaphoric placeholder (`elided_than`),
     /// an OPEN parse. Replaces the `more_deg_bare`/`less_deg_bare` lexical entries.
@@ -948,7 +953,7 @@ impl UnaryShift {
 /// each shift reading the cell state left by the previous. Elided-`than` sits after coordination and
 /// before the NP shifts: its input `X/cat_pp_than` and output `S[adj]\NP` are untouched by the others,
 /// so its position only keeps it out of `ModLift` (no attributive comparative modifier is minted).
-static UNARY_SHIFTS: [UnaryShift; 8] = [
+static UNARY_SHIFTS: [UnaryShift; 9] = [
     UnaryShift {
         kind: UnaryKind::ModLift,
         name: "mod_lift",
@@ -958,6 +963,13 @@ static UNARY_SHIFTS: [UnaryShift; 8] = [
         kind: UnaryKind::CoordComplete,
         name: "coord_complete",
         apply: apply_coord_complete,
+    },
+    // After coordination completes, so a coordinated determiner lifts too; its output is consumed by
+    // no other shift.
+    UnaryShift {
+        kind: UnaryKind::DetPremod,
+        name: "det_premod",
+        apply: apply_det_premod,
     },
     UnaryShift {
         kind: UnaryKind::ElidedThan,
@@ -1050,6 +1062,16 @@ fn apply_mod_lift(
     let mut v = super::combinators::mod_lifts(it);
     v.extend(super::combinators::participial_lifts(it));
     v
+}
+
+/// Determiner lift: a quantifier determiner or a partitive → `cat_det_premod` (D95 slice 7d).
+fn apply_det_premod(
+    _g: &Grammar,
+    it: &Item,
+    _span: (usize, usize),
+    _rctx: super::RightContext,
+) -> Vec<Item> {
+    super::combinators::det_premod_lifts(it)
 }
 
 /// Forward bounded type-raise: a name `NP` → `S/(S\NP)`.

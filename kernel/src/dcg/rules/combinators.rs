@@ -98,6 +98,25 @@ enum SemRecipe {
     },
     /// Forward composition: category `cat`; sem `λz. L(R z)`.
     FwdComp { cat: Exp },
+    /// A determiner composed with a noun modifier (D95 slice 7d, decision 14): category `cat`
+    /// (`cat_detmod`); the modifier's restrictor is built by the refine rule `builder` over a head
+    /// standing for the determiner's type variable. `stack`: the left operand is already composed,
+    /// so the restrictor joins its builder; else the left is a lifted determiner, and `scoped` says
+    /// whether its scope ranges over the head's members (a cardinal) and so takes them through
+    /// `Fst` from the refined type, as [`SemRecipe::DetRefine`] does. `and` is `logic:And`.
+    DetModify {
+        cat: Exp,
+        builder: SemBuild,
+        binds: CatSubst,
+        head: Exp,
+        stack: bool,
+        scoped: bool,
+        and: Iri,
+    },
+    /// A coordination of composed determiners applied to the shared head (decision 14): category
+    /// `cat`; sem `L C k`, `C` the head's class and `k` the builder `λR. Σx:C. R x`, or for a refined
+    /// head `Σx:C. P` the builder `λR. Σx:C. And(P, R x)`.
+    DetModApply { cat: Exp, head: Exp, and: Iri },
     /// A **datafied grammar rule** matched (Phase 1–2): a `combine_*` group matched a [`CatRule`] and
     /// carries its sem-`builder` plus the metavariable `binds` the pattern captured. `build` invokes
     /// the builder, the only place a child sem is read. Covers the nominal-modification family
@@ -188,6 +207,14 @@ enum CombKind {
     /// of `cat_mp(U, r)` on its left on the right — the partitive `of` (`more than half of the
     /// samples`, `45–60% of the cancers`). The sem quantifies the value as `UnitConstrain`'s does.
     UnitConstrainBwd,
+    /// A determiner meeting a noun modifier before its head (D95 slice 7d, decision 14): a lifted
+    /// determiner `cat_det_premod(n, λT. X)`, or a composed one not yet coordinated, and on its right
+    /// anything a refine rule takes as a head's modifier (a `cat_mod`, a noun, a name) → `cat_detmod(n,
+    /// λT. X)`. `five MSS` in `five MSS and five MSI cell lines`.
+    DetModify,
+    /// A coordination of composed determiners meeting the shared head `cat_n(C, num)` (decision 14):
+    /// `T := C`, as the dependent determiner instantiates it, the head's own restrictor conjoined.
+    DetModApply,
 }
 
 /// An Eisner normal-form provenance guard on the left operand (D63 §8.2 item 4).
@@ -220,6 +247,10 @@ enum ProvGuard {
     /// this one bars a lifted post-nominal modifier from *composing* because application is. Both
     /// routes reach the same `cat_pp` over the same span with the same sem.
     LeftNotObliqueParticipial,
+    /// The left operand — a composed determiner's application to its head — is not itself a
+    /// composition output ([`Combinator::DetComposed`]) but a coordination of them (D95 slice 7d):
+    /// applied alone it re-derives the determiner over the refined noun.
+    LeftNotDetComposed,
 }
 
 impl ProvGuard {
@@ -235,6 +266,7 @@ impl ProvGuard {
             ProvGuard::LeftNotModal => left_prov != Combinator::Modal,
             ProvGuard::RightNotKindRaised => right_prov != Combinator::KindRaised,
             ProvGuard::LeftNotObliqueParticipial => left_prov != Combinator::ObliqueParticipial,
+            ProvGuard::LeftNotDetComposed => left_prov != Combinator::DetComposed,
         }
     }
 }
@@ -400,6 +432,79 @@ impl CombKind {
                     backward: true,
                 })
             }
+            CombKind::DetModify => {
+                let (stack, num, body) = match (
+                    is_ctor(&left.cat, "cat_det_premod"),
+                    is_ctor(&left.cat, "cat_detmod"),
+                ) {
+                    (Some([num, body]), _) => (false, num, body),
+                    (_, Some([num, body])) if left.prov == Combinator::DetComposed => {
+                        (true, num, body)
+                    }
+                    _ => return None,
+                };
+                let Exp::Lam(Patt::Var(tvar), inner) = body else {
+                    return None;
+                };
+                let Exp::InductiveCtor(decl, _, _) = &left.cat else {
+                    return None;
+                };
+                // The modifier is whatever a refine rule takes as a head's left modifier; the head
+                // stands for the determiner's type variable until the coordination meets its noun.
+                let head = Exp::InductiveCtor(
+                    decl.clone(),
+                    "cat_n".into(),
+                    vec![Exp::Var(DETMOD_HEAD.into()), num.clone()],
+                );
+                let head_payload = CategoryPayload {
+                    cat: head.clone(),
+                    prov: Combinator::Other,
+                    cost: Cost::ZERO,
+                };
+                let Some(SemRecipe::Rule { builder, binds }) =
+                    combine_nominal_mod(right, &head_payload)
+                else {
+                    return None;
+                };
+                let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+                Some(SemRecipe::DetModify {
+                    cat: Exp::InductiveCtor(
+                        decl.clone(),
+                        "cat_detmod".into(),
+                        vec![num.clone(), body.clone()],
+                    ),
+                    builder,
+                    binds,
+                    head,
+                    stack,
+                    scoped: crate::nbe::check::exp_mentions_var(inner, tvar),
+                    and,
+                })
+            }
+            CombKind::DetModApply => {
+                let [det_num, Exp::Lam(Patt::Var(tvar), body)] = is_ctor(&left.cat, "cat_detmod")?
+                else {
+                    return None;
+                };
+                let [t, noun_num] = is_ctor(&right.cat, "cat_n")? else {
+                    return None;
+                };
+                if !feat_meets(det_num, noun_num) {
+                    return None;
+                }
+                let class = match t {
+                    Exp::Sig(_, base, _) => (**base).clone(),
+                    other => other.clone(),
+                };
+                let mut subst = CatSubst::new();
+                subst.insert(tvar.clone(), class);
+                let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+                Some(SemRecipe::DetModApply {
+                    cat: subst_cat(body, &subst),
+                    head: t.clone(),
+                    and,
+                })
+            }
             CombKind::UnitConstrain => {
                 let Exp::InductiveCtor(decl, name, args) = &right.cat else {
                     return None;
@@ -520,6 +625,16 @@ fn comb_rules() -> &'static [CombRule] {
                 name: "dependent_determiner",
                 kind: CombKind::DepApply,
                 prov_guards: &[],
+            },
+            CombRule {
+                name: "determiner_modifier",
+                kind: CombKind::DetModify,
+                prov_guards: &[],
+            },
+            CombRule {
+                name: "determiner_modifier_head",
+                kind: CombKind::DetModApply,
+                prov_guards: &[ProvGuard::LeftNotDetComposed],
             },
             CombRule {
                 name: "unit_application",
@@ -691,6 +806,77 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
                     )),
                 )),
             );
+            Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
+        }
+        SemRecipe::DetModify {
+            cat,
+            builder,
+            binds,
+            head,
+            stack,
+            scoped,
+            and,
+        } => {
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let lam = |x: &str, b: Exp| Exp::Lam(Patt::Var(x.into()), Box::new(b));
+            let var = |x: &str| Exp::Var(x.into());
+            // The modifier's restrictor, `λx. R`, off the refined head `Σx:H. R` its rule builds.
+            let refined = builder(&binds, right, &Item::new(head, var(DETMOD_HEAD)), layer);
+            let restrictor = match refined.sem() {
+                Exp::Sig(Patt::Var(x), _, r) => lam(x, (**r).clone()),
+                other => unreachable!("a refine rule built a non-Σ head: {other:?}"),
+            };
+            let (t, k, r, v, z, y) = ("__dm_T", "__dm_k", "__dm_R", "__dm_v", "__dm_z", "__dm_y");
+            let sem = if stack {
+                // `λT.λk. L T (λR. k (λy. And(r y, R y)))`: the nearer modifier conjoins first, as
+                // `refine_conjoin` orders a head's restrictors.
+                let joined = lam(
+                    y,
+                    Exp::const_applied(
+                        and,
+                        Vec::new(),
+                        vec![app(restrictor, var(y)), app(var(r), var(y))],
+                    ),
+                );
+                let builder_arg = lam(r, app(var(k), joined));
+                lam(t, lam(k, app(app(left.sem().clone(), var(t)), builder_arg)))
+            } else {
+                let refined_ty = app(var(k), restrictor);
+                let det = app(left.sem().clone(), refined_ty);
+                let body = if scoped {
+                    // `λv. D (k r) (λz. v (Fst z))` — the scope takes the refined type's members.
+                    lam(v, app(det, lam(z, app(var(v), Exp::Fst(Box::new(var(z)))))))
+                } else {
+                    det
+                };
+                lam(t, lam(k, body))
+            };
+            Item::from_parts(cat, sem, Combinator::DetComposed, Cost::ZERO)
+        }
+        SemRecipe::DetModApply { cat, head, and } => {
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let r = "__dm_R";
+            // `k`: a restrictor ↦ the head's type refined by it, the head's own restrictor first.
+            let (class, k) = match head {
+                Exp::Sig(Patt::Var(x), base, p) => {
+                    let body = Exp::const_applied(
+                        and,
+                        Vec::new(),
+                        vec![(*p).clone(), app(Exp::Var(r.into()), Exp::Var(x.clone()))],
+                    );
+                    let sigma = Exp::Sig(Patt::Var(x), base.clone(), Box::new(body));
+                    (*base, Exp::Lam(Patt::Var(r.into()), Box::new(sigma)))
+                }
+                c => {
+                    let sigma = Exp::Sig(
+                        Patt::Var(COMPOUND_X.into()),
+                        Box::new(c.clone()),
+                        Box::new(app(Exp::Var(r.into()), Exp::Var(COMPOUND_X.into()))),
+                    );
+                    (c, Exp::Lam(Patt::Var(r.into()), Box::new(sigma)))
+                }
+            };
+            let sem = app(app(left.sem().clone(), class), k);
             Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
         }
         SemRecipe::Apply { cat, order } => {
@@ -1106,6 +1292,73 @@ pub(crate) fn mod_lifts(it: &Item) -> Vec<Item> {
         )];
     }
     Vec::new()
+}
+
+/// The **determiner lift** (D95 slice 7d, decisions 14 and 15): a determiner as it meets a noun
+/// modifier whose head comes later, `cat_det_premod(n, λT. X)`, which only the `determiner_modifier`
+/// combinator consumes. Its own category stays for the dependent determiner: a determiner and a noun
+/// combine one way, and `five MSS` is both the count of MSS things and the start of `five MSS and
+/// five MSI cell lines`. Two sources:
+/// - a quantifier determiner ([`is_quantifier_det`]), with its sem;
+/// - a partitive over a raised noun phrase, `X / (S/(S\NP))` (`15% of`, `none of`), with the bare
+///   plural's kind in that position: `λT. f (λV. V(kind_of(T)))`, so `15% of colon, 22% of gastric
+///   … cancers` composes as the determiners do.
+///
+/// Fires at leaf seeding (`seed.rs`) and on composed cells (the `DetPremod` unary shift).
+///
+/// [`is_quantifier_det`]: super::super::category::is_quantifier_det
+pub(crate) fn det_premod_lifts(it: &Item) -> Vec<Item> {
+    let cat = it.cat();
+    let Exp::InductiveCtor(decl, _, _) = cat else {
+        return Vec::new();
+    };
+    let lifted = |args: Vec<Exp>, sem: Exp| {
+        vec![Item::from_parts(
+            Exp::InductiveCtor(decl.clone(), "cat_det_premod".into(), args),
+            sem,
+            Combinator::Other,
+            it.cost(),
+        )]
+    };
+    if super::super::category::is_quantifier_det(cat) {
+        let Some([num, body]) = is_ctor(cat, "cat_forall") else {
+            return Vec::new();
+        };
+        return lifted(vec![num.clone(), body.clone()], it.sem().clone());
+    }
+    // A partitive: its argument is a raised subject noun phrase, `S/(S\NP)`.
+    let Some((_, result, arg)) = slash_parts(cat, "fwd") else {
+        return Vec::new();
+    };
+    let Some((_, s, vp)) = slash_parts(arg, "fwd") else {
+        return Vec::new();
+    };
+    let np_num = slash_parts(vp, "bwd").and_then(|(_, s2, np)| {
+        is_ctor(s2, "cat_s")?;
+        match is_ctor(np, "cat_np")? {
+            [_, num] => Some(num.clone()),
+            _ => None,
+        }
+    });
+    let (true, Some(num)) = (is_ctor(s, "cat_s").is_some(), np_num) else {
+        return Vec::new();
+    };
+    let (t, v) = ("__dm_T", "__dm_V");
+    let raised_kind = Exp::Lam(
+        Patt::Var(v.into()),
+        Box::new(Exp::App(
+            Box::new(Exp::Var(v.into())),
+            Box::new(super::super::category::kind_of(Exp::Var(t.into()))),
+        )),
+    );
+    let sem = Exp::Lam(
+        Patt::Var(t.into()),
+        Box::new(Exp::App(Box::new(it.sem().clone()), Box::new(raised_kind))),
+    );
+    lifted(
+        vec![num, Exp::Lam(Patt::Var(t.into()), Box::new(result.clone()))],
+        sem,
+    )
 }
 
 /// Pre-nominal attributive PAST PARTICIPLE lift — SEPARATE from [`mod_lifts`] so seeding can GATE it.
@@ -1772,6 +2025,10 @@ pub fn apply_core(
 
 /// The bound variable of every 6-mod Σ-refinement (D63 §8.13).
 pub(crate) const COMPOUND_X: &str = "__cmp_x";
+
+/// The head a composed determiner's modifier refines while the head noun is still to come (D95 slice
+/// 7d, decision 14): the variable the determiner's type is abstracted over.
+const DETMOD_HEAD: &str = "__dm_H";
 
 /// Apply an opaque binary modifier axiom `R` to `(Var(arg0), arg1)` — the restrictor of a
 /// 6-mod Σ. `R(x, m)` where the bound `x` (`arg0`) ranges over the head noun's concrete

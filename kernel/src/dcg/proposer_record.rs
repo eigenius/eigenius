@@ -290,6 +290,7 @@ mod tests {
             var: "$demref$0_0".to_string(),
             ty: Exp::EigonClass(Iri::parse("urn:eigenius:lexicon:CellLine").unwrap()),
             kind: HoleKind::EntityRef,
+            count: None,
         }
     }
 

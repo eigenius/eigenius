@@ -471,6 +471,8 @@ mod tests {
             // `anaphor_of` is the POLYMORPHIC restrictor-typed sibling — d64-demonstratives-as-holes.md)
             "urn:eigenius:lexicon:anaphor",
             "urn:eigenius:lexicon:anaphor_of",
+            // D95 slice 7d — a demonstrative before a numeral (`these two genetic events`).
+            "urn:eigenius:lexicon:anaphor_of_count",
             "urn:eigenius:lexicon:speaker",
             "urn:eigenius:lexicon:poss_of",
             // D93 — reduced by the kernel, not opaque; see `nbe/unit_ext.rs`.

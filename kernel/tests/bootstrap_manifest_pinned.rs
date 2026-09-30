@@ -36,7 +36,9 @@
 //! bound markers `less than` … `roughly`; then the symbols `<` … `≈` and `=`, and the postfix `or more`
 //! … `or lower`), and for slice 7 on `lexicon` (`cat_num`), `ontology` (`has_count`) and
 //! `closed-class` (counting cardinals, word numerals as numbers, the count bounds), then for 7c on
-//! `ontology` (`has_proportion`) and `closed-class` (`half`, the partitives). Slices 6–8 each
+//! `ontology` (`has_proportion`) and `closed-class` (`half`, the partitives), and for 7d on `lexicon`
+//! (`cat_det_premod`, `cat_detmod`), `ontology` (`the_count`) and `closed-class` (the number words'
+//! entries removed; `the`, `these`, `those` before a numeral; `anaphor_of_count`). Slices 6–8 each
 //! move these layers and pay ONE reseed together, after slice 8
 //! (`docs/design/d95-implementation-plan.md`, slice 6).
 //!
@@ -216,9 +218,9 @@ notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
-lexicon:5d3ea087af9c7fbccbd34584dcfe1266bedc584f383f36e358a03cb2e684811c
-ontology:1db3fad112cec89ecaf6facbd7a2ffff37bdcdd34e6b6175c403dcb92c732af9
-closed-class:9aa540399d034afd35935ce8ca0fd0cf47bd19b78e47173e9f2d2f923c7c6b1c
+lexicon:5847d26fd34e8ed5cd62fb6446db10e74d517da2e57a0efdd175f8a1cbe969fb
+ontology:27c32170ac03a359cc3c6a73a58ce9f9102e830e23a1af84ca5b07660821dc67
+closed-class:34e058b1ee460d37896721dba59636dec5fbc221b2bf8c1349a718c959cb1a65
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 

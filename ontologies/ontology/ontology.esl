@@ -52,6 +52,9 @@ axiom ontology:kind_of : Set -> lexicon:Entity
 // over-generation). Opaque like `kind_of`: the grammar guarantees the typed tree; the
 // uniqueness presupposition + referent resolution are grounding-supplied (D62).
 axiom ontology:the : forall (A : Set) => A
+// the_count(A, q) — `the(A)` with the number of its members stated (D95 slice 7d, decision 13):
+// "the four other RecQ DNA helicases" → the_count(A, 4). Opaque like `the`.
+axiom ontology:the_count : forall (A : Set) => units:Quantity(u"1") -> A
 
 // ── Nominal-modification relations (D63 §8.13 Slice 6-mod) ────────────
 // OPAQUE modifier relations the compound-noun and PP-adjunct rules produce. The

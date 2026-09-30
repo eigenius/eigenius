@@ -961,7 +961,9 @@ deferred on zero corpus attestations.
 
 *Revised 2026-09-29:* ranges, bounds, `every N unit`, counts and ratios are in, as slices 6–9 of the
 implementation plan, because the paper attests them. Ranges need no interval type ("Ranges need no
-new semantics"). Statistic routing and the tolerance construction stay out.
+new semantics"). Statistic routing and the tolerance construction stay out. So are number words
+(`Nine days`), a determiner before a numeral (`the four other RecQ DNA helicases`) and counted
+conjuncts sharing a head (`five MSS and five MSI cell lines`), slice 7d.
 
 An earlier draft also placed "any change to the composition rules" out of scope, on the grounds that
 D93 showed them unaffected. That is false and the reason is recorded above: `cat_pp_arg`, `cat_pp`

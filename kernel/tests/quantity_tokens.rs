@@ -294,6 +294,77 @@ fn a_range_is_one_token() {
     }
 }
 
+/// Slice 7d, decisions 11 and 12: a number word is a numeral, in any case, so a unit after it makes a
+/// quantity (`Nine days` is 777600 s); a numeral joined by a hyphen to a unit name is a quantity too.
+/// A hyphen before a unit SYMBOL names a compound, and a unit that does not end the token (`8-week-old`)
+/// is not read.
+#[test]
+fn a_number_word_is_a_numeral() {
+    for (text, surface, stated, value) in [
+        (
+            "Nine days after doxycycline treatment",
+            "Nine days",
+            "d",
+            q(777_600, 1),
+        ),
+        (
+            "recovered by three weeks",
+            "three weeks",
+            "wk",
+            q(1_814_400, 1),
+        ),
+        (
+            "Seven days post-transduction",
+            "Seven days",
+            "d",
+            q(604_800, 1),
+        ),
+        (
+            "with an eight-day viability assay",
+            "eight-day",
+            "d",
+            q(691_200, 1),
+        ),
+        ("with an 8-day viability assay", "8-day", "d", q(691_200, 1)),
+        (
+            "in a seven-day viability assay",
+            "seven-day",
+            "d",
+            q(604_800, 1),
+        ),
+        ("a 10-minute incubation", "10-minute", "min", q(600, 1)),
+    ] {
+        assert_eq!(
+            the_quantity(text),
+            (surface.to_string(), one(stated, value, "s")),
+            "{text:?}"
+        );
+    }
+    for (text, value) in [("three sgRNAs", 3), ("One gene", 1), ("TEN cells", 10)] {
+        let tokens = tokenize(text, units());
+        assert_eq!(
+            tokens[0].kind(),
+            &TokenKind::Numeral(q(value, 1)),
+            "{text:?}: {tokens:?}"
+        );
+    }
+    for text in [
+        "8-week-old mice",
+        "treated with 5-mC",
+        "treated with 3-MA",
+        "treated with 6-TG",
+        "a 2-h incubation",
+        "one-sided test",
+        "someone",
+    ] {
+        assert!(
+            read(text).iter().all(|(_, r)| r.is_empty()),
+            "{text:?}: {:?}",
+            read(text)
+        );
+    }
+}
+
 /// Decision 4, deferred to D96: in plain text an unbracketed figure panel reads as a quantity.
 #[test]
 fn an_unbracketed_figure_panel_reads_as_a_quantity() {

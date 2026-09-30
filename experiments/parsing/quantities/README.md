@@ -23,11 +23,15 @@ cargo test -p eigenius-kernel --test quantity_corpus
 - a covered row parses, and every reading contains its relations and renders its values;
 - a gap row still does not parse. When one does, its construction has arrived: update the row.
 
-As committed: 30 covered rows, all passing. The two `g` rows have two readings each, gram and
-standard gravity (D93). Slices 6 and 7 (D95 implementation plan) added eight, each from a sentence of
-the paper: a range (`4–12% gels`, `80–90% confluence`), an approximation (`approximately 100 mm³`), a
-bound symbol (`>90%`), counts — a plain one (`three sgRNAs`), a bounded one (`more than one MMR
-gene`) and a count range (`4–7 foci`) — and a proportion (`Half of the cell pellet`). The 6 gap rows:
+As committed: 35 covered rows, all passing. The two `g` rows have two readings each, gram and
+standard gravity (D93). Slices 6 and 7 (D95 implementation plan) added thirteen, each from a sentence
+of the paper: a range (`4–12% gels`, `80–90% confluence`), an approximation (`approximately 100 mm³`),
+a bound symbol (`>90%`), counts — a plain one (`three sgRNAs`), a bounded one (`more than one MMR
+gene`) and a count range (`4–7 foci`) — a proportion (`Half of the cell pellet`), a number word with
+its unit (`after seven days`), a hyphenated one before a noun (`an eight-day viability assay`), a
+determiner before a numeral (`None of the four other RecQ helicases`), and counted conjuncts and
+proportions sharing a head (`five MSS and five MSI cell lines`; `15% of colon, 22% of gastric, 20–30%
+of endometrial and 12% of ovarian cancers`, one reading). The 6 gap rows:
 
 | Gap | Owner |
 |---|---|

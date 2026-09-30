@@ -399,6 +399,17 @@ data lexicon:Cat : Type 1 {
     // the consumed item — `u := U` from its `cat_mp(U, r)` — and its sem is applied to the unit, since
     // the unit appears in the denotation: ⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧.
     cat_unit_forall : (core:unit -> lexicon:Cat) -> lexicon:Cat,
+    // Num·∀T:Set. R[T] as it meets a noun modifier whose head comes later (D95 slice 7d, decision
+    // 14): a quantifier determiner or a partitive (`15% of`), lifted; the `determiner_modifier`
+    // combinator is its one consumer. It has no denotation, so it neither coordinates nor closes.
+    cat_det_premod : lexicon:Num -> (Set -> lexicon:Cat) -> lexicon:Cat,
+    // Num·∀T:Set. R[T] awaiting its head, with noun modifiers composed in (D95 slice 7d, decision
+    // 14): `five MSS` in `five MSS and five MSI cell lines`. Built by the `determiner_modifier`
+    // combinator from a lifted determiner and the modifiers after it, never lexical;
+    // coordinates as a determiner does, and applies to the shared head as a coordination.
+    // ⟦cat_detmod(n, λT. R)⟧ = ΠT:Set. ((T → Prop) → Set) → ⟦R⟧: the second argument builds the
+    // head's type from the modifiers' restrictor, conjoining the head's own.
+    cat_detmod : lexicon:Num -> (Set -> lexicon:Cat) -> lexicon:Cat,
 }
 
 // ── The lexical-entry record ──────────────────────────────────────────

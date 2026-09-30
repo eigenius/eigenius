@@ -121,8 +121,8 @@ and where each stands:
 - **Causal verbs**: `induce`, `promote`, `lead to`, `precipitate`.
 - **Quantities**: `96 hours after shWRN1 induction`, `8 days following sgRNA transduction` (D95). The
   hyphenated prenominal measure — `an 8-day viability assay`, `a 10-day competitive growth assay`,
-  `a 7-day viability assay` — is **not** read as one: a digit-initial hyphenated token is a word
-  (D95 decision 3, `5-fold`), so these are missing lexemes. No D95 slice covers it.
+  `a 7-day viability assay` — is read as one since D95 slice 7d (decision 12): a numeral joined by a
+  hyphen to a unit name is a quantity token. `5-fold` stays a word; `fold` is not a unit.
 - **Statistics** (`Q values = 4.8×10−24`, `P = 4.2×10−13`, `rho = −0.74`, `n = 37`) stay out of the
   claim and route to D52 records, per the style guide; the conclusions already carry them as
   `stats:` results.

@@ -195,8 +195,11 @@ equality: the kernel has `Id`, but the term encoder never produces it.
    - gate its pins in the parse-rate harness, which reads only
      `experiments/parsing/expected-readings.tsv` today;
    - re-run it with the reranker once step 2 is done.
-7. **D95 slices 6 and 7** (arguments and standards; degree semantics). Slice 7's degrees overlap
-   D98 slice 3 (`fully`, `partially`): design them together.
+7. **D95 slices 8 and 9**, then the reseed: slices 6 and 7 are built (bounds, ranges, counts,
+   proportions, number words, a determiner before a numeral, counted conjuncts sharing a head —
+   `docs/design/d95-implementation-plan.md`); slice 8 is the positions a measure phrase takes, slice
+   9 ratios. The first slices 6 and 7 (arguments and standards; degree semantics) were not built:
+   the paper attests neither.
 
 ## Known defects, found and not yet fixed
 
@@ -208,7 +211,7 @@ equality: the kernel has `Id`, but the term encoder never produces it.
 | WordNet has `incubate` as intransitive only; no verb `electroporate` | D97; quantity README | D97 |
 | The WordNet importer reads frame 13 (`----s on something`) as transitive | D97 | D97 slice 2 |
 | In a cap-only run, a lower-ranked right sense never enters if a wrong reading parses (the sense cap widens only on no parse): `increased` | claims README | the reranked run |
-| A hyphenated prenominal measure (`an 8-day viability assay`) is a missing lexeme | docs/06; claims README | not in any D95 slice |
+| ~~A hyphenated prenominal measure (`an 8-day viability assay`) is a missing lexeme~~ — fixed, D95 slice 7d decision 12 (`8-day`, `eight-day`) | docs/06; claims README | D95 slice 7d |
 | `all` has no collective reading; relative `where` and `whose`; `expose X as Y`; `greater colocalization … than` | claims README | grammar; the last one D97 decision 4 |
 | A governed preposition does not reach the meaning (`contributes to`) | D97 decision 6 | D97 |
 | `Project DRIVE` reads as `a project drive` where `Project Achilles` reads as a name | claims README | not assigned |

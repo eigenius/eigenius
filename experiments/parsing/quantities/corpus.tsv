@@ -41,3 +41,8 @@ Three sgRNAs were validated.	has_count	3 	results: we validated three sgRNAs tar
 The cells lost more than one MMR gene.	has_count	more than 1	figure legend: loss of more than one MMR gene
 The cells showed 4–7 foci.	has_count	from 4 to 7	figure: 4-7 foci
 Half of the cell pellet was saved.	has_proportion	1/2 of	methods: Half of the cell pellet was saved for immunoblot analysis
+The cells were harvested after seven days.	prep_after_value	604800 s	methods (manuscript): Seven days post-transduction, cells were harvested
+The cells were evaluated with an eight-day viability assay.	prep_with has_quantity	691200 s	results: with an eight-day viability assay (manuscript: an 8-day viability assay)
+None of the four other RecQ helicases were essential.	has_proportion the_count	0 of the 4	results: none of the four other RecQ DNA helicases were preferentially essential in MSI cell lines
+Knockout was evaluated in five MSS and five MSI cell lines.	prep_in has_count	5 	results: evaluated WRN knockout in five MSS and five MSI cell lines
+MSI occurs in 15% of colon, 22% of gastric, 20–30% of endometrial and 12% of ovarian cancers.	prep_in has_proportion	3/20 of;11/50 of;3/25 of	introduction (manuscript): predominantly 15% of colon, 22% of gastric, 20–30% of endometrial, and 12% of ovarian cancers

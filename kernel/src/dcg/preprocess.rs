@@ -35,10 +35,12 @@
 //!    `NonProse` token of its own, and a sign directly before a numeral joins it (`−1`).
 //! 5. **Commas.** Leading and trailing commas are dropped and a run collapses to one: a comma separates
 //!    content tokens, and a stray one would block a full-span parse.
-//! 6. **Kinds.** A numeral is [`TokenKind::Numeral`]. A token that starts with a digit and is not one
-//!    (`53BP1`, `5-fold`, `1a`) is a [`TokenKind::Word`], so a lexicon without it reports it missing
-//!    (D95, decision 3). A digit pair joined by an en-dash (`4–12`) and a token with no ASCII letter
-//!    are `NonProse`; step 9 makes the pair a range when a unit follows it.
+//! 6. **Kinds.** A numeral is [`TokenKind::Numeral`], in digits or as one of the number words `one`
+//!    … `ten`, in any case (D95 slice 7d, decision 11): `Nine days` is a quantity, and `three sgRNAs`
+//!    counts as `3 sgRNAs` does. A token that starts with a digit and is not one (`53BP1`, `5-fold`,
+//!    `1a`) is a [`TokenKind::Word`], so a lexicon without it reports it missing (D95, decision 3). A
+//!    digit pair joined by an en-dash (`4–12`) and a token with no ASCII letter are `NonProse`; step 9
+//!    makes the pair a range when a unit follows it.
 //! 7. **Scientific notation.** A mantissa, `×` or `x`, and a power of ten — `2 × 10⁻¹⁶`, `1.5 x 10³`,
 //!    `2.2× 10-16` — are one numeral, and so is a power of ten written with a superscript or a caret
 //!    (`10³`, `10^6`). After `×` the exponent may be written with a plain minus, as extracted text
@@ -47,7 +49,9 @@
 //!    unit attached to its digits, `931g` — are one [`TokenKind::Quantity`] token, carrying every
 //!    reading of the unit ([`super::quantity`]). The unit is read from the text, not the tokens, since
 //!    edge trimming has dropped the `°` and the `%`. The expression must end where a token ends:
-//!    `5′-UTR` is not five arcminutes and a suffix.
+//!    `5′-UTR` is not five arcminutes and a suffix. A numeral joined by a hyphen to a unit NAME — a
+//!    lowercase word of three letters or more that ends the token — is a quantity too: `8-day`,
+//!    `eight-day` (slice 7d, decision 12). A hyphen before a symbol is a compound's name (`5-mC`).
 //! 9. **Ranges.** A digit pair joined by an en-dash or a hyphen, with a unit or `%` after it — `2–3
 //!    days`, `80–90%`, `45-60%` — is one [`TokenKind::Range`] token, both endpoints read in that unit
 //!    (D95 implementation plan, slice 6, decision 8). An en-dash pair with no unit is a count range,
@@ -396,7 +400,8 @@ fn range_at(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, Quantit
 }
 
 /// The quantity a token starts, if a unit follows its numeral: a numeral token and the unit after
-/// it, or a word token whose leading digits carry the unit directly (`931g`, `5mg/kg`).
+/// it, a word token whose leading digits carry the unit directly (`931g`, `5mg/kg`), or a word token
+/// that joins a numeral to a unit name with a hyphen (`8-day`, `eight-day`).
 fn quantity_at(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, Quantity)> {
     match &t.kind {
         TokenKind::Numeral(value) => {
@@ -410,17 +415,36 @@ fn quantity_at(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, Quan
             ))
         }
         // The surface must be the text itself: a dropped gloss inside it would misplace the unit.
-        TokenKind::Word
-            if t.surface.starts_with(|c: char| c.is_ascii_digit())
-                && text.get(t.span()) == Some(t.surface.as_str()) =>
-        {
-            let digits = numeral_prefix(&t.surface);
-            let value = numeral_value(&t.surface[..digits])?;
-            let (end, readings) = units.read(text, t.span.start + digits, true, &value)?;
-            Some((end, Quantity { value, readings }))
+        TokenKind::Word if text.get(t.span()) == Some(t.surface.as_str()) => {
+            attached_quantity(text, t, units).or_else(|| hyphenated_quantity(text, t, units))
         }
         _ => None,
     }
+}
+
+/// A unit attached to a word token's leading digits: `931g`, `5mg/kg`.
+fn attached_quantity(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, Quantity)> {
+    if !t.surface.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    let digits = numeral_prefix(&t.surface);
+    let value = numeral_value(&t.surface[..digits])?;
+    let (end, readings) = units.read(text, t.span.start + digits, true, &value)?;
+    Some((end, Quantity { value, readings }))
+}
+
+/// A numeral joined by a hyphen to a unit name that ends the token: `8-day`, `eight-day`, the
+/// compound modifier before a noun (D95 slice 7d, decision 12). A name is a lowercase word of three
+/// letters or more; the SI writes a symbol without the hyphen, and a hyphen before letters that spell
+/// a symbol names a compound (`5-mC`, `3-MA`, `6-TG`).
+fn hyphenated_quantity(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, Quantity)> {
+    let (numeral, _) = t.surface.split_once('-')?;
+    let value = numeral_value(numeral).or_else(|| number_word(numeral))?;
+    let at = t.span.start + numeral.len() + 1;
+    let (end, readings) = units.read(text, at, true, &value)?;
+    let name = &text[at..end];
+    (end == t.span.end && name.len() >= 3 && name.bytes().all(|b| b.is_ascii_lowercase()))
+        .then_some((end, Quantity { value, readings }))
 }
 
 /// The byte length of the numeral that starts `s`: digits, grouped by commas in threes or not, and a
@@ -616,7 +640,7 @@ fn flush(text: &str, run: &mut Vec<&Lexeme>, tokens: &mut Vec<Token>) {
         tokens.push(symbol(text, l));
     }
     let surface = concat(&run[start..=last]);
-    let kind = match numeral_value(&surface) {
+    let kind = match numeral_value(&surface).or_else(|| number_word(&surface)) {
         Some(value) => TokenKind::Numeral(value),
         None if is_range(&surface) => TokenKind::NonProse,
         None if surface.starts_with(|c: char| c.is_ascii_digit()) => TokenKind::Word,
@@ -632,6 +656,19 @@ fn flush(text: &str, run: &mut Vec<&Lexeme>, tokens: &mut Vec<Token>) {
         tokens.push(symbol(text, l));
     }
     run.clear();
+}
+
+/// The number words (decision 6): the closed class's cardinals before D95 slice 7d, whose entries
+/// they replace. Larger numbers are written in digits.
+const NUMBER_WORDS: [&str; 10] = [
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+];
+
+/// The value of a number word, in any case: `Nine` is 9.
+fn number_word(s: &str) -> Option<Rational> {
+    let lower = s.to_ascii_lowercase();
+    let n = NUMBER_WORDS.iter().position(|w| *w == lower)? + 1;
+    Rational::from_integer(num_bigint::BigInt::from(n)).ok()
 }
 
 /// The value of a numeral: an optional sign (`-`, `−`), digits — plain, or grouped by commas in

@@ -514,6 +514,15 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
             }
             ("kind_of", 1) => return verbalize(args[0], vb),
             ("the", 1) => return format!("the {}", bare_np(args[0], vb)),
+            // `the_count(A, q)` (D95 slice 7d): the definite with its count, `the 4 Helicase`.
+            ("the_count", 2) => {
+                let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
+                return format!(
+                    "the {} {}",
+                    quantity_text(args[1], &unit),
+                    bare_np(args[0], vb)
+                );
+            }
             // Referential predication (D63 Defect 3): `the(subject-class, restrictor, x)` = "x is the
             // {subject-class} that is {restrictor}" — the copula's referential distribution over a
             // coordinated predicate nominal ("These groups are MSI lines, microsatellite-stable lines

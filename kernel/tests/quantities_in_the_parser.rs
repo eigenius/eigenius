@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! D95 slices 4 to 7 — measure phrases in the grammar, their consumers, bounds and ranges on them,
-//! and counts. The categories
+//! counts, proportions, and a determiner's numeral and modifiers before a shared head. The categories
 //! (`cat_mp`, `cat_unit_forall`, `lexicon:Reading`), the `Difference` type, the unit-polymorphic
 //! application, the seeding and the prepositions over a measured value (`closed-class.esl`) are in
 //! the bootstrap chain; the fixture adds the content words around them, and a verb that takes only a
@@ -21,6 +21,7 @@
 
 use std::sync::Arc;
 
+use eigenius_kernel::dcg::verbalize::{unit_sense_names, verbalize, Vb};
 use eigenius_kernel::dcg::{
     apply, entry_to_item, is_ctor, pretty_term, Identity, Item, Parser, RightContext,
 };
@@ -116,6 +117,40 @@ resource lexicon:cell_n : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:Cell;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "cell";
+}
+// Slice 7d: counted conjuncts sharing a head (`five MSS and five MSI cell lines`) — two adjective
+// modifiers, a noun modifier (a kind compound's left noun) and a plural head.
+class lexicon:CellLine : lexicon:Entity { }
+resource lexicon:cell_lines_n : lexicon:LexicalEntry {
+    lexicon:form     = "cell lines";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:pl) );
+    lexicon:sem      = lexicon:CellLine;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "cell lines";
+}
+axiom lexicon:msi_adj : lexicon:Entity -> Prop
+resource lexicon:msi_a : lexicon:LexicalEntry {
+    lexicon:form     = "MSI";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:msi_adj;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "msi";
+}
+axiom lexicon:mss_adj : lexicon:Entity -> Prop
+resource lexicon:mss_a : lexicon:LexicalEntry {
+    lexicon:form     = "MSS";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:mss_adj;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "mss";
+}
+class lexicon:Colon : lexicon:Entity { }
+resource lexicon:colon_n : lexicon:LexicalEntry {
+    lexicon:form     = "colon";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Colon, lexicon:sg) );
+    lexicon:sem      = lexicon:Colon;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "colon";
 }
 class lexicon:Temperature : lexicon:Entity { }
 resource lexicon:temperature_n : lexicon:LexicalEntry {
@@ -330,6 +365,13 @@ fn packed_equals_unpacked_on_quantities() {
         "more than half of the cells incubated",
         "15% of cells incubated",
         "HeLa incubated in more than half of the cells",
+        "HeLa incubated for nine days",
+        "HeLa received an eight-day dose",
+        "the two cells incubated",
+        "five MSS and five MSI cell lines incubated",
+        "HeLa received five MSS MSI and five MSI cell lines",
+        "five MSS and five MSI cell lines of HeLa incubated",
+        "15% of MSS, 22% of MSI and 30% of colon cells incubated",
     ] {
         assert_eq!(readings(&packed, text), readings(&unpacked, text), "{text}");
     }
@@ -1124,4 +1166,171 @@ fn a_proportion_of_a_group() {
             ),
         }
     }
+}
+
+/// Slice 7d, decisions 11 and 12: a number word is a numeral — its unit makes a quantity, and it
+/// counts as a digit does — and a numeral joined by a hyphen to a unit name is a prenominal quantity.
+/// A hyphen before a unit symbol is not read.
+#[test]
+fn a_number_word_is_a_numeral() {
+    let parser = Parser::build(layer());
+    for (text, relation, value) in [
+        (
+            "HeLa incubated for nine days",
+            "prep_for_value",
+            "numer: 777600, denom: 1",
+        ),
+        ("Nine cells incubated", "has_count", "numer: 9, denom: 1"),
+        (
+            "HeLa received an eight-day dose",
+            "has_quantity",
+            "numer: 691200, denom: 1",
+        ),
+        (
+            "HeLa received a 8-day dose",
+            "has_quantity",
+            "numer: 691200, denom: 1",
+        ),
+    ] {
+        let r = readings(&parser, text);
+        assert_eq!(r.len(), 1, "{text}: {r:#?}");
+        assert!(
+            r[0].contains(&format!("ontology:{relation}\"")) && r[0].contains(value),
+            "{text}: {r:#?}"
+        );
+    }
+    assert!(readings(&parser, "HeLa received a 2-h dose").is_empty());
+}
+
+/// Slice 7d, decision 13: `the`, `these` and `those` take a numeral. The definite is
+/// `the_count(A, q)`; a demonstrative's referent is a hole carrying the count, so the reading is open.
+#[test]
+fn a_determiner_takes_a_numeral() {
+    let parser = Parser::build(layer());
+    for (text, count) in [
+        ("the two cells incubated", "numer: 2, denom: 1"),
+        ("HeLa received the 4 cells", "numer: 4, denom: 1"),
+        ("none of the two cells incubated", "numer: 2, denom: 1"),
+    ] {
+        let r = readings(&parser, text);
+        assert_eq!(r.len(), 1, "{text}: {r:#?}");
+        assert!(
+            r[0].contains("ontology:the_count\"")
+                && r[0].contains("lexicon:Cell")
+                && r[0].contains(count),
+            "{text}: {r:#?}"
+        );
+    }
+    assert!(readings(&parser, "the two cell incubated").is_empty());
+    let layer = layer();
+    let text = "none of the two cells incubated";
+    let names = unit_sense_names(text, &parser, &Identity, &layer);
+    let said = verbalize(
+        parser.parse(text, &Identity)[0].sem(),
+        &Vb::surface(&names, &layer),
+    );
+    assert!(said.starts_with("0 of the 2 Cell"), "{said}");
+    for text in ["these two cells incubated", "HeLa received those 2 cells"] {
+        let (closed, open) = parser.parse_open(text, &Identity);
+        assert!(
+            closed.is_empty(),
+            "{text}: {} closed readings",
+            closed.len()
+        );
+        assert_eq!(open.len(), 1, "{text}");
+        assert_eq!(open[0].holes.len(), 1, "{text}");
+        let hole = &open[0].holes[0];
+        assert!(pretty_term(&hole.ty).contains("Cell"), "{text}");
+        assert!(
+            format!("{:?}", hole.count).contains("numer: 2, denom: 1"),
+            "{text}: {:?}",
+            hole.count
+        );
+        assert!(open[0].skeleton().contains("×2"), "{}", open[0].skeleton());
+    }
+}
+
+/// Slice 7d, decisions 14 and 15: counted conjuncts share their head noun. A determiner composes with
+/// the modifiers after it, the compositions coordinate, and the coordination applies to the head —
+/// one reading, each count over the head refined by its own modifiers: adjectives, a noun (a kind
+/// compound's), stacked modifiers, a head refined itself, a comma list, bounded counts, the definite,
+/// and a partitive over the bare plural.
+#[test]
+fn counted_conjuncts_share_their_head() {
+    let parser = Parser::build(layer());
+    for (text, conjuncts) in [
+        (
+            "five MSS and five MSI cell lines incubated",
+            vec!["ΣG#0:CellLine. mss_adj(G#0)", "ΣG#0:CellLine. msi_adj(G#0)"],
+        ),
+        (
+            "HeLa received 6 MSI and 5 MSS cell lines",
+            vec!["ΣG#0:CellLine. msi_adj(G#0)", "ΣG#0:CellLine. mss_adj(G#0)"],
+        ),
+        (
+            "HeLa received five colon and five MSI cells",
+            vec![
+                "ΣG#0:Cell. compound_kind(G#0, Colon)",
+                "ΣG#0:Cell. msi_adj(G#0)",
+            ],
+        ),
+        (
+            "HeLa received five MSS MSI and five MSI cell lines",
+            vec![
+                "ΣG#0:CellLine. And(msi_adj(G#0), mss_adj(G#0))",
+                "ΣG#0:CellLine. msi_adj(G#0)",
+            ],
+        ),
+        (
+            "five MSS and five MSI cell lines of HeLa incubated",
+            vec![
+                "ΣG#0:CellLine. And(prep_of(G#0, hela), mss_adj(G#0))",
+                "ΣG#0:CellLine. And(prep_of(G#0, hela), msi_adj(G#0))",
+            ],
+        ),
+        (
+            "five MSS, five MSI and two colon cell lines incubated",
+            vec![
+                "ΣG#0:CellLine. mss_adj(G#0)",
+                "ΣG#0:CellLine. msi_adj(G#0)",
+                "ΣG#0:CellLine. compound_kind(G#0, Colon)",
+            ],
+        ),
+        (
+            "HeLa received at least five MSS and at least five MSI cell lines",
+            vec!["ΣG#2:CellLine. mss_adj(G#2)", "ΣG#2:CellLine. msi_adj(G#2)"],
+        ),
+        (
+            "the two MSS and the two MSI cell lines incubated",
+            vec![
+                "the_count(ΣG#0:CellLine. mss_adj(G#0)",
+                "the_count(ΣG#0:CellLine. msi_adj(G#0)",
+            ],
+        ),
+        (
+            "15% of MSS, 22% of MSI and 30% of colon cells incubated",
+            vec![
+                "kind_of(ΣG#0:Cell. mss_adj(G#0))",
+                "kind_of(ΣG#0:Cell. msi_adj(G#0))",
+                "kind_of(ΣG#0:Cell. compound_kind(G#0, Colon))",
+            ],
+        ),
+        (
+            "HeLa incubated in 15% of MSS and 22% of MSI cells",
+            vec![
+                "kind_of(ΣG#0:Cell. mss_adj(G#0))",
+                "kind_of(ΣG#0:Cell. msi_adj(G#0))",
+            ],
+        ),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let pretty = pretty_term(parsed[0].sem());
+        assert!(pretty.starts_with("And("), "{text}: {pretty}");
+        for c in conjuncts {
+            assert!(pretty.contains(c), "{text}: no `{c}` in {pretty}");
+        }
+    }
+    // A single composed determiner does not apply to a head: `five MSS cell lines` reads once.
+    assert_eq!(readings(&parser, "five MSS cell lines incubated").len(), 1);
 }

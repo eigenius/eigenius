@@ -486,3 +486,142 @@ resource corpus:saved_v : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:save.v.90000034";
 }
+
+// Slice 7d rows: a number word with a unit, a determiner before a numeral, counted conjuncts sharing
+// a head, and proportions sharing one. MSI and MSS are nouns, as the UMLS concepts are.
+axiom corpus:v90000035_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:evaluated_v : lexicon:LexicalEntry {
+    lexicon:form     = "evaluated";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000035_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:evaluate.v.90000035";
+}
+axiom corpus:v90000036_i : lexicon:Entity -> Prop
+resource corpus:occurs_v : lexicon:LexicalEntry {
+    lexicon:form     = "occurs";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000036_i;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:occur.v.90000036";
+}
+class corpus:Viability : lexicon:Entity { }
+resource corpus:viability_n : lexicon:LexicalEntry {
+    lexicon:form     = "viability";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Viability, lexicon:mass) );
+    lexicon:sem      = corpus:Viability;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "viability";
+}
+class corpus:Assay : lexicon:Entity { }
+resource corpus:assay_n : lexicon:LexicalEntry {
+    lexicon:form     = "assay";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Assay, lexicon:sg) );
+    lexicon:sem      = corpus:Assay;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "assay";
+}
+class corpus:Knockout : lexicon:Entity { }
+resource corpus:knockout_n : lexicon:LexicalEntry {
+    lexicon:form     = "knockout";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Knockout, lexicon:mass) );
+    lexicon:sem      = corpus:Knockout;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "knockout";
+}
+class corpus:Helicase : lexicon:Entity { }
+resource corpus:helicases_n : lexicon:LexicalEntry {
+    lexicon:form     = "helicases";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Helicase, lexicon:pl) );
+    lexicon:sem      = corpus:Helicase;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "helicases";
+}
+class corpus:RecQ : lexicon:Entity { }
+resource corpus:recq_n : lexicon:LexicalEntry {
+    lexicon:form     = "RecQ";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:RecQ, lexicon:mass) );
+    lexicon:sem      = corpus:RecQ;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "recq";
+}
+axiom corpus:a90000037 : lexicon:Entity -> Prop
+resource corpus:other_a : lexicon:LexicalEntry {
+    lexicon:form     = "other";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:a90000037;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:other.a.90000037";
+}
+axiom corpus:a90000038 : lexicon:Entity -> Prop
+resource corpus:essential_a : lexicon:LexicalEntry {
+    lexicon:form     = "essential";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:a90000038;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:essential.a.90000038";
+}
+class corpus:MSI : lexicon:Entity { }
+resource corpus:msi_n : lexicon:LexicalEntry {
+    lexicon:form     = "MSI";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:MSI, lexicon:mass) );
+    lexicon:sem      = corpus:MSI;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "msi";
+}
+class corpus:MSS : lexicon:Entity { }
+resource corpus:mss_n : lexicon:LexicalEntry {
+    lexicon:form     = "MSS";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:MSS, lexicon:mass) );
+    lexicon:sem      = corpus:MSS;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "mss";
+}
+class corpus:CellLine : lexicon:Entity { }
+resource corpus:cell_lines_n : lexicon:LexicalEntry {
+    lexicon:form     = "cell lines";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:CellLine, lexicon:pl) );
+    lexicon:sem      = corpus:CellLine;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "cell lines";
+}
+class corpus:Colon : lexicon:Entity { }
+resource corpus:colon_n : lexicon:LexicalEntry {
+    lexicon:form     = "colon";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Colon, lexicon:sg) );
+    lexicon:sem      = corpus:Colon;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "colon";
+}
+axiom corpus:a90000039 : lexicon:Entity -> Prop
+resource corpus:gastric_a : lexicon:LexicalEntry {
+    lexicon:form     = "gastric";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:a90000039;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:gastric.a.90000039";
+}
+axiom corpus:a90000040 : lexicon:Entity -> Prop
+resource corpus:endometrial_a : lexicon:LexicalEntry {
+    lexicon:form     = "endometrial";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:a90000040;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:endometrial.a.90000040";
+}
+axiom corpus:a90000041 : lexicon:Entity -> Prop
+resource corpus:ovarian_a : lexicon:LexicalEntry {
+    lexicon:form     = "ovarian";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:a90000041;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:ovarian.a.90000041";
+}
+class corpus:Cancer : lexicon:Entity { }
+resource corpus:cancers_n : lexicon:LexicalEntry {
+    lexicon:form     = "cancers";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Cancer, lexicon:pl) );
+    lexicon:sem      = corpus:Cancer;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "cancers";
+}

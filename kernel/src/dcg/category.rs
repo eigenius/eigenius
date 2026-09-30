@@ -22,7 +22,7 @@ use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::eval::eval;
 use crate::nbe::readback::try_readback_val;
-use crate::nbe::term::{list_decl, Exp, Name};
+use crate::nbe::term::{list_decl, Exp, Name, Patt};
 use crate::ontology::iri::Iri;
 
 /// A category type-variable binding: schematic `Exp::Var` name → concrete type.
@@ -162,6 +162,23 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
                 Box::new(denote_cat(r)?),
             ))
         }
+        // ⟦cat_detmod(n, λT. R)⟧ = ΠT:Set. ((T → Prop) → Set) → ⟦R⟧ (D95 slice 7d, decision 14): a
+        // determiner with noun modifiers composed in, awaiting its head. Applying it passes the
+        // head's class `T` and a builder from a restrictor to the head's refined type.
+        ("cat_detmod", [_num, body]) => {
+            let Exp::Lam(patt @ Patt::Var(t), r) = body else {
+                return Err(format!(
+                    "denote_cat: cat_detmod body must be a λ (Set -> Cat), got {body:?}"
+                ));
+            };
+            let restrictor = Exp::Arrow(Box::new(Exp::Var(t.clone())), Box::new(Exp::sort(0)));
+            let builder = Exp::Arrow(Box::new(restrictor), Box::new(Exp::sort(1)));
+            Ok(Exp::Pi(
+                patt.clone(),
+                Box::new(Exp::sort(1)),
+                Box::new(Exp::Arrow(Box::new(builder), Box::new(denote_cat(r)?))),
+            ))
+        }
         // ⟦cat_fin_forall(λf. R)⟧ = ⟦R⟧ / ⟦cat_num_forall(λn. R)⟧ = ⟦R⟧ (D63 §8.10):
         // a FEATURE binder is denotation-TRANSPARENT — features are erased by `⟦·⟧`, so
         // the bound `f`/`n` is free in `R` but never reached (every feature position is
@@ -260,6 +277,29 @@ pub fn slash_parts<'a>(cat: &'a Exp, dir: &str) -> Option<(&'a Exp, &'a Exp, &'a
             None
         }
     }
+}
+
+/// Whether `cat` is a QUANTIFIER determiner, `cat_forall(n, λT. B)` with `B` the subject form
+/// `S/(S\NP_T)` or the object form `(S\NP)\((S\NP)/NP_T)` — the categories a cardinal repeats (D95
+/// slice 7d, decision 11) and a determiner composes with a modifier in (decision 14). `a`'s
+/// predicative form `S[pred]\NP` is not one.
+pub(crate) fn is_quantifier_det(cat: &Exp) -> bool {
+    let vp = |c: &Exp| {
+        slash_parts(c, "bwd").is_some_and(|(_, s, np)| {
+            is_ctor(s, "cat_s").is_some() && is_ctor(np, "cat_np").is_some()
+        })
+    };
+    let Some([_num, Exp::Lam(_, body)]) = is_ctor(cat, "cat_forall") else {
+        return false;
+    };
+    let subject = slash_parts(body, "fwd")
+        .is_some_and(|(_, s, arg)| is_ctor(s, "cat_s").is_some() && vp(arg));
+    let object = slash_parts(body, "bwd").is_some_and(|(_, res, arg)| {
+        vp(res)
+            && slash_parts(arg, "fwd")
+                .is_some_and(|(_, r, np)| vp(r) && is_ctor(np, "cat_np").is_some())
+    });
+    subject || object
 }
 
 /// Whether `cat` is a slash in either direction, as `(dir, mode, result, argument)`.
@@ -1017,7 +1057,7 @@ pub(super) fn cat_forall_body_head(cat: &Exp) -> Option<&'static str> {
 
 /// A `kind_of(A)` application — the class value `A` (a `Set`) realized as the `Entity` that is that
 /// kind (Chierchia's ∩; the axiom `ontology:kind_of : Set -> Entity`, D63 kind-predication reshape).
-pub(super) fn kind_of(a: Exp) -> Exp {
+pub(crate) fn kind_of(a: Exp) -> Exp {
     Exp::App(
         Box::new(Exp::EigonAxiom(
             Iri::parse("urn:eigenius:ontology:kind_of").expect("static kind_of IRI"),

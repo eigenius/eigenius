@@ -2874,6 +2874,87 @@ fn a_plural_reference_resolves_distributively_to_a_claim_set() {
     );
 }
 
+#[test]
+fn a_counted_demonstrative_resolves_only_to_a_set_of_its_size() {
+    // D95 slice 7d, decision 13: `these two cell lines` carries a referent hole counted 2. Two
+    // consecutively-landed claims form a set of two, which the hole accepts; `these three cell
+    // lines` vetoes that set, and every single antecedent, so it stays open (fail-closed).
+    use eigenius_kernel::dcg::{
+        DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection,
+    };
+    struct First;
+    impl ReadingRanker for First {
+        fn select(
+            &self,
+            _ctx: &DocumentContext,
+            c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            (!c.is_empty()).then(|| ReadingSelection {
+                chosen: 0,
+                rationale: "first (test)".to_string(),
+                runners_up: (1..c.len()).collect(),
+            })
+        }
+    }
+
+    // The plural surface, which the `Identity` lemmatizer does not derive from `cell line`.
+    let (base, _) = index_with_claim_kinds();
+    let plural = esl::compile(
+        r#"
+namespace lexicon = "urn:eigenius:lexicon";
+resource lexicon:e_cell_lines : lexicon:LexicalEntry {
+    lexicon:form     = "cell lines";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:pl) );
+    lexicon:sem      = lexicon:CellLine;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:cell_line.n.01";
+}
+"#,
+        &base,
+    )
+    .expect("plural fixture compiles");
+    let mut b = LayerBuilder::new("plural-fixture", Some(base));
+    for r in plural {
+        b.add_resource(r).expect("add plural resource");
+    }
+    let index = Parser::build(Arc::new(b.build(LayerStorage::in_memory())));
+    let lander = KindLander("TestFinding");
+    for (third, resolves) in [
+        ("these two cell lines affect BRCA1", true),
+        ("these three cell lines affect BRCA1", false),
+    ] {
+        let doc = ["HeLa affects BRCA1", "BRCA1 affects HeLa", third];
+        let resolved = index.resolve_document(&DiscourseRun {
+            document: &doc.join(" "),
+            sentences: &doc,
+            lemmatizer: &Identity,
+            proposer: &PickBySurface("the last 2 TestFinding claims, together"),
+            ranker: Some(&First),
+            lander: Some(&lander),
+            scope: None,
+        });
+        match (&resolved[2].outcome, resolves) {
+            (SentenceOutcome::Encoded(s3), true) => {
+                let sem = pretty_term(s3.sem());
+                assert!(
+                    sem.contains("claim0") && sem.contains("claim1") && sem.contains("And("),
+                    "{third}: both members are predicated: {sem}"
+                );
+            }
+            (SentenceOutcome::Open(_), false) => {}
+            (other, _) => panic!(
+                "{third}: expected {}, got {}",
+                if resolves { "Encoded" } else { "Open" },
+                match other {
+                    SentenceOutcome::Encoded(_) => "Encoded",
+                    SentenceOutcome::Open(_) => "Open",
+                    _ => "another outcome",
+                }
+            ),
+        }
+    }
+}
+
 fn index_with_demonstratives() -> (Arc<Layer>, Parser) {
     let (base, _) = index_over_bootstrap();
     let resources =
@@ -4542,19 +4623,21 @@ fn s20_shape_parses_open_with_modal_coordination_and_comparative() {
         closed.is_empty(),
         "the comparative standard is unresolved → the s20 shape must be OPEN, not closed"
     );
-    let it = open
+    // The shared-head reading (D95 slice 7d, decision 14) is open too — `a gene cell line or a larger
+    // cell line`, as `a steel or a wooden door` reads — so find the s20 shape among the one-hole parses.
+    let sems: Vec<String> = open
         .iter()
-        .find(|o| o.holes.len() == 1)
-        .expect("an open parse with exactly one comparison-standard hole");
-    let sem = pretty_term(it.item.sem());
+        .filter(|o| o.holes.len() == 1)
+        .map(|o| pretty_term(o.item.sem()))
+        .collect();
     assert!(
-        sem.contains("Possible(")
+        sems.iter().any(|sem| sem.contains("Possible(")
             && sem.contains("Or(")
             && sem.contains(":Gene.")
             && sem.contains(":CellLine.")
             && sem.contains("gt(deg_large")
-            && sem.contains("$anaphor$"),
-        "s20 shape = modal + type-preserving disjunction (Gene ∨ CellLine) + comparative-standard hole: {sem}"
+            && sem.contains("$anaphor$")),
+        "s20 shape = modal + type-preserving disjunction (Gene ∨ CellLine) + comparative-standard hole: {sems:#?}"
     );
 }
 

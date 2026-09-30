@@ -321,8 +321,20 @@ impl Parser {
     }
 
     /// Does the veto admit `ante` for `hole`? A set antecedent passes iff EVERY member does —
-    /// the distributive reading predicates each member, so each must inhabit the restrictor.
+    /// the distributive reading predicates each member, so each must inhabit the restrictor. A
+    /// counted hole (`these two genetic events`, D95 slice 7d) also needs an antecedent of its size:
+    /// a set of that many members, or one antecedent for a count of 1. A count the veto cannot read
+    /// admits nothing.
     fn hole_accepts_ante(&self, hole: &HoleInfo, ante: &Ante) -> bool {
+        if let Some(q) = &hole.count {
+            let size = match ante {
+                Ante::One(_) => 1,
+                Ante::Each(ms) => ms.len(),
+            };
+            if super::super::holes::count_value(q) != Some(size) {
+                return false;
+            }
+        }
         match ante {
             Ante::One(e) => self.hole_accepts(hole, e),
             Ante::Each(ms) => ms.iter().all(|m| self.hole_accepts(hole, m)),

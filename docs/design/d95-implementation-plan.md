@@ -691,10 +691,19 @@ A cardinal drops its number today: `two genes`, `5 cells` and `1,000 cells` all 
      (D98 slice 1), and a function says nothing the relation does not for stating a count.
    - *Rejected:* `lexicon:card : Set -> Entity -> float`, which counts per entity (how many `T` an
      entity has) and is a float.
-2. **A plain cardinal states the exact count** (decided above): `two genes affect HeLa` is
+2. **A plain cardinal states the exact count**: `two genes affect HeLa` is
    `has_count(Gene, λx. affects(hela, x), 2)` — the size of the scope set, `|T ∩ V|`. Subject and
    object determiners alike, the word forms with their number and a digit with its value; `0 genes`
    now reads, where the existential had to refuse it.
+   - Every plain count in the WRN paper is exact — the study's inventory (`Project Achilles screened
+     517 cell lines`), its replicates (`three technical replicates each from two biological
+     replicates`), a defined set (`these four lineages`), a definition (`the co-occurrence of two
+     genetic events`) — and where the paper means a bound it writes one (`at least 1,000 cells`,
+     `>17,000 genes`). The exact count is of the set the sentence defines (`evaluated WRN knockout in
+     5 MSI cell lines`), not of everything the predicate holds of. The CNL guide says how to write a
+     lower bound (Measured quantities, rule 7).
+   - *Rejected:* the at-least reading, which the paper never uses for a plain count; the existential,
+     which drops the number.
 3. **A bounded count uses the same markers.** Each marker gains two count-determiner entries,
    subject and object, taking the bare number, `cat_num` (decision 6): `at least 1,000 cells` is
    `∃q. le(1000, q) ∧ has_count(Cell, V, q)`. `fewer than` and `or fewer` join, for counts only.
@@ -704,7 +713,8 @@ A cardinal drops its number today: `two genes`, `5 cells` and `1,000 cells` all 
      `10%` and `1.5` as readily as to a count, and telling them apart would read the sem, which the
      packed chart's combination decision may not.
 4. **Word numerals are numbers too.** `one` … `ten` gain an entry at `cat_num`, as a digit seeds
-   one, so `more than one`, `at least two` and `two or more` work.
+   one, so `more than one`, `at least two` and `two or more` work. *Superseded by decision 11 (7d):
+   a number word is a numeral token, and the entries are gone.*
 5. **A count range** is an en-dash digit pair with no unit (`4–7 foci`): a dimensionless range token
    seeding count-range determiners, `∃q. le(4, q) ∧ le(q, 7) ∧ has_count(…, q)`, when both ends are
    whole numbers. A hyphen pair with no unit stays a word (`926-68021`).
@@ -742,7 +752,7 @@ A cardinal drops its number today: `two genes`, `5 cells` and `1,000 cells` all 
   `4–7 foci` a count range; the quantity corpus, three count rows from the paper, and the bare-number
   statistic row dropped.
 
-**Order.** 7a: decisions 1, 2. 7b: decisions 3–6. 7c: proportions.
+**Order.** 7a: decisions 1, 2. 7b: decisions 3–6. 7c: proportions. 7d: decisions 11–15.
 
 **7c — proportions, decided and built** (2026-09-29). The paper's shapes: `45–60% of such cancers do
 not respond`, `15% of colon … cancers`, `in more than half of the samples`, `> half of loss events`,
@@ -770,37 +780,119 @@ Built: `has_proportion` (`ontology.esl`); `half`, the two partitive `of`s and te
 partitives (`closed-class.esl`); `unit_constraint_backward` (`combinators.rs`); `verbalize` reads
 `more than 1/2 of the Cell, …`. Tests: `a_proportion_of_a_group` (eleven shapes, one reading each),
 verbalization, packed equals unpacked; the quantity corpus adds `Half of the cell pellet was saved.`
-Still out: `such` (`45–60% of such cancers`, no entry), the head noun elided across a coordination
-(`15% of colon, 22% of gastric … cancers`, 7d), and `the four other RecQ DNA helicases` (a determiner
-before a numeral, 7d). 7d: a determiner before a
-numeral, right-node sharing, and number words as numerals with units (`Nine days after doxycycline
-treatment`, which the preprocessor does not read as a quantity) — these change how `two` itself
-parses, and are measured with the reseed.
-- **The count**: a numeric cardinality of a predicate, beside `lexicon:card` (`closed-class.esl:1611`),
-  which is per entity and a float.
-- **Bounded cardinals**: `at least 1,000 cells`, `more than one MMR gene`, `≥ 8 foci`, `fewer than`;
-  count ranges, `4–7 foci`.
-- **Proportions**: `more than half of the samples`, `15% of colon cancers`, `20–30% of endometrial
-  cancers`.
-- **Decided (2026-09-29): a plain count is exact.** `5 MSI cell lines` states five. Every plain
-  count in the WRN paper is exact — the study's inventory (`Project Achilles screened 517 cell
-  lines`), its replicates (`three technical replicates each from two biological replicates`), a
-  defined set (`these four lineages`, `the four other RecQ DNA helicases`), a definition (`the
-  co-occurrence of two genetic events`) — and where the paper means a bound it writes one (`at least
-  1,000 cells`, `>17,000 genes`). The exact count is of the set the sentence defines (`evaluated WRN
-  knockout in 5 MSI cell lines`), not of everything the predicate holds of. A lower bound is written
-  out, and the CNL guide says how (Measured quantities, rule 7): `at least N`, `N or more`, `N or
-  higher`. Rejected: the at-least reading, which the paper never uses for a plain count; and the
-  existential, which drops the number.
-- **Also needed, from the same survey**: a determiner before a numeral (`these four lineages`, `the
-  four other RecQ DNA helicases`), which no rule builds today; right-node sharing in `5 MSS and 5 MSI
-  cell lines`; a breakdown that sums to its whole (`14 MSI cell lines … (6 leukemia, 2 prostate, …)`).
+Still out: `such` (`45–60% of such cancers`, no entry).
+
+**7d — number words, a determiner before a numeral, counted conjuncts** (decided 2026-09-29). The
+paper's shapes, both versions: `Nine days after doxycycline treatment`, `recovered by three weeks`,
+`Seven days post-transduction`, `an eight-day viability assay` (`an 8-day …` in the manuscript), `a
+seven-day viability assay`; `these two genetic events`, `these four lineages`, `these two versions of
+the cell line`, `none of the four other RecQ DNA helicases`, `the 4 most common MSI lineages`; `five
+MSS and five MSI cell lines`, `two MSI and two MSS cell lines`, `6 MSI and 5 MSS cell lines`, `51
+unique MSI and 541 unique MSS cell lines`, and in the manuscript `15% of colon, 22% of gastric, 20–30%
+of endometrial, and 12% of ovarian cancers`.
+
+11. **A number word is a numeral.** The preprocessor reads `one` … `ten`, in any case, as a
+    `Numeral` token with its value, as it reads digits: `Nine days` is a quantity token (777600 s),
+    and `three sgRNAs` counts as `3 sgRNAs` does. The entries 7a and 7b gave the words — `{w}_subj`,
+    `{w}_obj`, `{w}_number` and their 30 sems — are removed: seeding builds a word numeral's items
+    from its value, as it builds a digit's. The cardinal determiner categories come from `a` and
+    `these` (`DetTemplates`), which `one` and `two` repeated.
+    - *Rejected:* a number-word table read only before a unit. The table and the entries would each
+      state a word's value, and one construction would take two paths.
+    - *Rejected:* a unit as a lexical functor over a number (`days : MP\NUM`). Conversion to base
+      units is the preprocessor's (D93), and the functor would need a scaling function no layer
+      declares.
+    - The words are those the closed class had; the CNL writes larger numbers in digits.
+12. **A numeral joined by a hyphen to a unit name is a quantity**: `eight-day`, `8-day`,
+    `seven-day`, the compound modifier before a noun, read as `8 d` is. The unit must be a name — a
+    lowercase word of three letters or more, ending the token — as the SI writes a symbol without the
+    hyphen (`a 25-kilogram sphere`, `a 25 kg sphere`). `96-well` and `5-fold` stay words (`well` and
+    `fold` are not units), so do `8-week-old` (the unit does not end the token) and the compound
+    names `5-mC`, `3-MA` and `6-TG`, whose letters spell unit symbols.
+13. **A determiner before a numeral is a plural determiner.** `the`, `these` and `those` take a bare
+    number, `cat_num`, and yield the determiner categories `these` has. `the four other RecQ DNA
+    helicases` denotes `ontology:the_count(A, 4) : A`, the ι-term `the(A)` with its count. `these
+    two genetic events` carries `lexicon:anaphor_of_count(A, 2)`, which the felicity gate freshens
+    into a referent hole as it freshens `anaphor_of(A)`, and records the count on the hole.
+    Resolution vetoes an antecedent of another size: a set antecedent needs exactly that many
+    members, a single one a count of 1.
+    - *Rejected:* `V(the(A))` with a separate `has_count` conjunct. Stating the referent's size needs
+      a membership relation between an entity and a plurality, which no layer has (D98 decision 6).
+    - Today only a run of landed claims is a set antecedent (D68). `these four lineages`, whose
+      antecedents are four kinds, stays open rather than resolving to one kind.
+14. **Counted conjuncts share a head through a determiner composed with its modifiers.** `five MSS
+    and five MSI cell lines` is `[five MSS] and [five MSI] cell lines`. A determiner and a noun
+    modifier after it compose into a determiner awaiting its head, `cat_detmod(n, λT. X)`, whose
+    denotation is `ΠT:Set. ((T → Prop) → Set) → ⟦X⟧`: the second argument builds the head's type
+    from a restrictor. Two such coordinate as determiners do (`two and three cells` already does),
+    and the coordination applies to the head: `five MSS and five MSI cell lines incubated` is
+    `has_count(Σx:CellLine. mss(x), …, 5) ∧ has_count(Σx:CellLine. msi(x), …, 5)`. Applying passes
+    the head's class and a builder that conjoins the head's own restrictor, so `unique MSI` stacks
+    and a refined head (`colorectal cell lines`) conjoins, with no Σ nested in a Σ. The modifiers
+    are the refine rules' left operands (an adjective lifted to `cat_mod`, a noun of a kind
+    compound, a name), their restrictors built by those rules' own builders.
+    - A composed determiner applies to a head only after coordinating; applied alone it would
+      re-derive `five MSS cell lines`, which the determiner applied to the refined noun already reads.
+    - *Rejected:* seeding the distributed phrases, as `distribute_head` (D63) seeds lexicalized
+      compounds: a counted conjunct is a phrase, not a lexeme, and seeding cannot parse.
+    - *Rejected:* un-eliding the head before parsing (D63's note, §2).
+15. **A partitive over a bare plural composes the same way**: `15% of colon, 22% of gastric …
+    cancers`. `15% of` takes a raised noun phrase; with the bare plural's kind in that position it is
+    a determiner, `λT.λV. has_proportion(kind_of(T), V, 15%)`, and composes with `colon` as decision
+    14 builds. The shift is taken only into that composition, since the partitive already applies to
+    a bare plural (`15% of colon cancers`).
+
+A breakdown in parentheses (`14 MSI cell lines … (6 leukemia, 2 prostate, …)`) is a gloss, dropped
+before parsing (the preprocessor's decision 1); summing its parts to the whole is not grammar.
+
+**7d — built** (2026-09-29).
+- Number words (decision 11): `preprocess.rs` reads `one` … `ten` as `Numeral` tokens; the 30
+  number-word entries and sems are gone from `closed-class.esl`; `Parser::over` takes the cardinal
+  categories from `DetTemplates` (`a`, `these`) through `category::is_quantifier_det`, which also
+  drops `a`'s predicative form.
+- Hyphenated quantities (decision 12): `hyphenated_quantity` in `preprocess.rs` — `eight-day`,
+  `8-day`, `10-minute`; `8-week-old`, `5-mC`, `3-MA`, `6-TG`, `a 2-h incubation`, `one-sided` stay
+  words.
+- A determiner before a numeral (decision 13): `ontology:the_count`, `lexicon:anaphor_of_count`,
+  four sems and six entries (`the`, `these`, `those` × subject, object). `holes.rs` freshens
+  `anaphor_of_count(A, q)` into a hole with its count (`DemonstrativeHole`, `count_value`);
+  `HoleInfo` carries `count`, the open parse's skeleton shows it (`×2`), and
+  `hole_accepts_ante` vetoes an antecedent of another size. `verbalize` reads `the_count(A, q)` as
+  `the 4 A`.
+- Counted conjuncts (decisions 14, 15): `cat_det_premod` and `cat_detmod` (`lexicon-ontology.esl`,
+  denotation in `dcg/category.rs`); `det_premod_lifts` in `dcg/rules/combinators.rs`, fired at the
+  leaves (`seed.rs`) and by the `DetPremod` unary shift (`registry.rs`); the combinators
+  `determiner_modifier` (`CombKind::DetModify`, taking the modifier's restrictor from the refine
+  rule that would take it before a head) and `determiner_modifier_head` (`DetModApply`, guarded by
+  `ProvGuard::LeftNotDetComposed`); `Combinator::DetComposed`.
+- The one-recipe-per-pair decision shaped decision 14's build: a determiner and a noun combine one
+  way, as the dependent determiner, so `five MSS` with `MSS` a noun could not also compose. The lift
+  gives the determiner a second category that only the composition consumes.
+- A missing lexeme is decided over multiword spans too (`Parser::in_a_multiword`): `None` in `None
+  of the …` seeds through the partitive `none of`, which `unknown_words`, `unseedable_tokens` and
+  the widen gate `every_token_seeds` had reported as a token with no entry.
+- New ambiguity: a coordination of two determined noun phrases with a modifier before the second
+  head, `a gene or a larger cell line`, also reads with the head shared, `a gene cell line or a larger
+  cell line`, as `a steel or a wooden door` needs. The s20 test in `closed_class_determiners.rs`
+  finds its reading among the open parses instead of taking the first. The reseed after slice 8
+  measures how many units gain a reading.
+- Tests: `quantity_tokens.rs`, `a_number_word_is_a_numeral`; `quantities_in_the_parser.rs`,
+  `a_number_word_is_a_numeral`, `a_determiner_takes_a_numeral`, `counted_conjuncts_share_their_head`
+  (ten shapes, one reading each), seven more packed-equals-unpacked sentences;
+  `closed_class_determiners.rs`, `a_counted_demonstrative_resolves_only_to_a_set_of_its_size`; the
+  quantity corpus, five rows from the paper (35 covered, 6 gaps).
+- Not built: `such` (`45–60% of such cancers`); a counted demonstrative resolving to a set of kinds,
+  which needs set antecedents beyond a run of claims (D68).
 
 ## Slice 8 — positions a measure phrase takes
 
-- **Before a PP** (20 [8]): `9 days after shRNA induction`, `6 h before collection`. Fronted, as in
-  `2 days after lentiviral transduction, cells were seeded`, it also needs the fronted PP adjunct,
-  a gap without quantities (`After the dose, …`).
+- **Before a PP** (20 [8]): `9 days after shRNA induction`, `6 h before collection`, `Nine days
+  after doxycycline treatment`, `Seven days post-transduction`. Fronted, as in `2 days after
+  lentiviral transduction, cells were seeded`, it also needs the fronted PP adjunct, a gap without
+  quantities (`After the dose, …`).
+- **Measure phrases sharing a unit** (1 [1]): `Four and seven days after the lentiviral
+  transduction` — two values, one unit, as the counted conjuncts of 7d share one head.
+- **`by` with a measure phrase** (1 [1]): `WRN levels recovered by three weeks`.
 - **A verb's object**: `reached ~100 mm3`, `reached 80–90% confluence`, `used 0.2 µg/mL of
   doxycycline`, `genes that had less than one count per million`.
 - **Pseudo-partitive** (5 [12]): `300 µl of CellTiter-Glo`, `0.2 µg/mL of doxycycline`.

@@ -281,12 +281,12 @@ pub struct Parser {
     grammar: Grammar,
     /// The unit vocabulary as prose spells it, which the preprocessor reads quantities against (D95).
     units: ProseUnits,
-    /// The cardinal determiner categories a digit numeral seeds: `1` those of the closed-class word
-    /// `one` (singular), any other whole number those of `two` (plural) — resolved once here, as
-    /// [`DetTemplates`] resolves `a` and `these`. Seeding keeps each category and builds the sem with
-    /// the numeral's own count (D95 slice 7), as the word forms state theirs.
-    cardinal_one: Vec<Item>,
-    cardinal_many: Vec<Item>,
+    /// The cardinal determiner categories a numeral seeds: `1` the quantifier categories of `a`
+    /// (singular), any other whole number those of `these` (plural), taken from [`DetTemplates`].
+    /// Seeding keeps each category and builds the sem with the numeral's own count (D95 slice 7;
+    /// slice 7d, decision 11, for the number words).
+    cardinal_one: Vec<Exp>,
+    cardinal_many: Vec<Exp>,
     /// The processing parameters ([`ParseConfig`]).
     config: ParseConfig,
     /// The document this parser is reading, as sentences, for the reranker's CONTEXT WINDOW.
@@ -332,19 +332,17 @@ impl Parser {
         // determiner category templates from the lexicon. This is the only moment the grammar reads the
         // lexicon; from here on the rules hold values, not a lookup.
         let units = ProseUnits::load(&layer);
-        // The determiner entries only: the word is also a number (`one_number`, D95 slice 7).
-        let cardinal = |word: &str| -> Vec<Item> {
-            lex.entries_for(word)
-                .into_iter()
-                .filter(|e| e.in_lexicon.is_none() && e.sense.as_deref() == Some(word))
-                .map(|e| e.item)
-                .filter(|it| is_ctor(it.cat(), "cat_forall").is_some())
+        let dets = DetTemplates::resolve(lex.as_ref());
+        let quantifiers = |cats: &[Exp]| -> Vec<Exp> {
+            cats.iter()
+                .filter(|c| super::category::is_quantifier_det(c))
+                .cloned()
                 .collect()
         };
-        let (cardinal_one, cardinal_many) = (cardinal("one"), cardinal("two"));
+        let (cardinal_one, cardinal_many) = (quantifiers(&dets.a), quantifiers(&dets.these));
         let grammar = Grammar {
             reserved: ReservedTable::load(&layer),
-            dets: DetTemplates::resolve(lex.as_ref()),
+            dets,
             layer,
         };
         Parser {
@@ -990,43 +988,72 @@ impl Parser {
         Some((out, promoted))
     }
 
-    /// Whether every token of `text` other than a comma has a lexical entry ([`Self::has_token`]) —
-    /// no missing lexeme ([`Self::unknown_words`]) and no numeral or symbol the lexicon does not know
-    /// ([`Self::unseedable_tokens`]). Gates widen-on-failure: a token that seeds nothing leaves its span
-    /// uncoverable at every cap and beam, so widening cannot help (D95, "Numerals reach the parser and
-    /// seed nothing").
+    /// Whether every token of `text` other than a comma has a lexical entry ([`Self::has_token`]) or
+    /// lies in a multiword one ([`Self::in_a_multiword`]) — no missing lexeme ([`Self::unknown_words`])
+    /// and no numeral or symbol the lexicon does not know ([`Self::unseedable_tokens`]). Gates
+    /// widen-on-failure: a token that seeds nothing leaves its span uncoverable at every cap and beam,
+    /// so widening cannot help (D95, "Numerals reach the parser and seed nothing").
     fn every_token_seeds(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
-        self.tokenize(text)
-            .iter()
-            .filter(|t| !t.is_comma() && !seeds_itself(t))
-            .all(|t| self.has_token(t.surface(), lemmatizer))
+        let tokens = self.tokenize(text);
+        tokens.iter().enumerate().all(|(i, t)| {
+            t.is_comma()
+                || seeds_itself(t)
+                || self.has_token(t.surface(), lemmatizer)
+                || self.in_a_multiword(&tokens, i, lemmatizer)
+        })
+    }
+
+    /// Whether token `i` lies inside a span of two or more tokens that has lexical entries, as
+    /// seeding looks spans up: `None` in `None of the samples` seeds through the partitive `none of`,
+    /// though `none` alone has no entry. Only a token [`Self::has_token`] refuses reaches this.
+    fn in_a_multiword(&self, tokens: &[Token], i: usize, lemmatizer: &dyn Lemmatizer) -> bool {
+        let limit = self.lex.span_limit(tokens.len());
+        (0..=i).rev().take(limit).any(|a| {
+            ((a + 1).max(i)..tokens.len())
+                .take_while(|&b| b - a < limit)
+                .any(|b| {
+                    !self
+                        .lookup_span(&join_surfaces(&tokens[a..=b]), lemmatizer, None, None, None)
+                        .is_empty()
+                })
+        })
     }
 
     /// The tokens of `text` that are neither words nor commas — numerals and symbols — and have no
-    /// lexical entry, in order. Each seeds nothing, so its sentence cannot parse; unlike a missing
-    /// lexeme, no lexicon entry is expected to fix it.
+    /// lexical entry, alone or in a multiword one, in order. Each seeds nothing, so its sentence
+    /// cannot parse; unlike a missing lexeme, no lexicon entry is expected to fix it.
     pub fn unseedable_tokens(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<String> {
-        self.tokenize(text)
-            .into_iter()
-            .filter(|t| {
+        let tokens = self.tokenize(text);
+        tokens
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| {
                 !t.is_word()
                     && !t.is_comma()
                     && !seeds_itself(t)
                     && !self.has_token(t.surface(), lemmatizer)
+                    && !self.in_a_multiword(&tokens, *i, lemmatizer)
             })
-            .map(|t| t.surface().to_string())
+            .map(|(_, t)| t.surface().to_string())
             .collect()
     }
 
-    /// The word tokens of `text` with no lexical entry ([`Self::has_token`]), in order — the
-    /// **missing-lexeme** signal, and the one definition of it, which the encoding harnesses read. A
-    /// comma, a numeral or a [`NonProse`](super::preprocess::TokenKind::NonProse) token is not a word,
-    /// so it is never missing ([`Self::unseedable_tokens`] reports the last two).
+    /// The word tokens of `text` with no lexical entry ([`Self::has_token`]) and in no multiword
+    /// entry ([`Self::in_a_multiword`]), in order — the **missing-lexeme** signal, and the one
+    /// definition of it, which the encoding harnesses read. A comma, a numeral or a
+    /// [`NonProse`](super::preprocess::TokenKind::NonProse) token is not a word, so it is never missing
+    /// ([`Self::unseedable_tokens`] reports the last two).
     pub fn unknown_words(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<String> {
-        self.tokenize(text)
-            .into_iter()
-            .filter(|t| t.is_word() && !self.has_token(t.surface(), lemmatizer))
-            .map(|t| t.surface().to_string())
+        let tokens = self.tokenize(text);
+        tokens
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| {
+                t.is_word()
+                    && !self.has_token(t.surface(), lemmatizer)
+                    && !self.in_a_multiword(&tokens, *i, lemmatizer)
+            })
+            .map(|(_, t)| t.surface().to_string())
             .collect()
     }
 
