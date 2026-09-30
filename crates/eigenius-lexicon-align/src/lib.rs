@@ -31,6 +31,7 @@ pub mod adjudicate;
 pub mod drops;
 pub mod emit;
 pub mod merge;
+pub mod senses;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;

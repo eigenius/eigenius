@@ -26,6 +26,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use eigenius_kernel::dcg::category::prep_constructor;
+
+use crate::governance::Governance;
 use crate::inflect::{comparison, gerund, past_participles, third_singular, Comparison};
 use crate::wndb::{Offset, Pos, Synset};
 
@@ -137,7 +140,7 @@ pub struct Report {
     /// argument shift. Zero when no countability lexicon is supplied.
     pub mass_entries: usize,
     /// Multiword adjective lemmas skipped because they merely restate a governed-preposition frame
-    /// the base adjective already carries ([`restates_governed_frame`]).
+    /// the base adjective already carries ([`Governance::restates_frame`]).
     pub frame_duplicate_skipped: usize,
     /// Verb lemmas skipped because they are the COPULA (`be`) — grammar the closed-class bootstrap
     /// owns. WordNet's content senses of it (including a frame-6 LINKING entry over an opaque 2-place
@@ -706,8 +709,8 @@ fn stative_prep(frame: u8) -> Option<&'static str> {
 /// WHY IT IS NEEDED. [`classify`] collapses 14|15|16|17|18|19|31 into one preposition-less
 /// [`FrameKind::Ditransitive`] `((S\NP)/NP)/NP` and DISCARDS the preposition the frame names, so the
 /// relatum could only ever attach as a free ADJUNCT — `And(associated(x), prep_with(x, r))` rather
-/// than one saturated predication. The adjectival route cannot cover it either: [`governed_preposition`]
-/// is reached only from [`push_adj`], over the words of ADJECTIVE synsets, and `associated` is not a
+/// than one saturated predication. The adjectival route cannot cover it either: [`Governance`]
+/// is read only by [`push_adj`], over the words of ADJECTIVE synsets, and `associated` is not a
 /// WordNet adjective lemma (`index.adj` 0, unlike `dependent`/`essential`/`concordant`, all 1), so the
 /// `associated<TAB>with` row in `adjective-frames.tsv` never fires.
 ///
@@ -932,14 +935,13 @@ fn adj_cat() -> String {
     format!("lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
 }
 
-/// Curated adjective **subcategorization frames** (lemma → governed preposition) — the frame-acquisition
-/// source for [`governed_preposition`] when WordNet's gloss yields none (low-recall: it needs the lemma
-/// followed by its prep in its OWN gloss, missing e.g. "dependent" → "on"). Embedded at compile time
+/// Curated adjective **subcategorization frames** (lemma → governed preposition) — a lemma-level source
+/// for [`Governance`] beside SPECIALIST's complements (eigenius#263), placed on senses as they are. Embedded at compile time
 /// (`include_str!`) and parsed once; the high-confidence output an LLM proposer gives for a gradable
 /// adjective's frame (offline generation is the scale path). Crate-local (`crates/eigenius-wordnet/
 /// adjective-frames.tsv`) so it is embeddable inside the Docker build context (a sibling of the
 /// runtime-arg `experiments/lexicon-align/drops.json`/`merges.json`, which are read at import instead).
-fn adjective_frames() -> &'static BTreeMap<String, String> {
+pub fn adjective_frames() -> &'static BTreeMap<String, String> {
     static FRAMES: std::sync::OnceLock<BTreeMap<String, String>> = std::sync::OnceLock::new();
     FRAMES.get_or_init(|| {
         include_str!("../adjective-frames.tsv")
@@ -959,105 +961,14 @@ fn adjective_frames() -> &'static BTreeMap<String, String> {
     })
 }
 
-/// Whether `lemma` is a **multiword adjective that merely restates a governed-preposition frame** —
-/// `X P` where the base adjective `X` is already known to govern `P` ([`adjective_frames`]).
-///
-/// Such a lemma is REDUNDANT with the compositional analysis and competes destructively with it for
-/// the same span. WordNet lists `dependent on` as its own adjective lemma, sole sense `a00555859`
-/// (`contingent`), beside the base `dependent` whose sense 1 `a00725772` ("relying on or requiring a
-/// person or thing for support") already carries a `cat_pp_arg(prep_on)` frame from this very table.
-/// So the span "dependent on WRN" has two analyses: the compositional relational one, and the MWE —
-/// which SWALLOWS THE PREPOSITION and leaves the PP's object stranded as a bare noun.
-///
-/// Measured on the WRN page: that stranding is what let «The lines from rare lineages were less
-/// dependent on WRN.» parse as `is_a(the line …, Σ:WRN-protein. And(contingent, less))` — asserting a
-/// cell line IS a WRN protein — while its correct comparative reading was lost. Six other hypotheses
-/// for that regression were tried and refuted; this is the one the evidence supports.
-///
-/// The gate is DELIBERATELY NARROW and fails safe: the drop fires only where the base adjective's
-/// governance of that exact preposition is KNOWN, so genuine idioms — `all in`, `boxed in`, `agreed
-/// upon`, `contingent on` — are untouched, because their bases are not gloss-governed for those
-/// prepositions. Against WordNet 3.0 it removes exactly ONE lemma today (`dependent on`) out of 57
-/// multiword prepositional adjectives, and it widens automatically as `adjective-frames.tsv` grows —
-/// that file is the frame-acquisition source, so a new frame retires its own MWE duplicate.
-///
-/// Same discipline as the closed-class surface list and `GRAMMATICAL_SURFACES`: do not seed a lexical
-/// entry that merely restates a grammatical relation the grammar already builds.
-fn restates_governed_frame(lemma: &str) -> bool {
-    let Some((base, prep)) = lemma.rsplit_once(' ') else {
-        return false;
-    };
-    adjective_frames()
-        .get(&base.to_lowercase())
-        .is_some_and(|p| p.eq_ignore_ascii_case(prep))
-}
-
-/// The preposition governed by a relational gradable adjective, derived from its WordNet **gloss**
-/// (C3, d63-comparative-phrasal.md §5.3 — WordNet has no structured subcat frame, so the gloss is the
-/// only WordNet-internal signal). Two patterns, most-confident first:
-///   1. WordNet's explicit ``followed by `PREP'`` convention (67 adj synsets — `proportional`:
-///      *"usually followed by `to'"*).
-///   2. the **lemma itself** immediately followed by a preposition in the gloss/examples
-///      (`proportional to the crime`, `she is addicted to chocolate`). Keying on the lemma (not any
-///      word) avoids the verb+prep noise of examples (`spoke in`, `came to`) and gives the right
-///      per-lemma preposition within one synset (`addicted`→`to`, `dependent`→`on`).
-///
-/// `None` ⇒ no governance signal → a NON-relational bare measure (C1). Drives the relational emission
-/// in `push_adj` (a 2-place `deg_rel` + a `cat_measure/cat_pp_arg` reading; the bare 1-place forms stay
-/// for the ground-less reading — two independent measures, no optional-ground shift needed).
-fn governed_preposition(gloss: &str, lemma: &str) -> Option<String> {
-    const PREPS: &[&str] = &[
-        "to", "on", "in", "with", "from", "for", "at", "upon", "about", "against", "into",
-    ];
-    // (1) explicit ``followed by `PREP'``.
-    if let Some(rest) = gloss.split("followed by `").nth(1) {
-        if let Some(p) = rest.split('\'').next() {
-            if PREPS.contains(&p.trim()) {
-                return Some(p.trim().to_string());
-            }
-        }
-    }
-    // (2) `<lemma> <prep>` in the gloss (lemma-keyed).
-    let g = gloss.to_lowercase();
-    let key = format!("{} ", lemma.to_lowercase());
-    let mut from = 0;
-    while let Some(i) = g[from..].find(&key) {
-        let next = g[from + i + key.len()..]
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .trim_end_matches(|c: char| !c.is_ascii_alphabetic());
-        if PREPS.contains(&next) {
-            return Some(next.to_string());
-        }
-        from += i + key.len();
-    }
-    // (3) Curated / LLM frame fallback — the gloss heuristic is low-recall (misses "dependent" → "on",
-    // whose gloss says "contingent on"). A frame is admitted only if its preposition is in `PREPS`.
-    adjective_frames()
-        .get(&lemma.to_lowercase())
-        .filter(|p| PREPS.contains(&p.as_str()))
-        .cloned()
-}
-
-/// Map a `governed_preposition` result to its `lexicon:Prep` feature constructor (D63 §5.3
-/// C3-precision). The domain is exactly `governed_preposition`'s `PREPS`; anything else falls back
-/// to the `prep_any` wildcard (defensive — the closed set makes the fallback unreachable).
-fn prep_ctor(prep: &str) -> &'static str {
-    match prep {
-        "to" => "lexicon:prep_to",
-        "on" => "lexicon:prep_on",
-        "in" => "lexicon:prep_in",
-        "with" => "lexicon:prep_with",
-        "from" => "lexicon:prep_from",
-        "for" => "lexicon:prep_for",
-        "at" => "lexicon:prep_at",
-        "upon" => "lexicon:prep_upon",
-        "about" => "lexicon:prep_about",
-        "against" => "lexicon:prep_against",
-        "into" => "lexicon:prep_into",
-        _ => "lexicon:prep_any",
-    }
+/// The `lexicon:Prep` constructor for a governed preposition, from the kernel's single list
+/// (`dcg::category::GOVERNED_PREPOSITIONS`, eigenius#263). Every caller passes a preposition the list
+/// names — [`Governance`] keeps only those, and the stative frames name only those — so a miss is a
+/// bug, not a `prep_any`.
+fn prep_ctor(prep: &str) -> String {
+    let ctor = prep_constructor(prep)
+        .unwrap_or_else(|| panic!("`{prep}` names no lexicon:Prep constructor"));
+    format!("lexicon:{ctor}")
 }
 
 /// Adjective synset → predicative entries. **Relational** (pertainym) adjectives are
@@ -1075,6 +986,7 @@ fn push_adj(
     rep: &mut Report,
     noun_index: &BTreeMap<Offset, &Synset>,
     ranks: &SenseRanks,
+    governance: &Governance,
 ) {
     let loc = local(syn);
     let prop_arrow = format!("{ENTITY_TOP} -> Prop");
@@ -1088,7 +1000,7 @@ fn push_adj(
         rep.adj_axioms += 1;
         let cat = adj_cat();
         for (i, lemma) in syn.words.iter().enumerate() {
-            if restates_governed_frame(lemma) {
+            if governance.restates_frame(lemma) {
                 rep.frame_duplicate_skipped += 1;
                 continue;
             }
@@ -1122,17 +1034,18 @@ fn push_adj(
     // (positive + C1 measure) STAY for the ground-less reading (`more dependent than Y`) — two
     // independent opaque measures (the `∃g` relation between them is deferred, §7; an `∃`-close would be
     // ill-typed over a float).
-    // C3-precision: the synset's governed preposition (the first lemma that governs one) tags the
-    // nominalization projection's `cat_pp_arg(prep)`. A per-adjective-lemma prep (which may differ
-    // within one synset — `addicted`→to vs a co-lemma→on) is taken separately in the lemma loop.
-    let syn_prep: Option<String> = syn
+    // eigenius#263 / D97 decisions 6 and 7: the prepositions the synset's lemmas govern in this sense
+    // ([`Governance`]), each with its own 2-place measure `deg_{loc}_rel_{p}` — `responsible for X` and
+    // `responsible to Y` are two claims. The union over the lemmas tags the nominalization projection;
+    // each lemma's own prepositions are taken in the lemma loop.
+    let syn_preps: BTreeSet<String> = syn
         .words
         .iter()
-        .find_map(|l| governed_preposition(&syn.gloss, l));
-    let relational = syn_prep.is_some();
-    if relational {
+        .flat_map(|l| governance.of(&syn.offset, l))
+        .collect();
+    for p in &syn_preps {
         buf.push_str(&format!(
-            "axiom wn:deg_{loc}_rel : {ENTITY_TOP} -> {ENTITY_TOP} -> core:float\n\n"
+            "axiom wn:deg_{loc}_rel_{p} : {ENTITY_TOP} -> {ENTITY_TOP} -> core:float\n\n"
         ));
         // C3-positive (Fix A piece (c), d63-single-skeleton-defects.md): the POSITIVE relational
         // predication — "these classifications are concordant WITH X", "WRN is essential FOR
@@ -1145,8 +1058,8 @@ fn push_adj(
         // anaphoric `cmp_attrib_sem`), and the standard is a per-sense threshold, not per-ground.
         push_sem_term(
             buf,
-            &format!("pos_rel_sem_{loc}"),
-            &format!("( fun (r : {ENTITY_TOP}) => fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}_rel(r, x), wn:std_{loc}) : {ENTITY_TOP} -> {prop_arrow} )"),
+            &format!("pos_rel_sem_{loc}_{p}"),
+            &format!("( fun (r : {ENTITY_TOP}) => fun (x : {ENTITY_TOP}) => measurements:gt(wn:deg_{loc}_rel_{p}(r, x), wn:std_{loc}) : {ENTITY_TOP} -> {prop_arrow} )"),
         );
     }
     push_sem_term(
@@ -1175,7 +1088,7 @@ fn push_adj(
     );
     let cmp_arrow = format!("{ENTITY_TOP} -> {prop_arrow}");
     for (i, lemma) in syn.words.iter().enumerate() {
-        if restates_governed_frame(lemma) {
+        if governance.restates_frame(lemma) {
             rep.frame_duplicate_skipped += 1;
             continue;
         }
@@ -1209,19 +1122,20 @@ fn push_adj(
             &sense,
             ranks,
         );
-        // C3: relational lemmas (gloss governs a prep) also get the ground-taking cat_measure/cat_pp_arg
-        // reading — `deg_rel` (ground, subject); `on X` fills the ground → a cat_measure over the subject.
-        if let Some(prep) = governed_preposition(&syn.gloss, lemma) {
+        // C3: a lemma that governs a preposition in this sense also gets the ground-taking
+        // cat_measure/cat_pp_arg reading per preposition — `deg_rel_{p}` (ground, subject); `on X`
+        // fills the ground → a cat_measure over the subject.
+        for prep in governance.of(&syn.offset, lemma) {
             push_entry(
                 buf,
                 rep,
-                &format!("e_{loc}_{i}_r"),
+                &format!("e_{loc}_{i}_r_{prep}"),
                 lemma,
                 &format!(
                     "lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg({}))",
                     prep_ctor(&prep)
                 ),
-                &format!("deg_{loc}_rel"),
+                &format!("deg_{loc}_rel_{prep}"),
                 &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
                 &sense,
                 ranks,
@@ -1235,14 +1149,14 @@ fn push_adj(
             push_entry(
                 buf,
                 rep,
-                &format!("e_{loc}_{i}_rp"),
+                &format!("e_{loc}_{i}_rp_{prep}"),
                 lemma,
                 &format!(
                     "lexicon:fwd(lexicon:m_all, {}, lexicon:cat_pp_arg({}))",
                     adj_cat(),
                     prep_ctor(&prep)
                 ),
-                &format!("pos_rel_sem_{loc}"),
+                &format!("pos_rel_sem_{loc}_{prep}"),
                 &cmp_arrow,
                 &sense,
                 ranks,
@@ -1302,18 +1216,19 @@ fn push_adj(
                     ranks,
                 );
                 // C3: relational projection — the nominalization (`dependence`) also gets the
-                // ground-taking `cat_measure/cat_pp_arg` reading, so `greater dependence ON WRN` threads.
-                if let Some(prep) = &syn_prep {
+                // ground-taking `cat_measure/cat_pp_arg` reading per preposition, so `greater
+                // dependence ON WRN` threads.
+                for prep in &syn_preps {
                     push_entry(
                         buf,
                         rep,
-                        &format!("e_{loc}_dr_{}_{j}", local(noun)),
+                        &format!("e_{loc}_dr_{}_{j}_{prep}", local(noun)),
                         nlemma,
                         &format!(
                             "lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg({}))",
                             prep_ctor(prep)
                         ),
-                        &format!("deg_{loc}_rel"),
+                        &format!("deg_{loc}_rel_{prep}"),
                         &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
                         &sense_key(noun, nlemma),
                         ranks,
@@ -1334,8 +1249,9 @@ pub fn render_document(
     synsets: &[Synset],
     ranks: &SenseRanks,
     mass: &MassNouns,
+    governance: &Governance,
 ) -> (String, Report) {
-    let (decls, entries, rep) = render_core(synsets, ranks, mass);
+    let (decls, entries, rep) = render_core(synsets, ranks, mass, governance);
     // The `lexicon:wordnet` descriptor (D65 §3) leads the body — every entry's
     // `lexicon:in_lexicon` points at it, so it must resolve in the same document.
     let doc = format!(
@@ -1358,8 +1274,9 @@ pub fn render_sections(
     synsets: &[Synset],
     ranks: &SenseRanks,
     mass: &MassNouns,
+    governance: &Governance,
 ) -> (String, Vec<String>, Report) {
-    let (decls, entries, rep) = render_core(synsets, ranks, mass);
+    let (decls, entries, rep) = render_core(synsets, ranks, mass, governance);
     let base = format!("{ESL_HEADER}\n{WORDNET_LEXICON}\n{decls}");
     (base, entries, rep)
 }
@@ -1371,6 +1288,7 @@ fn render_core(
     synsets: &[Synset],
     ranks: &SenseRanks,
     mass: &MassNouns,
+    governance: &Governance,
 ) -> (String, Vec<String>, Report) {
     let mut sorted: Vec<&Synset> = synsets.iter().collect();
     sorted.sort_by(|a, b| (a.pos, &a.offset).cmp(&(b.pos, &b.offset)));
@@ -1407,7 +1325,7 @@ fn render_core(
             }
             Pos::Adj => {
                 let mut block = String::new();
-                push_adj(&mut block, syn, &mut rep, &noun_index, ranks);
+                push_adj(&mut block, syn, &mut rep, &noun_index, ranks, governance);
                 route(&block, &mut decls, &mut entries);
             }
             Pos::Adv => {} // deferred (§8.7.5)
@@ -1433,46 +1351,69 @@ fn route(block: &str, decls: &mut String, entries: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
 
-    /// The frame-duplicate drop must be NARROW: it fires only where the base adjective's governance
-    /// of that exact preposition is known, so genuine idioms survive.
+    /// The frame-duplicate drop fires only where the base adjective's governance of that exact
+    /// preposition is attested for the lemma, so idioms whose bases govern nothing survive. With
+    /// SPECIALIST attesting `contingent on`, the multiword `contingent on` restates a frame the grammar
+    /// composes, as `dependent on` does, and goes with it.
     #[test]
     fn frame_duplicate_drop_spares_idioms() {
-        // `dependent` -> `on` IS in adjective-frames.tsv, so the MWE duplicates the compositional
-        // relational analysis and must go.
-        assert!(restates_governed_frame("dependent on"));
-
-        // Idioms and non-governed pairs must SURVIVE. `contingent on` shares a synset with
-        // `dependent on`, but `contingent` is not gloss-governed, so the criterion leaves it alone —
-        // deliberately: the drop is keyed on KNOWN governance, not on shape.
-        for keep in [
+        let lex = eigenius_specialist::Lexicon::parse(
+            "{base=contingent\nentry=E1\n\tcat=adj\n\tcompl=pphr(on,np)\n\tcompl=pphr(upon,np)\n}\n",
+        )
+        .unwrap();
+        let adjectives: BTreeMap<Offset, Synset> = [
+            syn("00000001 00 a 01 dependent 0 000 | relying on"),
+            syn("00000002 00 a 01 essential 0 000 | absolutely necessary"),
+            syn("00000003 00 a 01 contingent 0 000 | possible but not certain"),
+        ]
+        .into_iter()
+        .map(|s| (s.offset.clone(), s))
+        .collect();
+        let g = crate::governance::classify(&adjectives, Some(&lex), adjective_frames())
+            .governance(&crate::governance::Placements::default())
+            .unwrap();
+        for drop in [
+            "dependent on",
+            "essential for",
             "contingent on",
             "contingent upon",
+        ] {
+            assert!(
+                g.restates_frame(drop),
+                "{drop} restates a frame its base governs"
+            );
+        }
+        for keep in [
             "all in",
             "boxed in",
             "agreed upon",
             "adequate to",
             "comparable to",
             "dependent",
-            "essential",
         ] {
             assert!(
-                !restates_governed_frame(keep),
-                "{keep} must not be dropped — its base is not gloss-governed for that preposition"
+                !g.restates_frame(keep),
+                "{keep} must not be dropped: its base governs nothing there"
             );
         }
-
-        // Every governed pair in the table is a drop candidate by construction; check one more so a
-        // future table edit cannot silently make the rule inert.
-        assert!(
-            restates_governed_frame("essential for")
-                || !adjective_frames().contains_key("essential")
-        );
     }
     use super::*;
     use crate::wndb::parse_data_line;
 
     fn syn(line: &str) -> Synset {
         parse_data_line(line).unwrap()
+    }
+
+    /// The governance a test's adjective synsets give: WordNet's convention, the curated frames and
+    /// the heuristic, no SPECIALIST. A one-sense fixture places every item without the judge.
+    fn governance_of(adjectives: &[&Synset]) -> Governance {
+        let adjectives: BTreeMap<Offset, Synset> = adjectives
+            .iter()
+            .map(|s| (s.offset.clone(), (*s).clone()))
+            .collect();
+        crate::governance::classify(&adjectives, None, adjective_frames())
+            .governance(&crate::governance::Placements::default())
+            .expect("a one-sense fixture places every item")
     }
 
     #[test]
@@ -1757,7 +1698,12 @@ mod tests {
             syn("10428004 18 n 01 physicist 0 000 | a scientist"),
             syn("10954498 18 n 01 Einstein 0 001 @i 10428004 n 0000 | a physicist"),
         ];
-        let (doc, rep) = render_document(&synsets, &SenseRanks::new(), &MassNouns::new());
+        let (doc, rep) = render_document(
+            &synsets,
+            &SenseRanks::new(),
+            &MassNouns::new(),
+            &Governance::default(),
+        );
         assert!(doc.contains("class wn:n10428004 : lexicon:Entity {"));
         assert!(doc.contains("resource wn:n10954498 : wn:n10428004 {"));
         assert!(!doc.contains("class wn:n10954498"));
@@ -1774,6 +1720,7 @@ mod tests {
             &[syn("00001740 03 n 01 entity 0 000 | that which exists")],
             &SenseRanks::new(),
             &MassNouns::new(),
+            &Governance::default(),
         );
         assert!(
             doc.starts_with("// "),
@@ -1797,6 +1744,7 @@ mod tests {
             &[syn("00001740 03 n 01 entity 0 000 | that which exists")],
             &SenseRanks::new(),
             &MassNouns::new(),
+            &Governance::default(),
         );
 
         // The descriptor is emitted exactly once, carrying provenance metadata.
@@ -2071,6 +2019,7 @@ mod tests {
             &mut rep,
             &BTreeMap::new(),
             &SenseRanks::new(),
+            &governance_of(&[&large]),
         );
         assert!(buf.contains("axiom wn:deg_a00000001 : lexicon:Entity -> core:float"));
         assert!(buf.contains("axiom wn:std_a00000001 : core:float"));
@@ -2108,7 +2057,14 @@ mod tests {
             .collect();
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_adj(&mut buf, &lethal, &mut rep, &noun_index, &SenseRanks::new());
+        push_adj(
+            &mut buf,
+            &lethal,
+            &mut rep,
+            &noun_index,
+            &SenseRanks::new(),
+            &governance_of(&[&lethal]),
+        );
         // the noun `lethality` gets a `cat_measure` reading whose sem IS the adjective's `deg`.
         assert!(
             buf.contains("lexicon:form     = \"lethality\";"),
@@ -2135,7 +2091,14 @@ mod tests {
             .collect();
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_adj(&mut buf, &lethal, &mut rep, &noun_index, &SenseRanks::new());
+        push_adj(
+            &mut buf,
+            &lethal,
+            &mut rep,
+            &noun_index,
+            &SenseRanks::new(),
+            &governance_of(&[&lethal]),
+        );
         assert_eq!(
             buf.matches("resource wn:e_a00000001_d_n00000002_0 :")
                 .count(),
@@ -2171,51 +2134,6 @@ mod tests {
     }
 
     #[test]
-    fn governed_preposition_from_gloss() {
-        // (1) WordNet's explicit `followed by `to'` convention (`proportional`).
-        assert_eq!(
-            governed_preposition(
-                "properly related in size or degree; usually followed by `to'",
-                "proportional"
-            ),
-            Some("to".to_string())
-        );
-        // (2) lemma in the gloss/example → its preposition, PER-LEMMA within one synset.
-        let g = "compulsively or physiologically dependent on something; \"she is addicted to chocolate\"";
-        assert_eq!(governed_preposition(g, "addicted"), Some("to".to_string()));
-        assert_eq!(governed_preposition(g, "dependent"), Some("on".to_string()));
-        // non-relational: no governance signal.
-        assert_eq!(governed_preposition("of great size", "large"), None);
-        // lemma-keyed avoids verb+prep noise (the prep follows a VERB, not the lemma).
-        assert_eq!(
-            governed_preposition("\"she walked with a limp\"", "temperate"),
-            None
-        );
-    }
-
-    #[test]
-    fn governed_preposition_falls_back_to_curated_frames() {
-        // Fix A piece (a): the REAL "dependent" synset glosses are "addicted to a drug" / "contingent on
-        // something else" — no "dependent on", so the gloss heuristic yields NONE. The curated frame file
-        // (adjective-frames.tsv) supplies the governed preposition.
-        assert_eq!(
-            governed_preposition("contingent on something else", "dependent"),
-            Some("on".to_string())
-        );
-        assert_eq!(
-            governed_preposition("absolutely necessary; vitally necessary", "essential"),
-            Some("for".to_string())
-        );
-        // A gloss-derived prep still wins (the fallback only fires when the gloss yields none).
-        assert_eq!(
-            governed_preposition("usually followed by `to'", "proportional"),
-            Some("to".to_string())
-        );
-        // An adjective in neither the gloss nor the frame file stays non-relational.
-        assert_eq!(governed_preposition("of great size", "large"), None);
-    }
-
-    #[test]
     fn relational_gradable_adjective_emits_ground_taking_measure() {
         // C3: a gradable adjective whose gloss governs a preposition (`dependent on`) also gets a 2-place
         // measure `deg_rel` + a `cat_measure/cat_pp_arg` reading (the ground `on X` fills the first arg),
@@ -2231,10 +2149,11 @@ mod tests {
             &mut rep,
             &BTreeMap::new(),
             &SenseRanks::new(),
+            &governance_of(&[&dependent]),
         );
         assert!(
             buf.contains(
-                "axiom wn:deg_a00000001_rel : lexicon:Entity -> lexicon:Entity -> core:float"
+                "axiom wn:deg_a00000001_rel_on : lexicon:Entity -> lexicon:Entity -> core:float"
             ),
             "2-place relational measure:\n{buf}"
         );
@@ -2245,7 +2164,7 @@ mod tests {
             "relational cat_measure/cat_pp_arg(prep_on) reading — the gloss `dependent on` governs `on` \
              (C3-precision):\n{buf}"
         );
-        assert!(buf.contains("lexicon:sem      = wn:deg_a00000001_rel;"));
+        assert!(buf.contains("lexicon:sem      = wn:deg_a00000001_rel_on;"));
         // the bare 1-place measure (C1) is STILL present for the ground-less reading.
         assert!(buf.contains("lexicon:sem      = wn:deg_a00000001;"));
     }
@@ -2268,10 +2187,11 @@ mod tests {
             &mut rep,
             &BTreeMap::new(),
             &SenseRanks::new(),
+            &governance_of(&[&dependent]),
         );
         // The positive-relational sem: the 2-place measure vs the absolute standard.
         assert!(
-            buf.contains("measurements:gt(wn:deg_a00000001_rel(r, x), wn:std_a00000001)"),
+            buf.contains("measurements:gt(wn:deg_a00000001_rel_on(r, x), wn:std_a00000001)"),
             "positive relational sem `gt(deg_rel(r, x), std)`:\n{buf}"
         );
         // The predicative category taking the governed PP as its argument.
@@ -2281,15 +2201,17 @@ mod tests {
             ),
             "positive relational cat `(S[adj]\\NP)/cat_pp_arg(prep_on)`:\n{buf}"
         );
-        assert!(buf.contains("lexicon:sem      = wn:pos_rel_sem_a00000001;"));
+        assert!(buf.contains("lexicon:sem      = wn:pos_rel_sem_a00000001_on;"));
         // A NON-relational gradable adjective gets no positive-relational entry (nothing to ground).
         let mut buf2 = String::new();
+        let large = syn("00000002 00 a 01 large 0 000 | of great size");
         push_adj(
             &mut buf2,
-            &syn("00000002 00 a 01 large 0 000 | of great size"),
+            &large,
             &mut Report::default(),
             &BTreeMap::new(),
             &SenseRanks::new(),
+            &governance_of(&[&large]),
         );
         assert!(
             !buf2.contains("pos_rel_sem_"),
@@ -2313,6 +2235,7 @@ mod tests {
             &mut rep,
             &BTreeMap::new(),
             &SenseRanks::new(),
+            &governance_of(&[&atomic]),
         );
         assert!(buf.contains("axiom wn:a00000004 : lexicon:Entity -> Prop"));
         assert!(buf.contains("lexicon:form     = \"atomic\";"));
@@ -2339,7 +2262,12 @@ mod tests {
             syn("00001740 03 n 01 entity 0 000 | the root"),
             syn("05444328 08 n 01 gene 0 001 @ 00001740 n 0000 | a gene"),
         ];
-        let (doc, rep) = render_document(&nouns, &SenseRanks::new(), &MassNouns::new());
+        let (doc, rep) = render_document(
+            &nouns,
+            &SenseRanks::new(),
+            &MassNouns::new(),
+            &Governance::default(),
+        );
         assert!(doc.contains("namespace wn         = \"urn:eigenius:wn\";"));
         assert!(doc.contains("class wn:n00001740 : lexicon:Entity {"));
         assert!(doc.contains("class wn:n05444328 : wn:n00001740 {"));

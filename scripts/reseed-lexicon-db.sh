@@ -181,9 +181,16 @@ COUNTABILITY="${COUNTABILITY:-references/wiktionary/uncountable-nouns.txt}"
 # Junk-atom drop set (D63 alignment): committed by `lexicon-align drops`; absent ⇒ no drops (non-fatal).
 DROPS="${DROPS:-experiments/lexicon-align/drops.json}"
 [[ -f "$DROPS" ]] || say "note: $DROPS absent — no junk-atom drops (run: lexicon-align drops)"
+# The SPECIALIST Lexicon (D97; eigenius#263): adjectives' governed prepositions. REQUIRED — the
+# importer stops without it (scripts/provision-specialist.sh). The adjective sense judge's committed
+# placements put a lemma's preposition on its senses where the evidence does not decide.
+SPECIALIST="${SPECIALIST:-references/specialist/LEXICON}"
+ADJECTIVE_SENSES="${ADJECTIVE_SENSES:-experiments/lexicon-specialist/adjective-senses.tsv}"
+[[ -f "$SPECIALIST" ]] || { echo "error: $SPECIALIST absent — run scripts/provision-specialist.sh" >&2; exit 1; }
 say "converting WordNet (--all) → wordnet-chain/"
 rm -rf wordnet-chain
-cargo run --release -q -p eigenius-wordnet --bin wordnet-import -- --all --dict "$DICT" --countability "$COUNTABILITY" --out-dir wordnet-chain
+cargo run --release -q -p eigenius-wordnet --bin wordnet-import -- --all --dict "$DICT" --countability "$COUNTABILITY" \
+  --specialist "$SPECIALIST" --adjective-senses "$ADJECTIVE_SENSES" --out-dir wordnet-chain
 
 say "converting UMLS → umls-chain/  ($([[ $UMLS_ALL == 1 ]] && echo 'all semantic types' || echo "TUIs: ${UMLS_TUIS[*]}"))"
 rm -rf umls-chain
@@ -264,6 +271,8 @@ docker run --rm -v "$VOLUME":/src:ro -v "$SNAPSHOT_DIR":/dst alpine \
   echo "drop_atoms      : $([[ -f "$DROPS" ]] && echo "$DROPS" || echo none)"
   echo "atom_overrides  : $([[ -f "$OVERRIDES" ]] && echo "$OVERRIDES" || echo none)"
   echo "countability    : $([[ -f "$COUNTABILITY" ]] && echo "$COUNTABILITY" || echo none)"
+  echo "specialist      : $SPECIALIST sha256:$(sha256sum "$SPECIALIST" | cut -c1-16)"
+  echo "adjective_senses: $([[ -f "$ADJECTIVE_SENSES" ]] && echo "$ADJECTIVE_SENSES sha256:$(sha256sum "$ADJECTIVE_SENSES" | cut -c1-16)" || echo none)"
   echo "chv_redundant   : ${DROP_CHV_REDUNDANT:-1}"
   echo "alignment       : none (raw reseed; scripts/build-alignment-snapshot.sh layers merges on top)"
 } > "$SNAPSHOT_DIR/PROVENANCE"

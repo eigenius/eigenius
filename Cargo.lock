@@ -1175,6 +1175,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "eigenius-kernel",
+ "eigenius-specialist",
  "eigenius-storage-rocksdb",
  "eigenius-umls",
  "eigenius-wordnet",
@@ -1288,6 +1289,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-specialist"
+version = "0.1.0"
+
+[[package]]
 name = "eigenius-statistics"
 version = "0.1.0"
 dependencies = [
@@ -1344,6 +1349,7 @@ dependencies = [
  "clap",
  "eigenius-encoding",
  "eigenius-kernel",
+ "eigenius-specialist",
  "eigenius-storage-rocksdb",
  "serde_json",
 ]

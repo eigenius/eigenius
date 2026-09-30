@@ -370,6 +370,26 @@ for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 
    - **Decided for adjectives:** decision 1's rule. One sense takes the preposition; where the
      pointers pick some senses, those; the 199 open lemmas go to the judge, validated first, its
      verdicts committed; where it accepts no sense, every sense takes it.
+   - **Revised the same day, on the judge's evidence (the owner): the judge places every item on
+     several senses; the pointers decide nothing for adjectives.** Counted over gradable senses: 560
+     lemmas, 691 items in `lexicon:Prep`, 263 on one sense, 428 for the judge. Where the pointers
+     picked some senses and not all (205 items), the judge disagreed on 440 senses; in a random 32 of
+     those disagreements it was right 25 times, the pointers 3 (`convenient to` "suited to your
+     comfort", `concordant with` "being of the same opinion", `confident in`), 4 unclear. The
+     pointers link a sense to the nominalization, which says nothing about its complement: they put
+     `alive to` on "possessing life" and missed `responsible for` on "being the agent or cause".
+   - **And where the judge accepts no sense at 0.85 (the owner):** the senses it said yes to below
+     the threshold (28 items, `confident in`, `quick with`); where it said no to every sense, no
+     sense — a recorded gap (27 items), mostly uses WordNet has no sense for: the evaluative `ADJ of
+     NP` (`it was good of you`), `reflective of` ("indicative of"), `insistent on`. Decision 1's
+     every-sense fallback would have put `good of` on all 21 senses of `good`.
+   - **The judge, validated** (`crates/eigenius-lexicon-align`, `specialist-senses`;
+     `experiments/lexicon-specialist/`): gold recall 45 of 45 on the senses whose own gloss names
+     the preposition (WordNet's convention, the one per-sense fact); a fixed precision sample of 40
+     placed senses reviewed 39 correct, 1 unclear, 0 wrong (`precision-probe.tsv`, Claude draft
+     pending the owner's adoption). Model `claude-sonnet-4-6`: the kernel's structured client forces
+     a tool choice, which the Claude 5 models refuse (eigenius#264's client). Placements: 373 on the
+     senses accepted at 0.85, 28 below it, 27 gaps (`adjective-senses.tsv`).
    - **Open for nouns:** 6,425 WordNet nouns, 3,329 with several senses — the same rule multiplies
      the judge's work several times over, so it is a budget question as well.
 8. **What a "no sense fits" verdict leads to.** The judge will name frames whose sense WordNet
@@ -407,13 +427,13 @@ for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 
       `compl=pphr(p, …)` prepositions, nominalizations.
    3. *The evidence:* per WordNet adjective lemma, the attested prepositions — WordNet's `followed
       by` convention, which is per sense; SPECIALIST's complements and the curated frames, which are
-      per lemma — and the senses decision 7 places a per-lemma preposition on: the one sense; the
-      senses whose `+` pointer reaches a SPECIALIST nominalization; the rest listed for the judge.
-      The gloss heuristic speaks only for a lemma no source attests, and never names `as`.
+      per lemma — and the senses decision 7 places a per-lemma preposition on: the one sense; else
+      the judge's (decision 7 as revised). The gloss heuristic speaks only for a lemma no source
+      attests, and never names `as`.
    4. *The judge:* the lemma, the preposition with an example (`X is dependent on Y`), each sense's
       gloss and examples; per sense, whether the preposition fits, with a confidence. Validated on
-      the 160 lemmas the pointers decide, with the pointers hidden, and on the senses whose gloss
-      carries WordNet's convention; verdicts committed, the run resumable and closed on failure.
+      the senses whose gloss carries WordNet's convention (recall) and on a reviewed sample of its
+      placements (precision); verdicts committed, the run resumable and closed on failure.
    5. *The importer:* behind `--specialist`, per sense the prepositions placed, one relation each
       (`deg_{loc}_rel_{p}`; decision 6); an open item with no verdict stops the import; a
       preposition outside `lexicon:Prep` is counted in the report.

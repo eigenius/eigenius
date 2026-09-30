@@ -10,6 +10,7 @@ members = [
     "crates/eigenius-wordnet",
     "crates/eigenius-ncbi-gene",
     "crates/eigenius-umls",
+    "crates/eigenius-specialist",
     "crates/eigenius-lexicon-align",
     "crates/eigenius-encoding",
     "crates/eigenius-oci",

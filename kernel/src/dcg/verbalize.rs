@@ -325,7 +325,8 @@ fn is_false(e: &Exp) -> bool {
 /// The word for a sense atom: the unit's own lemma map first, then the concept's layer label
 /// (via `cui_label`), else the local name.
 fn name_atom(local: &str, vb: &Vb) -> String {
-    // Normalise: strip the `deg_`/`std_` adjective wrappers and any verb frame suffix (`_t`/`_i`/…).
+    // Normalise: strip the `deg_`/`std_` adjective wrappers and any suffix after the sense key — a
+    // verb frame (`_t`/`_i`/…) or a relational degree's `_rel` / `_rel_{p}`.
     let core = local
         .strip_prefix("deg_")
         .or_else(|| local.strip_prefix("std_"))
@@ -500,15 +501,17 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                 let (h1, a1) = app_spine(args[1]);
                 let l0 = axiom_local(h0);
                 if let (Some(d0), Some(d1)) = (l0, axiom_local(h1)) {
-                    if d0.ends_with("_rel") && d0 == d1 && a0.len() == 2 && a1.len() == 2 {
-                        let word = if local == "gt" { "more" } else { "less" };
-                        return format!(
-                            "{} is {word} {} on {} than {}",
-                            verbalize(a0[1], vb),
-                            name_atom(d0, vb),
-                            verbalize(a0[0], vb),
-                            verbalize(a1[1], vb)
-                        );
+                    if let Some(prep) = relational_degree_preposition(d0) {
+                        if d0 == d1 && a0.len() == 2 && a1.len() == 2 {
+                            let word = if local == "gt" { "more" } else { "less" };
+                            return format!(
+                                "{} is {word} {} {prep} {} than {}",
+                                verbalize(a0[1], vb),
+                                name_atom(d0, vb),
+                                verbalize(a0[0], vb),
+                                verbalize(a1[1], vb)
+                            );
+                        }
                     }
                 }
                 if let (Some(dl), Some(subj)) = (l0, a0.first()) {
@@ -773,6 +776,18 @@ fn factor_comparison(order: &Exp, fold: &Exp, vb: &Vb) -> Option<String> {
         _ => false,
     };
     agrees.then(|| verbalize(fold, vb))
+}
+
+/// The preposition a relational degree governs, from its atom: `deg_{loc}_rel_{p}` names `p`, one
+/// relation per preposition (eigenius#263, D97 decision 6); a bare `…_rel` is read with `on`, as
+/// before the preposition joined the name. `None` for any other atom.
+fn relational_degree_preposition(atom: &str) -> Option<&str> {
+    if atom.ends_with("_rel") {
+        return Some("on");
+    }
+    let (head, prep) = atom.rsplit_once('_')?;
+    (head.ends_with("_rel") && crate::dcg::category::prep_constructor(prep).is_some())
+        .then_some(prep)
 }
 
 /// The number of `T` a count comparative compares, as `(T, x, median)`: `card(T, x)`, or with its
@@ -1214,6 +1229,26 @@ fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
 #[cfg(test)]
 mod register_tests {
     use super::*;
+
+    /// eigenius#263 (D97 decision 6): a relational degree's atom carries its preposition, which the
+    /// comparative reads back; a bare `…_rel` keeps the `on` it was read with before.
+    #[test]
+    fn a_relational_degree_names_its_preposition() {
+        assert_eq!(
+            relational_degree_preposition("deg_a00725772_rel_on"),
+            Some("on")
+        );
+        assert_eq!(
+            relational_degree_preposition("deg_a00482049_rel_with"),
+            Some("with")
+        );
+        assert_eq!(
+            relational_degree_preposition("deg_dependent_rel"),
+            Some("on")
+        );
+        assert_eq!(relational_degree_preposition("deg_a00725772"), None);
+        assert_eq!(relational_degree_preposition("deg_a00725772_rel_xyz"), None);
+    }
     use crate::layer::{LayerBuilder, LayerStorage};
     use crate::nbe::term::Patt;
 

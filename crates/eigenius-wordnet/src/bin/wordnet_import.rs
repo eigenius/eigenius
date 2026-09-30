@@ -41,6 +41,7 @@ use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
 use eigenius_wordnet::convert::{render_document, render_sections, MassNouns, ESL_HEADER};
+use eigenius_wordnet::governance::{self, Governance, Placements};
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::wndb::Pos;
 
@@ -89,6 +90,55 @@ struct Args {
     /// ⇒ no mass marking (count-only, the prior behaviour).
     #[arg(long, default_value = "references/wiktionary/uncountable-nouns.txt")]
     countability: PathBuf,
+    /// **The SPECIALIST Lexicon** (D97): an adjective's governed prepositions are read from its
+    /// complements beside WordNet's own (eigenius#263). Required — `scripts/provision-specialist.sh`.
+    #[arg(long, default_value = "references/specialist/LEXICON")]
+    specialist: PathBuf,
+    /// The adjective sense judge's placements (D97 decision 7), committed: the senses a lemma-level
+    /// preposition goes on where the evidence does not decide. An open item it does not place stops
+    /// the import.
+    #[arg(
+        long,
+        default_value = "experiments/lexicon-specialist/adjective-senses.tsv"
+    )]
+    adjective_senses: PathBuf,
+}
+
+/// The adjectives' governed prepositions (eigenius#263): WordNet's, SPECIALIST's and the curated
+/// frames', placed on senses by the evidence and the judge's committed placements (D97 decision 7).
+/// A missing placements file is empty, so an open item stops the import there.
+fn load_governance(dict: &Path, specialist: &Path, senses: &Path) -> Result<Governance, String> {
+    let placements = if senses.exists() {
+        Placements::read(senses)?
+    } else {
+        eprintln!(
+            "adjective senses: {} not found — no judged placements",
+            senses.display()
+        );
+        Placements::default()
+    };
+    let (governance, counts) = governance::build(dict, specialist, &placements)?;
+    let (pairs, preps) = governance.totals();
+    eprintln!(
+        "governed prepositions: {} adjective lemmas attested by SPECIALIST or the curated frames, \
+         {} items in lexicon:Prep — {} on the one sense, {} placed by the judge ({} of them gaps, on \
+         no sense; {} placements read); {} items on lemmas with no gradable sense; outside lexicon:Prep, not placed: {:?}; \
+         {} (sense, lemma) pairs carry {} prepositions ({} from WordNet's convention, {} from the \
+         gloss heuristic)",
+        counts.lemmas_attested,
+        counts.items,
+        counts.one_sense,
+        governance.judged,
+        governance.gaps,
+        placements.len(),
+        counts.no_gradable_sense,
+        counts.outside,
+        pairs,
+        preps,
+        counts.convention_senses,
+        counts.heuristic_senses,
+    );
+    Ok(governance)
 }
 
 /// Load the countability lexicon (one lemma per line; `#`/blank ignored), lowercased. A missing
@@ -161,14 +211,21 @@ fn main() -> ExitCode {
     // is non-fatal (ranks default 0).
     let ranks = read_sense_ranks(&args.dict, &spec.pos).unwrap_or_default();
     let mass = load_countability(&args.countability);
+    let governance = match load_governance(&args.dict, &args.specialist, &args.adjective_senses) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("error: governed prepositions: {e}");
+            return ExitCode::from(2);
+        }
+    };
 
     // Partitioned emit: a base layer (descriptor + all synset classes/axioms) + entry
     // batches, each under the size cap. The single-document path stays for small imports.
     if let Some(dir) = &args.out_dir {
-        return emit_partitioned(&chosen, &ranks, &mass, dir, args.split_bytes);
+        return emit_partitioned(&chosen, &ranks, &mass, &governance, dir, args.split_bytes);
     }
 
-    let (doc, rep) = render_document(&chosen, &ranks, &mass);
+    let (doc, rep) = render_document(&chosen, &ranks, &mass, &governance);
     eprintln!(
         "wordnet import: {} synsets selected → {} noun classes, {} instances, {} verb axioms, \
          {} adj axioms, {} entries ({} of them ger/pss participle forms) \
@@ -231,6 +288,7 @@ fn emit_partitioned(
     synsets: &[eigenius_wordnet::wndb::Synset],
     ranks: &eigenius_wordnet::convert::SenseRanks,
     mass: &MassNouns,
+    governance: &Governance,
     dir: &Path,
     split_bytes: usize,
 ) -> ExitCode {
@@ -239,7 +297,7 @@ fn emit_partitioned(
         return ExitCode::from(1);
     }
 
-    let (base, entries, rep) = render_sections(synsets, ranks, mass);
+    let (base, entries, rep) = render_sections(synsets, ranks, mass, governance);
 
     let mut files: Vec<PathBuf> = Vec::new();
     let base_path = dir.join("wordnet-000-base.esl");

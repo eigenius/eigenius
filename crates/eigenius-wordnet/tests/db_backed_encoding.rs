@@ -1309,7 +1309,7 @@ fn verify_governed_preposition_at_scale() {
         let mut rels: Vec<String> = c
             .iter()
             .map(|it| pretty_term(it.sem()))
-            .filter(|t| t.contains("_rel("))
+            .filter(|t| t.contains("_rel(") || t.contains("_rel_"))
             .collect();
         rels.sort();
         rels.dedup();

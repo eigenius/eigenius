@@ -20,6 +20,12 @@ any detour.
 > = WordNet's convention ∪ SPECIALIST's complements ∪ the curated frames (`scripts/provision-specialist.sh`,
 > D97), with attested ∪ the heuristic's first match as the loss-free interim. It lands with a reseed and
 > re-adjudicated pins (`… predictive of MMR deficiency`).
+> **#263 built (`2026-09-30`):** D97 decisions 6 and 7 decided for adjectives (7 revised the same day:
+> the judge places every multi-sense item; below-threshold yes votes place, a no to every sense is a
+> gap); the reader (`crates/eigenius-specialist`), the governance table (`eigenius-wordnet`,
+> `governance.rs`), the judge (`specialist-senses`: gold recall 45/45, precision sample 39/40, 1
+> unclear), one relation per preposition (`deg_{loc}_rel_{p}`). The import: 4,117 → 7,033 relational
+> adjective entries, `of` 0 → 1,003. **Next:** the reseed and its measurement.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change
