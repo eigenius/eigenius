@@ -154,6 +154,14 @@ baseline gates the grammar+lexicon (the produced forest), the selection baseline
 `invalid-selected == 0` (the ranker has **no kernel veto** — every candidate type-checks — so the
 ledger and the validity check are its controls).
 
+The ledger is checked before it scores (2026-09-30). Each `wrong` row names what it rules out in a
+fifth field (`structure`, `sense <atom>…`), and a `correct` row whose structure differs from its pin
+says `departs`. The `reading_ledger_is_consistent` test, and the sweep before it scores, reject a
+`correct` row that holds a structure or an atom that a `wrong` row of the same sentence rules out.
+The sweep also audits every ledger row its forest produces: a `correct` row off its pin without
+`departs` is a `LEDGER-CONFLICT`, counted in `ledger-conflicts` (gated to 0) and, when chosen, in
+`reading-conflict` rather than `reading-correct`. The ledger header has the field's grammar.
+
 Arms, mirroring the ranks discipline:
 
 ```bash

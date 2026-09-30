@@ -146,9 +146,12 @@ fi
 # the tracked replay, else the number is not a measurement). STRUCTURE diagnostic (reported, not
 # gated): structure-correct = chosen skeleton == the grammar pin, over `curated` chosen units.
 # invalid-selected = chosen skeleton is `invalid`-adjudicated (must be 0 — gated below).
+# LEDGER audit: ledger-conflicts = `correct` ledger rows whose reading the forest produces but whose
+# structure is not the pin and not marked `departs`, over ledger-produced rows (must be 0 — gated
+# below). reading-conflict = chosen readings on such a row; they count as neither correct nor wrong.
 SELSUM="$(grep -m1 -E '^=== SELECTION' "$LOG" || true)"
 SEL_RANKER=""; SEL_ELIG=""; SEL_CHOSE=""; SEL_ABST=""; SEL_INV=""
-SEL_RC=""; SEL_RW=""; SEL_RU=""; SEL_SC=""; SEL_CUR=""
+SEL_RC=""; SEL_RW=""; SEL_RU=""; SEL_SC=""; SEL_CUR=""; SEL_RX=""; SEL_LP=""; SEL_LC=""
 if [[ -n "$SELSUM" ]]; then
   SEL_RANKER="$(sed -E 's/^=== SELECTION \(([^)]*)\).*/\1/' <<<"$SELSUM")"
   SEL_ELIG=$(field 'eligible'  "$SELSUM"); [[ "$SEL_ELIG" =~ ^[0-9]+$ ]] || SEL_ELIG=""
@@ -160,12 +163,16 @@ if [[ -n "$SELSUM" ]]; then
   SEL_SC=$(field 'structure-correct' "$SELSUM");      [[ "$SEL_SC" =~ ^[0-9]+$ ]] || SEL_SC=""
   SEL_CUR=$(field 'curated'    "$SELSUM"); [[ "$SEL_CUR" =~ ^[0-9]+$ ]] || SEL_CUR=""
   SEL_INV=$(field 'invalid-selected' "$SELSUM"); [[ "$SEL_INV" =~ ^[0-9]+$ ]] || SEL_INV=""
+  SEL_RX=$(field 'reading-conflict' "$SELSUM");  [[ "$SEL_RX" =~ ^[0-9]+$ ]] || SEL_RX=""
+  SEL_LP=$(field 'ledger-produced' "$SELSUM");   [[ "$SEL_LP" =~ ^[0-9]+$ ]] || SEL_LP=""
+  SEL_LC=$(field 'ledger-conflicts' "$SELSUM");  [[ "$SEL_LC" =~ ^[0-9]+$ ]] || SEL_LC=""
   echo "  SELECTION ($SEL_RANKER): chose $SEL_CHOSE of $SEL_ELIG eligible (abstained $SEL_ABST)"
   if [[ -n "$SEL_RC" ]]; then
-    echo "    reading-level:  $SEL_RC correct, $SEL_RW wrong, $SEL_RU unadjudicated (the gated metric)"
+    echo "    reading-level:  $SEL_RC correct, $SEL_RW wrong, $SEL_RU unadjudicated${SEL_RX:+, $SEL_RX conflicting} (the gated metric)"
   fi
   [[ -n "$SEL_SC" ]] && echo "    structure:      $SEL_SC/$SEL_CUR in the pinned bracketing (diagnostic)"
   echo "    invalid-selected $SEL_INV"
+  [[ -n "$SEL_LC" ]] && echo "    ledger audit:   $SEL_LC conflicting of $SEL_LP rows the forest produces"
   echo
 fi
 
@@ -196,6 +203,18 @@ if [[ -n "$SEL_INV" ]]; then
     echo "  SELECTION-VALIDITY: PASS — no invalid-adjudicated skeleton was selected."
   else
     echo "  SELECTION-VALIDITY: FAIL — $SEL_INV selection(s) chose an invalid-adjudicated skeleton."
+    RC=2
+  fi
+fi
+
+# ── Ledger gate: a `correct` row the forest produces must have the pin's structure ───
+# (or say `departs`). A reading whose structure differs from its pin cannot count as correct, so a
+# conflicting row makes `reading-correct` a count of whichever ruling a draw happens to hit.
+if [[ -n "$SEL_LC" ]]; then
+  if [[ "$SEL_LC" -eq 0 ]]; then
+    echo "  LEDGER: PASS — no produced \`correct\` row contradicts its pin ($SEL_LP rows produced)."
+  else
+    echo "  LEDGER: FAIL — $SEL_LC produced \`correct\` row(s) contradict their pin (LEDGER-CONFLICT lines)."
     RC=2
   fi
 fi
