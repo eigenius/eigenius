@@ -625,3 +625,61 @@ resource corpus:cancers_n : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "cancers";
 }
+
+// Slice 8 rows: offsets, a deadline, a period, pseudo-partitives, fronted adjuncts.
+class corpus:Level : lexicon:Entity { }
+resource corpus:levels_n : lexicon:LexicalEntry {
+    lexicon:form     = "levels";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Level, lexicon:pl) );
+    lexicon:sem      = corpus:Level;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "levels";
+}
+axiom corpus:v90000042_i : lexicon:Entity -> Prop
+resource corpus:recovered_v : lexicon:LexicalEntry {
+    lexicon:form     = "recovered";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000042_i;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:recover.v.90000042";
+}
+class corpus:Collection : lexicon:Entity { }
+resource corpus:collection_n : lexicon:LexicalEntry {
+    lexicon:form     = "collection";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Collection, lexicon:mass) );
+    lexicon:sem      = corpus:Collection;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "collection";
+}
+axiom corpus:v90000043_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:split_v : lexicon:LexicalEntry {
+    lexicon:form     = "split";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000043_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:split.v.90000043";
+}
+class corpus:Treatment : lexicon:Entity { }
+resource corpus:treatment_n : lexicon:LexicalEntry {
+    lexicon:form     = "treatment";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Treatment, lexicon:mass) );
+    lexicon:sem      = corpus:Treatment;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "treatment";
+}
+axiom corpus:v90000044_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:assayed_v : lexicon:LexicalEntry {
+    lexicon:form     = "assayed";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000044_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:assay.v.90000044";
+}
+class corpus:Selection : lexicon:Entity { }
+resource corpus:selection_n : lexicon:LexicalEntry {
+    lexicon:form     = "selection";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Selection, lexicon:mass) );
+    lexicon:sem      = corpus:Selection;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "selection";
+}

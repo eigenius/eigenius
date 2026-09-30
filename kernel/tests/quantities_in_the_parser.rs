@@ -152,6 +152,15 @@ resource lexicon:colon_n : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "colon";
 }
+// Slice 8: the event an offset is measured from.
+class lexicon:Transduction : lexicon:Entity { }
+resource lexicon:transduction_n : lexicon:LexicalEntry {
+    lexicon:form     = "transduction";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Transduction, lexicon:mass) );
+    lexicon:sem      = lexicon:Transduction;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "transduction";
+}
 class lexicon:Temperature : lexicon:Entity { }
 resource lexicon:temperature_n : lexicon:LexicalEntry {
     lexicon:form     = "temperature";
@@ -372,6 +381,11 @@ fn packed_equals_unpacked_on_quantities() {
         "HeLa received five MSS MSI and five MSI cell lines",
         "five MSS and five MSI cell lines of HeLa incubated",
         "15% of MSS, 22% of MSI and 30% of colon cells incubated",
+        "HeLa incubated 72 h after transduction",
+        "72 h after transduction, HeLa incubated",
+        "HeLa incubated every 2–3 days",
+        "HeLa received 5 mg of etoposide",
+        "HeLa incubated by three weeks",
     ] {
         assert_eq!(readings(&packed, text), readings(&unpacked, text), "{text}");
     }
@@ -396,8 +410,9 @@ fn measure_phrases<'e>(cat: &'e Exp, out: &mut Vec<&'e [Exp]>) {
 /// Decision 5: every closed-class consumer of a measure phrase names the reading it takes. One
 /// whose reading were a variable would take the value and the difference items alike, and
 /// `at 37 °C` would be 310.15 K and 37 K at once. The 33 prepositions of slice 5, the 18 word-marker
-/// entries of slice 6a, the 19 symbol entries of 6b, the 8 postfix entries of 6d, and `half` and the
-/// two partitive `of`s of 7c take values.
+/// entries of slice 6a, the 19 symbol entries of 6b, the 8 postfix entries of 6d, `half` and the two
+/// partitive `of`s of 7c, and slice 8's 21 offsets, 6 `later`, 6 `by`, 6 `every` and 6
+/// pseudo-partitive `of`s take values.
 #[test]
 fn every_consumer_names_its_reading() {
     let ctx = eigenius_kernel::testing::bootstrap_context();
@@ -424,7 +439,7 @@ fn every_consumer_names_its_reading() {
             }
         }
     }
-    assert_eq!(readings.len(), 81, "{readings:?}");
+    assert_eq!(readings.len(), 126, "{readings:?}");
     assert!(readings.iter().all(|r| r == "value"), "{readings:?}");
 }
 
@@ -635,21 +650,28 @@ fn every_measure_consumer_takes_a_constraint() {
     let point = Item::new(measure("cat_mp"), Exp::Var("q".into()));
     let bound = Item::new(measure("cat_mpc"), Exp::Var("c".into()));
     let entry = Iri::parse("urn:eigenius:lexicon:LexicalEntry").unwrap();
-    let mut consumers = 0;
+    // A consumer takes the measure phrase on its right (a preposition) or on its left (a postfix
+    // bound, an offset, `later`).
+    let (mut forward, mut backward) = (0, 0);
     for (iri, r) in layer.iter_resources() {
         if !r.is_instance_of(&entry) {
             continue;
         }
         let consumer = entry_to_item(head, &r).unwrap_or_else(|e| panic!("{iri}: {e}"));
-        let Some(with_point) = apply(&consumer, &point, head, RightContext::Other) else {
-            continue;
-        };
-        let with_bound = apply(&consumer, &bound, head, RightContext::Other)
-            .unwrap_or_else(|| panic!("{iri} takes 37 K and no bound in K"));
-        assert_eq!(with_bound.cat(), with_point.cat(), "{iri}");
-        consumers += 1;
+        if let Some(with_point) = apply(&consumer, &point, head, RightContext::Other) {
+            let with_bound = apply(&consumer, &bound, head, RightContext::Other)
+                .unwrap_or_else(|| panic!("{iri} takes 37 K and no bound in K"));
+            assert_eq!(with_bound.cat(), with_point.cat(), "{iri}");
+            forward += 1;
+        }
+        if let Some(with_point) = apply(&point, &consumer, head, RightContext::Other) {
+            let with_bound = apply(&bound, &consumer, head, RightContext::Other)
+                .unwrap_or_else(|| panic!("{iri} takes 37 K on its left and no bound in K"));
+            assert_eq!(with_bound.cat(), with_point.cat(), "{iri}");
+            backward += 1;
+        }
     }
-    assert_eq!(consumers, 70);
+    assert_eq!((forward, backward), (82, 35));
 }
 
 /// Slice 6a: a bound verbalizes as its words where the quantity would have rendered — after a
@@ -1333,4 +1355,153 @@ fn counted_conjuncts_share_their_head() {
     }
     // A single composed determiner does not apply to a head: `five MSS cell lines` reads once.
     assert_eq!(readings(&parser, "five MSS cell lines incubated").len(), 1);
+}
+
+/// Slice 8a, decisions 1–3: an offset is a measure phrase a temporal preposition takes on its left
+/// (`72 h after transduction`), bounded as any value is; `post` is `after`; `later` is `after` an
+/// understood time; `by` with a value is a deadline.
+#[test]
+fn an_offset_is_a_measure_phrase_before_a_preposition() {
+    let parser = Parser::build(layer());
+    for (text, relation, value) in [
+        (
+            "HeLa incubated 72 h after transduction",
+            "prep_after_offset",
+            "numer: 259200, denom: 1",
+        ),
+        (
+            "HeLa incubated 6 h before transduction",
+            "prep_before_offset",
+            "numer: 21600, denom: 1",
+        ),
+        (
+            "HeLa incubated 4 days post transduction",
+            "prep_after_offset",
+            "numer: 345600, denom: 1",
+        ),
+        (
+            "HeLa incubated about 72 h after transduction",
+            "prep_after_offset",
+            "numer: 259200, denom: 1",
+        ),
+        (
+            "HeLa incubated 2 days later",
+            "prep_after_value",
+            "numer: 172800, denom: 1",
+        ),
+        (
+            "HeLa incubated by three weeks",
+            "prep_by_value",
+            "numer: 1814400, denom: 1",
+        ),
+    ] {
+        let r = readings(&parser, text);
+        assert_eq!(r.len(), 1, "{text}: {r:#?}");
+        assert!(
+            r[0].contains(&format!("ontology:{relation}\"")) && r[0].contains(value),
+            "{text}: {r:#?}"
+        );
+    }
+    let r = readings(&parser, "HeLa incubated about 72 h after transduction");
+    assert!(r[0].contains("units:approx\""), "{r:#?}");
+    assert!(r[0].contains("lexicon:Transduction"), "{r:#?}");
+}
+
+/// Slice 8a, decision 4: at the start of a sentence a VP adjunct modifies the subject, after a comma
+/// or without one — the reading the adjunct gives after the verb.
+#[test]
+fn a_fronted_adjunct_modifies_the_subject() {
+    let parser = Parser::build(layer());
+    for (fronted, after_the_verb) in [
+        ("After 72 h, HeLa incubated", "HeLa incubated after 72 h"),
+        (
+            "72 h after transduction, HeLa incubated",
+            "HeLa incubated 72 h after transduction",
+        ),
+        ("At 37 °C, HeLa incubated", "HeLa incubated at 37 °C"),
+        (
+            "After transduction HeLa incubated",
+            "HeLa incubated after transduction",
+        ),
+        (
+            "Every 3 days, two cells incubated",
+            "two cells incubated every 3 days",
+        ),
+    ] {
+        let a = parser.parse(fronted, &Identity);
+        let b = parser.parse(after_the_verb, &Identity);
+        assert_eq!((a.len(), b.len()), (1, 1), "{fronted} / {after_the_verb}");
+        assert_eq!(
+            pretty_term(a[0].sem()),
+            pretty_term(b[0].sem()),
+            "{fronted} / {after_the_verb}"
+        );
+    }
+    // Only at the start: an adjunct inside the sentence does not take the subject after it.
+    assert!(readings(&parser, "HeLa received after 72 h two cells").is_empty());
+}
+
+/// Slice 8b, decision 5: `every N unit` is the period of a repeated procedure, `every_period(x, u,
+/// q)`; a range is a constraint on it.
+#[test]
+fn every_n_unit_is_a_period() {
+    let parser = Parser::build(layer());
+    let r = readings(&parser, "HeLa incubated every 3 days");
+    assert_eq!(r.len(), 1, "{r:#?}");
+    assert!(
+        r[0].contains("ontology:every_period\"") && r[0].contains("numer: 259200, denom: 1"),
+        "{r:#?}"
+    );
+    let r = readings(&parser, "HeLa incubated every 2–3 days");
+    assert_eq!(r.len(), 1, "{r:#?}");
+    assert!(
+        r[0].contains("ontology:every_period\"")
+            && r[0].matches("urn:eigenius:units:le\"").count() == 2,
+        "{r:#?}"
+    );
+}
+
+/// Slice 8c, decision 6: a pseudo-partitive states an amount of the noun's stuff, as the prenominal
+/// measure phrase does, in each dimension that measures one; a percentage stays the partitive's
+/// proportion.
+#[test]
+fn a_pseudo_partitive_measures_the_noun() {
+    let parser = Parser::build(layer());
+    for (text, prenominal, value) in [
+        (
+            "HeLa received 5 mg of etoposide",
+            "HeLa received 5 mg etoposide",
+            "numer: 1, denom: 200000",
+        ),
+        (
+            "HeLa received 10 μM of etoposide",
+            "HeLa received 10 μM etoposide",
+            "numer: 1, denom: 100",
+        ),
+        (
+            "HeLa received 50 μl of etoposide",
+            "HeLa received 50 μl etoposide",
+            "numer: 1, denom: 20000000",
+        ),
+        (
+            "HeLa received 2 h of transduction",
+            "HeLa received 2 h transduction",
+            "numer: 7200, denom: 1",
+        ),
+    ] {
+        let a = readings(&parser, text);
+        let b = readings(&parser, prenominal);
+        assert_eq!(a.len(), 1, "{text}: {a:#?}");
+        assert_eq!(a, b, "{text} / {prenominal}");
+        assert!(
+            a[0].contains("ontology:has_quantity\"") && a[0].contains(value),
+            "{text}: {a:#?}"
+        );
+    }
+    let r = readings(&parser, "15% of etoposide incubated");
+    assert_eq!(r.len(), 1, "{r:#?}");
+    assert!(
+        r[0].contains("ontology:has_proportion\"") && !r[0].contains("has_quantity"),
+        "{r:#?}"
+    );
 }

@@ -92,8 +92,10 @@ axiom ontology:prep_by      : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_without : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_among   : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_beyond  : lexicon:Entity -> lexicon:Entity -> Prop
-// `after` joined the closed class in D95 slice 5, with its measured-value sibling below.
+// `after` joined the closed class in D95 slice 5, with its measured-value sibling below; `before` in
+// slice 8a, with the offsets (`72 h after transduction`). `post` is `after`, with its relations.
 axiom ontology:prep_after   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_before  : lexicon:Entity -> lexicon:Entity -> Prop
 
 // ── Prepositions over a measured value (D95 slice 5) ──────────────────────────
 // `prep_X_value(s, u, q)`: the predication or entity s stands in the prepositional relation to the
@@ -108,6 +110,17 @@ axiom ontology:prep_in_value    : lexicon:Entity -> forall (u : core:unit) => un
 axiom ontology:prep_with_value  : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
 axiom ontology:prep_after_value : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
 axiom ontology:prep_of_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `prep_by_value(x, u, q)`: x by the time the value q is reached, a deadline — `recovered by three
+// weeks` (D95 slice 8a, decision 3).
+axiom ontology:prep_by_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `prep_after_offset(x, y, u, q)`: x after y by the interval q — `purified 72 h after transduction`;
+// `prep_before_offset` likewise before (D95 slice 8a, decision 1).
+axiom ontology:prep_after_offset  : lexicon:Entity -> lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_before_offset : lexicon:Entity -> lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `every_period(x, u, q)`: x recurs with the period q — `changed every 3 days` (D95, "`every N unit`";
+// slice 8b). Opaque, as the PP adjuncts are: no event variable, and the periodicity is the
+// institution's to interpret.
+axiom ontology:every_period     : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
 // `has_quantity(x, u, q)`: the entity x has the measured value q — the prenominal measure phrase
 // ("10 μM etoposide" → Σx:etoposide. has_quantity(x, …)) and the predicative one ("the temperature
 // was 37 °C"). Which quantity of x it is (a concentration, a temperature) the parse does not say.

@@ -28,15 +28,15 @@ The cells were electroporated with 50 ng plasmid.	prep_with has_quantity	1/20000
 The temperature was 37 °C.	has_quantity	6203/20 K	D95: the temperature was 37 °C
 The concentration was 10 μM.	has_quantity	1/100 m^-3·mol	CNL: a predicated concentration
 The medium was replaced after 24 h.	prep_after_value	86400 s	methods: After 24 h, the medium was replaced
-After 24 h, the medium was replaced.	gap	a fronted PP adjunct: no parse for NP objects either (`After the dose, …`); not D95	methods: After 24 h, the medium was replaced
-The RNA was purified 72 h after transduction.	gap	a measure phrase modifying a PP (`72 h after X`): slice 8	methods: RNA was purified 72 h after transduction
-The cells were treated with 10 μg ml⁻¹ of colcemid.	gap	a pseudo-partitive (`MP of N`): slice 8	methods: treated with 10 ml of colcemid (OCR lost μg)
-The medium was changed every 3 days.	gap	`every N unit`: slice 8	methods: changed every 3 days
+After 24 h, the medium was replaced.	prep_after_value	86400 s	methods: After 24 h, the medium was replaced
+The RNA was purified 72 h after transduction.	prep_after_offset	259200 s after	methods: RNA was purified 72 h after transduction
+The cells were treated with 10 μg ml⁻¹ of colcemid.	prep_with has_quantity	1/100 m^-3·kg	methods: treated with 10 ml of colcemid (OCR lost μg)
+The medium was changed every 3 days.	every_period	every 259200 s	methods: changed every 3 days
 The lysates were fractionated in 4–12% gels.	prep_in has_quantity	from 1/25 to 3/25	methods: fractionated in 4–12% Bis-Tris gels
 The cells reached 80–90% confluence.	has_quantity	from 4/5 to 9/10	methods: when the cells reached 80–90% confluence
 The tumours reached a volume of approximately 100 mm³.	prep_of_value	about 1/10000000 m^3	methods: when primary tumours reached around 100 mm3
 The infection efficiency was >90%.	has_quantity	more than 9/10	methods: predetermined to achieve >90% infection efficiency
-The medium was changed every 2–3 days.	gap	`every N unit` over a range: slice 8	methods: media was refreshed every 2–3 days
+The medium was changed every 2–3 days.	every_period	from 172800 s to 259200 s	methods: media was refreshed every 2–3 days
 Three sgRNAs were validated.	has_count	3 	results: we validated three sgRNAs targeting WRN
 The cells lost more than one MMR gene.	has_count	more than 1	figure legend: loss of more than one MMR gene
 The cells showed 4–7 foci.	has_count	from 4 to 7	figure: 4-7 foci
@@ -46,3 +46,10 @@ The cells were evaluated with an eight-day viability assay.	prep_with has_quanti
 None of the four other RecQ helicases were essential.	has_proportion the_count	0 of the 4	results: none of the four other RecQ DNA helicases were preferentially essential in MSI cell lines
 Knockout was evaluated in five MSS and five MSI cell lines.	prep_in has_count	5 	results: evaluated WRN knockout in five MSS and five MSI cell lines
 MSI occurs in 15% of colon, 22% of gastric, 20–30% of endometrial and 12% of ovarian cancers.	prep_in has_proportion	3/20 of;11/50 of;3/25 of	introduction (manuscript): predominantly 15% of colon, 22% of gastric, 20–30% of endometrial, and 12% of ovarian cancers
+The cells were fixed 2 days later.	prep_after_value	172800 s	methods: Cells were fixed and stained 2 days later
+The levels recovered by three weeks.	prep_by_value	1814400 s	results: WRN levels recovered by three weeks
+The cells were treated 6 h before collection.	prep_before_offset	21600 s before	methods: treated with 10 uM etoposide and 1 mM hydroxyurea, respectively, 6 h before collection
+The cells were split 4 days post transduction.	prep_after_offset	345600 s after	methods (manuscript): Cells were split 4 days post transduction
+Nine days after doxycycline treatment, cell viability was assayed.	prep_after_offset	777600 s after	methods: Nine days after doxycycline treatment, cell viability was assayed
+The cells were treated with 0.2 μg/ml of doxycycline.	prep_with has_quantity	1/5000 m^-3·kg	methods (manuscript): All in vitro experiments used 0.2 µg/mL of doxycycline
+After 24 h of puromycin selection, the cells were harvested.	prep_after has_quantity	86400 s	methods: After 24 h of puromycin selection, lentivirally infected cells were …

@@ -212,6 +212,8 @@ equality: the kernel has `Id`, but the term encoder never produces it.
 | The WordNet importer reads frame 13 (`----s on something`) as transitive | D97 | D97 slice 2 |
 | In a cap-only run, a lower-ranked right sense never enters if a wrong reading parses (the sense cap widens only on no parse): `increased` | claims README | the reranked run |
 | ~~A hyphenated prenominal measure (`an 8-day viability assay`) is a missing lexeme~~ — fixed, D95 slice 7d decision 12 (`8-day`, `eight-day`) | docs/06; claims README | D95 slice 7d |
+| `the` has no entry for a mass noun: `The viability was assayed.` has no parse, `Viability was assayed.` does | D95 plan, 8a–8c note; CNL guide DON'T row | the determiner inventory (D62/D63) |
+| A preposition with a gerund clause as its object (`96 h after adding doxycycline`) | D95 plan, slice 8 | not assigned |
 | `all` has no collective reading; relative `where` and `whose`; `expose X as Y`; `greater colocalization … than` | claims README | grammar; the last one D97 decision 4 |
 | A governed preposition does not reach the meaning (`contributes to`) | D97 decision 6 | D97 |
 | `Project DRIVE` reads as `a project drive` where `Project Achilles` reads as a name | claims README | not assigned |

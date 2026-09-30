@@ -886,21 +886,109 @@ before parsing (the preprocessor's decision 1); summing its parts to the whole i
 
 ## Slice 8 — positions a measure phrase takes
 
-- **Before a PP** (20 [8]): `9 days after shRNA induction`, `6 h before collection`, `Nine days
-  after doxycycline treatment`, `Seven days post-transduction`. Fronted, as in `2 days after
-  lentiviral transduction, cells were seeded`, it also needs the fronted PP adjunct, a gap without
-  quantities (`After the dose, …`).
-- **Measure phrases sharing a unit** (1 [1]): `Four and seven days after the lentiviral
-  transduction` — two values, one unit, as the counted conjuncts of 7d share one head.
-- **`by` with a measure phrase** (1 [1]): `WRN levels recovered by three weeks`.
-- **A verb's object**: `reached ~100 mm3`, `reached 80–90% confluence`, `used 0.2 µg/mL of
-  doxycycline`, `genes that had less than one count per million`.
-- **Pseudo-partitive** (5 [12]): `300 µl of CellTiter-Glo`, `0.2 µg/mL of doxycycline`.
-- **`every N unit`** (5 [5]): D95's category and opaque `every_period` sem ("`every N unit` —
-  category decided").
-- **Rates**: `per` before a count noun distributes (`2 × 10³ cells per well`: for each well), and
-  `count per million` is number notation like `ppm`, which D93 records as 10⁻⁶ at the dimensionless
-  unit and nothing reads yet.
+**The paper's shapes** (both versions, running text unless marked; surveyed 2026-09-29):
+
+| Shape | Instances |
+|---|---|
+| a measure phrase before a PP, after the verb | `RNA was purified 72 h after transduction`, `Cells were split 4 days after transduction` (manuscript: `4 days post transduction`), `treated … 6 h before collection`, `Cells were fixed and stained 2 days later` |
+| the same, fronted | `Nine days after doxycycline treatment, cell viability was assayed`, `2 days after lentiviral transduction, cells were seeded`, `24 hours post infection, cells were split`, `24 hours later, medium was replaced`, `Seven days post-transduction, cells were harvested`, `Then, 7 days after transduction, cells were collected`, `96 h after adding doxycycline, cells were treated` |
+| a fronted PP, any object | 37 [30]: `After 24 h, the medium was replaced`, `After hygromycin selection, these two versions …`, `For immunoblotting, cells were lysed …`, `In contrast, …` |
+| `by` + a measure phrase | `WRN levels recovered by three weeks` |
+| `every N unit` | `changed every 3 days`, `refreshed every 2–3 days`, `every 3–4 days`, `refreshed every 48 h`, `every 3 days thereafter` |
+| a pseudo-partitive | `adding 300 µl of CellTiter-Glo`, `used 0.2 µg/mL of doxycycline`, `treated with 10 ug/ml of colcemid`, `resuspended in 100 µL of fixative`, `After 24 h of puromycin selection`, `After ~5 minutes of incubation` |
+| a measure phrase as a verb's object | `the primary tumours reached ~100 mm3` (both versions) |
+| `per` | `at least 1,000 cells per sample were scored`, `one mouse per time point was …`, `at 33 µl per well`, `250 µl per well of 0.1% crystal violet`, `genes that had less than one count per million`; figure labels (`foci per cell`) |
+| measure phrases sharing a unit | `Four and seven days after the lentiviral transduction, cells were labeled` (manuscript) |
+
+**Decisions** (2026-09-29)
+
+1. **An offset is a measure phrase a temporal preposition takes on its left.** `after`, `before` and
+   `post` gain, for each finiteness, `cat_unit_forall(λu. (((S\NP)\(S\NP))/NP) \ cat_mp(u,
+   value))`, sem `λu.λq.λy.λV.λx. And(V(x), prep_after_offset(x, y, u, q))`: `72 h after
+   transduction`, x was 72 h after y. The measure phrase is consumed first, by
+   `unit_application_backward` (6d); a bound or an approximation on it (`about 6 h before`) by
+   `unit_constraint_backward` (7c). A noun-modifier form (`cat_pp`) as each preposition has one.
+   - *Rejected:* the measure phrase modifying the finished PP (`PP/PP`). The offset belongs in the
+     preposition's relation, which a modifier outside the PP cannot reach; a shift would duplicate the
+     preposition's own readings (D95, "Consumers subcategorise").
+   - `post` is `after` (`post infection`): its entries use `after`'s relations. `before` is new to the
+     closed class, with the NP-object entries `after` has and the offset. `post-transduction`, one
+     hyphenated token, is not split; the CNL writes `post transduction`.
+2. **`later` takes a measure phrase on its left**: `2 days later` is `after 2 days`, relation
+   `prep_after_value`.
+3. **`by` with a measured value is a deadline**: `recovered by three weeks`, a VP adjunct over
+   `prep_by_value(x, u, q)`, for each finiteness. D95's objection to `prep_by` concerns a
+   differential `by` on an adjective; this entry does not lower to `prep_by(x, y)`, and the passive
+   `by` takes a noun phrase, so the two do not compete.
+4. **A fronted VP adjunct modifies the subject.** At the start of a sentence a finite VP adjunct
+   `(S\NP)\(S\NP)` shifts to `(S/(S\NP)) / (S/(S\NP))`, sem `λQ.λV. Q(λx. P(V)(x))`, absorbs the
+   comma after it as a fronted `S/S` does, and applies to the subject: `After 24 h, the medium was
+   replaced` is `the medium was replaced after 24 h`. The subject's type, number and finiteness are
+   variables the subject binds.
+   - *Rejected:* `S/S` with the subject a referent hole, the fronted participial's shape: every such
+     sentence would parse open, and a hole resolves only to an earlier sentence's referents.
+   - One fronted adjunct: in `Then, 7 days after transduction, cells were collected` the second
+     comma is not sentence-initial, and a comma elsewhere is a list separator.
+5. **`every N unit` is D95's category and relation**, with the unit: `cat_unit_forall(λu.
+   ((S\NP)\(S\NP))/cat_mp(u, value))` for each finiteness, sem `λu.λq.λV.λx. And(V(x),
+   every_period(x, u, q))`. A range is a constraint on the period: `every 2–3 days`.
+6. **A pseudo-partitive states an amount of the noun's stuff**, as a prenominal measure phrase does:
+   `300 µl of CellTiter-Glo` is `300 µl CellTiter-Glo`. `of` takes the measure phrase on its left and
+   yields the predicative item a quantity seeds, `S[adj]\NP` with `λx. has_quantity(x, u, q)`, which
+   the modifier lift makes prenominal. One entry per dimension that measures an amount of stuff or of
+   an activity: volume, mass, amount of substance, mass concentration, amount concentration, time.
+   - *Rejected:* one unit-polymorphic entry. It takes a percentage too, and `15% of colon cancers`
+     would gain a second reading, cancers measuring 15%, beside the proportion (7c).
+7. **A bare measure phrase as a verb's object is not built.** D95 decided that consumers
+   subcategorise; the imported verbs take noun phrases, and a shift from a measure phrase to a noun
+   phrase would give every preposition over a measured value a second reading. The CNL names the
+   quantity: `reached a volume of about 100 mm³`. Verb frames that take a quantity come with D97.
+8. **`per` after a counted noun phrase distributes**: `at least 1,000 cells per sample were scored` is
+   `∀s:Sample. ∃q. 1000 ≤ q ∧ has_count(Cell, λc. And(prep_per(c, s), scored(c)), q)`. `per` takes a
+   bare singular noun on its right and a quantifier on its left, subject and object forms:
+   `λY.λQ.λV. ∀y:Y. Q(λx. And(prep_per(x, y), V(x)))`. `ontology:prep_per` is polymorphic in `y`'s
+   type, so a refined noun (`per time point`) types.
+   - Not built: a measure phrase per noun (`at 33 µl per well`), a rate over a counting noun, which
+     needs the portion each well receives as an entity; the CNL writes `each well received 33 µl of
+     CellTiter-Glo`. `count per million`, number notation like `ppm` (D93), reaches its sentence only
+     as a verb's object (`had less than one count per million`), which decision 7 leaves out.
+9. **Measure phrases sharing a unit coordinate as a quantifier over the consumer's slot.** The
+   preprocessor reads a numeral list followed by one unit in that unit (`Four and seven days`: 4 d, 7
+   d), as a range reads its two ends; two measure phrases coordinate into `cat_mpq(u, r)`,
+   `⟦cat_mpq(u, r)⟧ = (⟦cat_mp(u, r)⟧ → Prop) → Prop`, sem `λk. And(k(q₁), k(q₂))`, which a consumer
+   takes as it takes a constraint: `λa…. Q(λq. f q a…)`.
+
+Not built, besides decisions 7 and 8: a preposition with a gerund clause as its object (`after adding
+doxycycline`), which has no parse without quantities either; the CNL writes `after the addition of
+doxycycline`. `every 3 days thereafter` (`thereafter`).
+
+**Order.** 8a: decisions 1–4. 8b: 5. 8c: 6. 8d: 8. 8e: 9. Then the reseed, which measures slices 6–8
+together.
+
+**8a–8c — built** (2026-09-29).
+- `ontology.esl`: `prep_before`, `prep_by_value`, `prep_after_offset`, `prep_before_offset`,
+  `every_period`. `closed-class.esl`: 65 entries — `before` and `post` over an NP (7 each), the offsets
+  of `after`, `before` and `post` (7 each), `later` (6), `by` over a value (6), `every` over a period
+  (6), and the pseudo-partitive `of` in six dimensions (volume `m^3`, mass `kg`, amount `mol`, mass
+  and amount concentration `m^-3·kg`, `m^-3·mol`, time `s`).
+- The fronted adjunct: `front_adjunct_lifts` (`dcg/rules/combinators.rs`), fired by the
+  `FrontAdjunct` unary shift on cells that start the sentence and at the leaf at position 0; the
+  comma absorption takes a subject modifier as it takes `S/S` (`category::is_sentence_premod`). `At
+  37 °C, HeLa incubated` reads as `HeLa incubated at 37 °C`, the same term.
+- `verbalize`: `the Rna 259200 s after Transduction`, `the Medium every 259200 s`.
+- A measure phrase inside a compound noun keeps both bracketings: `an eight-day viability assay` (the
+  assay is eight days) and `10% FBS medium` (the FBS is 10%) need opposite ones, so the
+  adjective-outside normal form (D63 §3.3) is not extended to measure phrases.
+- Found, not built: `the` has no entry for a mass noun (`The viability was assayed.` has no parse;
+  `Viability was assayed.` does). The determiner inventory is D62/D63's; the CNL guide carries a DON'T
+  row.
+- Tests: `quantities_in_the_parser.rs` — `an_offset_is_a_measure_phrase_before_a_preposition`,
+  `a_fronted_adjunct_modifies_the_subject`, `every_n_unit_is_a_period`,
+  `a_pseudo_partitive_measures_the_noun`, five more packed-equals-unpacked sentences; the consumer
+  inventories now check consumers on either side, 82 forward and 35 backward, and 126 measure-phrase
+  slots name their reading. The quantity corpus: the five slice-8 gap rows are covered (`72 h after
+  transduction`, `After 24 h, …`, `10 μg ml⁻¹ of colcemid`, `every 3 days`, `every 2–3 days`), and seven
+  rows are new, from sentences of the paper — 47 covered, one gap.
 
 ## Slice 9 — ratios
 

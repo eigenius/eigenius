@@ -1077,11 +1077,24 @@ pub(super) fn base_class(t: &Exp) -> Exp {
     }
 }
 
-/// Whether `cat` is a sentence PRE-modifier `S/S` (`fwd(cat_s, cat_s)`) — the category a fronted
-/// transitional adverb / participial adjunct carries. Used by the fronted-modifier comma absorption.
+/// Whether `cat` is a sentence PRE-modifier: `S/S` (`fwd(cat_s, cat_s)`), the category a fronted
+/// transitional adverb / participial adjunct carries, or a modifier of the subject quantifier, the one
+/// a fronted VP adjunct carries (D95 slice 8a). Used by the fronted-modifier comma absorption.
 pub(super) fn is_sentence_premod(cat: &Exp) -> bool {
     matches!(slash_parts(cat, "fwd"),
-        Some((_m, a, b)) if is_ctor(a, "cat_s").is_some() && is_ctor(b, "cat_s").is_some())
+        Some((_m, a, b)) if (is_ctor(a, "cat_s").is_some() && is_ctor(b, "cat_s").is_some())
+            || (is_subject_gq(a) && is_subject_gq(b)))
+}
+
+/// Whether `cat` is a subject quantifier `S/(S\NP)` — so a modifier of one, a fronted adjunct (D95
+/// slice 8a), is a sentence pre-modifier that absorbs its comma.
+fn is_subject_gq(cat: &Exp) -> bool {
+    slash_parts(cat, "fwd").is_some_and(|(_, s, vp)| {
+        is_ctor(s, "cat_s").is_some()
+            && slash_parts(vp, "bwd").is_some_and(|(_, s2, np)| {
+                is_ctor(s2, "cat_s").is_some() && is_ctor(np, "cat_np").is_some()
+            })
+    })
 }
 
 /// Whether `cat` is a VP-adjunct preposition `((S\NP)\(S\NP))/NP` (`fwd(bwd(VP,VP), NP)`) — as

@@ -38,8 +38,10 @@
 //! `closed-class` (counting cardinals, word numerals as numbers, the count bounds), then for 7c on
 //! `ontology` (`has_proportion`) and `closed-class` (`half`, the partitives), and for 7d on `lexicon`
 //! (`cat_det_premod`, `cat_detmod`), `ontology` (`the_count`) and `closed-class` (the number words'
-//! entries removed; `the`, `these`, `those` before a numeral; `anaphor_of_count`). Slices 6–8 each
-//! move these layers and pay ONE reseed together, after slice 8
+//! entries removed; `the`, `these`, `those` before a numeral; `anaphor_of_count`), and for 8a–8c on
+//! `ontology` (the offsets, `prep_before`, `prep_by_value`, `every_period`) and `closed-class`
+//! (`before`, `post`, the offsets, `later`, `by` over a value, `every` over a period, the
+//! pseudo-partitive `of`s). Slices 6–8 each move these layers and pay ONE reseed together, after slice 8
 //! (`docs/design/d95-implementation-plan.md`, slice 6).
 //!
 //! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
@@ -219,8 +221,8 @@ ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
 lexicon:5847d26fd34e8ed5cd62fb6446db10e74d517da2e57a0efdd175f8a1cbe969fb
-ontology:27c32170ac03a359cc3c6a73a58ce9f9102e830e23a1af84ca5b07660821dc67
-closed-class:34e058b1ee460d37896721dba59636dec5fbc221b2bf8c1349a718c959cb1a65
+ontology:e2bf2b6f580c825ee166be94c035bafcf5acf984a038d935ca1e8e17d8e39d57
+closed-class:088fc891e63e297ee593b3bb4897d1971dd36c1efbdeb93ff378eb46e660efc9
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 

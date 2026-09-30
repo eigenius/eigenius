@@ -22,7 +22,9 @@ notation parse — and for the owner's decision that **a plain number is exact**
 out (Measured quantities, rules 7–9). The slice-6 claims are checked by `kernel/tests/` over the
 bootstrap chain; the full-lexicon run waits for the reseed after D95 slice 8. Revised again the same
 day for D95 slice 7: counts, proportions, number words, a determiner before a numeral, and counted
-conjuncts sharing a head (DO item 3; Measured quantities, rule 10).*
+conjuncts sharing a head (DO item 3; Measured quantities, rule 10); and for slice 8: offsets
+(`72 h after transduction`), a deadline (`by three weeks`), `every N unit`, the pseudo-partitive, and
+a fronted adjunct (DO items 11 and 13; Measured quantities, rule 11).*
 
 ## Purpose & posture
 
@@ -95,19 +97,27 @@ Two rules sit above everything else:
 9. **Negation.** `WRN does not affect MSS models.` `The activity is not essential.`
 10. **Clausal complements (report verbs).** `These findings show that WRN is a vulnerability.`
 11. **Transitional adverbs** (sentence-initial): `Thus,` `Therefore,` `Hence,` `Moreover,`
-    `Similarly,` `Notably,` — transparent (they don't change the claim).
+    `Similarly,` `Notably,` — transparent (they don't change the claim). **One adjunct may open the
+    sentence**, with or without a comma, and reads as it does after the verb: `After 24 h, the medium
+    was replaced.` = `The medium was replaced after 24 h.` A second opening adjunct (`Then, 7 days
+    after transduction, cells were collected.`) has no parse: keep one, move the other after the
+    verb.
 12. **Light verbs** that exist in the lexicon, e.g. `gives rise to`.
 13. **Measured quantities** after a preposition, before a noun, or after the copula: `kept at
     37 °C for 1 h`, `10 μM etoposide`, `The incubation was 1 h.` — and bounded or ranged in the same
-    places: `at less than 37 °C`, `at 37 °C or higher`, `>90% infection efficiency`, `for 2–3 h`. See
-    "Measured quantities" below.
+    places: `at less than 37 °C`, `at 37 °C or higher`, `>90% infection efficiency`, `for 2–3 h`; before
+    `after`, `before`, `post` and `later` (`purified 72 h after transduction`, `fixed 2 days later`),
+    after `by` and `every` (`recovered by three weeks`, `changed every 3 days`), and before `of` and a
+    noun (`300 μl of CellTiter-Glo`). See "Measured quantities" below.
 
 ## DON'T — and how to rewrite it
 
 | Avoid (journal style) | Why | Rewrite recipe |
 |---|---|---|
 | **Test statistics** (`n = 37`, `P = 4.2 × 10⁻¹³`, `Q = 4.8 × 10⁻²⁴`) | Out of the claim **by design** — a statistic qualifies a claim, it is not one. Routed to a D52 record. | State the **qualitative** claim; the statistic lives elsewhere. `… showed greater dependence …`, not `(n = 37; P = …)`. Unchanged by D93/D95. |
-| **A quantity with nothing to take it** (`purified 72 h after transduction`, `contained 4 μg`, `10 μg ml⁻¹ of colcemid`, `every 3 days`) | A quantity is not a noun phrase. It composes only after a preposition that takes one, before a noun, or after the copula (DO §13). A quantity modifying a PP, a verb's object, a pseudo-partitive and `every N unit` have no entry (D95). | Put it where it composes: `treated with 10 μg ml⁻¹ colcemid` (dropping the `of` changes nothing). Where that changes the claim — `72 h after transduction`, `every 3 days` — keep it and record the gap (R2). |
+| **A quantity as a verb's object** (`contained 4 μg`, `reached ~100 mm³`) | A quantity is not a noun phrase. It composes where a word takes one (DO §13); an imported verb takes a noun phrase (D95 slice 8, decision 7). | Name the quantity: `reached a volume of about 100 mm³`, `contained 4 μg of puromycin`. |
+| **A preposition with a clause as its object** (`96 h after adding doxycycline`) | A preposition takes a noun phrase; a gerund clause has no parse, with or without the quantity. | Nominalize: `96 h after the addition of doxycycline`. |
+| **`the` before a mass noun** (`The viability was assayed.`) | `the` has entries for a singular and a plural count noun only. | Write the bare mass noun: `Cell viability was assayed.` |
 | **A range with the unit twice, or in words** (`37 °C–39 °C`, `between 37 °C and 39 °C`) | The range grammar reads a digit pair with one unit or `%` after it (D95 slice 6). An en-dash pair with no unit is a count range (`4–7 foci`, slice 7); a hyphen pair with no unit is not a range, since it may be a catalogue number (`926-68021`). | Write the pair with the unit once, after it: `37–39 °C`, `20–30%`. Do **not** collapse a range to one endpoint or to a midpoint — that changes the claim, which R2 forbids. |
 | **A plain number meant as a bound** (`5 cell lines` for "five or more", `37 °C` for "37 °C or above") | A plain number is exact (Measured quantities, rule 7). | Write the bound: `at least 5 cell lines`, `37 °C or higher`. |
 | **Parenthetical asides / inline abbreviations** (`(MSI)`, `(PARP-1)`, `(Fig. 1a)`) | Asides are dropped; the parenthetical can't be a claim. | Introduce an abbreviation in its **own** sentence, or just use one form consistently. Drop figure/citation refs. |
@@ -131,7 +141,13 @@ something takes it:
   37 °C for 1 h`, `resuspended in 50 μl`, `harvested after 72 h`), and `of`, `with` and `at` after a
   noun (`a dose of 5 mg/kg`, `a volume of 2,000 mm³`);
 - **before a noun**: `10 μM etoposide`, `a 24 h incubation`, `10% FBS`;
-- **after the copula**: `The incubation was 1 h.`, `The temperature was 37 °C.`
+- **after the copula**: `The incubation was 1 h.`, `The temperature was 37 °C.`;
+- **before a temporal preposition**, as its offset: `purified 72 h after transduction`, `6 h before
+  collection`, `4 days post transduction`, `fixed 2 days later` (D95 slice 8);
+- **after `by` and `every`**: `recovered by three weeks`, `changed every 3 days`, `every 2–3 days`;
+- **before `of` and a noun**, an amount of the noun's stuff (a volume, a mass, an amount of substance,
+  a concentration, a duration): `300 μl of CellTiter-Glo`, `0.2 μg/ml of doxycycline`, `24 h of
+  puromycin selection`. A percentage before `of` is a proportion (`15% of colon cancers`).
 
 It cannot be a subject or a verb's object: `The cells contained 4 μg.` has no parse; `The medium
 contained 2 μg ml⁻¹ puromycin.` does.
@@ -191,6 +207,10 @@ contained 2 μg ml⁻¹ puromycin.` does.
     10-minute incubation`. A unit SYMBOL takes no hyphen (`a 2 h incubation`, not `a 2-h incubation`,
     which is read as a word): the SI writes it so, and a hyphen before letters that spell a symbol
     names a compound (`5-mC`, `3-MA`).
+11. **An offset goes before its preposition, and `post` is written apart**: `4 days post
+    transduction`, not `4 days post-transduction` (one hyphenated token, read as a word). `after`,
+    `before`, `post` and `later` take the offset; a bound or approximation on it reads as on any value
+    (`about 6 h before collection`).
 
 **What this does not change.** A statistic is still not a quantity. `n = 37` counts samples and
 `P = 4.2 × 10⁻¹³` qualifies an inference; neither is a measured value of a physical quantity, and

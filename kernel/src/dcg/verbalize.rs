@@ -589,6 +589,35 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     format!("{share} of {group}, {pred}")
                 };
             }
+            // A period (D95 slice 8b): `every_period(x, u, q)` reads `x every 259200 s`.
+            ("every_period", 3) => {
+                let subj = verbalize(args[0], vb);
+                let q = quantity_text(args[2], args[1]);
+                return if subj.is_empty() {
+                    format!("every {q}")
+                } else {
+                    format!("{subj} every {q}")
+                };
+            }
+            // An offset (D95 slice 8a): `prep_after_offset(x, y, u, q)` reads `x 259200 s after y`.
+            ("prep_after_offset" | "prep_before_offset", 4) => {
+                let subj = verbalize(args[0], vb);
+                let p = if local == "prep_after_offset" {
+                    "after"
+                } else {
+                    "before"
+                };
+                let tail = format!(
+                    "{} {p} {}",
+                    quantity_text(args[3], args[2]),
+                    verbalize(args[1], vb)
+                );
+                return if subj.is_empty() {
+                    tail
+                } else {
+                    format!("{subj} {tail}")
+                };
+            }
             ("has_quantity", 3) => {
                 let subj = verbalize(args[0], vb);
                 let q = quantity_text(args[2], args[1]);

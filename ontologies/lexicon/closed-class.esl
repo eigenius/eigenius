@@ -3116,6 +3116,592 @@ resource lexicon:at_value_nmod : lexicon:LexicalEntry {
     lexicon:sense    = "at";
 }
 
+// ── Offsets, `before`, `post`, `later`, and `by` with a value (D95 slice 8a) ─────────
+// An offset is a measure phrase a temporal preposition takes on its LEFT: `72 h after transduction`,
+// `6 h before collection`, `4 days post transduction` — x after (before) y by the interval q. The
+// measure phrase is consumed first (`unit_application_backward`), so a bound on it composes too
+// (`about 6 h before collection`). `post` is `after` in Latin and shares its relations; `before` is new
+// to the closed class, with the NP roles `after` has. `later` takes a measure phrase on its left, `2
+// days later` = `after 2 days`. `by` with a measured value is a deadline, `recovered by three weeks`;
+// it does not lower to `prep_by`, and the passive `by` takes a noun phrase. VP adjuncts in the six
+// finiteness variants, and a noun-modifier form.
+resource lexicon:prep_before_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_before(s, x))
+          : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:nmod_before_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (y : lexicon:Entity) => fun (x : lexicon:Entity) => ontology:prep_before(x, y)
+          : lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:prep_after_offset_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (y : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_after_offset(s, y, u, q))
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:nmod_after_offset_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            ontology:prep_after_offset(x, y, u, q)
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:prep_before_offset_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (y : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_before_offset(s, y, u, q))
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:nmod_before_offset_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            ontology:prep_before_offset(x, y, u, q)
+          : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:prep_by_value_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:prep_by_value(s, u, q))
+          : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:before_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking an earlier time ('treated before collection').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_before_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_prep_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking an earlier time ('treated before collection').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_before_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_prep_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking an earlier time ('treated before collection').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_before_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_prep_ger : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking an earlier time ('treated before collection').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_before_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_prep_pss : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking an earlier time ('treated before collection').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_before_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_prep_pass : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking an earlier time ('treated before collection').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_before_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking an earlier time ('treated before collection').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_before_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "before";
+}
+resource lexicon:post_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a later time, as `after` ('split post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_after_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_prep_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a later time, as `after` ('split post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_after_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_prep_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a later time, as `after` ('split post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_after_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_prep_ger : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a later time, as `after` ('split post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_after_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_prep_pss : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a later time, as `after` ('split post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_after_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_prep_pass : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a later time, as `after` ('split post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:prep_after_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition marking a later time, as `after` ('split post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:nmod_after_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "post";
+}
+resource lexicon:after_offset : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h after transduction').";
+    lexicon:form     = "after";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "after";
+}
+resource lexicon:after_offset_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h after transduction').";
+    lexicon:form     = "after";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "after";
+}
+resource lexicon:after_offset_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h after transduction').";
+    lexicon:form     = "after";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "after";
+}
+resource lexicon:after_offset_ger : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h after transduction').";
+    lexicon:form     = "after";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "after";
+}
+resource lexicon:after_offset_pss : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h after transduction').";
+    lexicon:form     = "after";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "after";
+}
+resource lexicon:after_offset_pass : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h after transduction').";
+    lexicon:form     = "after";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "after";
+}
+resource lexicon:after_offset_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h after transduction').";
+    lexicon:form     = "after";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "after";
+}
+resource lexicon:before_offset : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h before transduction').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_before_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_offset_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h before transduction').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_before_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_offset_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h before transduction').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_before_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_offset_ger : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h before transduction').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_before_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_offset_pss : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h before transduction').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_before_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_offset_pass : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h before transduction').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_before_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "before";
+}
+resource lexicon:before_offset_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h before transduction').";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_before_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "before";
+}
+resource lexicon:post_offset : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_offset_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_offset_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_offset_ger : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_offset_pss : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_offset_pass : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "post";
+}
+resource lexicon:post_offset_nmod : lexicon:LexicalEntry {
+    core:description = "grammatical: preposition with an offset on its left ('72 h post transduction').";
+    lexicon:form     = "post";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_pp, lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:nmod_after_offset_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "post";
+}
+resource lexicon:later_value : lexicon:LexicalEntry {
+    core:description = "grammatical: an interval later than an understood time ('fixed 2 days later').";
+    lexicon:form     = "later";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "later";
+}
+resource lexicon:later_value_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: an interval later than an understood time ('fixed 2 days later').";
+    lexicon:form     = "later";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "later";
+}
+resource lexicon:later_value_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: an interval later than an understood time ('fixed 2 days later').";
+    lexicon:form     = "later";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "later";
+}
+resource lexicon:later_value_ger : lexicon:LexicalEntry {
+    core:description = "grammatical: an interval later than an understood time ('fixed 2 days later').";
+    lexicon:form     = "later";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "later";
+}
+resource lexicon:later_value_pss : lexicon:LexicalEntry {
+    core:description = "grammatical: an interval later than an understood time ('fixed 2 days later').";
+    lexicon:form     = "later";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "later";
+}
+resource lexicon:later_value_pass : lexicon:LexicalEntry {
+    core:description = "grammatical: an interval later than an understood time ('fixed 2 days later').";
+    lexicon:form     = "later";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_after_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "later";
+}
+resource lexicon:by_value_prep : lexicon:LexicalEntry {
+    core:description = "grammatical: a deadline, a measured value ('recovered by three weeks').";
+    lexicon:form     = "by";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_by_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "by";
+}
+resource lexicon:by_value_prep_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: a deadline, a measured value ('recovered by three weeks').";
+    lexicon:form     = "by";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_by_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "by";
+}
+resource lexicon:by_value_prep_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: a deadline, a measured value ('recovered by three weeks').";
+    lexicon:form     = "by";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_by_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "by";
+}
+resource lexicon:by_value_prep_ger : lexicon:LexicalEntry {
+    core:description = "grammatical: a deadline, a measured value ('recovered by three weeks').";
+    lexicon:form     = "by";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_by_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "by";
+}
+resource lexicon:by_value_prep_pss : lexicon:LexicalEntry {
+    core:description = "grammatical: a deadline, a measured value ('recovered by three weeks').";
+    lexicon:form     = "by";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_by_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "by";
+}
+resource lexicon:by_value_prep_pass : lexicon:LexicalEntry {
+    core:description = "grammatical: a deadline, a measured value ('recovered by three weeks').";
+    lexicon:form     = "by";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:prep_by_value_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "by";
+}
+
+// ── `every N unit` (D95, "`every N unit`"; slice 8b) ───────────────────────────────
+// A third `every`, beside the two determiners: a VP adjunct over a measured value, the period of a
+// repeated procedure — `changed every 3 days`, `refreshed every 48 h`, `every 2–3 days` (a range is a
+// constraint on the period). An opaque conjunct, as the PP adjuncts use; no event variable.
+resource lexicon:every_period_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            logic:And(V(s), ontology:every_period(s, u, q))
+          : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:every_period : lexicon:LexicalEntry {
+    core:description = "grammatical: the period of a repeated procedure ('changed every 3 days').";
+    lexicon:form     = "every";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:every_period_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "every";
+}
+resource lexicon:every_period_bse : lexicon:LexicalEntry {
+    core:description = "grammatical: the period of a repeated procedure ('changed every 3 days').";
+    lexicon:form     = "every";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:every_period_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "every";
+}
+resource lexicon:every_period_inf : lexicon:LexicalEntry {
+    core:description = "grammatical: the period of a repeated procedure ('changed every 3 days').";
+    lexicon:form     = "every";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:inf), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:every_period_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "every";
+}
+resource lexicon:every_period_ger : lexicon:LexicalEntry {
+    core:description = "grammatical: the period of a repeated procedure ('changed every 3 days').";
+    lexicon:form     = "every";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:ger), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:every_period_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "every";
+}
+resource lexicon:every_period_pss : lexicon:LexicalEntry {
+    core:description = "grammatical: the period of a repeated procedure ('changed every 3 days').";
+    lexicon:form     = "every";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:every_period_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "every";
+}
+resource lexicon:every_period_pass : lexicon:LexicalEntry {
+    core:description = "grammatical: the period of a repeated procedure ('changed every 3 days').";
+    lexicon:form     = "every";
+    lexicon:cat      = type_expr( lexicon:cat_unit_forall(fun (u : core:unit) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pass), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_mp(u, lexicon:value))) );
+    lexicon:sem      = lexicon:every_period_sem;
+    lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "every";
+}
+
+// ── The pseudo-partitive (D95 slice 8c) ───────────────────────────────────────────
+// `300 µl of CellTiter-Glo`, `0.2 µg/mL of doxycycline`, `24 h of puromycin selection`: an amount of the
+// noun's stuff, as the prenominal measure phrase states it (`300 µl CellTiter-Glo`). `of` takes the
+// measure phrase on its left and yields the predicative item a quantity seeds, which the modifier lift
+// makes prenominal. One entry per dimension that measures an amount of stuff or of an activity —
+// volume, mass, amount of substance, mass and amount concentration, time. Not the dimensionless unit:
+// `15% of colon cancers` is the partitive's proportion (slice 7c), not cancers measuring 15%.
+resource lexicon:of_amount_volume_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"m^3")) => fun (x : lexicon:Entity) => ontology:has_quantity(x, u"m^3", q)
+          : units:Quantity(u"m^3") -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:of_amount_volume : lexicon:LexicalEntry {
+    core:description = "grammatical: pseudo-partitive of, a volume ('300 µl of CellTiter-Glo').";
+    lexicon:form     = "of";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"m^3", lexicon:value)) );
+    lexicon:sem      = lexicon:of_amount_volume_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"m^3") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "of.pseudo-partitive";
+}
+resource lexicon:of_amount_mass_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"kg")) => fun (x : lexicon:Entity) => ontology:has_quantity(x, u"kg", q)
+          : units:Quantity(u"kg") -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:of_amount_mass : lexicon:LexicalEntry {
+    core:description = "grammatical: pseudo-partitive of, a mass ('50 ng of plasmid').";
+    lexicon:form     = "of";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"kg", lexicon:value)) );
+    lexicon:sem      = lexicon:of_amount_mass_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"kg") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "of.pseudo-partitive";
+}
+resource lexicon:of_amount_amount_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"mol")) => fun (x : lexicon:Entity) => ontology:has_quantity(x, u"mol", q)
+          : units:Quantity(u"mol") -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:of_amount_amount : lexicon:LexicalEntry {
+    core:description = "grammatical: pseudo-partitive of, an amount of substance ('5 nmol of primer').";
+    lexicon:form     = "of";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"mol", lexicon:value)) );
+    lexicon:sem      = lexicon:of_amount_amount_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"mol") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "of.pseudo-partitive";
+}
+resource lexicon:of_amount_mass_concentration_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"m^-3·kg")) => fun (x : lexicon:Entity) => ontology:has_quantity(x, u"m^-3·kg", q)
+          : units:Quantity(u"m^-3·kg") -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:of_amount_mass_concentration : lexicon:LexicalEntry {
+    core:description = "grammatical: pseudo-partitive of, a mass concentration ('0.2 µg/mL of doxycycline').";
+    lexicon:form     = "of";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"m^-3·kg", lexicon:value)) );
+    lexicon:sem      = lexicon:of_amount_mass_concentration_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"m^-3·kg") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "of.pseudo-partitive";
+}
+resource lexicon:of_amount_amount_concentration_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"m^-3·mol")) => fun (x : lexicon:Entity) => ontology:has_quantity(x, u"m^-3·mol", q)
+          : units:Quantity(u"m^-3·mol") -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:of_amount_amount_concentration : lexicon:LexicalEntry {
+    core:description = "grammatical: pseudo-partitive of, an amount concentration ('10 µM of etoposide').";
+    lexicon:form     = "of";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"m^-3·mol", lexicon:value)) );
+    lexicon:sem      = lexicon:of_amount_amount_concentration_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"m^-3·mol") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "of.pseudo-partitive";
+}
+resource lexicon:of_amount_time_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (q : units:Quantity(u"s")) => fun (x : lexicon:Entity) => ontology:has_quantity(x, u"s", q)
+          : units:Quantity(u"s") -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:of_amount_time : lexicon:LexicalEntry {
+    core:description = "grammatical: pseudo-partitive of, a duration of an activity ('24 h of puromycin selection').";
+    lexicon:form     = "of";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"s", lexicon:value)) );
+    lexicon:sem      = lexicon:of_amount_time_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"s") -> lexicon:Entity -> Prop );
+    lexicon:sense    = "of.pseudo-partitive";
+}
+
 // ── Bounds on a measured value (D95 slice 6) ──────────────────────────────────────
 // A bound constrains a measured value instead of stating one (D95, "Ranges need no new semantics"):
 // `less than 37 °C` is `λq. units:lt(u, q, 310.15 K)`, a `cat_mpc` that a consumer of the measure

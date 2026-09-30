@@ -1361,6 +1361,69 @@ pub(crate) fn det_premod_lifts(it: &Item) -> Vec<Item> {
     )
 }
 
+/// The **fronted adjunct** (D95 slice 8a, decision 4): at the start of a sentence a finite VP adjunct
+/// `(S\NP)\(S\NP)` modifies the subject, `(S/(S\NP)) / (S/(S\NP))`, sem `λQ.λV. Q(λx. P(V)(x))` —
+/// `After 24 h, the medium was replaced` is `the medium was replaced after 24 h`. The subject's type
+/// and number and the clause's finiteness are variables the subject binds. Fires on the
+/// sentence-initial cells only: the `FrontAdjunct` unary shift and the leaf at position 0.
+pub(crate) fn front_adjunct_lifts(it: &Item, layer: &Arc<Layer>) -> Vec<Item> {
+    let build = || -> Option<Item> {
+        let (_m, vp, vp_res) = slash_parts(it.cat(), "bwd")?;
+        if vp != vp_res {
+            return None;
+        }
+        let (_vm, s, _np) = slash_parts(vp, "bwd")?;
+        let [mood, fin] = is_ctor(s, "cat_s")? else {
+            return None;
+        };
+        if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "fin") {
+            return None;
+        }
+        let Exp::InductiveCtor(decl, _, _) = it.cat() else {
+            return None;
+        };
+        let m_all = super::super::category::mode_value(layer, super::super::category::MODE_ALL)?;
+        let ctor = |name: &str, args: Vec<Exp>| Exp::InductiveCtor(decl.clone(), name.into(), args);
+        let var = |x: &str| Exp::Var(x.into());
+        let subject_vp = ctor(
+            "bwd",
+            vec![
+                m_all.clone(),
+                s.clone(),
+                ctor("cat_np", vec![var(FRONT_T), var(FRONT_N)]),
+            ],
+        );
+        let gq = ctor(
+            "fwd",
+            vec![
+                m_all.clone(),
+                ctor("cat_s", vec![mood.clone(), var(FRONT_F)]),
+                subject_vp,
+            ],
+        );
+        let cat = ctor("fwd", vec![m_all, gq.clone(), gq]);
+        let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+        let lam = |x: &str, b: Exp| Exp::Lam(Patt::Var(x.into()), Box::new(b));
+        let (q, v, x) = ("__fr_Q", "__fr_V", "__fr_x");
+        // `λQ.λV. Q(λx. P(V)(x))` — the scope is a λ so it types at the subject's `T → Prop`.
+        let sem = lam(
+            q,
+            lam(
+                v,
+                app(var(q), lam(x, app(app(it.sem().clone(), var(v)), var(x)))),
+            ),
+        );
+        Some(Item::from_parts(cat, sem, Combinator::Other, it.cost()))
+    };
+    build().into_iter().collect()
+}
+
+/// The category variables of a fronted adjunct's subject: its type, its number, the clause's
+/// finiteness.
+const FRONT_T: &str = "__fr_T";
+const FRONT_N: &str = "__fr_N";
+const FRONT_F: &str = "__fr_F";
+
 /// Pre-nominal attributive PAST PARTICIPLE lift — SEPARATE from [`mod_lifts`] so seeding can GATE it.
 /// A transitive `(S[dcl,pss]\NP)/NP` → a reduced-passive modifier `cat_mod(λx. ∃a. TV(x, a))`
 /// ("predicted deficiency" = a deficiency x that was predicted by some a). English forms this for ANY
