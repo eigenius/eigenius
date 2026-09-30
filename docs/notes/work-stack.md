@@ -19,14 +19,14 @@ any detour.
 >
 > **Built:** slice 6 (bounds, approximations, ranges, bound symbols, scientific notation), slice 7
 > (counts; proportions; number words; a determiner before a numeral; counted conjuncts and
-> proportions sharing a head) and slice 8 (offsets `72 h after X`, `later`, `by` + a value, fronted
-> adjuncts, `every N unit`, pseudo-partitives, `per` after a count, lists with the unit once).
-> **Measured:** the reseed after slice 8 (`wordnet-umls-aligned-2026-09-29-quantities-s8b`): 0
-> grammar gaps, 62/62 expected hits, 652 readings, 212 skeletons (`baseline.json`). The selection
-> draw scores 29/41 against the selection baseline's 30; lowering it is the owner's call
-> (`selection-baseline.json`, the note of 2026-09-29 on slices 6–8).
-> **Next:** slice 9 (ratios: `a median 0.56-fold fewer deletion mutations … compared to typical
-> lineages`), then a reseed and measurement.
+> proportions sharing a head), slice 8 (offsets `72 h after X`, `later`, `by` + a value, fronted
+> adjuncts, `every N unit`, pseudo-partitives, `per` after a count, lists with the unit once) and
+> slice 9 (factors on count comparatives, `a median`, `compared to`).
+> **Measured:** the reseed after slice 9 (`wordnet-umls-aligned-2026-09-29-quantities-s9`, `a3c8452`):
+> 0 grammar gaps, 62/62 expected hits, 652 readings, 212 skeletons (`baseline.json`); slice 9 moves
+> nothing on the page. The selection draw scores 29/41 against the selection baseline's 30; lowering
+> it is the owner's call (`selection-baseline.json`, the note of 2026-09-29 on slices 6–8).
+> **Next:** the owner's ruling on the selection baseline, then the branch's PR.
 >
 > **Exit gate:** slices 6–9 built, the quantity corpus extended with the attested sentences, the
 > reseed measured, then the branch's PR.

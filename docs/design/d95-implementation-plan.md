@@ -1140,6 +1140,18 @@ to the condition without doxycycline`), 4 are the verb (`were compared to negati
   subject leaves the parse open, and the corpus check reads closed readings only — with `These`, plain
   `fewer … than` has none either.
 
+**The reseed after slice 9** (2026-09-30, at `a3c8452`): `wordnet-umls-2026-09-29-quantities-s9` and its
+aligned snapshot; the import counts equal the slice-8 reseeds'.
+- The page: the slice-8 rankings and selections replay with 0 misses, and every figure equals the
+  slice 6–8 measurement — grammar gaps 0, expected hits 62 of 62, readings 652, skeletons 212, each
+  unit's skeleton set identical, selection 29 of 41. The page has no factor; its one `compared to`
+  follows no comparative.
+- The quantity corpus as a page, cap-only: 52 units, 7 encoded, 40 ambiguous, 5 grammar gaps, 0
+  missing lexemes. Three gaps are the verbs the lexicon lacks (`incubated`, `electroporated`); two
+  are nouns it lacks in the fixture's shape — `confluence` is count-only and `sgRNAs` no plural count
+  noun (`experiments/parsing/quantities/README.md`). The slice 9 rows parse, with 23 and 333 readings
+  that differ in their senses.
+
 ## Out, as D95 decides
 
 The tolerance construction and the vector-denoting PP — its one attested variant, `within 1.5× the IQR

@@ -59,6 +59,27 @@ scripts/measure-parse-rate.sh --page /tmp/quantity-page.txt
 The WordNet and UMLS senses of the content words replace the fixture's single sense, so the reading
 counts there measure sense ambiguity, not the grammar.
 
+Measured `2026-09-30`, cap-only, at `a3c8452` (D95 slices 1–9) on
+`wordnet-umls-aligned-2026-09-29-quantities-s9`: of 52 units, 7 encoded, 40 ambiguous, 5 grammar gaps,
+0 missing lexemes, 0 non-prose; 1,920 readings, 178 skeletons.
+
+- The grammar gaps are 3 rows whose verbs the lexicon lacks (below: `incubated` twice,
+  `electroporated`) and 2 whose nouns it lacks in the shape the fixture declares, found with minimal
+  variants over the same snapshot:
+  - `The cells reached 80–90% confluence.` — `confluence` is a count noun there: WordNet's senses are
+    a flowing together and a place where rivers meet, and the Wiktionary uncountable list the importer
+    reads does not name it. The bare singular is no noun phrase: `The cells reached confluence.` has
+    no parse either, and `The cells reached a confluence of 80–90%.` has 4 readings. The fixture
+    declares it mass.
+  - `Three sgRNAs were validated.` — `sgRNAs` is no plural count noun there: `The sgRNAs were
+    validated.` has no parse either, and `Three genes were validated.` has 6 readings.
+- The slice 9 rows: `a median 0.56-fold fewer … compared to typical lineages` has 23 readings, and one
+  of its parse attempts hit the classification budget, which dropped 6,144 of 8,192 distinct readings;
+  `2-fold more deletion mutations than typical lineages` has 333. The readings differ in their senses:
+  cap-only runs rank none.
+- The range row that was non-prose here is a measure constraint since slice 6 and parses (`4–12% gels`,
+  5 readings); the gap row with the coordinated object still parses (2 readings).
+
 Measured `2026-09-27`, cap-only, at `6a3eabf` on `wordnet-umls-aligned-2026-09-27`: of 28 units,
 3 encoded, 17 ambiguous (2 to 12 readings, and 200 for the `and with` row), 7 grammar gaps, 1
 non-prose (the range).
