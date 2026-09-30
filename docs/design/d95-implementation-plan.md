@@ -1009,6 +1009,24 @@ together.
   transduction`, `After 24 h, …`, `10 μg ml⁻¹ of colcemid`, `every 3 days`, `every 2–3 days`), and seven
   rows are new, from sentences of the paper — 47 covered, one gap.
 
+**The reseed after slice 8, first measurement** (2026-09-29, at `ae4253a`): `wordnet-umls-2026-09-29-
+quantities-s8` and its aligned snapshot. WordNet 465,939 entries, 43,296 of them mass (178 fewer mass
+entries than the slice-5 note records, with the importer, the dictionary and the countability list
+unchanged since; not yet explained), 92 withheld; UMLS 6,409,712 entries.
+- A replay of the committed rankings missed 17 of 62 questions: 13 because `of` now had three sense
+  labels (`of`, `of.partitive`, `of.pseudo-partitive`, from 7c and 8c), so the sense ranker was asked
+  about it; 4 because the number words lost their closed-class senses (7d).
+- With the 17 re-answered and the 45 kept (a faithful replay, 0 misses): grammar gaps 0, readings 640
+  (626), skeletons 217 (175), expected hits 58 of 62.
+- Two defects, fixed: (1) the ranker kept only `of.pseudo-partitive` for `Depletion of WRN promoted
+  apoptosis …`, eliminating the plain `of` the pin needs (24 → 84 readings, the pin lost) — the
+  partitive and pseudo-partitive `of`s now carry the sense `of`, as every other `of` entry does, so
+  the constructions stay with the chart; (2) the fronted adjunct lifted lexical adverbs, `Thus,` and
+  `More commonly,`, which already front as `S/S`, giving the same term twice under two categories (4
+  → 8 readings each) — it now fires only on adjuncts built by application.
+- The other misses are the number-word units, whose pins encode the count as dropped (`cardinality
+  'three' not encoded`); 7a and 7d now state it, so they are re-pinned after the second reseed.
+
 ## Slice 9 — ratios
 
 `a median 0.56-fold fewer deletion mutations in microsatellite regions compared to typical-lineage

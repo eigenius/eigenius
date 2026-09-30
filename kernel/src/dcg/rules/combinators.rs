@@ -1401,8 +1401,14 @@ pub(crate) fn det_premod_lifts(it: &Item) -> Vec<Item> {
 /// `(S\NP)\(S\NP)` modifies the subject, `(S/(S\NP)) / (S/(S\NP))`, sem `λQ.λV. Q(λx. P(V)(x))` —
 /// `After 24 h, the medium was replaced` is `the medium was replaced after 24 h`. The subject's type
 /// and number and the clause's finiteness are variables the subject binds. Fires on the
-/// sentence-initial cells only: the `FrontAdjunct` unary shift and the leaf at position 0.
+/// sentence-initial cells, through the `FrontAdjunct` unary shift, and only on an adjunct the grammar
+/// BUILT by application — a PP, an offset, `every 3 days`. A lexical adverb (`Thus`, `More commonly`)
+/// fronts as the transitional `S/S` it has; lifting it too gave the same term twice, under two
+/// categories (measured at the reseed after slice 8).
 pub(crate) fn front_adjunct_lifts(it: &Item, layer: &Arc<Layer>) -> Vec<Item> {
+    if !matches!(it.prov(), Combinator::ForwardApp | Combinator::BackwardApp) {
+        return Vec::new();
+    }
     let build = || -> Option<Item> {
         let (_m, vp, vp_res) = slash_parts(it.cat(), "bwd")?;
         if vp != vp_res {

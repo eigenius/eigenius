@@ -3616,7 +3616,10 @@ resource lexicon:every_period_pass : lexicon:LexicalEntry {
 // measure phrase on its left and yields the predicative item a quantity seeds, which the modifier lift
 // makes prenominal. One entry per dimension that measures an amount of stuff or of an activity —
 // volume, mass, amount of substance, mass and amount concentration, time. Not the dimensionless unit:
-// `15% of colon cancers` is the partitive's proportion (slice 7c), not cancers measuring 15%.
+// `15% of colon cancers` is the partitive's proportion (slice 7c), not cancers measuring 15%. The sense
+// is `of`, as the partitive's is: the constructions differ by category, which the chart resolves, and a
+// sense label of their own would put them before the sense ranker, which eliminated the plain `of` of
+// `Depletion of WRN` in favour of this one (measured at the reseed after slice 8).
 resource lexicon:of_amount_volume_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (q : units:Quantity(u"m^3")) => fun (x : lexicon:Entity) => ontology:has_quantity(x, u"m^3", q)
@@ -3629,7 +3632,7 @@ resource lexicon:of_amount_volume : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"m^3", lexicon:value)) );
     lexicon:sem      = lexicon:of_amount_volume_sem;
     lexicon:sem_type = type_expr( units:Quantity(u"m^3") -> lexicon:Entity -> Prop );
-    lexicon:sense    = "of.pseudo-partitive";
+    lexicon:sense    = "of";
 }
 resource lexicon:of_amount_mass_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
@@ -3643,7 +3646,7 @@ resource lexicon:of_amount_mass : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"kg", lexicon:value)) );
     lexicon:sem      = lexicon:of_amount_mass_sem;
     lexicon:sem_type = type_expr( units:Quantity(u"kg") -> lexicon:Entity -> Prop );
-    lexicon:sense    = "of.pseudo-partitive";
+    lexicon:sense    = "of";
 }
 resource lexicon:of_amount_amount_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
@@ -3657,7 +3660,7 @@ resource lexicon:of_amount_amount : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"mol", lexicon:value)) );
     lexicon:sem      = lexicon:of_amount_amount_sem;
     lexicon:sem_type = type_expr( units:Quantity(u"mol") -> lexicon:Entity -> Prop );
-    lexicon:sense    = "of.pseudo-partitive";
+    lexicon:sense    = "of";
 }
 resource lexicon:of_amount_mass_concentration_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
@@ -3671,7 +3674,7 @@ resource lexicon:of_amount_mass_concentration : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"m^-3·kg", lexicon:value)) );
     lexicon:sem      = lexicon:of_amount_mass_concentration_sem;
     lexicon:sem_type = type_expr( units:Quantity(u"m^-3·kg") -> lexicon:Entity -> Prop );
-    lexicon:sense    = "of.pseudo-partitive";
+    lexicon:sense    = "of";
 }
 resource lexicon:of_amount_amount_concentration_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
@@ -3685,7 +3688,7 @@ resource lexicon:of_amount_amount_concentration : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"m^-3·mol", lexicon:value)) );
     lexicon:sem      = lexicon:of_amount_amount_concentration_sem;
     lexicon:sem_type = type_expr( units:Quantity(u"m^-3·mol") -> lexicon:Entity -> Prop );
-    lexicon:sense    = "of.pseudo-partitive";
+    lexicon:sense    = "of";
 }
 resource lexicon:of_amount_time_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
@@ -3699,7 +3702,7 @@ resource lexicon:of_amount_time : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_mp(u"s", lexicon:value)) );
     lexicon:sem      = lexicon:of_amount_time_sem;
     lexicon:sem_type = type_expr( units:Quantity(u"s") -> lexicon:Entity -> Prop );
-    lexicon:sense    = "of.pseudo-partitive";
+    lexicon:sense    = "of";
 }
 
 // ── `per` after a counted noun phrase (D95 slice 8d) ────────────────────────────────
@@ -4593,7 +4596,7 @@ resource lexicon:of_proportion_subj : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))), lexicon:cat_mp(u"1", lexicon:value)) );
     lexicon:sem      = lexicon:of_proportion_subj_sem;
     lexicon:sem_type = type_expr( units:Quantity(u"1") -> ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
-    lexicon:sense    = "of.partitive";
+    lexicon:sense    = "of";
 }
 resource lexicon:of_proportion_obj : lexicon:LexicalEntry {
     core:description = "grammatical: partitive of a proportion, as an object ('in more than half of the samples').";
@@ -4601,7 +4604,7 @@ resource lexicon:of_proportion_obj : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))), lexicon:cat_mp(u"1", lexicon:value)))) );
     lexicon:sem      = lexicon:of_proportion_obj_sem;
     lexicon:sem_type = type_expr( units:Quantity(u"1") -> ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
-    lexicon:sense    = "of.partitive";
+    lexicon:sense    = "of";
 }
 resource lexicon:none_of_subj_sem : lexicon:SemTerm {
     lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (V : lexicon:Entity -> Prop) =>

@@ -693,21 +693,6 @@ impl Parser {
                     .flat_map(super::super::rules::combinators::det_premod_lifts)
                     .collect::<Vec<_>>(),
             );
-            // A fronted adjunct (D95 slice 8a): the sentence's first token as a VP adjunct modifies
-            // the subject (`Subsequently, cells were seeded`).
-            if i == 0 {
-                mods.extend(
-                    row[i]
-                        .iter()
-                        .flat_map(|it| {
-                            super::super::rules::combinators::front_adjunct_lifts(
-                                it,
-                                &self.grammar.layer,
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                );
-            }
             // Attributive past-participle lift, GATED: only when this surface has NO lexical adjective
             // (else the WordNet adjective already covers the attributive use, and the rule's
             // reduced-passive reading would just double-seed — "reduced"/"increased"). Where there is

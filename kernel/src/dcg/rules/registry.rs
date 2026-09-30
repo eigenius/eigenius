@@ -908,9 +908,9 @@ pub(crate) enum UnaryKind {
     /// Fires on composed cells (`the four`, `at least 1,000`, `15% of`); leaves are lifted at seed
     /// time.
     DetPremod,
-    /// Fronted adjunct (D95 slice 8a, decision 4): a sentence-initial finite VP adjunct → a modifier
-    /// of the subject, `(S/(S\NP))/(S/(S\NP))` (`front_adjunct_lifts`). Fires on the cells that start
-    /// the sentence; the leaf at position 0 is lifted at seed time.
+    /// Fronted adjunct (D95 slice 8a, decision 4): a sentence-initial finite VP adjunct the grammar built
+    /// by application → a modifier of the subject, `(S/(S\NP))/(S/(S\NP))` (`front_adjunct_lifts`).
+    /// Fires on the cells that start the sentence; a lexical adverb fronts as its transitional `S/S`.
     FrontAdjunct,
     /// Elided-`than` standard defaulting (D63 §8.12): a comparative awaiting its `than` complement,
     /// `X / cat_pp_than` → `X` with the standard bound to the anaphoric placeholder (`elided_than`),

@@ -42,7 +42,9 @@
 //! `ontology` (the offsets, `prep_before`, `prep_by_value`, `every_period`) and `closed-class`
 //! (`before`, `post`, the offsets, `later`, `by` over a value, `every` over a period, the
 //! pseudo-partitive `of`s), and for 8d–8e on `lexicon` (`cat_mpq`), `ontology` (`prep_per`) and
-//! `closed-class` (`per`). Slices 6–8 each move these layers and pay ONE reseed together, after slice 8
+//! `closed-class` (`per`); then on `closed-class` again when the reseed after slice 8 found the
+//! partitive `of`s' own sense labels before the sense ranker (they now carry `of`). Slices 6–8 each
+//! move these layers and pay ONE reseed together, after slice 8
 //! (`docs/design/d95-implementation-plan.md`, slice 6).
 //!
 //! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
@@ -223,7 +225,7 @@ reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
 lexicon:cd61a4db8aef9d99cb950c27aad8747135aa3eee307791f1873c03a8eb6df651
 ontology:d8156dff601bd783c87b58518514961c22daba5a6d6f9b4953bcc5c1f9be4dfe
-closed-class:c586ef0de090de986ced442a21027dbfea23068a0f1c92e790002d48fc64d02a
+closed-class:6b50f69fdb4cf7b1fb0bb615d3bbcd4c6a678f190fe57a7ec0a5e054e17aebed
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 
