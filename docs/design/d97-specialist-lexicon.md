@@ -226,6 +226,12 @@ attested = WordNet's "followed by" convention ∪ SPECIALIST's `compl=pphr` ∪ 
 gloss heuristic only where none speaks, never `as`. The `governed-prepositions` branch's single
 kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
 
+*Scope decided 2026-09-30 (the owner):* #263 builds the adjectives' part of slice 3 before slice 2,
+for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 64 that name another
+(`by` 44, `over` 9, `towards` 6, …) wait for slice 2's inventory, whose argument entries every
+`prep_any` verb frame would also take; they are counted, not dropped silently. Nouns stay with slice
+3. It needs from slice 1 the reader and the sense judge, which #263 builds for adjectives first.
+
 ## Decisions
 
 1. **Lemma or sense — decided: the senses the evidence picks, and an LLM judge where it picks
@@ -336,7 +342,8 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    synset where it is a WordNet noun (80 verbs, 112 senses). See "A verb no other source has is the
    verb sense of its concept". **Open for the 3,790 with no concept to attach to**: no entry, or a
    sense-less predicate that records SPECIALIST's syntax alone.
-6. **Whether a governed preposition reaches the meaning.** `lexicon:Prep` is syntactic, erased by
+6. **Whether a governed preposition reaches the meaning — decided: one relation per sense and
+   preposition** (the owner, 2026-09-30). `lexicon:Prep` is syntactic, erased by
    ⟦·⟧: a sense's PP-oblique reading is one relation, `v{offset}_p`, and on the
    `governed-prepositions` branch an adjective's relational readings share one `deg_{loc}_rel`
    whatever the preposition (`crates/eigenius-wordnet/src/convert.rs`). While WordNet named no
@@ -346,15 +353,25 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    - Reach, over WordNet lemmas: 485 verbs whose PP argument names two or more prepositions
      (`account for`/`to`, `abound in`/`with`), 435 whose object + PP frames do (`acquit of`/`on`,
      `adapt for`/`to`), 130 adjectives, 2,404 nouns.
-   - *Proposed:* one relation per sense and preposition (`v{offset}_p_from`, `v{offset}_p_into`), so
-     the preposition is part of the predicate. It changes the axiom and entry shape of every
-     governed-PP reading, eigenius#263's adjectives with them. Keeping one relation conflates the
-     claims, which R2 of the style guide forbids.
-7. **Decision 1 for adjectives and nouns.** Decision 1 chooses the senses a verb frame goes on.
-   SPECIALIST's governed prepositions on adjectives and nouns are per lemma as well: 590 WordNet
-   adjectives, 354 with several senses; 6,425 WordNet nouns, 3,329 with several senses. Does the
-   same rule apply — derivational pointers where they discriminate, the judge otherwise? For nouns
-   that multiplies the judge's work several times over, so it is a budget question as well.
+   - **Decided:** one relation per sense and preposition (`v{offset}_p_from`, `v{offset}_p_into`;
+     for an adjective `deg_{loc}_rel_to`, `deg_{loc}_rel_for`), so the preposition is part of the
+     predicate. It changes the axiom and entry shape of every governed-PP reading; eigenius#263's
+     adjectives take it first, verbs with slice 2. Synonymous prepositions (`dependent on`/`upon`)
+     become distinct relations, which an alignment may merge later.
+   - *Rejected:* one relation per sense. It conflates `responsible for X` with `responsible to Y` and
+     `treat X with Y` with `treat X for Y`, which R2 of the style guide forbids.
+7. **Decision 1 for adjectives and nouns — decided for adjectives: the same rule** (the owner,
+   2026-09-30). SPECIALIST's governed prepositions on adjectives and nouns are per lemma as well.
+   Counted 2026-09-30 against WordNet 3.0: 599 WordNet adjectives get one (758 lemma × preposition
+   items, 135 lemmas with several prepositions), 359 of them with several senses. Over those 359 the
+   derivational pointers (an adjective sense's `+` to a noun synset holding one of SPECIALIST's
+   nominalizations) pick some senses and not all for 160; every sense points for 75, none for 49, and
+   75 have no nominalization — 199 lemmas for the judge.
+   - **Decided for adjectives:** decision 1's rule. One sense takes the preposition; where the
+     pointers pick some senses, those; the 199 open lemmas go to the judge, validated first, its
+     verdicts committed; where it accepts no sense, every sense takes it.
+   - **Open for nouns:** 6,425 WordNet nouns, 3,329 with several senses — the same rule multiplies
+     the judge's work several times over, so it is a budget question as well.
 8. **What a "no sense fits" verdict leads to.** The judge will name frames whose sense WordNet
    lacks (`mediate` as in `WRN mediates repair`). Decision 1 keeps such a frame on every sense. Open:
    whether it also yields a new sense — the verb sense of the concept its noun names, by decision
@@ -381,6 +398,28 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    constructors and closed-class argument entries (decision 3), and the kernel's single preposition
    list. Frame 13 moves to the PP-oblique kind, as `on`.
 3. **Adjectives and nouns**: eigenius#263's attested set.
+
+   **3a — adjectives (eigenius#263)**, built before slice 2 (scope decided 2026-09-30), in this order:
+   1. *The kernel's single list:* `dcg::category::GOVERNED_PREPOSITIONS`, checked against `data
+      lexicon:Prep` by a test; the importer derives its governance check and its constructors from
+      it.
+   2. *The reader:* `crates/eigenius-specialist` parses `LEXICON` — records, spelling variants,
+      `compl=pphr(p, …)` prepositions, nominalizations.
+   3. *The evidence:* per WordNet adjective lemma, the attested prepositions — WordNet's `followed
+      by` convention, which is per sense; SPECIALIST's complements and the curated frames, which are
+      per lemma — and the senses decision 7 places a per-lemma preposition on: the one sense; the
+      senses whose `+` pointer reaches a SPECIALIST nominalization; the rest listed for the judge.
+      The gloss heuristic speaks only for a lemma no source attests, and never names `as`.
+   4. *The judge:* the lemma, the preposition with an example (`X is dependent on Y`), each sense's
+      gloss and examples; per sense, whether the preposition fits, with a confidence. Validated on
+      the 160 lemmas the pointers decide, with the pointers hidden, and on the senses whose gloss
+      carries WordNet's convention; verdicts committed, the run resumable and closed on failure.
+   5. *The importer:* behind `--specialist`, per sense the prepositions placed, one relation each
+      (`deg_{loc}_rel_{p}`; decision 6); an open item with no verdict stops the import; a
+      preposition outside `lexicon:Prep` is counted in the report.
+   6. *Reseed and measure:* the import diff by preposition; the page and the quantity corpus; the
+      pins that move re-adjudicated (`… predictive of MMR deficiency`); a new selection draw where
+      the renamed relations change the candidates.
 4. **Object + PP**: the `((S\NP)/cat_pp_arg(p))/NP` category, its passive (`were treated with
    etoposide`), and the importer's frames 20/21.
 5. **Verb senses of concepts**: the UMLS importer emits them through SPECIALIST's nominalizations,

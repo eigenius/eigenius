@@ -1153,6 +1153,35 @@ pub(super) fn is_vp_adjunct_prep(cat: &Exp) -> bool {
         Some((_m, res, np)) if is_ctor(res, "bwd").is_some() && is_ctor(np, "cat_np").is_some())
 }
 
+/// The prepositions a `lexicon:Prep` value names, as (surface, constructor). An importer that finds a
+/// word governing a preposition types its argument PP from this list, so a preposition the ontology
+/// adds reaches every importer at once. `prep_any`, the wildcard, names none. A test checks the list
+/// against `data lexicon:Prep`: the WordNet importer once kept its own eleven, and `of` and `as`,
+/// added to the enum by hand, never reached it (eigenius#263).
+pub const GOVERNED_PREPOSITIONS: &[(&str, &str)] = &[
+    ("to", "prep_to"),
+    ("on", "prep_on"),
+    ("in", "prep_in"),
+    ("with", "prep_with"),
+    ("from", "prep_from"),
+    ("for", "prep_for"),
+    ("at", "prep_at"),
+    ("upon", "prep_upon"),
+    ("about", "prep_about"),
+    ("against", "prep_against"),
+    ("into", "prep_into"),
+    ("of", "prep_of"),
+    ("as", "prep_as"),
+];
+
+/// The `lexicon:Prep` constructor a governed preposition's surface names, if it names one.
+pub fn prep_constructor(surface: &str) -> Option<&'static str> {
+    GOVERNED_PREPOSITIONS
+        .iter()
+        .find(|(s, _)| *s == surface)
+        .map(|(_, ctor)| *ctor)
+}
+
 /// Whether `cat` **governs a named preposition** — `X/cat_pp_arg(prep_R)` for a CONCRETE `prep_R`.
 ///
 /// This is the lexical signature of a gloss-governed relational word: `concordant WITH`, `dependent
@@ -1234,6 +1263,29 @@ pub fn pretty_cat_dbg(c: &Exp) -> String {
 mod tests {
     use super::*;
     use crate::nbe::term::Patt;
+
+    /// `GOVERNED_PREPOSITIONS` names every specific `lexicon:Prep` constructor, and nothing else.
+    #[test]
+    fn the_governed_prepositions_are_the_prep_constructors() {
+        let ctx = crate::testing::bootstrap_context();
+        let decl = match crate::nbe::env_global::Env::of(ctx.head().clone())
+            .lookup(&Iri::parse("urn:eigenius:lexicon:Prep").unwrap())
+        {
+            crate::nbe::env_global::Global::Inductive(d) => d,
+            other => panic!("lexicon:Prep must be an inductive, got {other:?}"),
+        };
+        let declared: std::collections::BTreeSet<&str> = decl
+            .ctors
+            .iter()
+            .map(|c| c.name.as_str())
+            .filter(|n| *n != "prep_any")
+            .collect();
+        let listed: std::collections::BTreeSet<&str> =
+            GOVERNED_PREPOSITIONS.iter().map(|(_, c)| *c).collect();
+        assert_eq!(listed, declared);
+        assert_eq!(prep_constructor("of"), Some("prep_of"));
+        assert_eq!(prep_constructor("any"), None);
+    }
 
     /// A GOVERNED preposition names a marker; `prep_any` names nothing.
     ///
