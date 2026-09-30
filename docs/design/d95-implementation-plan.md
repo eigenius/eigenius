@@ -1027,6 +1027,26 @@ unchanged since; not yet explained), 92 withheld; UMLS 6,409,712 entries.
 - The other misses are the number-word units, whose pins encode the count as dropped (`cardinality
   'three' not encoded`); 7a and 7d now state it, so they are re-pinned after the second reseed.
 
+**The reseed after slice 8, second measurement** (2026-09-29, at `7df7bce`): `wordnet-umls-2026-09-29-
+quantities-s8b` and its aligned snapshot.
+- Rankings: the 56 questions slices 6–8 left unchanged keep their slice-5 answers; the 6 about a unit
+  with a number word were answered by a live run on this snapshot (`ranks/2026-09-29-d95-slice8.json`).
+  The replay is faithful, 62 hits and 0 misses.
+- Grammar gaps 0, missing lexemes 0, encoded 1; readings 652 (626), skeletons 212 (175), inside the
+  ceilings of 700 and 250. Per unit, against a skeleton-dump replay of the slice-5 baseline: the six
+  units with a number word gain all 26 readings and 33 skeletons (`these four lineages` 12 → 36); the
+  other 4 skeletons are decision 14's shared-head reading, which 7d predicted — `Some MSI lines and
+  some MSS lines were represented …` also reads `[some MSI lines] and [some MSS] lines`.
+- Expected hits 62 of 62, with the six number-word units re-pinned to the counted skeletons of their
+  verified structures (`expected-readings.tsv`, dated notes).
+- Selection: a new draw (`selections/2026-09-29-d95-slice8.json`), replayed with 0 misses, scores 29 of
+  41 correct against the selection baseline's 30, with 0 unadjudicated after six ledger rows. On the
+  four changed pools the helicases gain one (`the four` removes the UMLS junk nouns for `other`) and
+  `genetic` loses one (a02734192, the sense the ledger ruled wrong in an earlier draw); on three
+  unchanged pools the verdicts net −1, their prompts carrying the changed selection of the page's first
+  unit. `selection-baseline.json` records the draw and keeps 30, pending the owner's ruling.
+- `baseline.json` carries these figures.
+
 ## Slice 9 — ratios
 
 `a median 0.56-fold fewer deletion mutations in microsatellite regions compared to typical-lineage

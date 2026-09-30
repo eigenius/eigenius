@@ -195,10 +195,12 @@ equality: the kernel has `Id`, but the term encoder never produces it.
    - gate its pins in the parse-rate harness, which reads only
      `experiments/parsing/expected-readings.tsv` today;
    - re-run it with the reranker once step 2 is done.
-7. **D95 slices 8 and 9**, then the reseed: slices 6 and 7 are built (bounds, ranges, counts,
-   proportions, number words, a determiner before a numeral, counted conjuncts sharing a head —
-   `docs/design/d95-implementation-plan.md`); slice 8 is the positions a measure phrase takes, slice
-   9 ratios. The first slices 6 and 7 (arguments and standards; degree semantics) were not built:
+7. **D95 slice 9**, then the reseed: slices 6–8 are built (bounds, ranges, counts, proportions,
+   number words, a determiner before a numeral, counted conjuncts sharing a head, offsets, fronted
+   adjuncts, `every N unit`, pseudo-partitives, `per`, lists — `docs/design/d95-implementation-plan.md`)
+   and measured after the second reseed (0 grammar gaps, 62/62 expected hits, `baseline.json`); the
+   selection draw scores 29/41 against the selection baseline's 30, which the owner rules on. Slice 9
+   is ratios. The first slices 6 and 7 (arguments and standards; degree semantics) were not built:
    the paper attests neither.
 
 ## Known defects, found and not yet fixed
