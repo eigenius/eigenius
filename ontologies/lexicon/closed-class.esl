@@ -4227,3 +4227,180 @@ resource lexicon:or_fewer_count_obj : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "or fewer";
 }
+
+// ── Proportions (D95 slice 7c) ──────────────────────────────────────────────────────
+// `15% of colon cancers are MSI`, `in more than half of the samples`, `none of the helicases`. A
+// proportion is `has_proportion(x, P, q)`: of the group `x` — the partitive's noun phrase, a definite
+// plural or a kind — the members satisfying `P` are the proportion `q`. The value is a measure phrase at
+// the dimensionless unit: a percentage, or `half` (1/2). The partitive `of` takes it on its left and the
+// quantified noun phrase on its right, which it scopes over the group; a bound or a range on the value
+// (`more than half`, `45–60%`) reaches `of` through `unit_constraint_backward`. `none of`, `all of`,
+// `each of`, `most of` and `some of` state the proportion themselves: 0, 1, more than 1/2, more than
+// 0. Each comes as a subject and an object quantifier.
+resource lexicon:half_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(r"1/2", 0) : units:Quantity(u"1") ) );
+}
+resource lexicon:half_value : lexicon:LexicalEntry {
+    core:description = "grammatical: the proportion one half ('half of the cell pellet', 'more than half of the samples').";
+    lexicon:form     = "half";
+    lexicon:cat      = type_expr( lexicon:cat_mp(u"1", lexicon:value) );
+    lexicon:sem      = lexicon:half_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "half";
+}
+resource lexicon:of_proportion_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (q : units:Quantity(u"1")) => fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (V : lexicon:Entity -> Prop) =>
+            Q(fun (x : lexicon:Entity) => ontology:has_proportion(x, fun (y : lexicon:Entity) => V(y), q))
+        : units:Quantity(u"1") -> ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop ) );
+}
+resource lexicon:of_proportion_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (q : units:Quantity(u"1")) => fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            Q(fun (x : lexicon:Entity) => ontology:has_proportion(x, fun (y : lexicon:Entity) => TV(y, s), q))
+        : units:Quantity(u"1") -> ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:of_proportion_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive of a proportion ('15% of colon cancers').";
+    lexicon:form     = "of";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))), lexicon:cat_mp(u"1", lexicon:value)) );
+    lexicon:sem      = lexicon:of_proportion_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "of.partitive";
+}
+resource lexicon:of_proportion_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive of a proportion, as an object ('in more than half of the samples').";
+    lexicon:form     = "of";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))), lexicon:cat_mp(u"1", lexicon:value)))) );
+    lexicon:sem      = lexicon:of_proportion_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "of.partitive";
+}
+resource lexicon:none_of_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (V : lexicon:Entity -> Prop) =>
+            Q(fun (x : lexicon:Entity) => ontology:has_proportion(x, fun (y : lexicon:Entity) => V(y), (units:mk_quantity(0r, 0) : units:Quantity(u"1"))))
+        : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop ) );
+}
+resource lexicon:none_of_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            Q(fun (x : lexicon:Entity) => ontology:has_proportion(x, fun (y : lexicon:Entity) => TV(y, s), (units:mk_quantity(0r, 0) : units:Quantity(u"1"))))
+        : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:none_of_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier ('none of the cells').";
+    lexicon:form     = "none of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:none_of_subj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "none of";
+}
+resource lexicon:none_of_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier, as an object ('none of the cells').";
+    lexicon:form     = "none of";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:none_of_obj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "none of";
+}
+resource lexicon:all_of_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (V : lexicon:Entity -> Prop) =>
+            Q(fun (x : lexicon:Entity) => ontology:has_proportion(x, fun (y : lexicon:Entity) => V(y), (units:mk_quantity(1r, 0) : units:Quantity(u"1"))))
+        : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop ) );
+}
+resource lexicon:all_of_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            Q(fun (x : lexicon:Entity) => ontology:has_proportion(x, fun (y : lexicon:Entity) => TV(y, s), (units:mk_quantity(1r, 0) : units:Quantity(u"1"))))
+        : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:all_of_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier ('all of the samples').";
+    lexicon:form     = "all of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:all_of_subj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "all of";
+}
+resource lexicon:all_of_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier, as an object ('all of the samples').";
+    lexicon:form     = "all of";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:all_of_obj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "all of";
+}
+resource lexicon:each_of_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (V : lexicon:Entity -> Prop) =>
+            Q(fun (x : lexicon:Entity) => ontology:has_proportion(x, fun (y : lexicon:Entity) => V(y), (units:mk_quantity(1r, 0) : units:Quantity(u"1"))))
+        : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop ) );
+}
+resource lexicon:each_of_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            Q(fun (x : lexicon:Entity) => ontology:has_proportion(x, fun (y : lexicon:Entity) => TV(y, s), (units:mk_quantity(1r, 0) : units:Quantity(u"1"))))
+        : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:each_of_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier ('each of the genes').";
+    lexicon:form     = "each of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:each_of_subj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "each of";
+}
+resource lexicon:each_of_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier, as an object ('each of the genes').";
+    lexicon:form     = "each of";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:each_of_obj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "each of";
+}
+resource lexicon:most_of_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (V : lexicon:Entity -> Prop) =>
+            Q(fun (x : lexicon:Entity) => forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:lt(u"1", (units:mk_quantity(r"1/2", 0) : units:Quantity(u"1")), q), ontology:has_proportion(x, fun (y : lexicon:Entity) => V(y), q)) -> P)) -> P)
+        : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop ) );
+}
+resource lexicon:most_of_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            Q(fun (x : lexicon:Entity) => forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:lt(u"1", (units:mk_quantity(r"1/2", 0) : units:Quantity(u"1")), q), ontology:has_proportion(x, fun (y : lexicon:Entity) => TV(y, s), q)) -> P)) -> P)
+        : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:most_of_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier ('most of the samples').";
+    lexicon:form     = "most of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:most_of_subj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "most of";
+}
+resource lexicon:most_of_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier, as an object ('most of the samples').";
+    lexicon:form     = "most of";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:most_of_obj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "most of";
+}
+resource lexicon:some_of_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (V : lexicon:Entity -> Prop) =>
+            Q(fun (x : lexicon:Entity) => forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:lt(u"1", (units:mk_quantity(0r, 0) : units:Quantity(u"1")), q), ontology:has_proportion(x, fun (y : lexicon:Entity) => V(y), q)) -> P)) -> P)
+        : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop ) );
+}
+resource lexicon:some_of_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            Q(fun (x : lexicon:Entity) => forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:lt(u"1", (units:mk_quantity(0r, 0) : units:Quantity(u"1")), q), ontology:has_proportion(x, fun (y : lexicon:Entity) => TV(y, s), q)) -> P)) -> P)
+        : ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:some_of_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier ('some of the samples').";
+    lexicon:form     = "some of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))) );
+    lexicon:sem      = lexicon:some_of_subj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "some of";
+}
+resource lexicon:some_of_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: partitive quantifier, as an object ('some of the samples').";
+    lexicon:form     = "some of";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:some_of_obj_sem;
+    lexicon:sem_type = type_expr( ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "some of";
+}

@@ -86,13 +86,15 @@ enum SemRecipe {
     UnitApplyBwd { cat: Exp, unit: Exp },
     /// A consumer applied to a measure constraint: category `cat`; sem [`constrained_sem`] over the
     /// value type `value_ty` and the consumer's `arity`, the unit applied first when the consumer
-    /// binds one. `and` is `logic:And`, resolved when the combination was decided.
+    /// binds one. `and` is `logic:And`, resolved when the combination was decided. `backward`: the
+    /// consumer is the right operand and the constraint the left.
     UnitConstrain {
         cat: Exp,
         unit: Option<Exp>,
         value_ty: Exp,
         arity: usize,
         and: Iri,
+        backward: bool,
     },
     /// Forward composition: category `cat`; sem `λz. L(R z)`.
     FwdComp { cat: Exp },
@@ -182,6 +184,10 @@ enum CombKind {
     /// (`37 °C or higher`). `UnitApply` mirrored; the sem applies the right operand to the unit, then
     /// to the measure phrase.
     UnitApplyBwd,
+    /// `UnitConstrain` mirrored (D95 slice 7c): the constraint `cat_mpc(U, r)` on the left, a consumer
+    /// of `cat_mp(U, r)` on its left on the right — the partitive `of` (`more than half of the
+    /// samples`, `45–60% of the cancers`). The sem quantifies the value as `UnitConstrain`'s does.
+    UnitConstrainBwd,
 }
 
 /// An Eisner normal-form provenance guard on the left operand (D63 §8.2 item 4).
@@ -356,6 +362,44 @@ impl CombKind {
                     unit: unit.clone(),
                 })
             }
+            CombKind::UnitConstrainBwd => {
+                let Exp::InductiveCtor(decl, name, args) = &left.cat else {
+                    return None;
+                };
+                let (true, [unit @ Exp::LitUnit(_), reading]) =
+                    (name == "cat_mpc", args.as_slice())
+                else {
+                    return None;
+                };
+                let (functor, unit_arg) = match is_ctor(&right.cat, "cat_unit_forall") {
+                    Some([Exp::Lam(Patt::Var(uvar), body)]) => {
+                        let mut bind = CatSubst::new();
+                        bind.insert(uvar.clone(), unit.clone());
+                        (subst_cat(body, &bind), Some(unit.clone()))
+                    }
+                    Some(_) => return None,
+                    None => (right.cat.clone(), None),
+                };
+                let (_mode, res, slot) = slash_parts(&functor, "bwd")?;
+                let point = Exp::InductiveCtor(
+                    decl.clone(),
+                    "cat_mp".into(),
+                    vec![unit.clone(), reading.clone()],
+                );
+                let subst = unify_cat(slot, &point, layer)?;
+                let cat = subst_cat(res, &subst);
+                let value_ty = super::super::category::denote_cat(&point).ok()?;
+                let arity = prop_arity(&super::super::category::denote_cat(&cat).ok()?)?;
+                let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+                Some(SemRecipe::UnitConstrain {
+                    cat,
+                    unit: unit_arg,
+                    value_ty,
+                    arity,
+                    and,
+                    backward: true,
+                })
+            }
             CombKind::UnitConstrain => {
                 let Exp::InductiveCtor(decl, name, args) = &right.cat else {
                     return None;
@@ -395,6 +439,7 @@ impl CombKind {
                     value_ty,
                     arity,
                     and,
+                    backward: false,
                 })
             }
         }
@@ -489,6 +534,11 @@ fn comb_rules() -> &'static [CombRule] {
             CombRule {
                 name: "unit_application_backward",
                 kind: CombKind::UnitApplyBwd,
+                prov_guards: &[],
+            },
+            CombRule {
+                name: "unit_constraint_backward",
+                kind: CombKind::UnitConstrainBwd,
                 prov_guards: &[],
             },
             CombRule {
@@ -719,16 +769,22 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
             value_ty,
             arity,
             and,
+            backward,
         } => {
+            let (consumer, constraint, prov) = if backward {
+                (right, left, Combinator::BackwardApp)
+            } else {
+                (left, right, Combinator::ForwardApp)
+            };
             let sem = constrained_sem(
-                left.sem(),
+                consumer.sem(),
                 unit.as_ref(),
-                right.sem(),
+                constraint.sem(),
                 &value_ty,
                 arity,
                 &and,
             );
-            Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
+            Item::from_parts(cat, sem, prov, Cost::ZERO)
         }
         SemRecipe::FwdComp { cat } => {
             let z = "__comp_z";

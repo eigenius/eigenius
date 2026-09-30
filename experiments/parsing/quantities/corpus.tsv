@@ -40,3 +40,4 @@ The medium was changed every 2–3 days.	gap	`every N unit` over a range: slice 
 Three sgRNAs were validated.	has_count	3 	results: we validated three sgRNAs targeting WRN
 The cells lost more than one MMR gene.	has_count	more than 1	figure legend: loss of more than one MMR gene
 The cells showed 4–7 foci.	has_count	from 4 to 7	figure: 4-7 foci
+Half of the cell pellet was saved.	has_proportion	1/2 of	methods: Half of the cell pellet was saved for immunoblot analysis

@@ -461,3 +461,28 @@ resource corpus:showed_v : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:show.v.90000033";
 }
+
+// Slice 7c row: a proportion of a mass.
+class corpus:Pellet : lexicon:Entity { }
+resource corpus:pellet_n : lexicon:LexicalEntry {
+    lexicon:form     = "pellet";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Pellet, lexicon:sg) );
+    lexicon:sem      = corpus:Pellet;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "pellet";
+}
+resource corpus:cell_n : lexicon:LexicalEntry {
+    lexicon:form     = "cell";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Cell, lexicon:sg) );
+    lexicon:sem      = corpus:Cell;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "cell";
+}
+axiom corpus:v90000034_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:saved_v : lexicon:LexicalEntry {
+    lexicon:form     = "saved";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000034_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:save.v.90000034";
+}

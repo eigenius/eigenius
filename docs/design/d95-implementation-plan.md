@@ -742,7 +742,37 @@ A cardinal drops its number today: `two genes`, `5 cells` and `1,000 cells` all 
   `4–7 foci` a count range; the quantity corpus, three count rows from the paper, and the bare-number
   statistic row dropped.
 
-**Order.** 7a: decisions 1, 2. 7b: decisions 3–6. 7c: proportions. 7d: a determiner before a
+**Order.** 7a: decisions 1, 2. 7b: decisions 3–6. 7c: proportions.
+
+**7c — proportions, decided and built** (2026-09-29). The paper's shapes: `45–60% of such cancers do
+not respond`, `15% of colon … cancers`, `in more than half of the samples`, `> half of loss events`,
+`Half of the cell pellet was saved`, `none of the four other RecQ DNA helicases were preferentially
+essential`, `each of the >17,000 genes`.
+7. **A proportion is a relation of a group, a property and a value.** `ontology:has_proportion :
+   Entity -> (Entity -> Prop) -> Quantity(u"1") -> Prop`: of the group `x`, the members satisfying
+   `P` are the proportion `q`. The group is the entity the partitive's noun phrase denotes — a
+   definite plural (`the(Sample)`) or a kind (`kind_of(ColonCancer)`) — since `of the samples` names
+   a group, where a cardinal counts a noun's type.
+   - *Rejected:* a ratio of counts, `has_count(T ∩ P) / has_count(T)`, which needs arithmetic D95
+     has not declared, and states two counts the sentence does not.
+8. **The value is a measure phrase at the dimensionless unit**: a percentage, or `half`, an entry at
+   `cat_mp(u"1", value)` — a proportion is a measurement, as `50%` is, not a count.
+9. **The partitive `of` takes the value on its left and the quantified noun phrase on its right**,
+   which it scopes over the group: `of : (GQ / GQ) \ MP`, sem `λq.λQ.λV. Q(λx. has_proportion(x,
+   λy. V(y), q))`, as a subject and an object quantifier. A bound or range on the value (`more than
+   half`, `45–60%`) is a constraint on its left, which `unit_constraint_backward` — `UnitConstrain`
+   mirrored — applies. As a preposition's object (`in more than half of the samples`) it is the
+   subject-shaped quantifier `gq_prep_vpadjunct` takes.
+10. **`none of`, `all of`, `each of`, `most of` and `some of` state the proportion themselves**: 0, 1,
+   1, more than 1/2, more than 0.
+
+Built: `has_proportion` (`ontology.esl`); `half`, the two partitive `of`s and ten quantifier
+partitives (`closed-class.esl`); `unit_constraint_backward` (`combinators.rs`); `verbalize` reads
+`more than 1/2 of the Cell, …`. Tests: `a_proportion_of_a_group` (eleven shapes, one reading each),
+verbalization, packed equals unpacked; the quantity corpus adds `Half of the cell pellet was saved.`
+Still out: `such` (`45–60% of such cancers`, no entry), the head noun elided across a coordination
+(`15% of colon, 22% of gastric … cancers`, 7d), and `the four other RecQ DNA helicases` (a determiner
+before a numeral, 7d). 7d: a determiner before a
 numeral, right-node sharing, and number words as numerals with units (`Nine days after doxycycline
 treatment`, which the preprocessor does not read as a quantity) — these change how `two` itself
 parses, and are measured with the reseed.

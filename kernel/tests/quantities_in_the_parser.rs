@@ -327,6 +327,9 @@ fn packed_equals_unpacked_on_quantities() {
         "two cells incubated",
         "at least 1,000 cells incubated",
         "HeLa received 4–7 cells",
+        "more than half of the cells incubated",
+        "15% of cells incubated",
+        "HeLa incubated in more than half of the cells",
     ] {
         assert_eq!(readings(&packed, text), readings(&unpacked, text), "{text}");
     }
@@ -351,7 +354,8 @@ fn measure_phrases<'e>(cat: &'e Exp, out: &mut Vec<&'e [Exp]>) {
 /// Decision 5: every closed-class consumer of a measure phrase names the reading it takes. One
 /// whose reading were a variable would take the value and the difference items alike, and
 /// `at 37 °C` would be 310.15 K and 37 K at once. The 33 prepositions of slice 5, the 18 word-marker
-/// entries of slice 6a, the 19 symbol entries of 6b and the 8 postfix entries of 6d take values.
+/// entries of slice 6a, the 19 symbol entries of 6b, the 8 postfix entries of 6d, and `half` and the
+/// two partitive `of`s of 7c take values.
 #[test]
 fn every_consumer_names_its_reading() {
     let ctx = eigenius_kernel::testing::bootstrap_context();
@@ -378,7 +382,7 @@ fn every_consumer_names_its_reading() {
             }
         }
     }
-    assert_eq!(readings.len(), 78, "{readings:?}");
+    assert_eq!(readings.len(), 81, "{readings:?}");
     assert!(readings.iter().all(|r| r == "value"), "{readings:?}");
 }
 
@@ -1022,5 +1026,102 @@ fn a_bare_number_is_not_a_measure() {
         let r = readings(&parser, text);
         assert_eq!(r.len(), 1, "{text}: {r:#?}");
         assert!(!r[0].contains("has_quantity"), "{text}: {r:#?}");
+    }
+}
+
+/// Slice 7c: a proportion is `has_proportion(x, λy. V(y), q)` of the partitive's group — a definite
+/// plural or a kind — with a percentage or `half` as its value, bounded or ranged as any value is, as a
+/// subject, an object or a preposition's object. `none of`, `all of` and `most of` state it themselves.
+#[test]
+fn a_proportion_of_a_group() {
+    let parser = Parser::build(layer());
+    for (text, group, constraint, share) in [
+        (
+            "15% of the cells incubated",
+            "ontology:the",
+            None,
+            "numer: 3, denom: 20",
+        ),
+        (
+            "15% of cells incubated",
+            "kind_of",
+            None,
+            "numer: 3, denom: 20",
+        ),
+        (
+            "half of the cells incubated",
+            "ontology:the",
+            None,
+            "numer: 1, denom: 2",
+        ),
+        (
+            "HeLa received half of the cells",
+            "ontology:the",
+            None,
+            "numer: 1, denom: 2",
+        ),
+        (
+            "none of the cells incubated",
+            "ontology:the",
+            None,
+            "numer: 0, denom: 1",
+        ),
+        (
+            "all of the cells incubated",
+            "ontology:the",
+            None,
+            "numer: 1, denom: 1",
+        ),
+        (
+            "more than half of the cells incubated",
+            "ontology:the",
+            Some("lt"),
+            "numer: 1, denom: 2",
+        ),
+        (
+            "> half of the cells incubated",
+            "ontology:the",
+            Some("lt"),
+            "numer: 1, denom: 2",
+        ),
+        (
+            "most of the cells incubated",
+            "ontology:the",
+            Some("lt"),
+            "numer: 1, denom: 2",
+        ),
+        (
+            "HeLa incubated in more than half of the cells",
+            "ontology:the",
+            Some("lt"),
+            "numer: 1, denom: 2",
+        ),
+        (
+            "45–60% of the cells incubated",
+            "ontology:the",
+            Some("le"),
+            "numer: 9, denom: 20",
+        ),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        let pretty = pretty_term(parsed[0].sem());
+        assert!(
+            debug.contains("ontology:has_proportion")
+                && debug.contains(group)
+                && debug.contains(share),
+            "{text}: {pretty}"
+        );
+        match constraint {
+            Some(c) => assert!(
+                debug.contains(&format!("urn:eigenius:units:{c}\"")),
+                "{text}: {pretty}"
+            ),
+            None => assert!(
+                !debug.contains("urn:eigenius:units:lt\""),
+                "{text}: {pretty}"
+            ),
+        }
     }
 }

@@ -165,6 +165,10 @@ contained 2 μg ml⁻¹ puromycin.` does.
    copula and the words. The same forms bound a count (`at least 1,000 cells`), where `fewer than N`
    and `N or fewer` are also read. 🔜 A bound on a difference (`rose by more than 5 °C`) has no
    parse.
+   **A proportion** is `N% of`, `half of`, or a bound on either, before a plural noun phrase or a
+   mass: `15% of colon cancers`, `more than half of the samples`, `45–60% of the cancers`, `Half of
+   the cell pellet was saved.` `none of`, `all of`, `each of`, `most of` and `some of` are read too.
+   Write `the` or no determiner before the noun: `such` has no entry.
 8. **A range is the pair with the unit once, after it**: `2–3 days`, `80–90% confluence`,
    `30–37 °C`. Both ends are read in that unit and the range means `from … to …`, both ends included.
    Prefer the en-dash; a hyphen with a unit after it (`45-60%`) reads the same. Without a unit a pair
@@ -255,7 +259,7 @@ A passage is "parser-faithful" when every sentence yields a **closed or open** k
 the closed/open/gap distribution on the rewritten WRN page against the original.
 
 **Quantities have their own corpus.** The CNL page is results prose and contains one unit in 2,738
-words; the methods material contains 35 in 4,912. `experiments/parsing/quantities/` holds 35
+words; the methods material contains 35 in 4,912. `experiments/parsing/quantities/` holds 36
 sentences derived from the WRN paper. Each names the relations its readings must contain, or, for
 a gap, the construction it lacks and the D95 slice that owns it; `kernel/tests/quantity_corpus.rs`
 checks them without a database, and its README records the full-lexicon run. A quantity gap stays

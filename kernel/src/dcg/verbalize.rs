@@ -565,6 +565,21 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     format!("{count} {np}, {pred}")
                 };
             }
+            // A proportion (D95 slice 7c): `has_proportion(x, λy. body, q)` → "q of x, body".
+            ("has_proportion", 3) => {
+                let group = verbalize(args[0], vb);
+                let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
+                let share = quantity_text(args[2], &unit);
+                let pred = match args[1] {
+                    Exp::Lam(binder, body) => quant_clause_pred(binder, body, vb),
+                    other => verbalize(other, vb),
+                };
+                return if pred.is_empty() {
+                    format!("{share} of {group}")
+                } else {
+                    format!("{share} of {group}, {pred}")
+                };
+            }
             ("has_quantity", 3) => {
                 let subj = verbalize(args[0], vb);
                 let q = quantity_text(args[2], args[1]);

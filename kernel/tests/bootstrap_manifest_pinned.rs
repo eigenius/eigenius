@@ -35,7 +35,8 @@
 //! the order a bound states), `lexicon` (`cat_mpc`, the measure constraint) and `closed-class` (the
 //! bound markers `less than` … `roughly`; then the symbols `<` … `≈` and `=`, and the postfix `or more`
 //! … `or lower`), and for slice 7 on `lexicon` (`cat_num`), `ontology` (`has_count`) and
-//! `closed-class` (counting cardinals, word numerals as numbers, the count bounds). Slices 6–8 each
+//! `closed-class` (counting cardinals, word numerals as numbers, the count bounds), then for 7c on
+//! `ontology` (`has_proportion`) and `closed-class` (`half`, the partitives). Slices 6–8 each
 //! move these layers and pay ONE reseed together, after slice 8
 //! (`docs/design/d95-implementation-plan.md`, slice 6).
 //!
@@ -216,8 +217,8 @@ ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
 lexicon:5d3ea087af9c7fbccbd34584dcfe1266bedc584f383f36e358a03cb2e684811c
-ontology:f8433eef0ab9ea895dd3d21dbd02f20bad24cca0061afa2b05be370bfad00c6f
-closed-class:19ac132585cdcaf341552c3a9bb985c118abb40bc5a13407efd562c81323fac4
+ontology:1db3fad112cec89ecaf6facbd7a2ffff37bdcdd34e6b6175c403dcb92c732af9
+closed-class:9aa540399d034afd35935ce8ca0fd0cf47bd19b78e47173e9f2d2f923c7c6b1c
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 
