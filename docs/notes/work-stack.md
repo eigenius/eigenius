@@ -17,11 +17,13 @@ any detour.
 > attests (`docs/design/d95-implementation-plan.md`, "Slices 6–9"). The owner's rule: a
 > construction the paper uses once will recur in the next paper, so it is built.
 >
-> **Built:** slice 6 (bounds, approximations, ranges, bound symbols, scientific notation) and slice 7
+> **Built:** slice 6 (bounds, approximations, ranges, bound symbols, scientific notation), slice 7
 > (counts; proportions; number words; a determiner before a numeral; counted conjuncts and
-> proportions sharing a head). **Next:** slice 8 (a measure phrase before a PP, as a verb's object,
-> in a pseudo-partitive, `every N unit`, rates, two values sharing a unit, `by` + a measure phrase),
-> then one reseed and the parse-gate measurement over the aligned snapshot, then slice 9 (ratios).
+> proportions sharing a head) and slice 8 (offsets `72 h after X`, `later`, `by` + a value, fronted
+> adjuncts, `every N unit`, pseudo-partitives, `per` after a count, lists with the unit once).
+> **Next:** the reseed after slice 8 and the parse-gate measurement over its aligned snapshot
+> (`wordnet-umls-aligned-2026-09-29-quantities-s8`), then slice 9 (ratios: `a median 0.56-fold
+> fewer deletion mutations … compared to typical lineages`).
 >
 > **Exit gate:** slices 6–9 built, the quantity corpus extended with the attested sentences, the
 > reseed measured, then the branch's PR.
