@@ -182,6 +182,20 @@ impl ProseUnits {
         })
     }
 
+    /// A bare number read at the dimensionless unit — the one reading of a count range's endpoint
+    /// (`4–7 foci`, D95 slice 7). `None` without a vocabulary.
+    pub fn bare(&self, value: &Rational) -> Option<UnitReading> {
+        let vocabulary = self.vocabulary.as_ref()?;
+        Some(UnitReading {
+            units: Vec::new(),
+            stated: "1".to_string(),
+            value: vocabulary.convert_as(value, "1", Reading::Value).ok()?,
+            difference: vocabulary
+                .convert_as(value, "1", Reading::Difference)
+                .ok()?,
+        })
+    }
+
     /// Every sense combination of `factors` that converts.
     fn readings(
         &self,

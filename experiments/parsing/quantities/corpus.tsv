@@ -35,6 +35,8 @@ The medium was changed every 3 days.	gap	`every N unit`: slice 8	methods: change
 The lysates were fractionated in 4–12% gels.	prep_in has_quantity	from 1/25 to 3/25	methods: fractionated in 4–12% Bis-Tris gels
 The cells reached 80–90% confluence.	has_quantity	from 4/5 to 9/10	methods: when the cells reached 80–90% confluence
 The tumours reached a volume of approximately 100 mm³.	prep_of_value	about 1/10000000 m^3	methods: when primary tumours reached around 100 mm3
-The probability was less than 2 × 10⁻¹⁶.	has_quantity	less than 1/5000000000000000	results: P < 2 × 10⁻¹⁶ (the P value, a probability)
 The infection efficiency was >90%.	has_quantity	more than 9/10	methods: predetermined to achieve >90% infection efficiency
 The medium was changed every 2–3 days.	gap	`every N unit` over a range: slice 8	methods: media was refreshed every 2–3 days
+Three sgRNAs were validated.	has_count	3 	results: we validated three sgRNAs targeting WRN
+The cells lost more than one MMR gene.	has_count	more than 1	figure legend: loss of more than one MMR gene
+The cells showed 4–7 foci.	has_count	from 4 to 7	figure: 4-7 foci

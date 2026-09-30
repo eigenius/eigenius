@@ -549,6 +549,22 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
             }
             // A measured value predicated (D95): `has_quantity(x, u, q)` → "x is q". The subject is
             // a bound restrictor variable when the value modifies a noun, giving just "q".
+            // A cardinal's count (D95 slice 7): `has_count(T, λx. body, q)` → "q T, body", the bound
+            // variable rendered as the anaphor, as an existential renders "some T, body".
+            ("has_count", 3) => {
+                let np = bare_np(args[0], vb);
+                let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
+                let count = quantity_text(args[2], &unit);
+                let pred = match args[1] {
+                    Exp::Lam(binder, body) => quant_clause_pred(binder, body, vb),
+                    other => verbalize(other, vb),
+                };
+                return if pred.is_empty() {
+                    format!("{count} {np}")
+                } else {
+                    format!("{count} {np}, {pred}")
+                };
+            }
             ("has_quantity", 3) => {
                 let subj = verbalize(args[0], vb);
                 let q = quantity_text(args[2], args[1]);

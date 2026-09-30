@@ -1515,8 +1515,8 @@ fn but_not_cross_type_objects_is_a_known_gap() {
 #[test]
 fn cardinal_numerals_are_plural_determiners() {
     // D62 §2 #4: word-form cardinals (`two`..`ten`) parse as plural determiners in subject and object
-    // position. First-cut semantics is existential with the count DROPPED (`two genes` ≈ `∃ genes`);
-    // the exact cardinality is a faithfulness follow-on.
+    // position. Since D95 slice 7 a plain cardinal states the EXACT count of its scope set:
+    // `two genes affect HeLa` → `has_count(Gene, λx. affects(hela, x), 2)`.
     let (_layer, index) = index_over_bootstrap();
     assert!(
         !index.parse("two genes affect HeLa", &PluralS).is_empty(),
@@ -1535,8 +1535,8 @@ fn cardinal_numerals_are_plural_determiners() {
     // `one` is the singular cardinal: `one gene` parses, `one genes` does not.
     assert!(!index.parse("one gene affects HeLa", &PluralS).is_empty());
     assert!(index.parse("one genes affect HeLa", &PluralS).is_empty());
-    // D95: a digit numeral seeds the cardinal determiner items of `one` or `two`, with the same
-    // readings; `0` seeds no determiner.
+    // D95: a digit numeral seeds the categories of `one` or `two` with its own count, so it reads as
+    // the word form does; `0` reads too, as a count of zero (slice 7), where an existential refused it.
     let sems = |text: &str| {
         let mut s: Vec<String> = index
             .parse(text, &PluralS)
@@ -1555,7 +1555,11 @@ fn cardinal_numerals_are_plural_determiners() {
         assert!(!sems(digits).is_empty(), "{digits}");
         assert_eq!(sems(digits), sems(words), "{digits}");
     }
-    assert!(sems("0 genes affect HeLa").is_empty(), "`0` is not ∃");
+    let zero = sems("0 genes affect HeLa");
+    assert_eq!(zero.len(), 1, "{zero:?}");
+    assert!(zero[0].contains("has_count"), "{zero:?}");
+    let two = sems("two genes affect HeLa");
+    assert!(two.iter().all(|s| s.contains("has_count")), "{two:?}");
 }
 
 #[test]

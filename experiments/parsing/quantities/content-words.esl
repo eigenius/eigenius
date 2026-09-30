@@ -387,14 +387,6 @@ resource corpus:confluence_n : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "confluence";
 }
-class corpus:Probability : lexicon:Entity { }
-resource corpus:probability_n : lexicon:LexicalEntry {
-    lexicon:form     = "probability";
-    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Probability, lexicon:sg) );
-    lexicon:sem      = corpus:Probability;
-    lexicon:sem_type = type_expr( Set );
-    lexicon:sense    = "probability";
-}
 class corpus:Infection : lexicon:Entity { }
 resource corpus:infection_n : lexicon:LexicalEntry {
     lexicon:form     = "infection";
@@ -410,4 +402,62 @@ resource corpus:efficiency_n : lexicon:LexicalEntry {
     lexicon:sem      = corpus:Efficiency;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "efficiency";
+}
+
+// Slice 7 rows: the nouns and verbs around a count.
+class corpus:SgRNA : lexicon:Entity { }
+resource corpus:sgrnas_n : lexicon:LexicalEntry {
+    lexicon:form     = "sgRNAs";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:SgRNA, lexicon:pl) );
+    lexicon:sem      = corpus:SgRNA;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "sgrnas";
+}
+class corpus:MMR : lexicon:Entity { }
+resource corpus:mmr_n : lexicon:LexicalEntry {
+    lexicon:form     = "MMR";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:MMR, lexicon:mass) );
+    lexicon:sem      = corpus:MMR;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "mmr";
+}
+class corpus:Gene : lexicon:Entity { }
+resource corpus:gene_n : lexicon:LexicalEntry {
+    lexicon:form     = "gene";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Gene, lexicon:sg) );
+    lexicon:sem      = corpus:Gene;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "gene";
+}
+class corpus:Focus : lexicon:Entity { }
+resource corpus:foci_n : lexicon:LexicalEntry {
+    lexicon:form     = "foci";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Focus, lexicon:pl) );
+    lexicon:sem      = corpus:Focus;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "foci";
+}
+axiom corpus:v90000031_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:validated_v : lexicon:LexicalEntry {
+    lexicon:form     = "validated";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000031_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:validate.v.90000031";
+}
+axiom corpus:v90000032_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:lost_v : lexicon:LexicalEntry {
+    lexicon:form     = "lost";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000032_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:lose.v.90000032";
+}
+axiom corpus:v90000033_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:showed_v : lexicon:LexicalEntry {
+    lexicon:form     = "showed";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000033_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:show.v.90000033";
 }

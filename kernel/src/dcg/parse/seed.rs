@@ -753,10 +753,10 @@ impl Parser {
     /// (`cat_mp(u, difference)`, sem `Difference(u)`) — for `931g`, four. A quantity's value also
     /// seeds a predicative adjective `S[adj]\NP`, sem `λx. has_quantity(x, u, q)`: the leaf modifier
     /// lift makes it prenominal (`10 μM etoposide`), and the copula takes it (`the temperature was
-    /// 37 °C`). A numeral is the measure-phrase pair at the dimensionless unit; `1` also seeds the
-    /// cardinal determiner items of `one` and an integer of 2 or more those of `two`, their count
-    /// dropped as the word forms' is. A range seeds a constraint and a predicate ([`Self::range_items`]).
-    /// Any other token seeds nothing here.
+    /// 37 °C`). A numeral is a bare number, `cat_num`, and a whole number is also a cardinal
+    /// determiner stating its count ([`Self::count_determiner`]). A range with a unit seeds a constraint
+    /// and a predicate ([`Self::range_items`]); a range of bare numbers, count-range determiners. Any
+    /// other token seeds nothing here.
     fn measure_items(&self, token: &Token) -> Vec<Item> {
         use super::super::preprocess::TokenKind;
         use crate::units::convert::{Converted, Kinds, Reading};
@@ -797,22 +797,48 @@ impl Parser {
                     kinds: Kinds::default(),
                     reading,
                 };
-                let mut items: Vec<Item> = [Reading::Value, Reading::Difference]
+                // A bare number, not a measure phrase (D95, "Bare numerals and quantities share a
+                // carrier, not a category"; slice 7): `5 cells` counts cells, and a measure consumer
+                // or a measure bound does not take it.
+                let mut items: Vec<Item> = super::super::category::number_cat(&self.grammar.layer)
+                    .map(|cat| Item::new(cat, dimensionless(Reading::Value).term()))
                     .into_iter()
-                    .filter_map(|r| mp(&dimensionless(r)))
                     .collect();
-                if value.is_integer() {
+                // A whole number is also a cardinal determiner stating its exact count (D95 slice 7):
+                // `1` with `one`'s singular categories, any other with `two`'s plural ones, `0`
+                // included — `has_count(…, 0)` reads `0 genes`, where an existential could not.
+                if value.is_integer() && value.numer() >= &num_bigint::BigInt::from(0) {
                     let one = num_bigint::BigInt::from(1);
-                    if value.numer() == &one {
-                        items.extend(self.cardinal_one.iter().cloned());
-                    } else if value.numer() > &one {
-                        items.extend(self.cardinal_many.iter().cloned());
-                    }
+                    let templates = if value.numer() == &one {
+                        &self.cardinal_one
+                    } else {
+                        &self.cardinal_many
+                    };
+                    let count = dimensionless(Reading::Value).term();
+                    items.extend(
+                        templates
+                            .iter()
+                            .filter_map(|t| self.count_determiner(t.cat(), &count)),
+                    );
                 }
                 items
             }
             // A range (D95 slice 6c): the constraint `lo ≤ q ≤ hi` a consumer takes through
             // `unit_constraint`, and the predicate the copula takes and `mod_lifts` makes prenominal.
+            // A range with a unit or `%` is a measure constraint (slice 6); a range of bare numbers
+            // counts (D95 slice 7, decision 5): whole endpoints make a cardinal determiner,
+            // `∃q. lo ≤ q ≤ hi ∧ has_count(T, …, q)`, and nothing else, as a numeral is not a measure.
+            TokenKind::Range(r) if r.unitless => {
+                let whole = |v: &crate::numeric::Rational| {
+                    v.is_integer() && v.numer() >= &num_bigint::BigInt::from(0)
+                };
+                match (r.low.readings.as_slice(), r.high.readings.as_slice()) {
+                    ([lo], [hi]) if whole(&r.low.value) && whole(&r.high.value) => {
+                        self.count_range_determiners(&lo.value, &hi.value)
+                    }
+                    _ => Vec::new(),
+                }
+            }
             TokenKind::Range(r) => r
                 .low
                 .readings
@@ -822,6 +848,111 @@ impl Parser {
                 .collect(),
             _ => Vec::new(),
         }
+    }
+
+    /// A cardinal determiner over `cat` stating the count `q` (D95 slice 7, decision 2): a subject
+    /// determiner `cat_forall(n, λT. S/(S\\NP_T))` gets `λT.λV. has_count(T, λx. V(x), q)`, an object one
+    /// `cat_forall(n, λT. (S\\NP)\\((S\\NP)/NP_T))` gets `λT.λTV.λs. has_count(T, λx. TV(x, s), q)`.
+    /// `None` for any other shape, or when the chain lacks `has_count`.
+    fn count_determiner(&self, cat: &Exp, q: &Exp) -> Option<Item> {
+        let has_count = Iri::parse(HAS_COUNT).ok()?;
+        self.grammar.layer.resolve(&has_count)?;
+        let [_num, Exp::Lam(_, body)] = super::super::category::is_ctor(cat, "cat_forall")? else {
+            return None;
+        };
+        let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+        let lam = |x: &str, b: Exp| Exp::Lam(Patt::Var(x.into()), Box::new(b));
+        let var = |x: &str| Exp::Var(x.into());
+        let count = |scope: Exp| {
+            app(
+                app(app(Exp::EigonAxiom(has_count.clone()), var("CNT#T")), scope),
+                q.clone(),
+            )
+        };
+        // The scope is a λ over `T` in both shapes: a verb phrase's own sem is typed over `Entity`,
+        // and the kernel checks a λ at `T → Prop` but does not subtype `Entity → Prop` to it.
+        let sem = if super::super::category::is_ctor(body, "fwd").is_some() {
+            let scope = lam("CNT#x", app(var("CNT#V"), var("CNT#x")));
+            lam("CNT#T", lam("CNT#V", count(scope)))
+        } else if super::super::category::is_ctor(body, "bwd").is_some() {
+            let scope = lam("CNT#x", app(app(var("CNT#TV"), var("CNT#x")), var("CNT#s")));
+            lam("CNT#T", lam("CNT#TV", lam("CNT#s", count(scope))))
+        } else {
+            return None;
+        };
+        Some(Item::new(cat.clone(), sem))
+    }
+
+    /// A count range's cardinal determiners (D95 slice 7, decision 5), in the plural categories `two`
+    /// has: `λT.λV. ∃q. lo ≤ q ≤ hi ∧ has_count(T, λx. V(x), q)`, and its object counterpart.
+    fn count_range_determiners(
+        &self,
+        lo: &crate::units::convert::Converted,
+        hi: &crate::units::convert::Converted,
+    ) -> Vec<Item> {
+        use crate::units::convert::Reading;
+        let layer = &self.grammar.layer;
+        let build = || -> Option<Vec<Item>> {
+            let point =
+                super::super::category::measure_phrase_cat(layer, &lo.unit, Reading::Value)?;
+            let value_ty = super::super::category::denote_cat(&point).ok()?;
+            let le = Iri::parse(UNITS_LE).ok()?;
+            layer.resolve(&le)?;
+            let has_count = Iri::parse(HAS_COUNT).ok()?;
+            layer.resolve(&has_count)?;
+            let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+            let unit = Exp::LitUnit(lo.unit.clone());
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let lam = |x: &str, b: Exp| Exp::Lam(Patt::Var(x.into()), Box::new(b));
+            let var = |x: &str| Exp::Var(x.into());
+            let le_app =
+                |a: Exp, b: Exp| app(app(app(Exp::EigonAxiom(le.clone()), unit.clone()), a), b);
+            let q = "CNT#q";
+            let constraint = lam(
+                q,
+                Exp::const_applied(
+                    and.clone(),
+                    Vec::new(),
+                    vec![le_app(lo.term(), var(q)), le_app(var(q), hi.term())],
+                ),
+            );
+            let count = |scope: Exp| {
+                app(
+                    app(app(Exp::EigonAxiom(has_count.clone()), var("CNT#T")), scope),
+                    var(q),
+                )
+            };
+            let mut out = Vec::new();
+            for template in &self.cardinal_many {
+                let [_num, Exp::Lam(_, body)] =
+                    super::super::category::is_ctor(template.cat(), "cat_forall")?
+                else {
+                    continue;
+                };
+                // `f q a₁…aₙ` for `constrained_sem`, which quantifies `q` and closes over the args.
+                let (consumer, arity) = if super::super::category::is_ctor(body, "fwd").is_some() {
+                    let scope = lam("CNT#x", app(var("CNT#V"), var("CNT#x")));
+                    (lam(q, lam("CNT#T", lam("CNT#V", count(scope)))), 2)
+                } else {
+                    let scope = lam("CNT#x", app(app(var("CNT#TV"), var("CNT#x")), var("CNT#s")));
+                    (
+                        lam(q, lam("CNT#T", lam("CNT#TV", lam("CNT#s", count(scope))))),
+                        3,
+                    )
+                };
+                let sem = super::super::rules::combinators::constrained_sem(
+                    &consumer,
+                    None,
+                    &constraint,
+                    &value_ty,
+                    arity,
+                    &and,
+                );
+                out.push(Item::new(template.cat().clone(), sem));
+            }
+            Some(out)
+        };
+        build().unwrap_or_default()
     }
 
     /// A range's two items (D95 slice 6, decision 8): `cat_mpc(u, value)` with sem
@@ -1128,6 +1259,8 @@ pub(super) fn is_lexicalized_adverb(surface: &str) -> bool {
 const HAS_QUANTITY: &str = "urn:eigenius:ontology:has_quantity";
 /// `units:le` — a range's endpoints bound its value (D95 slice 6c).
 const UNITS_LE: &str = "urn:eigenius:units:le";
+/// `ontology:has_count` — a cardinal's exact count (D95 slice 7).
+const HAS_COUNT: &str = "urn:eigenius:ontology:has_count";
 
 /// The productive denominal-adjective suffixes (D63 compound morphology §3b, generalized from the
 /// shipped `-based` slice). Each row is `(suffix_tail, relation_lemma, theta_is_object)`:

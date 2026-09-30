@@ -219,8 +219,9 @@ fn scientific_notation_is_one_numeral() {
 }
 
 /// Slice 6c: a digit pair with a unit or `%` after it, joined by an en-dash or a hyphen, is one range
-/// token, both endpoints read in that unit — `30–37 °C` is 303.15 K to 310.15 K. A pair with no unit is
-/// not a range: a catalogue number, or a count (`4–7 foci`, slice 7).
+/// token, both endpoints read in that unit — `30–37 °C` is 303.15 K to 310.15 K. An en-dash pair with no
+/// unit is a count range, read at the dimensionless unit (slice 7); a hyphen pair with no unit is not a
+/// range, since that is how a catalogue number is written.
 #[test]
 fn a_range_is_one_token() {
     for (text, surface, low, high, unit) in [
@@ -270,9 +271,17 @@ fn a_range_is_one_token() {
         assert_eq!(lo.unit.to_canonical_string(), unit, "{text:?}");
         assert_eq!(hi.unit, lo.unit, "{text:?}");
     }
+    let count = tokenize("4–7 foci", units());
+    match count[0].kind() {
+        TokenKind::Range(r) => {
+            assert!(r.unitless, "{count:?}");
+            assert_eq!((&r.low.value, &r.high.value), (&q(4, 1), &q(7, 1)));
+            assert!(r.low.readings[0].value.unit.is_dimensionless());
+        }
+        other => panic!("`4–7 foci`: {other:?}"),
+    }
     for text in [
         "catalogue number 926-68021",
-        "4–7 foci",
         "96-well plates",
         "a 5-fold change",
     ] {

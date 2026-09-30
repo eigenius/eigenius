@@ -388,6 +388,12 @@ data lexicon:Cat : Type 1 {
     // units:Difference(u) → Prop. Indexed as `cat_mp` is. A consumer of `cat_mp(u, r)` takes it through
     // the `unit_constraint` combinator, which quantifies the value the consumer would have taken.
     cat_mpc : core:unit -> lexicon:Reading -> lexicon:Cat,
+    // NUM — a BARE NUMBER (D95 slice 7): `5`, `1,000`, `two`, `2 × 10³`. D95 decided that bare
+    // numerals and quantities "share a carrier, not a category": ⟦cat_num⟧ = units:Quantity(u"1"),
+    // the carrier a dimensionless measure phrase has, but a number is not a measure phrase — `5 cells`
+    // counts cells, it does not give them a quantity. Cardinal determiners and the bounds on a count
+    // take it; the measure consumers, which take `cat_mp`, do not.
+    cat_num : lexicon:Cat,
     // ∀u:unit. R[u] — a UNIT-polymorphic functor: a consumer that takes a measure phrase of any unit
     // (`at 37 °C`, `for 2 h`). Like `cat_forall` and unlike the feature binders, it is instantiated from
     // the consumed item — `u := U` from its `cat_mp(U, r)` — and its sem is applied to the unit, since

@@ -34,7 +34,8 @@
 //! IT FIRED FOR D95 SLICE 6 (`2026-09-29`), on three layers: `units` (`units:lt`, `le`, `approx`,
 //! the order a bound states), `lexicon` (`cat_mpc`, the measure constraint) and `closed-class` (the
 //! bound markers `less than` … `roughly`; then the symbols `<` … `≈` and `=`, and the postfix `or more`
-//! … `or lower`). Slices 6–8 each
+//! … `or lower`), and for slice 7 on `lexicon` (`cat_num`), `ontology` (`has_count`) and
+//! `closed-class` (counting cardinals, word numerals as numbers, the count bounds). Slices 6–8 each
 //! move these layers and pay ONE reseed together, after slice 8
 //! (`docs/design/d95-implementation-plan.md`, slice 6).
 //!
@@ -214,9 +215,9 @@ notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
-lexicon:1c6e18802c72de1f28b7b7469f93862259ee9324fea31a82e2a5214d2a418352
-ontology:4c90a71407c97e847597e8b55329c106a4071c4af41fe172ced12c3afdc539cd
-closed-class:e6c5dd20040ea2825cded56d1ab2d138350facebb9926e0d9394bb0fdd6259e1
+lexicon:5d3ea087af9c7fbccbd34584dcfe1266bedc584f383f36e358a03cb2e684811c
+ontology:f8433eef0ab9ea895dd3d21dbd02f20bad24cca0061afa2b05be370bfad00c6f
+closed-class:19ac132585cdcaf341552c3a9bb985c118abb40bc5a13407efd562c81323fac4
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 

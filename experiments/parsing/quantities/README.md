@@ -23,11 +23,11 @@ cargo test -p eigenius-kernel --test quantity_corpus
 - a covered row parses, and every reading contains its relations and renders its values;
 - a gap row still does not parse. When one does, its construction has arrived: update the row.
 
-As committed: 27 covered rows, all passing. The two `g` rows have two readings each, gram and
-standard gravity (D93). Slice 6 (D95 implementation plan) added five, each from a sentence of the
-paper: a range (`4–12% gels`, `80–90% confluence`), an approximation (`approximately 100 mm³`), a
-bound in words over scientific notation (`less than 2 × 10⁻¹⁶`) and a bound symbol
-(`>90%`). The 6 gap rows:
+As committed: 29 covered rows, all passing. The two `g` rows have two readings each, gram and
+standard gravity (D93). Slices 6 and 7 (D95 implementation plan) added seven, each from a sentence of
+the paper: a range (`4–12% gels`, `80–90% confluence`), an approximation (`approximately 100 mm³`), a
+bound symbol (`>90%`), and counts — a plain one (`three sgRNAs`), a bounded one (`more than one MMR
+gene`) and a count range (`4–7 foci`). The 6 gap rows:
 
 | Gap | Owner |
 |---|---|

@@ -679,6 +679,73 @@ words, `at less than 37 °C`). The three ontologies move the bootstrap manifest;
 
 A cardinal drops its number today: `two genes`, `5 cells` and `1,000 cells` all read `∃x`
 (`closed-class.esl:2170-2178`). No bound on a count can be stated over a number that is not there.
+
+**Decisions** (2026-09-29)
+
+1. **A count is a relation between a set and a number.** `ontology:has_count : forall (T : Set) =>
+   (T -> Prop) -> units:Quantity(u"1") -> Prop`: the number of `T` satisfying `P` is `q`.
+   `has_quantity(x, u, q)` gives an entity its measured value; `has_count` gives a set its size. A
+   count is dimensionless, so it shares a measure phrase's carrier, `Quantity(u"1")`, and slice 6's
+   order relations state its bounds.
+   - *Rejected:* a count function and an equation, `Id(count(T, P), n)`. ESL cannot write `Id` yet
+     (D98 slice 1), and a function says nothing the relation does not for stating a count.
+   - *Rejected:* `lexicon:card : Set -> Entity -> float`, which counts per entity (how many `T` an
+     entity has) and is a float.
+2. **A plain cardinal states the exact count** (decided above): `two genes affect HeLa` is
+   `has_count(Gene, λx. affects(hela, x), 2)` — the size of the scope set, `|T ∩ V|`. Subject and
+   object determiners alike, the word forms with their number and a digit with its value; `0 genes`
+   now reads, where the existential had to refuse it.
+3. **A bounded count uses the same markers.** Each marker gains two count-determiner entries,
+   subject and object, taking the bare number, `cat_num` (decision 6): `at least 1,000 cells` is
+   `∃q. le(1000, q) ∧ has_count(Cell, V, q)`. `fewer than` and `or fewer` join, for counts only.
+   - Number agreement is not checked on a bounded count: `more than one MMR gene` takes a singular
+     noun.
+   - *Rejected:* one rule turning any constraint over `u"1"` into a determiner. It would apply to
+     `10%` and `1.5` as readily as to a count, and telling them apart would read the sem, which the
+     packed chart's combination decision may not.
+4. **Word numerals are numbers too.** `one` … `ten` gain an entry at `cat_num`, as a digit seeds
+   one, so `more than one`, `at least two` and `two or more` work.
+5. **A count range** is an en-dash digit pair with no unit (`4–7 foci`): a dimensionless range token
+   seeding count-range determiners, `∃q. le(4, q) ∧ le(q, 7) ∧ has_count(…, q)`, when both ends are
+   whole numbers. A hyphen pair with no unit stays a word (`926-68021`).
+6. **A numeral is a bare number, `cat_num`, not a measure phrase.** D95 decided that "bare numerals
+   and quantities share a carrier, not a category"; slice 4 had seeded a numeral as `cat_mp(u"1",
+   value)` and `cat_mp(u"1", difference)` all the same. Slice 7 showed the cost: a bound marker's
+   measure predicate took the bare number, `mod_lifts` made it prenominal, and `at least 1,000 cells`
+   gained a second reading, cells with a quantity of at least 1000. `⟦cat_num⟧ = Quantity(u"1")`, the
+   carrier; the cardinal determiners and the count bounds take it, and no measure consumer does, so
+   `incubated at 37` without a unit has no parse. A percentage is still a measure phrase (`>90%
+   infection efficiency`). A bare number as a dimensionless measured value (`P = 0.02`) is a
+   statistic, which the CNL keeps out of a claim.
+
+**7a, 7b — built** (2026-09-29).
+- `ontology:has_count` (`ontology.esl`); `cat_num` (`lexicon-ontology.esl`, `dcg/category.rs`).
+- `one` … `ten`: their determiner entries state their number (20 sems), and each is a number at
+  `cat_num`. A digit seeds `cat_num` and, as a whole number, the determiner categories of `one` or
+  `two` with its own count (`seed.rs`, `count_determiner`); `0` included.
+- The scope is written `λx. V(x)`: the verb phrase's own sem is typed over `Entity`, and the kernel
+  checks a λ at `T → Prop` but does not subtype `Entity → Prop` to it — the first cut passed `V` and
+  every subject count failed the gate, while the object form, already a λ, passed.
+- 19 markers carry count-determiner entries, 38 over 10 sems: the nine words, `fewer than`, the six
+  symbols, `or more`, `or less`, `or fewer`.
+- A word numeral's count is written as the canonical term, `(units:mk_quantity(2r, 0) :
+  units:Quantity(u"1"))`, not `units:quantity(2, "1")`: a whole number needs no conversion, and the
+  conversion form needs the units vocabulary at compile time, which `lexicon_validates.rs` and its
+  siblings do not load (finding 12).
+- An en-dash pair with no unit is a count range (`QuantityRange::unitless`), seeding count-range
+  determiners only.
+- `verbalize`: `has_count(T, λx. body, q)` reads `q T, body` — `2 Cell`, `at least 1000 Cell`,
+  `from 4 to 7 Cell`.
+- Tests: `quantities_in_the_parser.rs`, 25 — exact counts (word, digit, subject, object, `0`, `one`,
+  `2 × 10³`), bounded counts in each form, count ranges, and a bare number that is not a measure;
+  `closed_class_determiners.rs`'s cardinal test, where `0 genes` now reads; `quantity_tokens.rs`,
+  `4–7 foci` a count range; the quantity corpus, three count rows from the paper, and the bare-number
+  statistic row dropped.
+
+**Order.** 7a: decisions 1, 2. 7b: decisions 3–6. 7c: proportions. 7d: a determiner before a
+numeral, right-node sharing, and number words as numerals with units (`Nine days after doxycycline
+treatment`, which the preprocessor does not read as a quantity) — these change how `two` itself
+parses, and are measured with the reseed.
 - **The count**: a numeric cardinality of a predicate, beside `lexicon:card` (`closed-class.esl:1611`),
   which is per entity and a float.
 - **Bounded cardinals**: `at least 1,000 cells`, `more than one MMR gene`, `≥ 8 foci`, `fewer than`;

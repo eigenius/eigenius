@@ -51,10 +51,11 @@ Two rules sit above everything else:
    dependency is selective.` Copula present/past: `is`/`are`/`was`/`were`.
 3. **Determiners.** `a`/`an`/`the`/`every`/`each`/`all`/`some`/`no`, the cardinals `one`…`ten`, and
    digits (`1 gene`, `3 genes`), which read as the word forms do.
-   - 🔜 **A plain count is exact** — `5 MSI cell lines` states five (decided `2026-09-29`; every plain
-     count in the WRN paper is exact). Until D95 slice 7 the parser still reads a cardinal as `some`
-     and drops the number. Write a lower bound out: `at least 1,000 cells`, `5 or more cell lines`
-     (rule 7 under Measured quantities); for counts these parse once slice 7 lands.
+   - **A plain count is exact** — `5 MSI cell lines` states five (decided `2026-09-29`; every plain
+     count in the WRN paper is exact), as `has_count(…, 5)`. Write a bound out: `at least 1,000
+     cells`, `more than one MMR gene`, `5 or more cell lines`, `fewer than 5 cells`, and a count range
+     with an en-dash, `4–7 foci` (rule 7 under Measured quantities).
+   - A bare number is a count, not a measurement: `incubated at 37` has no parse — write the unit.
    - ⚠ **Bare plurals and bare mass nouns now CLOSE, not open.** `Cancers exhibit defects.` composes as
      a kind predication (`kind_of`), not as a deferred quantifier. Prefer the bare form for
      kind-level claims — it is the shorter and the closed one.
@@ -98,7 +99,7 @@ Two rules sit above everything else:
 |---|---|---|
 | **Test statistics** (`n = 37`, `P = 4.2 × 10⁻¹³`, `Q = 4.8 × 10⁻²⁴`) | Out of the claim **by design** — a statistic qualifies a claim, it is not one. Routed to a D52 record. | State the **qualitative** claim; the statistic lives elsewhere. `… showed greater dependence …`, not `(n = 37; P = …)`. Unchanged by D93/D95. |
 | **A quantity with nothing to take it** (`purified 72 h after transduction`, `contained 4 μg`, `10 μg ml⁻¹ of colcemid`, `every 3 days`) | A quantity is not a noun phrase. It composes only after a preposition that takes one, before a noun, or after the copula (DO §13). A quantity modifying a PP, a verb's object, a pseudo-partitive and `every N unit` have no entry (D95). | Put it where it composes: `treated with 10 μg ml⁻¹ colcemid` (dropping the `of` changes nothing). Where that changes the claim — `72 h after transduction`, `every 3 days` — keep it and record the gap (R2). |
-| **A range with the unit twice, or in words** (`37 °C–39 °C`, `between 37 °C and 39 °C`), or with no unit (`15–18`) | The range grammar reads a digit pair with one unit or `%` after it (D95 slice 6). A pair without a unit is non-prose, since it may be a catalogue number or a count. | Write the pair with the unit once, after it: `37–39 °C`, `20–30%`. Do **not** collapse a range to one endpoint or to a midpoint — that changes the claim, which R2 forbids. A count range (`4–7 foci`) waits for D95 slice 7: keep it and record the gap. |
+| **A range with the unit twice, or in words** (`37 °C–39 °C`, `between 37 °C and 39 °C`) | The range grammar reads a digit pair with one unit or `%` after it (D95 slice 6). An en-dash pair with no unit is a count range (`4–7 foci`, slice 7); a hyphen pair with no unit is not a range, since it may be a catalogue number (`926-68021`). | Write the pair with the unit once, after it: `37–39 °C`, `20–30%`. Do **not** collapse a range to one endpoint or to a midpoint — that changes the claim, which R2 forbids. |
 | **A plain number meant as a bound** (`5 cell lines` for "five or more", `37 °C` for "37 °C or above") | A plain number is exact (Measured quantities, rule 7). | Write the bound: `at least 5 cell lines`, `37 °C or higher`. |
 | **Parenthetical asides / inline abbreviations** (`(MSI)`, `(PARP-1)`, `(Fig. 1a)`) | Asides are dropped; the parenthetical can't be a claim. | Introduce an abbreviation in its **own** sentence, or just use one form consistently. Drop figure/citation refs. |
 | **Telegraphic caption annotations** (`Scale bar, 50 μm`; `pH 7.5`; `(1,200 V, 20 ms, 2 pulses)`) | Not sentences — a label and its value, with no verb. Figure legends and instrument settings are written in an elliptical register the sentence grammar does not cover. | Expand to the sentence it abbreviates: `The scale bar is 50 μm.` A parameter list becomes one sentence per parameter. This is **register**, not content — nothing is added or dropped, so R2 is satisfied. |
@@ -161,8 +162,9 @@ contained 2 μg ml⁻¹ puromycin.` does.
    A bound goes wherever the value goes: `incubated at 37 °C or higher`, `a dose of at least
    5 mg/kg`, `The temperature was less than 37 °C.` A symbol between a noun phrase and a value is a
    comparison without the copula (`the temperature < 37 °C`), but in a sentence of prose write the
-   copula and the words. 🔜 For counts (`at least 1,000 cells`) the same forms parse once D95 slice 7
-   lands; a bound on a difference (`rose by more than 5 °C`) waits for slice 7's differences.
+   copula and the words. The same forms bound a count (`at least 1,000 cells`), where `fewer than N`
+   and `N or fewer` are also read. 🔜 A bound on a difference (`rose by more than 5 °C`) has no
+   parse.
 8. **A range is the pair with the unit once, after it**: `2–3 days`, `80–90% confluence`,
    `30–37 °C`. Both ends are read in that unit and the range means `from … to …`, both ends included.
    Prefer the en-dash; a hyphen with a unit after it (`45-60%`) reads the same. Without a unit a pair
@@ -253,7 +255,7 @@ A passage is "parser-faithful" when every sentence yields a **closed or open** k
 the closed/open/gap distribution on the rewritten WRN page against the original.
 
 **Quantities have their own corpus.** The CNL page is results prose and contains one unit in 2,738
-words; the methods material contains 35 in 4,912. `experiments/parsing/quantities/` holds 33
+words; the methods material contains 35 in 4,912. `experiments/parsing/quantities/` holds 35
 sentences derived from the WRN paper. Each names the relations its readings must contain, or, for
 a gap, the construction it lacks and the D95 slice that owns it; `kernel/tests/quantity_corpus.rs`
 checks them without a database, and its README records the full-lexicon run. A quantity gap stays

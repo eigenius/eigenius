@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D95 slices 4 to 6 — measure phrases in the grammar, their consumers, and bounds and ranges on
-//! them. The categories
+//! D95 slices 4 to 7 — measure phrases in the grammar, their consumers, bounds and ranges on them,
+//! and counts. The categories
 //! (`cat_mp`, `cat_unit_forall`, `lexicon:Reading`), the `Difference` type, the unit-polymorphic
 //! application, the seeding and the prepositions over a measured value (`closed-class.esl`) are in
 //! the bootstrap chain; the fixture adds the content words around them, and a verb that takes only a
@@ -101,6 +101,21 @@ resource lexicon:etoposide_n : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:Etoposide;
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "etoposide";
+}
+class lexicon:Cell : lexicon:Entity { }
+resource lexicon:cells_n : lexicon:LexicalEntry {
+    lexicon:form     = "cells";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Cell, lexicon:pl) );
+    lexicon:sem      = lexicon:Cell;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "cells";
+}
+resource lexicon:cell_n : lexicon:LexicalEntry {
+    lexicon:form     = "cell";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:Cell, lexicon:sg) );
+    lexicon:sem      = lexicon:Cell;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "cell";
 }
 class lexicon:Temperature : lexicon:Entity { }
 resource lexicon:temperature_n : lexicon:LexicalEntry {
@@ -309,6 +324,9 @@ fn packed_equals_unpacked_on_quantities() {
         "HeLa incubated with 80–90% etoposide",
         "HeLa incubated at 37 °C or higher",
         "the temperature was 4 °C or lower",
+        "two cells incubated",
+        "at least 1,000 cells incubated",
+        "HeLa received 4–7 cells",
     ] {
         assert_eq!(readings(&packed, text), readings(&unpacked, text), "{text}");
     }
@@ -844,5 +862,165 @@ fn a_bound_can_follow_the_value() {
             Some(value_first_expected),
             "{text}: {pretty}"
         );
+    }
+}
+
+/// Slice 7a: a plain cardinal states the exact count of its scope set, `has_count(T, λx. V(x), n)` —
+/// word or digit, subject or object, in scientific notation too; `0` reads, and `one` takes a
+/// singular noun.
+#[test]
+fn a_plain_count_is_exact() {
+    let parser = Parser::build(layer());
+    for (text, count) in [
+        ("two cells incubated", "numer: 2, denom: 1"),
+        ("2 cells incubated", "numer: 2, denom: 1"),
+        ("HeLa received two cells", "numer: 2, denom: 1"),
+        ("HeLa received 1,000 cells", "numer: 1000, denom: 1"),
+        ("HeLa received 2 × 10³ cells", "numer: 2000, denom: 1"),
+        ("0 cells incubated", "numer: 0, denom: 1"),
+        ("one cell incubated", "numer: 1, denom: 1"),
+        ("1 cell incubated", "numer: 1, denom: 1"),
+        ("ten cells incubated", "numer: 10, denom: 1"),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        assert!(
+            debug.contains("ontology:has_count") && debug.contains("lexicon:Cell"),
+            "{text}: {}",
+            pretty_term(parsed[0].sem())
+        );
+        assert!(debug.contains(count), "{text}: {debug}");
+    }
+    assert!(readings(&parser, "two cell incubated").is_empty());
+}
+
+/// Slice 7b: a bounded count constrains the count, `∃q. C(q) ∧ has_count(T, …, q)`, through the markers
+/// a measured value takes, before the number or after it. `fewer than` and `or fewer` bound counts
+/// only; `more than one` takes a singular noun.
+#[test]
+fn a_bounded_count_constrains_the_count() {
+    let parser = Parser::build(layer());
+    for (text, constraint, value_first_expected, count) in [
+        (
+            "at least 1,000 cells incubated",
+            "le",
+            false,
+            "numer: 1000, denom: 1",
+        ),
+        (
+            "HeLa received at least 1,000 cells",
+            "le",
+            false,
+            "numer: 1000, denom: 1",
+        ),
+        (
+            "more than one cell incubated",
+            "lt",
+            false,
+            "numer: 1, denom: 1",
+        ),
+        (
+            "fewer than 5 cells incubated",
+            "lt",
+            true,
+            "numer: 5, denom: 1",
+        ),
+        (
+            "at most 5 cells incubated",
+            "le",
+            true,
+            "numer: 5, denom: 1",
+        ),
+        (
+            "HeLa received 5 or more cells",
+            "le",
+            false,
+            "numer: 5, denom: 1",
+        ),
+        (
+            "5 or fewer cells incubated",
+            "le",
+            true,
+            "numer: 5, denom: 1",
+        ),
+        ("≥ 8 cells incubated", "le", false, "numer: 8, denom: 1"),
+        (
+            "HeLa received >17,000 cells",
+            "lt",
+            false,
+            "numer: 17000, denom: 1",
+        ),
+        (
+            "at least two cells incubated",
+            "le",
+            false,
+            "numer: 2, denom: 1",
+        ),
+        (
+            "two or more cells incubated",
+            "le",
+            false,
+            "numer: 2, denom: 1",
+        ),
+        (
+            "about 500 cells incubated",
+            "approx",
+            true,
+            "numer: 500, denom: 1",
+        ),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        let pretty = pretty_term(parsed[0].sem());
+        assert!(
+            debug.contains("ontology:has_count")
+                && debug.contains(&format!("units:{constraint}"))
+                && debug.contains(count),
+            "{text}: {pretty}"
+        );
+        assert_eq!(
+            value_first(&pretty, constraint),
+            Some(value_first_expected),
+            "{text}: {pretty}"
+        );
+    }
+}
+
+/// Slice 7b: an en-dash pair with no unit is a count range, `∃q. lo ≤ q ≤ hi ∧ has_count(…, q)`.
+#[test]
+fn a_count_range_constrains_the_count() {
+    let parser = Parser::build(layer());
+    for text in ["4–7 cells incubated", "HeLa received 4–7 cells"] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let debug = format!("{:?}", parsed[0].sem());
+        assert!(debug.contains("ontology:has_count"), "{text}: {debug}");
+        assert_eq!(debug.matches("urn:eigenius:units:le").count(), 2, "{text}");
+        let (lo, hi) = (
+            debug.find("numer: 4, denom: 1"),
+            debug.find("numer: 7, denom: 1"),
+        );
+        assert!(lo.is_some() && hi.is_some() && lo < hi, "{text}: {debug}");
+    }
+}
+
+/// Slice 7: a bare number is not a measure phrase (D95, "Bare numerals and quantities share a carrier,
+/// not a category"). `at 37` with no unit has no parse, and a bounded or plain count has its count
+/// reading only — never cells given a quantity.
+#[test]
+fn a_bare_number_is_not_a_measure() {
+    let parser = Parser::build(layer());
+    assert!(readings(&parser, "HeLa incubated at 37").is_empty());
+    for text in [
+        "2 cells incubated",
+        "at least 1,000 cells incubated",
+        "4–7 cells incubated",
+        "HeLa received 2 × 10³ cells",
+    ] {
+        let r = readings(&parser, text);
+        assert_eq!(r.len(), 1, "{text}: {r:#?}");
+        assert!(!r[0].contains("has_quantity"), "{text}: {r:#?}");
     }
 }

@@ -49,9 +49,10 @@
 //!    edge trimming has dropped the `°` and the `%`. The expression must end where a token ends:
 //!    `5′-UTR` is not five arcminutes and a suffix.
 //! 9. **Ranges.** A digit pair joined by an en-dash or a hyphen, with a unit or `%` after it — `2–3
-//!    days`, `80–90%`, `45-60%` — is one [`TokenKind::Range`] token, both endpoints read in that unit.
-//!    A pair with no unit is not a range: `926-68021` is a catalogue number, and `4–7 foci` counts
-//!    (D95 implementation plan, slice 6, decision 8).
+//!    days`, `80–90%`, `45-60%` — is one [`TokenKind::Range`] token, both endpoints read in that unit
+//!    (D95 implementation plan, slice 6, decision 8). An en-dash pair with no unit is a count range,
+//!    read at the dimensionless unit (`4–7 foci`, slice 7, decision 5); a hyphen pair with no unit is
+//!    not a range, since that is how a catalogue number is written (`926-68021`).
 //!
 //! **Case is preserved.** Consumers fold where they need a lowercase key ([`Parser::has_token`],
 //! `lookup_span`, the [`Lemmatizer`], `ReservedTable::kind`, `rank_key`); `all_caps_symbol` needs the
@@ -79,6 +80,9 @@ pub struct Token {
 pub struct QuantityRange {
     pub low: Quantity,
     pub high: Quantity,
+    /// No unit followed the pair (`4–7 foci`): its endpoints are bare numbers, read at the
+    /// dimensionless unit, and the range counts (D95 slice 7) rather than measures.
+    pub unitless: bool,
 }
 
 /// What a token is to the parser.
@@ -355,9 +359,24 @@ fn range_at(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, Quantit
         .split_once(EN_DASH)
         .or_else(|| t.surface.split_once('-'))?;
     let (low, high) = (numeral_value(low)?, numeral_value(high)?);
-    let (end, high_readings) = units.read(text, t.span.end, false, &high)?;
-    let (low_end, low_readings) = units.read(text, t.span.end, false, &low)?;
-    if low_end != end || low_readings.len() != high_readings.len() {
+    let (end, high_readings, low_readings, unitless) = match (
+        units.read(text, t.span.end, false, &high),
+        units.read(text, t.span.end, false, &low),
+    ) {
+        (Some((end, high_readings)), Some((low_end, low_readings))) if low_end == end => {
+            (end, high_readings, low_readings, false)
+        }
+        // An en-dash pair with no unit is a count range (`4–7 foci`); a hyphen pair with no unit
+        // stays a word, since that is how a catalogue number is written (`926-68021`).
+        (None, None) if t.surface.contains(EN_DASH) => (
+            t.span.end,
+            vec![units.bare(&high)?],
+            vec![units.bare(&low)?],
+            true,
+        ),
+        _ => return None,
+    };
+    if low_readings.len() != high_readings.len() {
         return None;
     }
     Some((
@@ -371,6 +390,7 @@ fn range_at(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, Quantit
                 value: high,
                 readings: high_readings,
             },
+            unitless,
         },
     ))
 }

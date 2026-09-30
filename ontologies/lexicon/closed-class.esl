@@ -2167,20 +2167,222 @@ resource lexicon:those_obj : lexicon:LexicalEntry {
     lexicon:sense    = "those";
 }
 
-// ── Cardinal numerals as determiners (D62 §2 #4) ─────────────────────────────
+// ── Cardinal numerals as determiners (D62 §2 #4; D95 slice 7) ─────────────────────
 // `two genes affect HeLa`, `HeLa affects two genes`. Categorially numerals ARE determiners
-// (core-en `det.xsl`: `np[X]/n[X]` + a `<Card>` value). FIRST-CUT SEMANTICS: existential, count
-// DROPPED (`exists_sem` / `obj_exists_sem`) — so `two genes …` PARSES as `∃ genes …`; the exact
-// cardinality is a faithfulness refinement (a `Card`/measure predicate, tying to D52
-// measurements). `one` is singular and mirrors `a`; `two`..`ten` are plural and mirror `these`
-// (subject) / `these_obj` (in-situ object). A DIGIT numeral seeds these items: `1` those of `one`,
-// an integer of 2 or more those of `two` (D95 slice 4, `Parser::over`); `0` seeds none, since
-// `∃` would misread `0 genes`.
+// (core-en `det.xsl`: `np[X]/n[X]` + a `<Card>` value). A plain cardinal states the EXACT count of
+// its scope set (D95 slice 7, decisions 1 and 2): `two genes affect HeLa` →
+// `has_count(Gene, λx. affects(hela, x), 2)`. `one` is singular and mirrors `a`; `two`..`ten` are
+// plural and mirror `these` (subject) / `these_obj` (in-situ object). A DIGIT numeral seeds the same
+// categories with its own value (`Parser::over` takes them from `one` and `two`), `0` included. Each
+// word numeral is also a bare number, `cat_num`, as a digit seeds one, so the count bounds take it:
+// `more than one`, `at least two`. The scope is written `fun (x : T) => V(x)`, not `V`: the
+// verb phrase's own sem is typed over `Entity`, and the kernel checks a λ at `T → Prop` but does not
+// subtype `Entity → Prop` to it.
+resource lexicon:count_one_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (V : T -> Prop) => ontology:has_count(T, fun (x : T) => V(x), (units:mk_quantity(1r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:count_one_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            ontology:has_count(T, fun (x : T) => TV(x, subj), (units:mk_quantity(1r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:one_number : lexicon:LexicalEntry {
+    core:description = "grammatical: the number 1, as a digit is ('more than one').";
+    lexicon:form     = "one";
+    lexicon:cat      = type_expr( lexicon:cat_num );
+    lexicon:sem      = lexicon:number_one_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "one";
+}
+resource lexicon:number_one_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(1r, 0) : units:Quantity(u"1") ) );
+}
+resource lexicon:count_two_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (V : T -> Prop) => ontology:has_count(T, fun (x : T) => V(x), (units:mk_quantity(2r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:count_two_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            ontology:has_count(T, fun (x : T) => TV(x, subj), (units:mk_quantity(2r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:two_number : lexicon:LexicalEntry {
+    core:description = "grammatical: the number 2, as a digit is ('more than two').";
+    lexicon:form     = "two";
+    lexicon:cat      = type_expr( lexicon:cat_num );
+    lexicon:sem      = lexicon:number_two_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "two";
+}
+resource lexicon:number_two_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(2r, 0) : units:Quantity(u"1") ) );
+}
+resource lexicon:count_three_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (V : T -> Prop) => ontology:has_count(T, fun (x : T) => V(x), (units:mk_quantity(3r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:count_three_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            ontology:has_count(T, fun (x : T) => TV(x, subj), (units:mk_quantity(3r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:three_number : lexicon:LexicalEntry {
+    core:description = "grammatical: the number 3, as a digit is ('more than three').";
+    lexicon:form     = "three";
+    lexicon:cat      = type_expr( lexicon:cat_num );
+    lexicon:sem      = lexicon:number_three_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "three";
+}
+resource lexicon:number_three_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(3r, 0) : units:Quantity(u"1") ) );
+}
+resource lexicon:count_four_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (V : T -> Prop) => ontology:has_count(T, fun (x : T) => V(x), (units:mk_quantity(4r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:count_four_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            ontology:has_count(T, fun (x : T) => TV(x, subj), (units:mk_quantity(4r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:four_number : lexicon:LexicalEntry {
+    core:description = "grammatical: the number 4, as a digit is ('more than four').";
+    lexicon:form     = "four";
+    lexicon:cat      = type_expr( lexicon:cat_num );
+    lexicon:sem      = lexicon:number_four_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "four";
+}
+resource lexicon:number_four_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(4r, 0) : units:Quantity(u"1") ) );
+}
+resource lexicon:count_five_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (V : T -> Prop) => ontology:has_count(T, fun (x : T) => V(x), (units:mk_quantity(5r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:count_five_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            ontology:has_count(T, fun (x : T) => TV(x, subj), (units:mk_quantity(5r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:five_number : lexicon:LexicalEntry {
+    core:description = "grammatical: the number 5, as a digit is ('more than five').";
+    lexicon:form     = "five";
+    lexicon:cat      = type_expr( lexicon:cat_num );
+    lexicon:sem      = lexicon:number_five_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "five";
+}
+resource lexicon:number_five_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(5r, 0) : units:Quantity(u"1") ) );
+}
+resource lexicon:count_six_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (V : T -> Prop) => ontology:has_count(T, fun (x : T) => V(x), (units:mk_quantity(6r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:count_six_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            ontology:has_count(T, fun (x : T) => TV(x, subj), (units:mk_quantity(6r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:six_number : lexicon:LexicalEntry {
+    core:description = "grammatical: the number 6, as a digit is ('more than six').";
+    lexicon:form     = "six";
+    lexicon:cat      = type_expr( lexicon:cat_num );
+    lexicon:sem      = lexicon:number_six_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "six";
+}
+resource lexicon:number_six_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(6r, 0) : units:Quantity(u"1") ) );
+}
+resource lexicon:count_seven_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (V : T -> Prop) => ontology:has_count(T, fun (x : T) => V(x), (units:mk_quantity(7r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:count_seven_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            ontology:has_count(T, fun (x : T) => TV(x, subj), (units:mk_quantity(7r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:seven_number : lexicon:LexicalEntry {
+    core:description = "grammatical: the number 7, as a digit is ('more than seven').";
+    lexicon:form     = "seven";
+    lexicon:cat      = type_expr( lexicon:cat_num );
+    lexicon:sem      = lexicon:number_seven_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "seven";
+}
+resource lexicon:number_seven_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(7r, 0) : units:Quantity(u"1") ) );
+}
+resource lexicon:count_eight_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (V : T -> Prop) => ontology:has_count(T, fun (x : T) => V(x), (units:mk_quantity(8r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:count_eight_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            ontology:has_count(T, fun (x : T) => TV(x, subj), (units:mk_quantity(8r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:eight_number : lexicon:LexicalEntry {
+    core:description = "grammatical: the number 8, as a digit is ('more than eight').";
+    lexicon:form     = "eight";
+    lexicon:cat      = type_expr( lexicon:cat_num );
+    lexicon:sem      = lexicon:number_eight_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "eight";
+}
+resource lexicon:number_eight_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(8r, 0) : units:Quantity(u"1") ) );
+}
+resource lexicon:count_nine_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (V : T -> Prop) => ontology:has_count(T, fun (x : T) => V(x), (units:mk_quantity(9r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:count_nine_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            ontology:has_count(T, fun (x : T) => TV(x, subj), (units:mk_quantity(9r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:nine_number : lexicon:LexicalEntry {
+    core:description = "grammatical: the number 9, as a digit is ('more than nine').";
+    lexicon:form     = "nine";
+    lexicon:cat      = type_expr( lexicon:cat_num );
+    lexicon:sem      = lexicon:number_nine_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "nine";
+}
+resource lexicon:number_nine_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(9r, 0) : units:Quantity(u"1") ) );
+}
+resource lexicon:count_ten_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (V : T -> Prop) => ontology:has_count(T, fun (x : T) => V(x), (units:mk_quantity(10r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:count_ten_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            ontology:has_count(T, fun (x : T) => TV(x, subj), (units:mk_quantity(10r, 0) : units:Quantity(u"1")))
+        : forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:ten_number : lexicon:LexicalEntry {
+    core:description = "grammatical: the number 10, as a digit is ('more than ten').";
+    lexicon:form     = "ten";
+    lexicon:cat      = type_expr( lexicon:cat_num );
+    lexicon:sem      = lexicon:number_ten_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") );
+    lexicon:sense    = "ten";
+}
+resource lexicon:number_ten_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( units:mk_quantity(10r, 0) : units:Quantity(u"1") ) );
+}
 resource lexicon:one_subj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (1), singular.";
     lexicon:form     = "one";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:count_one_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "one";
 }
@@ -2188,7 +2390,7 @@ resource lexicon:one_obj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (1), singular.";
     lexicon:form     = "one";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:count_one_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "one";
 }
@@ -2196,7 +2398,7 @@ resource lexicon:two_subj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (2).";
     lexicon:form     = "two";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:count_two_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "two";
 }
@@ -2204,7 +2406,7 @@ resource lexicon:two_obj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (2).";
     lexicon:form     = "two";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:count_two_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "two";
 }
@@ -2212,7 +2414,7 @@ resource lexicon:three_subj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (3).";
     lexicon:form     = "three";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:count_three_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "three";
 }
@@ -2220,7 +2422,7 @@ resource lexicon:three_obj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (3).";
     lexicon:form     = "three";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:count_three_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "three";
 }
@@ -2228,7 +2430,7 @@ resource lexicon:four_subj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (4).";
     lexicon:form     = "four";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:count_four_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "four";
 }
@@ -2236,7 +2438,7 @@ resource lexicon:four_obj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (4).";
     lexicon:form     = "four";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:count_four_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "four";
 }
@@ -2244,7 +2446,7 @@ resource lexicon:five_subj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (5).";
     lexicon:form     = "five";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:count_five_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "five";
 }
@@ -2252,7 +2454,7 @@ resource lexicon:five_obj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (5).";
     lexicon:form     = "five";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:count_five_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "five";
 }
@@ -2260,7 +2462,7 @@ resource lexicon:six_subj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (6).";
     lexicon:form     = "six";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:count_six_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "six";
 }
@@ -2268,7 +2470,7 @@ resource lexicon:six_obj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (6).";
     lexicon:form     = "six";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:count_six_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "six";
 }
@@ -2276,7 +2478,7 @@ resource lexicon:seven_subj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (7).";
     lexicon:form     = "seven";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:count_seven_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "seven";
 }
@@ -2284,7 +2486,7 @@ resource lexicon:seven_obj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (7).";
     lexicon:form     = "seven";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:count_seven_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "seven";
 }
@@ -2292,7 +2494,7 @@ resource lexicon:eight_subj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (8).";
     lexicon:form     = "eight";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:count_eight_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "eight";
 }
@@ -2300,7 +2502,7 @@ resource lexicon:eight_obj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (8).";
     lexicon:form     = "eight";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:count_eight_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "eight";
 }
@@ -2308,7 +2510,7 @@ resource lexicon:nine_subj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (9).";
     lexicon:form     = "nine";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:count_nine_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "nine";
 }
@@ -2316,7 +2518,7 @@ resource lexicon:nine_obj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (9).";
     lexicon:form     = "nine";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:count_nine_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "nine";
 }
@@ -2324,7 +2526,7 @@ resource lexicon:ten_subj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (10).";
     lexicon:form     = "ten";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
-    lexicon:sem      = lexicon:exists_sem;
+    lexicon:sem      = lexicon:count_ten_subj_sem;
     lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
     lexicon:sense    = "ten";
 }
@@ -2332,7 +2534,7 @@ resource lexicon:ten_obj : lexicon:LexicalEntry {
     core:description = "grammatical: cardinal numeral determiner (10).";
     lexicon:form     = "ten";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
-    lexicon:sem      = lexicon:obj_exists_sem;
+    lexicon:sem      = lexicon:count_ten_obj_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "ten";
 }
@@ -3662,4 +3864,366 @@ resource lexicon:or_lower_bound_pred : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:le_bound_pred_sem;
     lexicon:sem_type = type_expr( forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> Prop );
     lexicon:sense    = "or lower";
+}
+
+// ── Bounded counts (D95 slice 7b) ─────────────────────────────────────────────────
+// A bound on a cardinal is a bound on its count: `at least 1,000 cells` is
+// `∃q. le(1000, q) ∧ has_count(Cell, V, q)` (D95 implementation plan, slice 7, decision 3). Each marker
+// carries two count-determiner entries, subject and object, taking the bare number — `cat_num`, which
+// a digit seeds and a word numeral has — before the noun, or after it for `or more`, `or less`
+// and `or fewer`. `fewer than` and `or fewer` bound counts only. Number agreement is not checked
+// (`num_any`): `more than one MMR gene` takes a singular noun.
+resource lexicon:lt_bound_count_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (b : units:Quantity(u"1")) => fun (T : Set) => fun (V : T -> Prop) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:lt(u"1", q, b), ontology:has_count(T, fun (x : T) => V(x), q)) -> P)) -> P
+        : units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:lt_bound_count_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (b : units:Quantity(u"1")) => fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:lt(u"1", q, b), ontology:has_count(T, fun (x : T) => TV(x, subj), q)) -> P)) -> P
+        : units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:gt_bound_count_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (b : units:Quantity(u"1")) => fun (T : Set) => fun (V : T -> Prop) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:lt(u"1", b, q), ontology:has_count(T, fun (x : T) => V(x), q)) -> P)) -> P
+        : units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:gt_bound_count_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (b : units:Quantity(u"1")) => fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:lt(u"1", b, q), ontology:has_count(T, fun (x : T) => TV(x, subj), q)) -> P)) -> P
+        : units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:ge_bound_count_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (b : units:Quantity(u"1")) => fun (T : Set) => fun (V : T -> Prop) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:le(u"1", b, q), ontology:has_count(T, fun (x : T) => V(x), q)) -> P)) -> P
+        : units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:ge_bound_count_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (b : units:Quantity(u"1")) => fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:le(u"1", b, q), ontology:has_count(T, fun (x : T) => TV(x, subj), q)) -> P)) -> P
+        : units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:le_bound_count_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (b : units:Quantity(u"1")) => fun (T : Set) => fun (V : T -> Prop) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:le(u"1", q, b), ontology:has_count(T, fun (x : T) => V(x), q)) -> P)) -> P
+        : units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:le_bound_count_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (b : units:Quantity(u"1")) => fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:le(u"1", q, b), ontology:has_count(T, fun (x : T) => TV(x, subj), q)) -> P)) -> P
+        : units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:approx_bound_count_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (b : units:Quantity(u"1")) => fun (T : Set) => fun (V : T -> Prop) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:approx(u"1", q, b), ontology:has_count(T, fun (x : T) => V(x), q)) -> P)) -> P
+        : units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop ) );
+}
+resource lexicon:approx_bound_count_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (b : units:Quantity(u"1")) => fun (T : Set) => fun (TV : T -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (P : Prop) => (forall (q : units:Quantity(u"1")) => (logic:And(units:approx(u"1", q, b), ontology:has_count(T, fun (x : T) => TV(x, subj), q)) -> P)) -> P
+        : units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) ) );
+}
+resource lexicon:less_than_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('less than 5 cells').";
+    lexicon:form     = "less than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:lt_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "less than";
+}
+resource lexicon:less_than_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('less than 5 cells').";
+    lexicon:form     = "less than";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:lt_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "less than";
+}
+resource lexicon:more_than_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('more than one MMR gene').";
+    lexicon:form     = "more than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:gt_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "more than";
+}
+resource lexicon:more_than_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('more than one MMR gene').";
+    lexicon:form     = "more than";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:gt_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "more than";
+}
+resource lexicon:at_least_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('at least 1,000 cells').";
+    lexicon:form     = "at least";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:ge_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "at least";
+}
+resource lexicon:at_least_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('at least 1,000 cells').";
+    lexicon:form     = "at least";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:ge_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "at least";
+}
+resource lexicon:at_most_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('at most 5 cells').";
+    lexicon:form     = "at most";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:le_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "at most";
+}
+resource lexicon:at_most_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('at most 5 cells').";
+    lexicon:form     = "at most";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:le_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "at most";
+}
+resource lexicon:up_to_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('up to 5 cells').";
+    lexicon:form     = "up to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:le_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "up to";
+}
+resource lexicon:up_to_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('up to 5 cells').";
+    lexicon:form     = "up to";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:le_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "up to";
+}
+resource lexicon:approximately_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('approximately 500 cells').";
+    lexicon:form     = "approximately";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:approx_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "approximately";
+}
+resource lexicon:approximately_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('approximately 500 cells').";
+    lexicon:form     = "approximately";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:approx_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "approximately";
+}
+resource lexicon:about_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('about 500 cells').";
+    lexicon:form     = "about";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:approx_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "about";
+}
+resource lexicon:about_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('about 500 cells').";
+    lexicon:form     = "about";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:approx_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "about";
+}
+resource lexicon:around_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('around 500 cells').";
+    lexicon:form     = "around";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:approx_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "around";
+}
+resource lexicon:around_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('around 500 cells').";
+    lexicon:form     = "around";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:approx_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "around";
+}
+resource lexicon:roughly_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('roughly 500 cells').";
+    lexicon:form     = "roughly";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:approx_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "roughly";
+}
+resource lexicon:roughly_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('roughly 500 cells').";
+    lexicon:form     = "roughly";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:approx_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "roughly";
+}
+resource lexicon:fewer_than_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('fewer than 5 cells').";
+    lexicon:form     = "fewer than";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:lt_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "fewer than";
+}
+resource lexicon:fewer_than_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('fewer than 5 cells').";
+    lexicon:form     = "fewer than";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:lt_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "fewer than";
+}
+resource lexicon:less_symbol_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('< 5 cells').";
+    lexicon:form     = "<";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:lt_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "<";
+}
+resource lexicon:less_symbol_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('< 5 cells').";
+    lexicon:form     = "<";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:lt_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "<";
+}
+resource lexicon:le_symbol_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('≤ 5 cells').";
+    lexicon:form     = "≤";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:le_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "≤";
+}
+resource lexicon:le_symbol_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('≤ 5 cells').";
+    lexicon:form     = "≤";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:le_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "≤";
+}
+resource lexicon:greater_symbol_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('>17,000 genes').";
+    lexicon:form     = ">";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:gt_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = ">";
+}
+resource lexicon:greater_symbol_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('>17,000 genes').";
+    lexicon:form     = ">";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:gt_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = ">";
+}
+resource lexicon:ge_symbol_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('≥ 8 foci').";
+    lexicon:form     = "≥";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:ge_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "≥";
+}
+resource lexicon:ge_symbol_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('≥ 8 foci').";
+    lexicon:form     = "≥";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:ge_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "≥";
+}
+resource lexicon:tilde_symbol_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('~500 cells').";
+    lexicon:form     = "~";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:approx_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "~";
+}
+resource lexicon:tilde_symbol_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('~500 cells').";
+    lexicon:form     = "~";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:approx_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "~";
+}
+resource lexicon:approx_symbol_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('≈ 500 cells').";
+    lexicon:form     = "≈";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:approx_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "≈";
+}
+resource lexicon:approx_symbol_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('≈ 500 cells').";
+    lexicon:form     = "≈";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:approx_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "≈";
+}
+resource lexicon:or_more_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('5 or more cell lines').";
+    lexicon:form     = "or more";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:ge_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "or more";
+}
+resource lexicon:or_more_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('5 or more cell lines').";
+    lexicon:form     = "or more";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:ge_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "or more";
+}
+resource lexicon:or_less_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('5 or less cell lines').";
+    lexicon:form     = "or less";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:le_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "or less";
+}
+resource lexicon:or_less_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('5 or less cell lines').";
+    lexicon:form     = "or less";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:le_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "or less";
+}
+resource lexicon:or_fewer_count_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('5 or fewer cell lines').";
+    lexicon:form     = "or fewer";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num) );
+    lexicon:sem      = lexicon:le_bound_count_subj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> Prop) -> Prop );
+    lexicon:sense    = "or fewer";
+}
+resource lexicon:or_fewer_count_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: bound on a count ('5 or fewer cell lines').";
+    lexicon:form     = "or fewer";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))), lexicon:cat_num))) );
+    lexicon:sem      = lexicon:le_bound_count_obj_sem;
+    lexicon:sem_type = type_expr( units:Quantity(u"1") -> forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "or fewer";
 }

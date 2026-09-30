@@ -105,6 +105,13 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         // ⟦MP[u, value]⟧ = units:Quantity(u), ⟦MP[u, difference]⟧ = units:Difference(u) — a measure
         // phrase denotes its quantity, read as a measured value or a difference (D95, decisions 1, 5).
         ("cat_mp", [unit, reading]) => measure_type(unit, reading),
+        // ⟦NUM⟧ = units:Quantity(u"1") — a bare number shares a dimensionless measure phrase's carrier,
+        // not its category (D95, "Bare numerals and quantities share a carrier"; slice 7).
+        ("cat_num", []) => Ok(Exp::const_applied(
+            crate::ontology::well_known::iri(crate::units::convert::QUANTITY),
+            Vec::new(),
+            vec![Exp::LitUnit(crate::units::Unit::dimensionless())],
+        )),
         // ⟦MPC[u, r]⟧ = ⟦MP[u, r]⟧ → Prop — a measure constraint (`less than 37 °C`) is a predicate over
         // the quantity it bounds (D95 slice 6, decision 1).
         ("cat_mpc", [unit, reading]) => Ok(Exp::Arrow(
@@ -457,6 +464,13 @@ pub fn measure_phrase_cat(
             Exp::InductiveCtor(readings, reading.to_string(), vec![]),
         ],
     ))
+}
+
+/// A bare number's category `cat_num` (D95 slice 7), for the item a numeral seeds. `None` if
+/// `lexicon:Cat` does not resolve.
+pub fn number_cat(layer: &Arc<Layer>) -> Option<Exp> {
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    Some(Exp::InductiveCtor(cat, "cat_num".to_string(), vec![]))
 }
 
 /// A measure constraint's category `cat_mpc(unit, reading)` (D95 slice 6), for the items seeding

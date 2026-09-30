@@ -109,6 +109,10 @@ axiom ontology:prep_of_value    : lexicon:Entity -> forall (u : core:unit) => un
 // ("10 μM etoposide" → Σx:etoposide. has_quantity(x, …)) and the predicative one ("the temperature
 // was 37 °C"). Which quantity of x it is (a concentration, a temperature) the parse does not say.
 axiom ontology:has_quantity     : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `has_count(T, P, q)`: the number of `T` satisfying `P` is `q` (D95 slice 7) — a cardinal's claim,
+// `two genes affect HeLa` → has_count(Gene, λx. affects(hela, x), 2). A count is dimensionless, so it
+// is a `Quantity(u"1")` and a bound on it (`at least 1,000 cells`) is slice 6's constraint.
+axiom ontology:has_count        : forall (T : Set) => (T -> Prop) -> units:Quantity(u"1") -> Prop
 
 // ── Naming apposition (D63 §5.3, close apposition of a sortal + a proper name) ────────
 // `named(x, n)`: the individual `x` bears the proper name whose token is `n` — the coining

@@ -281,10 +281,10 @@ pub struct Parser {
     grammar: Grammar,
     /// The unit vocabulary as prose spells it, which the preprocessor reads quantities against (D95).
     units: ProseUnits,
-    /// The cardinal determiner items a digit numeral seeds: `1` those of the closed-class word `one`
-    /// (singular), an integer of 2 or more those of `two` (plural) — resolved once here, as
-    /// [`DetTemplates`] resolves `a` and `these`. The count is dropped, as it is for the word forms
-    /// (`closed-class.esl`, "Cardinal numerals as determiners").
+    /// The cardinal determiner categories a digit numeral seeds: `1` those of the closed-class word
+    /// `one` (singular), any other whole number those of `two` (plural) — resolved once here, as
+    /// [`DetTemplates`] resolves `a` and `these`. Seeding keeps each category and builds the sem with
+    /// the numeral's own count (D95 slice 7), as the word forms state theirs.
     cardinal_one: Vec<Item>,
     cardinal_many: Vec<Item>,
     /// The processing parameters ([`ParseConfig`]).
@@ -332,11 +332,13 @@ impl Parser {
         // determiner category templates from the lexicon. This is the only moment the grammar reads the
         // lexicon; from here on the rules hold values, not a lookup.
         let units = ProseUnits::load(&layer);
+        // The determiner entries only: the word is also a number (`one_number`, D95 slice 7).
         let cardinal = |word: &str| -> Vec<Item> {
             lex.entries_for(word)
                 .into_iter()
                 .filter(|e| e.in_lexicon.is_none() && e.sense.as_deref() == Some(word))
                 .map(|e| e.item)
+                .filter(|it| is_ctor(it.cat(), "cat_forall").is_some())
                 .collect()
         };
         let (cardinal_one, cardinal_many) = (cardinal("one"), cardinal("two"));
