@@ -2,7 +2,7 @@
 //
 // Two things live here: the type a quantity has, and the SI vocabulary an authored unit is
 // normalised through. Neither is in the trusted surface. The kernel's addition is the `Unit`
-// primitive alone — seven base dimensions, a kind vector, and a canonicalisation — and this layer
+// primitive alone — seven base dimensions and a canonicalisation — and this layer
 // is chain data that can be reviewed and replaced without touching the checker (D93, "What is
 // trusted, and how little").
 //
@@ -39,6 +39,12 @@ data units:Quantity (u : core:unit) : Set {
     mk_quantity : forall (u : core:unit) => core:rational -> core:integer -> units:Quantity(u)
 }
 
+data units:Difference (u : core:unit) : Set {
+    description = "A difference between two quantities in unit `u`, in base units, with the same magnitude pair as `Quantity`. A separate type because a measured value and a difference are converted differently for an affine unit: `5 °C` is 278.15 K as a value and 5 K as a difference. `units:quantity(5, \"°C\")` is the value, `units:difference(5, \"°C\")` the difference (D95 implementation plan, decision 5). Value − value is a difference, value + difference a value; that arithmetic is not declared yet.";
+
+    mk_difference : forall (u : core:unit) => core:rational -> core:integer -> units:Difference(u)
+}
+
 // ── The unit operators ───────────────────────────────────────────────────────────────────────────
 // Declared constants, reduced by the kernel (`kernel/src/nbe/unit_ext.rs`) the way nanoda's kernel
 // reduces `Nat.add`: recognised by name, with no term form of their own. A product of literal units
@@ -48,6 +54,19 @@ data units:Quantity (u : core:unit) : Set {
 
 axiom units:mul : core:unit -> core:unit -> core:unit
 axiom units:pow : core:unit -> core:rational -> core:unit
+
+// ── Order over quantities ────────────────────────────────────────────────────────────────────────
+// A bound on a measure phrase constrains its value rather than stating one (D95, "Ranges need no new
+// semantics"): `less than 37 °C` is `λq. lt(u, q, 37 °C)`. Two relations and argument order cover
+// the four directions, so `more than b` and `> b` are the one proposition `lt(u, b, q)`. Declared,
+// not reduced: the parser needs them to state a bound, and deciding one on literals is checking work
+// (D95 implementation plan, slice 6, decision 2). The unit is explicit, as in `prep_at_value`,
+// because implicit Π is deferred (eigenius#261).
+
+axiom units:lt : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop
+axiom units:le : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop
+// `approximately b`: opaque, because the text states no tolerance.
+axiom units:approx : forall (u : core:unit) => units:Quantity(u) -> units:Quantity(u) -> Prop
 
 // ── Vocabulary classes ───────────────────────────────────────────────────────────────────────────
 
@@ -314,6 +333,24 @@ resource units:electronvolt : units:NamedUnit {
 resource units:astronomical_unit : units:NamedUnit {
     core:description = "astronomical unit. Exact by IAU 2012 Resolution B2.";
     units:symbol = "au"; units:dimension = u"m"; units:factor = 149597870700r; units:factor_pi = 0; units:prefixable = false;
+}
+
+// ── Units outside the SI's accepted list ─────────────────────────────────────────────────────────
+// A unit enters when it is exactly defined and attested in the corpus (D93, "A vocabulary hazard
+// the same evidence surfaced"). Symbols here stay unique; a prose surface with several senses, as
+// `g` has, is a lexicon matter (D95).
+
+resource units:standard_gravity : units:NamedUnit {
+    core:description = "standard acceleration of gravity. Exact by the 3rd CGPM (1901). Relative centrifugal force is recorded in it: `931g` in prose is 931 g_n. The symbol is `g_n` because `g` is the gram; the prose surface `g` carries both senses in the lexicon.";
+    units:symbol = "g_n"; units:dimension = u"s^-2·m"; units:factor = 9.80665r; units:factor_pi = 0; units:prefixable = false;
+}
+resource units:molar : units:NamedUnit {
+    core:description = "molar: moles of solute per litre of solution, 1000 mol·m⁻³ exactly. Not SI-accepted; admitted under the criterion, as `mM` in the WRN methods. `M` is also the mega prefix: a unit symbol and a prefix symbol collide across classes by design, and an exact unit symbol wins.";
+    units:symbol = "M"; units:dimension = u"m^-3·mol"; units:factor = 1000r; units:factor_pi = 0; units:prefixable = true;
+}
+resource units:week : units:NamedUnit {
+    core:description = "week, 604800 s exactly. Not SI-accepted; admitted under the criterion, as `weeks` in the WRN methods. The SI has no symbol for it; `wk` is this layer's.";
+    units:symbol = "wk"; units:dimension = u"s"; units:factor = 604800r; units:factor_pi = 0; units:prefixable = false;
 }
 
 // ── The 24 SI prefixes ───────────────────────────────────────────────────────────────────────────

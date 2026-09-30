@@ -30,6 +30,7 @@
 use super::super::category::is_sentence_premod;
 use super::super::grammar::Grammar;
 use super::super::item::Item;
+use super::super::preprocess::Token;
 use super::super::rules::combinators::apply;
 use super::super::rules::registry::{unary_shifts, BinRule, UnaryKind};
 use super::forest::{self as packed, CubeCandidate, Edge, Forest, NodeId, Sig};
@@ -259,7 +260,7 @@ impl Grammar {
     pub(crate) fn build_forest(
         &self,
         leaves: &[Vec<Vec<Item>>],
-        tokens: &[String],
+        tokens: &[Token],
         prefer_multiword: bool,
     ) -> packed::Forest {
         use packed::node_sig;
@@ -355,7 +356,7 @@ impl Grammar {
                 // forward-apply across the node-less comma to the matrix clause. Keyed on `i == 0` (so
                 // it never competes with list-coordination commas); the child keeps its `Sig`, so the
                 // absorbed node packs identically. Mirrors the unpacked CKY's comma-absorption.
-                if i == 0 && j >= 1 && self.reserved.is_comma(&tokens[j]) {
+                if i == 0 && j >= 1 && self.reserved.is_comma(tokens[j].surface()) {
                     for cid in forest.cells[0][j - 1].values().copied().collect::<Vec<_>>() {
                         let rep = forest.nodes[cid].rep.clone();
                         if is_sentence_premod(rep.cat()) {

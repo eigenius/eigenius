@@ -28,6 +28,7 @@ use std::sync::{Arc, LazyLock};
 
 use crate::layer::Layer;
 use crate::nbe::term::{Exp, Patt};
+use crate::ontology::iri::Iri;
 
 use super::super::category::{
     cat_subsumes, feat_meets, is_ctor, match_cat, slash_parts, subst_cat, unify_cat, CatPat,
@@ -77,8 +78,48 @@ enum SemRecipe {
     DetRefine { cat: Exp, t: Exp },
     /// Application: category `cat`; sem `L R` (forward) or `R L` (backward).
     Apply { cat: Exp, order: AppOrder },
+    /// Unit-polymorphic application: category `cat`; sem `L unit R` — the functor's sem applied to the
+    /// unit it binds, then to the measure phrase.
+    UnitApply { cat: Exp, unit: Exp },
+    /// Backward unit-polymorphic application: category `cat`; sem `R unit L` — the right operand's
+    /// sem applied to the unit it binds, then to the measure phrase on its left.
+    UnitApplyBwd { cat: Exp, unit: Exp },
+    /// A consumer applied to a measure constraint: category `cat`; sem [`constrained_sem`] over the
+    /// value type `value_ty` and the consumer's `arity`, the unit applied first when the consumer
+    /// binds one. `and` is `logic:And`, resolved when the combination was decided. `backward`: the
+    /// consumer is the right operand and the constraint the left. `quantifier`: the operand is a
+    /// quantified measure phrase (`cat_mpq`, D95 slice 8e), applied to the consumer by
+    /// [`quantified_sem`] instead.
+    UnitConstrain {
+        cat: Exp,
+        unit: Option<Exp>,
+        value_ty: Exp,
+        arity: usize,
+        and: Iri,
+        backward: bool,
+        quantifier: bool,
+    },
     /// Forward composition: category `cat`; sem `λz. L(R z)`.
     FwdComp { cat: Exp },
+    /// A determiner composed with a noun modifier (D95 slice 7d, decision 14): category `cat`
+    /// (`cat_detmod`); the modifier's restrictor is built by the refine rule `builder` over a head
+    /// standing for the determiner's type variable. `stack`: the left operand is already composed,
+    /// so the restrictor joins its builder; else the left is a lifted determiner, and `scoped` says
+    /// whether its scope ranges over the head's members (a cardinal) and so takes them through
+    /// `Fst` from the refined type, as [`SemRecipe::DetRefine`] does. `and` is `logic:And`.
+    DetModify {
+        cat: Exp,
+        builder: SemBuild,
+        binds: CatSubst,
+        head: Exp,
+        stack: bool,
+        scoped: bool,
+        and: Iri,
+    },
+    /// A coordination of composed determiners applied to the shared head (decision 14): category
+    /// `cat`; sem `L C k`, `C` the head's class and `k` the builder `λR. Σx:C. R x`, or for a refined
+    /// head `Σx:C. P` the builder `λR. Σx:C. And(P, R x)`.
+    DetModApply { cat: Exp, head: Exp, and: Iri },
     /// A **datafied grammar rule** matched (Phase 1–2): a `combine_*` group matched a [`CatRule`] and
     /// carries its sem-`builder` plus the metavariable `binds` the pattern captured. `build` invokes
     /// the builder, the only place a child sem is read. Covers the nominal-modification family
@@ -148,6 +189,35 @@ enum CombKind {
     /// `cat_forall(det_num, λT. body)` consuming `cat_n(T, noun_num)` by INSTANTIATING `T` (not slot
     /// unification) — feature-gated by `feat_meets`, with a Fst-projecting refined-noun branch.
     DepApply,
+    /// Unit-polymorphic application (D95, decision 1): a `cat_unit_forall(λu. A/B)` consuming the
+    /// measure phrase `cat_mp(U, r)` on its right by INSTANTIATING `u := U`, then unifying `B[u := U]`
+    /// with it — the determiner's pattern for a unit. The unit is an explicit argument of the sem
+    /// because implicit Π is deferred (eigenius#261).
+    UnitApply,
+    /// A measure consumer taking a constraint (D95 slice 6, decision 3): a consumer of
+    /// `cat_mp(U, r)` — unit-polymorphic or not — meets `cat_mpc(U, r)` (`less than 37 °C`) on its
+    /// right and yields its own result, with the value it would have taken quantified:
+    /// `λa₁…aₙ. ∃q. C(q) ∧ f [U] q a₁…aₙ`. The quantifier scopes over the consumer's slot as
+    /// `gq_prep_vpadjunct` scopes a quantified noun phrase over a preposition's, generalised to the
+    /// consumer's arity, so one rule serves every consumer of a measure phrase.
+    UnitConstrain,
+    /// Backward unit-polymorphic application (D95 slice 6d): the measure phrase `cat_mp(U, r)` on the
+    /// left, a `cat_unit_forall(λu. A\B)` on its right instantiated `u := U` — a postfix bound
+    /// (`37 °C or higher`). `UnitApply` mirrored; the sem applies the right operand to the unit, then
+    /// to the measure phrase.
+    UnitApplyBwd,
+    /// `UnitConstrain` mirrored (D95 slice 7c): the constraint `cat_mpc(U, r)` on the left, a consumer
+    /// of `cat_mp(U, r)` on its left on the right — the partitive `of` (`more than half of the
+    /// samples`, `45–60% of the cancers`). The sem quantifies the value as `UnitConstrain`'s does.
+    UnitConstrainBwd,
+    /// A determiner meeting a noun modifier before its head (D95 slice 7d, decision 14): a lifted
+    /// determiner `cat_det_premod(n, λT. X)`, or a composed one not yet coordinated, and on its right
+    /// anything a refine rule takes as a head's modifier (a `cat_mod`, a noun, a name) → `cat_detmod(n,
+    /// λT. X)`. `five MSS` in `five MSS and five MSI cell lines`.
+    DetModify,
+    /// A coordination of composed determiners meeting the shared head `cat_n(C, num)` (decision 14):
+    /// `T := C`, as the dependent determiner instantiates it, the head's own restrictor conjoined.
+    DetModApply,
 }
 
 /// An Eisner normal-form provenance guard on the left operand (D63 §8.2 item 4).
@@ -180,6 +250,10 @@ enum ProvGuard {
     /// this one bars a lifted post-nominal modifier from *composing* because application is. Both
     /// routes reach the same `cat_pp` over the same span with the same sem.
     LeftNotObliqueParticipial,
+    /// The left operand — a composed determiner's application to its head — is not itself a
+    /// composition output ([`Combinator::DetComposed`]) but a coordination of them (D95 slice 7d):
+    /// applied alone it re-derives the determiner over the refined noun.
+    LeftNotDetComposed,
 }
 
 impl ProvGuard {
@@ -195,6 +269,7 @@ impl ProvGuard {
             ProvGuard::LeftNotModal => left_prov != Combinator::Modal,
             ProvGuard::RightNotKindRaised => right_prov != Combinator::KindRaised,
             ProvGuard::LeftNotObliqueParticipial => left_prov != Combinator::ObliqueParticipial,
+            ProvGuard::LeftNotDetComposed => left_prov != Combinator::DetComposed,
         }
     }
 }
@@ -286,13 +361,293 @@ impl CombKind {
                     order: AppOrder::Fwd,
                 })
             }
+            CombKind::UnitApply => {
+                let [Exp::Lam(Patt::Var(uvar), body)] = is_ctor(&left.cat, "cat_unit_forall")?
+                else {
+                    return None;
+                };
+                let [unit @ Exp::LitUnit(_), _reading] = is_ctor(&right.cat, "cat_mp")? else {
+                    return None;
+                };
+                let mut bind = CatSubst::new();
+                bind.insert(uvar.clone(), unit.clone());
+                let body = subst_cat(body, &bind);
+                let (_mode, res, slot) = slash_parts(&body, "fwd")?;
+                let subst = unify_cat(slot, &right.cat, layer)?;
+                Some(SemRecipe::UnitApply {
+                    cat: subst_cat(res, &subst),
+                    unit: unit.clone(),
+                })
+            }
+            CombKind::UnitApplyBwd => {
+                let [Exp::Lam(Patt::Var(uvar), body)] = is_ctor(&right.cat, "cat_unit_forall")?
+                else {
+                    return None;
+                };
+                let [unit @ Exp::LitUnit(_), _reading] = is_ctor(&left.cat, "cat_mp")? else {
+                    return None;
+                };
+                let mut bind = CatSubst::new();
+                bind.insert(uvar.clone(), unit.clone());
+                let body = subst_cat(body, &bind);
+                let (_mode, res, slot) = slash_parts(&body, "bwd")?;
+                let subst = unify_cat(slot, &left.cat, layer)?;
+                Some(SemRecipe::UnitApplyBwd {
+                    cat: subst_cat(res, &subst),
+                    unit: unit.clone(),
+                })
+            }
+            CombKind::UnitConstrainBwd => {
+                let Exp::InductiveCtor(decl, name, args) = &left.cat else {
+                    return None;
+                };
+                let (true, [unit @ Exp::LitUnit(_), reading]) =
+                    (name == "cat_mpc" || name == "cat_mpq", args.as_slice())
+                else {
+                    return None;
+                };
+                let quantifier = name == "cat_mpq";
+                let (functor, unit_arg) = match is_ctor(&right.cat, "cat_unit_forall") {
+                    Some([Exp::Lam(Patt::Var(uvar), body)]) => {
+                        let mut bind = CatSubst::new();
+                        bind.insert(uvar.clone(), unit.clone());
+                        (subst_cat(body, &bind), Some(unit.clone()))
+                    }
+                    Some(_) => return None,
+                    None => (right.cat.clone(), None),
+                };
+                let (_mode, res, slot) = slash_parts(&functor, "bwd")?;
+                let point = Exp::InductiveCtor(
+                    decl.clone(),
+                    "cat_mp".into(),
+                    vec![unit.clone(), reading.clone()],
+                );
+                let subst = unify_cat(slot, &point, layer)?;
+                let cat = subst_cat(res, &subst);
+                let value_ty = super::super::category::denote_cat(&point).ok()?;
+                let arity = prop_arity(&super::super::category::denote_cat(&cat).ok()?)?;
+                let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+                Some(SemRecipe::UnitConstrain {
+                    cat,
+                    unit: unit_arg,
+                    value_ty,
+                    arity,
+                    and,
+                    backward: true,
+                    quantifier,
+                })
+            }
+            CombKind::DetModify => {
+                let (stack, num, body) = match (
+                    is_ctor(&left.cat, "cat_det_premod"),
+                    is_ctor(&left.cat, "cat_detmod"),
+                ) {
+                    (Some([num, body]), _) => (false, num, body),
+                    (_, Some([num, body])) if left.prov == Combinator::DetComposed => {
+                        (true, num, body)
+                    }
+                    _ => return None,
+                };
+                let Exp::Lam(Patt::Var(tvar), inner) = body else {
+                    return None;
+                };
+                let Exp::InductiveCtor(decl, _, _) = &left.cat else {
+                    return None;
+                };
+                // The modifier is whatever a refine rule takes as a head's left modifier; the head
+                // stands for the determiner's type variable until the coordination meets its noun.
+                let head = Exp::InductiveCtor(
+                    decl.clone(),
+                    "cat_n".into(),
+                    vec![Exp::Var(DETMOD_HEAD.into()), num.clone()],
+                );
+                let head_payload = CategoryPayload {
+                    cat: head.clone(),
+                    prov: Combinator::Other,
+                    cost: Cost::ZERO,
+                };
+                let Some(SemRecipe::Rule { builder, binds }) =
+                    combine_nominal_mod(right, &head_payload)
+                else {
+                    return None;
+                };
+                let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+                Some(SemRecipe::DetModify {
+                    cat: Exp::InductiveCtor(
+                        decl.clone(),
+                        "cat_detmod".into(),
+                        vec![num.clone(), body.clone()],
+                    ),
+                    builder,
+                    binds,
+                    head,
+                    stack,
+                    scoped: crate::nbe::check::exp_mentions_var(inner, tvar),
+                    and,
+                })
+            }
+            CombKind::DetModApply => {
+                let [det_num, Exp::Lam(Patt::Var(tvar), body)] = is_ctor(&left.cat, "cat_detmod")?
+                else {
+                    return None;
+                };
+                let [t, noun_num] = is_ctor(&right.cat, "cat_n")? else {
+                    return None;
+                };
+                if !feat_meets(det_num, noun_num) {
+                    return None;
+                }
+                let class = match t {
+                    Exp::Sig(_, base, _) => (**base).clone(),
+                    other => other.clone(),
+                };
+                let mut subst = CatSubst::new();
+                subst.insert(tvar.clone(), class);
+                let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+                Some(SemRecipe::DetModApply {
+                    cat: subst_cat(body, &subst),
+                    head: t.clone(),
+                    and,
+                })
+            }
+            CombKind::UnitConstrain => {
+                let Exp::InductiveCtor(decl, name, args) = &right.cat else {
+                    return None;
+                };
+                let (true, [unit @ Exp::LitUnit(_), reading]) =
+                    (name == "cat_mpc" || name == "cat_mpq", args.as_slice())
+                else {
+                    return None;
+                };
+                let quantifier = name == "cat_mpq";
+                // A unit-polymorphic consumer is instantiated from the constraint's unit, as
+                // `UnitApply` instantiates it from the measure phrase's; its sem then takes the unit.
+                let (functor, unit_arg) = match is_ctor(&left.cat, "cat_unit_forall") {
+                    Some([Exp::Lam(Patt::Var(uvar), body)]) => {
+                        let mut bind = CatSubst::new();
+                        bind.insert(uvar.clone(), unit.clone());
+                        (subst_cat(body, &bind), Some(unit.clone()))
+                    }
+                    Some(_) => return None,
+                    None => (left.cat.clone(), None),
+                };
+                let (_mode, res, slot) = slash_parts(&functor, "fwd")?;
+                // The slot must take the measure phrase the constraint bounds.
+                let point = Exp::InductiveCtor(
+                    decl.clone(),
+                    "cat_mp".into(),
+                    vec![unit.clone(), reading.clone()],
+                );
+                let subst = unify_cat(slot, &point, layer)?;
+                // A marker is a consumer too: `less than about 2 h` is a value below one of about 2 h.
+                let cat = subst_cat(res, &subst);
+                let value_ty = super::super::category::denote_cat(&point).ok()?;
+                let arity = prop_arity(&super::super::category::denote_cat(&cat).ok()?)?;
+                let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+                Some(SemRecipe::UnitConstrain {
+                    cat,
+                    unit: unit_arg,
+                    value_ty,
+                    arity,
+                    and,
+                    backward: false,
+                    quantifier,
+                })
+            }
         }
     }
 }
 
+/// How many arguments a denotation takes before it is a `Prop` — `n` in `A₁ → … → Aₙ → Prop`, or
+/// `None` when it does not end in `Prop`, since a quantifier can only close over a proposition.
+fn prop_arity(ty: &Exp) -> Option<usize> {
+    let mut n = 0;
+    let mut t = ty;
+    loop {
+        match t {
+            Exp::Arrow(_, cod) | Exp::Pi(_, _, cod) => {
+                n += 1;
+                t = cod;
+            }
+            Exp::Sort(level) if level.as_nat() == Some(0) => return Some(n),
+            _ => return None,
+        }
+    }
+}
+
+/// The sem of a consumer `f` applied to a constraint `c` (D95 slice 6, decision 3):
+/// `λa₁…aₙ. ∀P:Prop. (∀q:T. And(c q, f [u] q a₁…aₙ) → P) → P` — an existential over the value, in
+/// the encoding the determiners use (`exists_sem`, `closed-class.esl:31-37`).
+pub(crate) fn constrained_sem(
+    f: &Exp,
+    unit: Option<&Exp>,
+    c: &Exp,
+    value_ty: &Exp,
+    arity: usize,
+    and: &Iri,
+) -> Exp {
+    let (q, p) = ("__mpc_q", "__mpc_P");
+    let args: Vec<String> = (0..arity).map(|i| format!("__mpc_a{i}")).collect();
+    let app = |f: Exp, x: Exp| Exp::App(Box::new(f), Box::new(x));
+    let mut consumer = f.clone();
+    if let Some(u) = unit {
+        consumer = app(consumer, u.clone());
+    }
+    consumer = app(consumer, Exp::Var(q.into()));
+    for a in &args {
+        consumer = app(consumer, Exp::Var(a.clone()));
+    }
+    let conjunction = Exp::const_applied(
+        and.clone(),
+        Vec::new(),
+        vec![app(c.clone(), Exp::Var(q.into())), consumer],
+    );
+    let witness = Exp::Pi(
+        Patt::Var(q.into()),
+        Box::new(value_ty.clone()),
+        Box::new(Exp::Arrow(
+            Box::new(conjunction),
+            Box::new(Exp::Var(p.into())),
+        )),
+    );
+    let exists = Exp::Pi(
+        Patt::Var(p.into()),
+        Box::new(Exp::sort(0)),
+        Box::new(Exp::Arrow(Box::new(witness), Box::new(Exp::Var(p.into())))),
+    );
+    args.iter().rev().fold(exists, |body, a| {
+        Exp::Lam(Patt::Var(a.clone()), Box::new(body))
+    })
+}
+
+/// The sem of a consumer `f` applied to a quantified measure phrase `Q` (D95 slice 8e):
+/// `λa₁…aₙ. Q(λq. f [u] q a₁…aₙ)` — `Four and seven days after transduction` is the consumer applied
+/// to each value, conjoined.
+fn quantified_sem(f: &Exp, unit: Option<&Exp>, quantifier: &Exp, arity: usize) -> Exp {
+    let q = "__mpq_q";
+    let args: Vec<String> = (0..arity).map(|i| format!("__mpq_a{i}")).collect();
+    let app = |f: Exp, x: Exp| Exp::App(Box::new(f), Box::new(x));
+    let mut consumer = f.clone();
+    if let Some(u) = unit {
+        consumer = app(consumer, u.clone());
+    }
+    consumer = app(consumer, Exp::Var(q.into()));
+    for a in &args {
+        consumer = app(consumer, Exp::Var(a.clone()));
+    }
+    let body = app(
+        quantifier.clone(),
+        Exp::Lam(Patt::Var(q.into()), Box::new(consumer)),
+    );
+    args.iter().rev().fold(body, |body, a| {
+        Exp::Lam(Patt::Var(a.clone()), Box::new(body))
+    })
+}
+
 /// The universal-combinator table (built once). Priority = order, mirroring the former arm order:
-/// dependent determiner (its `cat_forall` trigger is disjoint from the rest, so its first position is
-/// not load-bearing), then forward application, backward application, forward (harmonic) composition.
+/// dependent determiner and unit application (their `cat_forall` / `cat_unit_forall` triggers are
+/// disjoint from the rest, so their first positions are not load-bearing), then forward application,
+/// backward application, forward (harmonic) composition.
 /// Eisner NF is enforced per rule by `prov_guards`.
 fn comb_rules() -> &'static [CombRule] {
     static RULES: LazyLock<Vec<CombRule>> = LazyLock::new(|| {
@@ -300,6 +655,36 @@ fn comb_rules() -> &'static [CombRule] {
             CombRule {
                 name: "dependent_determiner",
                 kind: CombKind::DepApply,
+                prov_guards: &[],
+            },
+            CombRule {
+                name: "determiner_modifier",
+                kind: CombKind::DetModify,
+                prov_guards: &[],
+            },
+            CombRule {
+                name: "determiner_modifier_head",
+                kind: CombKind::DetModApply,
+                prov_guards: &[ProvGuard::LeftNotDetComposed],
+            },
+            CombRule {
+                name: "unit_application",
+                kind: CombKind::UnitApply,
+                prov_guards: &[],
+            },
+            CombRule {
+                name: "unit_constraint",
+                kind: CombKind::UnitConstrain,
+                prov_guards: &[],
+            },
+            CombRule {
+                name: "unit_application_backward",
+                kind: CombKind::UnitApplyBwd,
+                prov_guards: &[],
+            },
+            CombRule {
+                name: "unit_constraint_backward",
+                kind: CombKind::UnitConstrainBwd,
                 prov_guards: &[],
             },
             CombRule {
@@ -454,6 +839,77 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
             );
             Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
         }
+        SemRecipe::DetModify {
+            cat,
+            builder,
+            binds,
+            head,
+            stack,
+            scoped,
+            and,
+        } => {
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let lam = |x: &str, b: Exp| Exp::Lam(Patt::Var(x.into()), Box::new(b));
+            let var = |x: &str| Exp::Var(x.into());
+            // The modifier's restrictor, `λx. R`, off the refined head `Σx:H. R` its rule builds.
+            let refined = builder(&binds, right, &Item::new(head, var(DETMOD_HEAD)), layer);
+            let restrictor = match refined.sem() {
+                Exp::Sig(Patt::Var(x), _, r) => lam(x, (**r).clone()),
+                other => unreachable!("a refine rule built a non-Σ head: {other:?}"),
+            };
+            let (t, k, r, v, z, y) = ("__dm_T", "__dm_k", "__dm_R", "__dm_v", "__dm_z", "__dm_y");
+            let sem = if stack {
+                // `λT.λk. L T (λR. k (λy. And(r y, R y)))`: the nearer modifier conjoins first, as
+                // `refine_conjoin` orders a head's restrictors.
+                let joined = lam(
+                    y,
+                    Exp::const_applied(
+                        and,
+                        Vec::new(),
+                        vec![app(restrictor, var(y)), app(var(r), var(y))],
+                    ),
+                );
+                let builder_arg = lam(r, app(var(k), joined));
+                lam(t, lam(k, app(app(left.sem().clone(), var(t)), builder_arg)))
+            } else {
+                let refined_ty = app(var(k), restrictor);
+                let det = app(left.sem().clone(), refined_ty);
+                let body = if scoped {
+                    // `λv. D (k r) (λz. v (Fst z))` — the scope takes the refined type's members.
+                    lam(v, app(det, lam(z, app(var(v), Exp::Fst(Box::new(var(z)))))))
+                } else {
+                    det
+                };
+                lam(t, lam(k, body))
+            };
+            Item::from_parts(cat, sem, Combinator::DetComposed, Cost::ZERO)
+        }
+        SemRecipe::DetModApply { cat, head, and } => {
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let r = "__dm_R";
+            // `k`: a restrictor ↦ the head's type refined by it, the head's own restrictor first.
+            let (class, k) = match head {
+                Exp::Sig(Patt::Var(x), base, p) => {
+                    let body = Exp::const_applied(
+                        and,
+                        Vec::new(),
+                        vec![(*p).clone(), app(Exp::Var(r.into()), Exp::Var(x.clone()))],
+                    );
+                    let sigma = Exp::Sig(Patt::Var(x), base.clone(), Box::new(body));
+                    (*base, Exp::Lam(Patt::Var(r.into()), Box::new(sigma)))
+                }
+                c => {
+                    let sigma = Exp::Sig(
+                        Patt::Var(COMPOUND_X.into()),
+                        Box::new(c.clone()),
+                        Box::new(app(Exp::Var(r.into()), Exp::Var(COMPOUND_X.into()))),
+                    );
+                    (c, Exp::Lam(Patt::Var(r.into()), Box::new(sigma)))
+                }
+            };
+            let sem = app(app(left.sem().clone(), class), k);
+            Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
+        }
         SemRecipe::Apply { cat, order } => {
             let (sem, prov) = match order {
                 AppOrder::Fwd => {
@@ -508,6 +964,48 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
                     }
                 }
             }
+            Item::from_parts(cat, sem, prov, Cost::ZERO)
+        }
+        SemRecipe::UnitApply { cat, unit } => {
+            let sem = Exp::App(
+                Box::new(Exp::App(Box::new(left.sem().clone()), Box::new(unit))),
+                Box::new(right.sem().clone()),
+            );
+            Item::from_parts(cat, sem, Combinator::ForwardApp, Cost::ZERO)
+        }
+        SemRecipe::UnitApplyBwd { cat, unit } => {
+            let sem = Exp::App(
+                Box::new(Exp::App(Box::new(right.sem().clone()), Box::new(unit))),
+                Box::new(left.sem().clone()),
+            );
+            Item::from_parts(cat, sem, Combinator::BackwardApp, Cost::ZERO)
+        }
+        SemRecipe::UnitConstrain {
+            cat,
+            unit,
+            value_ty,
+            arity,
+            and,
+            backward,
+            quantifier,
+        } => {
+            let (consumer, constraint, prov) = if backward {
+                (right, left, Combinator::BackwardApp)
+            } else {
+                (left, right, Combinator::ForwardApp)
+            };
+            let sem = if quantifier {
+                quantified_sem(consumer.sem(), unit.as_ref(), constraint.sem(), arity)
+            } else {
+                constrained_sem(
+                    consumer.sem(),
+                    unit.as_ref(),
+                    constraint.sem(),
+                    &value_ty,
+                    arity,
+                    &and,
+                )
+            };
             Item::from_parts(cat, sem, prov, Cost::ZERO)
         }
         SemRecipe::FwdComp { cat } => {
@@ -831,6 +1329,142 @@ pub(crate) fn mod_lifts(it: &Item) -> Vec<Item> {
     }
     Vec::new()
 }
+
+/// The **determiner lift** (D95 slice 7d, decisions 14 and 15): a determiner as it meets a noun
+/// modifier whose head comes later, `cat_det_premod(n, λT. X)`, which only the `determiner_modifier`
+/// combinator consumes. Its own category stays for the dependent determiner: a determiner and a noun
+/// combine one way, and `five MSS` is both the count of MSS things and the start of `five MSS and
+/// five MSI cell lines`. Two sources:
+/// - a quantifier determiner ([`is_quantifier_det`]), with its sem;
+/// - a partitive over a raised noun phrase, `X / (S/(S\NP))` (`15% of`, `none of`), with the bare
+///   plural's kind in that position: `λT. f (λV. V(kind_of(T)))`, so `15% of colon, 22% of gastric
+///   … cancers` composes as the determiners do.
+///
+/// Fires at leaf seeding (`seed.rs`) and on composed cells (the `DetPremod` unary shift).
+///
+/// [`is_quantifier_det`]: super::super::category::is_quantifier_det
+pub(crate) fn det_premod_lifts(it: &Item) -> Vec<Item> {
+    let cat = it.cat();
+    let Exp::InductiveCtor(decl, _, _) = cat else {
+        return Vec::new();
+    };
+    let lifted = |args: Vec<Exp>, sem: Exp| {
+        vec![Item::from_parts(
+            Exp::InductiveCtor(decl.clone(), "cat_det_premod".into(), args),
+            sem,
+            Combinator::Other,
+            it.cost(),
+        )]
+    };
+    if super::super::category::is_quantifier_det(cat) {
+        let Some([num, body]) = is_ctor(cat, "cat_forall") else {
+            return Vec::new();
+        };
+        return lifted(vec![num.clone(), body.clone()], it.sem().clone());
+    }
+    // A partitive: its argument is a raised subject noun phrase, `S/(S\NP)`.
+    let Some((_, result, arg)) = slash_parts(cat, "fwd") else {
+        return Vec::new();
+    };
+    let Some((_, s, vp)) = slash_parts(arg, "fwd") else {
+        return Vec::new();
+    };
+    let np_num = slash_parts(vp, "bwd").and_then(|(_, s2, np)| {
+        is_ctor(s2, "cat_s")?;
+        match is_ctor(np, "cat_np")? {
+            [_, num] => Some(num.clone()),
+            _ => None,
+        }
+    });
+    let (true, Some(num)) = (is_ctor(s, "cat_s").is_some(), np_num) else {
+        return Vec::new();
+    };
+    let (t, v) = ("__dm_T", "__dm_V");
+    let raised_kind = Exp::Lam(
+        Patt::Var(v.into()),
+        Box::new(Exp::App(
+            Box::new(Exp::Var(v.into())),
+            Box::new(super::super::category::kind_of(Exp::Var(t.into()))),
+        )),
+    );
+    let sem = Exp::Lam(
+        Patt::Var(t.into()),
+        Box::new(Exp::App(Box::new(it.sem().clone()), Box::new(raised_kind))),
+    );
+    lifted(
+        vec![num, Exp::Lam(Patt::Var(t.into()), Box::new(result.clone()))],
+        sem,
+    )
+}
+
+/// The **fronted adjunct** (D95 slice 8a, decision 4): at the start of a sentence a finite VP adjunct
+/// `(S\NP)\(S\NP)` modifies the subject, `(S/(S\NP)) / (S/(S\NP))`, sem `λQ.λV. Q(λx. P(V)(x))` —
+/// `After 24 h, the medium was replaced` is `the medium was replaced after 24 h`. The subject's type
+/// and number and the clause's finiteness are variables the subject binds. Fires on the
+/// sentence-initial cells, through the `FrontAdjunct` unary shift, and only on an adjunct the grammar
+/// BUILT by application — a PP, an offset, `every 3 days`. A lexical adverb (`Thus`, `More commonly`)
+/// fronts as the transitional `S/S` it has; lifting it too gave the same term twice, under two
+/// categories (measured at the reseed after slice 8).
+pub(crate) fn front_adjunct_lifts(it: &Item, layer: &Arc<Layer>) -> Vec<Item> {
+    if !matches!(it.prov(), Combinator::ForwardApp | Combinator::BackwardApp) {
+        return Vec::new();
+    }
+    let build = || -> Option<Item> {
+        let (_m, vp, vp_res) = slash_parts(it.cat(), "bwd")?;
+        if vp != vp_res {
+            return None;
+        }
+        let (_vm, s, _np) = slash_parts(vp, "bwd")?;
+        let [mood, fin] = is_ctor(s, "cat_s")? else {
+            return None;
+        };
+        if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "fin") {
+            return None;
+        }
+        let Exp::InductiveCtor(decl, _, _) = it.cat() else {
+            return None;
+        };
+        let m_all = super::super::category::mode_value(layer, super::super::category::MODE_ALL)?;
+        let ctor = |name: &str, args: Vec<Exp>| Exp::InductiveCtor(decl.clone(), name.into(), args);
+        let var = |x: &str| Exp::Var(x.into());
+        let subject_vp = ctor(
+            "bwd",
+            vec![
+                m_all.clone(),
+                s.clone(),
+                ctor("cat_np", vec![var(FRONT_T), var(FRONT_N)]),
+            ],
+        );
+        let gq = ctor(
+            "fwd",
+            vec![
+                m_all.clone(),
+                ctor("cat_s", vec![mood.clone(), var(FRONT_F)]),
+                subject_vp,
+            ],
+        );
+        let cat = ctor("fwd", vec![m_all, gq.clone(), gq]);
+        let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+        let lam = |x: &str, b: Exp| Exp::Lam(Patt::Var(x.into()), Box::new(b));
+        let (q, v, x) = ("__fr_Q", "__fr_V", "__fr_x");
+        // `λQ.λV. Q(λx. P(V)(x))` — the scope is a λ so it types at the subject's `T → Prop`.
+        let sem = lam(
+            q,
+            lam(
+                v,
+                app(var(q), lam(x, app(app(it.sem().clone(), var(v)), var(x)))),
+            ),
+        );
+        Some(Item::from_parts(cat, sem, Combinator::Other, it.cost()))
+    };
+    build().into_iter().collect()
+}
+
+/// The category variables of a fronted adjunct's subject: its type, its number, the clause's
+/// finiteness.
+const FRONT_T: &str = "__fr_T";
+const FRONT_N: &str = "__fr_N";
+const FRONT_F: &str = "__fr_F";
 
 /// Pre-nominal attributive PAST PARTICIPLE lift — SEPARATE from [`mod_lifts`] so seeding can GATE it.
 /// A transitive `(S[dcl,pss]\NP)/NP` → a reduced-passive modifier `cat_mod(λx. ∃a. TV(x, a))`
@@ -1496,6 +2130,10 @@ pub fn apply_core(
 
 /// The bound variable of every 6-mod Σ-refinement (D63 §8.13).
 pub(crate) const COMPOUND_X: &str = "__cmp_x";
+
+/// The head a composed determiner's modifier refines while the head noun is still to come (D95 slice
+/// 7d, decision 14): the variable the determiner's type is abstracted over.
+const DETMOD_HEAD: &str = "__dm_H";
 
 /// Apply an opaque binary modifier axiom `R` to `(Var(arg0), arg1)` — the restrictor of a
 /// 6-mod Σ. `R(x, m)` where the bound `x` (`arg0`) ranges over the head noun's concrete

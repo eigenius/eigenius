@@ -29,6 +29,7 @@
 use super::super::category::{is_ctor, is_sentence_premod, is_vp_adjunct_prep, slash_parts};
 use super::super::grammar::Grammar;
 use super::super::item::Item;
+use super::super::preprocess::Token;
 use super::super::pretty::pretty_term;
 use super::super::reserved::ReservedKind;
 use super::super::rules::combinators::{apply, apply_core};
@@ -42,7 +43,7 @@ impl Grammar {
     pub(crate) fn drive_unpacked(
         &self,
         chart: &mut [Vec<Vec<Item>>],
-        tokens: &[String],
+        tokens: &[Token],
         beam: Option<usize>,
         combinatory_core: bool,
         prefer_multiword: bool,
@@ -108,7 +109,7 @@ impl Grammar {
                 for p in (i + 1)..j {
                     if !tokens
                         .get(p + 1)
-                        .is_some_and(|t| self.reserved.is(t, ReservedKind::WhRelativizer))
+                        .is_some_and(|t| self.reserved.is(t.surface(), ReservedKind::WhRelativizer))
                     {
                         continue;
                     }
@@ -188,7 +189,7 @@ impl Grammar {
                 // so it can then forward-apply to the matrix clause. The comma is otherwise a reserved
                 // coordinator with no chart item, leaving a gap the modifier can't bridge. Restricted to
                 // `i == 0` (sentence-initial) to avoid competing with list-coordination commas.
-                if i == 0 && len >= 2 && self.reserved.is_comma(&tokens[j]) {
+                if i == 0 && len >= 2 && self.reserved.is_comma(tokens[j].surface()) {
                     let absorbed: Vec<Item> = chart[i][j - 1]
                         .iter()
                         .filter(|it| is_sentence_premod(it.cat()))

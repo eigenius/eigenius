@@ -31,6 +31,32 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED FOR D95 SLICE 6 (`2026-09-29`), on three layers: `units` (`units:lt`, `le`, `approx`,
+//! the order a bound states), `lexicon` (`cat_mpc`, the measure constraint) and `closed-class` (the
+//! bound markers `less than` … `roughly`; then the symbols `<` … `≈` and `=`, and the postfix `or more`
+//! … `or lower`), and for slice 7 on `lexicon` (`cat_num`), `ontology` (`has_count`) and
+//! `closed-class` (counting cardinals, word numerals as numbers, the count bounds), then for 7c on
+//! `ontology` (`has_proportion`) and `closed-class` (`half`, the partitives), and for 7d on `lexicon`
+//! (`cat_det_premod`, `cat_detmod`), `ontology` (`the_count`) and `closed-class` (the number words'
+//! entries removed; `the`, `these`, `those` before a numeral; `anaphor_of_count`), and for 8a–8c on
+//! `ontology` (the offsets, `prep_before`, `prep_by_value`, `every_period`) and `closed-class`
+//! (`before`, `post`, the offsets, `later`, `by` over a value, `every` over a period, the
+//! pseudo-partitive `of`s), and for 8d–8e on `lexicon` (`cat_mpq`), `ontology` (`prep_per`) and
+//! `closed-class` (`per`); then on `closed-class` again when the reseed after slice 8 found the
+//! partitive `of`s' own sense labels before the sense ranker (they now carry `of`). Slices 6–8 each
+//! move these layers and pay ONE reseed together, after slice 8
+//! (`docs/design/d95-implementation-plan.md`, slice 6). It fired for slice 9 on `lexicon`
+//! (`cat_factor`, `cat_stat`), `ontology` (`fold_lower`, `fold_higher`, `median_over`) and
+//! `closed-class` (the factor comparatives, `a median`, `compared to`, `compared with`).
+//!
+//! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
+//! (`docs/design/d95-implementation-plan.md`, slice 5): `units` (standard gravity, `molar`, `week`,
+//! `units:Difference`), `lexicon` (`lexicon:Reading`, `cat_mp`, `cat_unit_forall`,
+//! `lexicon:UnitSurface`), `closed-class` (the unit spellings, `one`'s subject and object entries,
+//! the prepositions over a measured value, `after` over an NP) and `ontology` (`prep_*_value`,
+//! `has_quantity`, `prep_after`). `after` joining the closed class also moves the imported lexicon:
+//! the importers stop seeding its content homonyms.
+//!
 //! IT FIRED FOR THE PROVENANCE MIGRATION (`2026-08-30`), on TEN layers, which is the whole
 //! provenance axis moving off `reflection` onto `prov` plus the grade classes going away.
 //! `reflection` and `prov`'s consumers (`obo`, `justification`, `statistics`, `ingest`,
@@ -193,15 +219,15 @@ formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:3a4cd1b1a75a5032fda484dea529bcf79678ec4d4fd060e13c6ef00d782e5fc2
 justification:3544a09a5fa235332df6bfb40bc0c68ce266b72704d86d85a08d6a63f785ae2f
-units:26bca7cac3651070f89795702b3e6c3c0c543986c4b086475da683c46a4cb1cd
+units:f125f3ca24c57533565d17dac682640fe0f4ec8963c166c83950946a0559cbe8
 statistics:8c955279b691648a948061c47cd8ff2ada4c9edd9a05c756b373a5aa83c3b466
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
-lexicon:7ee38132e0b9d11e8ef91d88a8bcc8f81996715f66effd46e22c41ee6df80d7f
-ontology:7fb72a75946ca50e84df1aa1ae9207dc57676b96ef3c53879e82e4421f1aef43
-closed-class:a691050fcb75087947ef1b6c426b35b9ca872b9b1c8b7b76d020d4518463acee
+lexicon:46ef79a03ba22b61609186218ed356bcddf329656cad8a018778f3d322fb7eda
+ontology:1bb0d263b7dd3a090594105061e9edc4e2a2c3946dc576311551a0f2ceb1668e
+closed-class:48e8c708c6d72c629ae34abfaee5170daff2529c0223ac39b4a36b15e7a3a7e2
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 

@@ -19,6 +19,8 @@
 
 namespace ontology = "urn:eigenius:ontology";
 namespace lexicon  = "urn:eigenius:lexicon";
+namespace core     = "urn:eigenius:core";
+namespace units    = "urn:eigenius:units";
 
 // x is_a C — instance membership: the entity x is a member of class C.
 // "HeLa is a cell line" → is_a(hela, CellLine).
@@ -50,6 +52,9 @@ axiom ontology:kind_of : Set -> lexicon:Entity
 // over-generation). Opaque like `kind_of`: the grammar guarantees the typed tree; the
 // uniqueness presupposition + referent resolution are grounding-supplied (D62).
 axiom ontology:the : forall (A : Set) => A
+// the_count(A, q) — `the(A)` with the number of its members stated (D95 slice 7d, decision 13):
+// "the four other RecQ DNA helicases" → the_count(A, 4). Opaque like `the`.
+axiom ontology:the_count : forall (A : Set) => units:Quantity(u"1") -> A
 
 // ── Nominal-modification relations (D63 §8.13 Slice 6-mod) ────────────
 // OPAQUE modifier relations the compound-noun and PP-adjunct rules produce. The
@@ -87,6 +92,66 @@ axiom ontology:prep_by      : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_without : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_among   : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_beyond  : lexicon:Entity -> lexicon:Entity -> Prop
+// `after` joined the closed class in D95 slice 5, with its measured-value sibling below; `before` in
+// slice 8a, with the offsets (`72 h after transduction`). `post` is `after`, with its relations.
+axiom ontology:prep_after   : lexicon:Entity -> lexicon:Entity -> Prop
+axiom ontology:prep_before  : lexicon:Entity -> lexicon:Entity -> Prop
+
+// ── Prepositions over a measured value (D95 slice 5) ──────────────────────────
+// `prep_X_value(s, u, q)`: the predication or entity s stands in the prepositional relation to the
+// measured value q, in base unit u — "incubated at 37 °C" → … ∧ prep_at_value(s, K, 310.15 K). The
+// unit is an explicit argument because the relation is unit-polymorphic and implicit Π is deferred
+// (eigenius#261). The `prep_` family, as the entity-object relations are: a noun refined by one is
+// PP-refined, and verbalization renders it as "at 6203/20 K". A VP adjunct and a noun modifier share
+// the relation, as `in_prep` and `in_nmod` share `prep_in`.
+axiom ontology:prep_at_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_for_value   : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_in_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_with_value  : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_after_value : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_of_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `prep_by_value(x, u, q)`: x by the time the value q is reached, a deadline — `recovered by three
+// weeks` (D95 slice 8a, decision 3).
+axiom ontology:prep_by_value    : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `prep_after_offset(x, y, u, q)`: x after y by the interval q — `purified 72 h after transduction`;
+// `prep_before_offset` likewise before (D95 slice 8a, decision 1).
+axiom ontology:prep_after_offset  : lexicon:Entity -> lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+axiom ontology:prep_before_offset : lexicon:Entity -> lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `prep_per(Y, x, y)`: x is counted per y, the member y of the distributing kind Y — `at least 1,000
+// cells per sample` (D95 slice 8d). Polymorphic in y's type, so a refined noun (`per time point`)
+// types; opaque, as `prep_in` is.
+axiom ontology:prep_per         : forall (Y : Set) => lexicon:Entity -> Y -> Prop
+// `every_period(x, u, q)`: x recurs with the period q — `changed every 3 days` (D95, "`every N unit`";
+// slice 8b). Opaque, as the PP adjuncts are: no event variable, and the periodicity is the
+// institution's to interpret.
+axiom ontology:every_period     : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `has_quantity(x, u, q)`: the entity x has the measured value q — the prenominal measure phrase
+// ("10 μM etoposide" → Σx:etoposide. has_quantity(x, …)) and the predicative one ("the temperature
+// was 37 °C"). Which quantity of x it is (a concentration, a temperature) the parse does not say.
+axiom ontology:has_quantity     : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `has_count(T, P, q)`: the number of `T` satisfying `P` is `q` (D95 slice 7) — a cardinal's claim,
+// `two genes affect HeLa` → has_count(Gene, λx. affects(hela, x), 2). A count is dimensionless, so it
+// is a `Quantity(u"1")` and a bound on it (`at least 1,000 cells`) is slice 6's constraint.
+axiom ontology:has_count        : forall (T : Set) => (T -> Prop) -> units:Quantity(u"1") -> Prop
+// `has_proportion(x, P, q)`: the proportion of the group `x`'s members satisfying `P` is `q` (D95
+// slice 7c) — `15% of colon cancers are MSI` → has_proportion(kind_of(ColonCancer), λy. msi(y), 3/20).
+// The group is an entity, a definite plural (`the(Sample)`) or a kind, as the partitive's noun phrase
+// denotes it; the proportion is a dimensionless quantity, so a bound on it (`more than half`) is
+// slice 6's constraint.
+axiom ontology:has_proportion   : lexicon:Entity -> (lexicon:Entity -> Prop) -> units:Quantity(u"1") -> Prop
+// `fold_lower(N, a, b)`: a is N-fold lower than b — `0.56-fold fewer deletion mutations than typical
+// lineages` → fold_lower(0.56, card(M, x), card(M, y)) (D95 slice 9, decision 2); `fold_higher` the
+// other way. The factor is kept as written. Opaque, as `units:approx` is, because the text fixes no
+// arithmetic: `0.56-fold fewer` is a ratio of 0.56, `2-fold fewer` usually one of 1/2, and some
+// authors mean 44% fewer by the first. A check grounds it in `stats:EffectSize::Relative`.
+axiom ontology:fold_lower       : units:Quantity(u"1") -> core:float -> core:float -> Prop
+axiom ontology:fold_higher      : units:Quantity(u"1") -> core:float -> core:float -> Prop
+// `median_over(f, x)`: the median of the measure f over the group x's members (D95 slice 9, decision 3)
+// — `a median 0.56-fold fewer deletion mutations … compared to typical lineages` →
+// fold_lower(0.56, median_over(λm. card(M, m), x), median_over(λm. card(M, m), y)). The group is an
+// entity, as `has_proportion`'s is. Opaque, as `card` is; `stats:median_of` over a SampleSet is the
+// institution's.
+axiom ontology:median_over      : (lexicon:Entity -> core:float) -> lexicon:Entity -> core:float
 
 // ── Naming apposition (D63 §5.3, close apposition of a sortal + a proper name) ────────
 // `named(x, n)`: the individual `x` bears the proper name whose token is `n` — the coining

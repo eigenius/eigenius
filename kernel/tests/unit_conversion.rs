@@ -71,6 +71,11 @@ fn d93s_worked_examples() {
     assert_converts(q(50, 1), "kDa", da, 0, "kg");
     // An angle is dimensionless, and 37° is 37π/180.
     assert_converts(q(37, 1), "°", q(37, 180), 1, "1");
+    // `931g` read as g-force: 931 × 9.80665 m·s⁻².
+    assert_converts(q(931, 1), "g_n", q(182_599_823, 20_000), 0, "s^-2·m");
+    // The molar and the week, admitted with D95: 5 mM is 5 mol·m⁻³, 2 wk is 1209600 s.
+    assert_converts(q(5, 1), "mM", q(5, 1), 0, "m^-3·mol");
+    assert_converts(q(2, 1), "wk", q(1_209_600, 1), 0, "s");
 }
 
 /// Every named unit, converted from `1`, gives back its own declared factor, power of π and
@@ -80,7 +85,7 @@ fn every_named_unit_round_trips() {
     for symbol in [
         "s", "m", "kg", "A", "K", "mol", "cd", "g", "rad", "sr", "Hz", "N", "Pa", "J", "W", "C",
         "V", "F", "Ω", "S", "Wb", "T", "H", "lm", "lx", "Bq", "Gy", "Sv", "kat", "min", "h", "d",
-        "°", "′", "″", "ha", "L", "t", "Da", "eV", "au",
+        "°", "′", "″", "ha", "L", "t", "Da", "eV", "au", "g_n", "M", "wk",
     ] {
         let u = vocab()
             .unit(symbol)
@@ -165,6 +170,10 @@ fn what_is_refused() {
         ConvertError::NotPrefixable { .. }
     ));
     assert!(matches!(refused("k°C"), ConvertError::NotPrefixable { .. }));
+    assert!(matches!(
+        refused("mg_n"),
+        ConvertError::NotPrefixable { .. }
+    ));
     assert!(matches!(refused("metre"), ConvertError::UnknownSymbol(_)));
     assert!(matches!(refused("µg"), ConvertError::UnknownSymbol(_))); // U+00B5, not U+03BC
     assert!(matches!(refused("m/s/s"), ConvertError::Malformed { .. }));
@@ -211,6 +220,7 @@ namespace probe   = "urn:eigenius:probe";
 axiom probe:is_speed       : u:Quantity(u"s^-1·m") -> Prop
 axiom probe:is_temperature : u:Quantity(u"K") -> Prop
 axiom probe:is_ratio       : u:Quantity(u"1") -> Prop
+axiom probe:is_warming     : u:Difference(u"K") -> Prop
 "#;
 
 /// Compile `prop` as a claim beside [`PROBES`] and validate it on the bootstrap chain.
@@ -253,6 +263,43 @@ fn an_authored_quantity_commits_at_its_base_unit() {
         let errs = commit(prop).unwrap_or_else(|e| panic!("{prop} should compile: {e}"));
         assert!(errs.is_empty(), "{prop} should commit: {errs:#?}");
     }
+}
+
+/// `units:difference` (D95, decision 5) elaborates to a `Difference`, converted with no °C offset, and
+/// a value is not a difference: the types differ.
+#[test]
+fn an_authored_difference_commits_as_a_difference() {
+    for prop in [
+        r#"probe:is_warming(u:difference(5, "°C"))"#,
+        r#"probe:is_warming(u:difference(5, "K"))"#,
+    ] {
+        let errs = commit(prop).unwrap_or_else(|e| panic!("{prop} should compile: {e}"));
+        assert!(errs.is_empty(), "{prop} should commit: {errs:#?}");
+    }
+    let errs = commit(r#"probe:is_warming(u:quantity(5, "°C"))"#).expect("compiles");
+    assert!(
+        errs.iter()
+            .any(|(rule, _)| *rule == ValidationRule::TermIllTyped),
+        "a value in a difference slot is refused: {errs:#?}"
+    );
+}
+
+/// A value and a difference differ in magnitude only where the unit has an offset.
+#[test]
+fn a_difference_never_takes_the_offset() {
+    use eigenius_kernel::units::convert::Reading;
+    let as_ = |stated: &str, reading| {
+        vocab()
+            .convert_as(&q(5, 1), stated, reading)
+            .unwrap()
+            .magnitude
+            .coefficient()
+            .clone()
+    };
+    assert_eq!(as_("°C", Reading::Value), q(5563, 20));
+    assert_eq!(as_("°C", Reading::Difference), q(5, 1));
+    assert_eq!(as_("K", Reading::Value), as_("K", Reading::Difference));
+    assert_eq!(as_("mg", Reading::Value), as_("mg", Reading::Difference));
 }
 
 #[test]
@@ -299,9 +346,22 @@ fn the_rust_api_term_type_checks() {
     let ctx = eigenius_kernel::testing::bootstrap_context();
     let c = convert(q(3, 1), "m/s");
     let mut check = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(ctx.head()));
-    let ty = check_infer(&mut check, &c.quantity_term()).expect("the quantity term type-checks");
+    let ty = check_infer(&mut check, &c.term()).expect("the quantity term type-checks");
     let printed = format!("{:?}", readback_val(0, &ty));
     assert!(printed.contains("Unit(s^-1·m)"), "{printed}");
+    let d = vocab()
+        .convert_as(
+            &q(5, 1),
+            "°C",
+            eigenius_kernel::units::convert::Reading::Difference,
+        )
+        .unwrap();
+    let ty = check_infer(&mut check, &d.term()).expect("the difference term type-checks");
+    let printed = format!("{:?}", readback_val(0, &ty));
+    assert!(
+        printed.contains("Difference") && printed.contains("Unit(K)"),
+        "{printed}"
+    );
 }
 
 #[test]

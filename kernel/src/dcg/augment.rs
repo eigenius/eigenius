@@ -43,7 +43,6 @@ use super::glossary::{
 use super::lemmatizer::Lemmatizer;
 use super::parse::Parser;
 use super::segment::segment_sentences;
-use super::segment::tokenize;
 
 const LEXICAL_ENTRY: &str = "urn:eigenius:lexicon:LexicalEntry";
 
@@ -216,16 +215,17 @@ pub fn augment_document_only(
         known.insert(d.short_form.trim().to_lowercase());
     }
 
-    // OOV pre-pass (fail-closed): every single token the base lexicon does not know — and that we did not
-    // just add as an abbreviation — is a `Gap`. `LexiconBacked`/`LlmBacked` (Phase 2/3) would try to ground
+    // OOV pre-pass (fail-closed): every word token the base lexicon does not know — and that we did not
+    // just add as an abbreviation — is a `Gap`. Numerals, symbols and commas are not words to ground
+    // (D95); a digit-initial token that is not a numeral (`53BP1`) is a word, and is reported. `LexiconBacked`/`LlmBacked` (Phase 2/3) would try to ground
     // these; `DocumentOnly` reports them as-is. Each gap carries the sentence it occurs in as `context` —
     // the window a `CategoryProposer` reads to infer the OOV's expected category (§6a, the (B) step).
     let index = Parser::build(Arc::clone(base));
     let sentences = segment_sentences(document);
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut missing_oov = Vec::new();
-    for tok in tokenize(document) {
-        let t = tok.trim().to_lowercase();
+    for tok in index.tokenize(document).into_iter().filter(|t| t.is_word()) {
+        let t = tok.surface().trim().to_lowercase();
         if t.is_empty() || known.contains(&t) || !seen.insert(t.clone()) {
             continue;
         }
@@ -236,7 +236,7 @@ pub fn augment_document_only(
                 .cloned()
                 .unwrap_or_default();
             missing_oov.push(Gap {
-                surface: tok,
+                surface: tok.surface().to_string(),
                 context,
                 tried: Vec::new(),
             });

@@ -567,7 +567,7 @@ impl Parser {
 
     pub(super) fn seed_leaves(
         &self,
-        tokens: &[String],
+        tokens: &[Token],
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
         cap: Option<usize>,
@@ -585,7 +585,7 @@ impl Parser {
         for i in 0..n {
             let last = (i + span_limit).min(n);
             for j in i..last {
-                let surface = tokens[i..=j].join(" ");
+                let surface = join_surfaces(&tokens[i..=j]);
                 for mut it in self.lookup_span(&surface, lemmatizer, scope, cap, ranks) {
                     // Referent-hole freshening (D64): the `lexicon:anaphor` placeholder becomes a
                     // fresh per-occurrence free var (typed `Entity` at felicity).
@@ -595,6 +595,11 @@ impl Parser {
                 // Derived `-ly` adverbs (D62 Phase 3): transparent modifier items for a single `-ly`
                 // token whose adjective base is known. Single-token spans; identity sem, no holes.
                 if i == j {
+                    // Quantities and numerals (D95): items built here, not looked up — a measure
+                    // phrase for each reading, value and difference, and a numeral's cardinal
+                    // determiner. An attached quantity's surface was looked up above like any
+                    // token's, so a word it spells keeps its entries (decision 6).
+                    chart[i][j].extend(self.measure_items(&tokens[i]));
                     for it in self.adverb_items(&surface) {
                         chart[i][j].push(it);
                     }
@@ -623,7 +628,7 @@ impl Parser {
                 }
                 // Degree-modified adverb (`more commonly`): a 2-token transparent sentence adverb.
                 if j == i + 1 {
-                    for it in self.degree_adverb_items(&tokens[i], &tokens[j]) {
+                    for it in self.degree_adverb_items(tokens[i].surface(), tokens[j].surface()) {
                         chart[i][j].push(it);
                     }
                 }
@@ -680,6 +685,14 @@ impl Parser {
                 .iter()
                 .flat_map(super::super::rules::combinators::mod_lifts)
                 .collect();
+            // The determiner lift (D95 slice 7d): a determiner that meets a noun modifier before the
+            // head it shares with a coordinated one (`five MSS and five MSI cell lines`).
+            mods.extend(
+                row[i]
+                    .iter()
+                    .flat_map(super::super::rules::combinators::det_premod_lifts)
+                    .collect::<Vec<_>>(),
+            );
             // Attributive past-participle lift, GATED: only when this surface has NO lexical adjective
             // (else the WordNet adjective already covers the attributive use, and the rule's
             // reduced-passive reading would just double-seed — "reduced"/"increased"). Where there is
@@ -714,7 +727,7 @@ impl Parser {
             if debug {
                 eprintln!(
                     "  [parse-debug leaf] cell[{i}..{i}] tok={:?} | {}",
-                    tokens[i],
+                    tokens[i].surface(),
                     cell_histogram(&row[i])
                 );
             }
@@ -726,7 +739,7 @@ impl Parser {
                 if want == format!("{i}..{i}") {
                     eprintln!(
                         "  ===== DUMP leaf[{i}..{i}] tok={:?} ({} items, sample 20) =====",
-                        tokens[i],
+                        tokens[i].surface(),
                         row[i].len()
                     );
                     for it in row[i].iter().take(20) {
@@ -743,6 +756,349 @@ impl Parser {
         (chart, beam_drops)
     }
 
+    /// The items a quantity or numeral token seeds (D95, decisions 1 and 5): a measure phrase for each
+    /// unit reading, once as a value (`cat_mp(u, value)`, sem `Quantity(u)`) and once as a difference
+    /// (`cat_mp(u, difference)`, sem `Difference(u)`) — for `931g`, four. A quantity's value also
+    /// seeds a predicative adjective `S[adj]\NP`, sem `λx. has_quantity(x, u, q)`: the leaf modifier
+    /// lift makes it prenominal (`10 μM etoposide`), and the copula takes it (`the temperature was
+    /// 37 °C`). A numeral is a bare number, `cat_num`, and a whole number is also a cardinal
+    /// determiner stating its count ([`Self::count_determiner`]). A range with a unit seeds a constraint
+    /// and a predicate ([`Self::range_items`]); a range of bare numbers, count-range determiners. A
+    /// factor seeds `cat_factor` (slice 9). Any other token seeds nothing here.
+    fn measure_items(&self, token: &Token) -> Vec<Item> {
+        use super::super::preprocess::TokenKind;
+        use crate::units::convert::{Converted, Kinds, Reading};
+        let layer = &self.grammar.layer;
+        let mp = |c: &Converted| {
+            super::super::category::measure_phrase_cat(layer, &c.unit, c.reading)
+                .map(|cat| Item::new(cat, c.term()))
+        };
+        let measured = |c: &Converted| {
+            let cat = predicative_adjective_cat(layer)?;
+            let rel = Iri::parse(HAS_QUANTITY).ok()?;
+            layer.resolve(&rel)?;
+            let x = "MP#x";
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let body = app(
+                app(
+                    app(Exp::EigonAxiom(rel), Exp::Var(x.to_string())),
+                    Exp::LitUnit(c.unit.clone()),
+                ),
+                c.term(),
+            );
+            Some(Item::new(
+                cat,
+                Exp::Lam(Patt::Var(x.to_string()), Box::new(body)),
+            ))
+        };
+        match token.kind() {
+            TokenKind::Quantity(q) => q
+                .readings
+                .iter()
+                .flat_map(|r| [mp(&r.value), mp(&r.difference), measured(&r.value)])
+                .flatten()
+                .collect(),
+            TokenKind::Numeral(value) => {
+                let dimensionless = |reading| Converted {
+                    magnitude: crate::units::Magnitude::rational(value.clone()),
+                    unit: crate::units::Unit::dimensionless(),
+                    kinds: Kinds::default(),
+                    reading,
+                };
+                // A bare number, not a measure phrase (D95, "Bare numerals and quantities share a
+                // carrier, not a category"; slice 7): `5 cells` counts cells, and a measure consumer
+                // or a measure bound does not take it.
+                let mut items: Vec<Item> = super::super::category::number_cat(&self.grammar.layer)
+                    .map(|cat| Item::new(cat, dimensionless(Reading::Value).term()))
+                    .into_iter()
+                    .collect();
+                // A whole number is also a cardinal determiner stating its exact count (D95 slice 7):
+                // `1` in `a`'s singular categories, any other in `these`'s plural ones, `0`
+                // included — `has_count(…, 0)` reads `0 genes`, where an existential could not.
+                if value.is_integer() && value.numer() >= &num_bigint::BigInt::from(0) {
+                    let one = num_bigint::BigInt::from(1);
+                    let templates = if value.numer() == &one {
+                        &self.cardinal_one
+                    } else {
+                        &self.cardinal_many
+                    };
+                    let count = dimensionless(Reading::Value).term();
+                    items.extend(
+                        templates
+                            .iter()
+                            .filter_map(|cat| self.count_determiner(cat, &count)),
+                    );
+                }
+                items
+            }
+            // A range (D95 slice 6c): the constraint `lo ≤ q ≤ hi` a consumer takes through
+            // `unit_constraint`, and the predicate the copula takes and `mod_lifts` makes prenominal.
+            // A range with a unit or `%` is a measure constraint (slice 6); a range of bare numbers
+            // counts (D95 slice 7, decision 5): whole endpoints make a cardinal determiner,
+            // `∃q. lo ≤ q ≤ hi ∧ has_count(T, …, q)`, and nothing else, as a numeral is not a measure.
+            TokenKind::Range(r) if r.unitless => {
+                let whole = |v: &crate::numeric::Rational| {
+                    v.is_integer() && v.numer() >= &num_bigint::BigInt::from(0)
+                };
+                match (r.low.readings.as_slice(), r.high.readings.as_slice()) {
+                    ([lo], [hi]) if whole(&r.low.value) && whole(&r.high.value) => {
+                        self.count_range_determiners(&lo.value, &hi.value)
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            // A list with its unit written once (D95 slice 8e): a quantifier over the slot a measure
+            // phrase fills, one per reading — `λk. And(k(4 d), k(7 d))` — which a consumer takes as
+            // it takes a constraint. Value readings only, and no predicate: `5 and 10 μM etoposide`
+            // is not one entity with two concentrations.
+            TokenKind::QuantityList(l) => (0..l.members[0].readings.len())
+                .filter_map(|j| self.list_item(l, j))
+                .collect(),
+            TokenKind::Range(r) => r
+                .low
+                .readings
+                .iter()
+                .zip(&r.high.readings)
+                .flat_map(|(lo, hi)| self.range_items(&lo.value, &hi.value))
+                .collect(),
+            // A factor (D95 slice 9, decision 1): its value at the dimensionless unit, in the category
+            // only the factor comparatives take.
+            TokenKind::Factor(value) => {
+                let ratio = Converted {
+                    magnitude: crate::units::Magnitude::rational(value.clone()),
+                    unit: crate::units::Unit::dimensionless(),
+                    kinds: Kinds::default(),
+                    reading: Reading::Value,
+                };
+                super::super::category::factor_cat(layer)
+                    .map(|cat| Item::new(cat, ratio.term()))
+                    .into_iter()
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// A cardinal determiner over `cat` stating the count `q` (D95 slice 7, decision 2): a subject
+    /// determiner `cat_forall(n, λT. S/(S\\NP_T))` gets `λT.λV. has_count(T, λx. V(x), q)`, an object one
+    /// `cat_forall(n, λT. (S\\NP)\\((S\\NP)/NP_T))` gets `λT.λTV.λs. has_count(T, λx. TV(x, s), q)`.
+    /// `None` for any other shape, or when the chain lacks `has_count`.
+    fn count_determiner(&self, cat: &Exp, q: &Exp) -> Option<Item> {
+        let has_count = Iri::parse(HAS_COUNT).ok()?;
+        self.grammar.layer.resolve(&has_count)?;
+        let [_num, Exp::Lam(_, body)] = super::super::category::is_ctor(cat, "cat_forall")? else {
+            return None;
+        };
+        let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+        let lam = |x: &str, b: Exp| Exp::Lam(Patt::Var(x.into()), Box::new(b));
+        let var = |x: &str| Exp::Var(x.into());
+        let count = |scope: Exp| {
+            app(
+                app(app(Exp::EigonAxiom(has_count.clone()), var("CNT#T")), scope),
+                q.clone(),
+            )
+        };
+        // The scope is a λ over `T` in both shapes: a verb phrase's own sem is typed over `Entity`,
+        // and the kernel checks a λ at `T → Prop` but does not subtype `Entity → Prop` to it.
+        let sem = if super::super::category::is_ctor(body, "fwd").is_some() {
+            let scope = lam("CNT#x", app(var("CNT#V"), var("CNT#x")));
+            lam("CNT#T", lam("CNT#V", count(scope)))
+        } else if super::super::category::is_ctor(body, "bwd").is_some() {
+            let scope = lam("CNT#x", app(app(var("CNT#TV"), var("CNT#x")), var("CNT#s")));
+            lam("CNT#T", lam("CNT#TV", lam("CNT#s", count(scope))))
+        } else {
+            return None;
+        };
+        Some(Item::new(cat.clone(), sem))
+    }
+
+    /// A count range's cardinal determiners (D95 slice 7, decision 5), in the plural categories of
+    /// `these`: `λT.λV. ∃q. lo ≤ q ≤ hi ∧ has_count(T, λx. V(x), q)`, and its object counterpart.
+    fn count_range_determiners(
+        &self,
+        lo: &crate::units::convert::Converted,
+        hi: &crate::units::convert::Converted,
+    ) -> Vec<Item> {
+        use crate::units::convert::Reading;
+        let layer = &self.grammar.layer;
+        let build = || -> Option<Vec<Item>> {
+            let point =
+                super::super::category::measure_phrase_cat(layer, &lo.unit, Reading::Value)?;
+            let value_ty = super::super::category::denote_cat(&point).ok()?;
+            let le = Iri::parse(UNITS_LE).ok()?;
+            layer.resolve(&le)?;
+            let has_count = Iri::parse(HAS_COUNT).ok()?;
+            layer.resolve(&has_count)?;
+            let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+            let unit = Exp::LitUnit(lo.unit.clone());
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let lam = |x: &str, b: Exp| Exp::Lam(Patt::Var(x.into()), Box::new(b));
+            let var = |x: &str| Exp::Var(x.into());
+            let le_app =
+                |a: Exp, b: Exp| app(app(app(Exp::EigonAxiom(le.clone()), unit.clone()), a), b);
+            let q = "CNT#q";
+            let constraint = lam(
+                q,
+                Exp::const_applied(
+                    and.clone(),
+                    Vec::new(),
+                    vec![le_app(lo.term(), var(q)), le_app(var(q), hi.term())],
+                ),
+            );
+            let count = |scope: Exp| {
+                app(
+                    app(app(Exp::EigonAxiom(has_count.clone()), var("CNT#T")), scope),
+                    var(q),
+                )
+            };
+            let mut out = Vec::new();
+            for template in &self.cardinal_many {
+                let [_num, Exp::Lam(_, body)] =
+                    super::super::category::is_ctor(template, "cat_forall")?
+                else {
+                    continue;
+                };
+                // `f q a₁…aₙ` for `constrained_sem`, which quantifies `q` and closes over the args.
+                let (consumer, arity) = if super::super::category::is_ctor(body, "fwd").is_some() {
+                    let scope = lam("CNT#x", app(var("CNT#V"), var("CNT#x")));
+                    (lam(q, lam("CNT#T", lam("CNT#V", count(scope)))), 2)
+                } else {
+                    let scope = lam("CNT#x", app(app(var("CNT#TV"), var("CNT#x")), var("CNT#s")));
+                    (
+                        lam(q, lam("CNT#T", lam("CNT#TV", lam("CNT#s", count(scope))))),
+                        3,
+                    )
+                };
+                let sem = super::super::rules::combinators::constrained_sem(
+                    &consumer,
+                    None,
+                    &constraint,
+                    &value_ty,
+                    arity,
+                    &and,
+                );
+                out.push(Item::new(template.clone(), sem));
+            }
+            Some(out)
+        };
+        build().unwrap_or_default()
+    }
+
+    /// The quantifier a quantity list seeds for its `j`th reading (D95 slice 8e): `cat_mpq(u, value)`
+    /// with sem `λk. And(k(q₁), And(k(q₂), …))`, `Or` for a list joined by `or`. `None` when the
+    /// members' units differ or the chain lacks the category or the connective.
+    fn list_item(&self, list: &super::super::preprocess::QuantityList, j: usize) -> Option<Item> {
+        let layer = &self.grammar.layer;
+        let values: Vec<&crate::units::convert::Converted> = list
+            .members
+            .iter()
+            .map(|m| m.readings.get(j).map(|r| &r.value))
+            .collect::<Option<_>>()?;
+        let unit = &values.first()?.unit;
+        if values.iter().any(|v| &v.unit != unit) {
+            return None;
+        }
+        let cat = super::super::category::measure_quantifier_cat(
+            layer,
+            unit,
+            crate::units::convert::Reading::Value,
+        )?;
+        let connective = if list.disjunctive {
+            "urn:eigenius:logic:Or"
+        } else {
+            "urn:eigenius:logic:And"
+        };
+        let connective = super::super::category::inductive_iri(layer, connective)?;
+        let k = "MPQ#k";
+        let at = |v: &crate::units::convert::Converted| {
+            Exp::App(Box::new(Exp::Var(k.into())), Box::new(v.term()))
+        };
+        let (last, rest) = values.split_last()?;
+        let body = rest.iter().rev().fold(at(last), |acc, v| {
+            Exp::const_applied(connective.clone(), Vec::new(), vec![at(v), acc])
+        });
+        Some(Item::new(
+            cat,
+            Exp::Lam(Patt::Var(k.into()), Box::new(body)),
+        ))
+    }
+
+    /// A range's two items (D95 slice 6, decision 8): `cat_mpc(u, value)` with sem
+    /// `λq. And(le(u, lo, q), le(u, q, hi))`, and `S[adj]\NP` with sem
+    /// `λx. ∃q. And(le(u, lo, q), le(u, q, hi)) ∧ has_quantity(x, u, q)`. Empty when the endpoints'
+    /// units differ or the chain lacks the vocabulary.
+    fn range_items(
+        &self,
+        lo: &crate::units::convert::Converted,
+        hi: &crate::units::convert::Converted,
+    ) -> Vec<Item> {
+        use crate::units::convert::Reading;
+        let layer = &self.grammar.layer;
+        let build = || -> Option<Vec<Item>> {
+            if lo.unit != hi.unit {
+                return None;
+            }
+            let point =
+                super::super::category::measure_phrase_cat(layer, &lo.unit, Reading::Value)?;
+            let constraint_cat =
+                super::super::category::measure_constraint_cat(layer, &lo.unit, Reading::Value)?;
+            let predicate_cat = predicative_adjective_cat(layer)?;
+            let value_ty = super::super::category::denote_cat(&point).ok()?;
+            let le = Iri::parse(UNITS_LE).ok()?;
+            layer.resolve(&le)?;
+            let has_quantity = Iri::parse(HAS_QUANTITY).ok()?;
+            layer.resolve(&has_quantity)?;
+            let and = super::super::category::inductive_iri(layer, "urn:eigenius:logic:And")?;
+            let unit = Exp::LitUnit(lo.unit.clone());
+            let app = |f: Exp, a: Exp| Exp::App(Box::new(f), Box::new(a));
+            let le_app =
+                |a: Exp, b: Exp| app(app(app(Exp::EigonAxiom(le.clone()), unit.clone()), a), b);
+            let (q, u, x) = ("MP#q", "MP#u", "MP#x");
+            let constraint = Exp::Lam(
+                Patt::Var(q.into()),
+                Box::new(Exp::const_applied(
+                    and.clone(),
+                    Vec::new(),
+                    vec![
+                        le_app(lo.term(), Exp::Var(q.into())),
+                        le_app(Exp::Var(q.into()), hi.term()),
+                    ],
+                )),
+            );
+            // `λu.λq.λx. has_quantity(x, u, q)` — the consumer the predicate quantifies, as a marker's
+            // predicate entry does.
+            let has = Exp::Lam(
+                Patt::Var(u.into()),
+                Box::new(Exp::Lam(
+                    Patt::Var(q.into()),
+                    Box::new(Exp::Lam(
+                        Patt::Var(x.into()),
+                        Box::new(app(
+                            app(
+                                app(Exp::EigonAxiom(has_quantity), Exp::Var(x.into())),
+                                Exp::Var(u.into()),
+                            ),
+                            Exp::Var(q.into()),
+                        )),
+                    )),
+                )),
+            );
+            let predicate = super::super::rules::combinators::constrained_sem(
+                &has,
+                Some(&unit),
+                &constraint,
+                &value_ty,
+                1,
+                &and,
+            );
+            Some(vec![
+                Item::new(constraint_cat, constraint),
+                Item::new(predicate_cat, predicate),
+            ])
+        };
+        build().unwrap_or_default()
+    }
+
     /// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md`) — a SEED-time rule (it
     /// needs the lexicon, which the grammar and chart deliberately cannot reach). For a span `[i, j]`
     /// whose prefix `tokens[i..j]` is a pre-nominal modifier COORDINATION and `tokens[j]` is the shared
@@ -757,7 +1113,7 @@ impl Parser {
     /// stands — coverage is never reduced.
     fn distribute_head(
         &self,
-        span: &[String],
+        span: &[Token],
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
         cap: Option<usize>,
@@ -767,7 +1123,7 @@ impl Parser {
         let Some((head, mods)) = span.split_last() else {
             return Vec::new();
         };
-        let head = head.as_str();
+        let head = head.surface();
         let Some(conjuncts) = split_coord_conjuncts(mods, |t| {
             self.grammar.reserved.coord_connective(t).is_some()
         }) else {
@@ -792,7 +1148,7 @@ impl Parser {
         // Bail unless EVERY conjunct yields ≥1 lexicalized concept (first-cut all-lexicalized gate).
         let mut per_conjunct: Vec<Vec<Item>> = Vec::with_capacity(conjuncts.len());
         for c in &conjuncts {
-            let surface = format!("{} {head}", c.join(" "));
+            let surface = format!("{c} {head}");
             let raw = self.lookup_span(&surface, lemmatizer, scope, cap, ranks);
             // The bare-kind NP of each looked-up common noun: `cat_np(C, num)` with sem `kind_of(C)`,
             // built directly — `bare_nominal_shifts` yields the RAISED subject/object forms, not the
@@ -826,10 +1182,9 @@ impl Parser {
             per_conjunct.push(kinds);
         }
         // Connective: `or` anywhere → union; else `and` (a comma list finalizes to conjunction).
-        let op = if mods
-            .iter()
-            .any(|t| self.grammar.reserved.coord_connective(t) == Some("urn:eigenius:logic:Or"))
-        {
+        let op = if mods.iter().any(|t| {
+            self.grammar.reserved.coord_connective(t.surface()) == Some("urn:eigenius:logic:Or")
+        }) {
             "urn:eigenius:logic:Or"
         } else {
             "urn:eigenius:logic:And"
@@ -966,6 +1321,14 @@ pub(super) fn is_lexicalized_adverb(surface: &str) -> bool {
     ];
     LEXICALIZED_ADVERBS.contains(&surface)
 }
+
+/// The relation a measured value predicates of an entity (`ontology.esl`), which a quantity's
+/// predicative-adjective item applies ([`Parser::measure_items`]).
+const HAS_QUANTITY: &str = "urn:eigenius:ontology:has_quantity";
+/// `units:le` — a range's endpoints bound its value (D95 slice 6c).
+const UNITS_LE: &str = "urn:eigenius:units:le";
+/// `ontology:has_count` — a cardinal's exact count (D95 slice 7).
+const HAS_COUNT: &str = "urn:eigenius:ontology:has_count";
 
 /// The productive denominal-adjective suffixes (D63 compound morphology §3b, generalized from the
 /// shipped `-based` slice). Each row is `(suffix_tail, relation_lemma, theta_is_object)`:
@@ -1225,51 +1588,52 @@ pub(super) fn with_noun_num(it: &Item, num_name: &str) -> Item {
 /// **RNR head distribution** (`docs/notes/d63-rnr-head-distribution.md` §4) — split a candidate
 /// pre-nominal modifier-coordination slice on its connectives into the conjunct token-runs, so the
 /// caller can re-look-up each "conjunct + head" compound in isolation. `is_conn(t)` holds for a
-/// coordination connective (comma / `and` / `or`). Returns the conjunct surfaces ("colon",
-/// "microsatellite-stable"); `None` unless there are ≥2 non-empty conjuncts separated ONLY by
+/// coordination connective (comma / `and` / `or`). Returns the conjunct surfaces, each joined by single
+/// spaces ("colon", "double stranded"); `None` unless there are ≥2 non-empty conjuncts separated ONLY by
 /// connectives — a leading / trailing / doubled connective, or a single conjunct, is not a coordination.
-fn split_coord_conjuncts(
-    tokens: &[String],
-    is_conn: impl Fn(&str) -> bool,
-) -> Option<Vec<Vec<String>>> {
-    let mut conjuncts: Vec<Vec<String>> = vec![Vec::new()];
-    for t in tokens {
-        if is_conn(t) {
-            if conjuncts.last().unwrap().is_empty() {
+fn split_coord_conjuncts(tokens: &[Token], is_conn: impl Fn(&str) -> bool) -> Option<Vec<String>> {
+    let mut conjuncts: Vec<&[Token]> = Vec::new();
+    let mut start = 0;
+    for (k, t) in tokens.iter().enumerate() {
+        if is_conn(t.surface()) {
+            if k == start {
                 return None; // a leading or doubled connective — malformed
             }
-            conjuncts.push(Vec::new());
-        } else {
-            conjuncts.last_mut().unwrap().push(t.clone());
+            conjuncts.push(&tokens[start..k]);
+            start = k + 1;
         }
     }
-    if conjuncts.len() < 2 || conjuncts.last().unwrap().is_empty() {
+    if conjuncts.is_empty() || start == tokens.len() {
         return None; // a single conjunct, or a trailing connective
     }
-    Some(conjuncts)
+    conjuncts.push(&tokens[start..]);
+    Some(conjuncts.into_iter().map(join_surfaces).collect())
 }
 
 #[cfg(test)]
 mod rnr_tests {
     use super::split_coord_conjuncts;
+    use crate::dcg::preprocess::tokenize;
+    use crate::dcg::quantity::ProseUnits;
 
-    fn toks(s: &str) -> Vec<String> {
-        s.split_whitespace().map(str::to_string).collect()
-    }
-    // The parser tokenises the comma as its own token; connectives are `,` / `and` / `or`.
+    // The preprocessor makes the comma a token of its own; connectives are `,` / `and` / `or`.
     fn is_conn(t: &str) -> bool {
         matches!(t, "," | "and" | "or")
+    }
+
+    fn split(s: &str) -> Option<Vec<String>> {
+        split_coord_conjuncts(&tokenize(s, &ProseUnits::none()), is_conn)
     }
 
     #[test]
     fn splits_a_four_way_comma_list() {
         assert_eq!(
-            split_coord_conjuncts(&toks("colon , gastric , endometrial and ovarian"), is_conn),
+            split("colon, gastric, endometrial and ovarian"),
             Some(vec![
-                toks("colon"),
-                toks("gastric"),
-                toks("endometrial"),
-                toks("ovarian")
+                "colon".into(),
+                "gastric".into(),
+                "endometrial".into(),
+                "ovarian".into()
             ])
         );
     }
@@ -1277,23 +1641,20 @@ mod rnr_tests {
     #[test]
     fn or_list_keeps_multitoken_conjuncts() {
         assert_eq!(
-            split_coord_conjuncts(&toks("insertion or deletion"), is_conn),
-            Some(vec![toks("insertion"), toks("deletion")])
+            split("insertion or deletion"),
+            Some(vec!["insertion".into(), "deletion".into()])
         );
         assert_eq!(
-            split_coord_conjuncts(&toks("double stranded or single stranded"), is_conn),
-            Some(vec![toks("double stranded"), toks("single stranded")])
+            split("double stranded or single stranded"),
+            Some(vec!["double stranded".into(), "single stranded".into()])
         );
     }
 
     #[test]
     fn rejects_non_coordinations() {
-        assert_eq!(split_coord_conjuncts(&toks("colon"), is_conn), None);
-        assert_eq!(split_coord_conjuncts(&toks("colon and"), is_conn), None);
-        assert_eq!(split_coord_conjuncts(&toks("and colon"), is_conn), None);
-        assert_eq!(
-            split_coord_conjuncts(&toks("colon and and gastric"), is_conn),
-            None
-        );
+        assert_eq!(split("colon"), None);
+        assert_eq!(split("colon and"), None);
+        assert_eq!(split("and colon"), None);
+        assert_eq!(split("colon and and gastric"), None);
     }
 }

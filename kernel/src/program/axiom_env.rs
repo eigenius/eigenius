@@ -454,8 +454,9 @@ mod tests {
         // - the D62 §2e / D64 referent-hole placeholder `lexicon:anaphor : Entity` (a pronoun
         //   stores it; the parser freshens it into an open-parse hole — `closed-class.esl`); and
         // - the D93 unit operators `units:mul` / `units:pow`, which the kernel reduces
-        //   (`nbe/unit_ext.rs`) — named one by one, so a further `units:` axiom must be listed here
-        //   deliberately rather than admitted by prefix.
+        //   (`nbe/unit_ext.rs`), and the D95 order relations `units:lt` / `le` / `approx` — named
+        //   one by one, so a further `units:` axiom must be listed here deliberately rather than
+        //   admitted by prefix.
         // Every bootstrap axiom should be in one of those families.
         let head = Arc::clone(crate::testing::bootstrap_context().head());
         let env = build_axiom_env(&head).unwrap();
@@ -470,11 +471,18 @@ mod tests {
             // `anaphor_of` is the POLYMORPHIC restrictor-typed sibling — d64-demonstratives-as-holes.md)
             "urn:eigenius:lexicon:anaphor",
             "urn:eigenius:lexicon:anaphor_of",
+            // D95 slice 7d — a demonstrative before a numeral (`these two genetic events`).
+            "urn:eigenius:lexicon:anaphor_of_count",
             "urn:eigenius:lexicon:speaker",
             "urn:eigenius:lexicon:poss_of",
             // D93 — reduced by the kernel, not opaque; see `nbe/unit_ext.rs`.
             "urn:eigenius:units:mul",
             "urn:eigenius:units:pow",
+            // D95 slice 6 — the order over quantities a bound states (`less than 37 °C`). Opaque:
+            // the parser states bounds, and deciding one on literals is checking work not yet built.
+            "urn:eigenius:units:lt",
+            "urn:eigenius:units:le",
+            "urn:eigenius:units:approx",
         ];
         let unexpected: Vec<&Iri> = env
             .iter()
@@ -493,7 +501,7 @@ mod tests {
             unexpected.is_empty(),
             "bootstrap axioms should be the D52 measurement set + the D63 ontology \
              relations + the modal operators + the `lexicon:card` cardinality functor + the \
-             D93 unit operators; \
+             D93 unit operators + the D95 quantity order; \
              unexpected axioms: {unexpected:?}"
         );
     }

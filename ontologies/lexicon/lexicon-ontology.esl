@@ -20,6 +20,7 @@ namespace core       = "urn:eigenius:core";
 namespace normalizers = "urn:eigenius:core:normalizers";
 namespace eigentt    = "urn:eigenius:eigentt";
 namespace lexicon    = "urn:eigenius:lexicon";
+namespace units      = "urn:eigenius:units";
 
 // ── The entity top (D63 §8.3, decision ii) ────────────────────────────
 // The single foundational entity type — the universe a general predicate's
@@ -68,11 +69,12 @@ class lexicon:Entity {
 // stored category a CLOSED, kernel-checked `lexicon:Cat` value — a free-variable
 // open term would be rejected by the commit-time felicity check (Rule 21). The
 // reflexive constructor is strictly positive, hence sound.
-// Mood — the clause type of a sentence. The ONLY feature that alters ⟦·⟧:
+// Mood — the clause type of a sentence. One of the two features that alter ⟦·⟧ (the other is
+// `Reading`, D95):
 // declaratives denote a `Prop`; questions / imperatives denote distinct things
 // (deferred to D63 Slice 5, where ⟦·⟧ fails closed rather than denoting `Prop`).
 data lexicon:Mood {
-    description = "Clause mood — a SYNTACTIC feature of `cat_s`, and the one place where the categorial denotation branches: ⟦S[dcl,_]⟧ = Prop, while the interrogative and imperative moods denote their own shapes. Unlike Num/Fin/Prep/Mode it is therefore not erased by ⟦·⟧.";
+    description = "Clause mood — a SYNTACTIC feature of `cat_s`, and one of the two places where the categorial denotation branches (a measure phrase's `Reading` is the other): ⟦S[dcl,_]⟧ = Prop, while the interrogative and imperative moods denote their own shapes. Unlike Num/Fin/Prep/Mode it is therefore not erased by ⟦·⟧.";
 
     dcl,   // declarative — "a gene affects a cell line" (⟦S[dcl,_]⟧ = Prop)
     q,     // interrogative — "does a gene affect a cell line?" (Slice 5)
@@ -196,6 +198,17 @@ data lexicon:Prep {
     prep_as,      // essive / object-predicative "as": "identify X as Y", "regard X as Y" (D63 §5.3)
     prep_any,     // underspecified ⊤: meets any specific prep. Prep-agnostic verb frames
                   // carry this; a specific marker refines it at composition.
+}
+
+// Reading — how a measure phrase is read (D95 implementation plan, decision 5): a measured VALUE
+// (`incubated at 37 °C`, `for 2 h`) or a DIFFERENCE between two (`5 °C warmer`, `rose 5 °C`). Unlike
+// Num/Fin/Prep it changes the denotation — ⟦cat_mp(u, value)⟧ = units:Quantity(u),
+// ⟦cat_mp(u, difference)⟧ = units:Difference(u) — so, like Mood, it is not erased and has no wildcard:
+// every consumer takes one.
+data lexicon:Reading {
+    description = "How a measure phrase is read: a measured value or a difference. It changes the denotation, so it is not erased and has no wildcard.";
+    value,
+    difference,
 }
 
 // Mode — the SLASH MODALITY of multimodal CCG (Baldridge 2002 ch. 5, Figure 5.1
@@ -362,6 +375,56 @@ data lexicon:Cat : Type 1 {
     // has no parse) and builds `λμ.λV.λy.λx. gt(μ(x), μ(y))` over `measurements:gt`. Distinct from
     // `cat_pp` (⟦·⟧ = Entity → Prop) — a measure is a scalar, not a truth-value.
     cat_measure : lexicon:Cat,
+    // MP[u, reading] — a MEASURE PHRASE (D95): `37 °C`, `10 μg ml⁻¹`, `931g`. Indexed by its unit, a
+    // `core:unit` in base units, so a consumer that needs a dimension names it and a mismatch fails to
+    // compose; and by its reading. ⟦cat_mp(u, value)⟧ = units:Quantity(u), ⟦cat_mp(u, difference)⟧ =
+    // units:Difference(u). Not seeded from lexical entries: the preprocessor recognises the quantity and
+    // seeding builds its items (D95 implementation plan, decisions 1 and 5). Distinct from `cat_measure`,
+    // which is an opaque ordinal scale over entities.
+    cat_mp : core:unit -> lexicon:Reading -> lexicon:Cat,
+    // MPC[u, reading] — a MEASURE CONSTRAINT (D95 slice 6): `less than 37 °C`, `~100 mm3`. A bound
+    // constrains a measure phrase's value instead of stating one, so it denotes a predicate over the
+    // quantity: ⟦cat_mpc(u, value)⟧ = units:Quantity(u) → Prop, ⟦cat_mpc(u, difference)⟧ =
+    // units:Difference(u) → Prop. Indexed as `cat_mp` is. A consumer of `cat_mp(u, r)` takes it through
+    // the `unit_constraint` combinator, which quantifies the value the consumer would have taken.
+    cat_mpc : core:unit -> lexicon:Reading -> lexicon:Cat,
+    // MPQ[u, reading] — a QUANTIFIED measure phrase (D95 slice 8e): `Four and seven days`, a list of
+    // values with the unit written once, which the preprocessor reads as one token. It denotes a
+    // quantifier over the slot a measure phrase fills: ⟦cat_mpq(u, r)⟧ = (⟦cat_mp(u, r)⟧ → Prop) → Prop,
+    // `λk. And(k(4 d), k(7 d))`. A consumer of `cat_mp(u, r)` takes it through the `unit_constraint`
+    // combinators, as it takes a constraint.
+    cat_mpq : core:unit -> lexicon:Reading -> lexicon:Cat,
+    // NUM — a BARE NUMBER (D95 slice 7): `5`, `1,000`, `two`, `2 × 10³`. D95 decided that bare
+    // numerals and quantities "share a carrier, not a category": ⟦cat_num⟧ = units:Quantity(u"1"),
+    // the carrier a dimensionless measure phrase has, but a number is not a measure phrase — `5 cells`
+    // counts cells, it does not give them a quantity. Cardinal determiners and the bounds on a count
+    // take it; the measure consumers, which take `cat_mp`, do not.
+    cat_num : lexicon:Cat,
+    // FACTOR — a MULTIPLIER (D95 slice 9, decision 1): `0.56-fold`, `two-fold`, which the preprocessor
+    // reads as one token. ⟦cat_factor⟧ = units:Quantity(u"1"), the carrier a bare number has, but a
+    // ratio is neither a number nor a measure phrase: before `fewer`, `10%` and `3` state differences.
+    // The factor comparatives (`0.56-fold fewer`) take it.
+    cat_factor : lexicon:Cat,
+    // STAT — a STATISTIC over a group's members (D95 slice 9, decision 3): `a median`. ⟦cat_stat⟧ =
+    // (Entity → core:float) → Entity → core:float, a measure to its summary over a group; the factor
+    // comparatives apply it to both measures they compare (`a median 0.56-fold fewer`).
+    cat_stat : lexicon:Cat,
+    // ∀u:unit. R[u] — a UNIT-polymorphic functor: a consumer that takes a measure phrase of any unit
+    // (`at 37 °C`, `for 2 h`). Like `cat_forall` and unlike the feature binders, it is instantiated from
+    // the consumed item — `u := U` from its `cat_mp(U, r)` — and its sem is applied to the unit, since
+    // the unit appears in the denotation: ⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧.
+    cat_unit_forall : (core:unit -> lexicon:Cat) -> lexicon:Cat,
+    // Num·∀T:Set. R[T] as it meets a noun modifier whose head comes later (D95 slice 7d, decision
+    // 14): a quantifier determiner or a partitive (`15% of`), lifted; the `determiner_modifier`
+    // combinator is its one consumer. It has no denotation, so it neither coordinates nor closes.
+    cat_det_premod : lexicon:Num -> (Set -> lexicon:Cat) -> lexicon:Cat,
+    // Num·∀T:Set. R[T] awaiting its head, with noun modifiers composed in (D95 slice 7d, decision
+    // 14): `five MSS` in `five MSS and five MSI cell lines`. Built by the `determiner_modifier`
+    // combinator from a lifted determiner and the modifiers after it, never lexical;
+    // coordinates as a determiner does, and applies to the shared head as a coordination.
+    // ⟦cat_detmod(n, λT. R)⟧ = ΠT:Set. ((T → Prop) → Set) → ⟦R⟧: the second argument builds the
+    // head's type from the modifiers' restrictor, conjoining the head's own.
+    cat_detmod : lexicon:Num -> (Set -> lexicon:Cat) -> lexicon:Cat,
 }
 
 // ── The lexical-entry record ──────────────────────────────────────────
@@ -603,4 +666,27 @@ property lexicon:construct_kind : core:resource {
         lexicon:rk_relativizer, lexicon:rk_wh_relativizer, lexicon:rk_contrastive_but,
         lexicon:rk_negator, lexicon:rk_reciprocal_each, lexicon:rk_reciprocal_other;
     domain lexicon:ReservedConstruct;
+}
+
+// ── Unit spellings (D95) ──────────────────────────────────────────────
+// The prose spellings of units that the units layer's strict symbols do not cover: a second sense
+// for a symbol (`g` as standard gravity beside the gram), a spelling the SI also accepts (`l` for the
+// litre), a word form (`days`), a typographic variant (`ºC`). Every `units:symbol` is a spelling of
+// its own unit without an entry here. Read by TYPE (`typed_resource_iris`) by the quantity recogniser
+// only, never through the `lexicon:form` value index: a unit spelling has no category and never
+// stands in the chart alone, so it is not a lexical entry (D95 implementation plan, decision 2).
+class lexicon:UnitSurface {
+    description = "A prose spelling of a named unit, beside the units layer's strict symbol. Case-sensitive: `M` is the molar and `m` the metre. A prefix combines with the spelling when the unit is prefixable (`ml` and `μl` through `l`).";
+    requires lexicon:unit_form, lexicon:unit;
+}
+// A dedicated form property for the reason `construct_form` is one: `lexicon:form`'s domain is
+// `LexicalEntry`, and its value index is the lexicon's.
+property lexicon:unit_form : core:string {
+    description = "The spelling, case-sensitive (`g`, `l`, `RCF`, `days`).";
+    domain lexicon:UnitSurface;
+}
+property lexicon:unit : core:resource {
+    description = "The named unit the spelling denotes.";
+    class_types units:NamedUnit;
+    domain lexicon:UnitSurface;
 }

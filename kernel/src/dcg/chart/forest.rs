@@ -267,6 +267,10 @@ pub(crate) fn cat_shape(e: &Exp) -> String {
                 format!("{}({inner})", iri.local_name())
             }
         }
+        // A measure phrase's unit is KEPT: items of different units must never share a node, since a
+        // consumer that names a dimension decides differently on each (D95, decision 1). Units have no
+        // subtyping, so keying on the literal is exact.
+        Exp::LitUnit(u) => format!("u\"{}\"", u.to_canonical_string()),
         // Type indices / sense identities — erased.
         Exp::EigonClass(_) | Exp::EigonResource(_) | Exp::EigonAxiom(_) => "_".to_string(),
         // A refined noun's index is a `Σ`; keep the shape marker, erase the components.
@@ -337,6 +341,7 @@ pub(crate) fn cat_key(e: &Exp) -> String {
                 format!("{}({inner})", iri.local_name())
             }
         }
+        Exp::LitUnit(u) => format!("u\"{}\"", u.to_canonical_string()),
         // KEEP the type index — the whole point of this key over `cat_shape`. Full IRI (not `local`),
         // so two classes that share a local name across namespaces never collide into one node.
         Exp::EigonClass(iri) | Exp::EigonAxiom(iri) => iri.as_str().to_string(),
@@ -377,6 +382,16 @@ mod tests {
     // A leaf item with the given category (sem/cost irrelevant to the signature).
     fn leaf(cat: Exp) -> Item {
         Item::from_parts(cat, Exp::Unit, Combinator::Other, Cost::ZERO)
+    }
+
+    /// D95: a measure phrase's unit stays in the key. `931g`'s gram and standard-gravity items must not
+    /// share a node — a consumer that names a dimension decides differently on each.
+    #[test]
+    fn node_sig_keeps_a_measure_phrase_unit() {
+        let unit = |s: &str| Exp::LitUnit(crate::units::Unit::parse_canonical(s).unwrap());
+        let mp = |u: &str| leaf(ctor("cat_mp", vec![unit(u), ctor("value", vec![])]));
+        assert_ne!(node_sig(&mp("kg")), node_sig(&mp("s^-2·m")));
+        assert_eq!(node_sig(&mp("kg")), node_sig(&mp("kg")));
     }
 
     #[test]

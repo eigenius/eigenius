@@ -1,0 +1,92 @@
+# Quantity corpus (D95 slice 5)
+
+Sentences with measured quantities, in the controlled-language register, derived from the WRN
+methods (Chan et al., *Nature* 2019) and D95's examples. The methods text is gitignored and not
+CC-licensed; these rewrites are not quotations.
+
+- [`corpus.tsv`](corpus.tsv): one sentence per row with the relations every reading must contain and
+  the quantities every reading must render, in base units as `verbalize` prints them (`37 °C` is
+  `6203/20 K`). A `gap` row names the construction it lacks and who owns it.
+- [`content-words.esl`](content-words.esl): the nouns and verbs around the quantities, in the shapes
+  the WordNet importer emits. The closed class supplies the rest.
+
+## Checked without a database
+
+```bash
+cargo test -p eigenius-kernel --test quantity_corpus
+```
+
+`kernel/tests/quantity_corpus.rs` parses every row over the bootstrap chain plus
+`content-words.esl`:
+
+- every word is known, so a gap is the grammar's;
+- a covered row parses, and every reading contains its relations and renders its values;
+- a gap row still does not parse. When one does, its construction has arrived: update the row.
+
+As committed: 51 covered rows, all passing. The two `g` rows have two readings each, gram and
+standard gravity (D93). Slices 6–8 (D95 implementation plan) added twenty-seven, each from a sentence
+of the paper: a range (`4–12% gels`, `80–90% confluence`), an approximation (`approximately 100 mm³`),
+a bound symbol (`>90%`), counts — a plain one (`three sgRNAs`), a bounded one (`more than one MMR
+gene`) and a count range (`4–7 foci`) — a proportion (`Half of the cell pellet`), a number word with
+its unit (`after seven days`), a hyphenated one before a noun (`an eight-day viability assay`), a
+determiner before a numeral (`None of the four other RecQ helicases`), counted conjuncts and
+proportions sharing a head (`five MSS and five MSI cell lines`; `15% of colon, 22% of gastric, 20–30%
+of endometrial and 12% of ovarian cancers`, one reading), offsets (`72 h after transduction`, `6 h
+before collection`, `4 days post transduction`, `2 days later`), a deadline (`by three weeks`), a
+period (`every 3 days`, `every 2–3 days`), pseudo-partitives (`10 μg ml⁻¹ of colcemid`, `0.2 μg/ml of
+doxycycline`, `24 h of puromycin selection`), fronted adjuncts (`After 24 h, …`, `Nine days after
+doxycycline treatment, …`), `per` after a count (`At least 1,000 cells per sample were scored.`) and a
+list with its unit once (`Four and seven days after transduction, …`). Slice 9 added two: a factor on a
+count comparative with a statistic and `compared to` (`a median 0.56-fold fewer deletion mutations in
+microsatellite regions compared to typical lineages`), and without them (`2-fold more deletion
+mutations than typical lineages`). The paper's subject is `these MSI cell lines`; the row writes `The
+cell lines`, as a demonstrative's referent hole leaves no closed reading for this check. The one gap
+row:
+
+| Gap | Owner |
+|---|---|
+| a coordinated NP as an adjunct preposition's object | pre-existing: `treated with the dose and the diet` has no parse either; a verb that governs its `with` takes the group |
+
+## Over the full lexicon
+
+After the reseed, the same sentences run through the parse-rate harness as a page:
+
+```bash
+grep -v '^#' experiments/parsing/quantities/corpus.tsv | cut -f1 > /tmp/quantity-page.txt
+scripts/measure-parse-rate.sh --page /tmp/quantity-page.txt
+```
+
+The WordNet and UMLS senses of the content words replace the fixture's single sense, so the reading
+counts there measure sense ambiguity, not the grammar.
+
+Measured `2026-09-30`, cap-only, at `a3c8452` (D95 slices 1–9) on
+`wordnet-umls-aligned-2026-09-29-quantities-s9`: of 52 units, 7 encoded, 40 ambiguous, 5 grammar gaps,
+0 missing lexemes, 0 non-prose; 1,920 readings, 178 skeletons.
+
+- The grammar gaps are 3 rows whose verbs the lexicon lacks (below: `incubated` twice,
+  `electroporated`) and 2 whose nouns it lacks in the shape the fixture declares, found with minimal
+  variants over the same snapshot:
+  - `The cells reached 80–90% confluence.` — `confluence` is a count noun there: WordNet's senses are
+    a flowing together and a place where rivers meet, and the Wiktionary uncountable list the importer
+    reads does not name it. The bare singular is no noun phrase: `The cells reached confluence.` has
+    no parse either, and `The cells reached a confluence of 80–90%.` has 4 readings. The fixture
+    declares it mass.
+  - `Three sgRNAs were validated.` — `sgRNAs` is no plural count noun there: `The sgRNAs were
+    validated.` has no parse either, and `Three genes were validated.` has 6 readings.
+- The slice 9 rows: `a median 0.56-fold fewer … compared to typical lineages` has 23 readings, and one
+  of its parse attempts hit the classification budget, which dropped 6,144 of 8,192 distinct readings;
+  `2-fold more deletion mutations than typical lineages` has 333. The readings differ in their senses:
+  cap-only runs rank none.
+- The range row that was non-prose here is a measure constraint since slice 6 and parses (`4–12% gels`,
+  5 readings); the gap row with the coordinated object still parses (2 readings).
+
+Measured `2026-09-27`, cap-only, at `6a3eabf` on `wordnet-umls-aligned-2026-09-27`: of 28 units,
+3 encoded, 17 ambiguous (2 to 12 readings, and 200 for the `and with` row), 7 grammar gaps, 1
+non-prose (the range).
+
+- The grammar gaps are 4 of the gap rows and 3 covered rows whose verbs the lexicon lacks in the
+  passive. WordNet lists `incubate` as intransitive only (both senses, frames 1 and 2), so
+  `The cells were incubated.` has no parse; it has no verb `electroporate`. `The cells were kept at
+  37 °C for 1 h.` parses (9 readings).
+- The coordination gap row parses (2 readings): the imported `treat` governs `with`, and a governed
+  argument takes a coordinated group where an adjunct does not.

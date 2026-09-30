@@ -153,6 +153,14 @@ pub enum Combinator {
     ///
     /// ENF-inert: it must still forward-apply to its VP, so no `ProvGuard` refuses it.
     ScopeOperator,
+    /// A **determiner composed with its noun modifiers** (`cat_detmod`, D95 slice 7d, decision 14):
+    /// `five MSS` in `five MSS and five MSI cell lines`. It may take a further modifier and may
+    /// coordinate; it may not apply to a head ([`ProvGuard::LeftNotDetComposed`]) — applied alone it
+    /// would re-derive `five MSS cell lines`, which the determiner reads over the refined noun. A
+    /// coordination of such determiners is an ordinary producer and applies.
+    ///
+    /// [`ProvGuard::LeftNotDetComposed`]: crate::dcg::rules
+    DetComposed,
     /// Any other producer (lexical leaf, coordination, group/distributive rules) —
     /// not a composition output, so ENF never constrains it.
     Other,

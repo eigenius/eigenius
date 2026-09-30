@@ -68,12 +68,12 @@ impl RightContext {
     /// chart drivers compute this once per cell; a cell at the end of the sentence is [`Self::Other`].
     pub(crate) fn after(
         reserved: &super::reserved::ReservedTable,
-        tokens: &[String],
+        tokens: &[super::preprocess::Token],
         j: usize,
     ) -> Self {
         match tokens.get(j + 1) {
-            Some(t) if reserved.is_comma(t) => Self::Comma,
-            Some(t) if reserved.coord_connective(t).is_some() => Self::Coordinator,
+            Some(t) if reserved.is_comma(t.surface()) => Self::Comma,
+            Some(t) if reserved.coord_connective(t.surface()).is_some() => Self::Coordinator,
             _ => Self::Other,
         }
     }

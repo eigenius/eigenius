@@ -22,7 +22,7 @@ use crate::layer::Layer;
 use crate::nbe::env::Rho;
 use crate::nbe::eval::eval;
 use crate::nbe::readback::try_readback_val;
-use crate::nbe::term::{list_decl, Exp, Name};
+use crate::nbe::term::{list_decl, Exp, Name, Patt};
 use crate::ontology::iri::Iri;
 
 /// A category type-variable binding: schematic `Exp::Var` name → concrete type.
@@ -102,6 +102,61 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
             )),
             Box::new(Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::Float)),
         )),
+        // ⟦MP[u, value]⟧ = units:Quantity(u), ⟦MP[u, difference]⟧ = units:Difference(u) — a measure
+        // phrase denotes its quantity, read as a measured value or a difference (D95, decisions 1, 5).
+        ("cat_mp", [unit, reading]) => measure_type(unit, reading),
+        // ⟦NUM⟧ = units:Quantity(u"1") — a bare number shares a dimensionless measure phrase's carrier,
+        // not its category (D95, "Bare numerals and quantities share a carrier"; slice 7).
+        // ⟦FACTOR⟧ = units:Quantity(u"1") — a factor shares the carrier too, as a ratio (D95 slice 9,
+        // decision 1).
+        ("cat_num", []) | ("cat_factor", []) => Ok(Exp::const_applied(
+            crate::ontology::well_known::iri(crate::units::convert::QUANTITY),
+            Vec::new(),
+            vec![Exp::LitUnit(crate::units::Unit::dimensionless())],
+        )),
+        // ⟦STAT⟧ = (Entity → float) → Entity → float — a statistic takes a measure to its summary over
+        // a group's members (D95 slice 9, decision 3).
+        ("cat_stat", []) => {
+            let entity = || -> Result<Exp, String> {
+                Ok(Exp::EigonClass(
+                    Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
+                ))
+            };
+            let float = || Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::Float);
+            let measure = || -> Result<Exp, String> {
+                Ok(Exp::Arrow(Box::new(entity()?), Box::new(float())))
+            };
+            Ok(Exp::Arrow(Box::new(measure()?), Box::new(measure()?)))
+        }
+        // ⟦MPC[u, r]⟧ = ⟦MP[u, r]⟧ → Prop — a measure constraint (`less than 37 °C`) is a predicate over
+        // the quantity it bounds (D95 slice 6, decision 1).
+        ("cat_mpc", [unit, reading]) => Ok(Exp::Arrow(
+            Box::new(measure_type(unit, reading)?),
+            Box::new(Exp::sort(0)),
+        )),
+        // ⟦MPQ[u, r]⟧ = (⟦MP[u, r]⟧ → Prop) → Prop — a quantified measure phrase (`Four and seven days`)
+        // is a quantifier over the slot it fills (D95 slice 8e).
+        ("cat_mpq", [unit, reading]) => Ok(Exp::Arrow(
+            Box::new(Exp::Arrow(
+                Box::new(measure_type(unit, reading)?),
+                Box::new(Exp::sort(0)),
+            )),
+            Box::new(Exp::sort(0)),
+        )),
+        // ⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧ — as `cat_forall`, the bound variable appears in
+        // ⟦R⟧ (`cat_mp(u, _)` denotes `Quantity(u)`), so the binder is a Π, not erased.
+        ("cat_unit_forall", [body]) => {
+            let Exp::Lam(patt, r) = body else {
+                return Err(format!(
+                    "denote_cat: cat_unit_forall body must be a λ (unit -> Cat), got {body:?}"
+                ));
+            };
+            Ok(Exp::Pi(
+                patt.clone(),
+                Box::new(Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::Unit)),
+                Box::new(denote_cat(r)?),
+            ))
+        }
         // ⟦A/ₘB⟧ = ⟦A\ₘB⟧ = ⟦B⟧→⟦A⟧. The slash MODALITY `_m` is denotation-transparent: it
         // restricts which combinatory rules may consume the slash, never what it denotes.
         ("fwd", [_m, a, b]) | ("bwd", [_m, a, b]) => Ok(Exp::Arrow(
@@ -130,6 +185,23 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
                 patt.clone(),
                 Box::new(Exp::sort(1)),
                 Box::new(denote_cat(r)?),
+            ))
+        }
+        // ⟦cat_detmod(n, λT. R)⟧ = ΠT:Set. ((T → Prop) → Set) → ⟦R⟧ (D95 slice 7d, decision 14): a
+        // determiner with noun modifiers composed in, awaiting its head. Applying it passes the
+        // head's class `T` and a builder from a restrictor to the head's refined type.
+        ("cat_detmod", [_num, body]) => {
+            let Exp::Lam(patt @ Patt::Var(t), r) = body else {
+                return Err(format!(
+                    "denote_cat: cat_detmod body must be a λ (Set -> Cat), got {body:?}"
+                ));
+            };
+            let restrictor = Exp::Arrow(Box::new(Exp::Var(t.clone())), Box::new(Exp::sort(0)));
+            let builder = Exp::Arrow(Box::new(restrictor), Box::new(Exp::sort(1)));
+            Ok(Exp::Pi(
+                patt.clone(),
+                Box::new(Exp::sort(1)),
+                Box::new(Exp::Arrow(Box::new(builder), Box::new(denote_cat(r)?))),
             ))
         }
         // ⟦cat_fin_forall(λf. R)⟧ = ⟦R⟧ / ⟦cat_num_forall(λn. R)⟧ = ⟦R⟧ (D63 §8.10):
@@ -232,6 +304,29 @@ pub fn slash_parts<'a>(cat: &'a Exp, dir: &str) -> Option<(&'a Exp, &'a Exp, &'a
     }
 }
 
+/// Whether `cat` is a QUANTIFIER determiner, `cat_forall(n, λT. B)` with `B` the subject form
+/// `S/(S\NP_T)` or the object form `(S\NP)\((S\NP)/NP_T)` — the categories a cardinal repeats (D95
+/// slice 7d, decision 11) and a determiner composes with a modifier in (decision 14). `a`'s
+/// predicative form `S[pred]\NP` is not one.
+pub(crate) fn is_quantifier_det(cat: &Exp) -> bool {
+    let vp = |c: &Exp| {
+        slash_parts(c, "bwd").is_some_and(|(_, s, np)| {
+            is_ctor(s, "cat_s").is_some() && is_ctor(np, "cat_np").is_some()
+        })
+    };
+    let Some([_num, Exp::Lam(_, body)]) = is_ctor(cat, "cat_forall") else {
+        return false;
+    };
+    let subject = slash_parts(body, "fwd")
+        .is_some_and(|(_, s, arg)| is_ctor(s, "cat_s").is_some() && vp(arg));
+    let object = slash_parts(body, "bwd").is_some_and(|(_, res, arg)| {
+        vp(res)
+            && slash_parts(arg, "fwd")
+                .is_some_and(|(_, r, np)| vp(r) && is_ctor(np, "cat_np").is_some())
+    });
+    subject || object
+}
+
 /// Whether `cat` is a slash in either direction, as `(dir, mode, result, argument)`.
 pub fn as_slash(cat: &Exp) -> Option<(&'static str, &Exp, &Exp, &Exp)> {
     if let Some((m, a, b)) = slash_parts(cat, "fwd") {
@@ -329,6 +424,18 @@ fn unify_into(slot: &Exp, arg: &Exp, layer: &Arc<Layer>, subst: &mut CatSubst) -
             return unify_feat(&s[0], &a[0], subst);
         }
     }
+    // cat_mp(u, reading) (D95): a unit variable binds occurs-consistently, a literal unit matches only
+    // itself — units have no subtyping — and the reading matches exactly, having no wildcard.
+    if let (Some([su, sr]), Some([au, ar])) = (is_ctor(slot, "cat_mp"), is_ctor(arg, "cat_mp")) {
+        return sr == ar && unify_unit(su, au, subst);
+    }
+    // cat_mpc(u, reading) (D95 slice 6): a measure constraint unifies as the measure phrase it bounds;
+    // so does a quantified one, cat_mpq (slice 8e).
+    for ctor in ["cat_mpc", "cat_mpq"] {
+        if let (Some([su, sr]), Some([au, ar])) = (is_ctor(slot, ctor), is_ctor(arg, ctor)) {
+            return sr == ar && unify_unit(su, au, subst);
+        }
+    }
     // Higher-order functors `A/B` (`fwd`) and `A\B` (`bwd`), D63 §8.2 item 4:
     // structural subsumption with the standard function variance — the **result**
     // `A` is covariant, the **argument** `B` is contravariant. So an `S\NP_Entity`
@@ -368,6 +475,103 @@ fn unify_type(slot: &Exp, arg: &Exp, layer: &Arc<Layer>, subst: &mut CatSubst) -
     } else {
         type_subsumes(slot, arg, layer)
     }
+}
+
+/// The type a measure phrase's quantity has: `units:Quantity(u)` read as a value, `units:Difference(u)`
+/// read as a difference (D95, decisions 1 and 5). Shared by `cat_mp` and `cat_mpc`.
+fn measure_type(unit: &Exp, reading: &Exp) -> Result<Exp, String> {
+    let ty = match reading {
+        Exp::InductiveCtor(_, r, _) if r == "value" => crate::units::convert::QUANTITY,
+        Exp::InductiveCtor(_, r, _) if r == "difference" => crate::units::convert::DIFFERENCE,
+        other => {
+            return Err(format!(
+                "denote_cat: a measure phrase's reading is `value` or `difference`, got {other:?}"
+            ))
+        }
+    };
+    Ok(Exp::const_applied(
+        crate::ontology::well_known::iri(ty),
+        Vec::new(),
+        vec![unit.clone()],
+    ))
+}
+
+/// Unify a measure phrase's unit position: a slot `Exp::Var` binds to the argument's unit (a repeated
+/// variable must bind the same unit); a literal unit must equal the argument's.
+fn unify_unit(slot: &Exp, arg: &Exp, subst: &mut CatSubst) -> bool {
+    match slot {
+        Exp::Var(name) => match subst.get(name) {
+            Some(bound) => bound == arg,
+            None => {
+                subst.insert(name.clone(), arg.clone());
+                true
+            }
+        },
+        _ => slot == arg,
+    }
+}
+
+/// A measure phrase's category `cat_mp(unit, reading)` (D95), for the items seeding builds from a
+/// quantity token. `None` if `lexicon:Cat` or `lexicon:Reading` does not resolve.
+pub fn measure_phrase_cat(
+    layer: &Arc<Layer>,
+    unit: &crate::units::Unit,
+    reading: crate::units::convert::Reading,
+) -> Option<Exp> {
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    let readings = inductive_iri(layer, "urn:eigenius:lexicon:Reading")?;
+    let reading = match reading {
+        crate::units::convert::Reading::Value => "value",
+        crate::units::convert::Reading::Difference => "difference",
+    };
+    Some(Exp::InductiveCtor(
+        cat,
+        "cat_mp".to_string(),
+        vec![
+            Exp::LitUnit(unit.clone()),
+            Exp::InductiveCtor(readings, reading.to_string(), vec![]),
+        ],
+    ))
+}
+
+/// A bare number's category `cat_num` (D95 slice 7), for the item a numeral seeds. `None` if
+/// `lexicon:Cat` does not resolve.
+pub fn number_cat(layer: &Arc<Layer>) -> Option<Exp> {
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    Some(Exp::InductiveCtor(cat, "cat_num".to_string(), vec![]))
+}
+
+/// A factor's category `cat_factor` (D95 slice 9), for the item a factor token seeds. `None` if
+/// `lexicon:Cat` does not resolve.
+pub fn factor_cat(layer: &Arc<Layer>) -> Option<Exp> {
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    Some(Exp::InductiveCtor(cat, "cat_factor".to_string(), vec![]))
+}
+
+/// A measure constraint's category `cat_mpc(unit, reading)` (D95 slice 6), for the items seeding
+/// builds from a range token. `None` if `lexicon:Cat` or `lexicon:Reading` does not resolve.
+pub fn measure_constraint_cat(
+    layer: &Arc<Layer>,
+    unit: &crate::units::Unit,
+    reading: crate::units::convert::Reading,
+) -> Option<Exp> {
+    let Exp::InductiveCtor(cat, _, args) = measure_phrase_cat(layer, unit, reading)? else {
+        return None;
+    };
+    Some(Exp::InductiveCtor(cat, "cat_mpc".to_string(), args))
+}
+
+/// A quantified measure phrase's category `cat_mpq(unit, reading)` (D95 slice 8e), for the item a
+/// quantity list seeds. `None` if `lexicon:Cat` or `lexicon:Reading` does not resolve.
+pub fn measure_quantifier_cat(
+    layer: &Arc<Layer>,
+    unit: &crate::units::Unit,
+    reading: crate::units::convert::Reading,
+) -> Option<Exp> {
+    let Exp::InductiveCtor(cat, _, args) = measure_phrase_cat(layer, unit, reading)? else {
+        return None;
+    };
+    Some(Exp::InductiveCtor(cat, "cat_mpq".to_string(), args))
 }
 
 /// Substitute schematic category type-variables (`Exp::Var`) throughout a
@@ -901,7 +1105,7 @@ pub(super) fn cat_forall_body_head(cat: &Exp) -> Option<&'static str> {
 
 /// A `kind_of(A)` application — the class value `A` (a `Set`) realized as the `Entity` that is that
 /// kind (Chierchia's ∩; the axiom `ontology:kind_of : Set -> Entity`, D63 kind-predication reshape).
-pub(super) fn kind_of(a: Exp) -> Exp {
+pub(crate) fn kind_of(a: Exp) -> Exp {
     Exp::App(
         Box::new(Exp::EigonAxiom(
             Iri::parse("urn:eigenius:ontology:kind_of").expect("static kind_of IRI"),
@@ -921,11 +1125,24 @@ pub(super) fn base_class(t: &Exp) -> Exp {
     }
 }
 
-/// Whether `cat` is a sentence PRE-modifier `S/S` (`fwd(cat_s, cat_s)`) — the category a fronted
-/// transitional adverb / participial adjunct carries. Used by the fronted-modifier comma absorption.
+/// Whether `cat` is a sentence PRE-modifier: `S/S` (`fwd(cat_s, cat_s)`), the category a fronted
+/// transitional adverb / participial adjunct carries, or a modifier of the subject quantifier, the one
+/// a fronted VP adjunct carries (D95 slice 8a). Used by the fronted-modifier comma absorption.
 pub(super) fn is_sentence_premod(cat: &Exp) -> bool {
     matches!(slash_parts(cat, "fwd"),
-        Some((_m, a, b)) if is_ctor(a, "cat_s").is_some() && is_ctor(b, "cat_s").is_some())
+        Some((_m, a, b)) if (is_ctor(a, "cat_s").is_some() && is_ctor(b, "cat_s").is_some())
+            || (is_subject_gq(a) && is_subject_gq(b)))
+}
+
+/// Whether `cat` is a subject quantifier `S/(S\NP)` — so a modifier of one, a fronted adjunct (D95
+/// slice 8a), is a sentence pre-modifier that absorbs its comma.
+fn is_subject_gq(cat: &Exp) -> bool {
+    slash_parts(cat, "fwd").is_some_and(|(_, s, vp)| {
+        is_ctor(s, "cat_s").is_some()
+            && slash_parts(vp, "bwd").is_some_and(|(_, s2, np)| {
+                is_ctor(s2, "cat_s").is_some() && is_ctor(np, "cat_np").is_some()
+            })
+    })
 }
 
 /// Whether `cat` is a VP-adjunct preposition `((S\NP)\(S\NP))/NP` (`fwd(bwd(VP,VP), NP)`) — as
@@ -1099,6 +1316,56 @@ mod tests {
                  type-checks a Cat term (today only `⟦·⟧`'s erasure hides it)"
             );
         }
+    }
+
+    /// D95: a measure phrase's unit variable binds; a literal unit matches only itself; the reading
+    /// matches exactly.
+    #[test]
+    fn a_measure_phrase_unit_binds_or_matches() {
+        let ctx = crate::testing::bootstrap_context();
+        let layer = ctx.head();
+        let unit = |s: &str| Exp::LitUnit(crate::units::Unit::parse_canonical(s).unwrap());
+        let cat = |u: Exp, r: &str| {
+            Exp::InductiveCtor(
+                Iri::parse("urn:eigenius:lexicon:Cat").unwrap(),
+                "cat_mp".into(),
+                vec![
+                    u,
+                    Exp::InductiveCtor(
+                        Iri::parse("urn:eigenius:lexicon:Reading").unwrap(),
+                        r.into(),
+                        vec![],
+                    ),
+                ],
+            )
+        };
+        let bound = unify_cat(
+            &cat(Exp::Var("u".into()), "value"),
+            &cat(unit("K"), "value"),
+            layer,
+        )
+        .expect("a unit variable binds");
+        assert_eq!(bound.get("u"), Some(&unit("K")));
+        assert!(unify_cat(&cat(unit("K"), "value"), &cat(unit("K"), "value"), layer).is_some());
+        assert!(unify_cat(&cat(unit("K"), "value"), &cat(unit("kg"), "value"), layer).is_none());
+        assert!(unify_cat(
+            &cat(unit("K"), "value"),
+            &cat(unit("K"), "difference"),
+            layer
+        )
+        .is_none());
+        // ⟦·⟧: a value is a Quantity, a difference a Difference.
+        let shown = |r| format!("{:?}", denote_cat(&cat(unit("K"), r)).unwrap());
+        assert!(
+            shown("value").contains("units:Quantity"),
+            "{}",
+            shown("value")
+        );
+        assert!(
+            shown("difference").contains("units:Difference"),
+            "{}",
+            shown("difference")
+        );
     }
 
     /// An adverb must hand back the clause feature it consumed.

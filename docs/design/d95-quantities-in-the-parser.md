@@ -82,13 +82,13 @@ symbol**; the quantity is *constructed* at seed time from a recognised span.
 
 So the change is: recognise a quantity span, parse its unit sub-expression, build one item, seed it.
 
-## `931g` is the inverse of multiword seeding, and harder in one respect
+## A numeral-adjacent unit is the inverse of multiword seeding, and harder in one respect
 
 Multiword seeding **joins**: `cell line` is N surface tokens with a lexicon entry for the joined
 span, and `seed_leaves` emits the joined item *alongside* the split ones, "carried as competing
 chart edges, not resolved here."
 
-A numeral-adjacent unit **splits**: `931g` is one surface token that must yield two constituents.
+A numeral-adjacent unit **splits**: `5mg` is one surface token that must yield two constituents.
 Same lattice, opposite direction — but **not the same mechanism**, and an earlier draft claimed it
 was. The chart is `vec![vec![Vec::new(); n]; n]` with `n = tokens.len()`
 (`kernel/src/dcg/parse/seed.rs:568-581`). A joined span is a union of cells that already exist; a
@@ -98,7 +98,7 @@ own design diagram puts it — and not in seeding.
 
 **The asymmetry that makes splitting harder: the boundary is not given.** An MWE chooses among
 boundaries the tokenizer already produced. A split must *propose* one, and the proposal space is
-open — `931g` divides 3|1, `10x` 2|1, and `5-fold` and `53BP1` should not divide at all.
+open — `5mg` divides 1|2, `10x` 2|1, and `5-fold` and `53BP1` should not divide at all.
 
 **The unit vocabulary is what makes it decidable.** A quantity split is
 `⟨numeral⟩⟨known unit symbol⟩`, so the boundary is "the longest suffix that is a unit" — a lookup,
@@ -106,17 +106,45 @@ not a search:
 
 | token | prefix | suffix | split? |
 |---|---|---|---|
-| `931g` | `931` numeral | `g` is a unit | **yes** |
+| `5mg` | `5` numeral | `mg` is a unit | **yes** |
+| `931g` | `931` numeral | `g`: gram or standard gravity | **yes — two readings**, see below |
 | `53BP1` | `53` numeral | `BP1` is not a unit | no |
 | `HEK293T` | `HEK293` not a numeral | (`T` is tesla) | no |
 | `5-fold` | `5` numeral | `-fold` is not a unit | no |
 | `2-2` | `2` numeral | `-2` is not a unit | no |
+
+*Revised 2026-09-29 (implementation plan, slice 9, decision 1):* `5-fold` is not split and is not a
+unit, but it is no longer a word: a numeral joined by a hyphen to `fold` is a factor token, `cat_factor`,
+which the factor comparatives take (`0.56-fold fewer`).
 
 Both halves of the test are load-bearing. Without the numeral-prefix test, `HEK293T` would split on
 tesla; without the unit-suffix test, `53BP1` would split on nothing.
 
 So the unit vocabulary is not only what D93 needs for typing — it is what makes this tokenization
 decidable at all. Before units exist, `931g` is unanalysable.
+
+**A bare `g` splits into two readings** (D93, "A vocabulary hazard the same evidence surfaced",
+revised 2026-09-25). The prose surface `g` has two senses, gram and standard gravity (`g_n`), and a
+split yields one quantity per sense, competing in the chart as "Ambiguous unit symbols" describes.
+In the WRN methods, the only bare-`g` quantity is g-force:
+
+| token | in the WRN methods | what it is |
+|---|---|---|
+| `931g` | "the plates were spun at 931g for 2 h at 30 °C" | g-force; the PMC manuscript writes `931 RCF` |
+| `2g` | "(Fig. 2g)" | a figure panel — a reference, not a quantity; see below |
+
+**Why two senses and not a refusal.** D93 first decided that v1 would not split a bare `g`, as the
+fail-closed choice. It was withdrawn because of what refusing costs: being classed non-prose does not
+remove a token ("Numerals reach the parser and seed nothing", below) — it reaches the chart, seeds
+nothing, and its span cannot be covered, so "the plates were spun at 931g for 2 h at 30 °C" would not
+parse at all, and `2 h` and `30 °C` would be lost with the speed. A PREFIXED gram has one reading:
+standard gravity takes no prefix, so `mg`, `μg` and `kg` are unambiguously mass.
+
+**Figure panels are the same trap, wider than `g`.** The rule reads the unbracketed `Fig. 2d` in the
+WRN methods as two days, and would read `Fig. 2h` as two hours; panels `a`, `c`, `e` and `f` escape
+only because a prefix alone is not a unit. The nine bracketed references, `(Fig. 2g)` among them,
+are removed by the aside rule before the split runs; the unbracketed ones reach it. Deferred to D96;
+see "Decided while planning the implementation".
 
 ## An existing defect the same change repairs
 
@@ -146,7 +174,8 @@ better for the truth, and is the right direction on this project's own terms.
 
 The recognised span becomes leaf items carrying a magnitude and, where present, a unit — **one per
 candidate unit sense**, as competing edges. An unambiguous symbol yields exactly one; `931g` yields
-gram and standard gravity and lets the ranker choose (see "Ambiguous unit symbols" below). A bare
+gram and standard gravity, and the grammar and the reading choice decide (see "Ambiguous unit
+symbols" below). A bare
 `0.56` is the same item shape with no unit, which keeps cardinality and quantities on one path
 rather than building two mechanisms that must later agree.
 
@@ -206,7 +235,8 @@ unrecoverable.
 - discard punctuation the grammar does not consume;
 - classify a token as non-prose — the `is_nonprose` rule, relocated from the consumer and revised
   so `53BP1` is a symbol rather than a numeral;
-- **merge quantity spans** — `37` `°` `C` into one item, `931g` split on the numeral/unit boundary,
+- **merge quantity spans** — `37` `°` `C` into one item, `5mg` and `931g` split on the numeral/unit
+  boundary,
   `<` `−1` into a comparison — which is the new work.
 
 **The aim is behaviour preservation, and it is a rewrite rather than something got "by
@@ -255,18 +285,25 @@ reaches the sub-parser intact by construction.
 
 ## Ambiguous unit symbols are polysemy, not a special case
 
-`931g` is g-force; `10 g` is grams. `M` is molar or mega. `h` is hour, and in another register the
-Planck constant.
+`M` is molar or mega. `h` is hour, and in another register the Planck constant. `931g` is g-force
+where `10 g` is grams.
+
+**`g` is the case v1 has.** Gram and standard gravity are both in D93's vocabulary, as `g` and
+`g_n`; the prose surface `g` points at both, so `931g` seeds two items. `RCF` points at standard
+gravity alone.
 
 A unit symbol is a **lexeme carrying several senses**, exactly as a noun carries several synsets,
-and each sense denotes a different unit. It therefore routes through machinery that already exists:
-the sense cap and contextual `SenseRanker`, the felicity gate, and reading selection. A wrong unit
-sense is refused or down-ranked by the same path that refuses a wrong noun sense.
+and each sense denotes a different unit. Each sense is an item of its own: the grammar and the
+felicity gate refuse a reading that does not compose, and the reading choice (`enc:DecisionPoint`)
+records the one kept. *Corrected 2026-09-26: an earlier version routed unit senses through the sense
+cap and the contextual `SenseRanker`. Both act on lexical entries, and a quantity item is built
+outside one and carries no sense (`dcg/lexicon.rs:272-273`), so neither sees it (implementation
+plan, finding 4).*
 
 **Resolved: one item per candidate sense.** An earlier draft contradicted itself — one section had
 the sub-parser "return a `Unit` term" at recognition time, another said resolving early "would put
 unit disambiguation outside the ranker". Both cannot hold, since a `Unit` returned at recognition
-decides gram-versus-g-force before the `SenseRanker` ever runs.
+decides gram-versus-g-force before the chart sees the alternatives.
 
 A quantity span therefore seeds **one item per candidate unit sense**, as competing chart edges —
 the same shape as a polysemous noun, and the same shape `seed_leaves` already uses for the
@@ -274,28 +311,31 @@ MWE-versus-compositional ambiguity it carries rather than resolves.
 
 Three consequences, which supersede what the sections above say:
 
-- **The recogniser commits to a span, not to a unit.** It marks `931g` as a quantity span and
-  yields the candidate senses; it does not choose among them.
+- **The recogniser commits to a span, not to a unit.** It marks the quantity span and yields the
+  candidate senses; it does not choose among them.
 - **The unit sub-parser runs per sense**, producing one `Unit` term per candidate. For an
   unambiguous symbol that is a single item and nothing is lost.
-- **Normalisation happens after selection, not at recognition.** D93's "the parser emits both the
-  stated and the normalised form" is true of the *selected* reading, so the normaliser runs once the
-  chart has committed, not while it is being seeded.
+- **Conversion happens at seeding, once per reading.** An item's sem must have type `Quantity(u)`
+  for the felicity gate, and D93 dropped the stated-unit record, so each reading is converted when it
+  is seeded (implementation plan, finding 3). *Withdrawn: "Normalisation happens after selection, not
+  at recognition … the normaliser runs once the chart has committed."*
 
 This is what keeps the `g` hazard inside machinery that already exists: gram and standard gravity
-compete as chart edges, the ranker scores them in context, and the felicity gate refuses a reading
-that does not compose — rather than a pre-pass silently picking one.
+compete as chart edges, the felicity gate refuses a reading that does not compose, and the reading
+choice records the one kept — rather than a pre-pass silently picking one, or a refusal losing the
+whole sentence.
 
 ## What the pipeline stages inherit
 
 - **Stage A (preprocess / glossary).** Unchanged. Unit symbols are not document-scoped
   abbreviations; they belong to the base lexicon.
-- **Stage B (parse).** Seeding gains quantity items; the unit sub-parser is invoked here; the
-  sense ranker sees unit senses alongside word senses.
+- **Stage B (parse).** Seeding gains quantity items; the unit reader runs in the preprocessor.
+  Quantity items carry no sense, so the sense ranker does not see them; their alternatives reach the
+  reading choice.
 - **Stage C (resolve).** Unchanged — a quantity carries no referent hole.
 - **The felicity gate.** Unchanged in mechanism: it checks the assembled sem against `⟦cat⟧`, and a
-  quantity NP's `⟦cat⟧` is `units:Quantity(u)`. A mis-composed quantity fails there like anything
-  else.
+  measure phrase's `⟦cat_mp(u, value)⟧` is `units:Quantity(u)`, its difference reading's
+  `units:Difference(u)`. A mis-composed quantity fails there like anything else.
 
 ## Consequences for the measurement
 
@@ -308,16 +348,20 @@ The methods material is the natural corpus: of 240 sentences, nine carry two dis
 carries three (D93). It is also where the parser is weakest, so the two should not be conflated —
 a quantity gap and a syntax gap must be distinguishable in the report.
 
-## The CNL guide needs revising, not extending
+## The CNL guide: revised in #262, current once quantities parse
 
-`docs/method/controlled-english-style-guide.md`'s first DON'T instructs authors to drop inline
-numbers: "the parser routes non-prose out; numbers are dropped, so a numeric claim is lost… state
-the qualitative claim". Once quantities parse, that is wrong for quantities while remaining correct
-for test statistics (`P = 4.2 × 10⁻¹³` routes to a D52 record, not into the claim).
+`docs/method/controlled-english-style-guide.md` already distinguishes a *test statistic* from a
+*measured quantity*. #262 replaced the rule this section used to quote ("numbers are dropped, so a
+numeric claim is lost… state the qualitative claim"):
 
-The guide anticipates this — "expected to drift as the grammar grows; check a claim against the
-baseline before relying on it" — but the fix is a rewritten rule that distinguishes a *measured
-quantity* (now in the claim) from a *test statistic* (still out of it), not a new bullet.
+- test statistics stay out of the claim (`:84`) — `P = 4.2 × 10⁻¹³` routes to a D52 record;
+- measured quantities are marked 🔜 (`:85`): dropped today like statistics, part of the claim under
+  D93/D95;
+- a 🔜 section on measured quantities (`:98-127`), and a note that a quantity-bearing corpus with a
+  re-established baseline is part of landing them (`:199-204`).
+
+Slice 5 made the rows current (`2026-09-27`), measured over the full lexicon. Only differences stay
+🔜, for slice 7.
 
 ## Settled: the category of a quantity and its consumers
 
@@ -374,8 +418,13 @@ in the quantity, because no marker was present to carry it. The consumer is not 
 rows has a head that is independently a scalar-change verb (`rose`), a nominalised scalar change
 (`increase`) or a comparative (`warmer`).
 
-One item follows, and °C needs no second quantity type: the difference reading is `m^Δ`'s derived scale,
-not a distinct primitive.
+**Revised 2026-09-26: two items, and a second type.** A quantity token seeds a value item
+(`units:Quantity(u)`) and a difference item (`units:Difference(u)`), and the consumer's category
+selects one — the consumer still supplies the reading, by subcategorisation. A scalar-change verb
+still reaches its difference through `m^Δ`. *Withdrawn: "One item follows, and °C needs no second
+quantity type: the difference reading is `m^Δ`'s derived scale, not a distinct primitive." An item
+converted at seeding has already chosen between 310.15 K and 37 K for `37 °C`.* (Implementation plan,
+decision 5.)
 
 ### Bare numerals and quantities share a carrier, not a category — decided
 
@@ -439,6 +488,8 @@ instance today.
 
 Schwarzschild base-generates a measure phrase as a predicate over sets of degrees (`⟨d,t⟩`). The item
 denotes a property of an interval and the consumer resolves it. One underlying quantity item is safe.
+*Revised 2026-09-26: the token is neutral and seeds a value item and a difference item; the consumer's
+category selects one (see "The quantity is neutral").*
 
 Schwarzschild reaches the consumer by lexically governed type-shift; this document takes
 subcategorisation instead, for the reason given under "Consumers subcategorise". That changes the
@@ -514,8 +565,12 @@ collected on a verb where both objects are independently plausible so the semant
 the syntax. An earlier draft of this section proposed a test set that repeated the preposition in
 both conjuncts; that set is withdrawn, since it tests the configuration where the two analyses agree.
 
-Target types are unchanged by the mechanism: a point-denoting preposition takes an affine coordinate,
-a differential modifier takes a vector magnitude, and only the second admits arithmetic.
+Target types are unchanged by the mechanism: a point-denoting preposition takes a value
+(`units:Quantity(u)`), a differential modifier takes a difference (`units:Difference(u)`). *An earlier
+version said "only the second admits arithmetic". Whether two values add depends on the kind of
+quantity — masses do, temperatures do not, even in K — which the type does not record; the typed
+operations are value − value → difference, value + difference → value, difference ± difference →
+difference.*
 
 ### The tolerance derivation, repaired — decided
 
@@ -634,11 +689,18 @@ is the `⟨d,t⟩` typing applied directly. They stay out of v1 for the reason S
 is lexical rather than semantic — separating a range from a catalogue number (`926-68021`) needs the
 en-dash/hyphen distinction.
 
+*Revised 2026-09-29: in scope, as slice 6 of the implementation plan.* The lexical rule is that a
+digit pair is a range when a unit or `%` follows it, whichever dash joins it; a catalogue number
+carries no unit. Bounds (`less than`, `<`) and approximations (`~`) are the same constraint.
+
 ### Two facts recorded, not yet acted on
 
 - **The `Prep` enum and its importer have drifted.** `governed_preposition`
   (`crates/eigenius-wordnet/src/convert.rs:988`) extracts 11 prepositions and maps them at 1025-1037 with
   `_ => prep_any`; the enum declares 14, with `of` (dated 2026-07-26), `as` and `any` added by hand.
+  Filed as eigenius#263, with the parked branch `governed-prepositions`: one kernel list checked
+  against the enum, and every preposition WordNet names. The heuristic displaces valid prepositions
+  when `of` joins it, so it waits on a broader attested source (the UMLS SPECIALIST Lexicon).
 - **`5 °C` is exposed to the N-N kind compound rule.** Measure-phrase parsers are reported to mistake
   units for noun-noun compounds, and `closed-class.esl:941-942` names that rule as shipped. Seeding needs
   a regression test against it.
@@ -739,6 +801,9 @@ interprets, the measure phrase is its second argument, and no event machinery is
 which are already deferred, so two are reachable. The category and the semantic shape are recorded;
 whether two occurrences earn an entry is a coverage-target call.
 
+*Revised 2026-09-29: built, in slice 8 of the implementation plan.* The owner's rule decides the
+coverage call: a construction the paper attests is built.
+
 ### Dispersion splits in two, and only one half is a vocabulary gap
 
 *"We measure concentration of blood cells at x ppm with two sigma of the average concentration in
@@ -804,6 +869,71 @@ question. Applied to what the corpus turned up: `Scale bar, 50 μm` and `pH 7.5`
 grammar work; `μg ml⁻¹` sits inside a clause and is already covered by the unit sub-grammar's
 rational powers.
 
+## Carried in from D93
+
+D93 was built after this document was written (PR #262). What it settled, and one piece of work,
+come into D95:
+
+- **`931g` — two senses.** D93 first decided that v1 refuses to split a `g`-suffixed numeral, and this
+  document was revised to that; the decision was then revised again (2026-09-25), because refusing
+  costs the whole sentence. Standard gravity is admitted as `units:standard_gravity` (`g_n`), and the
+  prose surface `g` carries two senses, gram and standard gravity, seeded as competing items. The
+  unit-symbol lexical entries this document puts in scope are where those senses and the `RCF`
+  surface are declared.
+- **One converter.** The unit sub-parser normalises prose — `µ` (U+00B5), superscript exponents,
+  `per` — into D93's strict stated form and calls `units::convert::Vocabulary::convert`, which the
+  ESL form `units:quantity(v, "…")` also uses (D93 implementation plan, D6.2). Symbol resolution,
+  prefixes, the °C point-reading offset and exactness are decided there, not here.
+- **`%` and `ppm` are number notation**, a scale the parser applies, not units-layer vocabulary: D93
+  records `%` as "not a unit — notation for a number".
+- **What a quantity term is.** `(units:mk_quantity(coefficient, pi) : units:Quantity(unit))`, in
+  base units, with the unit a group element over the seven SI base dimensions — `rad`, `sr` and `°`
+  are all `1`. Quantity kinds (plane angle, solid angle) are metadata that conversion returns beside
+  the unit; nothing here consumes them yet (D93, "Kinds are metadata, not algebra").
+- **No stated-unit record.** What the author wrote stays in `enc:prose`, reached through
+  `enc:from_unit`; D93 dropped the per-occurrence record, so this work emits none.
+- **The WordNet importer's counts** (done). `push_entry` held the closed-class guard for all 19
+  emission sites but returned nothing, so every caller counted an entry it may not have written: the
+  2026-09-25 reseed reported 471,743 entries and wrote 471,655 — 88 withheld, 13 of them mass. It now
+  counts `entries` itself, counts a withheld entry in `closed_class_skipped`, and returns whether it
+  wrote, for the callers' sub-counts. Separately, degree-noun entries were emitted more than once — 5,534
+  extra copies (4,845 `_d_`, 689 `_dr_`) with identical bodies: `+` is a lexical pointer, so an adjective whose
+  lemmas link to one noun synset carries that target once per lemma pair, and the projection ran once
+  per pointer. `Synset::derivational` is now a set of target synsets. Against WordNet 3.0 with the
+  countability list the importer reports and writes 466,121 entries, 43,474 of them mass, 88
+  withheld, no duplicate; the emitted blocks are the same 642,597 as before, so the loaded lexicon
+  does not change and no reseed follows from it.
+
+## Decided while planning the implementation
+
+- **A numeral-initial token no rule interprets is a word** (2026-09-26). It seeds whatever the
+  lexicon has for it, and with no entry it is counted as a missing lexeme — what `53BP1` becomes
+  under the revised non-prose rule. Today such a token seeds nothing and the coverage probe does not
+  count it, so the sentence fails with no gap reported. Setting the token aside and parsing the rest
+  was the alternative; that parse omits a constituent, which R2 weighs against.
+- **Figure and table references in plain text are deferred to D96's build** (2026-09-26). D95 adds
+  no plain-text rule, so until JATS ingest exists the unbracketed `Fig. 2d` in the WRN methods reads
+  as two days and `Fig. 2h` would read as two hours; ten unbracketed `Fig. N<letter>` references occur
+  there. Bracketed references are still removed as asides. With JATS, a reference is an `<xref>` span
+  the preprocessor treats as one reference token, so the split never sees it; whether plain text
+  still needs a rule — no split directly after a reference word — is decided with that work.
+- **A measure phrase's category carries its unit** (2026-09-26): `cat_mp(u)`, denoting
+  `units:Quantity(u)`, with a unit binder for consumers that take any unit. A consumer that needs a
+  dimension names it, so a dimension mismatch fails to compose. The unindexed alternative, a category
+  denoting `Σu. Quantity(u)`, was rejected: no category could select a dimension. Details in the
+  implementation plan, decision 1.
+- **A difference is its own type** (2026-09-26). `units:Quantity(u)` stays the measured value, as
+  D93 built it; `units:Difference(u)` is new, converted with no °C offset. The measure phrase's
+  category carries the reading (`value | difference`), every quantity token seeds both, and each
+  consumer takes one: `at 37 °C` a value of 310.15 K, `rose 5 °C` a difference of 5 K. Details in
+  the implementation plan, decision 5.
+- **A unit attached to its digits keeps the word reading** (2026-09-26). `931g`, `5A` and `2d` are
+  quantities and the words they spell; seeding offers both and the grammar chooses. Slice 3
+  measured the attached form right once (`931g`) and wrong three times (`McCoy's 5A`, and the panels
+  `2d`, `8d`). An unknown attached identifier is then not reported missing. A rule refusing an
+  attached capital letter was rejected: it takes the choice away from the chart. Implementation
+  plan, decision 6.
+
 ## Open questions
 
 - **Arithmetic over the statistics functionals.** Nothing in the `stats:` namespace combines them.
@@ -832,6 +962,13 @@ to separate a range from a catalogue number (`926-68021`, a LI-COR part number) 
 D93 also defers; statistic routing to D52 records, which is separate existing work; the tolerance
 construction (`within 2 °C of the setpoint`) and the fourth, vector-denoting PP category it needs,
 deferred on zero corpus attestations.
+
+*Revised 2026-09-29:* ranges, bounds, `every N unit`, counts and ratios are in, as slices 6–9 of the
+implementation plan, because the paper attests them. Ranges need no interval type ("Ranges need no
+new semantics"). Statistic routing and the tolerance construction stay out. So are number words
+(`Nine days`), a determiner before a numeral (`the four other RecQ DNA helicases`) and counted
+conjuncts sharing a head (`five MSS and five MSI cell lines`), slice 7d. Slice 9 states `a median`
+inside the claim, as `ontology:median_over`, and leaves its routing to D52 out.
 
 An earlier draft also placed "any change to the composition rules" out of scope, on the grounds that
 D93 showed them unaffected. That is false and the reason is recorded above: `cat_pp_arg`, `cat_pp`

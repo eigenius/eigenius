@@ -7,6 +7,13 @@ subcategorisation cost.
 
     ./measure-quantities.py <file.txt> [<file.txt> ...]
     ./measure-quantities.py --verbose <file.txt>      # dump every instance per bucket
+    ./measure-quantities.py --shapes <file.txt>       # the shapes D95 slices 6-7 build
+
+`--shapes` counts what surrounds a number rather than what governs it: a bound
+before it (`less than`, `at least`, `<`, `~`), a range, a PP it modifies
+(`9 days after`), an `of` after it, `every` before it, a `per` rate, `N-fold`.
+A symbolic bound inside parentheses is counted apart, since those are almost all
+P values in a statistics aside.
 
 For a PDF, extract first — `pdftotext -enc UTF-8 paper.pdf paper.txt`.
 
@@ -102,9 +109,68 @@ def main(paths, verbose):
     return 0
 
 
+# A bare number, optionally a range, with no leading bound marker (SHAPES adds those).
+N = r"\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?"
+SHAPES = [
+    ("bound in words", re.compile(
+        r"\b(?:(?:less|more|fewer|greater|higher|lower)\s+than|at\s+(?:least|most)|up\s+to)\s+"
+        r"(?:" + N + r"|one|two|three|half)\b", re.I)),
+    ("bound in symbols, running text", re.compile(r"[<>≤≥]\s*[-−]?" + N)),
+    ("approximation", re.compile(r"(?:~\s*|\b(?:approximately|around|roughly)\s+)" + N, re.I)),
+    ("range with a unit or %", re.compile(
+        r"\b\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?\s*(?:%|°C|h\b|min\b|days?\b|weeks?\b|[µμu]?[gLlM]\b)")),
+    ("measure phrase before a PP", re.compile(
+        r"\b" + N + r"\s*(?:h|hours?|min|minutes?|days?|weeks?)\s+(?:after|before|post)\b", re.I)),
+    ("measure phrase + of + noun", re.compile(
+        r"\b" + N + r"\s*(?:%|[µμu]?[gLl](?:/m?[lL])?|[µμu]?L|ml|mL)\s+of\s+(?:the\s+)?[A-Za-z]")),
+    ("every + number", re.compile(r"\bevery\s+" + N + r"\b", re.I)),
+    ("per + noun (rate)", re.compile(
+        r"\bper\s+(?:million|well|sample|cell|mouse|mice|condition|replicate|plate)\b", re.I)),
+    ("N-fold", re.compile(r"\b\d+(?:\.\d+)?\s*[-–]?\s*fold\b", re.I)),
+]
+
+
+def inside_parentheses(text, pos):
+    depth = 0
+    for ch in text[:pos]:
+        if ch == "(":
+            depth += 1
+        elif ch == ")" and depth:
+            depth -= 1
+    return depth > 0
+
+
+def shapes(paths, verbose):
+    text = ""
+    for p in paths:
+        with open(p, encoding="utf-8", errors="replace") as fh:
+            text += fh.read() + "\n"
+    text = re.sub(r"\s+", " ", text)
+    text, _ = FIGREF.subn(" FIGREF ", text)
+    print(f"{'shape':<40}{'n':>5}   first instances")
+    for label, pattern in SHAPES:
+        found = [(m.start(), m.group(0)) for m in pattern.finditer(text)]
+        if label.startswith("bound in symbols"):
+            inside = [f for f in found if inside_parentheses(text, f[0])]
+            found = [f for f in found if not inside_parentheses(text, f[0])]
+            rows = [(label, found), ("bound in symbols, in parentheses", inside)]
+        else:
+            rows = [(label, found)]
+        for name, hits in rows:
+            shown = "; ".join(h for _, h in hits[:4])
+            print(f"{name:<40}{len(hits):>5}   {shown}")
+            if verbose:
+                for pos, hit in hits:
+                    print(f"      …{text[max(0, pos - 60):pos + len(hit) + 40]}…")
+    return 0
+
+
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:] if a != "--verbose"]
+    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
         print(__doc__)
         sys.exit(2)
-    sys.exit(main(args, "--verbose" in sys.argv))
+    if "--shapes" in flags:
+        sys.exit(shapes(args, "--verbose" in flags))
+    sys.exit(main(args, "--verbose" in flags))

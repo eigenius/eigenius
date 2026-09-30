@@ -35,7 +35,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::{
-    is_nonprose, pretty_term, segment_sentences, tokenize, Item, Lemmatizer, Parser, Pos,
+    pretty_term, segment_sentences, tokenize, Item, Lemmatizer, Parser, Pos, ProseUnits,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -104,6 +104,8 @@ enum Outcome {
     },
     /// No parse, and ≥1 token has no lexical entry → lexical recovery target (S5a).
     MissingLexeme { unknown: Vec<String> },
+    /// No parse, every word known, but a numeral or symbol seeds nothing (D95).
+    NonProse { tokens: Vec<String> },
     /// No parse, but every token is known → grammar gap → reformulation target (S5b).
     GrammarGap,
 }
@@ -118,16 +120,16 @@ fn encode_unit(text: &str, index: &Parser, lem: &dyn Lemmatizer, layer: &Arc<Lay
     let forest: Vec<Item> = index.parse_scoped(text, lem, None);
     match forest.len() {
         0 => {
-            // Diagnose: missing lexeme (route S5a) vs grammar gap (route S5b). Non-prose
-            // tokens (stats/figure-refs, S0) are routed out — not counted as missing lexemes.
-            let unknown: Vec<String> = tokenize(text)
-                .into_iter()
-                .filter(|t| !is_nonprose(t) && !index.has_token(t, lem))
-                .collect();
-            if unknown.is_empty() {
-                Outcome::GrammarGap
-            } else {
+            // Diagnose: missing lexeme (route S5a), a numeral or symbol that seeds nothing (D95), or
+            // a grammar gap (route S5b).
+            let unknown = index.unknown_words(text, lem);
+            let unseedable = index.unseedable_tokens(text, lem);
+            if !unknown.is_empty() {
                 Outcome::MissingLexeme { unknown }
+            } else if !unseedable.is_empty() {
+                Outcome::NonProse { tokens: unseedable }
+            } else {
+                Outcome::GrammarGap
             }
         }
         1 => {
@@ -184,6 +186,9 @@ fn print_report(report: &[UnitReport]) {
             Outcome::MissingLexeme { unknown } => {
                 eprintln!("  [MISSING  {unknown:?}] {:?}", u.text)
             }
+            Outcome::NonProse { tokens } => {
+                eprintln!("  [NON-PROSE {tokens:?}] {:?}", u.text)
+            }
             Outcome::GrammarGap => eprintln!("  [GRAMMAR-GAP] {:?}", u.text),
         }
     }
@@ -231,8 +236,9 @@ fn prototype_over_wrn_first_page() {
     // seed its singular synset and the lemma is spuriously reported OOV (the same surface-vs-
     // lemma mismatch that bit the `Identity`-lemmatizer test artifacts).
     let seed_lem = morphy();
-    let seeds: std::collections::BTreeSet<String> = tokenize(&page)
+    let seeds: std::collections::BTreeSet<String> = tokenize(&page, &ProseUnits::none())
         .into_iter()
+        .map(|t| t.surface().to_string())
         .filter(|t| t.chars().all(|c| c.is_ascii_alphabetic()) && t.len() > 2)
         .flat_map(|t| {
             let mut forms = vec![t.clone()];
@@ -263,7 +269,7 @@ fn prototype_over_wrn_first_page() {
     let mut scale_bound = 0usize;
     let mut report: Vec<UnitReport> = Vec::new();
     for text in segment_sentences(&page) {
-        if tokenize(&text).len() > MAX_UNIT_TOKENS {
+        if index.tokenize(&text).len() > MAX_UNIT_TOKENS {
             scale_bound += 1;
             continue;
         }
@@ -271,7 +277,7 @@ fn prototype_over_wrn_first_page() {
         report.push(UnitReport { text, outcome });
     }
 
-    let (mut enc, mut amb, mut miss, mut gap) = (0, 0, 0, 0);
+    let (mut enc, mut amb, mut miss, mut non_prose, mut gap) = (0, 0, 0, 0, 0);
     let mut oov: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for u in &report {
         match &u.outcome {
@@ -281,12 +287,13 @@ fn prototype_over_wrn_first_page() {
                 miss += 1;
                 oov.extend(unknown.iter().cloned());
             }
+            Outcome::NonProse { .. } => non_prose += 1,
             Outcome::GrammarGap => gap += 1,
         }
     }
     eprintln!(
         "\n=== WRN first page: {} parseable units (≤{MAX_UNIT_TOKENS} tok) → encoded {enc}, \
-         ambiguous {amb}, missing-lexeme {miss}, grammar-gap {gap}; \
+         ambiguous {amb}, missing-lexeme {miss}, non-prose {non_prose}, grammar-gap {gap}; \
          + {scale_bound} over-length units skipped (parsing-scale bound) ===",
         report.len()
     );
@@ -342,6 +349,7 @@ fn prototype_over_wrn_first_page() {
             Outcome::Encoded { .. } => "ENCODED",
             Outcome::Ambiguous { .. } => "AMBIG",
             Outcome::MissingLexeme { .. } => "MISSING",
+            Outcome::NonProse { .. } => "NON-PROSE",
             Outcome::GrammarGap => "GRAMMAR-GAP",
         };
         let t: String = u.text.chars().take(90).collect();
@@ -394,8 +402,8 @@ fn prototype_classifies_a_text_document_into_the_four_outcomes() {
 
 // ─── P1 — S0 verification on real WRN prose (uses the DCG engine's S0) ───────────────
 //
-// S0 is now in the engine: `dcg::segment_sentences` (segmentation) + `dcg::is_nonprose`
-// (routing) + the em-dash/slash/bracket splitting folded into `dcg::tokenize`. This test
+// S0 is now in the engine: `dcg::segment_sentences` (segmentation) + `dcg::tokenize` (the D95
+// lexer and preprocessor: em-dash/slash/bracket splitting, and `TokenKind::NonProse`). This test
 // confirms, on the cleaned WRN first page, that the engine S0 fixes the naive over-split
 // (4 paragraphs → 47 units) and routes stats/figure-refs out while keeping gene symbols.
 
@@ -420,13 +428,15 @@ fn p1_s0_cleans_wrn_page() {
     let mut routed: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut lexset: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for u in &units {
-        for t in tokenize(u) {
-            if is_nonprose(&t) {
-                non += 1;
-                routed.insert(t);
-            } else {
+        for t in tokenize(u, &ProseUnits::none()) {
+            // Lowercased for the gene checks below: tokens keep the source's case.
+            let surface = t.surface().to_lowercase();
+            if t.is_word() {
                 lex += 1;
-                lexset.insert(t);
+                lexset.insert(surface);
+            } else {
+                non += 1;
+                routed.insert(surface);
             }
         }
     }

@@ -44,7 +44,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::dcg::pretty::pretty_term;
-use crate::dcg::segment::tokenize;
 use crate::dcg::{Lemmatizer, Parser};
 use crate::layer::Layer;
 use crate::nbe::term::{Exp, Patt};
@@ -63,8 +62,11 @@ pub fn unit_sense_names(
     layer: &Arc<Layer>,
 ) -> BTreeMap<String, String> {
     let mut m = BTreeMap::new();
-    for tok in tokenize(text) {
-        let tok = tok.trim_matches(|c: char| !c.is_alphanumeric()); // shed attached commas/periods
+    for tok in index.tokenize(text) {
+        if tok.is_comma() {
+            continue;
+        }
+        let tok = tok.surface();
         for (_closed, _cat, sense) in index.debug_form_entries(tok, lem) {
             // `wn:{lemma}.{tag}.{offset}` — split from the RIGHT: offset, tag, then the lemma (which
             // may itself contain '.').
@@ -353,6 +355,11 @@ fn atom_label(key: &str, vb: &Vb) -> Option<String> {
 }
 
 pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
+    // A bound on a measured value (D95 slice 6) reads back as an existential over the value; render
+    // the value as its constraint, `less than 6203/20 K`, wherever the quantity would have rendered.
+    if has_bound(sem) {
+        return verbalize(&render_bounds(sem), vb);
+    }
     match sem {
         Exp::Ann(inner, _) | Exp::Fst(inner) | Exp::Snd(inner) => return verbalize(inner, vb),
         Exp::Lam(_, body) => return verbalize(body, vb),
@@ -507,6 +514,15 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
             }
             ("kind_of", 1) => return verbalize(args[0], vb),
             ("the", 1) => return format!("the {}", bare_np(args[0], vb)),
+            // `the_count(A, q)` (D95 slice 7d): the definite with its count, `the 4 Helicase`.
+            ("the_count", 2) => {
+                let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
+                return format!(
+                    "the {} {}",
+                    quantity_text(args[1], &unit),
+                    bare_np(args[0], vb)
+                );
+            }
             // Referential predication (D63 Defect 3): `the(subject-class, restrictor, x)` = "x is the
             // {subject-class} that is {restrictor}" — the copula's referential distribution over a
             // coordinated predicate nominal ("These groups are MSI lines, microsatellite-stable lines
@@ -540,6 +556,117 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     format!("{o}'s {n}")
                 };
             }
+            // A measured value predicated (D95): `has_quantity(x, u, q)` → "x is q". The subject is
+            // a bound restrictor variable when the value modifies a noun, giving just "q".
+            // A cardinal's count (D95 slice 7): `has_count(T, λx. body, q)` → "q T, body", the bound
+            // variable rendered as the anaphor, as an existential renders "some T, body".
+            ("has_count", 3) => {
+                let np = bare_np(args[0], vb);
+                let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
+                let count = quantity_text(args[2], &unit);
+                let pred = match args[1] {
+                    Exp::Lam(binder, body) => quant_clause_pred(binder, body, vb),
+                    other => verbalize(other, vb),
+                };
+                return if pred.is_empty() {
+                    format!("{count} {np}")
+                } else {
+                    format!("{count} {np}, {pred}")
+                };
+            }
+            // A proportion (D95 slice 7c): `has_proportion(x, λy. body, q)` → "q of x, body".
+            ("has_proportion", 3) => {
+                let group = verbalize(args[0], vb);
+                let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
+                let share = quantity_text(args[2], &unit);
+                let pred = match args[1] {
+                    Exp::Lam(binder, body) => quant_clause_pred(binder, body, vb),
+                    other => verbalize(other, vb),
+                };
+                return if pred.is_empty() {
+                    format!("{share} of {group}")
+                } else {
+                    format!("{share} of {group}, {pred}")
+                };
+            }
+            // A factor comparative (D95 slice 9): `fold_lower(N, card(T, x), card(T, y))` reads `x has
+            // N-fold fewer T than y`, and with `median_over` on both counts `x has a median N-fold
+            // fewer T than y`; over other measures, `a is N-fold lower than b`.
+            ("fold_lower" | "fold_higher", 3) => {
+                let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
+                let factor = quantity_text(args[0], &unit);
+                let lower = local == "fold_lower";
+                if let (Some((t, a, sa)), Some((u, b, sb))) = (counted(args[1]), counted(args[2])) {
+                    if t == u && sa == sb {
+                        let dir = if lower { "fewer" } else { "more" };
+                        let stat = if sa { "a median " } else { "" };
+                        return format!(
+                            "{} has {stat}{factor}-fold {dir} {} than {}",
+                            verbalize(a, vb),
+                            bare_np(t, vb),
+                            verbalize(b, vb)
+                        );
+                    }
+                }
+                let dir = if lower { "lower" } else { "higher" };
+                return format!(
+                    "{} is {factor}-fold {dir} than {}",
+                    verbalize(args[1], vb),
+                    verbalize(args[2], vb)
+                );
+            }
+            // A statistic (D95 slice 9): `median_over(λm. card(T, m), x)` reads `the median number of T
+            // in x`.
+            ("median_over", 2) => {
+                let group = verbalize(args[1], vb);
+                return match counted(args[0]) {
+                    Some((t, _, false)) => {
+                        format!("the median number of {} in {group}", bare_np(t, vb))
+                    }
+                    _ => format!("the median of {} over {group}", verbalize(args[0], vb)),
+                };
+            }
+            // The distributive `per` (D95 slice 8d): `prep_per(Y, x, y)` reads `per Y`; `x` and `y` are
+            // the variables the count and the universal bind.
+            ("prep_per", 3) => return format!("per {}", bare_np(args[0], vb)),
+            // A period (D95 slice 8b): `every_period(x, u, q)` reads `x every 259200 s`.
+            ("every_period", 3) => {
+                let subj = verbalize(args[0], vb);
+                let q = quantity_text(args[2], args[1]);
+                return if subj.is_empty() {
+                    format!("every {q}")
+                } else {
+                    format!("{subj} every {q}")
+                };
+            }
+            // An offset (D95 slice 8a): `prep_after_offset(x, y, u, q)` reads `x 259200 s after y`.
+            ("prep_after_offset" | "prep_before_offset", 4) => {
+                let subj = verbalize(args[0], vb);
+                let p = if local == "prep_after_offset" {
+                    "after"
+                } else {
+                    "before"
+                };
+                let tail = format!(
+                    "{} {p} {}",
+                    quantity_text(args[3], args[2]),
+                    verbalize(args[1], vb)
+                );
+                return if subj.is_empty() {
+                    tail
+                } else {
+                    format!("{subj} {tail}")
+                };
+            }
+            ("has_quantity", 3) => {
+                let subj = verbalize(args[0], vb);
+                let q = quantity_text(args[2], args[1]);
+                return if subj.is_empty() {
+                    q
+                } else {
+                    format!("{subj} is {q}")
+                };
+            }
             ("Possible" | "modal", 1) => return format!("possibly, {}", verbalize(args[0], vb)),
             ("speaker", _) => return "we".to_string(),
             ("anaphor", _) => return "it".to_string(),
@@ -549,16 +676,13 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
         // `And(V(subj), prep(subj, obj))` shape into a single clause, but a PP conjunct it cannot
         // merge — a distributed coordination, or a clausal complement — reached the ⟦…⟧ bracket.
         // The subject is usually a bound restrictor variable (verbalising to ""), giving "in X".
-        if let Some(p) = local.strip_prefix("prep_") {
-            if args.len() == 2 {
-                let subj = verbalize(args[0], vb);
-                let obj = verbalize(args[1], vb);
-                return if subj.is_empty() {
-                    format!("{p} {obj}")
-                } else {
-                    format!("{subj} {p} {obj}")
-                };
-            }
+        if let Some((p, subj, obj)) = prep_parts(local, &args, vb) {
+            let subj = verbalize(subj, vb);
+            return if subj.is_empty() {
+                format!("{p} {obj}")
+            } else {
+                format!("{subj} {p} {obj}")
+            };
         }
         // Verb: `v{offset}_{frame}(obj, subj)` transitive / `(subj)` intransitive (category
         // `(S\NP)/NP` — object first; the WordNet importer's verb-atom convention,
@@ -601,24 +725,204 @@ fn verb_pp(left: &Exp, right: &Exp, vb: &Vb) -> Option<String> {
     let (rh, ra) = app_spine(right);
     let ll = axiom_local(lh)?;
     let rl = axiom_local(rh)?;
-    if !(ll.starts_with('v') && ll.contains('_') && rl.starts_with("prep_") && ra.len() == 2) {
+    if !(ll.starts_with('v') && ll.contains('_')) {
         return None;
     }
+    let (p, pp_subj, obj) = prep_parts(rl, &ra, vb)?;
     // Intransitive/PP verb: its sole arg is the subject; it must match the PP's first arg.
     let subj = match la.as_slice() {
         [s] => s,
         _ => return None,
     };
-    if pretty_term(subj) != pretty_term(ra[0]) {
+    if pretty_term(subj) != pretty_term(pp_subj) {
         return None;
     }
     Some(format!(
-        "{} {} {} {}",
+        "{} {} {p} {obj}",
         verbalize(subj, vb),
         name_atom(ll, vb),
-        &rl[5..],
-        verbalize(ra[1], vb)
     ))
+}
+
+/// A PP relation's preposition, subject and rendered object: `prep_X(subj, obj)`, or a quantity
+/// relation `prep_X_value(subj, unit, quantity)` (D95), whose object is the quantity with its unit.
+/// `None` for anything else.
+fn prep_parts<'e>(local: &'e str, args: &[&'e Exp], vb: &Vb) -> Option<(&'e str, &'e Exp, String)> {
+    let p = local.strip_prefix("prep_")?;
+    match (p.strip_suffix("_value"), args) {
+        (Some(p), [subj, unit, quantity]) => Some((p, subj, quantity_text(quantity, unit))),
+        (None, [subj, obj]) => Some((p, subj, verbalize(obj, vb))),
+        _ => None,
+    }
+}
+
+/// The number of `T` a count comparative compares, as `(T, x, median)`: `card(T, x)`, or with its
+/// statistic `median_over(λm. card(T, m), x)`. A bare `λm. card(T, m)` gives `x` as the bound `m`.
+fn counted(e: &Exp) -> Option<(&Exp, &Exp, bool)> {
+    if let Exp::Lam(_, body) = e {
+        return counted(body);
+    }
+    let (h, a) = app_spine(e);
+    match (axiom_local(h), a.as_slice()) {
+        (Some("card"), [t, x]) => Some((*t, *x, false)),
+        (Some("median_over"), [f, x]) => match counted(f)? {
+            (t, _, false) => Some((t, *x, true)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A quantity or difference term with its unit, as `6203/20 K` — the base-unit value the chain
+/// holds, not the unit the author wrote, which is in `enc:prose` (D93). `π` powers are shown.
+fn quantity_text(quantity: &Exp, unit: &Exp) -> String {
+    if let Exp::Ann(inner, _) = quantity {
+        return quantity_text(inner, unit);
+    }
+    // A bounded value, already rendered as its constraint by [`render_bounds`].
+    if let Exp::LitString(constraint) = quantity {
+        return constraint.clone();
+    }
+    let Exp::InductiveCtor(_, _, parts) = quantity else {
+        return pretty_term(quantity);
+    };
+    let [Exp::LitRat(c), Exp::LitInt(pi)] = parts.as_slice() else {
+        return pretty_term(quantity);
+    };
+    let mut text = c.to_canonical_string();
+    if *pi != 0 {
+        text.push_str(&format!("·π^{pi}"));
+    }
+    match unit {
+        Exp::LitUnit(u) if !u.is_dimensionless() => format!("{text} {}", u.to_canonical_string()),
+        _ => text,
+    }
+}
+
+/// A bounded value as the `unit_constraint` combinator builds it and the gate reads it back (D95
+/// slice 6): `∀P:Prop. (∀q:Quantity(u). And(C, body) → P) → P`. Returns `q`, the constraint `C` and
+/// the consumer's `body`.
+fn bounded_exists(sem: &Exp) -> Option<(&str, &Exp, &Exp)> {
+    let Exp::Pi(Patt::Var(p), prop, cod) = sem else {
+        return None;
+    };
+    if !matches!(prop.as_ref(), Exp::Sort(l) if l.as_nat() == Some(0)) {
+        return None;
+    }
+    let (Exp::Pi(Patt::Var(q), ty, arr), Exp::Var(p2)) = as_arrow(cod)? else {
+        return None;
+    };
+    let (conjunction, Exp::Var(p3)) = as_arrow(arr)? else {
+        return None;
+    };
+    let (head, _, ty_args) = ty.as_const_spine()?;
+    if p2 != p || p3 != p || !head.as_str().ends_with("units:Quantity") || ty_args.len() != 1 {
+        return None;
+    }
+    let (and, _, parts) = conjunction.as_const_spine()?;
+    match parts.as_slice() {
+        [c, body] if and.as_str().ends_with("logic:And") => Some((q.as_str(), c, body)),
+        _ => None,
+    }
+}
+
+/// The words for a constraint on the value `q`: `units:lt(u, q, b)` is "less than b",
+/// `units:lt(u, b, q)` "more than b", `le` "at most" / "at least", `approx` "about". A bound on a
+/// bound (`less than about 2 h`) is the constraint relating `q` to an inner value, then that value's
+/// own constraint.
+fn bound_text(c: &Exp, q: &str) -> Option<String> {
+    // A range: `And(le(u, lo, q), le(u, q, hi))` is "from lo to hi" (D95 slice 6c).
+    if let Some((and, _, parts)) = c.as_const_spine() {
+        if let ([low, high], true) = (parts.as_slice(), and.as_str().ends_with("logic:And")) {
+            let (("at least", lo), ("at most", hi)) = (bound_words(low, q)?, bound_words(high, q)?)
+            else {
+                return None;
+            };
+            let (_, args) = app_spine(low);
+            return Some(format!(
+                "from {} to {}",
+                quantity_text(lo, args[0]),
+                quantity_text(hi, args[0])
+            ));
+        }
+    }
+    if let Some((inner, c2, rel)) = bounded_exists(c) {
+        let (words, other) = bound_words(rel, q)?;
+        if !matches!(other, Exp::Var(v) if v == inner) {
+            return None;
+        }
+        return Some(format!("{words} {}", bound_text(c2, inner)?));
+    }
+    let (words, other) = bound_words(c, q)?;
+    let (_, args) = app_spine(c);
+    Some(format!("{words} {}", quantity_text(other, args[0])))
+}
+
+/// A `units:` order relation over `q` and one other argument, as the words that say it with `q` as
+/// the subject, and that other argument.
+fn bound_words<'e>(rel: &'e Exp, q: &str) -> Option<(&'static str, &'e Exp)> {
+    let (Exp::EigonAxiom(head), args) = app_spine(rel) else {
+        return None;
+    };
+    let [_unit, x, y] = args.as_slice() else {
+        return None;
+    };
+    let local = head.as_str().strip_prefix("urn:eigenius:units:")?;
+    let is_q = |e: &Exp| matches!(e, Exp::Var(v) if v == q);
+    match (local, is_q(x), is_q(y)) {
+        ("lt", true, false) => Some(("less than", y)),
+        ("lt", false, true) => Some(("more than", x)),
+        ("le", true, false) => Some(("at most", y)),
+        ("le", false, true) => Some(("at least", x)),
+        ("approx", true, false) => Some(("about", y)),
+        _ => None,
+    }
+}
+
+/// Whether `sem` contains a bounded value [`render_bounds`] can render.
+fn has_bound(sem: &Exp) -> bool {
+    if let Some((q, c, _)) = bounded_exists(sem) {
+        if bound_text(c, q).is_some() {
+            return true;
+        }
+    }
+    match sem {
+        Exp::App(f, x) => has_bound(f) || has_bound(x),
+        Exp::Lam(_, b) | Exp::Fst(b) | Exp::Snd(b) | Exp::Ann(b, _) => has_bound(b),
+        Exp::Pi(_, a, b) | Exp::Sig(_, a, b) | Exp::Arrow(a, b) | Exp::Pair(a, b) => {
+            has_bound(a) || has_bound(b)
+        }
+        Exp::InductiveCtor(_, _, args) => args.iter().any(has_bound),
+        _ => false,
+    }
+}
+
+/// `sem` with each bounded value replaced by its body, the value rendered as its constraint — a
+/// string literal [`quantity_text`] prints as is.
+fn render_bounds(sem: &Exp) -> Exp {
+    if let Some((q, c, body)) = bounded_exists(sem) {
+        if let Some(text) = bound_text(c, q) {
+            return render_bounds(&subst_var(body, q, &Exp::LitString(text)));
+        }
+    }
+    let go = |x: &Exp| Box::new(render_bounds(x));
+    match sem {
+        Exp::App(f, x) => Exp::App(go(f), go(x)),
+        Exp::Lam(p, b) => Exp::Lam(p.clone(), go(b)),
+        Exp::Pi(p, a, b) => Exp::Pi(p.clone(), go(a), go(b)),
+        Exp::Sig(p, a, b) => Exp::Sig(p.clone(), go(a), go(b)),
+        Exp::Arrow(a, b) => Exp::Arrow(go(a), go(b)),
+        Exp::Pair(a, b) => Exp::Pair(go(a), go(b)),
+        Exp::Fst(x) => Exp::Fst(go(x)),
+        Exp::Snd(x) => Exp::Snd(go(x)),
+        Exp::Ann(x, t) => Exp::Ann(go(x), t.clone()),
+        Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
+            d.clone(),
+            n.clone(),
+            args.iter().map(render_bounds).collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 /// A quantifier's body over the bound entity: "{NP}, {predicate}" with the bound variable (already
@@ -760,10 +1064,12 @@ fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
                 }
             }
             Some(p) if p.starts_with("prep_") => {
-                if let Some(x) = a.get(1) {
-                    post.push(format!("{} {}", &p[5..], verbalize(x, vb)));
+                if let Some((p, _, obj)) = prep_parts(p, &a, vb) {
+                    post.push(format!("{p} {obj}"));
                 }
             }
+            // A prenominal measure phrase (D95): "10 μM etoposide" → "a 1/100 m^-3·mol etoposide".
+            Some("has_quantity") if a.len() == 3 => pre.push(quantity_text(a[2], a[1])),
             Some("is_a") if a.len() == 2 => post.push(format!("that is {}", indefinite(a[1], vb))),
             Some("named") if a.len() == 2 => post.push(format!("named {}", verbalize(a[1], vb))),
             // A possessive restrictor — `Σx:N. poss_of(N, x, owner)`, "their MSS counterparts".
@@ -838,9 +1144,12 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
                 bare_np(a[1], vb)
             )),
             Some(p) if p.starts_with("prep_") => {
-                if let Some(x) = a.get(1) {
-                    parts.push(format!("{} {}", &p[5..], verbalize(x, vb)));
+                if let Some((p, _, obj)) = prep_parts(p, &a, vb) {
+                    parts.push(format!("{p} {obj}"));
                 }
+            }
+            Some("has_quantity") if a.len() == 3 => {
+                parts.push(format!("has-quantity {}", quantity_text(a[2], a[1])))
             }
             Some("is_a") if a.len() == 2 => parts.push(format!("is-a {}", bare_np(a[1], vb))),
             Some("named") if a.len() == 2 => parts.push(format!("named {}", verbalize(a[1], vb))),
@@ -985,6 +1294,54 @@ mod register_tests {
         assert!(
             e_compound.contains("compound-with") && e_compound.contains("relation unspecified"),
             "the compound's unspecified relation is stated: {e_compound}"
+        );
+    }
+
+    /// A measured value (D95) renders in base units: predicated, before its noun, after a
+    /// preposition, and in the expanded register as a named commitment.
+    #[test]
+    fn a_measured_value_renders_with_its_unit() {
+        let l = layer();
+        let names = BTreeMap::new();
+        let kelvin = Exp::LitUnit(crate::units::Unit::parse_canonical("K").expect("unit"));
+        let q = Exp::InductiveCtor(
+            Iri::parse("urn:eigenius:units:Quantity").expect("iri"),
+            "mk_quantity".to_string(),
+            vec![
+                Exp::LitRat(crate::numeric::Rational::new(6203.into(), 20.into()).expect("q")),
+                Exp::LitInt(0),
+            ],
+        );
+        let app3 = |axiom: &str, a: Exp| {
+            Exp::App(
+                Box::new(app2(axiom, a, kelvin.clone())),
+                Box::new(q.clone()),
+            )
+        };
+        let hela = || Exp::EigonAxiom(Iri::parse("urn:eigenius:lexicon:hela").expect("iri"));
+        let surface = Vb::surface(&names, &l);
+        assert_eq!(
+            verbalize(
+                &app3("urn:eigenius:ontology:has_quantity", hela()),
+                &surface
+            ),
+            "hela is 6203/20 K"
+        );
+        assert_eq!(
+            verbalize(
+                &app3("urn:eigenius:ontology:prep_at_value", hela()),
+                &surface
+            ),
+            "hela at 6203/20 K"
+        );
+        let medium = sig(
+            cls("urn:eigenius:lexicon:Medium"),
+            app3("urn:eigenius:ontology:has_quantity", Exp::Var("x0".into())),
+        );
+        assert_eq!(verbalize(&medium, &surface), "a 6203/20 K Medium");
+        assert_eq!(
+            verbalize(&medium, &Vb::expanded(&names, &l)),
+            "a [Medium] + has-quantity 6203/20 K"
         );
     }
 

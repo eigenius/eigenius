@@ -44,6 +44,7 @@
 
 use std::collections::BTreeSet;
 
+use super::super::preprocess::{join_surfaces, Token};
 use super::super::pretty::pretty_term;
 use super::forest::{Edge, Forest, NodeId};
 
@@ -56,10 +57,10 @@ pub(crate) struct TraceFilter {
 }
 
 /// The token text of span `[i..j]`, space-joined — for reading a node against the sentence.
-fn span_text(tokens: &[String], i: usize, j: usize) -> String {
+fn span_text(tokens: &[Token], i: usize, j: usize) -> String {
     tokens
         .get(i..=j.min(tokens.len().saturating_sub(1)))
-        .map(|s| s.join(" "))
+        .map(join_surfaces)
         .unwrap_or_default()
 }
 
@@ -95,7 +96,7 @@ impl Forest {
 
     /// One SKELETON line for a node: id, span (+ its token text), pretty category, provenance, and the
     /// brief of every edge. Many nodes, one line each — the map of what a cell admits.
-    fn skeleton_line(&self, tokens: &[String], id: NodeId) -> String {
+    fn skeleton_line(&self, tokens: &[Token], id: NodeId) -> String {
         let node = &self.nodes[id];
         let (i, j) = node.span;
         let edges: Vec<String> = node.edges.iter().map(|e| self.edge_brief(e)).collect();
@@ -111,7 +112,7 @@ impl Forest {
 
     /// Render the forest as one skeleton line per node, cells in `(len, i)` order, filtered by
     /// `filter`. See [`Self::skeleton_line`].
-    pub(crate) fn render_skeleton(&self, tokens: &[String], filter: &TraceFilter) -> String {
+    pub(crate) fn render_skeleton(&self, tokens: &[Token], filter: &TraceFilter) -> String {
         let n = self.cells.len();
         let mut out = String::new();
         for len in 1..=n {
@@ -140,7 +141,7 @@ impl Forest {
     /// representative sem (the load-bearing detail for a structural read).
     pub(crate) fn render_derivation(
         &self,
-        tokens: &[String],
+        tokens: &[Token],
         root: NodeId,
         max_depth: usize,
     ) -> String {
@@ -152,7 +153,7 @@ impl Forest {
 
     fn render_node(
         &self,
-        tokens: &[String],
+        tokens: &[Token],
         id: NodeId,
         depth: usize,
         max_depth: usize,
@@ -216,7 +217,7 @@ fn usage() -> String {
 /// rather than silently printing nothing.
 pub(crate) fn forest_trace(
     forest: &Forest,
-    tokens: &[String],
+    tokens: &[Token],
     top: &[NodeId],
     spec: &str,
     header: &str,
@@ -312,11 +313,8 @@ mod tests {
 
     /// Build a 3-token forest: two leaves at `[0..0]` and `[1..2]` (a multiword `cat_n`), with a
     /// `Combine` node at `[0..2]`. `tokens = ["a", "cell", "line"]`.
-    fn tiny_forest() -> (Forest, Vec<String>) {
-        let tokens: Vec<String> = ["a", "cell", "line"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+    fn tiny_forest() -> (Forest, Vec<Token>) {
+        let tokens = crate::dcg::preprocess::tokenize("a cell line", &Default::default());
         let mut f = Forest::new(3);
         let det = leaf(ctor("cat_forall", vec![ctor("sg", vec![])]), Exp::Unit);
         let mw = leaf(
@@ -427,7 +425,7 @@ mod tests {
     #[test]
     fn derivation_dedups_a_reshared_node() {
         // A node whose two edges both reference the same child prints the child once, then `↑`.
-        let tokens: Vec<String> = ["x", "y"].iter().map(|s| s.to_string()).collect();
+        let tokens = crate::dcg::preprocess::tokenize("x y", &Default::default());
         let mut f = Forest::new(2);
         let child = leaf(cat_n("urn:eigenius:umlscui:C9"), Exp::Unit);
         let cid = f.get_or_create(

@@ -27,6 +27,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::dcg::chart::attribute::{SiteKind, UnitAttribution};
+use crate::dcg::preprocess::{join_surfaces, Token};
 
 /// One site flattened for aggregation: `sense` = which surface word; else which construction.
 struct Row {
@@ -52,7 +53,7 @@ pub(crate) fn is_enabled() -> bool {
 }
 
 /// Record one unit's attribution (overwriting any earlier attempt for the same tokens).
-pub(crate) fn record(tokens: &[String], attr: &UnitAttribution) {
+pub(crate) fn record(tokens: &[Token], attr: &UnitAttribution) {
     ROLLUP.with(|r| {
         if let Some(map) = r.borrow_mut().as_mut() {
             // Sense rows carry the FELICITOUS count (senses that survived into a reading) — the real
@@ -77,7 +78,7 @@ pub(crate) fn record(tokens: &[String], attr: &UnitAttribution) {
                     cross_lexicon: s.cross_lexicon,
                 })
                 .collect();
-            map.insert(tokens.join(" "), rows);
+            map.insert(join_surfaces(tokens), rows);
         }
     });
 }
@@ -214,6 +215,7 @@ fn render_ranked(buckets: &BTreeMap<String, Agg>, n: usize) -> String {
 mod tests {
     use super::*;
     use crate::dcg::chart::attribute::Site;
+    use crate::dcg::preprocess::tokenize;
 
     /// `factor` = raw alternatives, `felicitous` = how many survived into a reading.
     fn site(sense: bool, key: &str, factor: usize, felicitous: usize) -> Site {
@@ -245,8 +247,8 @@ mod tests {
             readings: 8,
             sites: vec![site(true, "lines", 4, 3), site(false, "adjective", 2, 2)],
         };
-        record(&["the".into(), "lines".into()], &a);
-        record(&["the".into(), "lines".into()], &a); // widen retry, same tokens → overwrite
+        record(&tokenize("the lines", &Default::default()), &a);
+        record(&tokenize("the lines", &Default::default()), &a); // widen retry, same tokens → overwrite
         let b = UnitAttribution {
             readings: 6,
             sites: vec![
@@ -257,7 +259,7 @@ mod tests {
                 site(false, "apply", 2, 2),
             ],
         };
-        record(&["two".into(), "lines".into()], &b);
+        record(&tokenize("two lines", &Default::default()), &b);
 
         let out = take().expect("armed");
         // "lines" in 2 units, excess (3−1)+(3−1)=4 — felicitous counts, and the retry did not double.

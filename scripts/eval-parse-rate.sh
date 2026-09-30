@@ -88,6 +88,9 @@ ENC=$(field 'encoded'        "$SUMMARY")
 AMB=$(field 'ambiguous'      "$SUMMARY")
 OPN=$(field 'open'           "$SUMMARY")
 MIS=$(field 'missing-lexeme' "$SUMMARY")
+# non-prose (D95): a unit with a numeral or symbol that seeds nothing. Absent on logs from before it
+# was wired (2026-09-26), where such units were counted as grammar gaps; absent reads as 0.
+NP=$(field 'non-prose'      "$SUMMARY"); [[ "$NP" =~ ^[0-9]+$ ]] || NP=0
 GAP=$(field 'grammar-gap'    "$SUMMARY")
 # total-readings (the multiplicity signal). Absent on logs from before it was wired into the harness
 # (2026-07-17); a non-numeric extraction means "not present", handled downstream.
@@ -174,10 +177,10 @@ if [[ "$PROFILE" == "debug" ]]; then
 fi
 
 # ── Coverage gate: every sentence must parse ─────────────────────────────────
-if [[ "$GAP" -eq 0 && "$MIS" -eq 0 ]]; then
-  echo "  COVERAGE: PASS — every unit parses (grammar-gap 0, missing-lexeme 0)."
+if [[ "$GAP" -eq 0 && "$MIS" -eq 0 && "$NP" -eq 0 ]]; then
+  echo "  COVERAGE: PASS — every unit parses (grammar-gap 0, missing-lexeme 0, non-prose 0)."
 else
-  echo "  COVERAGE: FAIL — grammar-gap $GAP, missing-lexeme $MIS."
+  echo "  COVERAGE: FAIL — grammar-gap $GAP, missing-lexeme $MIS, non-prose $NP."
   RC=2
 fi
 

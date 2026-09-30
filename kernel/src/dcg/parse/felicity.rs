@@ -121,12 +121,14 @@ impl Parser {
                 var: format!("{base}0"),
                 ty: (*ty_exp).clone(),
                 kind: (*kind).clone(),
+                count: None,
             })
             .collect();
-        infos.extend(dem_holes.into_iter().map(|(var, ty)| HoleInfo {
-            var,
-            ty,
+        infos.extend(dem_holes.into_iter().map(|h| HoleInfo {
+            var: h.var,
+            ty: h.ty,
             kind: HoleKind::EntityRef,
+            count: h.count,
         }));
         if dbg {
             eprintln!("    [felicity] check start");
@@ -189,14 +191,17 @@ pub enum HoleKind {
 }
 
 /// One typed parameter of an [`OpenParse`]'s abstraction: the binder name (`var`) standing for an
-/// unresolved referent, the EigenTT type it must inhabit (Slice 1: `Entity`), and its resolver
-/// [`HoleKind`]. A `Proposer` consumes it (to filter/rank antecedents); [`Parser::resolve_open`]
-/// applies the chosen antecedent to it.
+/// unresolved referent, the EigenTT type it must inhabit (Slice 1: `Entity`), its resolver
+/// [`HoleKind`], and the count a numeral after a demonstrative states (`these two genetic events`,
+/// D95 slice 7d) — resolution vetoes an antecedent of another size. A `Proposer` consumes it (to
+/// filter/rank antecedents); [`Parser::resolve_open`] applies the chosen antecedent to it.
 #[derive(Clone, Debug)]
 pub struct HoleInfo {
     pub var: String,
     pub ty: Exp,
     pub kind: HoleKind,
+    /// The referent's size, a `Quantity(u"1")` term; `None` when no numeral states it.
+    pub count: Option<Exp>,
 }
 
 /// An **open** parse (D64): a felicitous full-span `S` whose sem is a PARAMETRIC proposition —
@@ -236,7 +241,14 @@ impl OpenParse {
         // occurrences must go through the same pass to co-normalize.
         let mut raw = String::new();
         for h in &self.holes {
-            raw.push_str(&format!("λ({} : {}). ", h.var, pretty_term(&h.ty)));
+            // A counted hole shows its count, which `pretty_term` prints as `<term>`.
+            match h.count.as_ref().map(|q| {
+                super::super::holes::count_value(q)
+                    .map_or_else(|| pretty_term(q), |n| n.to_string())
+            }) {
+                Some(n) => raw.push_str(&format!("λ({} : {} ×{n}). ", h.var, pretty_term(&h.ty))),
+                None => raw.push_str(&format!("λ({} : {}). ", h.var, pretty_term(&h.ty))),
+            }
         }
         raw.push_str(&pretty_term(body));
         erase_senses(&raw)

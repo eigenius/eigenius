@@ -9,9 +9,41 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **The stack is drained (`2026-09-15`).** Every entry below is DONE, entry 0 included —
-> the next piece of work is a choice, not a resume. Do not read the topmost entry as
-> active; when work starts, push a new entry and mark it ACTIVE.
+> **entry 1 (`2026-09-29`). D95 — quantities in the parser, on `quantities-in-the-parser`. ACTIVE.**
+>
+> **The goal:** numerical quantities and measurements with units as part of the propositions.
+> Slices 1–5 are built and re-baselined (`5fb85cf`: 62/62 expected hits, 0 grammar gaps, 626
+> readings). Slices 6–9 were rewritten on `2026-09-29` around the constructions the WRN paper
+> attests (`docs/design/d95-implementation-plan.md`, "Slices 6–9"). The owner's rule: a
+> construction the paper uses once will recur in the next paper, so it is built.
+>
+> **Built:** slice 6 (bounds, approximations, ranges, bound symbols, scientific notation), slice 7
+> (counts; proportions; number words; a determiner before a numeral; counted conjuncts and
+> proportions sharing a head), slice 8 (offsets `72 h after X`, `later`, `by` + a value, fronted
+> adjuncts, `every N unit`, pseudo-partitives, `per` after a count, lists with the unit once) and
+> slice 9 (factors on count comparatives, `a median`, `compared to`).
+> **Measured:** the reseed after slice 9 (`wordnet-umls-aligned-2026-09-29-quantities-s9`, `a3c8452`):
+> 0 grammar gaps, 62/62 expected hits, 652 readings, 212 skeletons (`baseline.json`); slice 9 moves
+> nothing on the page. The selection draw scores 29/41 against the selection baseline's 30.
+> **In review:** PR #265 (`2026-09-30`). Before merge, the owner rules on the selection baseline:
+> three ledger rows contradict the ledger's own structure rule, and with them corrected both draws
+> score 28 (`selection-baseline.json`, the note of 2026-09-29 on slices 6–8, lists the options).
+>
+> **Exit gate:** slices 6–9 built, the quantity corpus extended with the attested sentences, the
+> reseed measured, then the branch's PR.
+>
+> **Parked on the way (not on this entry's path):** D96 (JATS, decided, unbuilt), D97 (SPECIALIST,
+> proposed; motivated by D95's lexicon gaps `incubate` and `electroporate`), D98 (qualifiers,
+> decided then parked: the direction moved to representing the study's argument).
+>
+> **Next, after this entry pops:** a design for the argument of a study, informed by EXPO
+> (Soldatova & King 2006): hypotheses (research, null, alternative), results that support or reject
+> them, the experimental model (factor, levels, target), assumptions and conclusions, carried in
+> the CNL and linked through the justification layer. It takes over D98's decision 4, its causal
+> vocabulary, and the reading of the exclusives as rejected hypotheses, and the statistic routing
+> to D52 that D95 left out.
+
+> **The stack was drained on `2026-09-15`.** Every entry below is DONE, entry 0 included.
 
 > **entry −4d (`2026-09-15`). Query-processing workplan, item D — vector-index lifecycle
 > (#133, #132). DONE, merged as `37149af` (#255).** Both issues closed.

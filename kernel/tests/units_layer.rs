@@ -86,8 +86,9 @@ fn pow10(n: i32) -> Rational {
 #[test]
 fn the_layer_holds_the_declared_vocabulary() {
     let units = instances("NamedUnit");
-    // 7 base + the gram + 22 derived + D93's 9 non-SI + the 3 plane angles.
-    assert_eq!(units.len(), 42, "{:?}", units.keys().collect::<Vec<_>>());
+    // 7 base + the gram + 22 derived + D93's 9 non-SI + the 3 plane angles + standard gravity, the
+    // molar and the week.
+    assert_eq!(units.len(), 45, "{:?}", units.keys().collect::<Vec<_>>());
     assert_eq!(instances("Prefix").len(), 24);
 }
 
@@ -177,6 +178,9 @@ fn every_dimension_matches_its_si_definition() {
         ("dalton", kg.clone()),
         ("electronvolt", j.clone()),
         ("astronomical_unit", m.clone()),
+        ("standard_gravity", m.div(&p(&s, 2)).unwrap()),
+        ("molar", mol.div(&p(&m, 3)).unwrap()),
+        ("week", s.clone()),
     ]
     .into_iter()
     .collect();
@@ -222,6 +226,9 @@ fn every_factor_is_the_exact_si_value() {
             ),
         ),
         ("astronomical_unit", (q(149597870700, 1), 0)),
+        ("standard_gravity", (q(196133, 20000), 0)),
+        ("molar", (q(1000, 1), 0)),
+        ("week", (q(604800, 1), 0)),
     ]
     .into_iter()
     .collect();

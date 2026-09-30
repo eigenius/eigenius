@@ -16,7 +16,7 @@
 //!
 //! Four stages, and the last one is the only one that decides anything:
 //!
-//! 1. **tokenize** the input ([`tokenize`]);
+//! 1. **tokenize** the input ([`tokenize`]: [`super::lex`], then [`super::preprocess`]);
 //! 2. **seed** the chart ([`seed`]) — for every token span (bounded by the longest multiword form),
 //!    reduce the surface to candidate lemmas via the [`Lemmatizer`] and look them up in the lexicon.
 //!    A multiword entry (`cell line`, `act on`) seeds its whole span *alongside* the single-token items
@@ -61,7 +61,8 @@ use seed::is_lexicalized_adverb;
 
 use super::grammar::{DetTemplates, Grammar};
 use super::lexicon::{read_description, FormEntries, LexEntry, LexicalIndex, LexicalLookup};
-use super::segment::tokenize;
+use super::preprocess::{join_surfaces, Token};
+use super::quantity::ProseUnits;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -278,6 +279,14 @@ pub struct Parser {
     /// The rules' world: the chain, the reserved-word triggers, and the resolved category templates.
     /// The rules are `impl Grammar` — they cannot see the lexicon at all.
     grammar: Grammar,
+    /// The unit vocabulary as prose spells it, which the preprocessor reads quantities against (D95).
+    units: ProseUnits,
+    /// The cardinal determiner categories a numeral seeds: `1` the quantifier categories of `a`
+    /// (singular), any other whole number those of `these` (plural), taken from [`DetTemplates`].
+    /// Seeding keeps each category and builds the sem with the numeral's own count (D95 slice 7;
+    /// slice 7d, decision 11, for the number words).
+    cardinal_one: Vec<Exp>,
+    cardinal_many: Vec<Exp>,
     /// The processing parameters ([`ParseConfig`]).
     config: ParseConfig,
     /// The document this parser is reading, as sentences, for the reranker's CONTEXT WINDOW.
@@ -289,6 +298,19 @@ pub struct Parser {
     /// The context window CHANGES the reranker's answer (and is unproven), so it is opt-in: set it
     /// (with a document) via [`Parser::with_document`], driven by the `--context-window` measurement arm.
     context_sentences: usize,
+}
+
+/// Whether a token seeds items of its own, whatever the lexicon holds: a numeral, a quantity, a
+/// range, a list or a factor, whose items seeding builds (D95).
+fn seeds_itself(t: &Token) -> bool {
+    matches!(
+        t.kind(),
+        super::preprocess::TokenKind::Numeral(_)
+            | super::preprocess::TokenKind::Quantity(_)
+            | super::preprocess::TokenKind::Range(_)
+            | super::preprocess::TokenKind::QuantityList(_)
+            | super::preprocess::TokenKind::Factor(_)
+    )
 }
 
 /// The default context-window size the `--context-window` arm turns on. A passage, not a corpus:
@@ -311,14 +333,26 @@ impl Parser {
         // The grammar is resolved ONCE, here: the reserved-word triggers from the ontology, and the
         // determiner category templates from the lexicon. This is the only moment the grammar reads the
         // lexicon; from here on the rules hold values, not a lookup.
+        let units = ProseUnits::load(&layer);
+        let dets = DetTemplates::resolve(lex.as_ref());
+        let quantifiers = |cats: &[Exp]| -> Vec<Exp> {
+            cats.iter()
+                .filter(|c| super::category::is_quantifier_det(c))
+                .cloned()
+                .collect()
+        };
+        let (cardinal_one, cardinal_many) = (quantifiers(&dets.a), quantifiers(&dets.these));
         let grammar = Grammar {
             reserved: ReservedTable::load(&layer),
-            dets: DetTemplates::resolve(lex.as_ref()),
+            dets,
             layer,
         };
         Parser {
             lex,
             grammar,
+            units,
+            cardinal_one,
+            cardinal_many,
             config: ParseConfig {
                 packing: true, // default ON (§11 3g.2 / B9)
                 ..ParseConfig::default()
@@ -392,6 +426,13 @@ impl Parser {
         self.document = Some(Arc::new(sentences));
         self.context_sentences = window;
         self
+    }
+
+    /// The tokens the parser seeds `text` from: [`super::lex`], then [`super::preprocess`] with the
+    /// chain's unit vocabulary, so `37 °C` is one quantity token. Every consumer of this parser's token
+    /// stream — seeding, the widen gate, the harnesses — reads it through here, so they agree on it.
+    pub fn tokenize(&self, text: &str) -> Vec<Token> {
+        super::preprocess::tokenize(text, &self.units)
     }
 
     /// Whether any lexical entry exists for `surface` — the raw lowercased surface, or
@@ -630,7 +671,7 @@ impl Parser {
         // and the fallback for the combinatory-core spike / pied-piping).
         if self.config.packing
             && !self.config.combinatory_core
-            && !self.parse_needs_unpacked(&tokenize(text), lemmatizer, scope)
+            && !self.parse_needs_unpacked(&self.tokenize(text), lemmatizer, scope)
         {
             return self.parse_packed(text, lemmatizer, scope);
         }
@@ -651,7 +692,7 @@ impl Parser {
     ///   express it yet.
     fn parse_needs_unpacked(
         &self,
-        tokens: &[String],
+        tokens: &[Token],
         lemmatizer: &dyn Lemmatizer,
         scope: Option<&[Iri]>,
     ) -> bool {
@@ -664,12 +705,12 @@ impl Parser {
             if !self
                 .grammar
                 .reserved
-                .is(&tokens[p], ReservedKind::WhRelativizer)
+                .is(tokens[p].surface(), ReservedKind::WhRelativizer)
             {
                 continue;
             }
             if self
-                .lookup_span(&tokens[p - 1], lemmatizer, scope, None, None)
+                .lookup_span(tokens[p - 1].surface(), lemmatizer, scope, None, None)
                 .iter()
                 .any(|it| is_vp_adjunct_prep(it.cat()))
             {
@@ -687,7 +728,7 @@ impl Parser {
     pub fn routes_packed(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
         self.config.packing
             && !self.config.combinatory_core
-            && !self.parse_needs_unpacked(&tokenize(text), lemmatizer, None)
+            && !self.parse_needs_unpacked(&self.tokenize(text), lemmatizer, None)
     }
 
     /// The **parse-attempt policy** shared by both chart paths (reorganization plan Phase 1) — the
@@ -738,7 +779,7 @@ impl Parser {
             trace.pass = WidenPass::Ranked;
             return (closed, open, trace);
         }
-        if ranks.is_some() && self.all_prose_tokens_known(text, lemmatizer) {
+        if ranks.is_some() && self.every_token_seeds(text, lemmatizer) {
             // Pass 1b — TARGETED RECOVERY (D69 §7g). Pass 2 below rescues the sentence by throwing
             // the ranking away for EVERY word, and then every word takes its most frequent sense.
             // Measured cost of that: «We analysed data from large-scale silencing screens.» parsed
@@ -819,8 +860,8 @@ impl Parser {
                 trace.beam = beam;
                 return (closed, open);
             }
-            // Widen only if a pruning artifact could be the cause (no OOV token).
-            if !self.all_prose_tokens_known(text, lemmatizer) {
+            // Widen only if a pruning artifact could be the cause (every token seeds).
+            if !self.every_token_seeds(text, lemmatizer) {
                 return (closed, open);
             }
             let grew_beam = match beam {
@@ -879,13 +920,13 @@ impl Parser {
         // construction and the sentence could only be saved by Pass 2 discarding every word's
         // ranking. Measured on «Germline mutations in the MMR genes … cause Lynch syndrome.», whose
         // sole blocking word is that span (D69 §7k).
-        let tokens = tokenize(text);
+        let tokens = self.tokenize(text);
         let n = tokens.len();
         let span_limit = self.lex.span_limit(n);
         for i in 0..n {
             let last = (i + span_limit).min(n);
             for j in i..last {
-                let surface = tokens[i..=j].join(" ").to_lowercase();
+                let surface = join_surfaces(&tokens[i..=j]).to_lowercase();
                 let mut all: Vec<crate::dcg::lexicon::LexEntry> = Vec::new();
                 for cand in self.candidate_lemmas(&surface, lemmatizer) {
                     all.extend(self.scoped(self.lex.entries_for(&cand), scope));
@@ -949,13 +990,73 @@ impl Parser {
         Some((out, promoted))
     }
 
-    /// Whether every prose token (non-`is_nonprose`) of `text` is lexically known
-    /// ([`Self::has_token`]). Used to gate widen-on-failure: an OOV miss is not a cap miss.
-    fn all_prose_tokens_known(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
-        tokenize(text)
+    /// Whether every token of `text` other than a comma has a lexical entry ([`Self::has_token`]) or
+    /// lies in a multiword one ([`Self::in_a_multiword`]) — no missing lexeme ([`Self::unknown_words`])
+    /// and no numeral or symbol the lexicon does not know ([`Self::unseedable_tokens`]). Gates
+    /// widen-on-failure: a token that seeds nothing leaves its span uncoverable at every cap and beam,
+    /// so widening cannot help (D95, "Numerals reach the parser and seed nothing").
+    fn every_token_seeds(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> bool {
+        let tokens = self.tokenize(text);
+        tokens.iter().enumerate().all(|(i, t)| {
+            t.is_comma()
+                || seeds_itself(t)
+                || self.has_token(t.surface(), lemmatizer)
+                || self.in_a_multiword(&tokens, i, lemmatizer)
+        })
+    }
+
+    /// Whether token `i` lies inside a span of two or more tokens that has lexical entries, as
+    /// seeding looks spans up: `None` in `None of the samples` seeds through the partitive `none of`,
+    /// though `none` alone has no entry. Only a token [`Self::has_token`] refuses reaches this.
+    fn in_a_multiword(&self, tokens: &[Token], i: usize, lemmatizer: &dyn Lemmatizer) -> bool {
+        let limit = self.lex.span_limit(tokens.len());
+        (0..=i).rev().take(limit).any(|a| {
+            ((a + 1).max(i)..tokens.len())
+                .take_while(|&b| b - a < limit)
+                .any(|b| {
+                    !self
+                        .lookup_span(&join_surfaces(&tokens[a..=b]), lemmatizer, None, None, None)
+                        .is_empty()
+                })
+        })
+    }
+
+    /// The tokens of `text` that are neither words nor commas — numerals and symbols — and have no
+    /// lexical entry, alone or in a multiword one, in order. Each seeds nothing, so its sentence
+    /// cannot parse; unlike a missing lexeme, no lexicon entry is expected to fix it.
+    pub fn unseedable_tokens(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<String> {
+        let tokens = self.tokenize(text);
+        tokens
             .iter()
-            .filter(|t| !super::is_nonprose(t))
-            .all(|t| self.has_token(t, lemmatizer))
+            .enumerate()
+            .filter(|(i, t)| {
+                !t.is_word()
+                    && !t.is_comma()
+                    && !seeds_itself(t)
+                    && !self.has_token(t.surface(), lemmatizer)
+                    && !self.in_a_multiword(&tokens, *i, lemmatizer)
+            })
+            .map(|(_, t)| t.surface().to_string())
+            .collect()
+    }
+
+    /// The word tokens of `text` with no lexical entry ([`Self::has_token`]) and in no multiword
+    /// entry ([`Self::in_a_multiword`]), in order — the **missing-lexeme** signal, and the one
+    /// definition of it, which the encoding harnesses read. A comma, a numeral or a
+    /// [`NonProse`](super::preprocess::TokenKind::NonProse) token is not a word, so it is never missing
+    /// ([`Self::unseedable_tokens`] reports the last two).
+    pub fn unknown_words(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<String> {
+        let tokens = self.tokenize(text);
+        tokens
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| {
+                t.is_word()
+                    && !self.has_token(t.surface(), lemmatizer)
+                    && !self.in_a_multiword(&tokens, *i, lemmatizer)
+            })
+            .map(|(_, t)| t.surface().to_string())
+            .collect()
     }
 
     /// The per-sentence **contextual sense ranking** (GH #97): for each content-word span with
@@ -978,7 +1079,7 @@ impl Parser {
     ) -> Option<BTreeMap<String, u32>> {
         let ranker = self.config.sense_ranker.as_deref()?;
         let cap = self.config.sense_cap?; // ranking only matters when the cap can drop senses
-        let tokens = tokenize(text);
+        let tokens = self.tokenize(text);
         let n = tokens.len();
         if n == 0 {
             return None;
@@ -991,7 +1092,7 @@ impl Parser {
         for i in 0..n {
             let last = (i + span_limit).min(n);
             for j in i..last {
-                let surface = tokens[i..=j].join(" ");
+                let surface = join_surfaces(&tokens[i..=j]);
                 let mut senses: Vec<SenseCandidate> = Vec::new();
                 let mut seen: BTreeSet<String> = BTreeSet::new();
                 // CASE-SENSITIVE ACRONYM MATCH — the SAME filter `lookup_span` applies, and it has to

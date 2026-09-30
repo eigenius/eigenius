@@ -12,25 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D62 S0 — document segmentation + non-prose classification (text-only).
+//! D62 S0 — document segmentation (text-only).
 //!
-//! The front of the encoding pipeline: **splitting text into the units the parser can attempt**, at
-//! both granularities. A document is split into sentence units ([`segment_sentences`]); a sentence is
-//! split into word tokens ([`tokenize`]). Tokens that are not prose (statistics, figure references) are
-//! flagged so the parser skips them ([`is_nonprose`]).
-//!
-//! Both are segmentation, and they were in different modules — `tokenize` sat inside the parser, which
-//! meant the parser owned a decision about *text* rather than about *grammar*.
+//! The front of the encoding pipeline: a document is split into the sentence units the parser can
+//! attempt ([`segment_sentences`]). A sentence is split into tokens by [`super::lex`] and
+//! [`super::preprocess`] (D95).
 //!
 //! Deterministic, no LLM. Verified on real paper prose in
 //! `crates/eigenius-wordnet/tests/encoding_prototype.rs` (the cleaned WRN first page: a naive
-//! `.`/`!`/`?` split over-segments 4 paragraphs into 47 units; this yields ~26, and routes the
-//! stat/figure-ref tokens out while keeping gene symbols like `MLH1`/`MSH2`).
+//! `.`/`!`/`?` split over-segments 4 paragraphs into 47 units; this yields ~26).
 
 /// Abbreviations (and, by the single-letter guard, initials / `e.g.` / `i.e.`) whose trailing
 /// `.` is NOT a sentence boundary. Lowercased, alphanumerics only.
 const ABBREV: &[&str] = &[
     "fig",
+    "figs",
     "et",
     "al",
     "vs",
@@ -57,37 +53,55 @@ const ABBREV: &[&str] = &[
 ];
 
 /// Whether `word`'s trailing `.` is an abbreviation period (so not a sentence boundary): a known
-/// abbreviation, or a single letter (an initial, or one half of `e.g.`/`i.e.`). `next` is the next
-/// **non-whitespace** char after the period (or `'\0'` at end-of-text). A single letter is an
-/// abbreviation/initial UNLESS it is followed by a sentence start (an uppercase letter) — that marks
-/// a real boundary, e.g. a figure-panel letter ending a clause: `… (Extended Data Fig. 1d, e). MSI …`
-/// (the letter is `e)`, alnum-reduced to `e`; the following `M` of `MSI` is the boundary signal). A
-/// single letter followed by a lowercase letter is the abbreviation case (`e.g.` → `g`).
+/// abbreviation, or an initialism — a word whose dot-separated parts are each one letter (an initial
+/// `e`, `e.g`, `r.p.m`, `s.e.m`). `next` is the next **non-whitespace** char after the period (or
+/// `'\0'` at end-of-text). An initialism is an abbreviation UNLESS it is followed by a sentence start
+/// (an uppercase letter) — that marks a real boundary, e.g. a figure-panel letter ending a clause:
+/// `… (Extended Data Fig. 1d, e). MSI …` (the letter is `e)`, alnum-reduced to `e`; the following
+/// `M` of `MSI` is the boundary signal). An initialism followed by a lowercase letter is the
+/// abbreviation case (`e.g. in`, `1,000 r.p.m. for 5 min`).
 fn is_abbrev(word: &str, next: char) -> bool {
     let w: String = word.chars().filter(|c| c.is_alphanumeric()).collect();
     let w = w.to_lowercase();
     if ABBREV.contains(&w.as_str()) {
         return true;
     }
-    w.chars().count() == 1 && !next.is_uppercase()
+    let initialism = word
+        .split('.')
+        .all(|part| part.chars().filter(|c| c.is_alphanumeric()).count() == 1);
+    initialism && !next.is_uppercase()
 }
 
-/// Split a document into sentence units. A `.` ends a sentence EXCEPT inside a decimal
-/// (`0.56`) or after an abbreviation / single-letter initial (`Fig.`, `et al.`, `e.g.`);
-/// `!` and `?` always end one. (Text-only S0: equation/citation/table routing is a later
-/// refinement; this is the prose path.)
+/// Split a document into sentence units. A `.` ends a sentence EXCEPT inside a word (a decimal
+/// `0.56`, a host name `depmap.org`) or after an abbreviation or initialism (`Fig.`, `et al.`,
+/// `e.g.`, `r.p.m.`);
+/// `!` and `?` always end one. None of the three ends a sentence inside an open parenthesis or
+/// bracket: a parenthetical belongs to the sentence around it, so `(Chr. 3+5)`, `(Extended Data
+/// Figs. 6b, e)` and `(https://portals.broadinstitute.org/gpp/public/)` stay whole. (Text-only S0:
+/// equation/citation/table routing is a later refinement; this is the prose path.)
 pub fn segment_sentences(doc: &str) -> Vec<String> {
     let chars: Vec<char> = doc.chars().collect();
     let mut out = Vec::new();
     let mut start = 0;
+    let mut depth = 0usize;
     for i in 0..chars.len() {
         let boundary = match chars[i] {
+            '(' | '[' => {
+                depth += 1;
+                false
+            }
+            ')' | ']' => {
+                depth = depth.saturating_sub(1);
+                false
+            }
+            _ if depth > 0 => false,
             '!' | '?' => true,
             '.' => {
-                let prev = if i > 0 { chars[i - 1] } else { ' ' };
                 let next = chars.get(i + 1).copied().unwrap_or(' ');
-                if prev.is_ascii_digit() && next.is_ascii_digit() {
-                    false // decimal point
+                if next.is_alphanumeric() {
+                    // Word-internal: a decimal (`0.56`), a host or file name (`depmap.org`,
+                    // `cloud.html`), a DOI, or inside an initialism (`r.p.m.`).
+                    false
                 } else {
                     // The next NON-whitespace char disambiguates a single-letter abbreviation/initial
                     // from a real boundary (an uppercase start). `'\0'` = end-of-text.
@@ -117,161 +131,8 @@ pub fn segment_sentences(doc: &str) -> Vec<String> {
     out
 }
 
-/// Whether a (already-tokenized, lowercased) token is **non-prose** — a number, statistic,
-/// percentage, or figure reference — and should be routed out of the parse rather than
-/// treated as a lexeme. These start with a digit or carry no letters (`10−13`, `0.56`,
-/// `1a`, `398`, `45`). Gene-like letter+digit symbols (`mlh1`, `msh2`, `brca1`, `parp`) start
-/// with a letter and are NOT non-prose — they are content the domain lexicon resolves.
-pub fn is_nonprose(token: &str) -> bool {
-    let first = token.chars().next().unwrap_or(' ');
-    first.is_ascii_digit() || !token.chars().any(|c| c.is_ascii_alphabetic())
-}
-
-/// Split prose into word tokens, **preserving the source's case**. Token-internal **separators** —
-/// em/en-dashes (`—`/`–`), slashes, and brackets — are normalised to spaces first, so `"not—can"` →
-/// `["not", "can"]` and `"and/or"` → `["and", "or"]` (D62 S0). Hyphens (`-`) are kept, so
-/// hyphenated compounds (`"double-stranded"`) stay intact. Each token is then trimmed of
-/// leading/trailing non-alphanumerics (so `"BRCA1,"` → `"BRCA1"`); empties are dropped.
-/// Multiword forms are recovered by re-joining spans at lookup time, not here.
-///
-/// **CASE IS PRESERVED HERE, and folded where a lowercase key is actually wanted** (2026-07-29).
-/// This function used to `to_lowercase()` every token, which destroyed the distinction between a
-/// nomenclature SYMBOL and the common noun it spells before any consumer could see it: `CELL` (HGNC
-/// `NS` for the CELP pseudogene) became indistinguishable from `cell`, so `MSI cell lines…` read
-/// `cell` as a GENE in 16 of its 48 skeletons. Case-insensitive LOOKUP is still right — the lexical
-/// index stays lowercase-keyed, and sentence-initial `Cell lines…` must reach the lemma `cell` — so
-/// every consumer that needs a key lowercases at the point of use ([`Parser::has_token`],
-/// `lookup_span`'s `s_lc`, the [`Lemmatizer`](super::lemmatizer::Lemmatizer), `ReservedTable::kind`,
-/// `rank_key`). The one consumer that needs the ORIGINAL is
-/// [`all_caps_symbol`](super::parse::all_caps_symbol), which is the whole point.
-pub fn tokenize(text: &str) -> Vec<String> {
-    // Bracket/dash/slash separators → spaces; the **comma** is preserved as a standalone `,` token
-    // (D62 S0) so the parser can key multi-item list coordination on it. Other punctuation is still
-    // trimmed off token edges.
-    let mut spaced = String::with_capacity(text.len());
-    for c in strip_bracketed_asides(text).chars() {
-        match c {
-            '—' | '–' | '‒' | '―' | '/' | '(' | ')' | '[' | ']' | '{' | '}' => {
-                spaced.push(' ')
-            }
-            ',' => spaced.push_str(" , "),
-            other => spaced.push(other),
-        }
-    }
-    let mut toks: Vec<String> = spaced
-        .split_whitespace()
-        .filter_map(|t| {
-            if t == "," {
-                Some(",".to_string())
-            } else {
-                let s = t.trim_matches(|c: char| !c.is_alphanumeric());
-                (!s.is_empty()).then_some(s.to_string())
-            }
-        })
-        .collect();
-    // A comma is only a separator BETWEEN content tokens: drop dangling (leading/trailing) commas
-    // and collapse runs, so a stray `,` never blocks a full-span parse.
-    while toks.first().is_some_and(|t| t == ",") {
-        toks.remove(0);
-    }
-    while toks.last().is_some_and(|t| t == ",") {
-        toks.pop();
-    }
-    toks.dedup_by(|a, b| a == "," && b == ",");
-    toks
-}
-
-/// Drop **bracketed asides** before tokenizing (D62 S0): parenthetical `(…)`/`[…]`/`{…}` glosses
-/// (depth-aware) and **em-dash-bracketed appositives** `—…—` (paired U+2014). These are droppable
-/// for a *scientific claim* — an abbreviation gloss (`microsatellite instability (MSI)`), a figure
-/// ref (`(Fig. 1a)`), or a defining appositive (`lethality—an interaction…—can be exploited`) leaves
-/// the head + matrix asserting the same fact. A deliberate, recorded cut (apposition-as-renaming is
-/// discourse-level, out of scope for the claim — `docs/notes/d62-grammar-gap-analysis.md`). Content
-/// punctuation (commas/lists) is NOT dropped here — that is the marker-keyed list slice.
-/// A single (unpaired) em-dash is left for the tokenizer to split (it isn't a bracketing pair).
-fn strip_bracketed_asides(text: &str) -> String {
-    // 1. Parentheticals/brackets, depth-aware (handles nesting like `poly(ADP(x))`).
-    let mut no_parens = String::with_capacity(text.len());
-    let mut depth = 0u32;
-    for c in text.chars() {
-        match c {
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth = depth.saturating_sub(1),
-            _ if depth == 0 => no_parens.push(c),
-            _ => {}
-        }
-    }
-    // 2. Paired em-dash appositives: with an even number of `—`, the bracketed asides are the
-    // odd-indexed segments; keep the even-indexed matrix. An odd count (a lone `—`) is left as-is.
-    let parts: Vec<&str> = no_parens.split('\u{2014}').collect();
-    if parts.len() >= 3 && parts.len() % 2 == 1 {
-        parts
-            .iter()
-            .step_by(2) // 0, 2, 4, … = the matrix segments
-            .copied()
-            .collect::<Vec<_>>()
-            .join(" ")
-    } else {
-        no_parens
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn tokenize_preserves_case_and_strips_edge_punctuation() {
-        // CASE IS PRESERVED (2026-07-29): `BRCA1` must stay distinguishable from a lowercase
-        // common noun, or an all-caps nomenclature symbol becomes reachable from ordinary prose
-        // (`CELL` the CELP pseudogene vs the noun `cell`). Consumers fold where they need a key.
-        assert_eq!(
-            tokenize("HeLa depends on BRCA1."),
-            ["HeLa", "depends", "on", "BRCA1"]
-        );
-        // The comma between content tokens is preserved as a `,` token (D62 S0 list coordination).
-        assert_eq!(tokenize("  A,  b!  "), ["A", ",", "b"]);
-        assert!(tokenize("   ").is_empty());
-        assert!(tokenize("").is_empty());
-    }
-
-    #[test]
-    fn tokenize_preserves_list_commas_and_drops_dangling() {
-        // Internal commas survive as separators; leading/trailing/duplicate commas are dropped.
-        assert_eq!(
-            tokenize("a, b, c and d"),
-            ["a", ",", "b", ",", "c", "and", "d"]
-        );
-        assert_eq!(tokenize("a,, b,"), ["a", ",", "b"]); // collapsed run + trailing dropped
-        assert_eq!(tokenize(", a"), ["a"]); // leading dropped
-    }
-
-    #[test]
-    fn tokenize_keeps_internal_alphanumerics() {
-        // intra-token digits/letters survive; only the edges are trimmed. The `(BRCA1)` is now a
-        // dropped parenthetical aside (D62 S0), so only `p53` survives.
-        assert_eq!(tokenize("p53, (BRCA1)"), ["p53"]);
-    }
-
-    #[test]
-    fn tokenize_drops_bracketed_asides() {
-        // Parenthetical gloss dropped, head + matrix kept.
-        assert_eq!(
-            tokenize("microsatellite instability (MSI) results"),
-            ["microsatellite", "instability", "results"]
-        );
-        // Nested parens dropped wholesale.
-        assert_eq!(
-            tokenize("poly(ADP(x)-ribose) polymerase"),
-            ["poly", "polymerase"]
-        );
-        // Paired em-dash appositive dropped; head + matrix kept.
-        assert_eq!(
-            tokenize("lethality\u{2014}an interaction here\u{2014}can be exploited"),
-            ["lethality", "can", "be", "exploited"]
-        );
-        // A single (unpaired) em-dash is NOT a bracket pair → split, both sides kept.
-        assert_eq!(tokenize("not\u{2014}can"), ["not", "can"]);
-    }
-
     use super::*;
 
     #[test]
@@ -317,12 +178,69 @@ mod tests {
     }
 
     #[test]
-    fn nonprose_routes_stats_keeps_genes() {
-        for stat in ["10", "0.56", "1a", "398", "45"] {
-            assert!(is_nonprose(stat), "{stat} should be non-prose");
-        }
-        for gene in ["mlh1", "msh2", "brca1", "parp", "wrn", "helicase"] {
-            assert!(!is_nonprose(gene), "{gene} should be kept as a lexeme");
+    fn a_parenthetical_does_not_end_its_sentence() {
+        assert_eq!(
+            segment_sentences(
+                "HCT116 cells gained chromosomes 3 and 5 (Chr. 3+5), which include MLH1. \
+                 The rest followed (see Extended Data Figs. 6b, e)."
+            ),
+            [
+                "HCT116 cells gained chromosomes 3 and 5 (Chr. 3+5), which include MLH1.",
+                "The rest followed (see Extended Data Figs. 6b, e)."
+            ]
+        );
+    }
+
+    #[test]
+    fn a_host_name_or_an_initialism_does_not_end_its_sentence() {
+        assert_eq!(
+            segment_sentences(
+                "Lines are listed at DepMap.org and are as follows. \
+                 Cells were centrifuged at 1,000 r.p.m. for 5 min. \
+                 Bars show the s.e.m. Code is at https://github.com/cancerdatasci/WRN."
+            ),
+            [
+                "Lines are listed at DepMap.org and are as follows.",
+                "Cells were centrifuged at 1,000 r.p.m. for 5 min.",
+                "Bars show the s.e.m.",
+                "Code is at https://github.com/cancerdatasci/WRN."
+            ]
+        );
+        assert_eq!(
+            segment_sentences("Blots are shown in Figs. 2e and 4a. Others were not.").len(),
+            2
+        );
+    }
+
+    /// Every WRN segment whose brackets do not balance, and the count. Run with
+    /// `--ignored --nocapture`; it reads the gitignored texts under `references/`.
+    #[test]
+    #[ignore = "reads the gitignored WRN texts under references/"]
+    fn list_the_wrn_segments_with_unbalanced_brackets() {
+        let dir = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../references/publications/WRN-Helicase-Nature-OCR"
+        );
+        for name in ["methods.txt", "letter-body.txt"] {
+            let path = format!("{dir}/{name}");
+            let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+            let sentences = segment_sentences(&text);
+            let mut unbalanced = 0;
+            for s in &sentences {
+                let depth = s.chars().fold(0i32, |d, c| match c {
+                    '(' | '[' => d + 1,
+                    ')' | ']' => d - 1,
+                    _ => d,
+                });
+                if depth != 0 {
+                    unbalanced += 1;
+                    println!("{name} [{depth:+}]: {s}");
+                }
+            }
+            println!(
+                "\n{name}: {unbalanced} of {} segments unbalanced\n",
+                sentences.len()
+            );
         }
     }
 }

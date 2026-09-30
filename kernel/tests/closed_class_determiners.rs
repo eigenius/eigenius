@@ -211,6 +211,28 @@ fn sense_cap_widens_on_failure_for_known_vocabulary() {
     );
 }
 
+/// D95 — **a symbol with no entry seeds nothing, and is not a missing lexeme.** `unknown_words`
+/// reports only word tokens, and a digit-initial token that is not a numeral (`53BP1`) is one. A
+/// numeral seeds its own measure-phrase and cardinal items (slice 4), and the bound symbols (`<`,
+/// `≥`, `~`) have closed-class entries (slice 6b), so only `±` is an `unseedable_token`. The widen gate
+/// counts it: a sentence with a token that seeds nothing fails closed on its first attempt, where the
+/// gate used to skip non-prose tokens and widen through every rung of a parse that could not succeed.
+#[test]
+fn symbols_are_unseedable_not_missing() {
+    let index = index_with_zob(1);
+    let text = "zob affects 53BP1 at 37 < 5 ± 1";
+    assert_eq!(index.unknown_words(text, &Identity), ["53BP1"]);
+    assert_eq!(index.unseedable_tokens(text, &Identity), ["±"]);
+
+    let (closed, open, trace) =
+        index.parse_scoped_open_traced("zob affects HeLa ±", &Identity, None);
+    assert!(closed.is_empty() && open.is_empty());
+    assert_eq!(
+        trace.attempts, 1,
+        "no widening past a token that seeds nothing"
+    );
+}
+
 /// GH#97 / D64 — **widen-on-failure overrides a mis-ranking reranker** ("a bad rank costs a re-parse,
 /// never a missed parse" — the proposer-behind-oracle guarantee that makes the untrusted LLM reranker
 /// safe). `zworp`'s static order keeps the agreeing **singular** sense at `sense_cap(1)`, so a plain
@@ -1493,8 +1515,8 @@ fn but_not_cross_type_objects_is_a_known_gap() {
 #[test]
 fn cardinal_numerals_are_plural_determiners() {
     // D62 §2 #4: word-form cardinals (`two`..`ten`) parse as plural determiners in subject and object
-    // position. First-cut semantics is existential with the count DROPPED (`two genes` ≈ `∃ genes`);
-    // the exact cardinality is a faithfulness follow-on.
+    // position. Since D95 slice 7 a plain cardinal states the EXACT count of its scope set:
+    // `two genes affect HeLa` → `has_count(Gene, λx. affects(hela, x), 2)`.
     let (_layer, index) = index_over_bootstrap();
     assert!(
         !index.parse("two genes affect HeLa", &PluralS).is_empty(),
@@ -1510,6 +1532,34 @@ fn cardinal_numerals_are_plural_determiners() {
         !index.parse("four genes affect HeLa", &PluralS).is_empty(),
         "another cardinal (`four`) parses"
     );
+    // `one` is the singular cardinal: `one gene` parses, `one genes` does not.
+    assert!(!index.parse("one gene affects HeLa", &PluralS).is_empty());
+    assert!(index.parse("one genes affect HeLa", &PluralS).is_empty());
+    // D95: a digit numeral seeds the categories of `one` or `two` with its own count, so it reads as
+    // the word form does; `0` reads too, as a count of zero (slice 7), where an existential refused it.
+    let sems = |text: &str| {
+        let mut s: Vec<String> = index
+            .parse(text, &PluralS)
+            .iter()
+            .map(|it| pretty_term(it.sem()))
+            .collect();
+        s.sort();
+        s
+    };
+    for (digits, words) in [
+        ("2 genes affect HeLa", "two genes affect HeLa"),
+        ("HeLa affects 3 genes", "HeLa affects three genes"),
+        ("1 gene affects HeLa", "one gene affects HeLa"),
+        ("HeLa affects 1 gene", "HeLa affects one gene"),
+    ] {
+        assert!(!sems(digits).is_empty(), "{digits}");
+        assert_eq!(sems(digits), sems(words), "{digits}");
+    }
+    let zero = sems("0 genes affect HeLa");
+    assert_eq!(zero.len(), 1, "{zero:?}");
+    assert!(zero[0].contains("has_count"), "{zero:?}");
+    let two = sems("two genes affect HeLa");
+    assert!(two.iter().all(|s| s.contains("has_count")), "{two:?}");
 }
 
 #[test]
@@ -2822,6 +2872,87 @@ fn a_plural_reference_resolves_distributively_to_a_claim_set() {
         ),
         "the audit records the set membership"
     );
+}
+
+#[test]
+fn a_counted_demonstrative_resolves_only_to_a_set_of_its_size() {
+    // D95 slice 7d, decision 13: `these two cell lines` carries a referent hole counted 2. Two
+    // consecutively-landed claims form a set of two, which the hole accepts; `these three cell
+    // lines` vetoes that set, and every single antecedent, so it stays open (fail-closed).
+    use eigenius_kernel::dcg::{
+        DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection,
+    };
+    struct First;
+    impl ReadingRanker for First {
+        fn select(
+            &self,
+            _ctx: &DocumentContext,
+            c: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            (!c.is_empty()).then(|| ReadingSelection {
+                chosen: 0,
+                rationale: "first (test)".to_string(),
+                runners_up: (1..c.len()).collect(),
+            })
+        }
+    }
+
+    // The plural surface, which the `Identity` lemmatizer does not derive from `cell line`.
+    let (base, _) = index_with_claim_kinds();
+    let plural = esl::compile(
+        r#"
+namespace lexicon = "urn:eigenius:lexicon";
+resource lexicon:e_cell_lines : lexicon:LexicalEntry {
+    lexicon:form     = "cell lines";
+    lexicon:cat      = type_expr( lexicon:cat_n(lexicon:CellLine, lexicon:pl) );
+    lexicon:sem      = lexicon:CellLine;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:cell_line.n.01";
+}
+"#,
+        &base,
+    )
+    .expect("plural fixture compiles");
+    let mut b = LayerBuilder::new("plural-fixture", Some(base));
+    for r in plural {
+        b.add_resource(r).expect("add plural resource");
+    }
+    let index = Parser::build(Arc::new(b.build(LayerStorage::in_memory())));
+    let lander = KindLander("TestFinding");
+    for (third, resolves) in [
+        ("these two cell lines affect BRCA1", true),
+        ("these three cell lines affect BRCA1", false),
+    ] {
+        let doc = ["HeLa affects BRCA1", "BRCA1 affects HeLa", third];
+        let resolved = index.resolve_document(&DiscourseRun {
+            document: &doc.join(" "),
+            sentences: &doc,
+            lemmatizer: &Identity,
+            proposer: &PickBySurface("the last 2 TestFinding claims, together"),
+            ranker: Some(&First),
+            lander: Some(&lander),
+            scope: None,
+        });
+        match (&resolved[2].outcome, resolves) {
+            (SentenceOutcome::Encoded(s3), true) => {
+                let sem = pretty_term(s3.sem());
+                assert!(
+                    sem.contains("claim0") && sem.contains("claim1") && sem.contains("And("),
+                    "{third}: both members are predicated: {sem}"
+                );
+            }
+            (SentenceOutcome::Open(_), false) => {}
+            (other, _) => panic!(
+                "{third}: expected {}, got {}",
+                if resolves { "Encoded" } else { "Open" },
+                match other {
+                    SentenceOutcome::Encoded(_) => "Encoded",
+                    SentenceOutcome::Open(_) => "Open",
+                    _ => "another outcome",
+                }
+            ),
+        }
+    }
 }
 
 fn index_with_demonstratives() -> (Arc<Layer>, Parser) {
@@ -4492,19 +4623,21 @@ fn s20_shape_parses_open_with_modal_coordination_and_comparative() {
         closed.is_empty(),
         "the comparative standard is unresolved → the s20 shape must be OPEN, not closed"
     );
-    let it = open
+    // The shared-head reading (D95 slice 7d, decision 14) is open too — `a gene cell line or a larger
+    // cell line`, as `a steel or a wooden door` reads — so find the s20 shape among the one-hole parses.
+    let sems: Vec<String> = open
         .iter()
-        .find(|o| o.holes.len() == 1)
-        .expect("an open parse with exactly one comparison-standard hole");
-    let sem = pretty_term(it.item.sem());
+        .filter(|o| o.holes.len() == 1)
+        .map(|o| pretty_term(o.item.sem()))
+        .collect();
     assert!(
-        sem.contains("Possible(")
+        sems.iter().any(|sem| sem.contains("Possible(")
             && sem.contains("Or(")
             && sem.contains(":Gene.")
             && sem.contains(":CellLine.")
             && sem.contains("gt(deg_large")
-            && sem.contains("$anaphor$"),
-        "s20 shape = modal + type-preserving disjunction (Gene ∨ CellLine) + comparative-standard hole: {sem}"
+            && sem.contains("$anaphor$")),
+        "s20 shape = modal + type-preserving disjunction (Gene ∨ CellLine) + comparative-standard hole: {sems:#?}"
     );
 }
 

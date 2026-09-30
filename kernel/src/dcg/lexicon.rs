@@ -655,9 +655,10 @@ mod referential_definite_tests {
                 "`{d}` must NOT be ι (the pre-D64 misparse blessed a closed the(N) reading)"
             );
         }
-        // Genuine existentials + a cardinal: NEVER referential or anaphoric — their
-        // negation-scope split is real and must be preserved.
-        for q in ["a", "an", "some", "two"] {
+        // Genuine existentials: NEVER referential or anaphoric — their negation-scope split is real
+        // and must be preserved. (A cardinal has no entry: seeding builds it from the numeral, D95
+        // slice 7d.)
+        for q in ["a", "an", "some"] {
             assert!(
                 mentions(q, THE).iter().all(|&b| !b),
                 "`{q}` must stay quantificational (no ontology:the)"
