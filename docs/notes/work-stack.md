@@ -24,11 +24,10 @@ any detour.
 > slice 9 (factors on count comparatives, `a median`, `compared to`).
 > **Measured:** the reseed after slice 9 (`wordnet-umls-aligned-2026-09-29-quantities-s9`, `a3c8452`):
 > 0 grammar gaps, 62/62 expected hits, 652 readings, 212 skeletons (`baseline.json`); slice 9 moves
-> nothing on the page. The selection draw scores 29/41 against the selection baseline's 30; lowering
-> it is the owner's call (`selection-baseline.json`, the note of 2026-09-29 on slices 6–8).
+> nothing on the page. The selection draw scores 29/41 against the selection baseline's 30.
 > **In review:** PR #265 (`2026-09-30`). Before merge, the owner rules on the selection baseline:
 > three ledger rows contradict the ledger's own structure rule, and with them corrected both draws
-> score 28 (`selection-baseline.json`, the note of 2026-09-29 on slices 6–8).
+> score 28 (`selection-baseline.json`, the note of 2026-09-29 on slices 6–8, lists the options).
 >
 > **Exit gate:** slices 6–9 built, the quantity corpus extended with the attested sentences, the
 > reseed measured, then the branch's PR.
