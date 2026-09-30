@@ -9,12 +9,32 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **entry 2 (`2026-09-30`). D95 follow-up, on `d95-fold-states-the-order`. ACTIVE.**
+> **entry 3 (`2026-09-30`). #263 and #264 — governed prepositions and the reading ranker, on
+> `prepositions-and-ranker`. ACTIVE.**
+>
+> **#263:** the WordNet importer decides an adjective's governed preposition against its own list of
+> eleven, which never gained `lexicon:Prep`'s `of` and `as`; it keeps one preposition per lemma, and
+> its gloss heuristic reads equatives and infinitives as governance. The parked WIP `8a226ef`
+> (`origin/governed-prepositions`: one list in the kernel, every preposition WordNet names) does not
+> apply to `main` as is — its `dcg/category.rs` hunk conflicts with D95. The issue's proposal: attested
+> = WordNet's convention ∪ SPECIALIST's complements ∪ the curated frames (`scripts/provision-specialist.sh`,
+> D97), with attested ∪ the heuristic's first match as the loss-free interim. It lands with a reseed and
+> re-adjudicated pins (`… predictive of MMR deficiency`).
+> **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
+> the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
+> behind a client trait; whether attachment is derivable at all (after the measurement). Each change
+> is a live draw, its replay, and the adjudication of every new verdict, on a fixed snapshot.
+> Entry 2's selection ruling (29 against 30; ledger lines 89, 98, 138) is measured on the same gate.
+>
+> **Exit gate:** #263 landed with its reseed and re-adjudicated pins; #264's first two strands measured
+> on a fixed snapshot and the third decided.
+
+> **entry 2 (`2026-09-30`). D95 follow-up. The parse results remain; entry 3 detours from it.**
 >
 > **Found after the merge:** the factor comparatives stated only the opaque `fold_lower`, so nothing
-> derived their order and a query for `fewer` missed every one. **Built on this branch:** they state
-> the plain comparative's order beside the factor (`docs/design/d95-implementation-plan.md`, slice 9,
-> 9d); the bootstrap moved on `closed-class`, so a reseed follows.
+> derived their order and a query for `fewer` missed every one. **Merged as #266 (`c21cff6`):** they
+> state the plain comparative's order beside the factor (`docs/design/d95-implementation-plan.md`,
+> slice 9, 9d); reseeded as `wordnet-umls-aligned-2026-09-30-fold-order`, the page unchanged.
 > **Then the parse results** (the owner, `2026-09-30`: revisit as a follow-up):
 > - the selection baseline: the gate reads 29/41 against 30 on `main`; ledger lines 89, 98 and 138
 >   contradict the ledger's own structure rule, and with them corrected both draws score 28
@@ -24,8 +44,8 @@ any detour.
 >   `sgRNAs` no plural count noun (`experiments/parsing/quantities/README.md`); `incubate` and
 >   `electroporate` go with D97.
 >
-> **Exit gate:** this branch merged and reseeded; the owner's selection ruling applied; each lexical
-> gap assigned.
+> **Exit gate:** the owner's selection ruling applied; decision 3's scope reviewed; each lexical gap
+> assigned.
 >
 > **Parked on the way (not on this entry's path):** D96 (JATS, decided, unbuilt), D97 (SPECIALIST,
 > proposed; motivated by D95's lexicon gaps `incubate` and `electroporate`), D98 (qualifiers,
