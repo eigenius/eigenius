@@ -35,10 +35,10 @@ any detour.
 > `reading_ledger_is_consistent` test and the sweep check rows against each other, and the sweep
 > audits every row its forest produces (`ledger-conflicts`, gated to 0). 19 rows `correct` → `wrong`,
 > 3 `wrong` → `correct`. The owner's rulings: C0600688 «Toxic effect» and `arise` v02625786 are faithful
-> twins; need-claims (essential, dispensable, dependency, dependent on) take the WRN protein, not the
-> gene, and six pins moved to the protein kind. Selection re-baselined at 25/41 on the governed-preps
-> draw. Not covered by the ruling: «WRN is a promising drug target / a synthetic-lethal vulnerability»
-> keep gene-individual pins.
+> twins; need-claims (essential, dispensable, dependency, dependent on) and a drug target take the WRN
+> protein, not the gene, and seven pins moved to the protein kind. Selection re-baselined at 25/41 on
+> the governed-preps draw. Not covered: «WRN is a synthetic-lethal vulnerability» keeps its
+> gene-individual pin.
 > **Next:** #264.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
