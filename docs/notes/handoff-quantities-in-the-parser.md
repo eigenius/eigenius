@@ -195,7 +195,8 @@ equality: the kernel has `Id`, but the term encoder never produces it.
    - gate its pins in the parse-rate harness, which reads only
      `experiments/parsing/expected-readings.tsv` today;
    - re-run it with the reranker once step 2 is done.
-7. **The branch's PR — #265, open since `2026-09-30`.** Slices 6–9 are built (bounds, ranges, counts, proportions, number words, a
+7. **The branch's PR — #265, merged `2026-09-30` as `9924769`.** The follow-up is on
+   `d95-fold-states-the-order` (work stack, entry 2). Slices 6–9 are built (bounds, ranges, counts, proportions, number words, a
    determiner before a numeral, counted conjuncts sharing a head, offsets, fronted adjuncts, `every N
    unit`, pseudo-partitives, `per`, lists, factors on count comparatives, `a median`, `compared to` —
    `docs/design/d95-implementation-plan.md`) and measured after the reseed after slice 9 (0 grammar

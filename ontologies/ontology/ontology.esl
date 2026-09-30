@@ -143,7 +143,8 @@ axiom ontology:has_proportion   : lexicon:Entity -> (lexicon:Entity -> Prop) -> 
 // lineages` → fold_lower(0.56, card(M, x), card(M, y)) (D95 slice 9, decision 2); `fold_higher` the
 // other way. The factor is kept as written. Opaque, as `units:approx` is, because the text fixes no
 // arithmetic: `0.56-fold fewer` is a ratio of 0.56, `2-fold fewer` usually one of 1/2, and some
-// authors mean 44% fewer by the first. A check grounds it in `stats:EffectSize::Relative`.
+// authors mean 44% fewer by the first. Every reading agrees on the order, which the comparative states
+// beside it as the plain comparative's `gt`. A check grounds the factor in `stats:EffectSize::Relative`.
 axiom ontology:fold_lower       : units:Quantity(u"1") -> core:float -> core:float -> Prop
 axiom ontology:fold_higher      : units:Quantity(u"1") -> core:float -> core:float -> Prop
 // `median_over(f, x)`: the median of the measure f over the group x's members (D95 slice 9, decision 3)

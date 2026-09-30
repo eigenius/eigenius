@@ -1565,32 +1565,43 @@ fn a_list_shares_its_unit() {
     }
 }
 
-/// Slice 9, decisions 1 and 2: a factor on a count comparative states the factor as written,
-/// `fold_lower(N, card(T, x), card(T, y))`. A percentage or a count before `fewer` is a difference,
-/// not a factor, and is not read as one.
+/// Slice 9, decisions 1 and 2: a factor on a count comparative states the plain comparative's order
+/// and the factor as written, `And(gt(card(T, y), card(T, x)), fold_lower(N, card(T, x), card(T, y)))`,
+/// so a query for `fewer` finds it. A percentage or a count before `fewer` is a difference, not a
+/// factor, and is not read as one.
 #[test]
 fn a_factor_on_a_count_comparative() {
     let layer = layer();
     let parser = Parser::build(Arc::clone(&layer));
     let names = std::collections::BTreeMap::new();
-    for (text, rel, value, words) in [
+    for (text, plain, rel, value, words) in [
         (
-            "HeLa received 0.56-fold fewer cells than HeLa",
-            "ontology:fold_lower\"",
+            "HeLa received 0.56-fold fewer cells than 5A",
+            "HeLa received fewer cells than 5A",
+            "fold_lower(",
             "numer: 14, denom: 25",
-            "hela has 14/25-fold fewer Cell than hela",
+            "hela has 14/25-fold fewer Cell than mccoys",
         ),
         (
-            "HeLa received two-fold more cells than HeLa",
-            "ontology:fold_higher\"",
+            "HeLa received two-fold more cells than 5A",
+            "HeLa received more cells than 5A",
+            "fold_higher(",
             "numer: 2, denom: 1",
-            "hela has 2-fold more Cell than hela",
+            "hela has 2-fold more Cell than mccoys",
         ),
     ] {
-        let r = readings(&parser, text);
-        assert_eq!(r.len(), 1, "{text}: {r:#?}");
-        assert!(r[0].contains(rel) && r[0].contains(value), "{text}: {r:#?}");
         let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let pretty = pretty_term(parsed[0].sem());
+        let order = parser.parse(plain, &Identity);
+        assert_eq!(order.len(), 1, "{plain}: {} readings", order.len());
+        let order = pretty_term(order[0].sem());
+        assert!(order.starts_with("gt(card(Cell, "), "{plain}: {order}");
+        assert!(
+            pretty.starts_with(&format!("And({order}, {rel}")),
+            "{text}: {pretty}"
+        );
+        assert!(format!("{:?}", parsed[0].sem()).contains(value), "{text}");
         let surface = verbalize(parsed[0].sem(), &Vb::surface(&names, &layer));
         assert_eq!(surface, words, "{text}");
     }
@@ -1625,25 +1636,31 @@ fn compared_to_marks_the_standard() {
 }
 
 /// Slice 9, decision 3: `a median` is a statistic over a group's members, which the factor
-/// comparative applies to both counts: `fold_lower(N, median_over(λm. card(T, m), x),
-/// median_over(λm. card(T, m), y))`.
+/// comparative applies to both counts, in the order and in the factor: `And(gt(median_over(λm.
+/// card(T, m), y), median_over(λm. card(T, m), x)), fold_lower(N, …x, …y))`.
 #[test]
 fn a_median_summarises_both_counts() {
     let layer = layer();
     let parser = Parser::build(Arc::clone(&layer));
     let names = std::collections::BTreeMap::new();
-    let text = "HeLa received a median 0.56-fold fewer cells compared to HeLa";
+    let text = "HeLa received a median 0.56-fold fewer cells compared to 5A";
     let parsed = parser.parse(text, &Identity);
     assert_eq!(parsed.len(), 1, "{} readings", parsed.len());
     let pretty = pretty_term(parsed[0].sem());
+    let median = |x: &str| format!("median_over(λG#0. card(Cell, G#0), {x})");
     assert!(
-        pretty.starts_with("fold_lower(")
-            && pretty.matches("median_over(λ").count() == 2
-            && pretty.matches("card(Cell, ").count() == 2,
+        pretty.starts_with(&format!(
+            "And(gt({}, {}), fold_lower(",
+            median("mccoys_5a"),
+            median("hela")
+        )) && pretty.matches("median_over(λ").count() == 4,
         "{pretty}"
     );
     let surface = verbalize(parsed[0].sem(), &Vb::surface(&names, &layer));
-    assert_eq!(surface, "hela has a median 14/25-fold fewer Cell than hela");
+    assert_eq!(
+        surface,
+        "hela has a median 14/25-fold fewer Cell than mccoys"
+    );
     // A statistic needs a factor: `a median fewer cells` is not English and has no reading.
     assert!(parser
         .parse("HeLa received a median fewer cells than HeLa", &Identity)

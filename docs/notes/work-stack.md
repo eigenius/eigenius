@@ -9,7 +9,37 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **entry 1 (`2026-09-29`). D95 — quantities in the parser, on `quantities-in-the-parser`. ACTIVE.**
+> **entry 2 (`2026-09-30`). D95 follow-up, on `d95-fold-states-the-order`. ACTIVE.**
+>
+> **Found after the merge:** the factor comparatives stated only the opaque `fold_lower`, so nothing
+> derived their order and a query for `fewer` missed every one. **Built on this branch:** they state
+> the plain comparative's order beside the factor (`docs/design/d95-implementation-plan.md`, slice 9,
+> 9d); the bootstrap moved on `closed-class`, so a reseed follows.
+> **Then the parse results** (the owner, `2026-09-30`: revisit as a follow-up):
+> - the selection baseline: the gate reads 29/41 against 30 on `main`; ledger lines 89, 98 and 138
+>   contradict the ledger's own structure rule, and with them corrected both draws score 28
+>   (`experiments/parsing/selection-baseline.json`, the note of 2026-09-29 on slices 6–8);
+> - slice 9 decision 3's scope, the median over both counts or the subject's only;
+> - the lexical gaps the quantity corpus found over the full lexicon: `confluence` is count-only and
+>   `sgRNAs` no plural count noun (`experiments/parsing/quantities/README.md`); `incubate` and
+>   `electroporate` go with D97.
+>
+> **Exit gate:** this branch merged and reseeded; the owner's selection ruling applied; each lexical
+> gap assigned.
+>
+> **Parked on the way (not on this entry's path):** D96 (JATS, decided, unbuilt), D97 (SPECIALIST,
+> proposed; motivated by D95's lexicon gaps `incubate` and `electroporate`), D98 (qualifiers,
+> decided then parked: the direction moved to representing the study's argument).
+>
+> **Next, after this entry pops:** a design for the argument of a study, informed by EXPO
+> (Soldatova & King 2006): hypotheses (research, null, alternative), results that support or reject
+> them, the experimental model (factor, levels, target), assumptions and conclusions, carried in
+> the CNL and linked through the justification layer. It takes over D98's decision 4, its causal
+> vocabulary, and the reading of the exclusives as rejected hypotheses, and the statistic routing
+> to D52 that D95 left out.
+
+> **entry 1 (`2026-09-29`). D95 — quantities in the parser. DONE, merged as #265 (`9924769`,
+> `2026-09-30`).**
 >
 > **The goal:** numerical quantities and measurements with units as part of the propositions.
 > Slices 1–5 are built and re-baselined (`5fb85cf`: 62/62 expected hits, 0 grammar gaps, 626
@@ -25,23 +55,10 @@ any detour.
 > **Measured:** the reseed after slice 9 (`wordnet-umls-aligned-2026-09-29-quantities-s9`, `a3c8452`):
 > 0 grammar gaps, 62/62 expected hits, 652 readings, 212 skeletons (`baseline.json`); slice 9 moves
 > nothing on the page. The selection draw scores 29/41 against the selection baseline's 30.
-> **In review:** PR #265 (`2026-09-30`). Before merge, the owner rules on the selection baseline:
-> three ledger rows contradict the ledger's own structure rule, and with them corrected both draws
-> score 28 (`selection-baseline.json`, the note of 2026-09-29 on slices 6–8, lists the options).
+> **Merged** with the selection ruling deferred to the follow-up (entry 2).
 >
 > **Exit gate:** slices 6–9 built, the quantity corpus extended with the attested sentences, the
 > reseed measured, then the branch's PR.
->
-> **Parked on the way (not on this entry's path):** D96 (JATS, decided, unbuilt), D97 (SPECIALIST,
-> proposed; motivated by D95's lexicon gaps `incubate` and `electroporate`), D98 (qualifiers,
-> decided then parked: the direction moved to representing the study's argument).
->
-> **Next, after this entry pops:** a design for the argument of a study, informed by EXPO
-> (Soldatova & King 2006): hypotheses (research, null, alternative), results that support or reject
-> them, the experimental model (factor, levels, target), assumptions and conclusions, carried in
-> the CNL and linked through the justification layer. It takes over D98's decision 4, its causal
-> vocabulary, and the reading of the exclusives as rejected hypotheses, and the statistic routing
-> to D52 that D95 left out.
 
 > **The stack was drained on `2026-09-15`.** Every entry below is DONE, entry 0 included.
 

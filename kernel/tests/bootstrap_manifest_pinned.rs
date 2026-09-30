@@ -47,7 +47,8 @@
 //! move these layers and pay ONE reseed together, after slice 8
 //! (`docs/design/d95-implementation-plan.md`, slice 6). It fired for slice 9 on `lexicon`
 //! (`cat_factor`, `cat_stat`), `ontology` (`fold_lower`, `fold_higher`, `median_over`) and
-//! `closed-class` (the factor comparatives, `a median`, `compared to`, `compared with`).
+//! `closed-class` (the factor comparatives, `a median`, `compared to`, `compared with`); then on
+//! `closed-class` again when the factor comparatives came to state the plain comparative's order.
 //!
 //! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
 //! (`docs/design/d95-implementation-plan.md`, slice 5): `units` (standard gravity, `molar`, `week`,
@@ -227,7 +228,7 @@ reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
 lexicon:46ef79a03ba22b61609186218ed356bcddf329656cad8a018778f3d322fb7eda
 ontology:1bb0d263b7dd3a090594105061e9edc4e2a2c3946dc576311551a0f2ceb1668e
-closed-class:48e8c708c6d72c629ae34abfaee5170daff2529c0223ac39b4a36b15e7a3a7e2
+closed-class:217615b7392275251fbe0a6176f02afebbc9e4e3c346be34e75a4ca73cab0a28
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 

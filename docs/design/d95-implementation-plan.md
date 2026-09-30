@@ -1081,8 +1081,11 @@ to the condition without doxycycline`), 4 are the verb (`were compared to negati
    the other way; `N : units:Quantity(u"1")`, and `a`, `b : core:float`, the measures `fewer` and
    `more` compare (`lexicon:card`). `fewer` and `more` each gain an entry that takes a factor on the
    left after its noun: `These cell lines contained 0.56-fold fewer deletion mutations than typical
-   lineages` is `fold_lower(0.56, card(M, x), card(M, y))`. The verb is dropped, as `fewer`'s own sem
-   drops it (D63 §8.12).
+   lineages` is `And(gt(card(M, y), card(M, x)), fold_lower(0.56, card(M, x), card(M, y)))` — the
+   plain comparative's own order term, on which every reading of `N-fold fewer` agrees, and the factor.
+   The verb is dropped, as `fewer`'s own sem drops it (D63 §8.12).
+   - *Revised 2026-09-30:* the first build stated only `fold_lower`. With it opaque, nothing derived the
+     order, so a query for `fewer` missed every factor comparative. Found after the merge (#265).
    - Opaque because `N-fold fewer` has more than one arithmetic reading and the text fixes none:
      `0.56-fold fewer` is a ratio of 0.56, `2-fold fewer` usually a ratio of 1/2, and some authors
      write `0.56-fold fewer` for 44% fewer. `units:approx` is opaque for the same reason, a tolerance
@@ -1097,8 +1100,8 @@ to the condition without doxycycline`), 4 are the verb (`were compared to negati
    core:float`, sem `ontology:median_over`, the median of a measure over a group's members (a group as
    `has_proportion` has one). `fewer` and `more` each gain a second factor entry with a statistic slot,
    consumed after the factor: `These cell lines contained a median 0.56-fold fewer deletion mutations
-   … compared to typical lineages` is `fold_lower(0.56, median_over(λm. card(M, m), x),
-   median_over(λm. card(M, m), y))`.
+   … compared to typical lineages` states the order and the factor over `median_over(λm. card(M, m),
+   x)` and `median_over(λm. card(M, m), y)`.
    - Both sides: the paper does not say whether 0.56 is the ratio of the two groups' medians or the
      median of each line's ratio to typical lineages. Against a standard summarised by the same
      statistic the two are equal, since dividing by a constant preserves the median.
@@ -1108,6 +1111,8 @@ to the condition without doxycycline`), 4 are the verb (`were compared to negati
    - *Rejected:* a factor that denotes a quantifier over the comparison, with `a median` its modifier.
      It builds the same proposition, and every factor would carry the comparative's measure and
      standard in its type.
+   - Not taken, and open to review: the median over the subject's lines only, with typical lineages
+     as the kind's own count (`card(M, y)`).
    - `median_over` is opaque, as `card` is. Routing it to `stats:median_of` over a `SampleSet` is the
      design for the study's argument (D95, "Out"). `an average` and `a mean` are not attested.
 4. **`compared to` and `compared with` mark a comparison's standard**: `cat_pp_than / NP`, sem `λy.
@@ -1139,6 +1144,15 @@ to the condition without doxycycline`), 4 are the verb (`were compared to negati
 - The corpus row writes `The cell lines` for the paper's `these MSI cell lines`: a demonstrative
   subject leaves the parse open, and the corpus check reads closed readings only — with `These`, plain
   `fewer … than` has none either.
+
+**9d — the order beside the factor — built** (2026-09-30, decision 2's revision).
+- `closed-class.esl`: the four factor entries state `gt(card(T, y), card(T, x))` (for `more`, the
+  other way), over the median-summarised counts after `a median`.
+- `verbalize`: `factor_comparison` reads the order and the factor once, as the factor's words say the
+  order (`hela has 14/25-fold fewer Cell than mccoys`).
+- Tests: `a_factor_on_a_count_comparative` and `a_median_summarises_both_counts` take a different
+  standard (`5A`), so the direction is checked, and require the order term to equal the plain
+  comparative's reading of the same sentence without the factor.
 
 **The reseed after slice 9** (2026-09-30, at `a3c8452`): `wordnet-umls-2026-09-29-quantities-s9` and its
 aligned snapshot; the import counts equal the slice-8 reseeds'.
