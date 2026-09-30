@@ -28,14 +28,23 @@ any detour.
 > adjective entries, `of` 0 → 1,003. **Measured** (`wordnet-umls-aligned-2026-09-30-governed-preps`):
 > grammar gaps 0, 62/62 expected hits, readings 652 → 668, skeletons 212 → 215; `… predictive of MMR
 > deficiency` re-pinned to its relational reading; selection 29/41 on a new draw. For the owner: the
-> judge's precision sample (`experiments/lexicon-specialist/precision-probe.tsv`), and a second ledger
-> contradiction (lines 67 and 95 accept `lineage` n13813042, a later row rejects it).
+> judge's precision sample (`experiments/lexicon-specialist/precision-probe.tsv`).
+> **The reading ledger checks itself (`2026-09-30`, `ea85d49`, the owner's rule):** a reading whose
+> structure differs from its pin cannot count as correct, and a row contradicting another row's ruling
+> on its sentence is flagged. Each `wrong` row names what it rules out (a fifth field); the
+> `reading_ledger_is_consistent` test and the sweep check rows against each other, and the sweep
+> audits every row its forest produces (`ledger-conflicts`, gated to 0). 19 rows `correct` → `wrong`,
+> 3 `wrong` → `correct`. The owner's rulings: C0600688 «Toxic effect» and `arise` v02625786 are faithful
+> twins; need-claims (essential, dispensable, dependency, dependent on) take the WRN protein, not the
+> gene, and six pins moved to the protein kind. Selection re-baselined at 25/41 on the governed-preps
+> draw. Not covered by the ruling: «WRN is a promising drug target / a synthetic-lethal vulnerability»
+> keep gene-individual pins.
 > **Next:** #264.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change
-> is a live draw, its replay, and the adjudication of every new verdict, on a fixed snapshot.
-> Entry 2's selection ruling (29 against 30; ledger lines 89, 98, 138) is measured on the same gate.
+> is a live draw, its replay, and the adjudication of every new verdict, on a fixed snapshot, against
+> the 25/41 baseline.
 >
 > **Exit gate:** #263 landed with its reseed and re-adjudicated pins; #264's first two strands measured
 > on a fixed snapshot and the third decided.
@@ -47,16 +56,15 @@ any detour.
 > state the plain comparative's order beside the factor (`docs/design/d95-implementation-plan.md`,
 > slice 9, 9d); reseeded as `wordnet-umls-aligned-2026-09-30-fold-order`, the page unchanged.
 > **Then the parse results** (the owner, `2026-09-30`: revisit as a follow-up):
-> - the selection baseline: the gate reads 29/41 against 30 on `main`; ledger lines 89, 98 and 138
->   contradict the ledger's own structure rule, and with them corrected both draws score 28
->   (`experiments/parsing/selection-baseline.json`, the note of 2026-09-29 on slices 6–8);
+> - ~~the selection baseline~~ DONE `2026-09-30` on `prepositions-and-ranker` (entry 3): the owner
+>   ruled the structure rule and the open senses; the ledger checks itself, and the baseline is 25/41;
 > - slice 9 decision 3's scope, the median over both counts or the subject's only;
 > - the lexical gaps the quantity corpus found over the full lexicon: `confluence` is count-only and
 >   `sgRNAs` no plural count noun (`experiments/parsing/quantities/README.md`); `incubate` and
 >   `electroporate` go with D97.
 >
-> **Exit gate:** the owner's selection ruling applied; decision 3's scope reviewed; each lexical gap
-> assigned.
+> **Exit gate:** ~~the owner's selection ruling applied~~ (done); decision 3's scope reviewed; each
+> lexical gap assigned.
 >
 > **Parked on the way (not on this entry's path):** D96 (JATS, decided, unbuilt), D97 (SPECIALIST,
 > proposed; motivated by D95's lexicon gaps `incubate` and `electroporate`), D98 (qualifiers,
