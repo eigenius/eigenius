@@ -25,7 +25,12 @@ any detour.
 > gap); the reader (`crates/eigenius-specialist`), the governance table (`eigenius-wordnet`,
 > `governance.rs`), the judge (`specialist-senses`: gold recall 45/45, precision sample 39/40, 1
 > unclear), one relation per preposition (`deg_{loc}_rel_{p}`). The import: 4,117 → 7,033 relational
-> adjective entries, `of` 0 → 1,003. **Next:** the reseed and its measurement.
+> adjective entries, `of` 0 → 1,003. **Measured** (`wordnet-umls-aligned-2026-09-30-governed-preps`):
+> grammar gaps 0, 62/62 expected hits, readings 652 → 668, skeletons 212 → 215; `… predictive of MMR
+> deficiency` re-pinned to its relational reading; selection 29/41 on a new draw. For the owner: the
+> judge's precision sample (`experiments/lexicon-specialist/precision-probe.tsv`), and a second ledger
+> contradiction (lines 67 and 95 accept `lineage` n13813042, a later row rejects it).
+> **Next:** #264.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change

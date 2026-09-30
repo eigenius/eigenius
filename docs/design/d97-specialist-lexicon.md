@@ -440,6 +440,16 @@ for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 
    6. *Reseed and measure:* the import diff by preposition; the page and the quantity corpus; the
       pins that move re-adjudicated (`… predictive of MMR deficiency`); a new selection draw where
       the renamed relations change the candidates.
+
+   **3a — built and measured** (2026-09-30, `93f3a64`; eigenius#263). The import: 465,939 → 468,807
+   WordNet entries; relational adjective entries 4,117 → 7,033, `of` 0 → 1,003; 1,601 (sense, lemma)
+   pairs carry 1,728 prepositions (104 from WordNet's convention, 773 from the gloss heuristic). The
+   reseed (`wordnet-umls-aligned-2026-09-30-governed-preps`): the recorded rankings replay with 0 misses;
+   grammar gaps 0, expected hits 62 of 62; readings 652 → 668 and skeletons 212 → 215, in two units —
+   `… predictive of MMR deficiency` gains the relational reading and is re-pinned to it; `PARP-1
+   inhibitors are successful in cancers with deficiencies in homologous recombination` gains two
+   readings attaching the last PP to the subject, its pinned reading unchanged. The selection draw
+   scores 29 of 41, as before.
 4. **Object + PP**: the `((S\NP)/cat_pp_arg(p))/NP` category, its passive (`were treated with
    etoposide`), and the importer's frames 20/21.
 5. **Verb senses of concepts**: the UMLS importer emits them through SPECIALIST's nominalizations,
