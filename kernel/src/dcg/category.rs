@@ -118,6 +118,15 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
             Box::new(measure_type(unit, reading)?),
             Box::new(Exp::sort(0)),
         )),
+        // ⟦MPQ[u, r]⟧ = (⟦MP[u, r]⟧ → Prop) → Prop — a quantified measure phrase (`Four and seven days`)
+        // is a quantifier over the slot it fills (D95 slice 8e).
+        ("cat_mpq", [unit, reading]) => Ok(Exp::Arrow(
+            Box::new(Exp::Arrow(
+                Box::new(measure_type(unit, reading)?),
+                Box::new(Exp::sort(0)),
+            )),
+            Box::new(Exp::sort(0)),
+        )),
         // ⟦cat_unit_forall(λu. R)⟧ = Πu:core:unit. ⟦R⟧ — as `cat_forall`, the bound variable appears in
         // ⟦R⟧ (`cat_mp(u, _)` denotes `Quantity(u)`), so the binder is a Π, not erased.
         ("cat_unit_forall", [body]) => {
@@ -404,9 +413,12 @@ fn unify_into(slot: &Exp, arg: &Exp, layer: &Arc<Layer>, subst: &mut CatSubst) -
     if let (Some([su, sr]), Some([au, ar])) = (is_ctor(slot, "cat_mp"), is_ctor(arg, "cat_mp")) {
         return sr == ar && unify_unit(su, au, subst);
     }
-    // cat_mpc(u, reading) (D95 slice 6): a measure constraint unifies as the measure phrase it bounds.
-    if let (Some([su, sr]), Some([au, ar])) = (is_ctor(slot, "cat_mpc"), is_ctor(arg, "cat_mpc")) {
-        return sr == ar && unify_unit(su, au, subst);
+    // cat_mpc(u, reading) (D95 slice 6): a measure constraint unifies as the measure phrase it bounds;
+    // so does a quantified one, cat_mpq (slice 8e).
+    for ctor in ["cat_mpc", "cat_mpq"] {
+        if let (Some([su, sr]), Some([au, ar])) = (is_ctor(slot, ctor), is_ctor(arg, ctor)) {
+            return sr == ar && unify_unit(su, au, subst);
+        }
     }
     // Higher-order functors `A/B` (`fwd`) and `A\B` (`bwd`), D63 §8.2 item 4:
     // structural subsumption with the standard function variance — the **result**
@@ -524,6 +536,19 @@ pub fn measure_constraint_cat(
         return None;
     };
     Some(Exp::InductiveCtor(cat, "cat_mpc".to_string(), args))
+}
+
+/// A quantified measure phrase's category `cat_mpq(unit, reading)` (D95 slice 8e), for the item a
+/// quantity list seeds. `None` if `lexicon:Cat` or `lexicon:Reading` does not resolve.
+pub fn measure_quantifier_cat(
+    layer: &Arc<Layer>,
+    unit: &crate::units::Unit,
+    reading: crate::units::convert::Reading,
+) -> Option<Exp> {
+    let Exp::InductiveCtor(cat, _, args) = measure_phrase_cat(layer, unit, reading)? else {
+        return None;
+    };
+    Some(Exp::InductiveCtor(cat, "cat_mpq".to_string(), args))
 }
 
 /// Substitute schematic category type-variables (`Exp::Var`) throughout a

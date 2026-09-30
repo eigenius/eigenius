@@ -388,6 +388,12 @@ data lexicon:Cat : Type 1 {
     // units:Difference(u) → Prop. Indexed as `cat_mp` is. A consumer of `cat_mp(u, r)` takes it through
     // the `unit_constraint` combinator, which quantifies the value the consumer would have taken.
     cat_mpc : core:unit -> lexicon:Reading -> lexicon:Cat,
+    // MPQ[u, reading] — a QUANTIFIED measure phrase (D95 slice 8e): `Four and seven days`, a list of
+    // values with the unit written once, which the preprocessor reads as one token. It denotes a
+    // quantifier over the slot a measure phrase fills: ⟦cat_mpq(u, r)⟧ = (⟦cat_mp(u, r)⟧ → Prop) → Prop,
+    // `λk. And(k(4 d), k(7 d))`. A consumer of `cat_mp(u, r)` takes it through the `unit_constraint`
+    // combinators, as it takes a constraint.
+    cat_mpq : core:unit -> lexicon:Reading -> lexicon:Cat,
     // NUM — a BARE NUMBER (D95 slice 7): `5`, `1,000`, `two`, `2 × 10³`. D95 decided that bare
     // numerals and quantities "share a carrier, not a category": ⟦cat_num⟧ = units:Quantity(u"1"),
     // the carrier a dimensionless measure phrase has, but a number is not a measure phrase — `5 cells`

@@ -365,6 +365,63 @@ fn a_number_word_is_a_numeral() {
     }
 }
 
+/// Slice 8e: numerals joined by commas and one `and` or `or`, with the unit written once after the
+/// last, are one list token, every member read in that unit. Each numeral with its own unit, or no
+/// unit, is not a list.
+#[test]
+fn a_list_with_its_unit_once_is_one_token() {
+    for (text, surface, values, disjunctive) in [
+        (
+            "Four and seven days after the lentiviral transduction",
+            "Four and seven days",
+            vec![q(345_600, 1), q(604_800, 1)],
+            false,
+        ),
+        (
+            "for 4, 8 and 12 h",
+            "4, 8 and 12 h",
+            vec![q(14_400, 1), q(28_800, 1), q(43_200, 1)],
+            false,
+        ),
+        (
+            "for 4, 8, and 12 h",
+            "4, 8, and 12 h",
+            vec![q(14_400, 1), q(28_800, 1), q(43_200, 1)],
+            false,
+        ),
+        (
+            "for 5 or 10 h",
+            "5 or 10 h",
+            vec![q(18_000, 1), q(36_000, 1)],
+            true,
+        ),
+    ] {
+        let tokens = tokenize(text, units());
+        let (found, list) = tokens
+            .iter()
+            .find_map(|t| match t.kind() {
+                TokenKind::QuantityList(l) => Some((t.surface().to_string(), l.clone())),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{text:?}: no list in {tokens:?}"));
+        assert_eq!(found, surface, "{text:?}");
+        let read: Vec<Rational> = list
+            .members
+            .iter()
+            .map(|m| m.readings[0].value.magnitude.coefficient().clone())
+            .collect();
+        assert_eq!((read, list.disjunctive), (values, disjunctive), "{text:?}");
+    }
+    for text in ["chromosomes 3 and 5", "2 and 3 cells", "for 4 h and 8 h"] {
+        assert!(
+            tokenize(text, units())
+                .iter()
+                .all(|t| !matches!(t.kind(), TokenKind::QuantityList(_))),
+            "{text:?}"
+        );
+    }
+}
+
 /// Decision 4, deferred to D96: in plain text an unbracketed figure panel reads as a quantity.
 #[test]
 fn an_unbracketed_figure_panel_reads_as_a_quantity() {

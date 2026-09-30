@@ -23,8 +23,8 @@ cargo test -p eigenius-kernel --test quantity_corpus
 - a covered row parses, and every reading contains its relations and renders its values;
 - a gap row still does not parse. When one does, its construction has arrived: update the row.
 
-As committed: 47 covered rows, all passing. The two `g` rows have two readings each, gram and
-standard gravity (D93). Slices 6–8 (D95 implementation plan) added twenty-five, each from a sentence
+As committed: 49 covered rows, all passing. The two `g` rows have two readings each, gram and
+standard gravity (D93). Slices 6–8 (D95 implementation plan) added twenty-seven, each from a sentence
 of the paper: a range (`4–12% gels`, `80–90% confluence`), an approximation (`approximately 100 mm³`),
 a bound symbol (`>90%`), counts — a plain one (`three sgRNAs`), a bounded one (`more than one MMR
 gene`) and a count range (`4–7 foci`) — a proportion (`Half of the cell pellet`), a number word with
@@ -34,8 +34,9 @@ proportions sharing a head (`five MSS and five MSI cell lines`; `15% of colon, 2
 of endometrial and 12% of ovarian cancers`, one reading), offsets (`72 h after transduction`, `6 h
 before collection`, `4 days post transduction`, `2 days later`), a deadline (`by three weeks`), a
 period (`every 3 days`, `every 2–3 days`), pseudo-partitives (`10 μg ml⁻¹ of colcemid`, `0.2 μg/ml of
-doxycycline`, `24 h of puromycin selection`) and fronted adjuncts (`After 24 h, …`, `Nine days after
-doxycycline treatment, …`). The one gap row:
+doxycycline`, `24 h of puromycin selection`), fronted adjuncts (`After 24 h, …`, `Nine days after
+doxycycline treatment, …`), `per` after a count (`At least 1,000 cells per sample were scored.`) and a
+list with its unit once (`Four and seven days after transduction, …`). The one gap row:
 
 | Gap | Owner |
 |---|---|

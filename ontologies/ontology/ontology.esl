@@ -117,6 +117,10 @@ axiom ontology:prep_by_value    : lexicon:Entity -> forall (u : core:unit) => un
 // `prep_before_offset` likewise before (D95 slice 8a, decision 1).
 axiom ontology:prep_after_offset  : lexicon:Entity -> lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
 axiom ontology:prep_before_offset : lexicon:Entity -> lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+// `prep_per(Y, x, y)`: x is counted per y, the member y of the distributing kind Y — `at least 1,000
+// cells per sample` (D95 slice 8d). Polymorphic in y's type, so a refined noun (`per time point`)
+// types; opaque, as `prep_in` is.
+axiom ontology:prep_per         : forall (Y : Set) => lexicon:Entity -> Y -> Prop
 // `every_period(x, u, q)`: x recurs with the period q — `changed every 3 days` (D95, "`every N unit`";
 // slice 8b). Opaque, as the PP adjuncts are: no event variable, and the periodicity is the
 // institution's to interpret.

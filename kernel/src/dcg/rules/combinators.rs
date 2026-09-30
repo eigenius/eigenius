@@ -87,7 +87,9 @@ enum SemRecipe {
     /// A consumer applied to a measure constraint: category `cat`; sem [`constrained_sem`] over the
     /// value type `value_ty` and the consumer's `arity`, the unit applied first when the consumer
     /// binds one. `and` is `logic:And`, resolved when the combination was decided. `backward`: the
-    /// consumer is the right operand and the constraint the left.
+    /// consumer is the right operand and the constraint the left. `quantifier`: the operand is a
+    /// quantified measure phrase (`cat_mpq`, D95 slice 8e), applied to the consumer by
+    /// [`quantified_sem`] instead.
     UnitConstrain {
         cat: Exp,
         unit: Option<Exp>,
@@ -95,6 +97,7 @@ enum SemRecipe {
         arity: usize,
         and: Iri,
         backward: bool,
+        quantifier: bool,
     },
     /// Forward composition: category `cat`; sem `λz. L(R z)`.
     FwdComp { cat: Exp },
@@ -399,10 +402,11 @@ impl CombKind {
                     return None;
                 };
                 let (true, [unit @ Exp::LitUnit(_), reading]) =
-                    (name == "cat_mpc", args.as_slice())
+                    (name == "cat_mpc" || name == "cat_mpq", args.as_slice())
                 else {
                     return None;
                 };
+                let quantifier = name == "cat_mpq";
                 let (functor, unit_arg) = match is_ctor(&right.cat, "cat_unit_forall") {
                     Some([Exp::Lam(Patt::Var(uvar), body)]) => {
                         let mut bind = CatSubst::new();
@@ -430,6 +434,7 @@ impl CombKind {
                     arity,
                     and,
                     backward: true,
+                    quantifier,
                 })
             }
             CombKind::DetModify => {
@@ -510,10 +515,11 @@ impl CombKind {
                     return None;
                 };
                 let (true, [unit @ Exp::LitUnit(_), reading]) =
-                    (name == "cat_mpc", args.as_slice())
+                    (name == "cat_mpc" || name == "cat_mpq", args.as_slice())
                 else {
                     return None;
                 };
+                let quantifier = name == "cat_mpq";
                 // A unit-polymorphic consumer is instantiated from the constraint's unit, as
                 // `UnitApply` instantiates it from the measure phrase's; its sem then takes the unit.
                 let (functor, unit_arg) = match is_ctor(&left.cat, "cat_unit_forall") {
@@ -545,6 +551,7 @@ impl CombKind {
                     arity,
                     and,
                     backward: false,
+                    quantifier,
                 })
             }
         }
@@ -609,6 +616,30 @@ pub(crate) fn constrained_sem(
         Box::new(Exp::Arrow(Box::new(witness), Box::new(Exp::Var(p.into())))),
     );
     args.iter().rev().fold(exists, |body, a| {
+        Exp::Lam(Patt::Var(a.clone()), Box::new(body))
+    })
+}
+
+/// The sem of a consumer `f` applied to a quantified measure phrase `Q` (D95 slice 8e):
+/// `λa₁…aₙ. Q(λq. f [u] q a₁…aₙ)` — `Four and seven days after transduction` is the consumer applied
+/// to each value, conjoined.
+fn quantified_sem(f: &Exp, unit: Option<&Exp>, quantifier: &Exp, arity: usize) -> Exp {
+    let q = "__mpq_q";
+    let args: Vec<String> = (0..arity).map(|i| format!("__mpq_a{i}")).collect();
+    let app = |f: Exp, x: Exp| Exp::App(Box::new(f), Box::new(x));
+    let mut consumer = f.clone();
+    if let Some(u) = unit {
+        consumer = app(consumer, u.clone());
+    }
+    consumer = app(consumer, Exp::Var(q.into()));
+    for a in &args {
+        consumer = app(consumer, Exp::Var(a.clone()));
+    }
+    let body = app(
+        quantifier.clone(),
+        Exp::Lam(Patt::Var(q.into()), Box::new(consumer)),
+    );
+    args.iter().rev().fold(body, |body, a| {
         Exp::Lam(Patt::Var(a.clone()), Box::new(body))
     })
 }
@@ -956,20 +987,25 @@ fn build(recipe: SemRecipe, left: &Item, right: &Item, layer: &Arc<Layer>) -> It
             arity,
             and,
             backward,
+            quantifier,
         } => {
             let (consumer, constraint, prov) = if backward {
                 (right, left, Combinator::BackwardApp)
             } else {
                 (left, right, Combinator::ForwardApp)
             };
-            let sem = constrained_sem(
-                consumer.sem(),
-                unit.as_ref(),
-                constraint.sem(),
-                &value_ty,
-                arity,
-                &and,
-            );
+            let sem = if quantifier {
+                quantified_sem(consumer.sem(), unit.as_ref(), constraint.sem(), arity)
+            } else {
+                constrained_sem(
+                    consumer.sem(),
+                    unit.as_ref(),
+                    constraint.sem(),
+                    &value_ty,
+                    arity,
+                    &and,
+                )
+            };
             Item::from_parts(cat, sem, prov, Cost::ZERO)
         }
         SemRecipe::FwdComp { cat } => {

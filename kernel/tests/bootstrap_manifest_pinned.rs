@@ -41,7 +41,8 @@
 //! entries removed; `the`, `these`, `those` before a numeral; `anaphor_of_count`), and for 8a–8c on
 //! `ontology` (the offsets, `prep_before`, `prep_by_value`, `every_period`) and `closed-class`
 //! (`before`, `post`, the offsets, `later`, `by` over a value, `every` over a period, the
-//! pseudo-partitive `of`s). Slices 6–8 each move these layers and pay ONE reseed together, after slice 8
+//! pseudo-partitive `of`s), and for 8d–8e on `lexicon` (`cat_mpq`), `ontology` (`prep_per`) and
+//! `closed-class` (`per`). Slices 6–8 each move these layers and pay ONE reseed together, after slice 8
 //! (`docs/design/d95-implementation-plan.md`, slice 6).
 //!
 //! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
@@ -220,9 +221,9 @@ notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
-lexicon:5847d26fd34e8ed5cd62fb6446db10e74d517da2e57a0efdd175f8a1cbe969fb
-ontology:e2bf2b6f580c825ee166be94c035bafcf5acf984a038d935ca1e8e17d8e39d57
-closed-class:088fc891e63e297ee593b3bb4897d1971dd36c1efbdeb93ff378eb46e660efc9
+lexicon:cd61a4db8aef9d99cb950c27aad8747135aa3eee307791f1873c03a8eb6df651
+ontology:d8156dff601bd783c87b58518514961c22daba5a6d6f9b4953bcc5c1f9be4dfe
+closed-class:c586ef0de090de986ced442a21027dbfea23068a0f1c92e790002d48fc64d02a
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 

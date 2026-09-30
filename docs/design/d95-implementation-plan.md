@@ -952,11 +952,15 @@ before parsing (the preprocessor's decision 1); summing its parts to the whole i
      needs the portion each well receives as an entity; the CNL writes `each well received 33 µl of
      CellTiter-Glo`. `count per million`, number notation like `ppm` (D93), reaches its sentence only
      as a verb's object (`had less than one count per million`), which decision 7 leaves out.
-9. **Measure phrases sharing a unit coordinate as a quantifier over the consumer's slot.** The
-   preprocessor reads a numeral list followed by one unit in that unit (`Four and seven days`: 4 d, 7
-   d), as a range reads its two ends; two measure phrases coordinate into `cat_mpq(u, r)`,
-   `⟦cat_mpq(u, r)⟧ = (⟦cat_mp(u, r)⟧ → Prop) → Prop`, sem `λk. And(k(q₁), k(q₂))`, which a consumer
-   takes as it takes a constraint: `λa…. Q(λq. f q a…)`.
+9. **Measure phrases sharing a unit are one token and a quantifier over the consumer's slot.** A
+   numeral list with the unit written once (`Four and seven days`, `4, 8 and 12 h`, `5 or 10 μM`) is
+   notation, as a range is: the preprocessor reads it as one token, every member in that unit, and
+   seeding gives it `cat_mpq(u, value)`, `⟦cat_mpq(u, r)⟧ = (⟦cat_mp(u, r)⟧ → Prop) → Prop`, sem `λk.
+   And(k(4 d), k(7 d))` (`Or` for `or`). A consumer takes it through the constraint combinators:
+   `λa…. Q(λq. f q a…)`. *(Revised while building: the first text coordinated two measure phrases in
+   the grammar; the unit written once makes the list the preprocessor's, as the range is.)*
+   - No predicate item: `5 and 10 μM etoposide` is not one entity with two concentrations, so a list
+     does not modify a noun. A list whose members each carry the unit (`4 d and 7 d`) is not built.
 
 Not built, besides decisions 7 and 8: a preposition with a gerund clause as its object (`after adding
 doxycycline`), which has no parse without quantities either; the CNL writes `after the addition of
@@ -964,6 +968,21 @@ doxycycline`. `every 3 days thereafter` (`thereafter`).
 
 **Order.** 8a: decisions 1–4. 8b: 5. 8c: 6. 8d: 8. 8e: 9. Then the reseed, which measures slices 6–8
 together.
+
+**8d, 8e — built** (2026-09-29).
+- `per`: `ontology:prep_per : forall (Y : Set) => Entity -> Y -> Prop`; `per_subj` and `per_obj`
+  (`closed-class.esl`), `cat_forall(sg, λY. Q\Q)` under feature binders named apart (`pf`, `pn`) from
+  an object determiner's own `f` and `n`. `At least 1,000 cells per sample were scored` is `∀y:Sample.
+  ∃q. 1000 ≤ q ∧ has_count(Cell, λx. And(prep_per(Sample, x, y), scored(x)), q)`; `verbalize` reads
+  `every Sample, at least 1000 Cell, per Sample …`.
+- Lists: `TokenKind::QuantityList` (`preprocess.rs`, `list_at`, its decision 10); `cat_mpq`
+  (`lexicon-ontology.esl`, its denotation and unification in `dcg/category.rs`); seeding's
+  `list_item`; the constraint combinators take a `cat_mpq` too, through `quantified_sem`.
+  `Four and seven days after transduction, the cells were labeled` is the conjunction of the two
+  offsets, one reading.
+- Tests: `quantity_tokens.rs`, `a_list_with_its_unit_once_is_one_token`; `quantities_in_the_parser.rs`,
+  `per_distributes_over_a_counted_noun_phrase`, `a_list_shares_its_unit`, three more
+  packed-equals-unpacked sentences; the quantity corpus, two rows (49 covered, one gap).
 
 **8a–8c — built** (2026-09-29).
 - `ontology.esl`: `prep_before`, `prep_by_value`, `prep_after_offset`, `prep_before_offset`,

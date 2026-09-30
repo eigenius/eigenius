@@ -3702,6 +3702,40 @@ resource lexicon:of_amount_time : lexicon:LexicalEntry {
     lexicon:sense    = "of.pseudo-partitive";
 }
 
+// ── `per` after a counted noun phrase (D95 slice 8d) ────────────────────────────────
+// `at least 1,000 cells per sample were scored`: for each sample, at least 1,000 of its cells. `per`
+// takes a bare singular noun as a determiner takes its noun (the dependent determiner binds `Y`), and
+// a quantifier on its left, over which it scopes a universal: `λY.λQ.λV. ∀y:Y. Q(λx. And(prep_per(Y,
+// x, y), V(x)))`, subject and object forms. The quantifier's type widens to `Entity` in the slot; its
+// number and finiteness are variables the quantifier binds, named apart from an object determiner's
+// own `f` and `n`, which they unify with.
+resource lexicon:per_subj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Y : Set) => fun (Q : (lexicon:Entity -> Prop) -> Prop) => fun (V : lexicon:Entity -> Prop) =>
+            forall (y : Y) => Q(fun (x : lexicon:Entity) => logic:And(ontology:prep_per(Y, x, y), V(x)))
+        : forall (Y : Set) => ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop ) );
+}
+resource lexicon:per_obj_sem : lexicon:SemTerm {
+    lexicon:term = type_expr( ( fun (Y : Set) => fun (Q : (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> Prop) => fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
+            forall (y : Y) => Q(fun (x : lexicon:Entity) => fun (s2 : lexicon:Entity) => logic:And(ontology:prep_per(Y, x, y), TV(x, s2)), s)
+        : forall (Y : Set) => ((lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> Prop ) );
+}
+resource lexicon:per_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: distributive per after a counted subject ('1,000 cells per sample were scored').";
+    lexicon:form     = "per";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (pf : lexicon:Fin) => lexicon:cat_num_forall(fun (pn : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (Y : Set) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, pf), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, pn))), lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, pf), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, pn))))))) );
+    lexicon:sem      = lexicon:per_subj_sem;
+    lexicon:sem_type = type_expr( forall (Y : Set) => ((lexicon:Entity -> Prop) -> Prop) -> (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "per";
+}
+resource lexicon:per_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: distributive per after a counted object ('scored 1,000 cells per sample').";
+    lexicon:form     = "per";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (pf : lexicon:Fin) => lexicon:cat_num_forall(fun (pn : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (Y : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, pf), lexicon:cat_np(lexicon:Entity, pn)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, pf), lexicon:cat_np(lexicon:Entity, pn)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, pf), lexicon:cat_np(lexicon:Entity, pn)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, pf), lexicon:cat_np(lexicon:Entity, pn)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))))) );
+    lexicon:sem      = lexicon:per_obj_sem;
+    lexicon:sem_type = type_expr( forall (Y : Set) => ((lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> Prop) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> Prop );
+    lexicon:sense    = "per";
+}
+
 // ── Bounds on a measured value (D95 slice 6) ──────────────────────────────────────
 // A bound constrains a measured value instead of stating one (D95, "Ranges need no new semantics"):
 // `less than 37 °C` is `λq. units:lt(u, q, 310.15 K)`, a `cat_mpc` that a consumer of the measure

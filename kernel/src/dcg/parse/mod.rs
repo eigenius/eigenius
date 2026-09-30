@@ -308,6 +308,7 @@ fn seeds_itself(t: &Token) -> bool {
         super::preprocess::TokenKind::Numeral(_)
             | super::preprocess::TokenKind::Quantity(_)
             | super::preprocess::TokenKind::Range(_)
+            | super::preprocess::TokenKind::QuantityList(_)
     )
 }
 

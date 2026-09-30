@@ -23,8 +23,9 @@ out (Measured quantities, rules 7–9). The slice-6 claims are checked by `kerne
 bootstrap chain; the full-lexicon run waits for the reseed after D95 slice 8. Revised again the same
 day for D95 slice 7: counts, proportions, number words, a determiner before a numeral, and counted
 conjuncts sharing a head (DO item 3; Measured quantities, rule 10); and for slice 8: offsets
-(`72 h after transduction`), a deadline (`by three weeks`), `every N unit`, the pseudo-partitive, and
-a fronted adjunct (DO items 11 and 13; Measured quantities, rule 11).*
+(`72 h after transduction`), a deadline (`by three weeks`), `every N unit`, the pseudo-partitive, a
+fronted adjunct, `per` after a count, and a list with its unit once (DO items 11 and 13; Measured
+quantities, rules 11 and 12).*
 
 ## Purpose & posture
 
@@ -147,7 +148,9 @@ something takes it:
 - **after `by` and `every`**: `recovered by three weeks`, `changed every 3 days`, `every 2–3 days`;
 - **before `of` and a noun**, an amount of the noun's stuff (a volume, a mass, an amount of substance,
   a concentration, a duration): `300 μl of CellTiter-Glo`, `0.2 μg/ml of doxycycline`, `24 h of
-  puromycin selection`. A percentage before `of` is a proportion (`15% of colon cancers`).
+  puromycin selection`. A percentage before `of` is a proportion (`15% of colon cancers`);
+- **as a list with the unit once**: `harvested 4 and 7 days after transduction` (at both), `for 5 or
+  10 h`. Not before a noun: `5 and 10 μM etoposide` has no parse — two treatments are two claims (R1).
 
 It cannot be a subject or a verb's object: `The cells contained 4 μg.` has no parse; `The medium
 contained 2 μg ml⁻¹ puromycin.` does.
@@ -211,6 +214,9 @@ contained 2 μg ml⁻¹ puromycin.` does.
     transduction`, not `4 days post-transduction` (one hyphenated token, read as a word). `after`,
     `before`, `post` and `later` take the offset; a bound or approximation on it reads as on any value
     (`about 6 h before collection`).
+12. **`per` distributes a count**: `At least 1,000 cells per sample were scored.` reads as a count
+    in each sample. A quantity per noun (`at 33 μl per well`) has no parse: write `Each well received
+    33 μl of CellTiter-Glo.`
 
 **What this does not change.** A statistic is still not a quantity. `n = 37` counts samples and
 `P = 4.2 × 10⁻¹³` qualifies an inference; neither is a measured value of a physical quantity, and

@@ -862,6 +862,13 @@ impl Parser {
                     _ => Vec::new(),
                 }
             }
+            // A list with its unit written once (D95 slice 8e): a quantifier over the slot a measure
+            // phrase fills, one per reading — `λk. And(k(4 d), k(7 d))` — which a consumer takes as
+            // it takes a constraint. Value readings only, and no predicate: `5 and 10 μM etoposide`
+            // is not one entity with two concentrations.
+            TokenKind::QuantityList(l) => (0..l.members[0].readings.len())
+                .filter_map(|j| self.list_item(l, j))
+                .collect(),
             TokenKind::Range(r) => r
                 .low
                 .readings
@@ -976,6 +983,45 @@ impl Parser {
             Some(out)
         };
         build().unwrap_or_default()
+    }
+
+    /// The quantifier a quantity list seeds for its `j`th reading (D95 slice 8e): `cat_mpq(u, value)`
+    /// with sem `λk. And(k(q₁), And(k(q₂), …))`, `Or` for a list joined by `or`. `None` when the
+    /// members' units differ or the chain lacks the category or the connective.
+    fn list_item(&self, list: &super::super::preprocess::QuantityList, j: usize) -> Option<Item> {
+        let layer = &self.grammar.layer;
+        let values: Vec<&crate::units::convert::Converted> = list
+            .members
+            .iter()
+            .map(|m| m.readings.get(j).map(|r| &r.value))
+            .collect::<Option<_>>()?;
+        let unit = &values.first()?.unit;
+        if values.iter().any(|v| &v.unit != unit) {
+            return None;
+        }
+        let cat = super::super::category::measure_quantifier_cat(
+            layer,
+            unit,
+            crate::units::convert::Reading::Value,
+        )?;
+        let connective = if list.disjunctive {
+            "urn:eigenius:logic:Or"
+        } else {
+            "urn:eigenius:logic:And"
+        };
+        let connective = super::super::category::inductive_iri(layer, connective)?;
+        let k = "MPQ#k";
+        let at = |v: &crate::units::convert::Converted| {
+            Exp::App(Box::new(Exp::Var(k.into())), Box::new(v.term()))
+        };
+        let (last, rest) = values.split_last()?;
+        let body = rest.iter().rev().fold(at(last), |acc, v| {
+            Exp::const_applied(connective.clone(), Vec::new(), vec![at(v), acc])
+        });
+        Some(Item::new(
+            cat,
+            Exp::Lam(Patt::Var(k.into()), Box::new(body)),
+        ))
     }
 
     /// A range's two items (D95 slice 6, decision 8): `cat_mpc(u, value)` with sem

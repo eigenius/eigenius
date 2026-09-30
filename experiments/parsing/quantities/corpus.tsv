@@ -53,3 +53,5 @@ The cells were split 4 days post transduction.	prep_after_offset	345600 s after	
 Nine days after doxycycline treatment, cell viability was assayed.	prep_after_offset	777600 s after	methods: Nine days after doxycycline treatment, cell viability was assayed
 The cells were treated with 0.2 μg/ml of doxycycline.	prep_with has_quantity	1/5000 m^-3·kg	methods (manuscript): All in vitro experiments used 0.2 µg/mL of doxycycline
 After 24 h of puromycin selection, the cells were harvested.	prep_after has_quantity	86400 s	methods: After 24 h of puromycin selection, lentivirally infected cells were …
+At least 1,000 cells per sample were scored.	has_count prep_per	at least 1000;per SampleOne	methods: signal intensities in the nucleus of at least 1,000 cells per sample were scored
+Four and seven days after transduction, the cells were labeled.	prep_after_offset	345600 s after;604800 s after	methods (manuscript): Four and seven days after the lentiviral transduction, cells were labeled with EdU

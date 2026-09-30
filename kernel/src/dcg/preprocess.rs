@@ -57,6 +57,9 @@
 //!    (D95 implementation plan, slice 6, decision 8). An en-dash pair with no unit is a count range,
 //!    read at the dimensionless unit (`4–7 foci`, slice 7, decision 5); a hyphen pair with no unit is
 //!    not a range, since that is how a catalogue number is written (`926-68021`).
+//! 10. **Lists.** Numerals joined by commas and one `and` or `or`, with a unit after the last —
+//!     `Four and seven days`, `4, 8 and 12 h` — are one [`TokenKind::QuantityList`] token, every
+//!     member read in that unit (slice 8e).
 //!
 //! **Case is preserved.** Consumers fold where they need a lowercase key ([`Parser::has_token`],
 //! `lookup_span`, the [`Lemmatizer`], `ReservedTable::kind`, `rank_key`); `all_caps_symbol` needs the
@@ -89,6 +92,15 @@ pub struct QuantityRange {
     pub unitless: bool,
 }
 
+/// Numerals with the unit written once after the last (D95 slice 8e): `Four and seven days`, `4, 8
+/// and 12 h`. Each member is read in that unit, with the same readings in the same order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuantityList {
+    pub members: Vec<Quantity>,
+    /// Joined by `or`, not `and`.
+    pub disjunctive: bool,
+}
+
 /// What a token is to the parser.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -104,6 +116,8 @@ pub enum TokenKind {
     /// Two numerals with the unit written once after them: `2–3 days`, `80–90%`, `45-60%`. The
     /// endpoints carry the same readings, in the same order.
     Range(QuantityRange),
+    /// A list of numerals with the unit written once after the last: `Four and seven days`.
+    QuantityList(QuantityList),
     /// A token the grammar has no reading for and the lexicon is not expected to know: an operator
     /// (`<`, `=`, `±`), a bracket kept around an argument or left unmatched, a token with no ASCII
     /// letter (`μ`).
@@ -330,6 +344,22 @@ fn recognise_quantities(text: &str, tokens: Vec<Token>, units: &ProseUnits) -> V
                 continue;
             }
         }
+        if let Some((end, list)) = list_at(text, &tokens[i..], units) {
+            let mut j = i + 1;
+            while j < tokens.len() && tokens[j].span.start < end {
+                j += 1;
+            }
+            if tokens[i..j].iter().all(|t| t.span.end <= end) {
+                let start = tokens[i].span.start;
+                out.push(Token {
+                    surface: text[start..end].to_string(),
+                    span: start..end,
+                    kind: TokenKind::QuantityList(list),
+                });
+                i = j;
+                continue;
+            }
+        }
         if let Some((end, quantity)) = quantity_at(text, &tokens[i], units) {
             let mut j = i + 1;
             while j < tokens.len() && tokens[j].span.start < end {
@@ -395,6 +425,57 @@ fn range_at(text: &str, t: &Token, units: &ProseUnits) -> Option<(usize, Quantit
                 readings: high_readings,
             },
             unitless,
+        },
+    ))
+}
+
+/// The list `tokens` starts, if it is numerals joined by commas and one `and` or `or`, and a unit
+/// follows the last (D95 slice 8e): `Four and seven days`, `4, 8, and 12 h`, `5 or 10 μM`. Every
+/// member is read in that unit; they must have as many readings as the last one does.
+fn list_at(text: &str, tokens: &[Token], units: &ProseUnits) -> Option<(usize, QuantityList)> {
+    let numeral = |t: &Token| match &t.kind {
+        TokenKind::Numeral(v) => Some(v.clone()),
+        _ => None,
+    };
+    let mut values = vec![numeral(tokens.first()?)?];
+    let mut k = 1;
+    while tokens.get(k).is_some_and(Token::is_comma) {
+        let Some(v) = tokens.get(k + 1).and_then(numeral) else {
+            break;
+        };
+        values.push(v);
+        k += 2;
+    }
+    if tokens.get(k).is_some_and(Token::is_comma) {
+        k += 1;
+    }
+    let conjunction = tokens.get(k)?;
+    let disjunctive = match conjunction.surface.to_ascii_lowercase().as_str() {
+        "and" => false,
+        "or" => true,
+        _ => return None,
+    };
+    let last = tokens.get(k + 1)?;
+    values.push(numeral(last)?);
+    let mut members = Vec::with_capacity(values.len());
+    let mut end = None;
+    for value in values {
+        let (e, readings) = units.read(text, last.span.end, false, &value)?;
+        if end.is_some_and(|end| end != e)
+            || members
+                .first()
+                .is_some_and(|m: &Quantity| m.readings.len() != readings.len())
+        {
+            return None;
+        }
+        end = Some(e);
+        members.push(Quantity { value, readings });
+    }
+    Some((
+        end?,
+        QuantityList {
+            members,
+            disjunctive,
         },
     ))
 }

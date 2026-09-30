@@ -589,6 +589,9 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     format!("{share} of {group}, {pred}")
                 };
             }
+            // The distributive `per` (D95 slice 8d): `prep_per(Y, x, y)` reads `per Y`; `x` and `y` are
+            // the variables the count and the universal bind.
+            ("prep_per", 3) => return format!("per {}", bare_np(args[0], vb)),
             // A period (D95 slice 8b): `every_period(x, u, q)` reads `x every 259200 s`.
             ("every_period", 3) => {
                 let subj = verbalize(args[0], vb);

@@ -683,3 +683,27 @@ resource corpus:selection_n : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( Set );
     lexicon:sense    = "selection";
 }
+class corpus:SampleOne : lexicon:Entity { }
+resource corpus:sample_n : lexicon:LexicalEntry {
+    lexicon:form     = "sample";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:SampleOne, lexicon:sg) );
+    lexicon:sem      = corpus:SampleOne;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "sample";
+}
+axiom corpus:v90000045_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:scored_v : lexicon:LexicalEntry {
+    lexicon:form     = "scored";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000045_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:score.v.90000045";
+}
+axiom corpus:v90000046_t : lexicon:Entity -> lexicon:Entity -> Prop
+resource corpus:labeled_v : lexicon:LexicalEntry {
+    lexicon:form     = "labeled";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:pss), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:v90000046_t;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:label.v.90000046";
+}

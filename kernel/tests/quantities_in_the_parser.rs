@@ -386,6 +386,9 @@ fn packed_equals_unpacked_on_quantities() {
         "HeLa incubated every 2–3 days",
         "HeLa received 5 mg of etoposide",
         "HeLa incubated by three weeks",
+        "at least 1,000 cells per dose incubated",
+        "HeLa received two cells per dose",
+        "HeLa incubated 4 and 7 days after transduction",
     ] {
         assert_eq!(readings(&packed, text), readings(&unpacked, text), "{text}");
     }
@@ -1504,4 +1507,56 @@ fn a_pseudo_partitive_measures_the_noun() {
         r[0].contains("ontology:has_proportion\"") && !r[0].contains("has_quantity"),
         "{r:#?}"
     );
+}
+
+/// Slice 8d, decision 8: `per` after a counted noun phrase distributes, `∀y:Y. Q(λx. And(prep_per(Y,
+/// x, y), V(x)))`, as a subject and as an object.
+#[test]
+fn per_distributes_over_a_counted_noun_phrase() {
+    let parser = Parser::build(layer());
+    for text in [
+        "two cells per dose incubated",
+        "at least 1,000 cells per dose incubated",
+        "HeLa received two cells per dose",
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        let pretty = pretty_term(parsed[0].sem());
+        assert!(
+            pretty.starts_with("ΠG#0:Dose.")
+                && pretty.contains("has_count(Cell")
+                && pretty.contains("prep_per(Dose, G#"),
+            "{text}: {pretty}"
+        );
+    }
+}
+
+/// Slice 8e, decision 9: a list with its unit written once is a quantifier over the slot a measure
+/// phrase fills — the consumer applied to each value, conjoined (`or`: disjoined).
+#[test]
+fn a_list_shares_its_unit() {
+    let parser = Parser::build(layer());
+    for (text, head, values) in [
+        (
+            "HeLa incubated 4 and 7 days after transduction",
+            "And(",
+            ["numer: 345600, denom: 1", "numer: 604800, denom: 1"],
+        ),
+        (
+            "HeLa incubated for 5 or 10 h",
+            "Or(",
+            ["numer: 18000, denom: 1", "numer: 36000, denom: 1"],
+        ),
+        (
+            "Four and seven days after transduction, HeLa incubated",
+            "And(",
+            ["numer: 345600, denom: 1", "numer: 604800, denom: 1"],
+        ),
+    ] {
+        let parsed = parser.parse(text, &Identity);
+        assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
+        assert!(pretty_term(parsed[0].sem()).starts_with(head), "{text}");
+        let debug = format!("{:?}", parsed[0].sem());
+        assert!(values.iter().all(|v| debug.contains(v)), "{text}: {debug}");
+    }
 }
