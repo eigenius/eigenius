@@ -26,7 +26,9 @@ any detour.
 > 0 grammar gaps, 62/62 expected hits, 652 readings, 212 skeletons (`baseline.json`); slice 9 moves
 > nothing on the page. The selection draw scores 29/41 against the selection baseline's 30; lowering
 > it is the owner's call (`selection-baseline.json`, the note of 2026-09-29 on slices 6–8).
-> **Next:** the owner's ruling on the selection baseline, then the branch's PR.
+> **In review:** PR #265 (`2026-09-30`). Before merge, the owner rules on the selection baseline:
+> three ledger rows contradict the ledger's own structure rule, and with them corrected both draws
+> score 28 (`selection-baseline.json`, the note of 2026-09-29 on slices 6–8).
 >
 > **Exit gate:** slices 6–9 built, the quantity corpus extended with the attested sentences, the
 > reseed measured, then the branch's PR.
