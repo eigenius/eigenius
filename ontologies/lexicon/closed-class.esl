@@ -1660,12 +1660,14 @@ resource lexicon:more_card : lexicon:LexicalEntry {
 }
 // (6d′) `N-fold fewer` / `N-fold more` — the count comparatives with a FACTOR (D95 slice 9, decision 2),
 // consumed on the left after the noun: `0.56-fold fewer deletion mutations than typical lineages` →
-// `fold_lower(0.56, card(T, x), card(T, y))`. The factor is kept as written; `fold_lower` is opaque.
-// The senses are the plain entries' own, so the ranker is not asked to choose between the two.
+// `And(gt(card(T, y), card(T, x)), fold_lower(0.56, card(T, x), card(T, y)))`. The order is the plain
+// comparative's own term, since every reading of `N-fold fewer` agrees on it; the factor is kept as
+// written in the opaque `fold_lower`. The senses are the plain entries' own, so the ranker is not
+// asked to choose between the two.
 resource lexicon:fewer_fold_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (T : Set) => fun (k : units:Quantity(u"1")) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
-            ontology:fold_lower(k, lexicon:card(T, x), lexicon:card(T, y))
+            logic:And(measurements:gt(lexicon:card(T, y), lexicon:card(T, x)), ontology:fold_lower(k, lexicon:card(T, x), lexicon:card(T, y)))
           : forall (T : Set) => units:Quantity(u"1") -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
     );
 }
@@ -1680,7 +1682,7 @@ resource lexicon:fewer_fold : lexicon:LexicalEntry {
 resource lexicon:more_fold_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (T : Set) => fun (k : units:Quantity(u"1")) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
-            ontology:fold_higher(k, lexicon:card(T, x), lexicon:card(T, y))
+            logic:And(measurements:gt(lexicon:card(T, x), lexicon:card(T, y)), ontology:fold_higher(k, lexicon:card(T, x), lexicon:card(T, y)))
           : forall (T : Set) => units:Quantity(u"1") -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
     );
 }
@@ -1693,8 +1695,8 @@ resource lexicon:more_fold : lexicon:LexicalEntry {
     lexicon:sense    = "wn:more.a.01";
 }
 // The same with a STATISTIC before the factor (D95 slice 9, decision 3), consumed after it: `a median
-// 0.56-fold fewer deletion mutations … compared to typical lineages` → `fold_lower(0.56,
-// median_over(λm. card(T, m), x), median_over(λm. card(T, m), y))`, the statistic applied to both
+// 0.56-fold fewer deletion mutations … compared to typical lineages` → the order and the factor over
+// `median_over(λm. card(T, m), x)` and `median_over(λm. card(T, m), y)`, the statistic applied to both
 // measures. `a median` is the one statistic entry.
 resource lexicon:a_median : lexicon:LexicalEntry {
     core:description = "grammatical: a statistic over a group's members ('a median 0.56-fold fewer').";
@@ -1707,7 +1709,7 @@ resource lexicon:a_median : lexicon:LexicalEntry {
 resource lexicon:fewer_stat_fold_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (T : Set) => fun (k : units:Quantity(u"1")) => fun (st : (lexicon:Entity -> core:float) -> lexicon:Entity -> core:float) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
-            ontology:fold_lower(k, st(fun (m : lexicon:Entity) => lexicon:card(T, m), x), st(fun (m : lexicon:Entity) => lexicon:card(T, m), y))
+            logic:And(measurements:gt(st(fun (m : lexicon:Entity) => lexicon:card(T, m), y), st(fun (m : lexicon:Entity) => lexicon:card(T, m), x)), ontology:fold_lower(k, st(fun (m : lexicon:Entity) => lexicon:card(T, m), x), st(fun (m : lexicon:Entity) => lexicon:card(T, m), y)))
           : forall (T : Set) => units:Quantity(u"1") -> ((lexicon:Entity -> core:float) -> lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
     );
 }
@@ -1722,7 +1724,7 @@ resource lexicon:fewer_stat_fold : lexicon:LexicalEntry {
 resource lexicon:more_stat_fold_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (T : Set) => fun (k : units:Quantity(u"1")) => fun (st : (lexicon:Entity -> core:float) -> lexicon:Entity -> core:float) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
-            ontology:fold_higher(k, st(fun (m : lexicon:Entity) => lexicon:card(T, m), x), st(fun (m : lexicon:Entity) => lexicon:card(T, m), y))
+            logic:And(measurements:gt(st(fun (m : lexicon:Entity) => lexicon:card(T, m), x), st(fun (m : lexicon:Entity) => lexicon:card(T, m), y)), ontology:fold_higher(k, st(fun (m : lexicon:Entity) => lexicon:card(T, m), x), st(fun (m : lexicon:Entity) => lexicon:card(T, m), y)))
           : forall (T : Set) => units:Quantity(u"1") -> ((lexicon:Entity -> core:float) -> lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
     );
 }

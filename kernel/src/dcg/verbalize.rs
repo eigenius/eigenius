@@ -372,6 +372,9 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
             // Verb + shared-subject PP is ONE clause, not a conjunction: `And(V(subj), prep(subj, o))`
             // → "subj V prep o" (e.g. "MSI arises from Lynch syndrome"), the dominant sentence shape.
             if d.ends_with("And") {
+                if let Some(text) = factor_comparison(args[0], args[1], vb) {
+                    return text;
+                }
                 if let Some(merged) = verb_pp(args[0], args[1], vb) {
                     return merged;
                 }
@@ -754,6 +757,22 @@ fn prep_parts<'e>(local: &'e str, args: &[&'e Exp], vb: &Vb) -> Option<(&'e str,
         (None, [subj, obj]) => Some((p, subj, verbalize(obj, vb))),
         _ => None,
     }
+}
+
+/// A factor comparative (D95 slice 9): the order `gt(b, a)` beside `fold_lower(N, a, b)`, or `gt(a,
+/// b)` beside `fold_higher(N, a, b)`, reads once, as the factor's words say the order.
+fn factor_comparison(order: &Exp, fold: &Exp, vb: &Vb) -> Option<String> {
+    let (oh, o) = app_spine(order);
+    let (fh, f) = app_spine(fold);
+    let (Some("gt"), [big, small]) = (axiom_local(oh), o.as_slice()) else {
+        return None;
+    };
+    let agrees = match (axiom_local(fh), f.as_slice()) {
+        (Some("fold_lower"), [_, a, b]) => big == b && small == a,
+        (Some("fold_higher"), [_, a, b]) => big == a && small == b,
+        _ => false,
+    };
+    agrees.then(|| verbalize(fold, vb))
 }
 
 /// The number of `T` a count comparative compares, as `(T, x, median)`: `card(T, x)`, or with its
