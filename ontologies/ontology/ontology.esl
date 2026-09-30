@@ -139,6 +139,19 @@ axiom ontology:has_count        : forall (T : Set) => (T -> Prop) -> units:Quant
 // denotes it; the proportion is a dimensionless quantity, so a bound on it (`more than half`) is
 // slice 6's constraint.
 axiom ontology:has_proportion   : lexicon:Entity -> (lexicon:Entity -> Prop) -> units:Quantity(u"1") -> Prop
+// `fold_lower(N, a, b)`: a is N-fold lower than b — `0.56-fold fewer deletion mutations than typical
+// lineages` → fold_lower(0.56, card(M, x), card(M, y)) (D95 slice 9, decision 2); `fold_higher` the
+// other way. The factor is kept as written. Opaque, as `units:approx` is, because the text fixes no
+// arithmetic: `0.56-fold fewer` is a ratio of 0.56, `2-fold fewer` usually one of 1/2, and some
+// authors mean 44% fewer by the first. A check grounds it in `stats:EffectSize::Relative`.
+axiom ontology:fold_lower       : units:Quantity(u"1") -> core:float -> core:float -> Prop
+axiom ontology:fold_higher      : units:Quantity(u"1") -> core:float -> core:float -> Prop
+// `median_over(f, x)`: the median of the measure f over the group x's members (D95 slice 9, decision 3)
+// — `a median 0.56-fold fewer deletion mutations … compared to typical lineages` →
+// fold_lower(0.56, median_over(λm. card(M, m), x), median_over(λm. card(M, m), y)). The group is an
+// entity, as `has_proportion`'s is. Opaque, as `card` is; `stats:median_of` over a SampleSet is the
+// institution's.
+axiom ontology:median_over      : (lexicon:Entity -> core:float) -> lexicon:Entity -> core:float
 
 // ── Naming apposition (D63 §5.3, close apposition of a sortal + a proper name) ────────
 // `named(x, n)`: the individual `x` bears the proper name whose token is `n` — the coining

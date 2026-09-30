@@ -37,10 +37,11 @@
 //!    content tokens, and a stray one would block a full-span parse.
 //! 6. **Kinds.** A numeral is [`TokenKind::Numeral`], in digits or as one of the number words `one`
 //!    … `ten`, in any case (D95 slice 7d, decision 11): `Nine days` is a quantity, and `three sgRNAs`
-//!    counts as `3 sgRNAs` does. A token that starts with a digit and is not one (`53BP1`, `5-fold`,
-//!    `1a`) is a [`TokenKind::Word`], so a lexicon without it reports it missing (D95, decision 3). A
-//!    digit pair joined by an en-dash (`4–12`) and a token with no ASCII letter are `NonProse`; step 9
-//!    makes the pair a range when a unit follows it.
+//!    counts as `3 sgRNAs` does. A numeral joined by a hyphen to `fold` — `0.56-fold`, `two-fold` — is
+//!    a [`TokenKind::Factor`] (slice 9, decision 1). Any other token that starts with a digit
+//!    (`53BP1`, `1a`) is a [`TokenKind::Word`], so a lexicon without it reports it missing (D95,
+//!    decision 3). A digit pair joined by an en-dash (`4–12`) and a token with no ASCII letter are
+//!    `NonProse`; step 9 makes the pair a range when a unit follows it.
 //! 7. **Scientific notation.** A mantissa, `×` or `x`, and a power of ten — `2 × 10⁻¹⁶`, `1.5 x 10³`,
 //!    `2.2× 10-16` — are one numeral, and so is a power of ten written with a superscript or a caret
 //!    (`10³`, `10^6`). After `×` the exponent may be written with a plain minus, as extracted text
@@ -118,6 +119,9 @@ pub enum TokenKind {
     Range(QuantityRange),
     /// A list of numerals with the unit written once after the last: `Four and seven days`.
     QuantityList(QuantityList),
+    /// A factor, a numeral joined by a hyphen to `fold`: `0.56-fold`, `two-fold` (D95 slice 9). A
+    /// ratio, not a measure: `10% fewer` and `3 fewer` state differences.
+    Factor(Rational),
     /// A token the grammar has no reading for and the lexicon is not expected to know: an operator
     /// (`<`, `=`, `±`), a bracket kept around an argument or left unmatched, a token with no ASCII
     /// letter (`μ`).
@@ -721,12 +725,14 @@ fn flush(text: &str, run: &mut Vec<&Lexeme>, tokens: &mut Vec<Token>) {
         tokens.push(symbol(text, l));
     }
     let surface = concat(&run[start..=last]);
-    let kind = match numeral_value(&surface).or_else(|| number_word(&surface)) {
-        Some(value) => TokenKind::Numeral(value),
-        None if is_range(&surface) => TokenKind::NonProse,
-        None if surface.starts_with(|c: char| c.is_ascii_digit()) => TokenKind::Word,
-        None if !surface.chars().any(|c| c.is_ascii_alphabetic()) => TokenKind::NonProse,
-        None => TokenKind::Word,
+    let number = numeral_value(&surface).or_else(|| number_word(&surface));
+    let kind = match (number, factor(&surface)) {
+        (Some(value), _) => TokenKind::Numeral(value),
+        (None, Some(value)) => TokenKind::Factor(value),
+        _ if is_range(&surface) => TokenKind::NonProse,
+        _ if surface.starts_with(|c: char| c.is_ascii_digit()) => TokenKind::Word,
+        _ if !surface.chars().any(|c| c.is_ascii_alphabetic()) => TokenKind::NonProse,
+        _ => TokenKind::Word,
     };
     tokens.push(Token {
         span: run[start].span.start..run[last].span.end,
@@ -750,6 +756,12 @@ fn number_word(s: &str) -> Option<Rational> {
     let lower = s.to_ascii_lowercase();
     let n = NUMBER_WORDS.iter().position(|w| *w == lower)? + 1;
     Rational::from_integer(num_bigint::BigInt::from(n)).ok()
+}
+
+/// The value of a factor (D95 slice 9, decision 1): a numeral or a number word, a hyphen, `fold`.
+fn factor(s: &str) -> Option<Rational> {
+    let n = s.strip_suffix("-fold")?;
+    numeral_value(n).or_else(|| number_word(n))
 }
 
 /// The value of a numeral: an optional sign (`-`, `−`), digits — plain, or grouped by commas in
@@ -965,7 +977,7 @@ mod tests {
 
     #[test]
     fn a_digit_initial_token_that_is_not_a_numeral_is_a_word() {
-        for word in ["53BP1", "5-fold", "1a", "0.56-fold", "45-60"] {
+        for word in ["53BP1", "1a", "45-60", "5-folded"] {
             assert_eq!(tokenize(word)[0].kind(), &TokenKind::Word, "{word}");
         }
         // A power of ten written with a superscript is a numeral (decision 7), no longer a word.
@@ -976,6 +988,26 @@ mod tests {
         for word in ["MLH1", "BRCA1", "WRN", "HEK293T"] {
             assert_eq!(tokenize(word)[0].kind(), &TokenKind::Word, "{word}");
         }
+    }
+
+    #[test]
+    fn a_numeral_joined_to_fold_is_a_factor() {
+        for (text, value) in [
+            ("0.56-fold", "0.56"),
+            ("2-fold", "2"),
+            ("Two-fold", "2"),
+            ("1,000-fold", "1000"),
+        ] {
+            assert_eq!(
+                tokenize(text)[0].kind(),
+                &TokenKind::Factor(rat(value)),
+                "{text}"
+            );
+        }
+        assert_eq!(
+            surfaces("a median 0.56-fold fewer"),
+            ["a", "median", "0.56-fold", "fewer"]
+        );
     }
 
     #[test]

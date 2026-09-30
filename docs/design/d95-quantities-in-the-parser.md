@@ -113,6 +113,10 @@ not a search:
 | `5-fold` | `5` numeral | `-fold` is not a unit | no |
 | `2-2` | `2` numeral | `-2` is not a unit | no |
 
+*Revised 2026-09-29 (implementation plan, slice 9, decision 1):* `5-fold` is not split and is not a
+unit, but it is no longer a word: a numeral joined by a hyphen to `fold` is a factor token, `cat_factor`,
+which the factor comparatives take (`0.56-fold fewer`).
+
 Both halves of the test are load-bearing. Without the numeral-prefix test, `HEK293T` would split on
 tesla; without the unit-suffix test, `53BP1` would split on nothing.
 
@@ -963,7 +967,8 @@ deferred on zero corpus attestations.
 implementation plan, because the paper attests them. Ranges need no interval type ("Ranges need no
 new semantics"). Statistic routing and the tolerance construction stay out. So are number words
 (`Nine days`), a determiner before a numeral (`the four other RecQ DNA helicases`) and counted
-conjuncts sharing a head (`five MSS and five MSI cell lines`), slice 7d.
+conjuncts sharing a head (`five MSS and five MSI cell lines`), slice 7d. Slice 9 states `a median`
+inside the claim, as `ontology:median_over`, and leaves its routing to D52 out.
 
 An earlier draft also placed "any change to the composition rules" out of scope, on the grounds that
 D93 showed them unaffected. That is false and the reason is recorded above: `cat_pp_arg`, `cat_pp`

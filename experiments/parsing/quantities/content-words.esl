@@ -707,3 +707,37 @@ resource corpus:labeled_v : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:label.v.90000046";
 }
+
+// Slice 9 rows: a factor on a count comparative, with a statistic and `compared to`.
+class corpus:DeletionMutation : lexicon:Entity { }
+resource corpus:deletion_mutations_n : lexicon:LexicalEntry {
+    lexicon:form     = "deletion mutations";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:DeletionMutation, lexicon:pl) );
+    lexicon:sem      = corpus:DeletionMutation;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "deletion mutations";
+}
+class corpus:MicrosatelliteRegion : lexicon:Entity { }
+resource corpus:microsatellite_regions_n : lexicon:LexicalEntry {
+    lexicon:form     = "microsatellite regions";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:MicrosatelliteRegion, lexicon:pl) );
+    lexicon:sem      = corpus:MicrosatelliteRegion;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "microsatellite regions";
+}
+class corpus:Lineage : lexicon:Entity { }
+resource corpus:lineages_n : lexicon:LexicalEntry {
+    lexicon:form     = "lineages";
+    lexicon:cat      = type_expr( lexicon:cat_n(corpus:Lineage, lexicon:pl) );
+    lexicon:sem      = corpus:Lineage;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "lineages";
+}
+axiom corpus:a90000047 : lexicon:Entity -> Prop
+resource corpus:typical_a : lexicon:LexicalEntry {
+    lexicon:form     = "typical";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = corpus:a90000047;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:typical.a.90000047";
+}

@@ -107,11 +107,27 @@ pub fn denote_cat(cat: &Exp) -> Result<Exp, String> {
         ("cat_mp", [unit, reading]) => measure_type(unit, reading),
         // ⟦NUM⟧ = units:Quantity(u"1") — a bare number shares a dimensionless measure phrase's carrier,
         // not its category (D95, "Bare numerals and quantities share a carrier"; slice 7).
-        ("cat_num", []) => Ok(Exp::const_applied(
+        // ⟦FACTOR⟧ = units:Quantity(u"1") — a factor shares the carrier too, as a ratio (D95 slice 9,
+        // decision 1).
+        ("cat_num", []) | ("cat_factor", []) => Ok(Exp::const_applied(
             crate::ontology::well_known::iri(crate::units::convert::QUANTITY),
             Vec::new(),
             vec![Exp::LitUnit(crate::units::Unit::dimensionless())],
         )),
+        // ⟦STAT⟧ = (Entity → float) → Entity → float — a statistic takes a measure to its summary over
+        // a group's members (D95 slice 9, decision 3).
+        ("cat_stat", []) => {
+            let entity = || -> Result<Exp, String> {
+                Ok(Exp::EigonClass(
+                    Iri::parse("urn:eigenius:lexicon:Entity").map_err(|e| e.to_string())?,
+                ))
+            };
+            let float = || Exp::EigonPrimitive(crate::nbe::term::PrimitiveType::Float);
+            let measure = || -> Result<Exp, String> {
+                Ok(Exp::Arrow(Box::new(entity()?), Box::new(float())))
+            };
+            Ok(Exp::Arrow(Box::new(measure()?), Box::new(measure()?)))
+        }
         // ⟦MPC[u, r]⟧ = ⟦MP[u, r]⟧ → Prop — a measure constraint (`less than 37 °C`) is a predicate over
         // the quantity it bounds (D95 slice 6, decision 1).
         ("cat_mpc", [unit, reading]) => Ok(Exp::Arrow(
@@ -523,6 +539,13 @@ pub fn measure_phrase_cat(
 pub fn number_cat(layer: &Arc<Layer>) -> Option<Exp> {
     let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
     Some(Exp::InductiveCtor(cat, "cat_num".to_string(), vec![]))
+}
+
+/// A factor's category `cat_factor` (D95 slice 9), for the item a factor token seeds. `None` if
+/// `lexicon:Cat` does not resolve.
+pub fn factor_cat(layer: &Arc<Layer>) -> Option<Exp> {
+    let cat = inductive_iri(layer, "urn:eigenius:lexicon:Cat")?;
+    Some(Exp::InductiveCtor(cat, "cat_factor".to_string(), vec![]))
 }
 
 /// A measure constraint's category `cat_mpc(unit, reading)` (D95 slice 6), for the items seeding

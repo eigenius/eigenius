@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! D95 slices 4 to 7 — measure phrases in the grammar, their consumers, bounds and ranges on them,
-//! counts, proportions, and a determiner's numeral and modifiers before a shared head. The categories
-//! (`cat_mp`, `cat_unit_forall`, `lexicon:Reading`), the `Difference` type, the unit-polymorphic
-//! application, the seeding and the prepositions over a measured value (`closed-class.esl`) are in
-//! the bootstrap chain; the fixture adds the content words around them, and a verb that takes only a
-//! difference in kelvin, which slice 7's consumers will be shaped as. No DB, no reseed.
+//! D95 slices 4 to 9 — measure phrases in the grammar, their consumers, bounds and ranges on them,
+//! counts, proportions, a determiner's numeral and modifiers before a shared head, the positions a
+//! measure phrase takes, and factors on count comparatives. The categories (`cat_mp`,
+//! `cat_unit_forall`, `lexicon:Reading`), the `Difference` type, the unit-polymorphic application, the
+//! seeding and the prepositions over a measured value (`closed-class.esl`) are in the bootstrap chain;
+//! the fixture adds the content words around them, and a verb that takes only a difference in kelvin,
+//! which slice 7's consumers will be shaped as. No DB, no reseed.
 
 use std::sync::Arc;
 
@@ -389,6 +390,9 @@ fn packed_equals_unpacked_on_quantities() {
         "at least 1,000 cells per dose incubated",
         "HeLa received two cells per dose",
         "HeLa incubated 4 and 7 days after transduction",
+        "HeLa received 0.56-fold fewer cells than HeLa",
+        "HeLa received two-fold more cells compared with HeLa",
+        "HeLa received a median 0.56-fold fewer cells compared to HeLa",
     ] {
         assert_eq!(readings(&packed, text), readings(&unpacked, text), "{text}");
     }
@@ -1559,4 +1563,89 @@ fn a_list_shares_its_unit() {
         let debug = format!("{:?}", parsed[0].sem());
         assert!(values.iter().all(|v| debug.contains(v)), "{text}: {debug}");
     }
+}
+
+/// Slice 9, decisions 1 and 2: a factor on a count comparative states the factor as written,
+/// `fold_lower(N, card(T, x), card(T, y))`. A percentage or a count before `fewer` is a difference,
+/// not a factor, and is not read as one.
+#[test]
+fn a_factor_on_a_count_comparative() {
+    let layer = layer();
+    let parser = Parser::build(Arc::clone(&layer));
+    let names = std::collections::BTreeMap::new();
+    for (text, rel, value, words) in [
+        (
+            "HeLa received 0.56-fold fewer cells than HeLa",
+            "ontology:fold_lower\"",
+            "numer: 14, denom: 25",
+            "hela has 14/25-fold fewer Cell than hela",
+        ),
+        (
+            "HeLa received two-fold more cells than HeLa",
+            "ontology:fold_higher\"",
+            "numer: 2, denom: 1",
+            "hela has 2-fold more Cell than hela",
+        ),
+    ] {
+        let r = readings(&parser, text);
+        assert_eq!(r.len(), 1, "{text}: {r:#?}");
+        assert!(r[0].contains(rel) && r[0].contains(value), "{text}: {r:#?}");
+        let parsed = parser.parse(text, &Identity);
+        let surface = verbalize(parsed[0].sem(), &Vb::surface(&names, &layer));
+        assert_eq!(surface, words, "{text}");
+    }
+    for text in [
+        "HeLa received 10% fewer cells than HeLa",
+        "HeLa received 3 fewer cells than HeLa",
+    ] {
+        let r = readings(&parser, text);
+        assert!(r.iter().all(|r| !r.contains("fold_")), "{text}: {r:#?}");
+    }
+}
+
+/// Slice 9, decision 4: `compared to` and `compared with` mark a comparison's standard as `than`
+/// does, with and without a factor.
+#[test]
+fn compared_to_marks_the_standard() {
+    let parser = Parser::build(layer());
+    for (than, compared) in [
+        (
+            "HeLa received 0.56-fold fewer cells than HeLa",
+            "HeLa received 0.56-fold fewer cells compared to HeLa",
+        ),
+        (
+            "HeLa received fewer cells than HeLa",
+            "HeLa received fewer cells compared with HeLa",
+        ),
+    ] {
+        let a = readings(&parser, than);
+        assert_eq!(a.len(), 1, "{than}: {a:#?}");
+        assert_eq!(a, readings(&parser, compared), "{compared}");
+    }
+}
+
+/// Slice 9, decision 3: `a median` is a statistic over a group's members, which the factor
+/// comparative applies to both counts: `fold_lower(N, median_over(λm. card(T, m), x),
+/// median_over(λm. card(T, m), y))`.
+#[test]
+fn a_median_summarises_both_counts() {
+    let layer = layer();
+    let parser = Parser::build(Arc::clone(&layer));
+    let names = std::collections::BTreeMap::new();
+    let text = "HeLa received a median 0.56-fold fewer cells compared to HeLa";
+    let parsed = parser.parse(text, &Identity);
+    assert_eq!(parsed.len(), 1, "{} readings", parsed.len());
+    let pretty = pretty_term(parsed[0].sem());
+    assert!(
+        pretty.starts_with("fold_lower(")
+            && pretty.matches("median_over(λ").count() == 2
+            && pretty.matches("card(Cell, ").count() == 2,
+        "{pretty}"
+    );
+    let surface = verbalize(parsed[0].sem(), &Vb::surface(&names, &layer));
+    assert_eq!(surface, "hela has a median 14/25-fold fewer Cell than hela");
+    // A statistic needs a factor: `a median fewer cells` is not English and has no reading.
+    assert!(parser
+        .parse("HeLa received a median fewer cells than HeLa", &Identity)
+        .is_empty());
 }

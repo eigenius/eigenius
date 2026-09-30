@@ -1055,6 +1055,91 @@ standard's marker, `a median` as the statistic the ratio is. The ratio has
 `stats:EffectSize::Relative`'s shape (D95, "The tolerance derivation"); the parse states it, and the
 statistics institution can later ground it.
 
+**The paper's shapes** (surveyed 2026-09-29): `N-fold` once in each version, in this sentence
+(`contained` in the Nature text, `harboring` in the manuscript); elsewhere `fold change` is a noun
+(`mean fold change`). `a` + statistic + number: this sentence only. `compared to` / `compared with`:
+11 in the Nature text — 7 mark a standard or a contrast (`the top preferential dependency in MSI
+compared to MSS cell lines`, this sentence, `change in intensity following WRN knockout compared to
+control sgRNA`, `the mean ratio of luminescence signal from the doxycycline-treated condition compared
+to the condition without doxycycline`), 4 are the verb (`were compared to negative controls`).
+
+**Decisions** (2026-09-29)
+
+1. **`N-fold` is a factor: a token and a category of its own.** The preprocessor reads a numeral
+   joined by a hyphen to `fold` — `0.56-fold`, `2-fold`, `two-fold` — as `TokenKind::Factor(value)`,
+   and seeding gives it `cat_factor`, ⟦cat_factor⟧ = `units:Quantity(u"1")`: a factor shares the
+   dimensionless carrier with `cat_num`, not its category (D95, "Bare numerals and quantities share a
+   carrier, not a category").
+   - *Rejected:* `fold` as a unit, making `0.56-fold` a `cat_mp(1, value)`. `%` is read at the
+     dimensionless unit too (`10%` is 1/10), and before `fewer` a percentage or a count is a
+     difference (`10% fewer`, `3 fewer`), where a factor is a ratio. One category would read `10%
+     fewer` as the factor 1/10.
+   - This revises D95 decision 3 and slice 7d decision 12 for `-fold` alone: `5-fold` was a word,
+     reported missing. `twofold`, one word, is a WordNet entry and stays one.
+2. **A factor comparative states the factor as written, in one opaque relation per direction.**
+   `ontology:fold_lower(N, a, b)`: `a` is `N`-fold lower than `b`; `ontology:fold_higher(N, a, b)`
+   the other way; `N : units:Quantity(u"1")`, and `a`, `b : core:float`, the measures `fewer` and
+   `more` compare (`lexicon:card`). `fewer` and `more` each gain an entry that takes a factor on the
+   left after its noun: `These cell lines contained 0.56-fold fewer deletion mutations than typical
+   lineages` is `fold_lower(0.56, card(M, x), card(M, y))`. The verb is dropped, as `fewer`'s own sem
+   drops it (D63 §8.12).
+   - Opaque because `N-fold fewer` has more than one arithmetic reading and the text fixes none:
+     `0.56-fold fewer` is a ratio of 0.56, `2-fold fewer` usually a ratio of 1/2, and some authors
+     write `0.56-fold fewer` for 44% fewer. `units:approx` is opaque for the same reason, a tolerance
+     the text does not state. The convention belongs to the check that grounds the claim in
+     `stats:EffectSize::Relative`.
+   - *Rejected:* defining it, `a < b ∧ (a = N·b ∨ b = N·a)`. That picks the ratio reading, and no
+     layer declares multiplication over `core:float` (D95, "Dispersion splits in two").
+   - *Rejected:* normalising to a single ratio at parse time. `stats:EffectSize` keeps the form
+     "rather than normalising to one number" so a recomputation can check the claim as written.
+3. **`a median` is a statistic over a group's members, applied to both measures.** `a median` is one
+   closed-class entry of a new category `cat_stat`, ⟦cat_stat⟧ = `(Entity → core:float) → Entity →
+   core:float`, sem `ontology:median_over`, the median of a measure over a group's members (a group as
+   `has_proportion` has one). `fewer` and `more` each gain a second factor entry with a statistic slot,
+   consumed after the factor: `These cell lines contained a median 0.56-fold fewer deletion mutations
+   … compared to typical lineages` is `fold_lower(0.56, median_over(λm. card(M, m), x),
+   median_over(λm. card(M, m), y))`.
+   - Both sides: the paper does not say whether 0.56 is the ratio of the two groups' medians or the
+     median of each line's ratio to typical lineages. Against a standard summarised by the same
+     statistic the two are equal, since dividing by a constant preserves the median.
+   - *Rejected:* `a median` as a modifier of the factor (`cat_factor/cat_factor`, a term
+     `median(0.56)`). No function takes a number to its median, and the group the median ranges over
+     would go unstated.
+   - *Rejected:* a factor that denotes a quantifier over the comparison, with `a median` its modifier.
+     It builds the same proposition, and every factor would carry the comparative's measure and
+     standard in its type.
+   - `median_over` is opaque, as `card` is. Routing it to `stats:median_of` over a `SampleSet` is the
+     design for the study's argument (D95, "Out"). `an average` and `a mean` are not attested.
+4. **`compared to` and `compared with` mark a comparison's standard**: `cat_pp_than / NP`, sem `λy.
+   y`, as `than`. Only comparatives take `cat_pp_than`, so the marker reads only where one waits for a
+   standard; the verb's entries stay for `were compared to negative controls`.
+   - Not built: `compared to` after a non-comparative (`preferentially dependent in MSI compared to
+     MSS`, `the mean ratio … compared to …`), which needs a contrast argument no entry has.
+
+**Order.** 9a: decisions 1 and 2. 9b: 4. 9c: 3. Then the quantity corpus and the reseed.
+
+**9a–9c — built** (2026-09-29).
+- Factors (decision 1): `TokenKind::Factor` (`preprocess.rs`, `factor`, its step 6); `cat_factor`
+  (`lexicon-ontology.esl`; its denotation and `factor_cat` in `dcg/category.rs`); seeding's `Factor`
+  arm (`seed.rs`) and `seeds_itself`.
+- Factor comparatives (decision 2): `ontology:fold_lower`, `fold_higher`; `fewer_fold` and
+  `more_fold` in `closed-class.esl`, with the plain entries' senses. `verbalize` reads `hela has
+  14/25-fold fewer Cell than hela`.
+- `compared to`, `compared with` (decision 4): two markers beside `than`.
+- `a median` (decision 3): `cat_stat`, `ontology:median_over`, the entry `a median`, and
+  `fewer_stat_fold`, `more_stat_fold`. `The cell lines contained a median 0.56-fold fewer deletion
+  mutations in microsatellite regions compared to typical lineages.` has one reading,
+  `fold_lower(0.56, median_over(λm. card(Σd:DeletionMutation. prep_in(d, kind_of(MicrosatelliteRegion)),
+  m), the(CellLine)), median_over(λm. card(…, m), kind_of(Σl:Lineage. typical(l))))`, which `verbalize`
+  reads as `… has a median 14/25-fold fewer …`.
+- Tests: `preprocess.rs`, `a_numeral_joined_to_fold_is_a_factor`; `quantities_in_the_parser.rs`,
+  `a_factor_on_a_count_comparative`, `compared_to_marks_the_standard`,
+  `a_median_summarises_both_counts`, three more packed-equals-unpacked sentences; the quantity corpus,
+  two rows (51 covered, one gap).
+- The corpus row writes `The cell lines` for the paper's `these MSI cell lines`: a demonstrative
+  subject leaves the parse open, and the corpus check reads closed readings only — with `These`, plain
+  `fewer … than` has none either.
+
 ## Out, as D95 decides
 
 The tolerance construction and the vector-denoting PP — its one attested variant, `within 1.5× the IQR

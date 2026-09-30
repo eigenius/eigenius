@@ -763,8 +763,8 @@ impl Parser {
     /// lift makes it prenominal (`10 μM etoposide`), and the copula takes it (`the temperature was
     /// 37 °C`). A numeral is a bare number, `cat_num`, and a whole number is also a cardinal
     /// determiner stating its count ([`Self::count_determiner`]). A range with a unit seeds a constraint
-    /// and a predicate ([`Self::range_items`]); a range of bare numbers, count-range determiners. Any
-    /// other token seeds nothing here.
+    /// and a predicate ([`Self::range_items`]); a range of bare numbers, count-range determiners. A
+    /// factor seeds `cat_factor` (slice 9). Any other token seeds nothing here.
     fn measure_items(&self, token: &Token) -> Vec<Item> {
         use super::super::preprocess::TokenKind;
         use crate::units::convert::{Converted, Kinds, Reading};
@@ -861,6 +861,20 @@ impl Parser {
                 .zip(&r.high.readings)
                 .flat_map(|(lo, hi)| self.range_items(&lo.value, &hi.value))
                 .collect(),
+            // A factor (D95 slice 9, decision 1): its value at the dimensionless unit, in the category
+            // only the factor comparatives take.
+            TokenKind::Factor(value) => {
+                let ratio = Converted {
+                    magnitude: crate::units::Magnitude::rational(value.clone()),
+                    unit: crate::units::Unit::dimensionless(),
+                    kinds: Kinds::default(),
+                    reading: Reading::Value,
+                };
+                super::super::category::factor_cat(layer)
+                    .map(|cat| Item::new(cat, ratio.term()))
+                    .into_iter()
+                    .collect()
+            }
             _ => Vec::new(),
         }
     }

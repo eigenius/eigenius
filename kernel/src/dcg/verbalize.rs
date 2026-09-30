@@ -589,6 +589,43 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     format!("{share} of {group}, {pred}")
                 };
             }
+            // A factor comparative (D95 slice 9): `fold_lower(N, card(T, x), card(T, y))` reads `x has
+            // N-fold fewer T than y`, and with `median_over` on both counts `x has a median N-fold
+            // fewer T than y`; over other measures, `a is N-fold lower than b`.
+            ("fold_lower" | "fold_higher", 3) => {
+                let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
+                let factor = quantity_text(args[0], &unit);
+                let lower = local == "fold_lower";
+                if let (Some((t, a, sa)), Some((u, b, sb))) = (counted(args[1]), counted(args[2])) {
+                    if t == u && sa == sb {
+                        let dir = if lower { "fewer" } else { "more" };
+                        let stat = if sa { "a median " } else { "" };
+                        return format!(
+                            "{} has {stat}{factor}-fold {dir} {} than {}",
+                            verbalize(a, vb),
+                            bare_np(t, vb),
+                            verbalize(b, vb)
+                        );
+                    }
+                }
+                let dir = if lower { "lower" } else { "higher" };
+                return format!(
+                    "{} is {factor}-fold {dir} than {}",
+                    verbalize(args[1], vb),
+                    verbalize(args[2], vb)
+                );
+            }
+            // A statistic (D95 slice 9): `median_over(λm. card(T, m), x)` reads `the median number of T
+            // in x`.
+            ("median_over", 2) => {
+                let group = verbalize(args[1], vb);
+                return match counted(args[0]) {
+                    Some((t, _, false)) => {
+                        format!("the median number of {} in {group}", bare_np(t, vb))
+                    }
+                    _ => format!("the median of {} over {group}", verbalize(args[0], vb)),
+                };
+            }
             // The distributive `per` (D95 slice 8d): `prep_per(Y, x, y)` reads `per Y`; `x` and `y` are
             // the variables the count and the universal bind.
             ("prep_per", 3) => return format!("per {}", bare_np(args[0], vb)),
@@ -715,6 +752,23 @@ fn prep_parts<'e>(local: &'e str, args: &[&'e Exp], vb: &Vb) -> Option<(&'e str,
     match (p.strip_suffix("_value"), args) {
         (Some(p), [subj, unit, quantity]) => Some((p, subj, quantity_text(quantity, unit))),
         (None, [subj, obj]) => Some((p, subj, verbalize(obj, vb))),
+        _ => None,
+    }
+}
+
+/// The number of `T` a count comparative compares, as `(T, x, median)`: `card(T, x)`, or with its
+/// statistic `median_over(λm. card(T, m), x)`. A bare `λm. card(T, m)` gives `x` as the bound `m`.
+fn counted(e: &Exp) -> Option<(&Exp, &Exp, bool)> {
+    if let Exp::Lam(_, body) = e {
+        return counted(body);
+    }
+    let (h, a) = app_spine(e);
+    match (axiom_local(h), a.as_slice()) {
+        (Some("card"), [t, x]) => Some((*t, *x, false)),
+        (Some("median_over"), [f, x]) => match counted(f)? {
+            (t, _, false) => Some((t, *x, true)),
+            _ => None,
+        },
         _ => None,
     }
 }

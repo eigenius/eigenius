@@ -400,6 +400,15 @@ data lexicon:Cat : Type 1 {
     // counts cells, it does not give them a quantity. Cardinal determiners and the bounds on a count
     // take it; the measure consumers, which take `cat_mp`, do not.
     cat_num : lexicon:Cat,
+    // FACTOR — a MULTIPLIER (D95 slice 9, decision 1): `0.56-fold`, `two-fold`, which the preprocessor
+    // reads as one token. ⟦cat_factor⟧ = units:Quantity(u"1"), the carrier a bare number has, but a
+    // ratio is neither a number nor a measure phrase: before `fewer`, `10%` and `3` state differences.
+    // The factor comparatives (`0.56-fold fewer`) take it.
+    cat_factor : lexicon:Cat,
+    // STAT — a STATISTIC over a group's members (D95 slice 9, decision 3): `a median`. ⟦cat_stat⟧ =
+    // (Entity → core:float) → Entity → core:float, a measure to its summary over a group; the factor
+    // comparatives apply it to both measures they compare (`a median 0.56-fold fewer`).
+    cat_stat : lexicon:Cat,
     // ∀u:unit. R[u] — a UNIT-polymorphic functor: a consumer that takes a measure phrase of any unit
     // (`at 37 °C`, `for 2 h`). Like `cat_forall` and unlike the feature binders, it is instantiated from
     // the consumed item — `u := U` from its `cat_mp(U, r)` — and its sem is applied to the unit, since

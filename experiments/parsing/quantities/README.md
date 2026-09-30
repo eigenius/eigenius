@@ -23,7 +23,7 @@ cargo test -p eigenius-kernel --test quantity_corpus
 - a covered row parses, and every reading contains its relations and renders its values;
 - a gap row still does not parse. When one does, its construction has arrived: update the row.
 
-As committed: 49 covered rows, all passing. The two `g` rows have two readings each, gram and
+As committed: 51 covered rows, all passing. The two `g` rows have two readings each, gram and
 standard gravity (D93). Slices 6–8 (D95 implementation plan) added twenty-seven, each from a sentence
 of the paper: a range (`4–12% gels`, `80–90% confluence`), an approximation (`approximately 100 mm³`),
 a bound symbol (`>90%`), counts — a plain one (`three sgRNAs`), a bounded one (`more than one MMR
@@ -36,7 +36,12 @@ before collection`, `4 days post transduction`, `2 days later`), a deadline (`by
 period (`every 3 days`, `every 2–3 days`), pseudo-partitives (`10 μg ml⁻¹ of colcemid`, `0.2 μg/ml of
 doxycycline`, `24 h of puromycin selection`), fronted adjuncts (`After 24 h, …`, `Nine days after
 doxycycline treatment, …`), `per` after a count (`At least 1,000 cells per sample were scored.`) and a
-list with its unit once (`Four and seven days after transduction, …`). The one gap row:
+list with its unit once (`Four and seven days after transduction, …`). Slice 9 added two: a factor on a
+count comparative with a statistic and `compared to` (`a median 0.56-fold fewer deletion mutations in
+microsatellite regions compared to typical lineages`), and without them (`2-fold more deletion
+mutations than typical lineages`). The paper's subject is `these MSI cell lines`; the row writes `The
+cell lines`, as a demonstrative's referent hole leaves no closed reading for this check. The one gap
+row:
 
 | Gap | Owner |
 |---|---|

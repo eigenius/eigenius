@@ -55,3 +55,5 @@ The cells were treated with 0.2 μg/ml of doxycycline.	prep_with has_quantity	1/
 After 24 h of puromycin selection, the cells were harvested.	prep_after has_quantity	86400 s	methods: After 24 h of puromycin selection, lentivirally infected cells were …
 At least 1,000 cells per sample were scored.	has_count prep_per	at least 1000;per SampleOne	methods: signal intensities in the nucleus of at least 1,000 cells per sample were scored
 Four and seven days after transduction, the cells were labeled.	prep_after_offset	345600 s after;604800 s after	methods (manuscript): Four and seven days after the lentiviral transduction, cells were labeled with EdU
+The cell lines contained a median 0.56-fold fewer deletion mutations in microsatellite regions compared to typical lineages.	fold_lower median_over	a median 14/25-fold fewer	results: these MSI cell lines were distinct and contained a median 0.56-fold fewer deletion mutations in microsatellite regions compared to typical lineages
+The cell lines contained 2-fold more deletion mutations than typical lineages.	fold_higher	2-fold more	CNL: the factor comparative's other direction, without a statistic

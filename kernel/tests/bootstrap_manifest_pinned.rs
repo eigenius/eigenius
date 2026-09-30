@@ -45,7 +45,9 @@
 //! `closed-class` (`per`); then on `closed-class` again when the reseed after slice 8 found the
 //! partitive `of`s' own sense labels before the sense ranker (they now carry `of`). Slices 6–8 each
 //! move these layers and pay ONE reseed together, after slice 8
-//! (`docs/design/d95-implementation-plan.md`, slice 6).
+//! (`docs/design/d95-implementation-plan.md`, slice 6). It fired for slice 9 on `lexicon`
+//! (`cat_factor`, `cat_stat`), `ontology` (`fold_lower`, `fold_higher`, `median_over`) and
+//! `closed-class` (the factor comparatives, `a median`, `compared to`, `compared with`).
 //!
 //! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
 //! (`docs/design/d95-implementation-plan.md`, slice 5): `units` (standard gravity, `molar`, `week`,
@@ -223,9 +225,9 @@ notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
-lexicon:cd61a4db8aef9d99cb950c27aad8747135aa3eee307791f1873c03a8eb6df651
-ontology:d8156dff601bd783c87b58518514961c22daba5a6d6f9b4953bcc5c1f9be4dfe
-closed-class:6b50f69fdb4cf7b1fb0bb615d3bbcd4c6a678f190fe57a7ec0a5e054e17aebed
+lexicon:46ef79a03ba22b61609186218ed356bcddf329656cad8a018778f3d322fb7eda
+ontology:1bb0d263b7dd3a090594105061e9edc4e2a2c3946dc576311551a0f2ceb1668e
+closed-class:48e8c708c6d72c629ae34abfaee5170daff2529c0223ac39b4a36b15e7a3a7e2
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 

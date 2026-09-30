@@ -25,7 +25,8 @@ day for D95 slice 7: counts, proportions, number words, a determiner before a nu
 conjuncts sharing a head (DO item 3; Measured quantities, rule 10); and for slice 8: offsets
 (`72 h after transduction`), a deadline (`by three weeks`), `every N unit`, the pseudo-partitive, a
 fronted adjunct, `per` after a count, and a list with its unit once (DO items 11 and 13; Measured
-quantities, rules 11 and 12).*
+quantities, rules 11 and 12); and for slice 9: a factor on a count comparative, `a median` before it,
+and `compared to` for `than` (Measured quantities, rule 13).*
 
 ## Purpose & posture
 
@@ -109,7 +110,8 @@ Two rules sit above everything else:
     places: `at less than 37 °C`, `at 37 °C or higher`, `>90% infection efficiency`, `for 2–3 h`; before
     `after`, `before`, `post` and `later` (`purified 72 h after transduction`, `fixed 2 days later`),
     after `by` and `every` (`recovered by three weeks`, `changed every 3 days`), and before `of` and a
-    noun (`300 μl of CellTiter-Glo`). See "Measured quantities" below.
+    noun (`300 μl of CellTiter-Glo`). A factor goes before a count comparative (`0.56-fold fewer
+    deletion mutations`). See "Measured quantities" below.
 
 ## DON'T — and how to rewrite it
 
@@ -217,6 +219,15 @@ contained 2 μg ml⁻¹ puromycin.` does.
 12. **`per` distributes a count**: `At least 1,000 cells per sample were scored.` reads as a count
     in each sample. A quantity per noun (`at 33 μl per well`) has no parse: write `Each well received
     33 μl of CellTiter-Glo.`
+13. **A factor goes before `fewer` or `more` and a counted noun**: `The cell lines contained 0.56-fold
+    fewer deletion mutations than typical lineages.` Join the number to `fold` with a hyphen
+    (`2-fold`, `two-fold`), and keep the factor as written — do not restate `0.56-fold fewer` as `44%
+    fewer` or as a ratio the other way up, since the text fixes no arithmetic and a check reads it as
+    written. `a median` before the factor states what it summarises: `a median 0.56-fold fewer deletion
+    mutations … compared to typical lineages`. A median is part of the claim, unlike `n` and `P`.
+    `compared to` and `compared with` mark the standard as `than` does, after a comparative only.
+    Not read: a factor on an adjective (`2-fold more dependent`), before a noun (`a 2-fold increase`)
+    or after a verb (`increased 2-fold`), and `10% fewer` or `3 fewer`, which state differences.
 
 **What this does not change.** A statistic is still not a quantity. `n = 37` counts samples and
 `P = 4.2 × 10⁻¹³` qualifies an inference; neither is a measured value of a physical quantity, and

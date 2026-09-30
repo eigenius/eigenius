@@ -1566,6 +1566,25 @@ resource lexicon:than_marker : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
     lexicon:sense    = "than";
 }
+// `compared to` / `compared with` mark the standard as `than` does (D95 slice 9, decision 4): `a median
+// 0.56-fold fewer deletion mutations … compared to typical lineages`. Only a comparative takes
+// `cat_pp_than`; the verb `compared` keeps its own entries (`were compared to negative controls`).
+resource lexicon:compared_to_marker : lexicon:LexicalEntry {
+    core:description = "grammatical: comparison standard marker ('fewer deletion mutations compared to typical lineages').";
+    lexicon:form     = "compared to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_than, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:than_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "compared to";
+}
+resource lexicon:compared_with_marker : lexicon:LexicalEntry {
+    core:description = "grammatical: comparison standard marker ('fewer deletion mutations compared with typical lineages').";
+    lexicon:form     = "compared with";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_than, lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:than_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "compared with";
+}
 
 // ── PHRASAL / predicative comparative OPERATORS (D63 §8.12, d63-comparative-phrasal.md §5) ──
 // Closed-class function words over the scale category `cat_measure` (⟦·⟧ = Entity→float) / any `cat_n`.
@@ -1637,6 +1656,82 @@ resource lexicon:more_card : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:more_card_sem;
     lexicon:sem_type = type_expr( forall (T : Set) => (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:more.a.01";
+}
+// (6d′) `N-fold fewer` / `N-fold more` — the count comparatives with a FACTOR (D95 slice 9, decision 2),
+// consumed on the left after the noun: `0.56-fold fewer deletion mutations than typical lineages` →
+// `fold_lower(0.56, card(T, x), card(T, y))`. The factor is kept as written; `fold_lower` is opaque.
+// The senses are the plain entries' own, so the ranker is not asked to choose between the two.
+resource lexicon:fewer_fold_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (k : units:Quantity(u"1")) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            ontology:fold_lower(k, lexicon:card(T, x), lexicon:card(T, y))
+          : forall (T : Set) => units:Quantity(u"1") -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:fewer_fold : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative quantifier over count nouns, with a factor ('0.56-fold fewer').";
+    lexicon:form     = "fewer";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_factor)))) );
+    lexicon:sem      = lexicon:fewer_fold_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => units:Quantity(u"1") -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:few.a.01";
+}
+resource lexicon:more_fold_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (k : units:Quantity(u"1")) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            ontology:fold_higher(k, lexicon:card(T, x), lexicon:card(T, y))
+          : forall (T : Set) => units:Quantity(u"1") -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:more_fold : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative quantifier over count nouns, with a factor ('2-fold more cells').";
+    lexicon:form     = "more";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_factor)))) );
+    lexicon:sem      = lexicon:more_fold_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => units:Quantity(u"1") -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:more.a.01";
+}
+// The same with a STATISTIC before the factor (D95 slice 9, decision 3), consumed after it: `a median
+// 0.56-fold fewer deletion mutations … compared to typical lineages` → `fold_lower(0.56,
+// median_over(λm. card(T, m), x), median_over(λm. card(T, m), y))`, the statistic applied to both
+// measures. `a median` is the one statistic entry.
+resource lexicon:a_median : lexicon:LexicalEntry {
+    core:description = "grammatical: a statistic over a group's members ('a median 0.56-fold fewer').";
+    lexicon:form     = "a median";
+    lexicon:cat      = type_expr( lexicon:cat_stat );
+    lexicon:sem      = ontology:median_over;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> core:float) -> lexicon:Entity -> core:float );
+    lexicon:sense    = "a median";
+}
+resource lexicon:fewer_stat_fold_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (k : units:Quantity(u"1")) => fun (st : (lexicon:Entity -> core:float) -> lexicon:Entity -> core:float) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            ontology:fold_lower(k, st(fun (m : lexicon:Entity) => lexicon:card(T, m), x), st(fun (m : lexicon:Entity) => lexicon:card(T, m), y))
+          : forall (T : Set) => units:Quantity(u"1") -> ((lexicon:Entity -> core:float) -> lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:fewer_stat_fold : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative quantifier over count nouns, with a statistic and a factor ('a median 0.56-fold fewer').";
+    lexicon:form     = "fewer";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_stat), lexicon:cat_factor)))) );
+    lexicon:sem      = lexicon:fewer_stat_fold_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => units:Quantity(u"1") -> ((lexicon:Entity -> core:float) -> lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:few.a.01";
+}
+resource lexicon:more_stat_fold_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (T : Set) => fun (k : units:Quantity(u"1")) => fun (st : (lexicon:Entity -> core:float) -> lexicon:Entity -> core:float) => fun (v : lexicon:Entity -> lexicon:Entity -> Prop) => fun (y : lexicon:Entity) => fun (x : lexicon:Entity) =>
+            ontology:fold_higher(k, st(fun (m : lexicon:Entity) => lexicon:card(T, m), x), st(fun (m : lexicon:Entity) => lexicon:card(T, m), y))
+          : forall (T : Set) => units:Quantity(u"1") -> ((lexicon:Entity -> core:float) -> lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop )
+    );
+}
+resource lexicon:more_stat_fold : lexicon:LexicalEntry {
+    core:description = "grammatical: comparative quantifier over count nouns, with a statistic and a factor ('a median 2-fold more').";
+    lexicon:form     = "more";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:num_any, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_pp_than), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_stat), lexicon:cat_factor)))) );
+    lexicon:sem      = lexicon:more_stat_fold_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => units:Quantity(u"1") -> ((lexicon:Entity -> core:float) -> lexicon:Entity -> core:float) -> (lexicon:Entity -> lexicon:Entity -> Prop) -> lexicon:Entity -> lexicon:Entity -> Prop );
     lexicon:sense    = "wn:more.a.01";
 }
 // (6e) `more` / `less` — ANALYTIC degree on a gradable ADJECTIVE (predicative
