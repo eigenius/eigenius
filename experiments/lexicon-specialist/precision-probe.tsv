@@ -1,6 +1,6 @@
 # The adjective sense judge's precision probe (D97 decision 7; eigenius#263): a fixed sample
 # of the senses it placed. Review each: correct | wrong | unclear, with a note.
-# Reviewed 2026-09-30: 39 correct, 1 unclear, 0 wrong — Claude draft, pending maintainer adoption.
+# Reviewed 2026-09-30: 40 correct, 0 wrong — Claude draft, adopted by the maintainer the same day, who ruled the one row the draft left unclear (`one with`) correct.
 # lemma <TAB> preposition <TAB> offset <TAB> confidence <TAB> review <TAB> note <TAB> gloss
 analogous	to	02071973	0.95	correct	the gloss's own example or its plain use takes the complement	similar or equivalent in some respects though otherwise dissimilar; "brains and computers are often considered analogous"; "salmon roe is marketed as analogous to caviar"
 intimate	with	00453053	0.85	correct	the gloss's own example or its plain use takes the complement	having mutual interests or affections; of established friendship; "on familiar terms"; "pretending she is on an intimate footing with those she slanders"
@@ -32,7 +32,7 @@ dear	to	01462324	0.95	correct	the gloss's own example or its plain use takes the
 incompatible	with	01487352	0.88	correct	the gloss's own example or its plain use takes the complement	not easy to combine harmoniously
 skeptical	about	02463847	0.90	correct	the gloss's own example or its plain use takes the complement	marked by or given to doubt; "a skeptical attitude"; "a skeptical listener"
 perpendicular	to	01720280	0.99	correct	the gloss's own example or its plain use takes the complement	intersecting at or forming right angles; "the axes are perpendicular to each other"
-one	with	02477885	0.88	unclear	`one with nature` fits "having the indivisible character of a unit" only loosely	having the indivisible character of a unit; "a unitary action"; "spoke with one voice"
+one	with	02477885	0.88	correct	`one with nature` fits "having the indivisible character of a unit" only loosely — the draft left it unclear; ruled correct by the maintainer, 2026-09-30	having the indivisible character of a unit; "a unitary action"; "spoke with one voice"
 amenable	to	01997415	0.97	correct	the gloss's own example or its plain use takes the complement	liable to answer to a higher authority; "the president is amenable to the constitutional court"
 united	with	02475855	0.85	correct	the gloss's own example or its plain use takes the complement	characterized by unity; being or joined into a single entity; "presented a united front"
 proximate	to	01579608	0.85	correct	the gloss's own example or its plain use takes the complement	closest in degree or order (space or time) especially in a chain of causes and effects; "news of his proximate arrival"; "interest in proximate rather than ultimate goals"

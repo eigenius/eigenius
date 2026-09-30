@@ -386,8 +386,9 @@ for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 
    - **The judge, validated** (`crates/eigenius-lexicon-align`, `specialist-senses`;
      `experiments/lexicon-specialist/`): gold recall 45 of 45 on the senses whose own gloss names
      the preposition (WordNet's convention, the one per-sense fact); a fixed precision sample of 40
-     placed senses reviewed 39 correct, 1 unclear, 0 wrong (`precision-probe.tsv`, Claude draft
-     pending the owner's adoption). Model `claude-sonnet-4-6`: the kernel's structured client forces
+     placed senses reviewed 40 correct, 0 wrong (`precision-probe.tsv`; adopted by the owner
+     2026-09-30, who ruled the draft's one unclear row, `one with`, correct). Model
+     `claude-sonnet-4-6`: the kernel's structured client forces
      a tool choice, which the Claude 5 models refuse (eigenius#264's client). Placements: 373 on the
      senses accepted at 0.85, 28 below it, 27 gaps (`adjective-senses.tsv`).
    - **Open for nouns:** 6,425 WordNet nouns, 3,329 with several senses — the same rule multiplies

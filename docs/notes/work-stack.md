@@ -23,12 +23,11 @@ any detour.
 > **#263 built (`2026-09-30`):** D97 decisions 6 and 7 decided for adjectives (7 revised the same day:
 > the judge places every multi-sense item; below-threshold yes votes place, a no to every sense is a
 > gap); the reader (`crates/eigenius-specialist`), the governance table (`eigenius-wordnet`,
-> `governance.rs`), the judge (`specialist-senses`: gold recall 45/45, precision sample 39/40, 1
-> unclear), one relation per preposition (`deg_{loc}_rel_{p}`). The import: 4,117 → 7,033 relational
+> `governance.rs`), the judge (`specialist-senses`: gold recall 45/45, precision sample 40/40,
+> adopted by the owner), one relation per preposition (`deg_{loc}_rel_{p}`). The import: 4,117 → 7,033 relational
 > adjective entries, `of` 0 → 1,003. **Measured** (`wordnet-umls-aligned-2026-09-30-governed-preps`):
 > grammar gaps 0, 62/62 expected hits, readings 652 → 668, skeletons 212 → 215; `… predictive of MMR
-> deficiency` re-pinned to its relational reading; selection 29/41 on a new draw. For the owner: the
-> judge's precision sample (`experiments/lexicon-specialist/precision-probe.tsv`).
+> deficiency` re-pinned to its relational reading; selection 29/41 on a new draw.
 > **The reading ledger checks itself (`2026-09-30`, `ea85d49`, the owner's rule):** a reading whose
 > structure differs from its pin cannot count as correct, and a row contradicting another row's ruling
 > on its sentence is flagged. Each `wrong` row names what it rules out (a fifth field); the
