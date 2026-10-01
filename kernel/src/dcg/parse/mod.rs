@@ -85,6 +85,12 @@ use super::rules::constructions::front_participial;
 use super::reserved::{ReservedKind, ReservedTable};
 use super::sense_ranker::{SenseCandidate, SenseRanker, WordSenses};
 
+/// The default sense floor: a ranked sense weighing less is eliminated. A ranking without
+/// probabilities weighs a sense it ranks 1 and one it leaves out 0, so any floor above 0 eliminates
+/// exactly the senses such a ranker omits, as before 2026-10-01; a provider's probabilities are cut
+/// at the floor, which the sense-rank instrument calibrates.
+pub const DEFAULT_SENSE_FLOOR: f64 = 0.02;
+
 /// Default forest cap (D63 §8.7 Stage B): `parse` returns at most this many parses,
 /// the lowest-cost (most-frequent-sense) first; the rest are dropped with a log line.
 /// Chosen from the scale-up baselines — short sentences over full-WordNet polysemy
@@ -238,6 +244,9 @@ pub struct ParseConfig {
     /// only reorders the seed beam; the kernel felicity gate still decides validity and widen-on-failure
     /// recovers a wrongly down-ranked sense, so a bad rank costs a re-parse, never a missed parse.
     sense_ranker: Option<Box<dyn SenseRanker + Send + Sync>>,
+    /// The weight below which a ranked sense is eliminated, where the ranker weighs senses
+    /// ([`super::sense_ranker::WordRanking`]); `None` is [`DEFAULT_SENSE_FLOOR`].
+    sense_floor: Option<f64>,
     /// Optional **per-cell beam** (Lever B — GH #97). Each CKY chart cell is capped to this many
     /// lowest-`Cost` items after it is built, bounding the chart's intermediate growth (the source of
     /// the full-lexicon OOM; the per-lemma `sense_cap` alone does not stop a fully-known,
@@ -412,6 +421,12 @@ impl Parser {
     /// static `sense_rank` cap.
     pub fn with_sense_ranker(mut self, ranker: Box<dyn SenseRanker + Send + Sync>) -> Self {
         self.config.sense_ranker = Some(ranker);
+        self
+    }
+
+    /// The weight below which a ranked sense is eliminated ([`DEFAULT_SENSE_FLOOR`] unless set).
+    pub fn with_sense_floor(mut self, floor: f64) -> Self {
+        self.config.sense_floor = Some(floor);
         self
     }
 
@@ -1210,11 +1225,12 @@ impl Parser {
         if rankings.len() != words.len() {
             return None; // malformed reply ⇒ degrade to the static cap
         }
-        // Flatten to `sense → rank`. A sense shared across overlapping spans keeps its best (min)
-        // contextual rank.
+        // Flatten to `sense → rank`, the senses below the floor eliminated (absent). A sense shared
+        // across overlapping spans keeps its best (min) contextual rank.
+        let floor = self.config.sense_floor.unwrap_or(DEFAULT_SENSE_FLOOR);
         let mut map: BTreeMap<String, u32> = BTreeMap::new();
         for (ranking, word_cands) in rankings.iter().zip(&cands) {
-            for (pos, &ci) in ranking.iter().enumerate() {
+            for (pos, ci) in ranking.kept(floor).enumerate() {
                 if let Some(c) = word_cands.get(ci) {
                     map.entry(c.sense.clone())
                         .and_modify(|r| *r = (*r).min(pos as u32))

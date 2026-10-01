@@ -237,7 +237,7 @@ pub fn render_prompt(choice: &Choice) -> String {
     out.push_str(
         "For each question, return under its id `choice` = the key of the option that is right, \
          `rationale` = one or two sentences that decide it, and `runners_up` = the other keys, \
-         most plausible first.",
+         most plausible first, less any its question excludes.",
     );
     out
 }

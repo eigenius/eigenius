@@ -25,7 +25,7 @@ use eigenius_kernel::dcg::{
     extract_abbreviations, glossary_resources, ground_long_form, is_ctor, pretty_term, type_raise,
     AbbrDef, AbbreviationBinding, Candidate, DiscourseRun, DocumentPipeline, Identity,
     InProcessPipeline, Item, LexicalIndex, LexicalLookup, NoAbbreviationProposer, Parser, Proposal,
-    ProposeCtx, Proposer, SenseRanker, SentenceEncoding, SentenceOutcome, WordSenses,
+    ProposeCtx, Proposer, SenseRanker, SentenceEncoding, SentenceOutcome, WordRanking, WordSenses,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -274,13 +274,13 @@ impl SenseRanker for BurySense {
         _sentence: &str,
         _context: &str,
         words: &[WordSenses],
-    ) -> Option<Vec<Vec<usize>>> {
+    ) -> Option<Vec<WordRanking>> {
         words
             .iter()
             .map(|w| {
                 let mut idx: Vec<usize> = (0..w.candidates.len()).collect();
                 idx.sort_by_key(|&i| w.candidates[i].sense == self.0); // target (true) sorts LAST
-                idx
+                WordRanking::ordered(idx)
             })
             .collect::<Vec<_>>()
             .into()
@@ -422,13 +422,13 @@ impl SenseRanker for PreferSense {
         _sentence: &str,
         _context: &str,
         words: &[WordSenses],
-    ) -> Option<Vec<Vec<usize>>> {
+    ) -> Option<Vec<WordRanking>> {
         words
             .iter()
             .map(|w| {
                 let mut idx: Vec<usize> = (0..w.candidates.len()).collect();
                 idx.sort_by_key(|&i| w.candidates[i].sense != self.0); // target (false) sorts first
-                idx
+                WordRanking::ordered(idx)
             })
             .collect::<Vec<_>>()
             .into()

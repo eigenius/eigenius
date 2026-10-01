@@ -55,6 +55,10 @@
 #   scripts/measure-parse-rate.sh --attribution    # + page ambiguity roll-up (read-only; see README §7)
 #   scripts/measure-parse-rate.sh --context-window # reranker sees +/-2 sentences — CHANGES the result (unproven)
 #   scripts/measure-parse-rate.sh --flat-ranker    # ARM: the flat reading listing, one call (before eigenius#264)
+#   scripts/measure-parse-rate.sh --sense-model <id>   # ARM: the sense ranker's model (default claude-sonnet-4-6;
+#                                                    #   jev-* asks TypeSafe) — a live ranks recording only
+#   scripts/measure-parse-rate.sh --sense-floor <w>    # ARM: the weight below which a ranked sense is eliminated
+#                                                    #   (default 0.02; replay a weighted recording to tune it)
 #   scripts/measure-parse-rate.sh --ranker-model <id>  # ARM: the reading ranker's model (default jev-latest,
 #                                                    #   claude-sonnet-4-6 under --flat-ranker; jev-* asks TypeSafe)
 #   scripts/measure-parse-rate.sh --snapshot /path/to/store
@@ -94,6 +98,8 @@ ATTRIBUTION=0
 CONTEXT_WINDOW=0
 FLAT_RANKER=0
 RANKER_MODEL=""
+SENSE_MODEL=""
+SENSE_FLOOR=""
 REPLAY=""
 SEL_REPLAY=""
 while [[ $# -gt 0 ]]; do
@@ -109,6 +115,8 @@ while [[ $# -gt 0 ]]; do
     --context-window)   CONTEXT_WINDOW=2; shift ;;
     --flat-ranker)      FLAT_RANKER=1; shift ;;
     --ranker-model)     RANKER_MODEL="$2"; shift 2 ;;
+    --sense-model)      SENSE_MODEL="$2"; shift 2 ;;
+    --sense-floor)      SENSE_FLOOR="$2"; shift 2 ;;
     *) echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -120,12 +128,12 @@ done
 #
 # `EIGENIUS_POS_PRUNE` is read with `.is_ok()`: ANY value, including the empty string, enables it.
 # Setting it to "0" would turn it ON. It must be UNSET to be off — hence `env -u`, not `VAR=0`.
-for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT EIGENIUS_ATTRIBUTION_ROLLUP EIGENIUS_TRACE_ATTRIBUTION EIGENIUS_CONTEXT_SENTENCES EIGENIUS_SELECTIONS EIGENIUS_SELECTIONS_OUT EIGENIUS_SELECT_FLAT EIGENIUS_SELECT_MODEL; do
+for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT EIGENIUS_ATTRIBUTION_ROLLUP EIGENIUS_TRACE_ATTRIBUTION EIGENIUS_CONTEXT_SENTENCES EIGENIUS_SELECTIONS EIGENIUS_SELECTIONS_OUT EIGENIUS_SELECT_FLAT EIGENIUS_SELECT_MODEL EIGENIUS_SENSE_MODEL EIGENIUS_SENSE_FLOOR; do
   if [[ -n "${!v:-}" ]]; then
     echo "note: ignoring ambient $v=${!v} — the run declares its own config (use the flags)" >&2
   fi
 done
-ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT -u EIGENIUS_ATTRIBUTION_ROLLUP -u EIGENIUS_TRACE_ATTRIBUTION -u EIGENIUS_CONTEXT_SENTENCES -u EIGENIUS_SELECTIONS -u EIGENIUS_SELECTIONS_OUT -u EIGENIUS_SELECT_FLAT -u EIGENIUS_SELECT_MODEL)
+ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT -u EIGENIUS_ATTRIBUTION_ROLLUP -u EIGENIUS_TRACE_ATTRIBUTION -u EIGENIUS_CONTEXT_SENTENCES -u EIGENIUS_SELECTIONS -u EIGENIUS_SELECTIONS_OUT -u EIGENIUS_SELECT_FLAT -u EIGENIUS_SELECT_MODEL -u EIGENIUS_SENSE_MODEL -u EIGENIUS_SENSE_FLOOR)
 [[ "$POS_PRUNE" == "1" ]] && ENV_STRIP+=(EIGENIUS_POS_PRUNE=1)
 [[ "$COMB_CORE" == "1" ]] && ENV_STRIP+=(EIGENIUS_COMBINATORY_CORE=1)
 # Read-only instrument: it observes the forest and does NOT change the parse (the four metrics are
@@ -139,6 +147,13 @@ ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PA
 [[ "$FLAT_RANKER" == "1" ]] && ENV_STRIP+=(EIGENIUS_SELECT_FLAT=1)
 # The reading ranker's model (eigenius#264 strand 2) — which provider and model answer a live draw.
 [[ -n "$RANKER_MODEL" ]] && ENV_STRIP+=(EIGENIUS_SELECT_MODEL="$RANKER_MODEL")
+# The sense ranker's model and floor (2026-10-01): the model answers a live ranks recording; the floor
+# cuts a weighted ranking, recorded or replayed. Both change the result; neither is set unless given.
+[[ -n "$SENSE_MODEL" ]] && ENV_STRIP+=(EIGENIUS_SENSE_MODEL="$SENSE_MODEL")
+[[ -n "$SENSE_FLOOR" ]] && ENV_STRIP+=(EIGENIUS_SENSE_FLOOR="$SENSE_FLOOR")
+SENSE_KNOBS=""
+[[ -n "$SENSE_MODEL" ]] && SENSE_KNOBS+=" sense_model=$SENSE_MODEL"
+[[ -n "$SENSE_FLOOR" ]] && SENSE_KNOBS+=" sense_floor=$SENSE_FLOOR"
 # The model a live selection draw asks — the defaults of `live_reading_ranker_from_env`.
 if [[ -n "$RANKER_MODEL" ]]; then SELECT_MODEL="$RANKER_MODEL"
 elif [[ "$FLAT_RANKER" == "1" ]]; then SELECT_MODEL="claude-sonnet-4-6"
@@ -204,6 +219,8 @@ RUN_ID+="-$([[ "$USE_LLM" == "1" ]] && echo reranked || echo caponly)"
 [[ "$COMB_CORE" == "1" ]] && RUN_ID+="-combcore"
 [[ "$FLAT_RANKER" == "1" ]] && RUN_ID+="-flatranker"
 [[ -n "$RANKER_MODEL" ]] && RUN_ID+="-$RANKER_MODEL"
+[[ -n "$SENSE_MODEL" ]] && RUN_ID+="-sense-$SENSE_MODEL"
+[[ -n "$SENSE_FLOOR" ]] && RUN_ID+="-floor$SENSE_FLOOR"
 RUN_DIR="$OUT_DIR/$RUN_ID"
 mkdir -p "$RUN_DIR"
 # ABSOLUTIZE (gotcha #1): the harness writes ranks and selections into the run dir from the crate dir.
@@ -260,6 +277,11 @@ else
   SELECTIONS_MODE="pin-backed arm → $SELECTIONS"
   ENV_STRIP+=(EIGENIUS_SELECTIONS_OUT="$SELECTIONS")
 fi
+# A live ranks recording by a TypeSafe model ranks nothing without its key; fail here instead.
+if [[ -z "$REPLAY" && "$USE_LLM" == "1" && "$SENSE_MODEL" == jev-* && -z "${TYPESAFE_API_KEY:-}" ]]; then
+  echo "error: live sense ranking by $SENSE_MODEL but TYPESAFE_API_KEY is unset" >&2
+  exit 1
+fi
 # A live draw by a TypeSafe model fails every selection without its key; fail here instead.
 if [[ "$SELECTIONS_MODE" == LIVE* && "$SELECT_MODEL" == jev-* && -z "${TYPESAFE_API_KEY:-}" ]]; then
   echo "error: live selection draw by $SELECT_MODEL but TYPESAFE_API_KEY is unset (pass --ranker-model claude-… or --selections <existing file>)" >&2
@@ -278,7 +300,7 @@ KNOBS="$(grep -hoE 'const (SENSE_CAP|CELL_BEAM): usize = [0-9]+' \
   echo "# snapshot:  $SNAP"
   echo "# reranker:  $RERANKER"
   echo "# profile:   release"
-  echo "# config:    pos_prune=$POS_PRUNE combinatory_core=$COMB_CORE attribution=$ATTRIBUTION context_window=$CONTEXT_WINDOW flat_ranker=$FLAT_RANKER ranker_model=$SELECT_MODEL $KNOBS"
+  echo "# config:    pos_prune=$POS_PRUNE combinatory_core=$COMB_CORE attribution=$ATTRIBUTION context_window=$CONTEXT_WINDOW flat_ranker=$FLAT_RANKER ranker_model=$SELECT_MODEL$SENSE_KNOBS $KNOBS"
   echo "# rust_min_stack: ${RUST_MIN_STACK:-default}"
   echo "# ranks:     $RANKS_MODE"
   echo "# selections: $SELECTIONS_MODE"

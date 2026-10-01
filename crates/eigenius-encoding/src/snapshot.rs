@@ -132,7 +132,7 @@ pub enum Recording {
     #[cfg(feature = "use-llm")]
     Live(
         std::sync::Arc<
-            eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::AnthropicSenseRanker>,
+            eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::LiveSenseRanker>,
         >,
         PathBuf,
     ),
@@ -166,14 +166,15 @@ fn record(
     ),
     String,
 > {
-    let Some(live) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() else {
+    let Some(live) = eigenius_kernel::dcg::live_sense_ranker_from_env() else {
         return Err(format!(
-            "--ranks {} does not exist (RECORD mode) but ANTHROPIC_API_KEY is unset",
+            "--ranks {} does not exist (RECORD mode) but the sense model's API key is unset",
             path.display()
         ));
     };
     eprintln!(
-        "contextual reranker: AnthropicSenseRanker (live) — RECORDING to {}",
+        "contextual reranker: {} (live) — RECORDING to {}",
+        live.model().unwrap_or_default(),
         path.display()
     );
     let rec = std::sync::Arc::new(eigenius_kernel::dcg::RecordingSenseRanker::new(live));
@@ -208,7 +209,7 @@ fn record(
 #[cfg(feature = "use-llm")]
 struct ArcRanker(
     std::sync::Arc<
-        eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::AnthropicSenseRanker>,
+        eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::LiveSenseRanker>,
     >,
 );
 
@@ -219,8 +220,11 @@ impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
         sentence: &str,
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
-    ) -> Option<Vec<Vec<usize>>> {
+    ) -> Option<Vec<eigenius_kernel::dcg::WordRanking>> {
         self.0.rank(sentence, context, words)
+    }
+    fn model(&self) -> Option<String> {
+        self.0.model()
     }
 }
 

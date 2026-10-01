@@ -2290,8 +2290,8 @@ fn cmd_lexicon_parse(
     }
     #[cfg(feature = "use-llm")]
     if pc.use_ranker {
-        if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
-            index = index.with_sense_ranker(Box::new(r));
+        if let Some(r) = eigenius_kernel::dcg::live_sense_ranker_from_env() {
+            index = index.with_sense_ranker(r);
         }
     }
     let forest = index.parse_scoped(sentence, &*pc.lemmatizer, scope_iris.as_deref());

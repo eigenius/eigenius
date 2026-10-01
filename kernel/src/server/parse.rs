@@ -118,8 +118,8 @@ impl EigeniusService {
         }
         #[cfg(feature = "use-llm")]
         if cfg.use_ranker {
-            if let Some(ranker) = crate::dcg::AnthropicSenseRanker::from_env() {
-                index = index.with_sense_ranker(Box::new(ranker));
+            if let Some(ranker) = crate::dcg::live_sense_ranker_from_env() {
+                index = index.with_sense_ranker(ranker);
             }
         }
         let forest = index.parse_scoped(&req.sentence, &*cfg.lemmatizer, scope.as_deref());

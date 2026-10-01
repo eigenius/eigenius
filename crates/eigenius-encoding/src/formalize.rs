@@ -526,7 +526,7 @@ struct Arms {
 #[cfg(feature = "use-llm")]
 #[derive(Default)]
 struct LiveRecorders {
-    sense: Option<Arc<RecordingSenseRanker<eigenius_kernel::dcg::AnthropicSenseRanker>>>,
+    sense: Option<Arc<RecordingSenseRanker<eigenius_kernel::dcg::LiveSenseRanker>>>,
     selection: Option<Arc<RecordingReadingRanker<eigenius_kernel::dcg::LiveReadingRanker>>>,
     proposer: Option<Arc<RecordingProposer<eigenius_kernel::dcg::resolver_llm::AnthropicProposer>>>,
     kinds: Option<Arc<crate::RecordingKindClassifier<crate::AnthropicKindClassifier>>>,
@@ -551,10 +551,8 @@ impl Arms {
             None => {
                 #[cfg(feature = "use-llm")]
                 {
-                    let live = eigenius_kernel::dcg::AnthropicSenseRanker::from_env_with(
-                        req.model.clone(),
-                    )
-                    .ok_or("no sense-rank recording and ANTHROPIC_API_KEY is unset")?;
+                    let live = eigenius_kernel::dcg::live_sense_ranker(&req.model)
+                        .ok_or("no sense-rank recording and the sense model's API key is unset")?;
                     let a = Arc::new(RecordingSenseRanker::new(live));
                     rec.sense = Some(Arc::clone(&a));
                     Some(Box::new(ArcSense(a)))
@@ -710,7 +708,7 @@ mod arc_handles {
     use super::*;
 
     pub(super) struct ArcSense(
-        pub Arc<RecordingSenseRanker<eigenius_kernel::dcg::AnthropicSenseRanker>>,
+        pub Arc<RecordingSenseRanker<eigenius_kernel::dcg::LiveSenseRanker>>,
     );
     impl eigenius_kernel::dcg::SenseRanker for ArcSense {
         fn rank(
@@ -718,8 +716,11 @@ mod arc_handles {
             sentence: &str,
             context: &str,
             words: &[eigenius_kernel::dcg::WordSenses],
-        ) -> Option<Vec<Vec<usize>>> {
+        ) -> Option<Vec<eigenius_kernel::dcg::WordRanking>> {
             self.0.rank(sentence, context, words)
+        }
+        fn model(&self) -> Option<String> {
+            self.0.model()
         }
     }
 
@@ -733,6 +734,13 @@ mod arc_handles {
             cands: &[eigenius_kernel::dcg::ReadingCandidate],
         ) -> Option<eigenius_kernel::dcg::ReadingSelection> {
             self.0.select(ctx, cands)
+        }
+        fn tells_apart(
+            &self,
+            a: &eigenius_kernel::dcg::ReadingCandidate,
+            b: &eigenius_kernel::dcg::ReadingCandidate,
+        ) -> bool {
+            self.0.tells_apart(a, b)
         }
     }
 

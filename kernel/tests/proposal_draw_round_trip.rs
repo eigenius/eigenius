@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use eigenius_kernel::dcg::draw::{draw_resources, draws_from_layer, DrawSeam};
 use eigenius_kernel::dcg::sense_ranker::{
-    RecordingSenseRanker, ReplaySenseRanker, SenseCandidate, SenseRanker, WordSenses,
+    RecordingSenseRanker, ReplaySenseRanker, SenseCandidate, SenseRanker, WordRanking, WordSenses,
 };
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
@@ -99,11 +99,11 @@ fn encoding_chain() -> Arc<Layer> {
 /// "the replay actually answered" is distinguishable from "the replay fell through to the default".
 struct ReverseRanker;
 impl SenseRanker for ReverseRanker {
-    fn rank(&self, _s: &str, _c: &str, words: &[WordSenses]) -> Option<Vec<Vec<usize>>> {
+    fn rank(&self, _s: &str, _c: &str, words: &[WordSenses]) -> Option<Vec<WordRanking>> {
         Some(
             words
                 .iter()
-                .map(|w| (0..w.candidates.len()).rev().collect())
+                .map(|w| WordRanking::ordered((0..w.candidates.len()).rev().collect()))
                 .collect(),
         )
     }
@@ -118,7 +118,7 @@ fn cand(sense: &str) -> SenseCandidate {
 }
 
 /// Two questions, each with a distinguishable answer.
-fn ask(r: &dyn SenseRanker) -> Vec<Option<Vec<Vec<usize>>>> {
+fn ask(r: &dyn SenseRanker) -> Vec<Option<Vec<WordRanking>>> {
     let w1 = [WordSenses {
         surface: "Cancers",
         candidates: &[cand("n14247239"), cand("v02604760")],
@@ -138,8 +138,8 @@ fn a_recorded_draw_round_trips_through_the_chain_and_replays_with_zero_misses() 
     // 1. RECORD — the live arm.
     let recorder = RecordingSenseRanker::new(ReverseRanker);
     let live = ask(&recorder);
-    assert_eq!(live[0], Some(vec![vec![1, 0]]));
-    assert_eq!(live[1], Some(vec![vec![2, 1, 0]]));
+    assert_eq!(live[0], Some(vec![WordRanking::ordered(vec![1, 0])]));
+    assert_eq!(live[1], Some(vec![WordRanking::ordered(vec![2, 1, 0])]));
 
     // 2. COMMIT — the draws become resources on a layer, and that layer VALIDATES.
     let draws = recorder.keyed_draws().expect("keyed draws");

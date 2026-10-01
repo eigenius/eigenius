@@ -321,8 +321,11 @@ impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
         sentence: &str,
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
-    ) -> Option<Vec<Vec<usize>>> {
+    ) -> Option<Vec<eigenius_kernel::dcg::WordRanking>> {
         self.0.rank(sentence, context, words)
+    }
+    fn model(&self) -> Option<String> {
+        self.0.model()
     }
 }
 
@@ -330,7 +333,7 @@ impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
 // is no LLM to record, so recording is a no-op (a replay still works — it needs no ranker at all).
 #[cfg(feature = "use-llm")]
 type Recorder = std::sync::Arc<
-    eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::AnthropicSenseRanker>,
+    eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::LiveSenseRanker>,
 >;
 
 thread_local! {
@@ -395,6 +398,7 @@ fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Par
         lex = lex.with_document_augmentation(aug);
     }
     let index = Parser::over(Arc::new(lex), Arc::clone(head))
+        .with_sense_floor(sense_floor())
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(CELL_BEAM)
         .with_combinatory_core(core)
@@ -430,10 +434,11 @@ fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Par
     }
     #[cfg(feature = "use-llm")]
     {
-        if let Some(ranker) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
+        if let Some(ranker) = eigenius_kernel::dcg::live_sense_ranker_from_env() {
+            let model = ranker.model().unwrap_or_default();
             if let Some(p) = ranks_path {
                 eprintln!(
-                    "contextual reranker: AnthropicSenseRanker (live) — RECORDING to {}",
+                    "contextual reranker: {model} (live) — RECORDING to {}",
                     p.display()
                 );
                 let rec =
@@ -442,10 +447,10 @@ fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Par
                     .with(|slot| *slot.borrow_mut() = Some((std::sync::Arc::clone(&rec), p)));
                 return index.with_sense_ranker(Box::new(ArcRanker(rec)));
             }
-            eprintln!("contextual reranker: AnthropicSenseRanker (live)");
-            return index.with_sense_ranker(Box::new(ranker));
+            eprintln!("contextual reranker: {model} (live)");
+            return index.with_sense_ranker(ranker);
         }
-        eprintln!("contextual reranker: none (ANTHROPIC_API_KEY unset) — cap-only");
+        eprintln!("contextual reranker: none (the sense model's API key is unset) — cap-only");
     }
     #[cfg(not(feature = "use-llm"))]
     {
@@ -728,8 +733,11 @@ impl eigenius_kernel::dcg::SenseRanker for ArcReplay {
         sentence: &str,
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
-    ) -> Option<Vec<Vec<usize>>> {
+    ) -> Option<Vec<eigenius_kernel::dcg::WordRanking>> {
         self.0.rank(sentence, context, words)
+    }
+    fn model(&self) -> Option<String> {
+        self.0.model()
     }
 }
 
@@ -974,9 +982,19 @@ struct SenseRankScore {
     eliminated: Vec<String>,
 }
 
+/// The sense floor this run's parser cuts at: `EIGENIUS_SENSE_FLOOR`, else the parser's default.
+fn sense_floor() -> f64 {
+    std::env::var("EIGENIUS_SENSE_FLOOR")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(eigenius_kernel::dcg::DEFAULT_SENSE_FLOOR)
+}
+
+/// Score `records` against `ledger`, a weighted ranking at `floor` — the senses the parser kept.
 fn score_sense_ranks(
     records: &[eigenius_kernel::dcg::RankRecord],
     ledger: &[LedgerRow],
+    floor: f64,
 ) -> SenseRankScore {
     let mut right: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for r in ledger.iter().filter(|r| r.verdict == Verdict::Correct) {
@@ -1001,20 +1019,26 @@ fn score_sense_ranks(
             if good.is_empty() {
                 continue;
             }
+            let kept: Vec<usize> = w
+                .order
+                .iter()
+                .copied()
+                .filter(|&i| w.weights.get(i).is_none_or(|&x| x >= floor))
+                .collect();
             score.words += 1;
             score.candidates += w.senses.len();
-            score.kept_senses += w.order.len();
-            if w.order.first().is_some_and(|i| good.contains(i)) {
+            score.kept_senses += kept.len();
+            if kept.first().is_some_and(|i| good.contains(i)) {
                 score.first += 1;
             }
-            if w.order.iter().any(|i| good.contains(i)) {
+            if kept.iter().any(|i| good.contains(i)) {
                 score.kept += 1;
             } else {
                 score.eliminated.push(format!(
                     "«{}» in «{}»: kept {} of {}; eliminated {}",
                     w.surface,
                     rec.sentence.trim(),
-                    w.order.len(),
+                    kept.len(),
                     w.senses.len(),
                     good.iter()
                         .map(|&i| w.sems[i].as_str())
@@ -1029,12 +1053,12 @@ fn score_sense_ranks(
 
 /// The run's sense rankings — recorded or replayed, `EIGENIUS_SENSE_RANKS` — scored against the
 /// reading ledger; `None` when the run has no rankings file.
-fn sense_rank_score() -> Option<SenseRankScore> {
+fn sense_rank_score() -> Option<(Vec<eigenius_kernel::dcg::RankRecord>, Vec<LedgerRow>)> {
     let path = std::env::var("EIGENIUS_SENSE_RANKS").ok()?;
     let text = std::fs::read_to_string(&path).ok()?;
     let records: Vec<eigenius_kernel::dcg::RankRecord> = serde_json::from_str(&text)
         .unwrap_or_else(|e| panic!("{path} is not a rankings file: {e}"));
-    Some(score_sense_ranks(&records, &load_reading_ledger()))
+    Some((records, load_reading_ledger()))
 }
 
 fn load_reading_ledger() -> Vec<LedgerRow> {
@@ -1134,6 +1158,7 @@ fn a_ranking_is_scored_by_the_senses_the_ledger_rules_correct() {
         senses: sems.iter().map(|s| format!("wn:{s}")).collect(),
         sems: sems.iter().map(|s| s.to_string()).collect(),
         order: order.to_vec(),
+        weights: Vec::new(),
     };
     let records = [RankRecord {
         sentence: "S.".into(),
@@ -1152,8 +1177,9 @@ fn a_ranking_is_scored_by_the_senses_the_ledger_rules_correct() {
             // no right sense among the candidates: not counted
             word("some", &["n00000007", "n00000008"], &[0]),
         ],
+        model: String::new(),
     }];
-    let score = score_sense_ranks(&records, &ledger);
+    let score = score_sense_ranks(&records, &ledger, 0.02);
     assert_eq!(
         (score.words, score.kept, score.first, score.eliminated.len()),
         (3, 2, 1, 1)
@@ -1487,8 +1513,8 @@ fn verify_sense_lever_at_page_beam() {
     let mut variants: Vec<(String, Parser)> = vec![("baseline".into(), mk())];
     #[cfg(feature = "use-llm")]
     {
-        if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
-            variants.push(("+llm".into(), mk().with_sense_ranker(Box::new(r))));
+        if let Some(r) = eigenius_kernel::dcg::live_sense_ranker_from_env() {
+            variants.push(("+llm".into(), mk().with_sense_ranker(r)));
         }
     }
 
@@ -3076,13 +3102,16 @@ fn measure_pile_cell_population() {
     // Attach the live contextual reranker when built with --features use-llm (mirrors build_index),
     // so this probe measures the reranked serving path, not cap-only.
     #[cfg(feature = "use-llm")]
-    let index = match eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
+    let index = match eigenius_kernel::dcg::live_sense_ranker_from_env() {
         Some(r) => {
-            eprintln!("contextual reranker: AnthropicSenseRanker (live)");
-            index.with_sense_ranker(Box::new(r))
+            eprintln!(
+                "contextual reranker: {} (live)",
+                r.model().unwrap_or_default()
+            );
+            index.with_sense_ranker(r)
         }
         None => {
-            eprintln!("contextual reranker: none (ANTHROPIC_API_KEY unset)");
+            eprintln!("contextual reranker: none (the sense model's API key is unset)");
             index
         }
     };
@@ -4792,10 +4821,12 @@ fn probe_blocking_word() {
             sentence: &str,
             context: &str,
             words: &[eigenius_kernel::dcg::WordSenses],
-        ) -> Option<Vec<Vec<usize>>> {
+        ) -> Option<Vec<eigenius_kernel::dcg::WordRanking>> {
             let mut r = self.inner.rank(sentence, context, words)?;
             if let Some(v) = r.get_mut(self.blank) {
-                v.clear(); // this word only: out of the map ⇒ static frequency, as Pass 2 does
+                // this word only: out of the map ⇒ static frequency, as Pass 2 does
+                v.order.clear();
+                v.weights.clear();
             }
             Some(r)
         }
@@ -4995,13 +5026,30 @@ fn summarize(report: &[UnitReport]) {
     // Persist the reranker's decisions (if recording) BEFORE the summary, so a run that produced a
     // number always leaves behind the artifact that makes it replayable.
     flush_sense_ranks();
-    if let Some(score) = sense_rank_score() {
+    if let Some((records, ledger)) = sense_rank_score() {
+        // Where the ranker weighed its senses, how the floor trades the right sense against
+        // pruning — the floor's calibration, no API call needed.
+        if records
+            .iter()
+            .any(|r| r.words.iter().any(|w| !w.weights.is_empty()))
+        {
+            for floor in [0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2] {
+                let s = score_sense_ranks(&records, &ledger, floor);
+                eprintln!(
+                    "  sense floor {floor}: right sense kept {} of {}, first {}, senses kept {} of {}",
+                    s.kept, s.words, s.first, s.kept_senses, s.candidates
+                );
+            }
+        }
+        let floor = sense_floor();
+        let score = score_sense_ranks(&records, &ledger, floor);
         for e in &score.eliminated {
             eprintln!("  SENSE-ELIMINATED: {e}");
         }
         eprintln!(
-            "=== SENSE RANKS (against the reading ledger): words {}, right-sense-kept {}, \
-             right-sense-first {}, right-sense-eliminated {}, senses-kept {} of {} ===",
+            "=== SENSE RANKS (against the reading ledger, floor {floor}): words {}, \
+             right-sense-kept {}, right-sense-first {}, right-sense-eliminated {}, senses-kept {} \
+             of {} ===",
             score.words,
             score.kept,
             score.first,

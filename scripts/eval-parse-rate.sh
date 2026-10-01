@@ -107,7 +107,7 @@ EC=$(field 'expected-curated' "$SUMMARY"); [[ "$EC" =~ ^[0-9]+$ ]] || EC=""
 
 # ── Trap 3: which KIND of run was this? ──────────────────────────────────────
 RERANK="$(grep -m1 -E '^contextual reranker:' "$LOG" | sed 's/^contextual reranker: //' || echo 'unknown')"
-KIND=caponly; grep -qE '^contextual reranker: AnthropicSenseRanker \(live\)' "$LOG" && KIND=reranked
+KIND=caponly; grep -qE '^contextual reranker: .*\(live\)' "$LOG" && KIND=reranked
 PROFILE=unknown
 grep -qE 'Finished .release. profile' "$LOG" && PROFILE=release
 grep -qE 'Finished .(dev|test). profile' "$LOG" && PROFILE=debug
@@ -377,7 +377,7 @@ if [[ -n "$BASE" && -f "$BASE" ]]; then
     echo "  baseline $BASE did not complete — cannot compare."
     exit 1
   fi
-  BKIND=caponly; grep -qE '^contextual reranker: AnthropicSenseRanker \(live\)' "$BASE" && BKIND=reranked
+  BKIND=caponly; grep -qE '^contextual reranker: .*\(live\)' "$BASE" && BKIND=reranked
   BCONFIG="$(grep -m1 -E '^# config:' "$BASE" | sed 's/^# config: *//' || echo 'not recorded')"
   echo
   if [[ "$KIND" != "$BKIND" ]]; then
