@@ -527,7 +527,7 @@ struct Arms {
 #[derive(Default)]
 struct LiveRecorders {
     sense: Option<Arc<RecordingSenseRanker<eigenius_kernel::dcg::AnthropicSenseRanker>>>,
-    selection: Option<Arc<RecordingReadingRanker<eigenius_kernel::dcg::AnthropicReadingRanker>>>,
+    selection: Option<Arc<RecordingReadingRanker<eigenius_kernel::dcg::LiveReadingRanker>>>,
     proposer: Option<Arc<RecordingProposer<eigenius_kernel::dcg::resolver_llm::AnthropicProposer>>>,
     kinds: Option<Arc<crate::RecordingKindClassifier<crate::AnthropicKindClassifier>>>,
 }
@@ -575,10 +575,8 @@ impl Arms {
             None => {
                 #[cfg(feature = "use-llm")]
                 {
-                    let live = eigenius_kernel::dcg::AnthropicReadingRanker::from_env_with(
-                        req.model.clone(),
-                    )
-                    .ok_or("no selection recording and ANTHROPIC_API_KEY is unset")?;
+                    let live = eigenius_kernel::dcg::live_reading_ranker(req.model.clone())
+                        .ok_or("no selection recording and the model's API key is unset")?;
                     let a = Arc::new(RecordingReadingRanker::new(live));
                     rec.selection = Some(Arc::clone(&a));
                     Some(Box::new(ArcSelection(a)))
@@ -726,7 +724,7 @@ mod arc_handles {
     }
 
     pub(super) struct ArcSelection(
-        pub Arc<RecordingReadingRanker<eigenius_kernel::dcg::AnthropicReadingRanker>>,
+        pub Arc<RecordingReadingRanker<eigenius_kernel::dcg::LiveReadingRanker>>,
     );
     impl ReadingRanker for ArcSelection {
         fn select(

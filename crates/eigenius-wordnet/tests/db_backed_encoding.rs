@@ -3394,7 +3394,7 @@ fn wrn_first_page_over_full_lexicon() {
     // `EIGENIUS_SENSE_RANKS` discipline:
     //   EIGENIUS_SELECTIONS file EXISTS → REPLAY it (deterministic, no LLM; a miss ABSTAINS and
     //                                     is asserted 0 after the run — see the tail assert)
-    //   file ABSENT + live ranker       → LIVE AnthropicReadingRanker, RECORDED to that path
+    //   file ABSENT + live ranker       → the LIVE ranker (live_reading_ranker_from_env), RECORDED
     //   env unset                       → the deterministic PIN-BACKED arm (abstains on unpinned
     //                                     sentences and skeleton ties, so correct == curated by
     //                                     construction; recorded to EIGENIUS_SELECTIONS_OUT)
@@ -3431,19 +3431,20 @@ fn wrn_first_page_over_full_lexicon() {
             // test binary's CWD is the crate dir, not the repo root).
             #[cfg(feature = "use-llm")]
             {
-                let Some(r) = eigenius_kernel::dcg::AnthropicReadingRanker::from_env() else {
+                let Some(r) = eigenius_kernel::dcg::live_reading_ranker_from_env() else {
                     panic!(
-                        "EIGENIUS_SELECTIONS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                        "EIGENIUS_SELECTIONS={} does not exist and the model's API key is unset — \
                          cannot record a live selection draw",
                         p.display()
                     );
                 };
                 eprintln!(
-                    "reading ranker: AnthropicReadingRanker (live) — RECORDING to {}",
+                    "reading ranker: live, {} — RECORDING to {}",
+                    r.model().unwrap_or_default(),
                     p.display()
                 );
                 selection_arm = "live";
-                Box::new(r)
+                r
             }
             #[cfg(not(feature = "use-llm"))]
             panic!(
@@ -3985,7 +3986,7 @@ fn resolve_document_discourse_close_out() {
     // INSIDE the discourse loop, choosing over the pool of closed ∪ resolved-open readings).
     // Same three-arm discipline as every other recorded stage:
     //   EIGENIUS_SELECTIONS file EXISTS → REPLAY (deterministic, no LLM; misses ABSTAIN)
-    //   file ABSENT + live ranker       → LIVE AnthropicReadingRanker, RECORDED to that path
+    //   file ABSENT + live ranker       → the LIVE ranker (live_reading_ranker_from_env), RECORDED
     //   env unset                       → NO ranker: multi-reading pools stay Ambiguous. This is
     //                                     the arm the pinned tallies below are measured on — it
     //                                     isolates the RESOLVER, which is what those pins gate.
@@ -4015,19 +4016,20 @@ fn resolve_document_discourse_close_out() {
         Some(p) => {
             #[cfg(feature = "use-llm")]
             {
-                let Some(r) = eigenius_kernel::dcg::AnthropicReadingRanker::from_env() else {
+                let Some(r) = eigenius_kernel::dcg::live_reading_ranker_from_env() else {
                     panic!(
-                        "EIGENIUS_SELECTIONS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                        "EIGENIUS_SELECTIONS={} does not exist and the model's API key is unset — \
                          cannot record a live selection draw",
                         p.display()
                     );
                 };
                 eprintln!(
-                    "reading ranker: AnthropicReadingRanker (live) — RECORDING to {}",
+                    "reading ranker: live, {} — RECORDING to {}",
+                    r.model().unwrap_or_default(),
                     p.display()
                 );
                 selection_arm = "live";
-                Some(Box::new(r) as Box<dyn eigenius_kernel::dcg::ReadingRanker>)
+                Some(r as Box<dyn eigenius_kernel::dcg::ReadingRanker>)
             }
             #[cfg(not(feature = "use-llm"))]
             panic!(

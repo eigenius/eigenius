@@ -38,6 +38,7 @@ pub mod augment;
 pub mod category;
 pub(crate) mod chart;
 pub mod closed_class;
+pub mod decision;
 pub mod draw;
 pub mod formalizer;
 pub mod glossary;
@@ -122,10 +123,13 @@ pub use proposer_record::{
 };
 pub use quantity::{ProseUnits, Quantity, UnitReading};
 #[cfg(feature = "use-llm")]
-pub use reading_ranker::AnthropicReadingRanker;
 pub use reading_ranker::{
-    DocumentContext, PinReadingRanker, PriorSelection, ReadingCandidate, ReadingRanker,
-    ReadingSelection, RecordingReadingRanker, ReplayReadingRanker, SelectionRecord,
+    live_reading_ranker, live_reading_ranker_from_env, AnthropicReadingRanker,
+};
+pub use reading_ranker::{
+    DecisionReadingRanker, DocumentContext, LiveReadingRanker, PinReadingRanker, PriorSelection,
+    ReadingCandidate, ReadingRanker, ReadingSelection, RecordingReadingRanker, ReplayReadingRanker,
+    SelectionRecord,
 };
 pub use rules::combinators::apply;
 pub use rules::constructions::{

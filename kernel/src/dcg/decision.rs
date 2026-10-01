@@ -1,0 +1,539 @@
+// Copyright 2026 The Eigenius Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! **A decision put to a model, independent of who answers it** (eigenius#264 strand 2).
+//!
+//! Every call the reasoning layer makes to a model picks one of a set of described options: which
+//! structure a sentence has, which of its readings, which sense of a word. A [`Choice`] states that
+//! — what the question is about, the question, the facts it rests on, the options — and a
+//! [`Decider`] answers it. The providers answer differently: Anthropic's models write a reason and a
+//! ranking ([`AnthropicDecider`], through [`super::anthropic_client`]); TypeSafe's System One model
+//! returns a calibrated probability per option and no reason ([`TypeSafeDecider`]). [`Decided`]
+//! carries whichever the provider gives.
+//!
+//! The question is rendered per provider ([`render_prompt`], [`render_typesafe`]); both renderings
+//! are pure and tested here, so what a model is asked can be read without calling one.
+
+use std::collections::BTreeMap;
+
+use serde_json::{json, Value};
+
+/// One decision: what it is about, the question, the facts it rests on, and the options.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Choice {
+    /// What the question is about, as named parts in order (the document, the earlier selections,
+    /// the sentence). An empty part is left out.
+    pub context: Vec<(String, String)>,
+    /// What to decide, with whatever the options' notation needs explained.
+    pub question: String,
+    /// Facts the decision rests on, as named lists (how the structures differ; what the concepts
+    /// mean). An empty list is left out.
+    pub notes: Vec<(String, Vec<String>)>,
+    /// The options, by key, each with what it means.
+    pub options: Vec<(String, String)>,
+}
+
+/// A provider's answer to a [`Choice`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Decided {
+    /// The chosen option's key — one of the choice's keys; [`Decider::choose`] checks it.
+    pub choice: String,
+    /// The other options, most plausible first, as far as the provider ranks them.
+    pub runners_up: Vec<String>,
+    /// The probability of each option, where the provider reports one.
+    pub probabilities: BTreeMap<String, f64>,
+    /// The provider's reason, where it gives one.
+    pub rationale: String,
+    /// The model that answered, as the provider names it (`jev-1.13.0`, `claude-sonnet-5-5`).
+    pub model: String,
+}
+
+impl Decided {
+    /// What the answer says beyond the choice: the reason, else the distribution.
+    pub fn account(&self) -> String {
+        if !self.rationale.is_empty() || self.probabilities.is_empty() {
+            return self.rationale.clone();
+        }
+        let mut ps: Vec<(&String, &f64)> = self.probabilities.iter().collect();
+        ps.sort_by(|a, b| b.1.total_cmp(a.1));
+        let ps: Vec<String> = ps.iter().map(|(k, p)| format!("{k}={p:.2}")).collect();
+        format!("probabilities {}", ps.join(", "))
+    }
+}
+
+/// A model that answers [`Choice`]s.
+pub trait Decider {
+    /// Answer `choice`: `Err` on any transport, API or decode failure, or an answer naming no
+    /// option of the choice — the caller fails closed.
+    fn choose(&self, choice: &Choice) -> Result<Decided, String>;
+
+    /// The model this decider asks.
+    fn model(&self) -> &str;
+}
+
+impl<T: Decider + ?Sized> Decider for Box<T> {
+    fn choose(&self, choice: &Choice) -> Result<Decided, String> {
+        (**self).choose(choice)
+    }
+    fn model(&self) -> &str {
+        (**self).model()
+    }
+}
+
+/// An answer is well-formed if it names an option of the choice; its runners-up are kept only as
+/// far as they name other options, each once.
+pub fn checked(choice: &Choice, mut decided: Decided) -> Result<Decided, String> {
+    let keys: Vec<&str> = choice.options.iter().map(|(k, _)| k.as_str()).collect();
+    if !keys.contains(&decided.choice.as_str()) {
+        return Err(format!(
+            "the answer names {:?}, which is not an option ({})",
+            decided.choice,
+            keys.join(", ")
+        ));
+    }
+    let mut seen = vec![decided.choice.clone()];
+    decided.runners_up.retain(|r| {
+        let fresh = keys.contains(&r.as_str()) && !seen.contains(r);
+        if fresh {
+            seen.push(r.clone());
+        }
+        fresh
+    });
+    Ok(decided)
+}
+
+/// The choice as one prompt, for a model that reads text and writes a reason.
+pub fn render_prompt(choice: &Choice) -> String {
+    let mut out = format!("{}\n\n", choice.question.trim());
+    for (name, text) in choice.context.iter().filter(|(_, t)| !t.trim().is_empty()) {
+        out.push_str(&format!("{name}:\n{}\n\n", text.trim_end()));
+    }
+    out.push_str("Options:\n");
+    for (key, description) in &choice.options {
+        out.push_str(&format!("  [{key}] {description}\n"));
+    }
+    for (name, lines) in choice.notes.iter().filter(|(_, l)| !l.is_empty()) {
+        out.push_str(&format!("\n{name}:\n"));
+        for l in lines {
+            out.push_str(&format!("  - {l}\n"));
+        }
+    }
+    out.push_str(
+        "\nReturn `choice` = the key of the option that is right, `rationale` = one or two \
+         sentences that decide it, and `runners_up` = the other keys, most plausible first.",
+    );
+    out
+}
+
+/// The reply schema for [`render_prompt`]: the choice and runners-up confined to the option keys.
+pub fn reply_schema(choice: &Choice) -> Value {
+    let keys: Vec<&str> = choice.options.iter().map(|(k, _)| k.as_str()).collect();
+    json!({
+        "type": "object",
+        "properties": {
+            "choice": { "type": "string", "enum": keys },
+            "rationale": { "type": "string" },
+            "runners_up": { "type": "array", "items": { "type": "string", "enum": keys } },
+        },
+        "required": ["choice", "rationale", "runners_up"],
+        "additionalProperties": false,
+    })
+}
+
+/// The id a question carries in a TypeSafe request; the answer comes back under it.
+pub const TYPESAFE_QUESTION: &str = "decision";
+
+/// The choice as a TypeSafe request: the context as `state`, the question with its notes as
+/// structured `instructions`, the options as a `choice` question's `criteria`.
+pub fn render_typesafe(choice: &Choice, model: &str) -> Value {
+    let mut state = serde_json::Map::new();
+    for (name, text) in choice.context.iter().filter(|(_, t)| !t.trim().is_empty()) {
+        state.insert(snake(name), Value::String(text.trim_end().to_string()));
+    }
+    let mut instructions = serde_json::Map::new();
+    instructions.insert("question".into(), Value::String(choice.question.clone()));
+    for (name, lines) in choice.notes.iter().filter(|(_, l)| !l.is_empty()) {
+        instructions.insert(snake(name), json!(lines));
+    }
+    let criteria: serde_json::Map<String, Value> = choice
+        .options
+        .iter()
+        .map(|(k, d)| (k.clone(), Value::String(d.clone())))
+        .collect();
+    json!({
+        "state": state,
+        "model": model,
+        "questions": {
+            TYPESAFE_QUESTION: {
+                "type": "choice",
+                "instructions": instructions,
+                "criteria": criteria,
+            }
+        }
+    })
+}
+
+/// A TypeSafe `choice` answer as [`Decided`]: the runners-up are the other options by probability.
+pub fn read_typesafe(payload: &Value) -> Result<Decided, String> {
+    let answer = payload
+        .get("answers")
+        .and_then(|a| a.get(TYPESAFE_QUESTION))
+        .ok_or_else(|| format!("no `{TYPESAFE_QUESTION}` answer: {payload}"))?;
+    let choice = answer
+        .get("choice")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("no choice in the answer: {payload}"))?
+        .to_string();
+    let probabilities: BTreeMap<String, f64> = answer
+        .get("probabilities")
+        .and_then(Value::as_object)
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| v.as_f64().map(|p| (k.clone(), p)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut runners: Vec<(&String, &f64)> = probabilities
+        .iter()
+        .filter(|(k, _)| **k != choice)
+        .collect();
+    runners.sort_by(|a, b| b.1.total_cmp(a.1));
+    Ok(Decided {
+        runners_up: runners.into_iter().map(|(k, _)| k.clone()).collect(),
+        rationale: String::new(),
+        model: payload
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        choice,
+        probabilities,
+    })
+}
+
+/// `How the structures differ` → `how_the_structures_differ`.
+fn snake(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.ends_with('_') && !out.is_empty() {
+            out.push('_');
+        }
+    }
+    out.trim_end_matches('_').to_string()
+}
+
+#[cfg(feature = "use-llm")]
+mod providers {
+    use super::*;
+    use crate::dcg::anthropic_client::{anthropic_json, ModelConfig};
+
+    /// Anthropic's models answer a choice with a reason, through the structured-output client.
+    pub struct AnthropicDecider {
+        api_key: String,
+        cfg: ModelConfig,
+    }
+
+    impl AnthropicDecider {
+        pub fn new(api_key: impl Into<String>, cfg: ModelConfig) -> Self {
+            Self {
+                api_key: api_key.into(),
+                cfg,
+            }
+        }
+
+        /// From `$ANTHROPIC_API_KEY`; `None` if unset.
+        pub fn from_env(cfg: ModelConfig) -> Option<Self> {
+            std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty())
+                .map(|k| Self::new(k, cfg))
+        }
+    }
+
+    impl Decider for AnthropicDecider {
+        fn choose(&self, choice: &Choice) -> Result<Decided, String> {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())?;
+            let reply = rt.block_on(anthropic_json(
+                &self.api_key,
+                &self.cfg,
+                &render_prompt(choice),
+                reply_schema(choice),
+            ))?;
+            let text = |k: &str| reply.get(k).and_then(Value::as_str).unwrap_or_default();
+            let decided = Decided {
+                choice: text("choice").to_string(),
+                runners_up: reply
+                    .get("runners_up")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                probabilities: BTreeMap::new(),
+                rationale: text("rationale").to_string(),
+                model: self.cfg.model.clone(),
+            };
+            checked(choice, decided)
+        }
+
+        fn model(&self) -> &str {
+            &self.cfg.model
+        }
+    }
+
+    const TYPESAFE_URL: &str = "https://api.typesafe.ai/v1/systemone";
+
+    /// Retries after a 429 (rate limit) or 529 (overloaded), with the delay doubling from this.
+    const TYPESAFE_FIRST_BACKOFF_MS: u64 = 500;
+    const TYPESAFE_TRIES: u32 = 6;
+
+    /// TypeSafe's System One models answer a choice with a probability per option and no reason.
+    pub struct TypeSafeDecider {
+        api_key: String,
+        model: String,
+    }
+
+    impl TypeSafeDecider {
+        pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+            Self {
+                api_key: api_key.into(),
+                model: model.into(),
+            }
+        }
+
+        /// From `$TYPESAFE_API_KEY`; `None` if unset.
+        pub fn from_env(model: impl Into<String>) -> Option<Self> {
+            std::env::var("TYPESAFE_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty())
+                .map(|k| Self::new(k, model))
+        }
+    }
+
+    impl Decider for TypeSafeDecider {
+        fn choose(&self, choice: &Choice) -> Result<Decided, String> {
+            if choice.options.len() > 255 {
+                return Err(format!(
+                    "{} options; a TypeSafe choice takes at most 255",
+                    choice.options.len()
+                ));
+            }
+            let body = render_typesafe(choice, &self.model);
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())?;
+            let payload = rt.block_on(async {
+                let client = reqwest::Client::new();
+                let mut wait = TYPESAFE_FIRST_BACKOFF_MS;
+                for attempt in 1..=TYPESAFE_TRIES {
+                    let resp = client
+                        .post(TYPESAFE_URL)
+                        .bearer_auth(&self.api_key)
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|e| format!("typesafe request failed: {e}"))?;
+                    let status = resp.status();
+                    let payload: Value = resp
+                        .json()
+                        .await
+                        .map_err(|e| format!("typesafe response not JSON: {e}"))?;
+                    if status.is_success() {
+                        return Ok(payload);
+                    }
+                    let busy = matches!(status.as_u16(), 429 | 529);
+                    if !busy || attempt == TYPESAFE_TRIES {
+                        return Err(format!("typesafe API {status}: {payload}"));
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                    wait *= 2;
+                }
+                unreachable!("the last attempt returns")
+            })?;
+            checked(choice, read_typesafe(&payload)?)
+        }
+
+        fn model(&self) -> &str {
+            &self.model
+        }
+    }
+}
+
+#[cfg(feature = "use-llm")]
+pub use providers::{AnthropicDecider, TypeSafeDecider};
+
+/// The decider for `cfg`'s model, from the provider's key in the environment; `None` without one.
+#[cfg(feature = "use-llm")]
+pub fn decider_from_env(
+    cfg: &crate::dcg::model_config::ModelConfig,
+) -> Option<Box<dyn Decider + Send + Sync>> {
+    use crate::dcg::model_config::Provider;
+    match cfg.provider() {
+        Provider::Anthropic => AnthropicDecider::from_env(cfg.clone())
+            .map(|d| Box::new(d) as Box<dyn Decider + Send + Sync>),
+        Provider::TypeSafe => TypeSafeDecider::from_env(cfg.model.clone())
+            .map(|d| Box::new(d) as Box<dyn Decider + Send + Sync>),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn choice() -> Choice {
+        Choice {
+            context: vec![
+                ("Document".into(), "Doc text.".into()),
+                ("Earlier selections".into(), String::new()),
+                ("The sentence".into(), "S.".into()),
+            ],
+            question: "Which structure?".into(),
+            notes: vec![(
+                "How the structures differ".into(),
+                vec!["«for X»: attaches to «a» in 1; to «b» in 2".into()],
+            )],
+            options: vec![
+                ("1".into(), "structure one".into()),
+                ("2".into(), "structure two".into()),
+            ],
+        }
+    }
+
+    /// The prompt names every option by key, carries the notes, and drops an empty context part.
+    #[test]
+    fn the_prompt_carries_the_options_and_notes() {
+        let p = render_prompt(&choice());
+        assert!(
+            p.starts_with("Which structure?\n\nDocument:\nDoc text."),
+            "{p}"
+        );
+        assert!(!p.contains("Earlier selections"), "{p}");
+        assert!(
+            p.contains("  [1] structure one\n  [2] structure two\n"),
+            "{p}"
+        );
+        assert!(p.contains("How the structures differ:\n  - «for X»"), "{p}");
+        let schema = reply_schema(&choice());
+        assert_eq!(schema["properties"]["choice"]["enum"], json!(["1", "2"]));
+    }
+
+    /// The TypeSafe request puts the context in `state`, the notes beside the question, and the
+    /// options in `criteria`; its answer's runners-up follow the probabilities.
+    #[test]
+    fn a_typesafe_request_and_answer_round_trip() {
+        let req = render_typesafe(&choice(), "jev-latest");
+        assert_eq!(req["state"]["the_sentence"], json!("S."));
+        assert!(req["state"].get("earlier_selections").is_none());
+        let q = &req["questions"][TYPESAFE_QUESTION];
+        assert_eq!(q["type"], json!("choice"));
+        assert_eq!(q["criteria"]["2"], json!("structure two"));
+        assert_eq!(q["instructions"]["question"], json!("Which structure?"));
+        assert!(q["instructions"]["how_the_structures_differ"].is_array());
+        let payload = json!({
+            "model": "jev-1.13.0",
+            "answers": { TYPESAFE_QUESTION: {
+                "type": "choice", "choice": "2", "confidence": 0.8,
+                "probabilities": { "1": 0.1, "2": 0.9 },
+            }},
+        });
+        let d = checked(&choice(), read_typesafe(&payload).unwrap()).unwrap();
+        assert_eq!(d.choice, "2");
+        assert_eq!(d.runners_up, vec!["1".to_string()]);
+        assert_eq!(d.model, "jev-1.13.0");
+        assert_eq!(d.account(), "probabilities 2=0.90, 1=0.10");
+    }
+
+    /// An answer naming no option is an error; runners-up naming none are dropped.
+    #[test]
+    fn an_answer_outside_the_options_is_refused() {
+        let d = |c: &str, r: &[&str]| Decided {
+            choice: c.into(),
+            runners_up: r.iter().map(|s| s.to_string()).collect(),
+            probabilities: BTreeMap::new(),
+            rationale: "because".into(),
+            model: "m".into(),
+        };
+        assert!(checked(&choice(), d("3", &[])).is_err());
+        let ok = checked(&choice(), d("1", &["9", "2", "2", "1"])).unwrap();
+        assert_eq!(ok.runners_up, vec!["2".to_string()]);
+    }
+}
+
+/// Live: each provider answers the witness of eigenius#264's strand 1 — an instrumental PP — through
+/// its own transport. Skips without the provider's key; runs with `--features use-llm`.
+#[cfg(all(test, feature = "use-llm"))]
+mod live_tests {
+    use super::*;
+    use crate::dcg::model_config::ModelConfig;
+
+    fn library() -> Choice {
+        Choice {
+            context: vec![(
+                "The sentence".into(),
+                "Project Achilles screened cell lines with a CRISPR library.".into(),
+            )],
+            question: "Which structure does the sentence mean?".into(),
+            notes: Vec::new(),
+            options: vec![
+                (
+                    "1".into(),
+                    "the library is a property of the cell lines".into(),
+                ),
+                (
+                    "2".into(),
+                    "the library is the instrument of the screening".into(),
+                ),
+            ],
+        }
+    }
+
+    fn ask(model: &str) {
+        let Some(d) = decider_from_env(&ModelConfig::with_model(model)) else {
+            eprintln!("SKIP {model}: no API key");
+            return;
+        };
+        let answer = d.choose(&library()).expect("the provider answered");
+        eprintln!(
+            "{model}: {} — {} [{}]",
+            answer.choice,
+            answer.account(),
+            answer.model
+        );
+        assert_eq!(answer.choice, "2", "the instrument");
+        assert_eq!(answer.runners_up, vec!["1".to_string()]);
+    }
+
+    #[test]
+    fn live_typesafe_decides_the_instrument() {
+        ask("jev-latest");
+    }
+
+    #[test]
+    fn live_claude5_decides_the_instrument() {
+        ask("claude-sonnet-5-5");
+    }
+
+    #[test]
+    fn live_claude4_decides_the_instrument() {
+        ask("claude-sonnet-4-6");
+    }
+}

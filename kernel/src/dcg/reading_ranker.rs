@@ -46,6 +46,7 @@ use std::sync::Mutex;
 
 use sha2::{Digest, Sha256};
 
+use crate::dcg::decision::{render_prompt, Choice, Decided, Decider};
 use crate::dcg::verbalize::ConceptNote;
 /// D69-B truncation cap: how many STRUCTURES a single prompt may show.
 ///
@@ -54,7 +55,6 @@ use crate::dcg::verbalize::ConceptNote;
 /// complete, since a half-shown structure would make the sense table lie. Dropping is logged and
 /// stated in the prompt; a silent cap would let the model pick "the best of what it saw" and report it
 /// as the best reading (the D62 no-silent-caps rule).
-#[cfg(feature = "use-llm")]
 const MAX_STRUCTURES_SHOWN: usize = 12;
 
 /// One reading of the sentence, as presented to the ranker. Candidates are presented grouped by
@@ -131,6 +131,12 @@ pub trait ReadingRanker {
         ctx: &DocumentContext,
         candidates: &[ReadingCandidate],
     ) -> Option<ReadingSelection>;
+
+    /// The model that answers, for a ranker that asks one — what a recorded draw names as its
+    /// answerer (D71 §9).
+    fn model(&self) -> Option<String> {
+        None
+    }
 }
 
 impl<T: ReadingRanker + ?Sized> ReadingRanker for Box<T> {
@@ -141,6 +147,9 @@ impl<T: ReadingRanker + ?Sized> ReadingRanker for Box<T> {
     ) -> Option<ReadingSelection> {
         (**self).select(ctx, candidates)
     }
+    fn model(&self) -> Option<String> {
+        (**self).model()
+    }
 }
 
 impl<T: ReadingRanker + ?Sized> ReadingRanker for std::sync::Arc<T> {
@@ -150,6 +159,9 @@ impl<T: ReadingRanker + ?Sized> ReadingRanker for std::sync::Arc<T> {
         candidates: &[ReadingCandidate],
     ) -> Option<ReadingSelection> {
         (**self).select(ctx, candidates)
+    }
+    fn model(&self) -> Option<String> {
+        (**self).model()
     }
 }
 
@@ -220,6 +232,10 @@ pub struct SelectionRecord {
     pub rationale: String,
     #[serde(default)]
     pub runners_up: Vec<usize>,
+    /// The model that answered (eigenius#264): the arms of an A/B differ in it. Empty in draws
+    /// recorded before it was kept, and for rankers that ask no model.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
 }
 
 /// One candidate as recorded — skeleton, gloss, and sem, exactly as presented.
@@ -334,6 +350,7 @@ impl<R: ReadingRanker> ReadingRanker for RecordingReadingRanker<R> {
         candidates: &[ReadingCandidate],
     ) -> Option<ReadingSelection> {
         let selection = self.inner.select(ctx, candidates);
+        let model = self.inner.model().unwrap_or_default();
         let recorded = recorded_candidates(candidates);
         let sha = document_sha(ctx.document);
         let key = selection_key(ctx.sentence, &sha, ctx.prior_selections, &recorded);
@@ -347,6 +364,7 @@ impl<R: ReadingRanker> ReadingRanker for RecordingReadingRanker<R> {
                 chosen: s.chosen,
                 rationale: s.rationale.clone(),
                 runners_up: s.runners_up.clone(),
+                model,
             },
             None => SelectionRecord {
                 sentence: ctx.sentence.to_string(),
@@ -357,6 +375,7 @@ impl<R: ReadingRanker> ReadingRanker for RecordingReadingRanker<R> {
                 chosen: 0,
                 rationale: String::new(),
                 runners_up: Vec::new(),
+                model,
             },
         };
         self.log.lock().expect("selection log").insert(key, record);
@@ -735,6 +754,293 @@ fn word_diff(a: &str, b: &str) -> (String, String) {
     (mid(&wa), mid(&wb))
 }
 
+// ───────────────────────── the two-call ranker (eigenius#264) ─────────────────────────
+
+/// The option key a decision answers with when nothing offered is faithful.
+const NONE_FAITHFUL: &str = "none";
+
+/// The structure call's question, with its notation.
+const STRUCTURE_QUESTION: &str = "A parser read the document and found several STRUCTURES for one \
+     of its sentences — different ways the sentence's words combine. Choose the structure that \
+     matches what the sentence means in the context of the document. Word senses are not the \
+     question here: every word is shown as the sentence writes it, and a second step chooses the \
+     senses within the structure you pick. Decide the differences listed under how the structures \
+     differ — where each phrase attaches, and why. In a structure, `«…»` is a word of the \
+     sentence; `+ X` is a relation the structure asserts of the phrase before it; `compound-with` \
+     marks a noun modifier whose relation the sentence leaves unspecified; `and` joins separate \
+     claims.";
+
+/// **The two-call reading ranker** (eigenius#264; the default since 2026-09-30): a structure
+/// call, then a sense call, each a [`Choice`] put to a [`Decider`], so any provider answers it.
+///
+/// The structure call shows each structure once in the sentence's own words
+/// ([`ReadingCandidate::structure`]) with how the structures differ ([`structure_contrasts`]);
+/// the sense call shows the chosen structure's readings as glosses, with the legend of the
+/// concepts they name. A pool with one structure skips the first call, a structure with one
+/// reading the second. Every failure abstains: a decider error, an answer naming nothing shown,
+/// or `none` — which is a result, and is logged with the reason.
+pub struct DecisionReadingRanker<D: Decider> {
+    decider: D,
+}
+
+impl<D: Decider> DecisionReadingRanker<D> {
+    pub fn new(decider: D) -> Self {
+        Self { decider }
+    }
+
+    fn ask(&self, ctx: &DocumentContext, choice: &Choice) -> Option<Decided> {
+        if std::env::var("EIGENIUS_DUMP_SELECT_PROMPT").is_ok() {
+            eprintln!(
+                "\n===== READING-RANKER DECISION ({}) =====\n{}\n===== END DECISION =====\n",
+                self.decider.model(),
+                render_prompt(choice)
+            );
+        }
+        match self.decider.choose(choice) {
+            Ok(d) if d.choice == NONE_FAITHFUL => {
+                eprintln!(
+                    "reading-ranker: NONE FAITHFUL on «{}» — {}",
+                    ctx.sentence.trim(),
+                    d.account()
+                );
+                None
+            }
+            Ok(d) => Some(d),
+            Err(e) => {
+                eprintln!(
+                    "reading-ranker: {} gave no answer on «{}» — {e}; abstained",
+                    self.decider.model(),
+                    ctx.sentence.trim()
+                );
+                None
+            }
+        }
+    }
+}
+
+impl<D: Decider> ReadingRanker for DecisionReadingRanker<D> {
+    fn model(&self) -> Option<String> {
+        Some(self.decider.model().to_string())
+    }
+
+    fn select(
+        &self,
+        ctx: &DocumentContext,
+        candidates: &[ReadingCandidate],
+    ) -> Option<ReadingSelection> {
+        if candidates.len() < 2 {
+            return None; // nothing to disambiguate
+        }
+        let mut groups = structure_groups(candidates);
+        let total = groups.len();
+        let kept = total.min(MAX_STRUCTURES_SHOWN);
+        let dropped: usize = groups[kept..].iter().map(Vec::len).sum();
+        groups.truncate(kept);
+        if dropped > 0 {
+            eprintln!(
+                "reading-ranker: TRUNCATED «{}» — showed {kept} of {total} structures, omitting \
+                 {dropped} reading(s); the omitted ones cannot be chosen",
+                ctx.sentence.trim()
+            );
+        }
+        // Option keys are numbers as shown, and `Decider::choose` checked the answer names one.
+        let number = |k: &str| k.parse::<usize>().ok();
+        let (group, structure_account, other_structures) = if groups.len() == 1 {
+            (0, None, Vec::new())
+        } else {
+            let d = self.ask(
+                ctx,
+                &structure_choice(ctx, candidates, &groups, total - kept),
+            )?;
+            let n = number(&d.choice)?;
+            let others: Vec<usize> = d
+                .runners_up
+                .iter()
+                .filter_map(|r| number(r))
+                .map(|r| r - 1)
+                .collect();
+            (
+                n - 1,
+                Some(format!("STRUCTURE {n} [{}]: {}", d.model, d.account())),
+                others,
+            )
+        };
+        let members = &groups[group];
+        let (chosen, sense_account, sense_runners) = if members.len() == 1 {
+            (members[0], None, Vec::new())
+        } else {
+            let d = self.ask(ctx, &sense_choice(ctx, candidates, members))?;
+            let local = number(&d.choice)?;
+            let runners: Vec<usize> = d
+                .runners_up
+                .iter()
+                .filter_map(|r| number(r).and_then(|r| members.get(r).copied()))
+                .collect();
+            (
+                members[local],
+                Some(format!("SENSES [{}]: {}", d.model, d.account())),
+                runners,
+            )
+        };
+        // The chosen structure's other readings first, then each other structure's first.
+        let mut seen = vec![false; candidates.len()];
+        seen[chosen] = true;
+        let runners_up: Vec<usize> = sense_runners
+            .into_iter()
+            .chain(other_structures.iter().map(|&g| groups[g][0]))
+            .filter(|&i| !std::mem::replace(&mut seen[i], true))
+            .collect();
+        let rationale: Vec<String> = [structure_account, sense_account]
+            .into_iter()
+            .flatten()
+            .collect();
+        Some(ReadingSelection {
+            chosen,
+            rationale: rationale.join(" | "),
+            runners_up,
+        })
+    }
+}
+
+/// What every decision of a sentence is about: the document, the readings already selected for
+/// earlier sentences, and the sentence.
+fn context_parts(ctx: &DocumentContext) -> Vec<(String, String)> {
+    let prior: Vec<String> = ctx
+        .prior_selections
+        .iter()
+        .map(|p| format!("sentence {}: \"{}\"", p.ordinal, p.gloss))
+        .collect();
+    vec![
+        ("Document".into(), ctx.document.trim().to_string()),
+        (
+            "Readings already selected for earlier sentences (stay consistent with them)".into(),
+            prior.join("\n"),
+        ),
+        ("The sentence".into(), ctx.sentence.trim().to_string()),
+    ]
+}
+
+/// The structure call: the shown structures, numbered from 1, and how they differ.
+fn structure_choice(
+    ctx: &DocumentContext,
+    candidates: &[ReadingCandidate],
+    groups: &[Vec<usize>],
+    dropped_structures: usize,
+) -> Choice {
+    let mut options: Vec<(String, String)> = groups
+        .iter()
+        .enumerate()
+        .map(|(n, g)| ((n + 1).to_string(), candidates[g[0]].structure.clone()))
+        .collect();
+    options.push((
+        NONE_FAITHFUL.into(),
+        "None of these structures — the grouping the sentence means is not among them".into(),
+    ));
+    let mut notes = vec![(
+        "How the structures differ".to_string(),
+        structure_contrasts(candidates, groups),
+    )];
+    if dropped_structures > 0 {
+        notes.push((
+            "Not shown".into(),
+            vec![format!(
+                "{dropped_structures} further structure(s) are not shown and cannot be chosen; if \
+                 none shown is faithful, answer `{NONE_FAITHFUL}`"
+            )],
+        ));
+    }
+    Choice {
+        context: context_parts(ctx),
+        question: STRUCTURE_QUESTION.into(),
+        notes,
+        options,
+    }
+}
+
+/// The sense call: the chosen structure's readings, numbered from 0, with the legend of the
+/// concepts they name.
+fn sense_choice(
+    ctx: &DocumentContext,
+    candidates: &[ReadingCandidate],
+    members: &[usize],
+) -> Choice {
+    let mut options: Vec<(String, String)> = members
+        .iter()
+        .enumerate()
+        .map(|(n, &i)| (n.to_string(), candidates[i].gloss.clone()))
+        .collect();
+    options.push((
+        NONE_FAITHFUL.into(),
+        "None of these readings — a sense the sentence needs is not among them".into(),
+    ));
+    let legend: Vec<String> = ctx
+        .concepts
+        .iter()
+        .filter(|c| {
+            let id = format!("[{}]", c.id);
+            members.iter().any(|&i| candidates[i].gloss.contains(&id))
+        })
+        .filter_map(|c| {
+            let d = c.definition.as_deref()?;
+            let d: String = if d.chars().count() > 240 {
+                format!("{}…", d.chars().take(240).collect::<String>())
+            } else {
+                d.to_string()
+            };
+            Some(format!("[{}] «{}» — {d}", c.id, c.label))
+        })
+        .collect();
+    Choice {
+        context: context_parts(ctx),
+        question: format!(
+            "A parser read the document and produced several READINGS of one sentence. Their \
+             structure is settled: {}. The readings share it and differ in word sense. Choose the \
+             reading whose word senses match what the sentence means in the context of the \
+             document. `«label» [id]` names a concept, `+ relation X` is a relation the reading \
+             asserts, and `⟦…⟧` marks a fragment that could not be rendered.",
+            candidates[members[0]].structure
+        ),
+        notes: vec![("What the concepts mean".into(), legend)],
+        options,
+    }
+}
+
+/// A live reading ranker, whichever provider answers it.
+pub type LiveReadingRanker = Box<dyn ReadingRanker + Send + Sync>;
+
+/// The live reading ranker for `cfg`'s model: the two-call ranker over its provider's decider,
+/// or — under `EIGENIUS_SELECT_FLAT`, Anthropic models only — the flat listing it replaced. `None`
+/// without the provider's key in the environment.
+#[cfg(feature = "use-llm")]
+pub fn live_reading_ranker(
+    cfg: crate::dcg::model_config::ModelConfig,
+) -> Option<LiveReadingRanker> {
+    use crate::dcg::model_config::Provider;
+    if std::env::var("EIGENIUS_SELECT_FLAT").is_ok() {
+        if cfg.provider() != Provider::Anthropic {
+            eprintln!(
+                "reading-ranker: the flat listing asks Anthropic models only, not {}",
+                cfg.model
+            );
+            return None;
+        }
+        return AnthropicReadingRanker::from_env_with(cfg)
+            .map(|r| Box::new(r) as LiveReadingRanker);
+    }
+    crate::dcg::decision::decider_from_env(&cfg)
+        .map(|d| Box::new(DecisionReadingRanker::new(d)) as LiveReadingRanker)
+}
+
+/// [`live_reading_ranker`] for the model in `EIGENIUS_SELECT_MODEL`, else the default model.
+#[cfg(feature = "use-llm")]
+pub fn live_reading_ranker_from_env() -> Option<LiveReadingRanker> {
+    let model = std::env::var("EIGENIUS_SELECT_MODEL")
+        .ok()
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| crate::dcg::model_config::DEFAULT_MODEL.to_string());
+    live_reading_ranker(crate::dcg::model_config::ModelConfig::with_model(model))
+}
+
 #[cfg(feature = "use-llm")]
 mod anthropic {
     use super::{DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection};
@@ -841,245 +1147,6 @@ mod anthropic {
                 }
             }
         }
-
-        /// eigenius#264 — two calls. The structure call sees each structure once, in the
-        /// sentence's own words, with how the structures differ, and argues that difference; the
-        /// sense call sees the chosen structure's readings as the flat listing presents them. A
-        /// pool with one structure skips the first call, a structure with one reading the second.
-        fn select_two_call(
-            &self,
-            ctx: &DocumentContext,
-            candidates: &[ReadingCandidate],
-        ) -> Option<ReadingSelection> {
-            let mut groups = super::structure_groups(candidates);
-            let total = groups.len();
-            let kept = total.min(super::MAX_STRUCTURES_SHOWN);
-            let dropped: usize = groups[kept..].iter().map(Vec::len).sum();
-            groups.truncate(kept);
-            if dropped > 0 {
-                eprintln!(
-                    "reading-ranker: TRUNCATED «{}» — showed {kept} of {total} structures, \
-                     omitting {dropped} reading(s); the omitted ones cannot be chosen",
-                    ctx.sentence.trim()
-                );
-            }
-            let (group, structure_rationale, other_structures) = if groups.len() == 1 {
-                (0, None, Vec::new())
-            } else {
-                let prompt = structure_prompt(ctx, candidates, &groups, total - kept);
-                dump_prompt(&prompt);
-                let reply: StructureReply = self.ask(&prompt)?;
-                if reply.verdict == Verdict::NoneFaithful {
-                    none_faithful(ctx, &reply.rationale, reply.missing.as_deref());
-                    return None;
-                }
-                // Numbered from 1 as shown; anything else is malformed ⇒ fail closed, and say so.
-                let Some(n) = reply.structure.filter(|n| (1..=groups.len()).contains(n)) else {
-                    malformed(
-                        ctx,
-                        &format!("structure {:?} of {}", reply.structure, groups.len()),
-                    );
-                    return None;
-                };
-                let others: Vec<usize> = reply
-                    .runners_up
-                    .iter()
-                    .filter(|&&r| r != n && (1..=groups.len()).contains(&r))
-                    .map(|&r| r - 1)
-                    .collect();
-                (
-                    n - 1,
-                    Some(format!("STRUCTURE {n}: {}", reply.rationale)),
-                    others,
-                )
-            };
-            let members = &groups[group];
-            let (chosen, sense_rationale, sense_runners) = if members.len() == 1 {
-                (members[0], None, Vec::new())
-            } else {
-                let prompt = sense_prompt(ctx, candidates, members);
-                dump_prompt(&prompt);
-                let reply: ReadingSelectionReply = self.ask(&prompt)?;
-                if reply.verdict == Verdict::NoneFaithful {
-                    none_faithful(ctx, &reply.rationale, reply.missing_sense.as_deref());
-                    return None;
-                }
-                // The readings are numbered from 0 as shown; map back to the candidate list.
-                let Some(c) = reply.chosen.and_then(|c| members.get(c)) else {
-                    malformed(
-                        ctx,
-                        &format!("reading {:?} of {}", reply.chosen, members.len()),
-                    );
-                    return None;
-                };
-                let runners = reply
-                    .runners_up
-                    .iter()
-                    .filter_map(|&r| members.get(r).copied());
-                (
-                    *c,
-                    Some(format!("SENSES: {}", reply.rationale)),
-                    runners.collect(),
-                )
-            };
-            // The chosen structure's other readings first, then each other structure's first.
-            let mut seen = vec![false; candidates.len()];
-            seen[chosen] = true;
-            let runners_up: Vec<usize> = sense_runners
-                .into_iter()
-                .filter(|i| members.contains(i))
-                .chain(other_structures.iter().map(|&g| groups[g][0]))
-                .filter(|&i| !std::mem::replace(&mut seen[i], true))
-                .collect();
-            let rationale: Vec<String> = [structure_rationale, sense_rationale]
-                .into_iter()
-                .flatten()
-                .collect();
-            Some(ReadingSelection {
-                chosen,
-                rationale: rationale.join(" | "),
-                runners_up,
-            })
-        }
-    }
-
-    /// The structure call's reply (eigenius#264).
-    #[derive(Deserialize, JsonSchema)]
-    struct StructureReply {
-        /// `chose` when one structure matches the sentence; `none_faithful` when none does.
-        verdict: Verdict,
-        /// The chosen structure's number as shown, from 1. Required when `verdict` is `chose`.
-        structure: Option<usize>,
-        /// When `verdict` is `none_faithful`: the grouping the structures lack.
-        missing: Option<String>,
-        /// One or two sentences that decide the listed differences between the structures.
-        rationale: String,
-        /// The other structure numbers, most plausible first.
-        #[serde(default)]
-        runners_up: Vec<usize>,
-    }
-
-    /// `EIGENIUS_DUMP_SELECT_PROMPT=1` prints each prompt the ranker sends.
-    fn dump_prompt(prompt: &str) {
-        if std::env::var("EIGENIUS_DUMP_SELECT_PROMPT").is_ok() {
-            eprintln!("\n===== READING-RANKER PROMPT =====\n{prompt}\n===== END PROMPT =====\n");
-        }
-    }
-
-    /// A reply naming nothing that was shown: the ranker abstains, and the log says why.
-    fn malformed(ctx: &DocumentContext, what: &str) {
-        eprintln!(
-            "reading-ranker: MALFORMED reply on «{}» — {what}; abstained",
-            ctx.sentence.trim()
-        );
-    }
-
-    /// "No candidate is faithful" is a result, and its diagnostic names what the pool lacks.
-    fn none_faithful(ctx: &DocumentContext, rationale: &str, missing: Option<&str>) {
-        eprintln!(
-            "reading-ranker: NONE FAITHFUL on «{}» — {rationale}{}",
-            ctx.sentence.trim(),
-            missing
-                .map(|m| format!("  [missing: {m}]"))
-                .unwrap_or_default()
-        );
-    }
-
-    /// The readings already selected for earlier sentences, for consistency.
-    fn prior_block(ctx: &DocumentContext) -> String {
-        let mut out = String::new();
-        if !ctx.prior_selections.is_empty() {
-            out.push_str(
-                "Readings already selected for earlier sentences (stay consistent with them):\n",
-            );
-            for p in ctx.prior_selections {
-                out.push_str(&format!("  sentence {}: \"{}\"\n", p.ordinal, p.gloss));
-            }
-            out.push('\n');
-        }
-        out
-    }
-
-    /// The structure call: each shown structure once, in the sentence's words, and the lines
-    /// saying how they differ, which the rationale must decide.
-    fn structure_prompt(
-        ctx: &DocumentContext,
-        candidates: &[ReadingCandidate],
-        groups: &[Vec<usize>],
-        dropped_structures: usize,
-    ) -> String {
-        let mut shown = super::render_structures(candidates, groups);
-        if dropped_structures > 0 {
-            shown.push_str(&format!(
-                "(NOTE: {dropped_structures} further structure(s) are not shown and cannot be \
-                 chosen. If none of the above is faithful, say so rather than picking the \
-                 closest.)\n"
-            ));
-        }
-        format!(
-            "A parser read the document below and found several STRUCTURES for one of its \
-             sentences — different ways the sentence's words combine. Choose the structure that \
-             matches what the sentence means in the context of the document.\n\n\
-             Word senses are not the question here. Every word is shown as the sentence writes \
-             it; a second step chooses the senses within the structure you pick.\n\n\
-             Document:\n{}\n\n{}\
-             The sentence:\n  \"{}\"\n\n\
-             Structures. `«…»` is a word of the sentence; `+ X` is a relation the structure \
-             asserts of the phrase before it; `compound-with` marks a noun modifier whose \
-             relation the sentence leaves unspecified; `and` joins separate claims.\n\
-             {shown}\n\
-             Return verdict `chose` with `structure` = the number of the structure whose grouping \
-             the sentence means, `rationale` = one or two sentences that decide the differences \
-             listed above (where each phrase attaches, and why), and `runners_up` = the other \
-             structure numbers in preference order. If no structure is faithful, return verdict \
-             `none_faithful` and say in `missing` which grouping the structures lack.",
-            ctx.document.trim(),
-            prior_block(ctx),
-            ctx.sentence.trim(),
-        )
-    }
-
-    /// The sense call: the chosen structure's readings, flat, with the legend of the concepts
-    /// they name.
-    fn sense_prompt(
-        ctx: &DocumentContext,
-        candidates: &[ReadingCandidate],
-        members: &[usize],
-    ) -> String {
-        let listing: String = members
-            .iter()
-            .enumerate()
-            .map(|(n, &i)| format!("  [{n}] {}\n", candidates[i].gloss))
-            .collect();
-        let named: Vec<super::ConceptNote> = ctx
-            .concepts
-            .iter()
-            .filter(|c| {
-                let id = format!("[{}]", c.id);
-                members.iter().any(|&i| candidates[i].gloss.contains(&id))
-            })
-            .cloned()
-            .collect();
-        format!(
-            "A parser read the document below and produced several candidate READINGS \
-             (interpretations) of one sentence. Their structure is settled:\n  {}\n\
-             The readings below share it and differ in word sense. Choose the reading whose word \
-             senses match what the sentence means in the context of the document.\n\n\
-             Document:\n{}\n\n{}\
-             The sentence to disambiguate:\n  \"{}\"\n\n\
-             Candidate readings. `«label» [id]` names a concept, `+ relation X` is an explicit \
-             relation the reading asserts, and `⟦…⟧` marks a fragment that could not be \
-             rendered.\n{listing}{}\n\
-             Return verdict `chose` with `chosen` = the index of the reading whose word senses \
-             match the sentence's intended meaning, `rationale` = one sentence why, and \
-             `runners_up` = the remaining indices in preference order. If no reading is faithful, \
-             return verdict `none_faithful` and say in `missing_sense` which sense is missing.",
-            candidates[members[0]].structure,
-            ctx.document.trim(),
-            prior_block(ctx),
-            ctx.sentence.trim(),
-            concept_legend(&named),
-        )
     }
 
     /// The concept legend: each concept the candidates name, once, with its definition. Empty string
@@ -1104,6 +1171,10 @@ mod anthropic {
     }
 
     impl ReadingRanker for AnthropicReadingRanker {
+        fn model(&self) -> Option<String> {
+            Some(self.model.model.clone())
+        }
+
         fn select(
             &self,
             ctx: &DocumentContext,
@@ -1111,14 +1182,6 @@ mod anthropic {
         ) -> Option<ReadingSelection> {
             if candidates.len() < 2 {
                 return None; // nothing to disambiguate
-            }
-            // eigenius#264: two calls, structure then senses, is the default. The A/B of
-            // 2026-09-30 — three live draws per arm on one snapshot and one ranking, every reading
-            // adjudicated — scored 29, 28, 30 of 41 correct (structure 34, 35, 36) against this
-            // flat listing's 23, 21, 24 (27, 27, 28). `EIGENIUS_SELECT_FLAT` keeps the flat
-            // listing, so the A/B can be repeated.
-            if std::env::var("EIGENIUS_SELECT_FLAT").is_err() {
-                return self.select_two_call(ctx, candidates);
             }
             // Prior selections — the discourse the ranker must stay consistent with.
             let mut prior_block = String::new();
@@ -1661,6 +1724,107 @@ mod two_call_tests {
         assert_eq!(
             word_diff("a b", "a b c"),
             ("—".to_string(), "c".to_string())
+        );
+    }
+}
+
+#[cfg(test)]
+mod decision_ranker_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// A decider that answers from a script and records each choice it was put.
+    struct Scripted {
+        answers: RefCell<Vec<&'static str>>,
+        asked: RefCell<Vec<Choice>>,
+    }
+
+    impl Scripted {
+        fn new(answers: &[&'static str]) -> Self {
+            Self {
+                answers: RefCell::new(answers.iter().rev().copied().collect()),
+                asked: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl Decider for Scripted {
+        fn choose(&self, choice: &Choice) -> Result<Decided, String> {
+            self.asked.borrow_mut().push(choice.clone());
+            let a = self
+                .answers
+                .borrow_mut()
+                .pop()
+                .ok_or("no answer scripted")?;
+            crate::dcg::decision::checked(
+                choice,
+                Decided {
+                    choice: a.to_string(),
+                    runners_up: Vec::new(),
+                    probabilities: BTreeMap::new(),
+                    rationale: "scripted".into(),
+                    model: "script".into(),
+                },
+            )
+        }
+        fn model(&self) -> &str {
+            "script"
+        }
+    }
+
+    fn cand(skeleton: &str, gloss: &str) -> ReadingCandidate {
+        ReadingCandidate {
+            skeleton: skeleton.into(),
+            gloss: gloss.into(),
+            sem: String::new(),
+            structure: format!("structure {skeleton}"),
+            links: Vec::new(),
+        }
+    }
+
+    fn ctx() -> DocumentContext<'static> {
+        DocumentContext {
+            document: "Doc.",
+            sentence: "S.",
+            prior_selections: &[],
+            concepts: &[],
+        }
+    }
+
+    /// Structure 2 is chosen in the first call; the second call numbers that structure's readings
+    /// from 0, and its answer maps back to the candidate list.
+    #[test]
+    fn the_structure_call_then_the_sense_call_pick_one_reading() {
+        let c = [cand("A", "a0"), cand("B", "b0"), cand("B", "b1")];
+        let d = Scripted::new(&["2", "1"]);
+        let r = DecisionReadingRanker::new(d);
+        let sel = r.select(&ctx(), &c).expect("chose");
+        assert_eq!(sel.chosen, 2);
+        assert!(
+            sel.rationale.starts_with("STRUCTURE 2 [script]"),
+            "{}",
+            sel.rationale
+        );
+        let asked = r.decider.asked.borrow();
+        assert_eq!(asked.len(), 2);
+        let keys: Vec<&str> = asked[1].options.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, ["0", "1", NONE_FAITHFUL]);
+        assert_eq!(asked[1].options[1].1, "b1");
+    }
+
+    /// One structure skips the structure call; `none` and an unscripted answer abstain.
+    #[test]
+    fn one_structure_asks_once_and_none_abstains() {
+        let c = [cand("A", "a0"), cand("A", "a1")];
+        let r = DecisionReadingRanker::new(Scripted::new(&["1"]));
+        assert_eq!(r.select(&ctx(), &c).expect("chose").chosen, 1);
+        assert_eq!(r.decider.asked.borrow().len(), 1);
+        let r = DecisionReadingRanker::new(Scripted::new(&[NONE_FAITHFUL]));
+        assert!(r.select(&ctx(), &c).is_none());
+        let r = DecisionReadingRanker::new(Scripted::new(&["7"]));
+        assert!(
+            r.select(&ctx(), &c).is_none(),
+            "an answer naming no option abstains"
         );
     }
 }

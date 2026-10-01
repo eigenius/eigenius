@@ -200,9 +200,7 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
     #[cfg(feature = "use-llm")]
     let mut selection_recording: Option<(
         std::sync::Arc<
-            eigenius_kernel::dcg::RecordingReadingRanker<
-                eigenius_kernel::dcg::AnthropicReadingRanker,
-            >,
+            eigenius_kernel::dcg::RecordingReadingRanker<eigenius_kernel::dcg::LiveReadingRanker>,
         >,
         PathBuf,
     )> = None;
@@ -223,15 +221,16 @@ pub fn run(args: &Args, format: OutputFormat) -> Result<(), String> {
             // RECORD mode — the live ranker answers and the draw is written after generation.
             #[cfg(feature = "use-llm")]
             {
-                let Some(live) = eigenius_kernel::dcg::AnthropicReadingRanker::from_env() else {
+                let Some(live) = eigenius_kernel::dcg::live_reading_ranker_from_env() else {
                     return Err(format!(
-                        "--selections {} does not exist (RECORD mode) but ANTHROPIC_API_KEY \
+                        "--selections {} does not exist (RECORD mode) but the model's API key \
                          is unset",
                         s.display()
                     ));
                 };
                 eprintln!(
-                    "selections: AnthropicReadingRanker (live) — RECORDING to {}",
+                    "selections: live reading ranker, {} — RECORDING to {}",
+                    live.model().unwrap_or_default(),
                     s.display()
                 );
                 let rec =
