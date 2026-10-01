@@ -498,6 +498,36 @@ impl Parser {
         out
     }
 
+    /// Every sense a span of `text`'s tokens can take, with the span's words: the spans seeding
+    /// looks up, up to six tokens and never across a comma, and a derived adjective's base senses
+    /// on its own token. How the structural register names a multiword concept or a derived
+    /// adjective by its words rather than its label (eigenius#264).
+    pub fn span_senses(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<(String, String)> {
+        let tokens = self.tokenize(text);
+        let n = tokens.len();
+        let limit = self.lex.span_limit(n).min(6);
+        let mut out = Vec::new();
+        for i in 0..n {
+            for j in i..(i + limit).min(n) {
+                if tokens[j].is_comma() {
+                    break;
+                }
+                let words = super::preprocess::join_surfaces(&tokens[i..=j]);
+                for (_closed, _cat, sense) in self.debug_form_entries(&words, lemmatizer) {
+                    if !sense.is_empty() {
+                        out.push((words.clone(), sense));
+                    }
+                }
+                if i == j {
+                    for sense in self.derived_adjective_senses(&words) {
+                        out.push((words.clone(), sense));
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Diagnostic (D1, `docs/notes/d63-nominal-modification-normal-form.md` §8): for each **adjective**
     /// entry resolved for `surface`, the [`super::category::ModifierClass`] its restrictor sem falls
     /// into — so the D1 classifier's verdict can be confirmed against the corpus's *real* lexicon

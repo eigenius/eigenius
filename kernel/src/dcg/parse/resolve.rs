@@ -26,7 +26,10 @@ use crate::dcg::reading_ranker::{
     first_collision, DocumentContext, PriorSelection, ReadingCandidate, ReadingRanker,
 };
 use crate::dcg::skeleton::skeleton_of;
-use crate::dcg::verbalize::{concept_notes, resource_label, unit_sense_names, verbalize, Vb};
+use crate::dcg::verbalize::{
+    concept_notes, resource_label, structure_links, unit_sense_names, unit_surface_names,
+    verbalize, Vb,
+};
 use crate::ontology::Resource;
 
 /// Cap on FULL re-gates ([`Parser::resolve_open`] calls) per [`Parser::resolve_with`] search —
@@ -627,6 +630,14 @@ impl Parser {
         // The chooser's register (D69 §4): the ranker is being asked which reading is right, and
         // in Surface these 120 readings render to 4 strings.
         let vb = Vb::expanded(&names, &self.grammar.layer);
+        // The structure alone, in the sentence's words — what the two-call ranker's structure
+        // call is shown, and what its contrasts are computed from (eigenius#264).
+        let mut surface = unit_surface_names(sentence, self, lemmatizer);
+        // An atom no span carries (a coordinated head) keeps its lemma name rather than its id.
+        for (key, name) in &names {
+            surface.entry(key.clone()).or_insert_with(|| name.clone());
+        }
+        let vbs = Vb::structural(&surface, &self.grammar.layer);
         let skels: Vec<String> = closed.iter().map(|it| skeleton_of(it.sem())).collect();
         // Present GROUPED BY SKELETON (the stable sort keeps the forest's cost order within a
         // group), so structural alternatives sit side by side for the ranker.
@@ -638,6 +649,8 @@ impl Parser {
                 skeleton: skels[i].clone(),
                 gloss: verbalize(closed[i].sem(), &vb),
                 sem: pretty_term(closed[i].sem()),
+                structure: verbalize(closed[i].sem(), &vbs),
+                links: structure_links(closed[i].sem(), &vbs),
             })
             .collect();
         // The legend: every concept these readings name, once, with the chain's definition

@@ -54,6 +54,7 @@
 #   scripts/measure-parse-rate.sh --combinatory-core # ARM: extra CCG combinators — CHANGES the grammar
 #   scripts/measure-parse-rate.sh --attribution    # + page ambiguity roll-up (read-only; see README §7)
 #   scripts/measure-parse-rate.sh --context-window # reranker sees +/-2 sentences — CHANGES the result (unproven)
+#   scripts/measure-parse-rate.sh --two-call       # ARM: two-call reading ranker, structure then senses (eigenius#264)
 #   scripts/measure-parse-rate.sh --snapshot /path/to/store
 #
 # Env overrides:
@@ -88,6 +89,7 @@ POS_PRUNE=0
 COMB_CORE=0
 ATTRIBUTION=0
 CONTEXT_WINDOW=0
+TWO_CALL=0
 REPLAY=""
 SEL_REPLAY=""
 while [[ $# -gt 0 ]]; do
@@ -101,6 +103,7 @@ while [[ $# -gt 0 ]]; do
     --combinatory-core) COMB_CORE=1; shift ;;
     --attribution)      ATTRIBUTION=1; shift ;;
     --context-window)   CONTEXT_WINDOW=2; shift ;;
+    --two-call)         TWO_CALL=1; shift ;;
     *) echo "error: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -112,12 +115,12 @@ done
 #
 # `EIGENIUS_POS_PRUNE` is read with `.is_ok()`: ANY value, including the empty string, enables it.
 # Setting it to "0" would turn it ON. It must be UNSET to be off — hence `env -u`, not `VAR=0`.
-for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT EIGENIUS_ATTRIBUTION_ROLLUP EIGENIUS_TRACE_ATTRIBUTION EIGENIUS_CONTEXT_SENTENCES EIGENIUS_SELECTIONS EIGENIUS_SELECTIONS_OUT; do
+for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT EIGENIUS_ATTRIBUTION_ROLLUP EIGENIUS_TRACE_ATTRIBUTION EIGENIUS_CONTEXT_SENTENCES EIGENIUS_SELECTIONS EIGENIUS_SELECTIONS_OUT EIGENIUS_SELECT_TWO_CALL; do
   if [[ -n "${!v:-}" ]]; then
     echo "note: ignoring ambient $v=${!v} — the run declares its own config (use the flags)" >&2
   fi
 done
-ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT -u EIGENIUS_ATTRIBUTION_ROLLUP -u EIGENIUS_TRACE_ATTRIBUTION -u EIGENIUS_CONTEXT_SENTENCES -u EIGENIUS_SELECTIONS -u EIGENIUS_SELECTIONS_OUT)
+ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT -u EIGENIUS_ATTRIBUTION_ROLLUP -u EIGENIUS_TRACE_ATTRIBUTION -u EIGENIUS_CONTEXT_SENTENCES -u EIGENIUS_SELECTIONS -u EIGENIUS_SELECTIONS_OUT -u EIGENIUS_SELECT_TWO_CALL)
 [[ "$POS_PRUNE" == "1" ]] && ENV_STRIP+=(EIGENIUS_POS_PRUNE=1)
 [[ "$COMB_CORE" == "1" ]] && ENV_STRIP+=(EIGENIUS_COMBINATORY_CORE=1)
 # Read-only instrument: it observes the forest and does NOT change the parse (the four metrics are
@@ -126,6 +129,9 @@ ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PA
 [[ "$ATTRIBUTION" == "1" ]] && ENV_STRIP+=(EIGENIUS_ATTRIBUTION_ROLLUP=1)
 # Context window CHANGES the reranker's answer (and its ranks.json key) — declared, off unless armed.
 [[ "$CONTEXT_WINDOW" != "0" ]] && ENV_STRIP+=(EIGENIUS_CONTEXT_SENTENCES="$CONTEXT_WINDOW")
+# The two-call reading ranker (eigenius#264) CHANGES which reading a live draw selects; a replay
+# reproduces whichever ranker recorded it.
+[[ "$TWO_CALL" == "1" ]] && ENV_STRIP+=(EIGENIUS_SELECT_TWO_CALL=1)
 
 # ── resolve the page (named shortcut → absolute; else realpath from the invocation dir) ──
 case "$PAGE_ARG" in
@@ -185,6 +191,7 @@ RUN_ID+="-$([[ "$USE_LLM" == "1" ]] && echo reranked || echo caponly)"
 [[ -n "$SEL_REPLAY" ]]  && RUN_ID+="-selreplay"
 [[ "$POS_PRUNE" == "1" ]] && RUN_ID+="-posprune"
 [[ "$COMB_CORE" == "1" ]] && RUN_ID+="-combcore"
+[[ "$TWO_CALL" == "1" ]] && RUN_ID+="-twocall"
 RUN_DIR="$OUT_DIR/$RUN_ID"
 mkdir -p "$RUN_DIR"
 LOG="$RUN_DIR/run.log"
@@ -252,7 +259,7 @@ KNOBS="$(grep -hoE 'const (SENSE_CAP|CELL_BEAM): usize = [0-9]+' \
   echo "# snapshot:  $SNAP"
   echo "# reranker:  $RERANKER"
   echo "# profile:   release"
-  echo "# config:    pos_prune=$POS_PRUNE combinatory_core=$COMB_CORE attribution=$ATTRIBUTION context_window=$CONTEXT_WINDOW $KNOBS"
+  echo "# config:    pos_prune=$POS_PRUNE combinatory_core=$COMB_CORE attribution=$ATTRIBUTION context_window=$CONTEXT_WINDOW two_call=$TWO_CALL $KNOBS"
   echo "# rust_min_stack: ${RUST_MIN_STACK:-default}"
   echo "# ranks:     $RANKS_MODE"
   echo "# selections: $SELECTIONS_MODE"

@@ -439,6 +439,21 @@ impl Parser {
         out
     }
 
+    /// The senses a derived adjective takes from its base (`hypermutable` takes `mutable`'s), so
+    /// [`Parser::span_senses`] can name them by the derived word (eigenius#264).
+    pub(super) fn derived_adjective_senses(&self, surface: &str) -> Vec<String> {
+        let s = surface.trim().to_lowercase();
+        if s.contains('-') && !self.lex.entries_for(&s.replace('-', " ")).is_empty() {
+            return Vec::new();
+        }
+        adjective_bases(&s)
+            .iter()
+            .flat_map(|b| self.lex.entries_for(b))
+            .filter(|e| is_adjective_cat(e.item.cat()))
+            .filter_map(|e| e.sense)
+            .collect()
+    }
+
     /// The denominal-suffix adjective `X-E` (D63 compound morphology §3b, generalized from the shipped
     /// `-based` slice — see [`DENOMINAL_SUFFIXES`]): `X-<suffix>` (X a known common noun) seeds a
     /// predicative `ADJ` (`S[adj]\NP`) with sem `λθ. rel(…)`, reusing the element's WordNet verb axiom —

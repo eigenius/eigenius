@@ -86,6 +86,37 @@ pub fn unit_sense_names(
     m
 }
 
+/// `sense key → the sentence's words that carry it`, keyed as [`unit_sense_names`] keys: the words
+/// as written, over every span seeding looks up, so a multiword concept is named by its span
+/// (`synthetic lethality`), not by its label. [`Register::Structural`] renders by these, so every
+/// sense of one word renders alike (eigenius#264).
+pub fn unit_surface_names(
+    text: &str,
+    index: &Parser,
+    lem: &dyn Lemmatizer,
+) -> BTreeMap<String, String> {
+    let mut m: BTreeMap<String, String> = BTreeMap::new();
+    for (words, sense) in index.span_senses(text, lem) {
+        let key = if let Some(rest) = sense.strip_prefix("wn:") {
+            match rest.rsplitn(3, '.').collect::<Vec<_>>().as_slice() {
+                [offset, tag, _lemma] => format!("{tag}{offset}"),
+                _ => continue,
+            }
+        } else if let Some(cui) = sense.strip_prefix("umls:") {
+            cui.to_string()
+        } else {
+            continue;
+        };
+        // The shortest span names an atom: `mismatch repair`, not `DNA mismatch repair` beside a
+        // separate «DNA» modifier.
+        let shorter = |w: &String| words.split(' ').count() < w.split(' ').count();
+        if m.get(&key).is_none_or(shorter) {
+            m.insert(key, words);
+        }
+    }
+    m
+}
+
 /// A short display label for a chain resource: its `core:description` up to the definition
 /// separator. Generic over the lexicon — the caller supplies the IRI; nothing here names a
 /// source vocabulary. `None` when the resource is absent or carries no string description
@@ -249,8 +280,19 @@ impl<'a> Vb<'a> {
         }
     }
 
+    /// The structure chooser's register (eigenius#264). `names` must be the unit's SURFACE names
+    /// ([`unit_surface_names`]): a lemma or concept label would name the sense again.
+    pub fn structural(names: &'a BTreeMap<String, String>, layer: &'a Arc<Layer>) -> Self {
+        Self {
+            names,
+            layer,
+            register: Register::Structural,
+        }
+    }
+
+    /// Structure spelled out: Expanded and Structural share every arm but atom naming.
     fn expanded_mode(&self) -> bool {
-        self.register == Register::Expanded
+        matches!(self.register, Register::Expanded | Register::Structural)
     }
 }
 
@@ -275,6 +317,11 @@ pub enum Register {
     /// IRI (labels collide, IRIs do not), a compound modifier is marked as the unspecified
     /// relation it is, and structure is explicit rather than implied by word order.
     Expanded,
+    /// The structure alone (eigenius#264): Expanded's explicit relations and grouping, with each
+    /// content position named by the sentence's own word ([`unit_surface_names`]) instead of a
+    /// sense. The readings of one structure render the same whatever senses they take, and two
+    /// structures render differently — the ranker's structure question without the sense axis.
+    Structural,
 }
 
 fn app_spine(e: &Exp) -> (&Exp, Vec<&Exp>) {
@@ -325,14 +372,12 @@ fn is_false(e: &Exp) -> bool {
 /// The word for a sense atom: the unit's own lemma map first, then the concept's layer label
 /// (via `cui_label`), else the local name.
 fn name_atom(local: &str, vb: &Vb) -> String {
-    // Normalise: strip the `deg_`/`std_` adjective wrappers and any suffix after the sense key — a
-    // verb frame (`_t`/`_i`/…) or a relational degree's `_rel` / `_rel_{p}`.
-    let core = local
-        .strip_prefix("deg_")
-        .or_else(|| local.strip_prefix("std_"))
-        .unwrap_or(local);
-    let key = core.split('_').next().unwrap_or(core);
+    let key = atom_key(local);
     let label = atom_label(key, vb);
+    if vb.register == Register::Structural {
+        // The word, never the identity: the senses of one word must render alike here.
+        return format!("«{}»", label.unwrap_or_else(|| key.to_string()));
+    }
     if vb.expanded_mode() {
         // Label AND identity: two concepts routinely share a label (C1148824's label IS
         // "exonuclease activity"), and the identity is what a chooser needs.
@@ -342,6 +387,52 @@ fn name_atom(local: &str, vb: &Vb) -> String {
         };
     }
     label.unwrap_or_else(|| key.to_string())
+}
+
+/// An atom's sense key: the `deg_`/`std_` adjective wrappers stripped, and any suffix after the key
+/// — a verb frame (`_t`/`_i`/…) or a relational degree's `_rel` / `_rel_{p}`.
+fn atom_key(local: &str) -> &str {
+    let core = local
+        .strip_prefix("deg_")
+        .or_else(|| local.strip_prefix("std_"))
+        .unwrap_or(local);
+    core.split('_').next().unwrap_or(core)
+}
+
+/// An atom's plain word — its display label with no register markup.
+fn atom_word(local: &str, vb: &Vb) -> String {
+    let key = atom_key(local);
+    atom_label(key, vb).unwrap_or_else(|| key.to_string())
+}
+
+/// The fail-honest bracket around a shape the verbaliser does not render. In
+/// [`Register::Structural`] each sense atom inside is named by its word, so an unrendered fragment
+/// does not carry the sense into the structure call.
+fn bracket(sem: &Exp, vb: &Vb) -> String {
+    let raw = pretty_term(sem);
+    if vb.register != Register::Structural {
+        return format!("⟦{raw}⟧");
+    }
+    let mut out = String::new();
+    for piece in raw.split_inclusive(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+        let (tok, tail) = piece.split_at(
+            piece
+                .char_indices()
+                .last()
+                .filter(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '_'))
+                .map_or(piece.len(), |(i, _)| i),
+        );
+        let sense = tok
+            .split(|c: char| !c.is_ascii_digit())
+            .any(|run| run.len() >= 4);
+        if sense {
+            out.push_str(&format!("«{}»", atom_word(tok, vb)));
+        } else {
+            out.push_str(tok);
+        }
+        out.push_str(tail);
+    }
+    format!("⟦{out}⟧")
 }
 
 /// The display label for an atom's key, or `None` when the lexicon offers none.
@@ -431,7 +522,7 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
             }
             return format!("every {}", quant_clause(dom, binder, cod, vb));
         }
-        return format!("⟦{}⟧", pretty_term(sem)); // other Π — not verbalizable yet
+        return bracket(sem, vb); // other Π — not verbalizable yet
     }
     if let Exp::Sig(_, base, restr) = sem {
         let np = noun_phrase(base, restr, vb);
@@ -715,14 +806,14 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     verbalize(a, vb),
                     verbalize(b, vb)
                 ),
-                _ => format!("⟦{}⟧", pretty_term(sem)),
+                _ => bracket(sem, vb),
             };
         }
     }
     if let Some(local) = axiom_local(sem) {
         return name_atom(local, vb);
     }
-    format!("⟦{}⟧", pretty_term(sem))
+    bracket(sem, vb)
 }
 
 /// `And(V(subj), prep_X(subj, obj))` → "subj V prep obj" when the two share a subject; else `None`.
@@ -1226,6 +1317,194 @@ fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
     out.push(e);
 }
 
+/// One way a phrase hangs on another in a reading: the `dependent` attaches to its `host` through
+/// `relation` — a preposition (`for`), `compound` for a noun modifier, `modifier` for an
+/// adjective, `count` for a count (no dependent), or the preposition an adjective governs (the
+/// host is then the adjective). Both ends are named by their head word. Two
+/// structures that attach «for vulnerabilities» to different nouns differ in one link, which is
+/// the contrast the ranker's structure call is asked to decide (eigenius#264).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Link {
+    pub relation: String,
+    pub dependent: String,
+    pub host: String,
+}
+
+/// The [`Link`]s of a reading, sorted and deduplicated. Pass a [`Vb::structural`] builder, so the
+/// links of one structure name the same words whatever senses its readings take.
+pub fn structure_links(sem: &Exp, vb: &Vb) -> Vec<Link> {
+    let mut out = Vec::new();
+    collect_links(sem, vb, &mut Vec::new(), &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Walk a reading, tracking what each bound variable stands for (a `Σ`/`Π` binder's domain, the
+/// counted phrase a count's predicate is about), and record every link on the way.
+fn collect_links<'e>(e: &'e Exp, vb: &Vb, env: &mut Vec<(&'e str, String)>, out: &mut Vec<Link>) {
+    if let Exp::Sig(p, dom, body) | Exp::Pi(p, dom, body) = e {
+        collect_links(dom, vb, env, out);
+        return with_binder(p, head_word(dom, vb, env), body, vb, env, out);
+    }
+    let (h, args) = app_spine(e);
+    if args.is_empty() {
+        for c in child_exps(e) {
+            collect_links(c, vb, env, out);
+        }
+        return;
+    }
+    // An application is read once, with all its arguments, then each argument is walked: a
+    // partial application would read `v(obj)` as a verb whose only argument is its subject.
+    // `has_count(ΣG:N. …, λG. P(G), q)` — the predicate's variable is the counted N.
+    if let (Some("has_count"), [counted, Exp::Lam(p, body), rest @ ..]) =
+        (axiom_local(h), args.as_slice())
+    {
+        collect_links(counted, vb, env, out);
+        let head = head_word(counted, vb, env);
+        out.push(Link {
+            relation: "count".to_string(),
+            dependent: String::new(),
+            host: head.clone(),
+        });
+        with_binder(p, head, body, vb, env, out);
+        for r in rest {
+            collect_links(r, vb, env, out);
+        }
+        return;
+    }
+    if let Some(local) = axiom_local(h) {
+        out.extend(link_of(local, &args, vb, env));
+        if is_verb_frame(local) {
+            verb_links(local, &args, vb, env, out);
+        }
+    }
+    collect_links(h, vb, env, out);
+    for a in args {
+        collect_links(a, vb, env, out);
+    }
+}
+
+fn with_binder<'e>(
+    p: &'e Patt,
+    head: String,
+    body: &'e Exp,
+    vb: &Vb,
+    env: &mut Vec<(&'e str, String)>,
+    out: &mut Vec<Link>,
+) {
+    match p {
+        Patt::Var(v) => {
+            env.push((v.as_str(), head));
+            collect_links(body, vb, env, out);
+            env.pop();
+        }
+        _ => collect_links(body, vb, env, out),
+    }
+}
+
+/// The link an application states, if it is one: `prep_p(host, dependent)`, a compound
+/// `compound_kind(head, modifier)`, or a governed degree `deg_{loc}_rel_{p}(dependent, subject)`.
+fn link_of(local: &str, args: &[&Exp], vb: &Vb, env: &[(&str, String)]) -> Option<Link> {
+    let link = |relation: &str, dependent: &Exp, host: String| Link {
+        relation: relation.to_string(),
+        dependent: head_word(dependent, vb, env),
+        host,
+    };
+    match args {
+        [host, obj] if local.starts_with("prep_") && !local.ends_with("_value") => {
+            Some(link(&local["prep_".len()..], obj, head_word(host, vb, env)))
+        }
+        [head, modifier] if matches!(local, "compound_kind" | "compound") => {
+            Some(link("compound", modifier, head_word(head, vb, env)))
+        }
+        [obj, _subject] if local.starts_with("deg_") => {
+            let prep = relational_degree_preposition(local)?;
+            Some(link(prep, obj, atom_word(local, vb)))
+        }
+        // An adjective on a phrase: a gradable one's degree `deg_{a}(x)`, or an intersective one's
+        // predicate `{a}(x)`.
+        [subject] if is_adjective(local) => Some(Link {
+            relation: "modifier".to_string(),
+            dependent: atom_word(local, vb),
+            host: head_word(subject, vb, env),
+        }),
+        _ => None,
+    }
+}
+
+/// A verb's arguments, as links to the verb: its last argument is the subject, the others its
+/// object and complements (`v…_t(object, subject)`, `v…_as(object, complement, subject)`). A
+/// clausal argument names no phrase and is skipped.
+fn verb_links(local: &str, args: &[&Exp], vb: &Vb, env: &[(&str, String)], out: &mut Vec<Link>) {
+    let verb = atom_word(local, vb);
+    let last = args.len().saturating_sub(1);
+    for (i, a) in args.iter().enumerate().filter(|(_, a)| is_phrase(a)) {
+        out.push(Link {
+            relation: if i == last { "subject" } else { "argument" }.to_string(),
+            dependent: head_word(a, vb, env),
+            host: verb.clone(),
+        });
+    }
+}
+
+/// A verb's frame atom: `v{offset}_{frame}`.
+fn is_verb_frame(local: &str) -> bool {
+    local.split_once('_').is_some_and(|(key, _)| {
+        key.len() == 9 && key.starts_with('v') && key[1..].bytes().all(|b| b.is_ascii_digit())
+    })
+}
+
+/// A term that names a phrase (an entity or a kind), not a clause.
+fn is_phrase(e: &Exp) -> bool {
+    match e {
+        Exp::Var(_)
+        | Exp::Sig(..)
+        | Exp::Fst(_)
+        | Exp::EigonClass(_)
+        | Exp::EigonResource(_)
+        | Exp::EigonAxiom(_) => true,
+        _ => matches!(
+            app_spine(e),
+            (h, args) if !args.is_empty()
+                && matches!(axiom_local(h), Some("kind_of" | "the" | "the_count" | "has_count"))
+        ),
+    }
+}
+
+/// An adjective's degree (`deg_a01580306`) or predicate (`a02734544`) — not a governed degree, a
+/// standard, or a verb.
+fn is_adjective(local: &str) -> bool {
+    let bare = local.strip_prefix("deg_").unwrap_or(local);
+    bare.len() > 4 && bare.starts_with(['a', 's']) && bare[1..].bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The head word of a phrase: an atom's word, a bound variable's phrase, or the head of the
+/// first argument through `kind_of`, `the`, a count, or a projection.
+fn head_word(e: &Exp, vb: &Vb, env: &[(&str, String)]) -> String {
+    match e {
+        Exp::Var(v) => env
+            .iter()
+            .rev()
+            .find(|(b, _)| *b == v.as_str())
+            .map(|(_, h)| h.clone())
+            .unwrap_or_else(|| "…".to_string()),
+        Exp::Sig(_, dom, _) | Exp::Pi(_, dom, _) => head_word(dom, vb, env),
+        Exp::Fst(x) | Exp::Snd(x) | Exp::Ann(x, _) => head_word(x, vb, env),
+        _ => match app_spine(e) {
+            (_, args) if !args.is_empty() => head_word(args[0], vb, env),
+            (h, _) => match axiom_local(h) {
+                Some(local) if local.bytes().filter(u8::is_ascii_digit).count() >= 4 => {
+                    atom_word(local, vb)
+                }
+                _ => verbalize(e, vb)
+                    .trim_matches(|c| c == '«' || c == '»')
+                    .to_string(),
+            },
+        },
+    }
+}
+
 #[cfg(test)]
 mod register_tests {
     use super::*;
@@ -1418,6 +1697,170 @@ mod register_tests {
         assert_eq!(
             verbalize(&e, &Vb::surface(&names, &l)),
             "an exonuclease activity"
+        );
+    }
+
+    fn app1(axiom: &str, a: Exp) -> Exp {
+        Exp::App(
+            Box::new(Exp::EigonAxiom(Iri::parse(axiom).expect("iri"))),
+            Box::new(a),
+        )
+    }
+
+    /// «other strong biomarkers for vulnerabilities» with the PP inside the biomarkers phrase.
+    fn nested(vulnerability: &str) -> Exp {
+        sig(
+            cls("urn:eigenius:umlscui:C0005516"),
+            app2(
+                "urn:eigenius:ontology:prep_for",
+                Exp::Var("x0".into()),
+                app1("urn:eigenius:ontology:kind_of", cls(vulnerability)),
+            ),
+        )
+    }
+
+    fn surface_names() -> BTreeMap<String, String> {
+        [
+            ("C0005516", "biomarkers"),
+            ("C1821973", "vulnerabilities"),
+            ("n05042871", "vulnerabilities"),
+            ("n13780719", "relationship"),
+            ("a00725772", "dependent"),
+            ("C0388246", "WRN"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+    }
+
+    /// eigenius#264: two senses of one word render alike in the structural register — the
+    /// structure call must not see the sense axis — while Expanded still tells them apart.
+    #[test]
+    fn structural_names_the_word_not_the_sense() {
+        let (l, names) = (layer(), surface_names());
+        let umls = nested("urn:eigenius:umlscui:C1821973");
+        let wn = nested("urn:eigenius:wn:n05042871");
+        let structural = Vb::structural(&names, &l);
+        let s = verbalize(&umls, &structural);
+        assert_eq!(s, verbalize(&wn, &structural));
+        assert!(
+            s.contains("«vulnerabilities»") && !s.contains("C1821973"),
+            "{s}"
+        );
+        let expanded = Vb::expanded(&names, &l);
+        assert_ne!(verbalize(&umls, &expanded), verbalize(&wn, &expanded));
+    }
+
+    /// The contrast of eigenius#264's witness: «for vulnerabilities» on the biomarkers (the Σ's
+    /// head, through its bound variable) or on «the relationship» (through `the(…).1`).
+    #[test]
+    fn links_name_where_a_phrase_attaches() {
+        let (l, names) = (layer(), surface_names());
+        let vb = Vb::structural(&names, &l);
+        let for_ = |host: &str| Link {
+            relation: "for".into(),
+            dependent: "vulnerabilities".into(),
+            host: host.into(),
+        };
+        assert_eq!(
+            structure_links(&nested("urn:eigenius:umlscui:C1821973"), &vb),
+            vec![for_("biomarkers")]
+        );
+        let the_relationship = Exp::Fst(Box::new(app1(
+            "urn:eigenius:ontology:the",
+            cls("urn:eigenius:wn:n13780719"),
+        )));
+        let flat = app2(
+            "urn:eigenius:ontology:prep_for",
+            the_relationship,
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:umlscui:C1821973"),
+            ),
+        );
+        assert_eq!(structure_links(&flat, &vb), vec![for_("relationship")]);
+        // A governed preposition hangs its object on the adjective (D97 decision 6).
+        let dependent_on = app2(
+            "urn:eigenius:ontology:deg_a00725772_rel_on",
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:umlscui:C0388246"),
+            ),
+            Exp::Var("x0".into()),
+        );
+        assert_eq!(
+            structure_links(&dependent_on, &vb),
+            vec![Link {
+                relation: "on".into(),
+                dependent: "WRN".into(),
+                host: "dependent".into(),
+            }]
+        );
+    }
+
+    /// An unrendered fragment names its atoms by their words in the structural register, so a
+    /// sense the renderer cannot place does not split one structure into two (eigenius#264).
+    #[test]
+    fn a_structural_fragment_names_its_atoms_by_word() {
+        let l = layer();
+        let names: BTreeMap<String, String> = [
+            ("n00029378", "events"),
+            ("a02734544", "genetic"),
+            ("a02734192", "genetic"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let events = |genetic: &str| {
+            sig(
+                cls("urn:eigenius:wn:n00029378"),
+                app1(genetic, Exp::Var("x0".into())),
+            )
+        };
+        let vb = Vb::structural(&names, &l);
+        let a = verbalize(&events("urn:eigenius:wn:a02734544"), &vb);
+        assert_eq!(a, verbalize(&events("urn:eigenius:wn:a02734192"), &vb));
+        assert!(a.contains("«genetic»") && !a.contains("a02734544"), "{a}");
+        // An intersective adjective is a link on its head, as a gradable one's degree is.
+        assert_eq!(
+            structure_links(&events("urn:eigenius:wn:a02734544"), &vb),
+            vec![Link {
+                relation: "modifier".into(),
+                dependent: "genetic".into(),
+                host: "events".into(),
+            }]
+        );
+    }
+
+    /// A verb's arguments are links to it — read once, with the whole application, so the object
+    /// is never also taken for a one-argument verb's subject.
+    #[test]
+    fn a_verb_links_its_object_and_subject_once() {
+        let (l, names) = (layer(), surface_names());
+        let vb = Vb::structural(&names, &l);
+        let analysed = app2(
+            "urn:eigenius:ontology:v00644583_t",
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:umlscui:C0005516"),
+            ),
+            cls("urn:eigenius:wn:n13780719"),
+        );
+        let verb = "v00644583".to_string();
+        assert_eq!(
+            structure_links(&analysed, &vb),
+            vec![
+                Link {
+                    relation: "argument".into(),
+                    dependent: "biomarkers".into(),
+                    host: verb.clone(),
+                },
+                Link {
+                    relation: "subject".into(),
+                    dependent: "relationship".into(),
+                    host: verb,
+                },
+            ]
         );
     }
 }

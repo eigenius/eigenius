@@ -1114,6 +1114,26 @@ fn ledger_contradictions_name_each_kind() {
     assert!(parse_reading_ledger("S.\tg(n00000001)\twrong\tev\tsense\n").is_err());
 }
 
+/// Prints the two-call ranker's structure question for each unit, then defers to the ranker it
+/// wraps (`EIGENIUS_DUMP_STRUCTURES`, eigenius#264).
+struct StructurePreview(Box<dyn eigenius_kernel::dcg::ReadingRanker>);
+
+impl eigenius_kernel::dcg::ReadingRanker for StructurePreview {
+    fn select(
+        &self,
+        ctx: &eigenius_kernel::dcg::reading_ranker::DocumentContext,
+        candidates: &[eigenius_kernel::dcg::reading_ranker::ReadingCandidate],
+    ) -> Option<eigenius_kernel::dcg::reading_ranker::ReadingSelection> {
+        eprintln!(
+            "\n===== STRUCTURES «{}» ({} readings) =====\n{}",
+            ctx.sentence.trim(),
+            candidates.len(),
+            eigenius_kernel::dcg::reading_ranker::structure_question(candidates)
+        );
+        self.0.select(ctx, candidates)
+    }
+}
+
 /// The `(sentence, skeleton)` pairs adjudicated `invalid`. Missing file ⇒ empty (check inactive).
 fn load_invalid_adjudications() -> BTreeSet<(String, String)> {
     let Ok(text) = std::fs::read_to_string(ADJUDICATIONS) else {
@@ -3438,6 +3458,14 @@ fn wrn_first_page_over_full_lexicon() {
             Box::new(eigenius_kernel::dcg::PinReadingRanker::new(pins.clone()))
         }
     };
+    // `EIGENIUS_DUMP_STRUCTURES=1` prints, for every ambiguous unit, the two-call ranker's
+    // structure question (eigenius#264) without calling a model, so a replay previews it.
+    let inner_ranker: Box<dyn eigenius_kernel::dcg::ReadingRanker> =
+        if std::env::var("EIGENIUS_DUMP_STRUCTURES").is_ok() {
+            Box::new(StructurePreview(inner_ranker))
+        } else {
+            inner_ranker
+        };
     let selection_ranker = eigenius_kernel::dcg::RecordingReadingRanker::new(inner_ranker);
     // Where the recorded decisions land: the live arm writes to its EIGENIUS_SELECTIONS path;
     // the other arms to EIGENIUS_SELECTIONS_OUT (per-run artifact).

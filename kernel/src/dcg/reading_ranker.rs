@@ -71,6 +71,14 @@ pub struct ReadingCandidate {
     pub gloss: String,
     /// The pretty-printed λ-term — the reading's identity, for the record and the prompt appendix.
     pub sem: String,
+    /// The structure alone, in the sentence's own words
+    /// ([`crate::dcg::verbalize::Register::Structural`]): the same for every reading of one
+    /// structure. What the two-call ranker's structure call shows (eigenius#264). A presentation
+    /// of `sem`, like the prompt's wording, so it is not part of the selection key.
+    pub structure: String,
+    /// How the reading's phrases attach ([`crate::dcg::verbalize::structure_links`]) — from
+    /// which the structure call states how the structures differ.
+    pub links: Vec<crate::dcg::verbalize::Link>,
 }
 
 /// A prior sentence's already-selected reading — part of the question for every later sentence
@@ -545,6 +553,188 @@ fn render_structure_group(n: usize, group: &[(usize, &ReadingCandidate)]) -> Str
     out
 }
 
+/// eigenius#264 — the candidates as structure choices: indices grouped by skeleton, in the
+/// caller's order, and skeletons whose structural renderings coincide merged into one choice, so
+/// the sense call still sees both. Grouping on the skeleton first means a sense the rendering fails
+/// to hide can never split one structure into two.
+fn structure_groups(candidates: &[ReadingCandidate]) -> Vec<Vec<usize>> {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut by_skeleton: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut by_rendering: BTreeMap<&str, usize> = BTreeMap::new();
+    for (i, c) in candidates.iter().enumerate() {
+        if let Some(&g) = by_skeleton.get(c.skeleton.as_str()) {
+            groups[g].push(i);
+            continue;
+        }
+        let g = *by_rendering.entry(&c.structure).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        by_skeleton.insert(&c.skeleton, g);
+        groups[g].push(i);
+    }
+    groups
+}
+
+/// The structure call's question without its instructions: each structure once, in the
+/// sentence's words, then how the structures differ. What the harness prints for every ambiguous
+/// unit under `EIGENIUS_DUMP_STRUCTURES`, without calling a model (eigenius#264).
+pub fn structure_question(candidates: &[ReadingCandidate]) -> String {
+    let groups = structure_groups(candidates);
+    render_structures(candidates, &groups)
+}
+
+/// The shown structures, numbered from 1, and the lines saying how they differ.
+fn render_structures(candidates: &[ReadingCandidate], groups: &[Vec<usize>]) -> String {
+    let mut out = String::new();
+    for (n, g) in groups.iter().enumerate() {
+        out.push_str(&format!(
+            "Structure {}: {}\n",
+            n + 1,
+            candidates[g[0]].structure
+        ));
+    }
+    let contrasts = structure_contrasts(candidates, groups);
+    if !contrasts.is_empty() {
+        out.push_str("\nHow the structures differ:\n");
+        for l in contrasts {
+            out.push_str(&format!("  - {l}\n"));
+        }
+    }
+    out
+}
+
+/// The most contrast lines a structure call shows; the rest are counted in a closing line.
+const MAX_CONTRASTS: usize = 16;
+
+/// How the shown structures differ, as lines the structure call must decide: one per phrase whose
+/// role is not the same in every structure, saying what it does in each. Structures whose phrases
+/// all play the same roles differ in grouping or scope, which links do not see; the first few such
+/// pairs are named with the words where their renderings part.
+fn structure_contrasts(candidates: &[ReadingCandidate], groups: &[Vec<usize>]) -> Vec<String> {
+    use std::collections::BTreeSet;
+    let reps: Vec<&ReadingCandidate> = groups.iter().map(|g| &candidates[g[0]]).collect();
+    let mut roles: BTreeMap<String, Vec<BTreeSet<String>>> = BTreeMap::new();
+    for (n, rep) in reps.iter().enumerate() {
+        for l in &rep.links {
+            let (phrase, role) = phrase_and_role(l);
+            roles
+                .entry(phrase)
+                .or_insert_with(|| vec![BTreeSet::new(); reps.len()])[n]
+                .insert(role);
+        }
+    }
+    let mut lines = Vec::new();
+    for (phrase, per) in &roles {
+        if per.iter().all(|r| *r == per[0]) {
+            continue;
+        }
+        // The structures, grouped by the phrase's role, in the order they are shown.
+        let mut by_role: Vec<(Vec<&str>, Vec<usize>)> = Vec::new();
+        for (n, r) in per.iter().enumerate() {
+            let r: Vec<&str> = r.iter().map(String::as_str).collect();
+            match by_role.iter_mut().find(|(d, _)| *d == r) {
+                Some((_, ns)) => ns.push(n + 1),
+                None => by_role.push((r, vec![n + 1])),
+            }
+        }
+        let parts: Vec<String> = by_role
+            .iter()
+            .map(|(r, ns)| match r.as_slice() {
+                [] => format!("no such link in {}", numbered(ns)),
+                r => format!("{} in {}", r.join(" and "), numbered(ns)),
+            })
+            .collect();
+        lines.push(format!("{phrase}: {}", parts.join("; ")));
+    }
+    let mut alike = 0;
+    for a in 0..reps.len() {
+        for b in a + 1..reps.len() {
+            if reps[a].links == reps[b].links && alike < MAX_ALIKE {
+                alike += 1;
+                let (x, y) = word_diff(&reps[a].structure, &reps[b].structure);
+                lines.push(format!(
+                    "structures {} and {} link every phrase alike and part here: «{x}» in {}, \
+                     «{y}» in {}",
+                    a + 1,
+                    b + 1,
+                    a + 1,
+                    b + 1
+                ));
+            }
+        }
+    }
+    if lines.len() > MAX_CONTRASTS {
+        let more = lines.len() - MAX_CONTRASTS;
+        lines.truncate(MAX_CONTRASTS);
+        lines.push(format!("({more} further difference(s) not listed)"));
+    }
+    lines
+}
+
+/// The most structure pairs named as linking alike; the words where two renderings part are a
+/// weaker contrast than a link, and every further pair repeats them.
+const MAX_ALIKE: usize = 4;
+
+/// A link as the contrast names it: the phrase, and what it does in one structure.
+fn phrase_and_role(l: &crate::dcg::verbalize::Link) -> (String, String) {
+    match l.relation.as_str() {
+        "compound" => (
+            format!("«{}»", l.dependent),
+            format!("a noun modifier of «{}»", l.host),
+        ),
+        "modifier" => (
+            format!("«{}»", l.dependent),
+            format!("an adjective on «{}»", l.host),
+        ),
+        "count" => ("a count".to_string(), format!("of «{}»", l.host)),
+        "argument" => (
+            format!("«{}»", l.dependent),
+            format!("an argument of «{}»", l.host),
+        ),
+        "subject" => (
+            format!("«{}»", l.dependent),
+            format!("the subject of «{}»", l.host),
+        ),
+        p => (
+            format!("«{p} {}»", l.dependent),
+            format!("attaches to «{}»", l.host),
+        ),
+    }
+}
+
+fn numbered(ns: &[usize]) -> String {
+    let s: Vec<String> = ns.iter().map(usize::to_string).collect();
+    match s.as_slice() {
+        [one] => format!("structure {one}"),
+        _ => format!("structures {}", s.join(", ")),
+    }
+}
+
+/// Where two renderings part: the words between their longest common prefix and suffix, at most
+/// 12 of them.
+fn word_diff(a: &str, b: &str) -> (String, String) {
+    let (wa, wb): (Vec<&str>, Vec<&str>) = (
+        a.split_whitespace().collect(),
+        b.split_whitespace().collect(),
+    );
+    let pre = wa.iter().zip(&wb).take_while(|(x, y)| x == y).count();
+    let room = wa.len().min(wb.len()) - pre;
+    let suf = wa
+        .iter()
+        .rev()
+        .zip(wb.iter().rev())
+        .take(room)
+        .take_while(|(x, y)| x == y)
+        .count();
+    let mid = |w: &[&str]| match &w[pre..w.len() - suf] {
+        [] => "—".to_string(),
+        m if m.len() > 12 => format!("{} …", m[..12].join(" ")),
+        m => m.join(" "),
+    };
+    (mid(&wa), mid(&wb))
+}
+
 #[cfg(feature = "use-llm")]
 mod anthropic {
     use super::{DocumentContext, ReadingCandidate, ReadingRanker, ReadingSelection};
@@ -631,15 +821,19 @@ mod anthropic {
                 .map(|k| Self::with_config(k, cfg.clone()))
         }
 
-        fn ask(&self, instructions: &str) -> Option<ReadingSelectionReply> {
+        fn ask<T: JsonSchema + serde::de::DeserializeOwned>(
+            &self,
+            instructions: &str,
+        ) -> Option<T> {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .ok()?;
-            match rt.block_on(crate::dcg::anthropic_client::anthropic_structured::<
-                ReadingSelectionReply,
-            >(&self.api_key, &self.model, instructions))
-            {
+            match rt.block_on(crate::dcg::anthropic_client::anthropic_structured::<T>(
+                &self.api_key,
+                &self.model,
+                instructions,
+            )) {
                 Ok(r) => Some(r),
                 Err(e) => {
                     eprintln!("anthropic reading-ranker error: {e}");
@@ -647,6 +841,219 @@ mod anthropic {
                 }
             }
         }
+
+        /// eigenius#264 — two calls. The structure call sees each structure once, in the
+        /// sentence's own words, with how the structures differ, and argues that difference; the
+        /// sense call sees the chosen structure's readings as the flat listing presents them. A
+        /// pool with one structure skips the first call, a structure with one reading the second.
+        fn select_two_call(
+            &self,
+            ctx: &DocumentContext,
+            candidates: &[ReadingCandidate],
+        ) -> Option<ReadingSelection> {
+            let mut groups = super::structure_groups(candidates);
+            let total = groups.len();
+            let kept = total.min(super::MAX_STRUCTURES_SHOWN);
+            let dropped: usize = groups[kept..].iter().map(Vec::len).sum();
+            groups.truncate(kept);
+            if dropped > 0 {
+                eprintln!(
+                    "reading-ranker: TRUNCATED «{}» — showed {kept} of {total} structures, \
+                     omitting {dropped} reading(s); the omitted ones cannot be chosen",
+                    ctx.sentence.trim()
+                );
+            }
+            let (group, structure_rationale, other_structures) = if groups.len() == 1 {
+                (0, None, Vec::new())
+            } else {
+                let prompt = structure_prompt(ctx, candidates, &groups, total - kept);
+                dump_prompt(&prompt);
+                let reply: StructureReply = self.ask(&prompt)?;
+                if reply.verdict == Verdict::NoneFaithful {
+                    none_faithful(ctx, &reply.rationale, reply.missing.as_deref());
+                    return None;
+                }
+                // Numbered from 1 as shown; anything else is malformed ⇒ fail closed.
+                let n = reply.structure.filter(|n| (1..=groups.len()).contains(n))?;
+                let others: Vec<usize> = reply
+                    .runners_up
+                    .iter()
+                    .filter(|&&r| r != n && (1..=groups.len()).contains(&r))
+                    .map(|&r| r - 1)
+                    .collect();
+                (
+                    n - 1,
+                    Some(format!("STRUCTURE {n}: {}", reply.rationale)),
+                    others,
+                )
+            };
+            let members = &groups[group];
+            let (chosen, sense_rationale, sense_runners) = if members.len() == 1 {
+                (members[0], None, Vec::new())
+            } else {
+                let prompt = sense_prompt(ctx, candidates, members);
+                dump_prompt(&prompt);
+                let reply: ReadingSelectionReply = self.ask(&prompt)?;
+                if reply.verdict == Verdict::NoneFaithful {
+                    none_faithful(ctx, &reply.rationale, reply.missing_sense.as_deref());
+                    return None;
+                }
+                let c = reply.chosen.filter(|c| members.contains(c))?;
+                (
+                    c,
+                    Some(format!("SENSES: {}", reply.rationale)),
+                    reply.runners_up,
+                )
+            };
+            // The chosen structure's other readings first, then each other structure's first.
+            let mut seen = vec![false; candidates.len()];
+            seen[chosen] = true;
+            let runners_up: Vec<usize> = sense_runners
+                .into_iter()
+                .filter(|i| members.contains(i))
+                .chain(other_structures.iter().map(|&g| groups[g][0]))
+                .filter(|&i| !std::mem::replace(&mut seen[i], true))
+                .collect();
+            let rationale: Vec<String> = [structure_rationale, sense_rationale]
+                .into_iter()
+                .flatten()
+                .collect();
+            Some(ReadingSelection {
+                chosen,
+                rationale: rationale.join(" | "),
+                runners_up,
+            })
+        }
+    }
+
+    /// The structure call's reply (eigenius#264).
+    #[derive(Deserialize, JsonSchema)]
+    struct StructureReply {
+        /// `chose` when one structure matches the sentence; `none_faithful` when none does.
+        verdict: Verdict,
+        /// The chosen structure's number as shown, from 1. Required when `verdict` is `chose`.
+        structure: Option<usize>,
+        /// When `verdict` is `none_faithful`: the grouping the structures lack.
+        missing: Option<String>,
+        /// One or two sentences that decide the listed differences between the structures.
+        rationale: String,
+        /// The other structure numbers, most plausible first.
+        #[serde(default)]
+        runners_up: Vec<usize>,
+    }
+
+    /// `EIGENIUS_DUMP_SELECT_PROMPT=1` prints each prompt the ranker sends.
+    fn dump_prompt(prompt: &str) {
+        if std::env::var("EIGENIUS_DUMP_SELECT_PROMPT").is_ok() {
+            eprintln!("\n===== READING-RANKER PROMPT =====\n{prompt}\n===== END PROMPT =====\n");
+        }
+    }
+
+    /// "No candidate is faithful" is a result, and its diagnostic names what the pool lacks.
+    fn none_faithful(ctx: &DocumentContext, rationale: &str, missing: Option<&str>) {
+        eprintln!(
+            "reading-ranker: NONE FAITHFUL on «{}» — {rationale}{}",
+            ctx.sentence.trim(),
+            missing
+                .map(|m| format!("  [missing: {m}]"))
+                .unwrap_or_default()
+        );
+    }
+
+    /// The readings already selected for earlier sentences, for consistency.
+    fn prior_block(ctx: &DocumentContext) -> String {
+        let mut out = String::new();
+        if !ctx.prior_selections.is_empty() {
+            out.push_str(
+                "Readings already selected for earlier sentences (stay consistent with them):\n",
+            );
+            for p in ctx.prior_selections {
+                out.push_str(&format!("  sentence {}: \"{}\"\n", p.ordinal, p.gloss));
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// The structure call: each shown structure once, in the sentence's words, and the lines
+    /// saying how they differ, which the rationale must decide.
+    fn structure_prompt(
+        ctx: &DocumentContext,
+        candidates: &[ReadingCandidate],
+        groups: &[Vec<usize>],
+        dropped_structures: usize,
+    ) -> String {
+        let mut shown = super::render_structures(candidates, groups);
+        if dropped_structures > 0 {
+            shown.push_str(&format!(
+                "(NOTE: {dropped_structures} further structure(s) are not shown and cannot be \
+                 chosen. If none of the above is faithful, say so rather than picking the \
+                 closest.)\n"
+            ));
+        }
+        format!(
+            "A parser read the document below and found several STRUCTURES for one of its \
+             sentences — different ways the sentence's words combine. Choose the structure that \
+             matches what the sentence means in the context of the document.\n\n\
+             Word senses are not the question here. Every word is shown as the sentence writes \
+             it; a second step chooses the senses within the structure you pick.\n\n\
+             Document:\n{}\n\n{}\
+             The sentence:\n  \"{}\"\n\n\
+             Structures. `«…»` is a word of the sentence; `+ X` is a relation the structure \
+             asserts of the phrase before it; `compound-with` marks a noun modifier whose \
+             relation the sentence leaves unspecified; `and` joins separate claims.\n\
+             {shown}\n\
+             Return verdict `chose` with `structure` = the number of the structure whose grouping \
+             the sentence means, `rationale` = one or two sentences that decide the differences \
+             listed above (where each phrase attaches, and why), and `runners_up` = the other \
+             structure numbers in preference order. If no structure is faithful, return verdict \
+             `none_faithful` and say in `missing` which grouping the structures lack.",
+            ctx.document.trim(),
+            prior_block(ctx),
+            ctx.sentence.trim(),
+        )
+    }
+
+    /// The sense call: the chosen structure's readings, flat, with the legend of the concepts
+    /// they name.
+    fn sense_prompt(
+        ctx: &DocumentContext,
+        candidates: &[ReadingCandidate],
+        members: &[usize],
+    ) -> String {
+        let listing: String = members
+            .iter()
+            .map(|&i| format!("  [{i}] {}\n", candidates[i].gloss))
+            .collect();
+        let named: Vec<super::ConceptNote> = ctx
+            .concepts
+            .iter()
+            .filter(|c| {
+                let id = format!("[{}]", c.id);
+                members.iter().any(|&i| candidates[i].gloss.contains(&id))
+            })
+            .cloned()
+            .collect();
+        format!(
+            "A parser read the document below and produced several candidate READINGS \
+             (interpretations) of one sentence. Their structure is settled:\n  {}\n\
+             The readings below share it and differ in word sense. Choose the reading whose word \
+             senses match what the sentence means in the context of the document.\n\n\
+             Document:\n{}\n\n{}\
+             The sentence to disambiguate:\n  \"{}\"\n\n\
+             Candidate readings. `«label» [id]` names a concept, `+ relation X` is an explicit \
+             relation the reading asserts, and `⟦…⟧` marks a fragment that could not be \
+             rendered.\n{listing}{}\n\
+             Return verdict `chose` with `chosen` = the index of the reading whose word senses \
+             match the sentence's intended meaning, `rationale` = one sentence why, and \
+             `runners_up` = the remaining indices in preference order. If no reading is faithful, \
+             return verdict `none_faithful` and say in `missing_sense` which sense is missing.",
+            candidates[members[0]].structure,
+            ctx.document.trim(),
+            prior_block(ctx),
+            ctx.sentence.trim(),
+            concept_legend(&named),
+        )
     }
 
     /// The concept legend: each concept the candidates name, once, with its definition. Empty string
@@ -678,6 +1085,11 @@ mod anthropic {
         ) -> Option<ReadingSelection> {
             if candidates.len() < 2 {
                 return None; // nothing to disambiguate
+            }
+            // eigenius#264: the two-call ranker is OPT-IN until its A/B against this flat listing
+            // (three live draws per arm on one snapshot) decides the default.
+            if std::env::var("EIGENIUS_SELECT_TWO_CALL").is_ok() {
+                return self.select_two_call(ctx, candidates);
             }
             // Prior selections — the discourse the ranker must stay consistent with.
             let mut prior_block = String::new();
@@ -776,7 +1188,7 @@ mod anthropic {
                     "\n===== READING-RANKER PROMPT =====\n{prompt}\n===== END PROMPT =====\n"
                 );
             }
-            let reply = self.ask(&prompt)?;
+            let reply: ReadingSelectionReply = self.ask(&prompt)?;
             // "No candidate is faithful" is a RESULT, and its diagnostic is the valuable half:
             // it names the sense the pool lacks, which is the upstream bug (a sense that exists
             // in the lexicon but never entered this sentence's candidate set — D69 §7d).
@@ -843,6 +1255,8 @@ mod tests {
                 skeleton: format!("skel-{i}"),
                 gloss: format!("gloss {i}"),
                 sem: format!("sem {i}"),
+                structure: format!("structure {i}"),
+                links: Vec::new(),
             })
             .collect()
     }
@@ -919,11 +1333,15 @@ mod tests {
                 skeleton: "see_with(§)(we, telescope, man)".to_string(),
                 gloss: "we saw the man by using a telescope".to_string(),
                 sem: String::new(),
+                structure: "we saw the man by using a telescope".to_string(),
+                links: Vec::new(),
             },
             ReadingCandidate {
                 skeleton: "see(§)(we, man_with(telescope))".to_string(),
                 gloss: "we saw the man who was holding a telescope".to_string(),
                 sem: String::new(),
+                structure: "we saw the man who was holding a telescope".to_string(),
+                links: Vec::new(),
             },
         ];
         let ctx = DocumentContext {
@@ -1051,6 +1469,8 @@ mod d69b_tests {
             skeleton: "§(§, §)".into(),
             gloss: gloss.into(),
             sem: String::new(),
+            structure: String::new(),
+            links: Vec::new(),
         }
     }
 
@@ -1108,5 +1528,110 @@ mod d69b_tests {
         let out = render_structure_group(1, &g);
         assert!(out.contains("[0] a «target» [n05981230]\n"), "{out}");
         assert!(!out.contains("{A}"), "no slots when unaligned: {out}");
+    }
+}
+
+#[cfg(test)]
+mod two_call_tests {
+    use super::{structure_contrasts, structure_groups, word_diff, ReadingCandidate};
+    use crate::dcg::verbalize::Link;
+
+    fn link(relation: &str, dependent: &str, host: &str) -> Link {
+        Link {
+            relation: relation.into(),
+            dependent: dependent.into(),
+            host: host.into(),
+        }
+    }
+
+    fn cand(structure: &str, links: Vec<Link>) -> ReadingCandidate {
+        ReadingCandidate {
+            skeleton: structure.into(),
+            gloss: String::new(),
+            sem: String::new(),
+            structure: structure.into(),
+            links,
+        }
+    }
+
+    /// eigenius#264's witness: «The MSI relationship compared favourably to other strong
+    /// biomarkers for vulnerabilities.» — two structures, one link apart.
+    #[test]
+    fn the_contrast_names_the_attachment_that_differs() {
+        let shared = || {
+            vec![
+                link("compound", "MSI", "relationship"),
+                link("to", "biomarkers", "relationship"),
+            ]
+        };
+        let mut flat = shared();
+        flat.push(link("for", "vulnerabilities", "relationship"));
+        let mut nested = shared();
+        nested.push(link("for", "vulnerabilities", "biomarkers"));
+        let c = [
+            cand(
+                "the «relationship» … and the «relationship» for «vulnerabilities»",
+                flat.clone(),
+            ),
+            cand(
+                "the «relationship» … «biomarkers» + for «vulnerabilities»",
+                nested.clone(),
+            ),
+            cand(
+                "the «relationship» … «biomarkers» + for «vulnerabilities»",
+                nested,
+            ),
+        ];
+        let groups = structure_groups(&c);
+        assert_eq!(
+            groups,
+            vec![vec![0], vec![1, 2]],
+            "alike renderings share a group"
+        );
+        assert_eq!(
+            structure_contrasts(&c, &groups),
+            vec![
+                "«for vulnerabilities»: attaches to «relationship» in structure 1; attaches to \
+                 «biomarkers» in structure 2"
+                    .to_string()
+            ]
+        );
+    }
+
+    /// Grouping is by skeleton first: a sense the rendering fails to hide cannot split a structure.
+    #[test]
+    fn one_skeleton_is_one_structure_whatever_it_renders_as() {
+        let mut leaky = cand("x «a02734544»", Vec::new());
+        leaky.skeleton = "S".into();
+        let mut other = cand("x «a02734192»", Vec::new());
+        other.skeleton = "S".into();
+        assert_eq!(structure_groups(&[leaky, other]), vec![vec![0, 1]]);
+    }
+
+    /// Structures no link separates differ in grouping or scope; the contrast shows where their
+    /// renderings part.
+    #[test]
+    fn structures_alike_in_links_are_named_by_where_they_part() {
+        let c = [
+            cand("possibly ( «A» or «B» )", Vec::new()),
+            cand("possibly «A» or possibly «B»", Vec::new()),
+        ];
+        let groups = structure_groups(&c);
+        assert_eq!(
+            structure_contrasts(&c, &groups),
+            vec![
+                "structures 1 and 2 link every phrase alike and part here: «( «A» or «B» )» in 1, \
+                 ««A» or possibly «B»» in 2"
+                    .to_string()
+            ]
+        );
+        assert_eq!(
+            word_diff("a b c d", "a x d"),
+            ("b c".to_string(), "x".to_string())
+        );
+        assert_eq!(
+            word_diff("a b", "a b c"),
+            ("—".to_string(), "c".to_string())
+        );
     }
 }
