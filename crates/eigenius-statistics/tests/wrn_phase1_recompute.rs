@@ -136,13 +136,12 @@ fn recompute_finalized(
                 Some(o) => vec![o.clone()],
                 None => Vec::new(),
             };
-            for marker in [wk::INSTITUTION_EMITTED_DERIVATION] {
-                if !classes
-                    .iter()
-                    .any(|v| matches!(v, Value::String(s) if s == marker))
-                {
-                    classes.push(Value::String(marker.to_string()));
-                }
+            let marker = wk::INSTITUTION_EMITTED_DERIVATION;
+            if !classes
+                .iter()
+                .any(|v| matches!(v, Value::String(s) if s == marker))
+            {
+                classes.push(Value::String(marker.to_string()));
             }
             result.set(is_a.clone(), Value::Array(classes));
             result
