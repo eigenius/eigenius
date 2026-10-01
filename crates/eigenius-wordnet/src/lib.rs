@@ -29,4 +29,5 @@ pub mod import;
 pub mod inflect;
 pub mod lemmatizer;
 pub mod morphy;
+pub mod verb_governance;
 pub mod wndb;

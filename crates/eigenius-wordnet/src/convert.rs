@@ -26,10 +26,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use eigenius_kernel::dcg::category::prep_constructor;
+use eigenius_kernel::dcg::category::{prep_constructor, preposition_of_slug};
 
 use crate::governance::Governance;
 use crate::inflect::{comparison, gerund, past_participles, third_singular, Comparison};
+use crate::verb_governance::{VerbComplement, VerbGovernance};
 use crate::wndb::{Offset, Pos, Synset};
 
 /// Sense-frequency ranks keyed by the entry's `sense` key (`wn:{lemma}.{tag}.{offset}`,
@@ -151,6 +152,12 @@ pub struct Report {
     /// `(S[adj]\NP)/cat_pp_arg(prep)` reading of a past participle whose verb's WordNet frames NAME a
     /// governed preposition (`associated WITH`, `linked WITH`).
     pub stative_entries: usize,
+    /// (verb sense, lemma, frame kind) triples the SPECIALIST complements placed there add beside
+    /// WordNet's frames (D97 slice 2).
+    pub specialist_verb_kinds: usize,
+    /// (verb sense, lemma) pairs where a placed SPECIALIST preposition replaced WordNet's
+    /// any-preposition frame (D97 decision 2).
+    pub any_pp_replaced: usize,
     /// Entries withheld because their surface is closed-class ([`push_entry`]'s guard, the list
     /// `eigenius_kernel::dcg::closed_class` shares with the UMLS importer): `As` arsenic, `In` indium.
     /// Not in `entries`, nor in any of its sub-counts.
@@ -161,7 +168,7 @@ pub struct Report {
 /// (predicative-complement, clausal, control / raising) are not emittable at
 /// stage-1 and are deferred (§8.7.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum FrameKind {
+pub(crate) enum FrameKind {
     Intransitive,
     Transitive,
     Ditransitive,
@@ -170,7 +177,12 @@ enum FrameKind {
     /// (D63 verb+PP frames). Same `Entity → Entity → Prop` axiom as a transitive verb — only the
     /// category differs, so the argument-marker preposition is forced and a plain transitive verb still
     /// rejects a stray `to X`. Replaces the old coarse "PP-oblique → transitive/intransitive" mapping.
-    PpOblique,
+    ///
+    /// The preposition, when a source names it: WordNet's frames 12 and 27 (`to`) and 13 (`on`), or
+    /// SPECIALIST's (D97 slice 2, [`crate::verb_governance`]). `None` is WordNet's any-preposition
+    /// frame (4, 22), `cat_pp_arg(prep_any)`. One relation per preposition (D97 decision 6):
+    /// `v{offset}_p_{slug}` beside the any frame's `v{offset}_p`.
+    PpOblique(Option<&'static str>),
     /// Clause-taking (report) verb — frame 26, "Somebody ----s that CLAUSE" (D63 §8.11
     /// 6-cl): an opaque `Prop → Entity → Prop` axiom, category `(S\NP)/cat_cp`.
     Clausal,
@@ -195,15 +207,16 @@ enum FrameKind {
 }
 
 impl FrameKind {
-    fn tag(self) -> &'static str {
+    fn tag(self) -> String {
         match self {
-            FrameKind::Intransitive => "i",
-            FrameKind::Transitive => "t",
-            FrameKind::Ditransitive => "d",
-            FrameKind::PpOblique => "p",
-            FrameKind::Clausal => "c",
-            FrameKind::LinkingAdj => "j",
-            FrameKind::Essive => "as",
+            FrameKind::Intransitive => "i".into(),
+            FrameKind::Transitive => "t".into(),
+            FrameKind::Ditransitive => "d".into(),
+            FrameKind::PpOblique(None) => "p".into(),
+            FrameKind::PpOblique(Some(prep)) => format!("p_{}", prep_slug(prep)),
+            FrameKind::Clausal => "c".into(),
+            FrameKind::LinkingAdj => "j".into(),
+            FrameKind::Essive => "as".into(),
         }
     }
 
@@ -214,7 +227,7 @@ impl FrameKind {
         match self {
             FrameKind::Intransitive => format!("{ENTITY_TOP} -> Prop"),
             // Same relation shape as transitive — the PP's object is the second entity argument.
-            FrameKind::Transitive | FrameKind::PpOblique => {
+            FrameKind::Transitive | FrameKind::PpOblique(_) => {
                 format!("{ENTITY_TOP} -> {ENTITY_TOP} -> Prop")
             }
             FrameKind::Ditransitive | FrameKind::Essive => {
@@ -252,15 +265,15 @@ impl FrameKind {
             FrameKind::Essive => format!(
                 "lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_as)), {obj})"
             ),
-            // Argument-PP verb: `(S\NP)/cat_pp_arg(prep_any)` — the object arrives through a transparent
-            // argument-marker preposition (`to`/`on`/…). Distinct from a bare NP so the preposition is
-            // forced; `⟦cat_pp_arg⟧ = Entity`, so the sem_type equals the transitive one above. WordNet's
-            // PP frames (4, 22) are preposition-AGNOSTIC (no governed prep recorded), so the verb takes the
-            // `prep_any` wildcard — it accepts any marker (C3-precision; the specific-prep gate applies to
-            // gloss-governed ADJECTIVES, where WordNet's gloss does carry the governance).
-            FrameKind::PpOblique => {
+            // Argument-PP verb: `(S\NP)/cat_pp_arg(prep_P)` — the object arrives through a transparent
+            // argument-marker preposition. Distinct from a bare NP so the preposition is forced;
+            // `⟦cat_pp_arg⟧ = Entity`, so the sem_type equals the transitive one above. A named
+            // preposition takes only its own marker; WordNet's any-preposition frames (4, 22) record
+            // none, so they take the `prep_any` wildcard, which accepts any marker.
+            FrameKind::PpOblique(prep) => {
+                let marker = prep.map_or_else(|| "lexicon:prep_any".to_string(), prep_ctor);
                 format!(
-                    "lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:cat_pp_arg(lexicon:prep_any))"
+                    "lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, {s}, {subj}), lexicon:cat_pp_arg({marker}))"
                 )
             }
             // Clause-taking: `(S\NP)/cat_cp` — the complement is an embedded clause.
@@ -282,12 +295,13 @@ impl FrameKind {
 ///   - 26, 29, 34 — clausal complement (`that` / `whether CLAUSE`, only 26 emitted);
 ///   - 24, 25, 28, 30, 32, 33, 35 — control / raising (INFINITIVE / V-ing).
 ///
-/// **Single-PP-complement frames** — the verb subcategorizes for one PP ("----s to X" 12/27, "is
-/// ----ing PP" 4, "Somebody ----s PP" 22) — map to [`FrameKind::PpOblique`] (`(S\NP)/cat_pp_arg`). This
-/// replaces the former coarse handling (12/27 → transitive with the preposition dropped; 4/22 →
-/// intransitive with the PP dropped). **Object+PP** frames (13, 20, 21) and other PP shapes stay coarse
-/// for now — a follow-up (`((S\NP)/cat_pp_arg)/NP`). Frame 14 is left as this importer already classifies
-/// it.
+/// **Single-PP-complement frames** — the verb subcategorizes for one PP ("----s to somebody" 12/27,
+/// "----s on something" 13, "is ----ing PP" 4, "Somebody ----s PP" 22) — map to
+/// [`FrameKind::PpOblique`] (`(S\NP)/cat_pp_arg`), naming the preposition where the frame does (12, 27
+/// `to`; 13 `on`, D97 decision 2). This replaces the former coarse handling (12/27 → transitive with
+/// the preposition dropped; 4/22 → intransitive with the PP dropped; 13 → transitive, its `on`
+/// dropped). **Object+PP** frames (20, 21) and other PP shapes stay coarse for now — a follow-up
+/// (`((S\NP)/cat_pp_arg)/NP`). Frame 14 is left as this importer already classifies it.
 ///
 /// Frames **22 and 23 were swapped** here until 2026-08-02. `doc/man/wninput.5` (vendored at
 /// `references/WordNet-3.0/doc/man/wninput.5`, line 212) reads `22  Somebody ----s PP` and
@@ -295,11 +309,13 @@ impl FrameKind {
 /// dropped 22's PP — leaving `give rise` with no argument slot for its `to`-PP, so the PP fell to adjunct
 /// position and an adjunct escaped a finite `that`-clause onto the matrix subject — and handed 23 a
 /// spurious oblique slot.
-fn classify(frame: u8) -> Option<FrameKind> {
+pub(crate) fn classify(frame: u8) -> Option<FrameKind> {
     match frame {
         1 | 2 | 3 | 23 => Some(FrameKind::Intransitive),
-        4 | 12 | 22 | 27 => Some(FrameKind::PpOblique),
-        8 | 9 | 10 | 11 | 13 | 20 | 21 => Some(FrameKind::Transitive),
+        4 | 22 => Some(FrameKind::PpOblique(None)),
+        12 | 27 => Some(FrameKind::PpOblique(Some("to"))),
+        13 => Some(FrameKind::PpOblique(Some("on"))),
+        8 | 9 | 10 | 11 | 20 | 21 => Some(FrameKind::Transitive),
         14 | 15 | 16 | 17 | 18 | 19 | 31 => Some(FrameKind::Ditransitive),
         6 | 7 => Some(FrameKind::LinkingAdj), // "----s Adjective" — copular/linking verb (D63 §8.5)
         26 => Some(FrameKind::Clausal),       // "Somebody ----s that CLAUSE" (D63 §8.11 6-cl)
@@ -720,16 +736,21 @@ fn stative_prep(frame: u8) -> Option<&'static str> {
 /// agent). A flipping lambda would read backwards in every gloss.
 fn push_stative_relational(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) {
     // One preposition per synset, chosen by the LOWEST-NUMBERED naming frame so the result does not
-    // depend on frame order in `data.verb`.
+    // depend on frame order in `data.verb`; entries for the words that frame holds for.
     let Some(prep) = syn
         .frames
         .iter()
-        .copied()
+        .map(|f| f.number)
         .filter(|&f| stative_prep(f).is_some())
         .min()
         .and_then(stative_prep)
     else {
         return;
+    };
+    let takes = |i: usize| {
+        syn.frames_of(i)
+            .into_iter()
+            .any(|f| stative_prep(f) == Some(prep))
     };
     let off = &syn.offset;
     buf.push_str(&format!(
@@ -744,6 +765,9 @@ fn push_stative_relational(buf: &mut String, syn: &Synset, rep: &mut Report, ran
         prep_ctor(prep)
     );
     for (i, lemma) in syn.words.iter().enumerate() {
+        if !takes(i) {
+            continue;
+        }
         // The copula is grammar, not a content verb — same per-LEMMA skip as the verbal paradigm.
         if is_copula_lemma(lemma) {
             rep.copula_skipped += 1;
@@ -769,20 +793,53 @@ fn push_stative_relational(buf: &mut String, syn: &Synset, rep: &mut Report, ran
     }
 }
 
-fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) -> bool {
-    let mut kinds: std::collections::BTreeSet<FrameKind> =
-        syn.frames.iter().filter_map(|&f| classify(f)).collect();
+fn push_verb(
+    buf: &mut String,
+    syn: &Synset,
+    rep: &mut Report,
+    ranks: &SenseRanks,
+    governance: &VerbGovernance,
+) -> bool {
     // Essive (`identify / regard / describe X as Y`) is NOT a WordNet frame (its inventory has no
-    // `as`-complement), so add it per-lemma for the curated essive set (D63 §5.3) — additively, on top
-    // of the synset's frame-derived categories.
+    // `as`-complement), so add it for the curated essive set (D63 §5.3) — additively, on top of the
+    // frame-derived categories, for every word of a synset holding one of them.
+    let mut curated: BTreeSet<FrameKind> = BTreeSet::new();
     if syn.words.iter().any(|w| is_essive_verb(w)) {
-        kinds.insert(FrameKind::Essive);
+        curated.insert(FrameKind::Essive);
     }
     // Same shape for the oblique-PP complement WordNet does not record ("compared TO X") — see
     // `PP_OBLIQUE_VERBS`.
     if syn.words.iter().any(|w| is_pp_oblique_verb(w)) {
-        kinds.insert(FrameKind::PpOblique);
+        curated.insert(FrameKind::PpOblique(None));
     }
+    // Per lemma: the frames WordNet gives that word — the synset's own and those it restricts to the
+    // word ([`Synset::frames_of`]) — the curated kinds, and the SPECIALIST complements placed on
+    // (sense, lemma) (D97 slice 2). A placed preposition replaces the any-preposition frame there
+    // (decision 2).
+    let lemma_kinds: Vec<BTreeSet<FrameKind>> = syn
+        .words
+        .iter()
+        .enumerate()
+        .map(|(i, lemma)| {
+            let placed = governance.of(&syn.offset, lemma);
+            let mut own: BTreeSet<FrameKind> =
+                syn.frames_of(i).into_iter().filter_map(classify).collect();
+            own.extend(curated.iter().copied());
+            if placed.iter().any(|c| matches!(c, VerbComplement::Pp(_))) {
+                rep.any_pp_replaced += usize::from(own.remove(&FrameKind::PpOblique(None)));
+            }
+            for c in &placed {
+                let kind = match c {
+                    VerbComplement::Object => FrameKind::Transitive,
+                    VerbComplement::Pp(p) => FrameKind::PpOblique(Some(governed(p))),
+                    VerbComplement::Clause => FrameKind::Clausal,
+                };
+                rep.specialist_verb_kinds += usize::from(own.insert(kind));
+            }
+            own
+        })
+        .collect();
+    let kinds: BTreeSet<FrameKind> = lemma_kinds.iter().flatten().copied().collect();
     if kinds.is_empty() {
         rep.verbs_deferred += 1;
         return false;
@@ -814,6 +871,9 @@ fn push_verb(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRank
         // (3sg/pl) and the participles existed.
         let cat_fin_past = kind.cat("fin", "num_any");
         for (i, lemma) in syn.words.iter().enumerate() {
+            if !lemma_kinds[i].contains(&kind) {
+                continue;
+            }
             // The COPULA is grammar, not a content verb: skip WordNet's `be` senses (D63, the WRN
             // page's worst unit). WordNet gives `be` 8 verb synsets, and `02604760` "have the quality
             // of being" carries frame 6 → `FrameKind::LinkingAdj`, so it emits a linking entry
@@ -967,6 +1027,11 @@ pub fn adjective_frames() -> &'static BTreeMap<String, String> {
 /// bug, not a `prep_any`.
 fn prep_ctor(prep: &str) -> String {
     format!("lexicon:prep_{}", prep_slug(prep))
+}
+
+/// The kernel's spelling of a governed preposition, `'static` so a [`FrameKind`] can carry it.
+fn governed(prep: &str) -> &'static str {
+    preposition_of_slug(prep_slug(prep)).expect("a constructor's slug names its preposition")
 }
 
 /// A governed preposition as it appears in an atom or entry name: its constructor without `prep_`,
@@ -1327,7 +1392,7 @@ fn render_core(
             }
             Pos::Verb => {
                 let mut block = String::new();
-                if push_verb(&mut block, syn, &mut rep, ranks) {
+                if push_verb(&mut block, syn, &mut rep, ranks, &governance.verbs) {
                     route(&block, &mut decls, &mut entries);
                 }
             }
@@ -1433,7 +1498,13 @@ mod tests {
         );
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_verb(&mut buf, &s, &mut rep, &SenseRanks::new());
+        push_verb(
+            &mut buf,
+            &s,
+            &mut rep,
+            &SenseRanks::new(),
+            &VerbGovernance::default(),
+        );
 
         // A 2-place axiom, distinct from the verbal `_d` ditransitive one.
         assert!(
@@ -1475,7 +1546,13 @@ mod tests {
         let s = syn("01115006 41 v 01 set 0 000 01 + 19 00 | put into a certain place");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_verb(&mut buf, &s, &mut rep, &SenseRanks::new());
+        push_verb(
+            &mut buf,
+            &s,
+            &mut rep,
+            &SenseRanks::new(),
+            &VerbGovernance::default(),
+        );
         assert_eq!(rep.stative_entries, 0);
         assert!(
             !buf.contains("_rel"),
@@ -1489,15 +1566,15 @@ mod tests {
         assert_eq!(classify(2), Some(FrameKind::Intransitive));
         assert_eq!(classify(23), Some(FrameKind::Intransitive)); // "Somebody's (body part) ----s"
         assert_eq!(classify(8), Some(FrameKind::Transitive));
-        assert_eq!(classify(13), Some(FrameKind::Transitive)); // "----s on something"
+        assert_eq!(classify(13), Some(FrameKind::PpOblique(Some("on")))); // "----s on something"
         assert_eq!(classify(14), Some(FrameKind::Ditransitive));
         assert_eq!(classify(31), Some(FrameKind::Ditransitive));
         // single-PP-complement frames → argument-PP verb `(S\NP)/cat_pp_arg` (D63 verb+PP).
-        assert_eq!(classify(12), Some(FrameKind::PpOblique)); // "----s to somebody"
-        assert_eq!(classify(27), Some(FrameKind::PpOblique)); // "----s to somebody"
-        assert_eq!(classify(4), Some(FrameKind::PpOblique)); //  "is ----ing PP"
-        assert_eq!(classify(22), Some(FrameKind::PpOblique)); // "Somebody ----s PP"
-                                                              // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
+        assert_eq!(classify(12), Some(FrameKind::PpOblique(Some("to")))); // "----s to somebody"
+        assert_eq!(classify(27), Some(FrameKind::PpOblique(Some("to")))); // "----s to somebody"
+        assert_eq!(classify(4), Some(FrameKind::PpOblique(None))); //  "is ----ing PP"
+        assert_eq!(classify(22), Some(FrameKind::PpOblique(None))); // "Somebody ----s PP"
+                                                                    // frame 26 "that CLAUSE" → clause-taking (D63 §8.11 6-cl).
         assert_eq!(classify(26), Some(FrameKind::Clausal));
         // frames 6/7 "----s Adjective" → linking (copular) verb (D63 §8.5).
         assert_eq!(classify(6), Some(FrameKind::LinkingAdj));
@@ -1780,7 +1857,13 @@ mod tests {
         let eat = syn("00275082 30 v 03 corrode 1 eat 0 rust 1 001 @ 00259743 v 0000 01 + 11 00 | to deteriorate");
         let mut rep = Report::default();
         let mut buf = String::new();
-        assert!(push_verb(&mut buf, &eat, &mut rep, &SenseRanks::new()));
+        assert!(push_verb(
+            &mut buf,
+            &eat,
+            &mut rep,
+            &SenseRanks::new(),
+            &VerbGovernance::default()
+        ));
         // frame 11 → transitive; the axiom IRI is kind-tagged (`_t`). The synset gloss rides the
         // axiom as a `desc:` clause → `core:description` (D63 §6a index c: verb senses searchable).
         assert!(buf.contains(
@@ -1839,7 +1922,8 @@ mod tests {
             &mut buf,
             &v,
             &mut Report::default(),
-            &SenseRanks::new()
+            &SenseRanks::new(),
+            &VerbGovernance::default()
         ));
         // The essive axiom is a 3-place opaque relation (subj, obj, as-complement), tagged `_as`.
         assert!(buf.contains(
@@ -1864,7 +1948,8 @@ mod tests {
             &mut buf,
             &eat,
             &mut Report::default(),
-            &SenseRanks::new()
+            &SenseRanks::new(),
+            &VerbGovernance::default()
         ));
         assert!(!buf.contains("_as :"));
         assert!(!buf.contains("prep_as"));
@@ -1881,7 +1966,8 @@ mod tests {
             &mut buf,
             &eat,
             &mut Report::default(),
-            &SenseRanks::new()
+            &SenseRanks::new(),
+            &VerbGovernance::default()
         ));
         // gerund (regular -ing) + its `ger` category.
         assert!(buf.contains("lexicon:form     = \"eating\";"));
@@ -1898,16 +1984,65 @@ mod tests {
         assert!(buf.contains("lexicon:form     = \"rusting\";"));
     }
 
+    /// D97 slice 2, per lemma: the frames WordNet gives the word, and the complements placed on
+    /// (sense, lemma). In 00630380 frame 8 is `chew over`'s alone, and 22 (any preposition) both
+    /// words'; SPECIALIST's `reflect on`, on `reflect`'s one sense, replaces 22 for `reflect` only.
+    #[test]
+    fn a_verbs_frames_and_placed_complements_are_per_lemma() {
+        let v = syn(
+            "00630380 31 v 02 chew_over 0 reflect 0 000 02 + 08 01 + 22 00 | reflect deeply on a subject",
+        );
+        let lexicon = eigenius_specialist::Lexicon::parse(
+            "{base=reflect\nentry=E1\n\tcat=verb\n\ttran=pphr(on,np)\n}\n",
+        )
+        .unwrap();
+        let verbs = BTreeMap::from([(v.offset.clone(), v.clone())]);
+        let governance = crate::verb_governance::classify_verbs(&verbs, &lexicon)
+            .governance(&crate::governance::Placements::default())
+            .unwrap();
+        let mut buf = String::new();
+        let mut rep = Report::default();
+        assert!(push_verb(
+            &mut buf,
+            &v,
+            &mut rep,
+            &SenseRanks::new(),
+            &governance
+        ));
+        let entries: BTreeSet<(String, String)> = buf
+            .split("resource wn:")
+            .skip(1)
+            .filter_map(|e| {
+                let form = e.split("lexicon:form     = \"").nth(1)?.split('"').next()?;
+                let sem = e
+                    .split("lexicon:sem      = wn:")
+                    .nth(1)?
+                    .split(';')
+                    .next()?;
+                Some((form.to_string(), sem.to_string()))
+            })
+            .collect();
+        let has = |form: &str, sem: &str| entries.contains(&(form.to_string(), sem.to_string()));
+        assert!(has("chews over", "v00630380_t"));
+        assert!(has("chews over", "v00630380_p"));
+        assert!(has("reflects", "v00630380_p_on"));
+        assert!(!has("reflects", "v00630380_t"), "frame 8 is chew over's");
+        assert!(!has("reflects", "v00630380_p"), "a placed `on` replaces 22");
+        assert!(!has("chews over", "v00630380_p_on"));
+        assert_eq!((rep.specialist_verb_kinds, rep.any_pp_replaced), (1, 1));
+    }
+
     #[test]
     fn multiword_verb_inflects_only_the_head() {
-        // "depend on" (frame 13, PP-oblique → transitive): head inflects, particle kept.
+        // "depend on" (frame 13, a PP-oblique `on`): head inflects, particle kept.
         let v = syn("00000002 31 v 01 depend_on 0 000 01 + 13 00 | rely");
         let mut buf = String::new();
         assert!(push_verb(
             &mut buf,
             &v,
             &mut Report::default(),
-            &SenseRanks::new()
+            &SenseRanks::new(),
+            &VerbGovernance::default()
         ));
         assert!(buf.contains("lexicon:form     = \"depend on\";")); // bse
         assert!(buf.contains("lexicon:form     = \"depends on\";")); // fin 3sg
@@ -1922,7 +2057,13 @@ mod tests {
         let v = syn("00001740 29 v 01 breathe 0 000 02 + 02 00 + 08 00 | respire");
         let mut rep = Report::default();
         let mut buf = String::new();
-        assert!(push_verb(&mut buf, &v, &mut rep, &SenseRanks::new()));
+        assert!(push_verb(
+            &mut buf,
+            &v,
+            &mut rep,
+            &SenseRanks::new(),
+            &VerbGovernance::default()
+        ));
         assert!(buf.contains("axiom wn:v00001740_i : lexicon:Entity -> Prop"));
         assert!(buf.contains("axiom wn:v00001740_t : lexicon:Entity -> lexicon:Entity -> Prop"));
         assert_eq!(rep.verb_axioms, 2);
@@ -1939,7 +2080,8 @@ mod tests {
             &mut buf,
             &v,
             &mut Report::default(),
-            &SenseRanks::new()
+            &SenseRanks::new(),
+            &VerbGovernance::default()
         ));
         assert!(buf.contains(
             "axiom wn:v00001234_d : lexicon:Entity -> lexicon:Entity -> lexicon:Entity -> Prop"
@@ -1954,7 +2096,13 @@ mod tests {
         let v = syn("00000003 31 v 01 show 0 000 01 + 26 00 | demonstrate");
         let mut rep = Report::default();
         let mut buf = String::new();
-        assert!(push_verb(&mut buf, &v, &mut rep, &SenseRanks::new()));
+        assert!(push_verb(
+            &mut buf,
+            &v,
+            &mut rep,
+            &SenseRanks::new(),
+            &VerbGovernance::default()
+        ));
         assert!(buf.contains("axiom wn:v00000003_c : Prop -> lexicon:Entity -> Prop"));
         assert!(buf.contains("lexicon:form     = \"shows\";")); // 3sg
         assert!(buf.contains(
@@ -1973,7 +2121,13 @@ mod tests {
             syn("02445925 41 v 02 be 0 follow 9 000 02 + 22 00 + 08 01 | work in a specific place");
         let mut rep = Report::default();
         let mut buf = String::new();
-        push_verb(&mut buf, &be_and_follow, &mut rep, &SenseRanks::new());
+        push_verb(
+            &mut buf,
+            &be_and_follow,
+            &mut rep,
+            &SenseRanks::new(),
+            &VerbGovernance::default(),
+        );
         assert!(
             !buf.contains("lexicon:form     = \"be\";"),
             "the copula lemma must not be emitted:\n{buf}"
@@ -2001,7 +2155,13 @@ mod tests {
         let v = syn("00000004 42 v 01 remain 0 000 01 + 06 00 | continue in a state");
         let mut rep = Report::default();
         let mut buf = String::new();
-        assert!(push_verb(&mut buf, &v, &mut rep, &SenseRanks::new()));
+        assert!(push_verb(
+            &mut buf,
+            &v,
+            &mut rep,
+            &SenseRanks::new(),
+            &VerbGovernance::default()
+        ));
         assert!(buf
             .contains("axiom wn:v00000004_j : (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop"));
         // 3sg "remains" over an `adj` complement, singular subject.
@@ -2259,7 +2419,13 @@ mod tests {
         let v = syn("00000001 00 v 01 cogitate 0 000 01 + 29 00 | think");
         let mut rep = Report::default();
         let mut buf = String::new();
-        assert!(!push_verb(&mut buf, &v, &mut rep, &SenseRanks::new()));
+        assert!(!push_verb(
+            &mut buf,
+            &v,
+            &mut rep,
+            &SenseRanks::new(),
+            &VerbGovernance::default()
+        ));
         assert_eq!(rep.verbs_deferred, 1);
         assert!(buf.is_empty());
     }

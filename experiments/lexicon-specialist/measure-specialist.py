@@ -53,8 +53,16 @@ TEXTS = [
 ]
 CORPUS = os.path.join(ROOT, "experiments/parsing/quantities/corpus.tsv")
 
-# The prepositions `lexicon:Prep` names (less `prep_any`).
-PREP_ENUM = {"to", "on", "in", "with", "from", "for", "at", "upon", "about", "against", "into", "of", "as"}
+# The prepositions `lexicon:Prep` names (less `prep_any`), slug -> surface, from the kernel's list
+# (`GOVERNED_PREPOSITIONS` in `kernel/src/dcg/category.rs`): `out_of` -> `out of`.
+PREP_SLUGS = dict(
+    (ctor[len("prep_"):], surface)
+    for surface, ctor in re.findall(
+        r'\("([a-z ]+)", "(prep_[a-z_]+)"\)',
+        open(os.path.join(ROOT, "kernel/src/dcg/category.rs"), encoding="utf-8").read(),
+    )
+)
+PREP_ENUM = set(PREP_SLUGS.values())
 # Frame tags that give the verb an NP object (`FrameKind` in the WordNet importer).
 OBJECT_TAGS = {"t", "d", "as"}
 # The closed class's verbs, which no content importer emits.
@@ -141,15 +149,16 @@ def read_wordnet():
             if pos == "v" and "lexicon:pss)" in cat:
                 participles.add(form.lower())
             if pos == "v":
-                tag = sem.strip().rsplit("_", 1)[-1]
+                # The frame tag after the offset: `i`, `t`, `p` (any preposition), `p_to` (named).
+                tag = sem.strip().split("_", 1)[-1]
                 v = verbs[lemma]
                 v["senses"].add(offset)
                 v["tags"][tag] += 1
                 v["sense_tags"][offset].add(tag)
             elif pos == "a":
                 adjs.add(lemma)
-                for p in re.findall(r"cat_pp_arg\(lexicon:prep_([a-z]+)\)", cat):
-                    adj_preps[lemma].add(p)
+                for slug in re.findall(r"cat_pp_arg\(lexicon:prep_([a-z_]+)\)", cat):
+                    adj_preps[lemma].add(PREP_SLUGS.get(slug, slug))
             elif pos == "n":
                 nouns.add(lemma)
     return verbs, adjs, adj_preps, nouns, forms, participles

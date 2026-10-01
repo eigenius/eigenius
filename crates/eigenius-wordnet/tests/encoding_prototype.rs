@@ -55,18 +55,23 @@ const DICT: &str = concat!(
     "/../../references/WordNet-3.0/dict"
 );
 
-/// The adjectives' governed prepositions as the importer builds them (eigenius#263): the whole dict,
-/// the provisioned SPECIALIST Lexicon and the judge's committed placements.
+/// The governance as the importer builds it (eigenius#263, D97 slice 2): the whole dict,
+/// the provisioned SPECIALIST Lexicon and the judges' committed placements.
 fn governance() -> Governance {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let placements = Placements::read(
         &std::path::Path::new(root).join("experiments/lexicon-specialist/adjective-senses.tsv"),
     )
     .expect("the adjective sense judge's placements are committed");
+    let verb_placements = Placements::read(
+        &std::path::Path::new(root).join("experiments/lexicon-specialist/verb-senses.tsv"),
+    )
+    .expect("the verb sense judge's placements are committed");
     governance::build(
         std::path::Path::new(DICT),
         &std::path::Path::new(root).join("references/specialist/LEXICON"),
         &placements,
+        &verb_placements,
     )
     .expect("governed prepositions")
     .0

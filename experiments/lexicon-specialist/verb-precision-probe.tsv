@@ -1,0 +1,44 @@
+# The verb sense judge's precision probe (D97): a fixed sample of the senses it placed, after the
+# adjacency test withdrew the yes votes whose sentence does not show the preposition right after the verb.
+# Review each: correct | wrong | unclear, with a note.
+# lemma <TAB> complement <TAB> offset <TAB> confidence <TAB> review <TAB> note <TAB> gloss
+boggle	at	02640311	0.90	correct		hesitate when confronted with a problem, or when in doubt or fear
+hope	for	00706047	0.85	unclear	«hoped for a promotion» is the wish sense; this one is "intend", «I hope to have finished»	intend with some possibility of fulfilment; "I hope to have finished this work by tomorrow evening"
+come	to	00542120	0.99	correct	the gloss quotes «came to a boil»	reach or enter a state, relation, condition, use, or position; "The water came to a boil"; "We came to understand the true meaning of life"; "Their anger came to a boil"; "I came to realize the true meaning of life"; "The shoes came untied"; "come into contact with a terrorist group"; "his face went red"; "your wish will come true"
+brush	against	01240720	0.97	correct		touch lightly and briefly; "He brushed the wall lightly"
+embark	upon	02373336	0.87	correct		proceed somewhere despite the risk of possible dangers; "We ventured into the world of high-tech and bought a supercomputer"
+devolve	to	02229550	0.97	correct		be inherited by; "The estate fell to my sister"; "The land returned to the family"; "The estate devolved to an heir that everybody had assumed to be dead"
+drape	round	01617034	0.85	correct	«Vines draped round the old gateposts»	cover as if with clothing; "the mountain was clothed in tropical trees"
+insist	on	00818974	0.98	correct		be emphatic or resolute and refuse to budge; "I must insist!"
+confide	clause	00936465	0.92	correct		reveal in private; tell confidentially
+carry	over	02233195	0.90	wrong	particle + object, not a PP: «carried over the balance to the new ledger»	transfer (entries) from one account book to another
+box	up	01485158	0.95	wrong	particle + object, not a PP: «box up the old books»	put into a box; "box the gift, please"
+bear	with	00668099	0.99	correct	«bear with me»	put up with something or somebody unpleasant; "I cannot bear his constant criticism"; "The new secretary had to endure a lot of unprofessional remarks"; "he learned to tolerate the heat"; "She stuck out two years in a miserable marriage"
+subcontract	with	02460883	0.90	correct		work under a subcontract; engage in a subcontract
+ride	on	02711987	0.98	correct		be contingent on; "The outcomes rides on the results of the election"; "Your grade will depends on your homework"
+fly	at	00545292	0.95	wrong	«She flew at him in a fury» is the attack sense; this one is "fly into a rage"	change quickly from one emotional state to another; "fly into a rage"
+separate	from	02431320	0.88	correct		discontinue an association or relation; go different ways; "The business partners broke over a tax question"; "The couple separated after 25 years of marriage"; "My friend and I split up"
+rejoice	in	01813884	0.95	correct		feel happiness or joy
+submit	clause	00878636	0.92	wrong	«The lawyers submitted that …» is 00878136 "put before; I submit to you that", not "refer for judgment"	refer for judgment or consideration; "The lawyers submitted the material to the court"
+rumble	object	01045719	0.85	correct	«he grumbled a rude response» in the gloss	to utter or emit low dull rumbling sounds; "he grumbled a rude response"; "Stones grumbled down the cliff"
+mourn	for	01797204	0.90	correct		observe the customs of mourning after the death of a loved one
+trample	over	01929467	0.90	correct	a path, as the gloss's «trampled across the fields»	tread or stomp heavily or roughly; "The soldiers trampled across the fields"
+barnstorm	object	01094661	0.90	correct		tour the country making political speeches, giving lectures, or presenting plays; "The presidential candidates are busy barnstorming this month"
+indulge	in	01191645	0.99	correct	the gloss quotes «indulges in»	enjoy to excess; "She indulges in ice cream"
+hang	upon	02170427	0.85	correct	«hung on his every word» in the gloss	give heed (to); "The children in the audience attended the recital quietly"; "She hung on his every word"; "They attended to everything he said"
+empower	by	02474239	0.85	wrong	the by-phrase of a passive, «empowered by the training», not a PP of the verb	give qualities or abilities to
+condense	into	00364868	0.97	correct		undergo condensation; change from a gaseous to a liquid state and fall in drops; "water condenses"; "The acid distills at a specific temperature"
+light	on	01978700	0.95	correct	«Misfortune lighted upon him» in the gloss	to come to rest, settle; "Misfortune lighted upon him"
+agglutinate	object	01222016	0.85	correct		string together (morphemes in an agglutinating language)
+resound	with	02183787	0.99	correct	the gloss quotes it	ring or echo with sound; "the hall resounded with laughter"
+glare	at	00033203	0.99	correct	the gloss quotes it	look at with a fixed gaze; "The girl glared at the man who tried to make a pass at her"
+relate	to	02724417	0.95	correct		be in a relationship with; "How are these two observations related?"
+know	of	00594621	0.97	correct		be cognizant or aware of a fact or a specific piece of information; possess knowledge or information about; "I know that the President lied to the people"; "I want to know who is winning the game!"; "I know it's time"
+bind	with	00567291	0.95	correct	«The enzyme binds with the substrate»	form a chemical bond with; "The hydrogen binds the oxygen"
+romp	through	01926878	0.85	correct	a path	run easily and fairly fast
+cling	to	01776065	0.99	correct		to remain emotionally or intellectually attached; "He clings to the idea that she might still love him."
+back	into	01997119	0.99	correct	the gloss quotes «back into the driveway»	travel backward; "back into the driveway"; "The car backed up and hit the tree"
+gossip	about	01038666	0.95	correct		talk socially without exchanging too much information; "the men were sitting in the cafe and shooting the breeze"
+climb	into	01923909	0.95	correct	a path after a motion verb	move with difficulty, by grasping
+turn	on	00146138	0.95	wrong	«The dog suddenly turned on its owner» is the attack sense; this one is "undergo a change"	undergo a transformation or a change of position or action; "We turned from Socialism to Capitalism"; "The people turned against the President when he stole the election"
+go	to	02372605	0.85	unclear	«The complaint had to go to the highest authority» reads as "be referred to"	follow a procedure or take a course; "We should go farther in this matter"; "She went through a lot of trouble"; "go about the world in a certain manner"; "Messages must go through diplomatic channels"

@@ -69,6 +69,18 @@ any detour.
 > pin policy for lexicalised twins come first. **Open:** those presentation and pin fixes; the
 > sense-ranker rework; strand 3 (whether attachment is derivable); the «for cancer therapeutics»
 > attachment for the maintainer; the combined #263+#264 PR.
+> **D97 slice 2 (verbs) joins the branch (`2026-10-01`, the owner):** «Some cancers do not respond to
+> immune checkpoint blockade» needs `respond to` on v00718737, which WordNet gives no PP frame. Decided:
+> a SPECIALIST preposition placed on a sense replaces the any-preposition frame there; the judge places
+> every several-sense item. Committed: 53 `lexicon:Prep` constructors with argument entries
+> (`651c4ed`). Then the verb governance, named PP relations `v{off}_p_{slug}` (frame 13 → `on`), the
+> judge for verbs, and the reader's per-word frames (WordNet restricts 365 frame entries to one word; reading them per synset
+> emitted 590 (sense, lemma, kind) triples WordNet does not give). 1,702 open items. **The judge,
+> accepted below the 0.95 bar (the owner):** recall clause 0.883, object 0.887 (held-out 0.900),
+> preposition 0.927; ten wordings and models tried (D97 decision 1). A preposition is placed only
+> where the judge's sentence shows it right after the verb (372 object + PP withdrawn); probe 32 of
+> 40 correct. **Next:** the adjectives' gloss heuristic, widened by the 53 prepositions (586 entries
+> on them, many adjuncts: «scarce during») — the owner's call; then reseed, the sweep, the draws.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change

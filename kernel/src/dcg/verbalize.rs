@@ -761,14 +761,18 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
         // `eigenius-wordnet` `convert.rs`).
         if local.starts_with('v') && local.contains('_') {
             let verb = name_atom(local, vb);
-            // The frame tag is the suffix after the last `_` (the importer's frame tags: `_i` intransitive,
-            // `_t` transitive, `_p` PP-oblique, `_as` ESSIVE, `_d` ditransitive). A 3-argument
-            // frame had no arm at all, so every essive clause — "identified WRN AS the top
-            // dependency", "evaluated MSI AS a biomarker" — bracketed in full.
-            let tag = local.rsplit('_').next().unwrap_or("");
+            // The frame tag follows the offset (the importer's frame tags: `_i` intransitive,
+            // `_t` transitive, `_p` PP-oblique with any preposition, `_p_to` with a named one, `_as`
+            // ESSIVE, `_d` ditransitive). A 3-argument frame had no arm at all, so every essive
+            // clause — "identified WRN AS the top dependency", "evaluated MSI AS a biomarker" —
+            // bracketed in full.
+            let tag = verb_frame(local);
             return match args.as_slice() {
                 [subj] => format!("{} {verb}", verbalize(subj, vb)),
-                [obj, subj] => format!("{} {verb} {}", verbalize(subj, vb), verbalize(obj, vb)),
+                [obj, subj] => match named_preposition(tag) {
+                    Some(p) => format!("{} {verb} {p} {}", verbalize(subj, vb), verbalize(obj, vb)),
+                    None => format!("{} {verb} {}", verbalize(subj, vb), verbalize(obj, vb)),
+                },
                 [obj, comp, subj] if tag == "as" => format!(
                     "{} {verb} {} as {}",
                     verbalize(subj, vb),
@@ -1625,12 +1629,12 @@ fn link_of(local: &str, args: &[&Exp], vb: &Vb, env: &[Binding]) -> Option<Link>
 /// its `as` complement. A clausal argument names no phrase and is skipped.
 fn verb_links(local: &str, args: &[&Exp], vb: &Vb, env: &[Binding], out: &mut Vec<Link>) {
     let verb = atom_word(local, vb);
-    let frame = local.split_once('_').map_or("", |(_, f)| f);
+    let frame = verb_frame(local);
     let last = args.len().saturating_sub(1);
     for (i, a) in args.iter().enumerate().filter(|(_, a)| is_phrase(a)) {
         let function = match (i, frame) {
             (i, _) if i == last => Function::Subject,
-            (0, "p") => Function::PrepositionalObject,
+            (0, f) if f == "p" || named_preposition(f).is_some() => Function::PrepositionalObject,
             (1, "as") => Function::ObjectComplement("as".to_string()),
             _ => Function::Object,
         };
@@ -1640,6 +1644,17 @@ fn verb_links(local: &str, args: &[&Exp], vb: &Vb, env: &[Binding], out: &mut Ve
             host: verb.clone(),
         });
     }
+}
+
+/// A verb atom's frame tag, after the offset: `t` in `v00254150_t`, `p_to` in `v00717358_p_to`.
+fn verb_frame(local: &str) -> &str {
+    local.split_once('_').map_or("", |(_, f)| f)
+}
+
+/// The preposition a PP-oblique frame tag names (`p_to` → `to`, `p_out_of` → `out of`, D97 slice 2);
+/// `None` for any other tag, the any-preposition `p` among them.
+fn named_preposition(frame: &str) -> Option<&'static str> {
+    crate::dcg::category::preposition_of_slug(frame.strip_prefix("p_")?)
 }
 
 /// A verb's frame atom: `v{offset}_{frame}`.
@@ -2044,13 +2059,23 @@ mod register_tests {
                 link(Function::Object, "biomarkers", verb),
             ]
         );
-        assert_eq!(
-            structure_links(&with_frame("p"), &vb),
-            vec![
-                link(Function::Subject, "relationship", verb),
-                link(Function::PrepositionalObject, "biomarkers", verb),
-            ]
-        );
+        for frame in ["p", "p_to", "p_out_of"] {
+            assert_eq!(
+                structure_links(&with_frame(frame), &vb),
+                vec![
+                    link(Function::Subject, "relationship", verb),
+                    link(Function::PrepositionalObject, "biomarkers", verb),
+                ],
+                "{frame}"
+            );
+        }
+        // The gloss says a named preposition (D97 slice 2); the any-preposition frame has none to say.
+        let named = verbalize(&with_frame("p_to"), &vb);
+        let any = verbalize(&with_frame("p"), &vb);
+        assert_eq!(named.replacen(" to ", " ", 1), any, "{named}");
+        // A tag that only starts like a named one is not a PP frame.
+        assert_eq!(named_preposition("p_nowhere"), None);
+        assert_eq!(named_preposition("p_out_of"), Some("out of"));
     }
 
     fn and(a: Exp, b: Exp) -> Exp {

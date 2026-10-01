@@ -26,6 +26,8 @@
 //! judge disagreed on 440 senses, and in a sample of 32 disagreements it was right 25 times and the
 //! pointers 3 (decision 7, revised 2026-09-30).
 //!
+//! The verbs' complements are [`crate::verb_governance`]'s; [`build`] reads both.
+//!
 //! An item with several senses the judge has not placed stops the import
 //! ([`Classified::governance`]). The gloss heuristic speaks only for a lemma no source attests,
 //! and never names `as`: its `as` matches are equatives and definition wording. A preposition
@@ -37,6 +39,7 @@ use std::path::Path;
 
 use eigenius_kernel::dcg::category::prep_constructor;
 
+use crate::verb_governance::{classify_verbs, VerbCounts, VerbGovernance};
 use crate::wndb::{Offset, Synset};
 
 /// The prepositions WordNet's convention names in a gloss: ``(usually) followed by `on'``,
@@ -76,9 +79,11 @@ pub fn heuristic_preposition(gloss: &str, lemma: &str) -> Option<String> {
     None
 }
 
-/// The judge's placements, resolved from its committed verdicts: for a (lemma, preposition) on
+/// The judge's placements, resolved from its committed verdicts: for a (lemma, complement) on
 /// several senses, the senses it goes on — none, a gap, where the judge said no sense fits. Read from
-/// `adjective-senses.tsv`: `lemma <TAB> preposition <TAB> offset,offset,…` or `-`, with `#` comments.
+/// `adjective-senses.tsv` or `verb-senses.tsv`: `lemma <TAB> complement <TAB> offset,offset,…` or
+/// `-`, with `#` comments. An adjective's complement is a preposition; a verb's a preposition,
+/// `object` or `clause` ([`crate::verb_governance::label`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Placements {
     map: BTreeMap<(String, String), BTreeSet<Offset>>,
@@ -117,13 +122,13 @@ impl Placements {
         Ok(Placements { map })
     }
 
-    pub fn insert(&mut self, lemma: &str, preposition: &str, senses: BTreeSet<Offset>) {
+    pub fn insert(&mut self, lemma: &str, complement: &str, senses: BTreeSet<Offset>) {
         self.map
-            .insert((lemma.to_string(), preposition.to_string()), senses);
+            .insert((lemma.to_string(), complement.to_string()), senses);
     }
 
-    fn get(&self, lemma: &str, preposition: &str) -> Option<&BTreeSet<Offset>> {
-        self.map.get(&(lemma.to_string(), preposition.to_string()))
+    pub(crate) fn get(&self, lemma: &str, complement: &str) -> Option<&BTreeSet<Offset>> {
+        self.map.get(&(lemma.to_string(), complement.to_string()))
     }
 
     pub fn len(&self) -> usize {
@@ -337,19 +342,22 @@ impl Classified {
             lemma_facts: self.lemma_facts.clone(),
             judged,
             gaps,
+            verbs: VerbGovernance::default(),
         })
     }
 }
 
-/// The governance the importer builds: every adjective synset in `dict`, SPECIALIST's `LEXICON` at
-/// `specialist`, the curated frames, and the judge's `placements`. SPECIALIST is required: without it
-/// the import would be a different lexicon from the one the judge's placements were made for. `Err`
-/// names what is missing, each unplaced open item among it.
+/// The governance the importer builds: every adjective and verb synset in `dict`, SPECIALIST's
+/// `LEXICON` at `specialist`, the curated frames, and the judge's placements for adjectives
+/// (`placements`) and verbs (`verb_placements`). SPECIALIST is required: without it the import would
+/// be a different lexicon from the one the judge's placements were made for. `Err` names what is
+/// missing, each unplaced open item among it.
 pub fn build(
     dict: &Path,
     specialist: &Path,
     placements: &Placements,
-) -> Result<(Governance, Counts), String> {
+    verb_placements: &Placements,
+) -> Result<(Governance, Counts, VerbCounts), String> {
     let read = |pos: &str| {
         crate::wndb::read_data_file(&dict.join(format!("data.{pos}")))
             .map_err(|e| format!("{}: {e}", dict.join(format!("data.{pos}")).display()))
@@ -366,9 +374,9 @@ pub fn build(
         Some(&lexicon),
         crate::convert::adjective_frames(),
     );
-    let governance = classified.governance(placements).map_err(|unplaced| {
+    let unplaced = |part: &str, unplaced: Vec<String>| {
         format!(
-            "{} open item(s) with no placement from the adjective sense judge, e.g. {}",
+            "{} open item(s) with no placement from the {part} sense judge, e.g. {}",
             unplaced.len(),
             unplaced
                 .iter()
@@ -377,19 +385,29 @@ pub fn build(
                 .collect::<Vec<_>>()
                 .join("; ")
         )
-    })?;
-    Ok((governance, classified.counts))
+    };
+    let mut governance = classified
+        .governance(placements)
+        .map_err(|u| unplaced("adjective", u))?;
+    let verbs = classify_verbs(&read("verb")?, &lexicon);
+    governance.verbs = verbs
+        .governance(verb_placements)
+        .map_err(|u| unplaced("verb", u))?;
+    Ok((governance, classified.counts, verbs.counts))
 }
 
-/// The prepositions each (gradable adjective sense, lemma) governs.
+/// The prepositions each (gradable adjective sense, lemma) governs, and the complements placed on
+/// each (verb sense, lemma).
 #[derive(Debug, Clone, Default)]
 pub struct Governance {
     by_sense: BTreeMap<(Offset, String), BTreeSet<String>>,
     lemma_facts: BTreeMap<String, BTreeSet<String>>,
-    /// Open items the judge's placements placed.
+    /// Open adjective items the judge's placements placed.
     pub judged: usize,
     /// Of those, the gaps: placed on no sense.
     pub gaps: usize,
+    /// The verbs' (D97 slice 2).
+    pub verbs: VerbGovernance,
 }
 
 impl Governance {

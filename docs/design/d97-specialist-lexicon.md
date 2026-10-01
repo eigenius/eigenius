@@ -295,6 +295,43 @@ for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 
    examples attest a PP complement for 217 (sense, lemma) pairs with no PP frame (162 verbs), but a
    sample of 40 holds about 12 adjuncts, infinitives and particles («playing for hours», «was called
    to discuss», «burn off calories»), so they are evidence for the judge, not a rule.
+   - **What the judge decides.** A preposition goes to the judge on every several-sense lemma; an
+     object or a clause only where WordNet gives no sense of the lemma a frame of that kind (where
+     it gives some sense one, it has placed the complement per sense, and those items score the
+     judge instead). Counted over WordNet 3.0: 1,702 open items over 1,019 lemmas (1,563
+     preposition, 108 object, 31 clause), 740 on one sense.
+   - **Its gold** is the frames WordNet gives the lemma in each sense — 12 and 27 `to`, 13 `on`,
+     8–11/20/21 an object, 26 a clause — hidden from it, with the other frames shown. WordNet
+     restricts 365 of its 21,649 frame entries to one word of the synset (frame 8 in 00630380 is
+     `chew over`'s, not `reflect`'s); the reader dropped that word number until 2026-10-01, which
+     both put frames on the wrong lemmas in the gold and emitted 590 (sense, lemma, kind) triples
+     WordNet does not give.
+   - **Validated below the adjectives' bar (the owner, 2026-10-01).** Ten configurations on a
+     tuning sample of 299 gold items (150 object, 113 clause, 36 preposition): `claude-sonnet-4-6`
+     with one wording for the three kinds is the best single judge — recall clause 0.883 (159 of
+     180 senses), object 0.887 (385 of 434), preposition 0.927 (38 of 41); on 150 held-out object
+     items 0.900 (468 of 520). A wording per kind lowered clause recall to 0.783;
+     `claude-opus-5-5` (0.69–0.78) and `claude-fable-5-1` (0.82–0.85) say no where WordNet and
+     Sonnet say yes; unions of runs reach 0.93 on clauses and objects, their added senses 0.73
+     precise. Of 67 misses reviewed, 47 are the judge's (`verb-gold-review.tsv`). Of 40 senses the
+     wording before its last fix (which says the preposition follows the verb directly) accepts
+     beyond WordNet's frames, 36 are correct — `I warned you that…` on `warn`, whose gloss quotes it,
+     `carbonize coal` — and 4 put the complement on a sibling sense or after an object
+     (`verb-precision-review.tsv`); the final wording keeps 34 of the 36 and all 4. Accepted at that
+     recall: a missed sense keeps the frames WordNet
+     gives it. `aerosolize`, as an object, is refused by every model tried and stays unjudged.
+   - **A preposition is placed only where the judge's sentence shows it right after the verb**
+     (the owner, 2026-10-01). A probe of 40 placed senses held 8 wrong, 6 of them where the judge's
+     own sentence shows another construction: an object before the preposition («He turned the
+     dial to the highest setting»), a particle («box up the old books»), a passive by-phrase. The
+     adjacency test reads the sentence with WordNet's morphology and withdraws a yes whose sentence
+     has no form of the verb directly followed by the preposition: 372 of 2,676 accepted senses, in
+     a random 25 of them 24 object + PP — D97 slice 4's frame — and 1 with an adverb between. Every
+     sense WordNet's `to` and `on` frames confirm passes. With it the probe holds 32 correct, 6
+     wrong, 2 unclear (`verb-precision-probe.tsv`): particles, a passive by-phrase and senses
+     sibling to the one placed remain. *Rejected:* a second LLM pass over each placement against
+     its sentence. In two wordings it vetoed senses WordNet's frames confirm (object recall 0.887 →
+     0.832–0.843) and, asked for a better sentence, wrote one where none exists.
 2. **Union or authority — decided: union.** Where WordNet has a frame SPECIALIST does not (a
    PP-oblique `prep_any` beside SPECIALIST's named preposition), SPECIALIST's frame joins it. Both
    entries carry the sense's axiom, so they yield the same sem wherever both apply; slice 1 measures
