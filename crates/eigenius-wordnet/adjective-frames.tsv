@@ -14,3 +14,6 @@ dependent	on
 essential	for
 associated	with
 concordant	with
+# From the UAB residue-versus-variant sentence («desmopressin-responsive AVPR2 genotypes»); the
+# WordNet gloss of responsive.a.01 names no preposition. SPECIALIST E0053052 records compl=pphr(to,np).
+responsive	to

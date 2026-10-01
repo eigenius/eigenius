@@ -524,9 +524,11 @@ fn ly_adverb_recognition_requires_a_known_adjective_base() {
 #[test]
 fn derived_adjective_reuses_its_base_and_is_transparent() {
     // D63 compound morphology §3, Slice 1: a closed-prefix concatenation (`hyperprimary` ← `primary`)
-    // and a right-headed hyphen compound (`double-primary` ← `primary`) each seed the base
-    // adjective's own items on the whole-token span, so the derived word parses identically to its
-    // base — the affix / left modifier is transparent in v1 (identity sem, like the `-ly` adverbs).
+    // and a right-headed hyphen compound with an ADJECTIVE left half (`large-primary` ← `primary`)
+    // each seed the base adjective's own items on the whole-token span, so the derived word parses
+    // identically to its base — the affix / left modifier is transparent in v1 (identity sem, like
+    // the `-ly` adverbs). A noun left half is not a modifier; see
+    // `noun_left_hyphen_compound_fills_the_heads_governed_complement`.
     let (_layer, index) = index_over_bootstrap();
 
     let base = index.parse("HeLa is primary", &Identity);
@@ -541,13 +543,13 @@ fn derived_adjective_reuses_its_base_and_is_transparent() {
         "`hyperprimary` is transparent — same claim as `primary`"
     );
 
-    // Right-headed hyphen compound.
-    let compound = index.parse("HeLa is double-primary", &Identity);
+    // Right-headed hyphen compound, adjective left half.
+    let compound = index.parse("HeLa is large-primary", &Identity);
     assert!(!compound.is_empty(), "the hyphen compound adjective parses");
     assert_eq!(
         pretty_term(compound[0].sem()),
         pretty_term(base[0].sem()),
-        "`double-primary` is transparent — same claim as `primary`"
+        "`large-primary` is transparent — same claim as `primary`"
     );
 
     // Attributive (prenominal) use — the real target (`hypermutable cells`): the derived adjective
@@ -573,6 +575,138 @@ fn derived_adjective_recognition_requires_a_known_base() {
         index.parse("HeLa is double-zorp", &Identity).is_empty(),
         "a hyphen compound with no adjective head does not seed a derived adjective"
     );
+    // The left half must be known too: dropping an unknown left half would drop whatever it says.
+    assert!(
+        index.parse("HeLa is zorp-primary", &Identity).is_empty(),
+        "a hyphen compound with an unknown left half does not seed a derived adjective"
+    );
+}
+
+/// A relational adjective in the shape the WordNet importer emits for a governed preposition
+/// (`push_adj`, C3-positive): `(S[adj]\NP)/cat_pp_arg(prep_to)` over a 2-place relation, complement
+/// first — beside its plain 1-place reading. And a common noun `pan` (WordNet's chimpanzee genus has
+/// the same letters as the bound prefix `pan-`).
+const RELATIONAL_ADJECTIVE_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+namespace fixture   = "urn:eigenius:test:compound-fixture";
+class fixture:Pan : lexicon:Entity { }
+resource fixture:e_pan : lexicon:LexicalEntry {
+    lexicon:form     = "pan";
+    lexicon:cat      = type_expr( lexicon:cat_n(fixture:Pan, lexicon:sg) );
+    lexicon:sem      = fixture:Pan;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:pan.n.02";
+}
+class fixture:Large : lexicon:Entity { }
+resource fixture:e_large_n : lexicon:LexicalEntry {
+    lexicon:form     = "large";
+    lexicon:cat      = type_expr( lexicon:cat_n(fixture:Large, lexicon:sg) );
+    lexicon:sem      = fixture:Large;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:large.n.01";
+}
+axiom lexicon:responsive_rel : lexicon:Entity -> lexicon:Entity -> Prop
+resource lexicon:e_responsive_rp : lexicon:LexicalEntry {
+    lexicon:form     = "responsive";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_to)) );
+    lexicon:sem      = lexicon:responsive_rel;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:responsive.a.01";
+}
+axiom lexicon:responsive_adj : lexicon:Entity -> Prop
+resource lexicon:e_responsive : lexicon:LexicalEntry {
+    lexicon:form     = "responsive";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:responsive_adj;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:responsive.a.01";
+}
+"#;
+
+#[test]
+fn noun_left_hyphen_compound_keeps_the_noun() {
+    // D63 compound morphology §3, Slice 1: a noun left half is not dropped. Every reading keeps it —
+    // through the vague modifier relation `compound_kind` (the N-N compound rule's), and, where the
+    // head governs a preposition, also as the phrase the compound may abbreviate (§2a:
+    // `gene-responsive` ≡ `responsive to genes`, one proposition with one representation).
+    let index = index_with_fixture(RELATIONAL_ADJECTIVE_FIXTURE);
+
+    // A head that governs nothing: only the vague reading.
+    let primary = index.parse("HeLa is gene-primary", &PluralS);
+    assert!(!primary.is_empty(), "`gene-primary` parses");
+    for it in &primary {
+        let t = pretty_term(it.sem());
+        assert!(
+            t.contains("compound_kind") && t.contains("Gene"),
+            "every reading keeps the noun through compound_kind — got {t}"
+        );
+    }
+
+    // A head that governs `to`: the vague reading AND the phrase's.
+    let compound: Vec<String> = index
+        .parse("HeLa is gene-responsive", &PluralS)
+        .iter()
+        .map(|it| pretty_term(it.sem()))
+        .collect();
+    let phrase: std::collections::BTreeSet<String> = index
+        .parse("HeLa is responsive to genes", &PluralS)
+        .iter()
+        .map(|it| pretty_term(it.sem()))
+        .collect();
+    assert!(
+        compound.iter().all(|t| t.contains("Gene")),
+        "every reading keeps the noun — got {compound:?}"
+    );
+    assert!(
+        compound.iter().any(|t| t.contains("compound_kind")),
+        "the vague reading is among the candidates — got {compound:?}"
+    );
+    assert!(
+        compound.iter().any(|t| phrase.contains(t)),
+        "`responsive to genes` is among the candidates — {compound:?} vs {phrase:?}"
+    );
+
+    // A left half that is an adjective AND a noun (the demo adjective `large`, a noun in this
+    // fixture — WordNet's `double` is both) is a modifier: no nominal reading beside it.
+    let large: Vec<String> = index
+        .parse("HeLa is large-responsive", &PluralS)
+        .iter()
+        .map(|it| pretty_term(it.sem()))
+        .collect();
+    assert!(!large.is_empty(), "`large-responsive` parses");
+    assert!(
+        large.iter().all(|t| !t.contains("Large")),
+        "an adjective left half has only the modifier reading — got {large:?}"
+    );
+}
+
+#[test]
+fn a_bound_prefix_is_never_a_noun() {
+    // `pan-essential` once read as «essential for the genus Pan»: the left half was looked up as a
+    // word, and WordNet has a noun `pan`. A transparent prefix reads as its head (identity, v1); a
+    // prefix that negates or reverses (`non-`, `anti-`) has no reading rather than an inverted one.
+    let index = index_with_fixture(RELATIONAL_ADJECTIVE_FIXTURE);
+    let base: std::collections::BTreeSet<String> = index
+        .parse("HeLa is responsive", &PluralS)
+        .iter()
+        .map(|it| pretty_term(it.sem()))
+        .collect();
+    let pan: std::collections::BTreeSet<String> = index
+        .parse("HeLa is pan-responsive", &PluralS)
+        .iter()
+        .map(|it| pretty_term(it.sem()))
+        .collect();
+    assert!(!pan.is_empty(), "`pan-responsive` parses");
+    assert_eq!(
+        pan, base,
+        "`pan-` is transparent — the same claims as `responsive`"
+    );
+    for prefixed in ["HeLa is non-responsive", "HeLa is anti-responsive"] {
+        assert!(
+            index.parse(prefixed, &PluralS).is_empty(),
+            "{prefixed}: a negating prefix has no reading, not the head's"
+        );
+    }
 }
 
 /// Synthetic relations for the denominal-suffix rule (D63 compound morphology §3b): a transitive `base`
@@ -606,7 +740,8 @@ resource lexicon:e_like : lexicon:LexicalEntry {
 }
 "#;
 
-fn denominal_index() -> Parser {
+/// Bootstrap + the demo domain, with `fixture` layered on top.
+fn index_with_fixture(fixture: &str) -> Parser {
     let ctx = testing::bootstrap_context();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
@@ -614,12 +749,16 @@ fn denominal_index() -> Parser {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix = esl::compile(DENOMINAL_FIXTURE, &demo_layer).expect("denominal fixture compiles");
-    let mut b2 = LayerBuilder::new("denominal", Some(Arc::clone(&demo_layer)));
+    let fix = esl::compile(fixture, &demo_layer).expect("fixture compiles");
+    let mut b2 = LayerBuilder::new("fixture", Some(Arc::clone(&demo_layer)));
     for r in fix {
-        b2.add_resource(r).expect("add denominal relation");
+        b2.add_resource(r).expect("add fixture resource");
     }
     Parser::build(Arc::new(b2.build(LayerStorage::in_memory())))
+}
+
+fn denominal_index() -> Parser {
+    index_with_fixture(DENOMINAL_FIXTURE)
 }
 
 #[test]

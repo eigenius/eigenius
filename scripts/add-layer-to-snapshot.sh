@@ -30,14 +30,18 @@
 #
 # Env:
 #   ENDPOINT   kernel gRPC endpoint (default: 127.0.0.1:50051)
-#   VOLUME     docker volume to stage in (default: eigenius_eigenius_db)
+#   VOLUME     docker volume to stage in (default: the compose project's `eigenius_db` volume,
+#              which is `eigenius_eigenius_db` for a checkout named `eigenius`)
+#   COMPOSE_PROJECT_NAME, EIGENIUS_KERNEL_TAG   stage in isolation from other checkouts: their
+#              own volume and container, and their own kernel image tag (docker-compose.yml)
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 ENDPOINT="${ENDPOINT:-127.0.0.1:50051}"
-VOLUME="${VOLUME:-eigenius_eigenius_db}"
+# The volume the kernel ACTUALLY mounts, named by the compose project (see reseed-lexicon-db.sh).
+VOLUME="${VOLUME:-$(docker compose config --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["volumes"]["eigenius_db"]["name"])')}"
 BASE=""
 OUT=""
 LAYERS=()
@@ -90,10 +94,12 @@ docker run --rm -v "$(readlink -f "$BASE")":/src:ro -v "$VOLUME":/dst alpine \
 
 say "bringing the kernel up on the staged volume"
 docker compose up -d --no-deps kernel
-until [[ "$(docker inspect -f '{{.State.Health.Status}}' eigenius-kernel-1 2>/dev/null)" == "healthy" ]]; do
-  [[ "$(docker inspect -f '{{.State.Status}}' eigenius-kernel-1 2>/dev/null)" == "exited" ]] && {
+# The container compose started — its name carries the project, so it is looked up, not spelled.
+KERNEL="$(docker compose ps -q kernel)"
+until [[ "$(docker inspect -f '{{.State.Health.Status}}' "$KERNEL" 2>/dev/null)" == "healthy" ]]; do
+  [[ "$(docker inspect -f '{{.State.Status}}' "$KERNEL" 2>/dev/null)" == "exited" ]] && {
     echo "error: kernel exited before becoming healthy" >&2
-    docker logs --tail 40 eigenius-kernel-1
+    docker logs --tail 40 "$KERNEL"
     exit 1
   }
   sleep 2

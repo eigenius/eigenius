@@ -24,8 +24,10 @@ services:
     # `docker buildx build --tag eigenius-kernel:local --load` (with
     # GHA layer caching) and then `docker compose up -d --no-build` to
     # run it. Local devs still get the regular `docker compose build`
-    # behaviour because `build:` is also present.
-    image: eigenius-kernel:local
+    # behaviour because `build:` is also present. `EIGENIUS_KERNEL_TAG` gives a worktree its own
+    # image: every checkout builds into the one `local` tag otherwise, so a build on one branch
+    # replaces the kernel every other branch's `docker compose up` runs.
+    image: eigenius-kernel:${EIGENIUS_KERNEL_TAG:-local}
     build:
       context: .
       dockerfile: deploy/Dockerfile.kernel

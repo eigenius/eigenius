@@ -41,7 +41,10 @@
 #
 # Env overrides:
 #   ENDPOINT       kernel gRPC endpoint to load into (default: 127.0.0.1:50051)
-#   VOLUME         docker volume name (default: eigenius_eigenius_db — compose project "eigenius")
+#   VOLUME         docker volume name (default: the compose project's `eigenius_db` volume, which
+#                  is `eigenius_eigenius_db` for a checkout named `eigenius`)
+#   COMPOSE_PROJECT_NAME, EIGENIUS_KERNEL_TAG   seed in isolation from other checkouts: their own
+#                  volume and container, and their own kernel image tag (docker-compose.yml)
 #   SNAPSHOT_ROOT  parent dir for snapshots (default: ../db-snapshot relative to repo root)
 #   CARGO_PROFILE_IMG  kernel image build profile (default: ci — functionally identical, faster than release)
 #   CARGO_FEATURES     cargo features for the kernel image (default: none). Set to `use-llm` to
@@ -58,7 +61,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 ENDPOINT="${ENDPOINT:-127.0.0.1:50051}"
-VOLUME="${VOLUME:-eigenius_eigenius_db}"
+# The volume the kernel ACTUALLY mounts, named by the compose project — the checkout's directory
+# unless COMPOSE_PROJECT_NAME says otherwise. A hardcoded `eigenius_eigenius_db` is right only for
+# a checkout named `eigenius`: from any other worktree the script dropped another checkout's
+# volume and snapshotted a volume its own kernel never wrote.
+VOLUME="${VOLUME:-$(docker compose config --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["volumes"]["eigenius_db"]["name"])')}"
 SNAPSHOT_ROOT="${SNAPSHOT_ROOT:-$ROOT/../db-snapshot}"
 CARGO_PROFILE_IMG="${CARGO_PROFILE_IMG:-ci}"
 UMLS_RELEASE="${RELEASE:-2026AA}"
@@ -165,9 +172,11 @@ say "bringing up kernel on a clean volume"
 docker compose up -d --no-deps kernel
 
 say "waiting for kernel health"
-until [[ "$(docker inspect -f '{{.State.Health.Status}}' eigenius-kernel-1 2>/dev/null)" == "healthy" ]]; do
-  [[ "$(docker inspect -f '{{.State.Status}}' eigenius-kernel-1 2>/dev/null)" == "exited" ]] && {
-    echo "error: kernel exited before becoming healthy" >&2; docker logs --tail 30 eigenius-kernel-1; exit 1; }
+# The container compose started — its name carries the project, so it is looked up, not spelled.
+KERNEL="$(docker compose ps -q kernel)"
+until [[ "$(docker inspect -f '{{.State.Health.Status}}' "$KERNEL" 2>/dev/null)" == "healthy" ]]; do
+  [[ "$(docker inspect -f '{{.State.Status}}' "$KERNEL" 2>/dev/null)" == "exited" ]] && {
+    echo "error: kernel exited before becoming healthy" >&2; docker logs --tail 30 "$KERNEL"; exit 1; }
   sleep 3
 done
 echo "kernel healthy @ $ENDPOINT"
