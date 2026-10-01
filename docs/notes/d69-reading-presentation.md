@@ -744,7 +744,9 @@ Three live jev-latest draws, 5 new ledger rows, each re-scored by replay. The wo
 gene modifying «promoter» gives the readings different skeletons in one analysis. Selection
 re-baselined at 28 on the first draw (`2026-10-01-word-senses-jev-latest-1`, 13aa718).
 
-**The structure call's errors, analysed** (six draws of §7p, 81 structure decisions per model):
+**The structure call's errors, analysed** (six draws of §7p, 81 structure decisions per model;
+per unit with the options shown, the models' answers and the evidence:
+`d69-structure-call-errors.md`):
 the pin was offered in all 27 calls; jev chose another structure in 25, sonnet-4-6 in 24, over 10
 units. By cause: presentation 9 and 12, a pin or ledger row open to question 15 and 12, model error
 under a clear presentation 0 and 0, one undetermined. 31 of the 49 are a multiword concept against
