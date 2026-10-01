@@ -177,8 +177,15 @@ fn adjective_sources(
         gold,
         summary: vec![format!(
             "{} adjective lemmas attested; {} items in lexicon:Prep: {} on one sense, {} for the \
-             judge; outside lexicon:Prep: {:?}",
-            c.lemmas_attested, c.items, c.one_sense, c.open, c.outside
+             judge; outside lexicon:Prep: {:?}; the gloss heuristic proposes {} items for the judge \
+             from {} (sense, lemma) pairs",
+            c.lemmas_attested,
+            c.items,
+            c.one_sense,
+            c.open - c.heuristic_items,
+            c.outside,
+            c.heuristic_items,
+            c.heuristic_senses
         )],
         forms: None,
     }

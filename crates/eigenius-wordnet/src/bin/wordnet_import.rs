@@ -140,8 +140,8 @@ fn load_governance(
         "governed prepositions: {} adjective lemmas attested by SPECIALIST or the curated frames, \
          {} items in lexicon:Prep — {} on the one sense, {} placed by the judge ({} of them gaps, on \
          no sense; {} placements read); {} items on lemmas with no gradable sense; outside lexicon:Prep, not placed: {:?}; \
-         {} (sense, lemma) pairs carry {} prepositions ({} from WordNet's convention, {} from the \
-         gloss heuristic)",
+         {} (sense, lemma) pairs carry {} prepositions ({} from WordNet's convention; the gloss \
+         heuristic proposed {} (sense, lemma) pairs, {} items for the judge)",
         counts.lemmas_attested,
         counts.items,
         counts.one_sense,
@@ -154,10 +154,11 @@ fn load_governance(
         preps,
         counts.convention_senses,
         counts.heuristic_senses,
+        counts.heuristic_items,
     );
     let (pairs, complements) = governance.verbs.totals();
     eprintln!(
-        "verb complements: {} verb lemmas SPECIALIST names a complement for; by kind {:?}; {} placed          by the judge ({} of them gaps; {} placements read); outside lexicon:Prep, not placed: {:?}; \
+        "verb complements: {} verb lemmas SPECIALIST names a complement for; by kind {:?}; {} placed by the judge ({} of them gaps; {} placements read); outside lexicon:Prep, not placed: {:?}; \
          {} (sense, lemma) pairs carry {} complements",
         verb_counts.lemmas_attested,
         verb_counts.by_kind,

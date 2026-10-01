@@ -30,7 +30,10 @@
 //!
 //! An item with several senses the judge has not placed stops the import
 //! ([`Classified::governance`]). The gloss heuristic speaks only for a lemma no source attests,
-//! and never names `as`: its `as` matches are equatives and definition wording. A preposition
+//! and never names `as`: its `as` matches are equatives and definition wording. It proposes; the
+//! judge places (decision 7, revised 2026-10-01): its pattern is often an adjunct or a passive's
+//! agent («boggy under foot», «aggravated by passive resistance»), so its items go to the judge
+//! even on a one-sense lemma. A preposition
 //! outside `lexicon:Prep` is counted, not placed (D97 slice 2 brings its argument entries); `than`
 //! belongs to the comparative.
 
@@ -176,6 +179,8 @@ pub struct Counts {
     pub convention_senses: usize,
     /// (sense, lemma) pairs the heuristic names a preposition for.
     pub heuristic_senses: usize,
+    /// Of `open`, the (lemma, preposition) items the heuristic proposes.
+    pub heuristic_items: usize,
 }
 
 /// Every adjective lemma's attested prepositions, sorted into the items placed on a lemma's one sense
@@ -183,7 +188,6 @@ pub struct Counts {
 #[derive(Debug, Clone, Default)]
 pub struct Classified {
     convention: BTreeMap<(Offset, String), BTreeSet<String>>,
-    heuristic: BTreeMap<(Offset, String), String>,
     lemma_facts: BTreeMap<String, BTreeSet<String>>,
     pub decided: Vec<DecidedItem>,
     pub open: Vec<OpenItem>,
@@ -262,11 +266,11 @@ pub fn classify(
         }
     }
     c.counts.one_sense = c.decided.len();
-    c.counts.open = c.open.len();
     // The heuristic, for a lemma no source attests: no lemma-level fact, and no sense of it carries
-    // the convention.
+    // the convention. Its proposals are the judge's items, on the lemma's every gradable sense.
     let conventional: BTreeSet<String> =
         c.convention.keys().map(|(_, l)| l.to_lowercase()).collect();
+    let mut proposed: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for syn in adjectives.values().filter(|s| !s.relational) {
         for lemma in &syn.words {
             let key = lemma.to_lowercase();
@@ -274,11 +278,22 @@ pub fn classify(
                 continue;
             }
             if let Some(p) = heuristic_preposition(&syn.gloss, lemma) {
-                c.heuristic.insert((syn.offset.clone(), lemma.clone()), p);
+                c.counts.heuristic_senses += 1;
+                proposed.entry(key).or_default().insert(p);
             }
         }
     }
-    c.counts.heuristic_senses = c.heuristic.len();
+    for (lemma, preps) in proposed {
+        for p in preps {
+            c.counts.heuristic_items += 1;
+            c.open.push(OpenItem {
+                lemma: lemma.clone(),
+                preposition: p,
+                senses: senses[&lemma].clone(),
+            });
+        }
+    }
+    c.counts.open = c.open.len();
     c
 }
 
@@ -293,12 +308,6 @@ impl Classified {
                 .entry((off.clone(), lemma.to_lowercase()))
                 .or_default()
                 .extend(preps.iter().cloned());
-        }
-        for ((off, lemma), p) in &self.heuristic {
-            by_sense
-                .entry((off.clone(), lemma.to_lowercase()))
-                .or_default()
-                .insert(p.clone());
         }
         for item in &self.decided {
             by_sense
@@ -547,11 +556,16 @@ entry=E4
         assert_eq!(
             open,
             BTreeSet::from([
+                ("addicted", "to"),
                 ("dependent", "on"),
                 ("dependent", "upon"),
                 ("responsible", "for"),
                 ("responsible", "to"),
             ])
+        );
+        assert_eq!(
+            (c.counts.heuristic_senses, c.counts.heuristic_items),
+            (1, 1)
         );
         assert_eq!(
             c.counts.outside,
@@ -564,13 +578,18 @@ entry=E4
         let lex = eigenius_specialist::Lexicon::parse(SPECIALIST).unwrap();
         let c = classify(&fixture(), Some(&lex), &BTreeMap::new());
         let err = c.governance(&Placements::default()).unwrap_err();
-        assert_eq!(err.len(), 4);
+        assert_eq!(
+            err.len(),
+            5,
+            "addicted to, the heuristic's, is the judge's too: {err:?}"
+        );
         let one = |o: &str| BTreeSet::from([o.to_string()]);
         let mut placements = Placements::default();
         placements.insert("dependent", "on", one("00000001"));
         placements.insert("dependent", "upon", one("00000001"));
         placements.insert("responsible", "for", one("00000005"));
         placements.insert("responsible", "to", one("00000009"));
+        placements.insert("addicted", "to", one("00000006"));
         let err = c.governance(&placements).unwrap_err();
         assert_eq!(err.len(), 1, "a sense that is not the lemma's: {err:?}");
         placements.insert("responsible", "to", one("00000004"));
@@ -584,7 +603,7 @@ entry=E4
         assert!(g.of("00000007", "black").is_empty());
         assert!(g.restates_frame("dependent on"));
         assert!(!g.restates_frame("contingent on"));
-        assert_eq!(g.judged, 4);
+        assert_eq!(g.judged, 5);
     }
 
     #[test]

@@ -446,6 +446,16 @@ for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 
      `claude-sonnet-4-6`: the kernel's structured client forces
      a tool choice, which the Claude 5 models refuse (eigenius#264's client). Placements: 373 on the
      senses accepted at 0.85, 28 below it, 27 gaps (`adjective-senses.tsv`).
+   - **The gloss heuristic proposes; the judge places (the owner, 2026-10-01).** The heuristic placed
+     a preposition directly where an adjective's own gloss shows it after the lemma, on lemmas no
+     source attests: 773 (sense, lemma) pairs with 3a's 13 prepositions. Slice 2's 53 widened it to
+     921, the new ones mostly adjuncts and passive agents («scarce during», «boggy under foot»,
+     «aggravated by passive resistance»). Its 882 (lemma, preposition) items now go to the judge on
+     the lemma's every gradable sense, a one-sense lemma included. The judge accepts 654 of the 815
+     senses proposed with 3a's thirteen and 100 of 143 with the new ones. Of 30 accepted senses, 21
+     are correct, 7 wrong — to-infinitives read as `to` + NP («obligated to repay»), adjuncts
+     («flabby around the middle») — and 2 unclear (`adjective-heuristic-probe.tsv`). Placements: 1,339
+     items, 1,073 on senses accepted at 0.85, 98 below it, 168 gaps.
    - **Open for nouns:** 6,425 WordNet nouns, 3,329 with several senses — the same rule multiplies
      the judge's work several times over, so it is a budget question as well.
 8. **What a "no sense fits" verdict leads to.** The judge will name frames whose sense WordNet
