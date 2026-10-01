@@ -23,7 +23,7 @@ use super::*;
 
 use crate::dcg::pretty::pretty_term;
 use crate::dcg::reading_ranker::{
-    first_collision, DocumentContext, PriorSelection, ReadingCandidate, ReadingRanker,
+    first_collision, DocumentContext, PriorSelection, ReadingCandidate, ReadingRanker, SenseAt,
 };
 use crate::dcg::skeleton::skeleton_of;
 use crate::dcg::verbalize::{
@@ -644,15 +644,26 @@ impl Parser {
                 let it = &closed[i];
                 // Each concept named by the words of the leaf that introduced it in THIS reading,
                 // else by its lemma; and the constituents its derivation builds.
-                let (mut words, constituents) = match it.derivation() {
+                let (mut words, constituents, senses_at) = match it.derivation() {
                     Some(d) => (
                         d.leaf_words(&tokens),
                         d.constituents()
                             .into_iter()
                             .filter(|&(a, b)| b > a)
                             .collect(),
+                        d.leaves()
+                            .into_iter()
+                            .filter(|l| !l.atoms.is_empty())
+                            .filter_map(|l| {
+                                Some(SenseAt {
+                                    span: l.span,
+                                    words: tokens.get(l.span.0..=l.span.1)?.join(" "),
+                                    atoms: l.atoms.clone(),
+                                })
+                            })
+                            .collect(),
                     ),
-                    None => (BTreeMap::new(), Vec::new()),
+                    None => (BTreeMap::new(), Vec::new(), Vec::new()),
                 };
                 for (key, name) in &names {
                     words.entry(key.clone()).or_insert_with(|| name.clone());
@@ -664,6 +675,7 @@ impl Parser {
                     constituents,
                     links: structure_links(it.sem(), &Vb::surface(&words, &self.grammar.layer)),
                     predication: predication(it.sem()).map(str::to_string),
+                    senses_at,
                 }
             })
             .collect();

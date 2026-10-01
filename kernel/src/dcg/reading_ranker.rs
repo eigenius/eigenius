@@ -47,7 +47,7 @@ use std::sync::Mutex;
 use sha2::{Digest, Sha256};
 
 use crate::dcg::analysis::{analyses, Analysis, Parse};
-use crate::dcg::decision::{render_prompt, Choice, Decided, Decider, Description, Field};
+use crate::dcg::decision::{render_prompt, Choice, Decided, Decider, Description, Field, Question};
 use crate::dcg::verbalize::ConceptNote;
 /// D69-B truncation cap: how many STRUCTURES a single prompt may show.
 ///
@@ -82,6 +82,20 @@ pub struct ReadingCandidate {
     /// What the reading's predication says, where its form decides something no link shows
     /// ([`crate::dcg::verbalize::predication`]).
     pub predication: Option<String>,
+    /// The sense each word takes, in sentence order: its derivation's leaves that contribute a
+    /// concept. Empty for a reading without one.
+    pub senses_at: Vec<SenseAt>,
+}
+
+/// The senses a reading gives the word (or multiword) at a span: the concepts its leaf contributes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SenseAt {
+    /// The leaf's token span, inclusive.
+    pub span: (usize, usize),
+    /// The words at the span, as the sentence writes them.
+    pub words: String,
+    /// The sense atoms, by key ([`crate::dcg::derivation::Derivation::atoms`]).
+    pub atoms: Vec<String>,
 }
 
 /// A prior sentence's already-selected reading — part of the question for every later sentence
@@ -642,8 +656,13 @@ const SENTENCE: &str = "the_sentence";
 const STRUCTURE_QUESTION: &str =
     "Which grammatical analysis of `the_sentence` matches what it means in `document`?";
 
-/// The sense call's question.
-const SENSE_QUESTION: &str = "Which reading of `the_sentence` gives its words the senses they \
+/// A sense call's question about one word.
+fn word_question(words: &str) -> String {
+    format!("Which sense of «{words}» matches what `the_sentence` means in `document`?")
+}
+
+/// The question among whole readings, for readings no word's sense separates.
+const READING_QUESTION: &str = "Which reading of `the_sentence` gives its words the senses they \
      have in `document`? `«label» [id]` names a concept (`what_the_concepts_mean` defines each); \
      `+ relation X` is a relation the reading asserts.";
 
@@ -652,10 +671,12 @@ const SENSE_QUESTION: &str = "Which reading of `the_sentence` gives its words th
 ///
 /// The structure call shows each grammatical analysis once — the sentence bracketed where the
 /// analyses group its words differently, and the function of each phrase on which they differ
-/// ([`crate::dcg::analysis`]); the sense call shows the chosen analysis's readings as glosses,
-/// with the legend of the concepts they name. A pool with one analysis skips the first call, an
-/// analysis with one reading the second. Every failure abstains: a decider error, an answer naming
-/// nothing shown, or `none` — which is a result, and is logged with the reason.
+/// ([`crate::dcg::analysis`]). The sense call asks, for each word whose sense differs among the
+/// chosen analysis's readings, which sense it has — one question per word, answered together —
+/// and takes the reading whose senses the answers support most; readings that differ in no word's
+/// sense are put as whole readings. A pool with one analysis skips the first call, an analysis
+/// with one reading the second. Every failure abstains: a decider error, an answer naming nothing
+/// shown, or `none` — which is a result, and is logged with the reason.
 pub struct DecisionReadingRanker<D: Decider> {
     decider: D,
 }
@@ -665,7 +686,7 @@ impl<D: Decider> DecisionReadingRanker<D> {
         Self { decider }
     }
 
-    fn ask(&self, ctx: &DocumentContext, choice: &Choice) -> Option<Decided> {
+    fn ask(&self, ctx: &DocumentContext, choice: &Choice) -> Option<Vec<Decided>> {
         if std::env::var("EIGENIUS_DUMP_SELECT_PROMPT").is_ok() {
             eprintln!(
                 "\n===== READING-RANKER DECISION ({}) =====\n{}\n===== END DECISION =====\n",
@@ -674,15 +695,17 @@ impl<D: Decider> DecisionReadingRanker<D> {
             );
         }
         match self.decider.choose(choice) {
-            Ok(d) if d.choice == NONE_FAITHFUL => {
-                eprintln!(
-                    "reading-ranker: NONE FAITHFUL on «{}» — {}",
-                    ctx.sentence.trim(),
-                    d.account()
-                );
-                None
+            Ok(answers) => {
+                if let Some(d) = answers.iter().find(|d| d.choice == NONE_FAITHFUL) {
+                    eprintln!(
+                        "reading-ranker: NONE FAITHFUL on «{}» — {}",
+                        ctx.sentence.trim(),
+                        d.account()
+                    );
+                    return None;
+                }
+                Some(answers)
             }
-            Ok(d) => Some(d),
             Err(e) => {
                 eprintln!(
                     "reading-ranker: {} gave no answer on «{}» — {e}; abstained",
@@ -692,6 +715,60 @@ impl<D: Decider> DecisionReadingRanker<D> {
                 None
             }
         }
+    }
+
+    /// The sense call over one analysis's readings: the reading chosen, the account of the
+    /// answers, and the other readings, best first.
+    fn senses(
+        &self,
+        ctx: &DocumentContext,
+        candidates: &[ReadingCandidate],
+        members: &[usize],
+    ) -> Option<(usize, String, Vec<usize>)> {
+        let words = word_questions(candidates, members);
+        let mut ranked = members.to_vec();
+        let mut account = Vec::new();
+        if !words.is_empty() {
+            let answers = self.ask(ctx, &sense_choice(ctx, &words))?;
+            let support = |m: usize| -> f64 {
+                words
+                    .iter()
+                    .zip(&answers)
+                    .map(|(w, d)| w.of.get(&m).map_or(1.0, |o| d.weight(&(o + 1).to_string())))
+                    .product()
+            };
+            ranked.sort_by(|&a, &b| support(b).total_cmp(&support(a)));
+            let per_word: Vec<String> = words
+                .iter()
+                .zip(&answers)
+                .map(|(w, d)| format!("«{}» {}", w.words, d.account()))
+                .collect();
+            account.push(format!(
+                "SENSES [{}]: {}",
+                answers.first().map_or("", |d| d.model.as_str()),
+                per_word.join("; ")
+            ));
+        }
+        // Readings that give every word the best reading's senses differ in something no word's
+        // sense shows; they are put as whole readings.
+        let best = ranked[0];
+        let alike: Vec<usize> = ranked
+            .iter()
+            .copied()
+            .filter(|m| words.iter().all(|w| w.of.get(m) == w.of.get(&best)))
+            .collect();
+        let chosen = if alike.len() > 1 {
+            let d = self
+                .ask(ctx, &reading_choice(ctx, candidates, &alike))?
+                .into_iter()
+                .next()?;
+            account.push(format!("READINGS [{}]: {}", d.model, d.account()));
+            *alike.get(d.choice.parse::<usize>().ok()?)?
+        } else {
+            best
+        };
+        let others = ranked.into_iter().filter(|&m| m != chosen).collect();
+        Some((chosen, account.join(" | "), others))
     }
 }
 
@@ -724,7 +801,10 @@ impl<D: Decider> ReadingRanker for DecisionReadingRanker<D> {
         let (group, structure_account, other_structures) = if groups.len() == 1 {
             (0, None, Vec::new())
         } else {
-            let d = self.ask(ctx, &structure_choice(ctx, &groups, total - kept))?;
+            let d = self
+                .ask(ctx, &structure_choice(ctx, &groups, total - kept))?
+                .into_iter()
+                .next()?;
             let n = number(&d.choice)?;
             let others: Vec<usize> = d
                 .runners_up
@@ -742,18 +822,8 @@ impl<D: Decider> ReadingRanker for DecisionReadingRanker<D> {
         let (chosen, sense_account, sense_runners) = if members.len() == 1 {
             (members[0], None, Vec::new())
         } else {
-            let d = self.ask(ctx, &sense_choice(ctx, candidates, members))?;
-            let local = number(&d.choice)?;
-            let runners: Vec<usize> = d
-                .runners_up
-                .iter()
-                .filter_map(|r| number(r).and_then(|r| members.get(r).copied()))
-                .collect();
-            (
-                members[local],
-                Some(format!("SENSES [{}]: {}", d.model, d.account())),
-                runners,
-            )
+            let (chosen, account, others) = self.senses(ctx, candidates, members)?;
+            (chosen, Some(account), others)
         };
         // The chosen analysis's other readings first, then each other analysis's first.
         let mut seen = vec![false; candidates.len()];
@@ -809,7 +879,8 @@ pub struct DecisionQuestions {
     pub groups: Vec<Vec<usize>>,
     /// The structure call; `None` when one analysis is shown.
     pub structure: Option<Choice>,
-    /// Each shown analysis's sense call; `None` for an analysis with one reading.
+    /// Each shown analysis's sense call — its word questions, or the whole-reading question when no
+    /// word's sense differs; `None` for an analysis with one reading.
     pub senses: Vec<Option<Choice>>,
 }
 
@@ -824,7 +895,16 @@ pub fn decision_questions(
         (groups.len() > 1).then(|| structure_choice(ctx, &groups, total - groups.len()));
     let senses = groups
         .iter()
-        .map(|(g, _)| (g.len() > 1).then(|| sense_choice(ctx, candidates, g)))
+        .map(|(g, _)| {
+            (g.len() > 1).then(|| {
+                let words = word_questions(candidates, g);
+                if words.is_empty() {
+                    reading_choice(ctx, candidates, g)
+                } else {
+                    sense_choice(ctx, &words)
+                }
+            })
+        })
         .collect();
     DecisionQuestions {
         groups: groups.into_iter().map(|(g, _)| g).collect(),
@@ -879,17 +959,111 @@ fn structure_choice(
     } else {
         Vec::new()
     };
+    Choice::single(
+        context_parts(ctx),
+        Question {
+            question: STRUCTURE_QUESTION.into(),
+            notes,
+            options,
+        },
+    )
+}
+
+/// A word whose sense differs among one analysis's readings: one question of the sense call.
+struct WordQuestion {
+    /// The word (or multiword) as the sentence writes it.
+    words: String,
+    /// The distinct senses the readings give it, each as its atoms; option `n + 1` is `senses[n]`.
+    senses: Vec<Vec<String>>,
+    /// Each reading's option index into `senses`, by candidate; a reading whose derivation has no
+    /// leaf at the word has none.
+    of: BTreeMap<usize, usize>,
+}
+
+/// The atoms each reading gives the word at a span, by the span and its words.
+type SensesAt<'a> = BTreeMap<((usize, usize), &'a str), BTreeMap<usize, &'a [String]>>;
+
+/// The words whose senses differ among `members`, in sentence order.
+fn word_questions(candidates: &[ReadingCandidate], members: &[usize]) -> Vec<WordQuestion> {
+    let mut at: SensesAt = BTreeMap::new();
+    for &m in members {
+        for w in &candidates[m].senses_at {
+            at.entry((w.span, w.words.as_str()))
+                .or_default()
+                .insert(m, &w.atoms);
+        }
+    }
+    at.into_iter()
+        .filter_map(|((_, words), per)| {
+            let mut senses: Vec<Vec<String>> = Vec::new();
+            let mut of = BTreeMap::new();
+            for &m in members {
+                let Some(atoms) = per.get(&m) else { continue };
+                let n = match senses.iter().position(|s| s.as_slice() == *atoms) {
+                    Some(n) => n,
+                    None => {
+                        senses.push(atoms.to_vec());
+                        senses.len() - 1
+                    }
+                };
+                of.insert(m, n);
+            }
+            (senses.len() > 1).then(|| WordQuestion {
+                words: words.to_string(),
+                senses,
+                of,
+            })
+        })
+        .collect()
+}
+
+/// A sense as an option: each of its concepts' label and definition (cut at 240 characters).
+fn sense_text(ctx: &DocumentContext, atoms: &[String]) -> String {
+    let concept = |atom: &String| match ctx.concepts.iter().find(|c| &c.id == atom) {
+        Some(c) => match c
+            .definition
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+        {
+            Some(d) if d.chars().count() > 240 => {
+                format!(
+                    "«{}» — {}…",
+                    c.label,
+                    d.chars().take(240).collect::<String>()
+                )
+            }
+            Some(d) => format!("«{}» — {d}", c.label),
+            None => format!("«{}»", c.label),
+        },
+        None => atom.clone(),
+    };
+    atoms.iter().map(concept).collect::<Vec<_>>().join("; ")
+}
+
+/// The sense call: one question per word whose sense differs, its senses numbered from 1.
+fn sense_choice(ctx: &DocumentContext, words: &[WordQuestion]) -> Choice {
     Choice {
         context: context_parts(ctx),
-        question: STRUCTURE_QUESTION.into(),
-        notes,
-        options,
+        questions: words
+            .iter()
+            .map(|w| Question {
+                question: word_question(&w.words),
+                notes: Vec::new(),
+                options: w
+                    .senses
+                    .iter()
+                    .enumerate()
+                    .map(|(n, atoms)| ((n + 1).to_string(), sense_text(ctx, atoms).into()))
+                    .collect(),
+            })
+            .collect(),
     }
 }
 
-/// The sense call: the chosen analysis's readings, numbered from 0, with the legend of the
-/// concepts they name.
-fn sense_choice(
+/// The question among whole readings, numbered from 0, with the legend of the concepts they name:
+/// for readings no word's sense separates.
+fn reading_choice(
     ctx: &DocumentContext,
     candidates: &[ReadingCandidate],
     members: &[usize],
@@ -920,12 +1094,14 @@ fn sense_choice(
             Some(format!("[{}] «{}» — {d}", c.id, c.label))
         })
         .collect();
-    Choice {
-        context: context_parts(ctx),
-        question: SENSE_QUESTION.into(),
-        notes: vec![("what_the_concepts_mean".into(), legend)],
-        options,
-    }
+    Choice::single(
+        context_parts(ctx),
+        Question {
+            question: READING_QUESTION.into(),
+            notes: vec![("what_the_concepts_mean".into(), legend)],
+            options,
+        },
+    )
 }
 
 /// A live reading ranker, whichever provider answers it.
@@ -1279,6 +1455,7 @@ mod tests {
                 constituents: Vec::new(),
                 links: Vec::new(),
                 predication: None,
+                senses_at: Vec::new(),
             })
             .collect()
     }
@@ -1359,6 +1536,7 @@ mod tests {
                 constituents: Vec::new(),
                 links: Vec::new(),
                 predication: None,
+                senses_at: Vec::new(),
             },
             ReadingCandidate {
                 skeleton: "see(§)(we, man_with(telescope))".to_string(),
@@ -1367,6 +1545,7 @@ mod tests {
                 constituents: Vec::new(),
                 links: Vec::new(),
                 predication: None,
+                senses_at: Vec::new(),
             },
         ];
         let ctx = DocumentContext {
@@ -1498,6 +1677,7 @@ mod d69b_tests {
             constituents: Vec::new(),
             links: Vec::new(),
             predication: None,
+            senses_at: Vec::new(),
         }
     }
 
@@ -1579,6 +1759,7 @@ mod two_call_tests {
             constituents: constituents.to_vec(),
             links,
             predication: None,
+            senses_at: Vec::new(),
         }
     }
 
@@ -1627,7 +1808,8 @@ mod two_call_tests {
         let choice = decision_questions(&ctx, &c)
             .structure
             .expect("two analyses");
-        assert_eq!(choice.question, STRUCTURE_QUESTION);
+        let question = &choice.questions[0];
+        assert_eq!(question.question, STRUCTURE_QUESTION);
         assert_eq!(
             choice
                 .context
@@ -1636,7 +1818,7 @@ mod two_call_tests {
                 .collect::<Vec<_>>(),
             [DOCUMENT, EARLIER, SENTENCE]
         );
-        let Description::Fields(fields) = &choice.options[0].1 else {
+        let Description::Fields(fields) = &question.options[0].1 else {
             panic!("an analysis is fields");
         };
         assert_eq!(
@@ -1662,7 +1844,7 @@ mod two_call_tests {
             )
         );
         assert_eq!(
-            choice.options.last().map(|(k, _)| k.as_str()),
+            question.options.last().map(|(k, _)| k.as_str()),
             Some(NONE_FAITHFUL)
         );
     }
@@ -1702,24 +1884,29 @@ mod decision_ranker_tests {
         }
     }
 
+    /// Answers each question of a choice with the next scripted key.
     impl Decider for Scripted {
-        fn choose(&self, choice: &Choice) -> Result<Decided, String> {
+        fn choose(&self, choice: &Choice) -> Result<Vec<Decided>, String> {
             self.asked.borrow_mut().push(choice.clone());
-            let a = self
-                .answers
-                .borrow_mut()
-                .pop()
-                .ok_or("no answer scripted")?;
-            crate::dcg::decision::checked(
-                choice,
-                Decided {
-                    choice: a.to_string(),
-                    runners_up: Vec::new(),
-                    probabilities: BTreeMap::new(),
-                    rationale: "scripted".into(),
-                    model: "script".into(),
-                },
-            )
+            let answers = choice
+                .questions
+                .iter()
+                .map(|_| {
+                    let a = self
+                        .answers
+                        .borrow_mut()
+                        .pop()
+                        .ok_or("no answer scripted")?;
+                    Ok(Decided {
+                        choice: a.to_string(),
+                        runners_up: Vec::new(),
+                        probabilities: BTreeMap::new(),
+                        rationale: "scripted".into(),
+                        model: "script".into(),
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            crate::dcg::decision::checked_all(choice, answers)
         }
         fn model(&self) -> &str {
             "script"
@@ -1735,6 +1922,7 @@ mod decision_ranker_tests {
             constituents: vec![(0, 2), if skeleton == "A" { (0, 1) } else { (1, 2) }],
             links: Vec::new(),
             predication: None,
+            senses_at: Vec::new(),
         }
     }
 
@@ -1751,8 +1939,8 @@ mod decision_ranker_tests {
         }
     }
 
-    /// Structure 2 is chosen in the first call; the second call numbers that structure's readings
-    /// from 0, and its answer maps back to the candidate list.
+    /// Structure 2 is chosen in the first call; its readings differ in no word's sense, so the
+    /// second call puts them whole, numbered from 0, and its answer maps back to the candidates.
     #[test]
     fn the_structure_call_then_the_sense_call_pick_one_reading() {
         let c = [cand("A", "a0"), cand("B", "b0"), cand("B", "b1")];
@@ -1767,9 +1955,55 @@ mod decision_ranker_tests {
         );
         let asked = r.decider.asked.borrow();
         assert_eq!(asked.len(), 2);
-        let keys: Vec<&str> = asked[1].options.iter().map(|(k, _)| k.as_str()).collect();
+        let options = &asked[1].questions[0].options;
+        let keys: Vec<&str> = options.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(keys, ["0", "1", NONE_FAITHFUL]);
-        assert_eq!(asked[1].options[1].1, Description::from("b1"));
+        assert_eq!(options[1].1, Description::from("b1"));
+    }
+
+    /// A reading of «a b c» giving «a» and «c» the senses `sa`, `sc`.
+    fn sensed(sa: &str, sc: &str) -> ReadingCandidate {
+        let at = |i: usize, w: &str, s: &str| SenseAt {
+            span: (i, i),
+            words: w.into(),
+            atoms: vec![s.into()],
+        };
+        let mut c = cand("A", &format!("{sa} {sc}"));
+        c.senses_at = vec![at(0, "a", sa), at(1, "b", "nb"), at(2, "c", sc)];
+        c
+    }
+
+    /// One analysis whose readings differ in the senses of «a» and «c»: one question per word, in
+    /// one choice, and the reading that gives both words the chosen senses.
+    #[test]
+    fn the_sense_call_asks_one_question_per_word() {
+        let c = [
+            sensed("n1", "n3"),
+            sensed("n1", "n4"),
+            sensed("n2", "n3"),
+            sensed("n2", "n4"),
+        ];
+        let r = DecisionReadingRanker::new(Scripted::new(&["2", "1"]));
+        let sel = r.select(&ctx(), &c).expect("chose");
+        assert_eq!(sel.chosen, 2, "«a» n2, «c» n3");
+        let asked = r.decider.asked.borrow();
+        assert_eq!(asked.len(), 1, "one analysis: no structure call");
+        let questions: Vec<&str> = asked[0]
+            .questions
+            .iter()
+            .map(|q| q.question.as_str())
+            .collect();
+        assert_eq!(questions, [word_question("a"), word_question("c")]);
+        assert_eq!(
+            asked[0].questions[0].options.len(),
+            2,
+            "no `none` for a word"
+        );
+        assert!(
+            sel.rationale.starts_with("SENSES [script]: «a» scripted"),
+            "{}",
+            sel.rationale
+        );
     }
 
     /// One structure skips the structure call; `none` and an unscripted answer abstain.

@@ -1167,6 +1167,9 @@ impl eigenius_kernel::dcg::ReadingRanker for DecisionDump {
                     "gloss": c.gloss,
                     "constituents": c.constituents,
                     "predication": c.predication,
+                    "senses_at": c.senses_at.iter()
+                        .map(|w| serde_json::json!({"span": w.span, "words": w.words, "atoms": w.atoms}))
+                        .collect::<Vec<_>>(),
                     "links": c.links.iter()
                         .map(|l| [format!("{:?}", l.function), l.dependent.clone(), l.host.clone()])
                         .collect::<Vec<_>>(),

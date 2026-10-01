@@ -14,34 +14,51 @@
 
 //! **A decision put to a model, independent of who answers it** (eigenius#264 strand 2).
 //!
-//! Every call the reasoning layer makes to a model picks one of a set of described options: which
-//! structure a sentence has, which of its readings, which sense of a word. A [`Choice`] states that
-//! — what the question is about, the question, the facts it rests on, the options — and a
-//! [`Decider`] answers it. The providers answer differently: Anthropic's models write a reason and a
-//! ranking ([`AnthropicDecider`], through [`super::anthropic_client`]); TypeSafe's System One model
-//! returns a calibrated probability per option and no reason ([`TypeSafeDecider`]). [`Decided`]
-//! carries whichever the provider gives.
+//! Every call the reasoning layer makes to a model picks among described options: which structure
+//! a sentence has, which sense a word takes. A [`Choice`] states that — what the decision is about,
+//! and the [`Question`]s put about it, each with the facts it rests on and its options — and a
+//! [`Decider`] answers every question of it together. The providers answer differently: Anthropic's
+//! models write a reason and a ranking ([`AnthropicDecider`], through
+//! [`super::anthropic_client`]); TypeSafe's System One model returns a calibrated probability per
+//! option and no reason ([`TypeSafeDecider`]), several questions over one state in one request.
+//! [`Decided`] carries whichever the provider gives.
 //!
-//! The question is rendered per provider ([`render_prompt`], [`render_typesafe`]); both renderings
-//! are pure and tested here, so what a model is asked can be read without calling one.
+//! A choice is rendered per provider ([`render_prompt`], [`render_typesafe`]); both renderings are
+//! pure and tested here, so what a model is asked can be read without calling one.
 
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
-/// One decision: what it is about, the question, the facts it rests on, and the options.
+/// One decision: what it is about, and the questions put about it, answered together.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Choice {
-    /// What the question is about, as named parts in order (the document, the earlier selections,
-    /// the sentence). An empty part is left out.
+    /// What the questions are about, as named parts in order (the document, the earlier
+    /// selections, the sentence). An empty part is left out.
     pub context: Vec<(String, String)>,
+    pub questions: Vec<Question>,
+}
+
+/// One question of a [`Choice`]: what to decide, the facts it rests on, and the options.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct Question {
     /// What to decide, with whatever the options' notation needs explained.
     pub question: String,
-    /// Facts the decision rests on, as named lists (how the structures differ; what the concepts
-    /// mean). An empty list is left out.
+    /// Facts the decision rests on, as named lists (what the concepts mean). An empty list is left
+    /// out.
     pub notes: Vec<(String, Vec<String>)>,
     /// The options, by key, each with what it means.
     pub options: Vec<(String, Description)>,
+}
+
+impl Choice {
+    /// A choice of one question.
+    pub fn single(context: Vec<(String, String)>, question: Question) -> Self {
+        Choice {
+            context,
+            questions: vec![question],
+        }
+    }
 }
 
 /// What an option means: a text, or named fields in order (a grammatical analysis and the
@@ -73,10 +90,10 @@ impl From<String> for Description {
     }
 }
 
-/// A provider's answer to a [`Choice`].
+/// A provider's answer to one [`Question`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Decided {
-    /// The chosen option's key — one of the choice's keys; [`Decider::choose`] checks it.
+    /// The chosen option's key — one of the question's keys; [`Decider::choose`] checks it.
     pub choice: String,
     /// The other options, most plausible first, as far as the provider ranks them.
     pub runners_up: Vec<String>,
@@ -99,20 +116,37 @@ impl Decided {
         let ps: Vec<String> = ps.iter().map(|(k, p)| format!("{k}={p:.2}")).collect();
         format!("probabilities {}", ps.join(", "))
     }
+
+    /// How strongly the answer supports `key`: its probability where the provider gives one;
+    /// otherwise 1 for the choice, a falling weight down the runners-up, and least for an option
+    /// the answer leaves unranked. Comparable across one provider's answers, which is how a
+    /// combination of answers is scored.
+    pub fn weight(&self, key: &str) -> f64 {
+        if !self.probabilities.is_empty() {
+            return self.probabilities.get(key).copied().unwrap_or(0.0);
+        }
+        if key == self.choice {
+            return 1.0;
+        }
+        match self.runners_up.iter().position(|r| r == key) {
+            Some(i) => 0.5 / (i as f64 + 1.0),
+            None => 0.01,
+        }
+    }
 }
 
 /// A model that answers [`Choice`]s.
 pub trait Decider {
-    /// Answer `choice`: `Err` on any transport, API or decode failure, or an answer naming no
-    /// option of the choice — the caller fails closed.
-    fn choose(&self, choice: &Choice) -> Result<Decided, String>;
+    /// Answer every question of `choice`, in order: `Err` on any transport, API or decode
+    /// failure, or an answer naming no option of its question — the caller fails closed.
+    fn choose(&self, choice: &Choice) -> Result<Vec<Decided>, String>;
 
     /// The model this decider asks.
     fn model(&self) -> &str;
 }
 
 impl<T: Decider + ?Sized> Decider for Box<T> {
-    fn choose(&self, choice: &Choice) -> Result<Decided, String> {
+    fn choose(&self, choice: &Choice) -> Result<Vec<Decided>, String> {
         (**self).choose(choice)
     }
     fn model(&self) -> &str {
@@ -120,10 +154,10 @@ impl<T: Decider + ?Sized> Decider for Box<T> {
     }
 }
 
-/// An answer is well-formed if it names an option of the choice; its runners-up are kept only as
-/// far as they name other options, each once.
-pub fn checked(choice: &Choice, mut decided: Decided) -> Result<Decided, String> {
-    let keys: Vec<&str> = choice.options.iter().map(|(k, _)| k.as_str()).collect();
+/// An answer is well-formed if it names an option of its question; its runners-up are kept only
+/// as far as they name other options, each once.
+pub fn checked(question: &Question, mut decided: Decided) -> Result<Decided, String> {
+    let keys: Vec<&str> = question.options.iter().map(|(k, _)| k.as_str()).collect();
     if !keys.contains(&decided.choice.as_str()) {
         return Err(format!(
             "the answer names {:?}, which is not an option ({})",
@@ -142,67 +176,106 @@ pub fn checked(choice: &Choice, mut decided: Decided) -> Result<Decided, String>
     Ok(decided)
 }
 
+/// Every answer checked against its question; as many answers as questions.
+pub fn checked_all(choice: &Choice, decided: Vec<Decided>) -> Result<Vec<Decided>, String> {
+    if decided.len() != choice.questions.len() {
+        return Err(format!(
+            "{} answers for {} questions",
+            decided.len(),
+            choice.questions.len()
+        ));
+    }
+    choice
+        .questions
+        .iter()
+        .zip(decided)
+        .map(|(q, d)| checked(q, d))
+        .collect()
+}
+
+/// The id of question `n` (from 0) in a request and its reply: `q1`, `q2`, ….
+pub fn question_id(n: usize) -> String {
+    format!("q{}", n + 1)
+}
+
 /// The choice as one prompt, for a model that reads text and writes a reason.
 pub fn render_prompt(choice: &Choice) -> String {
-    let mut out = format!("{}\n\n", choice.question.trim());
+    let mut out = String::new();
     for (name, text) in choice.context.iter().filter(|(_, t)| !t.trim().is_empty()) {
         out.push_str(&format!("{name}:\n{}\n\n", text.trim_end()));
     }
-    out.push_str("Options:\n");
-    for (key, description) in &choice.options {
-        match description {
-            Description::Text(text) => out.push_str(&format!("  [{key}] {text}\n")),
-            Description::Fields(fields) => {
-                out.push_str(&format!("  [{key}]\n"));
-                for (name, field) in fields {
-                    match field {
-                        Field::Text(text) => out.push_str(&format!("      {name}: {text}\n")),
-                        Field::List(items) => {
-                            out.push_str(&format!("      {name}:\n"));
-                            for item in items {
-                                out.push_str(&format!("        - {item}\n"));
+    for (n, q) in choice.questions.iter().enumerate() {
+        out.push_str(&format!("{}: {}\n", question_id(n), q.question.trim()));
+        out.push_str("Options:\n");
+        for (key, description) in &q.options {
+            match description {
+                Description::Text(text) => out.push_str(&format!("  [{key}] {text}\n")),
+                Description::Fields(fields) => {
+                    out.push_str(&format!("  [{key}]\n"));
+                    for (name, field) in fields {
+                        match field {
+                            Field::Text(text) => out.push_str(&format!("      {name}: {text}\n")),
+                            Field::List(items) => {
+                                out.push_str(&format!("      {name}:\n"));
+                                for item in items {
+                                    out.push_str(&format!("        - {item}\n"));
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
-    for (name, lines) in choice.notes.iter().filter(|(_, l)| !l.is_empty()) {
-        out.push_str(&format!("\n{name}:\n"));
-        for l in lines {
-            out.push_str(&format!("  - {l}\n"));
+        for (name, lines) in q.notes.iter().filter(|(_, l)| !l.is_empty()) {
+            out.push_str(&format!("{name}:\n"));
+            for l in lines {
+                out.push_str(&format!("  - {l}\n"));
+            }
         }
+        out.push('\n');
     }
     out.push_str(
-        "\nReturn `choice` = the key of the option that is right, `rationale` = one or two \
-         sentences that decide it, and `runners_up` = the other keys, most plausible first.",
+        "For each question, return under its id `choice` = the key of the option that is right, \
+         `rationale` = one or two sentences that decide it, and `runners_up` = the other keys, \
+         most plausible first.",
     );
     out
 }
 
-/// The reply schema for [`render_prompt`]: the choice and runners-up confined to the option keys.
+/// The reply schema for [`render_prompt`]: one answer per question, under its id, the choice and
+/// runners-up confined to that question's keys.
 pub fn reply_schema(choice: &Choice) -> Value {
-    let keys: Vec<&str> = choice.options.iter().map(|(k, _)| k.as_str()).collect();
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    for (n, q) in choice.questions.iter().enumerate() {
+        let keys: Vec<&str> = q.options.iter().map(|(k, _)| k.as_str()).collect();
+        properties.insert(
+            question_id(n),
+            json!({
+                "type": "object",
+                "properties": {
+                    "choice": { "type": "string", "enum": keys },
+                    "rationale": { "type": "string" },
+                    "runners_up": { "type": "array", "items": { "type": "string", "enum": keys } },
+                },
+                "required": ["choice", "rationale", "runners_up"],
+                "additionalProperties": false,
+            }),
+        );
+        required.push(question_id(n));
+    }
     json!({
         "type": "object",
-        "properties": {
-            "choice": { "type": "string", "enum": keys },
-            "rationale": { "type": "string" },
-            "runners_up": { "type": "array", "items": { "type": "string", "enum": keys } },
-        },
-        "required": ["choice", "rationale", "runners_up"],
+        "properties": properties,
+        "required": required,
         "additionalProperties": false,
     })
 }
 
-/// The id a question carries in a TypeSafe request; the answer comes back under it.
-pub const TYPESAFE_QUESTION: &str = "decision";
-
-/// The choice as a TypeSafe request body: the context as `state`, the question with its notes as
-/// structured `instructions`, the options as a `choice` question's `criteria` — each in the
-/// choice's order. The model reads the JSON as text, and `serde_json::Map` would sort the keys:
-/// the notes before the question, option `10` before `2`.
+/// The choice as a TypeSafe request body: the context as `state`, and each question as a `choice`
+/// question under its id — its notes beside it in structured `instructions`, its options as
+/// `criteria` — each in the choice's order. The model reads the JSON as text, and
+/// `serde_json::Map` would sort the keys: the notes before the question, option `10` before `2`.
 pub fn render_typesafe(choice: &Choice, model: &str) -> String {
     let text = |t: &str| Ordered::Value(Value::String(t.to_string()));
     let state = choice
@@ -211,49 +284,55 @@ pub fn render_typesafe(choice: &Choice, model: &str) -> String {
         .filter(|(_, t)| !t.trim().is_empty())
         .map(|(name, t)| (snake(name), text(t.trim_end())))
         .collect();
-    let instructions = std::iter::once(("question".to_string(), text(&choice.question)))
-        .chain(
-            choice
-                .notes
-                .iter()
-                .filter(|(_, l)| !l.is_empty())
-                .map(|(name, lines)| (snake(name), Ordered::Value(json!(lines)))),
-        )
-        .collect();
-    let criteria = choice
-        .options
+    let questions = choice
+        .questions
         .iter()
-        .map(|(k, d)| {
-            let criterion = match d {
-                Description::Text(t) => text(t),
-                Description::Fields(fields) => Ordered::Object(
-                    fields
+        .enumerate()
+        .map(|(n, q)| {
+            let instructions = std::iter::once(("question".to_string(), text(&q.question)))
+                .chain(
+                    q.notes
                         .iter()
-                        .map(|(name, field)| {
-                            let value = match field {
-                                Field::Text(t) => text(t),
-                                Field::List(items) => Ordered::Value(json!(items)),
-                            };
-                            (snake(name), value)
-                        })
-                        .collect(),
-                ),
-            };
-            (k.clone(), criterion)
+                        .filter(|(_, l)| !l.is_empty())
+                        .map(|(name, lines)| (snake(name), Ordered::Value(json!(lines)))),
+                )
+                .collect();
+            let criteria = q
+                .options
+                .iter()
+                .map(|(k, d)| {
+                    let criterion = match d {
+                        Description::Text(t) => text(t),
+                        Description::Fields(fields) => Ordered::Object(
+                            fields
+                                .iter()
+                                .map(|(name, field)| {
+                                    let value = match field {
+                                        Field::Text(t) => text(t),
+                                        Field::List(items) => Ordered::Value(json!(items)),
+                                    };
+                                    (snake(name), value)
+                                })
+                                .collect(),
+                        ),
+                    };
+                    (k.clone(), criterion)
+                })
+                .collect();
+            (
+                question_id(n),
+                Ordered::Object(vec![
+                    ("type".into(), text("choice")),
+                    ("instructions".into(), Ordered::Object(instructions)),
+                    ("criteria".into(), Ordered::Object(criteria)),
+                ]),
+            )
         })
         .collect();
-    let question = Ordered::Object(vec![
-        ("type".into(), text("choice")),
-        ("instructions".into(), Ordered::Object(instructions)),
-        ("criteria".into(), Ordered::Object(criteria)),
-    ]);
     let body = Ordered::Object(vec![
         ("state".into(), Ordered::Object(state)),
         ("model".into(), text(model)),
-        (
-            "questions".into(),
-            Ordered::Object(vec![(TYPESAFE_QUESTION.into(), question)]),
-        ),
+        ("questions".into(), Ordered::Object(questions)),
     ]);
     serde_json::to_string(&body).expect("a JSON object of strings serializes")
 }
@@ -280,42 +359,77 @@ impl serde::Serialize for Ordered {
     }
 }
 
-/// A TypeSafe `choice` answer as [`Decided`]: the runners-up are the other options by probability.
-pub fn read_typesafe(payload: &Value) -> Result<Decided, String> {
-    let answer = payload
-        .get("answers")
-        .and_then(|a| a.get(TYPESAFE_QUESTION))
-        .ok_or_else(|| format!("no `{TYPESAFE_QUESTION}` answer: {payload}"))?;
-    let choice = answer
-        .get("choice")
+/// A TypeSafe reply's `choice` answers as [`Decided`]s, for `questions` questions in order: the
+/// runners-up are the other options by probability.
+pub fn read_typesafe(payload: &Value, questions: usize) -> Result<Vec<Decided>, String> {
+    let model = payload
+        .get("model")
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("no choice in the answer: {payload}"))?
+        .unwrap_or_default()
         .to_string();
-    let probabilities: BTreeMap<String, f64> = answer
-        .get("probabilities")
-        .and_then(Value::as_object)
-        .map(|m| {
-            m.iter()
-                .filter_map(|(k, v)| v.as_f64().map(|p| (k.clone(), p)))
-                .collect()
+    (0..questions)
+        .map(|n| {
+            let id = question_id(n);
+            let answer = payload
+                .get("answers")
+                .and_then(|a| a.get(&id))
+                .ok_or_else(|| format!("no `{id}` answer: {payload}"))?;
+            let choice = answer
+                .get("choice")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("no choice in the `{id}` answer: {payload}"))?
+                .to_string();
+            let probabilities: BTreeMap<String, f64> = answer
+                .get("probabilities")
+                .and_then(Value::as_object)
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|(k, v)| v.as_f64().map(|p| (k.clone(), p)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut runners: Vec<(&String, &f64)> = probabilities
+                .iter()
+                .filter(|(k, _)| **k != choice)
+                .collect();
+            runners.sort_by(|a, b| b.1.total_cmp(a.1));
+            Ok(Decided {
+                runners_up: runners.into_iter().map(|(k, _)| k.clone()).collect(),
+                rationale: String::new(),
+                model: model.clone(),
+                choice,
+                probabilities,
+            })
         })
-        .unwrap_or_default();
-    let mut runners: Vec<(&String, &f64)> = probabilities
-        .iter()
-        .filter(|(k, _)| **k != choice)
-        .collect();
-    runners.sort_by(|a, b| b.1.total_cmp(a.1));
-    Ok(Decided {
-        runners_up: runners.into_iter().map(|(k, _)| k.clone()).collect(),
-        rationale: String::new(),
-        model: payload
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        choice,
-        probabilities,
-    })
+        .collect()
+}
+
+/// An Anthropic reply as [`Decided`]s, for `choice`'s questions in order.
+pub fn read_reply(reply: &Value, choice: &Choice, model: &str) -> Result<Vec<Decided>, String> {
+    (0..choice.questions.len())
+        .map(|n| {
+            let id = question_id(n);
+            let answer = reply
+                .get(&id)
+                .ok_or_else(|| format!("no `{id}` answer: {reply}"))?;
+            let text = |k: &str| answer.get(k).and_then(Value::as_str).unwrap_or_default();
+            Ok(Decided {
+                choice: text("choice").to_string(),
+                runners_up: answer
+                    .get("runners_up")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                probabilities: BTreeMap::new(),
+                rationale: text("rationale").to_string(),
+                model: model.to_string(),
+            })
+        })
+        .collect()
 }
 
 /// `How the structures differ` → `how_the_structures_differ`.
@@ -360,7 +474,7 @@ mod providers {
     }
 
     impl Decider for AnthropicDecider {
-        fn choose(&self, choice: &Choice) -> Result<Decided, String> {
+        fn choose(&self, choice: &Choice) -> Result<Vec<Decided>, String> {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -371,23 +485,7 @@ mod providers {
                 &render_prompt(choice),
                 reply_schema(choice),
             ))?;
-            let text = |k: &str| reply.get(k).and_then(Value::as_str).unwrap_or_default();
-            let decided = Decided {
-                choice: text("choice").to_string(),
-                runners_up: reply
-                    .get("runners_up")
-                    .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(str::to_string))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                probabilities: BTreeMap::new(),
-                rationale: text("rationale").to_string(),
-                model: self.cfg.model.clone(),
-            };
-            checked(choice, decided)
+            checked_all(choice, read_reply(&reply, choice, &self.cfg.model)?)
         }
 
         fn model(&self) -> &str {
@@ -425,11 +523,11 @@ mod providers {
     }
 
     impl Decider for TypeSafeDecider {
-        fn choose(&self, choice: &Choice) -> Result<Decided, String> {
-            if choice.options.len() > 255 {
+        fn choose(&self, choice: &Choice) -> Result<Vec<Decided>, String> {
+            if let Some(q) = choice.questions.iter().find(|q| q.options.len() > 255) {
                 return Err(format!(
                     "{} options; a TypeSafe choice takes at most 255",
-                    choice.options.len()
+                    q.options.len()
                 ));
             }
             let body = render_typesafe(choice, &self.model);
@@ -466,7 +564,7 @@ mod providers {
                 }
                 unreachable!("the last attempt returns")
             })?;
-            checked(choice, read_typesafe(&payload)?)
+            checked_all(choice, read_typesafe(&payload, choice.questions.len())?)
         }
 
         fn model(&self) -> &str {
@@ -496,13 +594,8 @@ pub fn decider_from_env(
 mod tests {
     use super::*;
 
-    fn choice() -> Choice {
-        Choice {
-            context: vec![
-                ("Document".into(), "Doc text.".into()),
-                ("Earlier selections".into(), String::new()),
-                ("The sentence".into(), "S.".into()),
-            ],
+    fn question() -> Question {
+        Question {
             question: "Which structure?".into(),
             notes: vec![(
                 "How the structures differ".into(),
@@ -515,22 +608,58 @@ mod tests {
         }
     }
 
+    fn choice() -> Choice {
+        Choice::single(
+            vec![
+                ("Document".into(), "Doc text.".into()),
+                ("Earlier selections".into(), String::new()),
+                ("The sentence".into(), "S.".into()),
+            ],
+            question(),
+        )
+    }
+
+    /// Two questions over one context: the senses of «analysed» and of «data».
+    fn two_words() -> Choice {
+        let q = |w: &str, a: &str, b: &str| Question {
+            question: format!("Which sense of «{w}»?"),
+            notes: Vec::new(),
+            options: vec![("1".into(), a.into()), ("2".into(), b.into())],
+        };
+        Choice {
+            context: vec![("the_sentence".into(), "We analysed data.".into())],
+            questions: vec![
+                q(
+                    "analysed",
+                    "consider in detail",
+                    "break down into components",
+                ),
+                q("data", "an item of information", "a collection of facts"),
+            ],
+        }
+    }
+
     /// The prompt names every option by key, carries the notes, and drops an empty context part.
     #[test]
     fn the_prompt_carries_the_options_and_notes() {
         let p = render_prompt(&choice());
         assert!(
-            p.starts_with("Which structure?\n\nDocument:\nDoc text."),
+            p.starts_with("Document:\nDoc text.\n\nThe sentence:\nS."),
             "{p}"
         );
         assert!(!p.contains("Earlier selections"), "{p}");
         assert!(
-            p.contains("  [1] structure one\n  [2] structure two\n"),
+            p.contains(
+                "q1: Which structure?\nOptions:\n  [1] structure one\n  [2] structure two\n"
+            ),
             "{p}"
         );
         assert!(p.contains("How the structures differ:\n  - «for X»"), "{p}");
         let schema = reply_schema(&choice());
-        assert_eq!(schema["properties"]["choice"]["enum"], json!(["1", "2"]));
+        assert_eq!(
+            schema["properties"]["q1"]["properties"]["choice"]["enum"],
+            json!(["1", "2"])
+        );
     }
 
     /// The TypeSafe request puts the context in `state`, the notes beside the question, and the
@@ -540,30 +669,69 @@ mod tests {
         let req: Value = serde_json::from_str(&render_typesafe(&choice(), "jev-latest")).unwrap();
         assert_eq!(req["state"]["the_sentence"], json!("S."));
         assert!(req["state"].get("earlier_selections").is_none());
-        let q = &req["questions"][TYPESAFE_QUESTION];
+        let q = &req["questions"]["q1"];
         assert_eq!(q["type"], json!("choice"));
         assert_eq!(q["criteria"]["2"], json!("structure two"));
         assert_eq!(q["instructions"]["question"], json!("Which structure?"));
         assert!(q["instructions"]["how_the_structures_differ"].is_array());
         let payload = json!({
             "model": "jev-1.13.0",
-            "answers": { TYPESAFE_QUESTION: {
+            "answers": { "q1": {
                 "type": "choice", "choice": "2", "confidence": 0.8,
                 "probabilities": { "1": 0.1, "2": 0.9 },
             }},
         });
-        let d = checked(&choice(), read_typesafe(&payload).unwrap()).unwrap();
-        assert_eq!(d.choice, "2");
-        assert_eq!(d.runners_up, vec!["1".to_string()]);
-        assert_eq!(d.model, "jev-1.13.0");
-        assert_eq!(d.account(), "probabilities 2=0.90, 1=0.10");
+        let d = checked_all(&choice(), read_typesafe(&payload, 1).unwrap()).unwrap();
+        assert_eq!(d[0].choice, "2");
+        assert_eq!(d[0].runners_up, vec!["1".to_string()]);
+        assert_eq!(d[0].model, "jev-1.13.0");
+        assert_eq!(d[0].account(), "probabilities 2=0.90, 1=0.10");
+        assert_eq!(d[0].weight("1"), 0.1);
+    }
+
+    /// Several questions go in one request, each under its id, and come back as one answer each.
+    #[test]
+    fn several_questions_are_asked_together() {
+        let c = two_words();
+        let req: Value = serde_json::from_str(&render_typesafe(&c, "jev-latest")).unwrap();
+        assert_eq!(
+            req["questions"]["q1"]["instructions"]["question"],
+            json!("Which sense of «analysed»?")
+        );
+        assert_eq!(
+            req["questions"]["q2"]["criteria"]["2"],
+            json!("a collection of facts")
+        );
+        let payload = json!({
+            "model": "jev-1.13.0",
+            "answers": {
+                "q1": { "type": "choice", "choice": "2", "probabilities": { "1": 0.3, "2": 0.7 } },
+                "q2": { "type": "choice", "choice": "2", "probabilities": { "1": 0.2, "2": 0.8 } },
+            },
+        });
+        let d = checked_all(&c, read_typesafe(&payload, 2).unwrap()).unwrap();
+        assert_eq!((d[0].choice.as_str(), d[1].choice.as_str()), ("2", "2"));
+        let schema = reply_schema(&c);
+        assert_eq!(schema["required"], json!(["q1", "q2"]));
+        let reply = json!({
+            "q1": { "choice": "2", "rationale": "specimens", "runners_up": ["1"] },
+            "q2": { "choice": "1", "rationale": "one item", "runners_up": [] },
+        });
+        let d = checked_all(&c, read_reply(&reply, &c, "claude").unwrap()).unwrap();
+        assert_eq!(d[1].choice, "1");
+        // Without probabilities, the choice outweighs a runner-up, which outweighs the unranked.
+        assert!(d[0].weight("2") > d[0].weight("1") && d[0].weight("1") > d[1].weight("2"));
+        assert!(
+            checked_all(&c, d[..1].to_vec()).is_err(),
+            "one answer for two questions"
+        );
     }
 
     /// The body keeps the choice's order: the question before its notes, option 2 before 10.
     #[test]
     fn a_typesafe_request_keeps_the_choices_order() {
         let mut c = choice();
-        c.options = (1..=11)
+        c.questions[0].options = (1..=11)
             .map(|n| (n.to_string(), format!("s{n}").into()))
             .collect();
         let body = render_typesafe(&c, "jev-latest");
@@ -579,7 +747,7 @@ mod tests {
     #[test]
     fn an_option_of_fields_renders_as_its_fields() {
         let mut c = choice();
-        c.options[0].1 = Description::Fields(vec![
+        c.questions[0].options[0].1 = Description::Fields(vec![
             (
                 "analysis".into(),
                 Field::Text("We ascertained [MSI status] with sequencing.".into()),
@@ -593,7 +761,7 @@ mod tests {
         ]);
         let body = render_typesafe(&c, "jev-latest");
         let req: Value = serde_json::from_str(&body).unwrap();
-        let one = &req["questions"][TYPESAFE_QUESTION]["criteria"]["1"];
+        let one = &req["questions"]["q1"]["criteria"]["1"];
         assert_eq!(
             one["analysis"],
             json!("We ascertained [MSI status] with sequencing.")
@@ -618,8 +786,8 @@ mod tests {
             rationale: "because".into(),
             model: "m".into(),
         };
-        assert!(checked(&choice(), d("3", &[])).is_err());
-        let ok = checked(&choice(), d("1", &["9", "2", "2", "1"])).unwrap();
+        assert!(checked(&question(), d("3", &[])).is_err());
+        let ok = checked(&question(), d("1", &["9", "2", "2", "1"])).unwrap();
         assert_eq!(ok.runners_up, vec!["2".to_string()]);
     }
 }
@@ -632,24 +800,26 @@ mod live_tests {
     use crate::dcg::model_config::ModelConfig;
 
     fn library() -> Choice {
-        Choice {
-            context: vec![(
+        Choice::single(
+            vec![(
                 "The sentence".into(),
                 "Project Achilles screened cell lines with a CRISPR library.".into(),
             )],
-            question: "Which structure does the sentence mean?".into(),
-            notes: Vec::new(),
-            options: vec![
-                (
-                    "1".into(),
-                    "the library is a property of the cell lines".into(),
-                ),
-                (
-                    "2".into(),
-                    "the library is the instrument of the screening".into(),
-                ),
-            ],
-        }
+            Question {
+                question: "Which structure does the sentence mean?".into(),
+                notes: Vec::new(),
+                options: vec![
+                    (
+                        "1".into(),
+                        "the library is a property of the cell lines".into(),
+                    ),
+                    (
+                        "2".into(),
+                        "the library is the instrument of the screening".into(),
+                    ),
+                ],
+            },
+        )
     }
 
     fn ask(model: &str) {
@@ -657,7 +827,10 @@ mod live_tests {
             eprintln!("SKIP {model}: no API key");
             return;
         };
-        let answer = d.choose(&library()).expect("the provider answered");
+        let answer = d
+            .choose(&library())
+            .expect("the provider answered")
+            .remove(0);
         eprintln!(
             "{model}: {} — {} [{}]",
             answer.choice,
