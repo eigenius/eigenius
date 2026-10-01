@@ -1,7 +1,8 @@
 # D97 — The SPECIALIST Lexicon as the lexicon's syntactic authority
 
 **Status: proposed** (2026-09-27), **parked** (2026-09-29) while the branch finishes D95; provisioning
-is done (`scripts/provision-specialist.sh`). Measured against the imported lexicon at the lexicon
+is done (`scripts/provision-specialist.sh`). Slice 3a (adjectives) built on `prepositions-and-ranker`
+(eigenius#263, 2026-09-30); **slice 2 (verbs) in progress there** (2026-10-01). Measured against the imported lexicon at the lexicon
 level; the parse-level measurement is slice 1. Decisions 1–4 are taken (2026-09-27), and 5 for verbs
 whose noun names a concept; the rest of 5 and decisions 6–10 are open.
 
@@ -283,10 +284,27 @@ for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 
    says otherwise (`mediate`'s "occupy an intermediate position X"); and the evidenced senses only,
    which drops the frame wherever a several-sense verb has no evidence: 923 cases over the three
    kinds, 865 with no nominalization and 58 where no sense points to it.
+
+   **Revised for verbs (the owner, 2026-10-01): the judge places every several-sense item, as for
+   adjectives (decision 7); the pointers decide nothing.** Decision 7's evidence carries over: the
+   pointers link a sense to the nominalization, which says nothing about its complement. Witness:
+   `respond` takes `to` (SPECIALIST `tran=pphr(to,np)`), its nominalization is `response`, and no
+   sense's pointers reach it (they reach `respondent`, `reaction`, `reply`); WordNet gives v00718737
+   "respond favorably or as hoped" frames 1 and 2 only, though its own example is «The cancer
+   responded to the aggressive therapy». The judge sees each sense's gloss and examples. WordNet's
+   examples attest a PP complement for 217 (sense, lemma) pairs with no PP frame (162 verbs), but a
+   sample of 40 holds about 12 adjuncts, infinitives and particles («playing for hours», «was called
+   to discuss», «burn off calories»), so they are evidence for the judge, not a rule.
 2. **Union or authority — decided: union.** Where WordNet has a frame SPECIALIST does not (a
    PP-oblique `prep_any` beside SPECIALIST's named preposition), SPECIALIST's frame joins it. Both
    entries carry the sense's axiom, so they yield the same sem wherever both apply; slice 1 measures
    the readings that remain.
+   - **Refined for verbs (the owner, 2026-10-01), after decision 6.** One relation per preposition
+     makes the any-preposition frame (`v{offset}_p`, WordNet's 4 and 22) a second relation beside a
+     named one (`v{offset}_p_to`), with the same meaning. **Where SPECIALIST's prepositions are placed
+     on a sense (decision 1), they are its PP frames and replace the any-preposition frame; it stays
+     on the senses SPECIALIST names no preposition for.** WordNet's own named frames are named
+     relations: 12 and 27 (`----s to somebody`) are `to`, 13 (`----s on something`) is `on`.
 3. **The preposition inventory — decided: every preposition SPECIALIST names.** `lexicon:Prep`
    names 13. Over verbs, adjectives and nouns,
    SPECIALIST records 30,950 governed prepositions (a record × a preposition), 14,174 of them on a

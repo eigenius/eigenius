@@ -49,6 +49,17 @@ pub struct Record {
     pub fields: Vec<(String, String)>,
 }
 
+/// A complement a verb takes, as D97 slice 2 reads a verb's `tran=` field.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum VerbComplement {
+    /// `tran=np`: an object (`incubate X`).
+    Object,
+    /// `tran=pphr(p,np)`: a PP argument naming its preposition (`respond to X`, `depend on X`).
+    Pp(String),
+    /// `tran=fincomp(t)` or `fincomp(o)`: a finite clause (`report that S`).
+    Clause,
+}
+
 /// A nominalization a record names: `nominalization=essentiality|noun|E0220318`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Nominalization {
@@ -76,6 +87,30 @@ impl Record {
     /// noun phrase, a gerund or a clause; each names `p`.
     pub fn pp_prepositions(&self, key: &str) -> BTreeSet<String> {
         self.values(key).filter_map(pphr_preposition).collect()
+    }
+
+    /// The complements a verb record's `tran=` fields name: an object, a PP argument with its
+    /// preposition, a finite clause. A complement with a particle (`np;part(up)`) is a phrasal verb's
+    /// and is left out, as are the gerund, infinitive and wh-clause complements; `;nopass` (no
+    /// passive) does not change what the verb takes.
+    pub fn verb_complements(&self) -> BTreeSet<VerbComplement> {
+        self.values("tran")
+            .filter_map(|v| {
+                let mut parts = v.split(';');
+                let main = parts.next()?;
+                if parts.any(|m| m.starts_with("part(")) {
+                    return None;
+                }
+                match main {
+                    "np" => Some(VerbComplement::Object),
+                    "fincomp(t)" | "fincomp(o)" => Some(VerbComplement::Clause),
+                    _ => {
+                        let p = pphr_preposition(main)?;
+                        main.ends_with(",np)").then_some(VerbComplement::Pp(p))
+                    }
+                }
+            })
+            .collect()
     }
 
     /// The nominalizations the record names.
@@ -227,6 +262,26 @@ impl Lexicon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `respond` (E0053045, as provisioned): intransitive, `to` and `with` PP arguments, a finite
+    /// clause; its gerund complement and its particle verb are not read.
+    #[test]
+    fn a_verbs_complements_are_typed() {
+        let lex = Lexicon::parse(
+            "{base=respond\nentry=E0053045\n\tcat=verb\n\tvariants=reg\n\tintran\n\ttran=fincomp(t);nopass\n\ttran=pphr(by,ingcomp:subjc);nopass\n\ttran=pphr(to,np);nopass\n\ttran=pphr(with,np);nopass\n\ttran=np;part(back)\n\tnominalization=response|noun|E0053049\n}\n",
+        )
+        .unwrap();
+        let rec = lex.lookup("respond", "verb").next().unwrap();
+        let got: Vec<VerbComplement> = rec.verb_complements().into_iter().collect();
+        assert_eq!(
+            got,
+            vec![
+                VerbComplement::Pp("to".into()),
+                VerbComplement::Pp("with".into()),
+                VerbComplement::Clause,
+            ]
+        );
+    }
 
     const FIXTURE: &str = "{base=essential
 entry=E0026170

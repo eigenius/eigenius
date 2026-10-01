@@ -847,13 +847,12 @@ fn factor_comparison(order: &Exp, fold: &Exp, vb: &Vb) -> Option<String> {
 /// The preposition a relational degree governs, from its atom: `deg_{loc}_rel_{p}` names `p`, one
 /// relation per preposition (eigenius#263, D97 decision 6); a bare `…_rel` is read with `on`, as
 /// before the preposition joined the name. `None` for any other atom.
-fn relational_degree_preposition(atom: &str) -> Option<&str> {
+fn relational_degree_preposition(atom: &str) -> Option<&'static str> {
     if atom.ends_with("_rel") {
         return Some("on");
     }
-    let (head, prep) = atom.rsplit_once('_')?;
-    (head.ends_with("_rel") && crate::dcg::category::prep_constructor(prep).is_some())
-        .then_some(prep)
+    let (_, slug) = atom.split_once("_rel_")?;
+    crate::dcg::category::preposition_of_slug(slug)
 }
 
 /// The number of `T` a count comparative compares, as `(T, x, median)`: `card(T, x)`, or with its
@@ -1719,6 +1718,10 @@ mod register_tests {
         assert_eq!(
             relational_degree_preposition("deg_dependent_rel"),
             Some("on")
+        );
+        assert_eq!(
+            relational_degree_preposition("deg_a01234567_rel_out_of"),
+            Some("out of")
         );
         assert_eq!(relational_degree_preposition("deg_a00725772"), None);
         assert_eq!(relational_degree_preposition("deg_a00725772_rel_xyz"), None);

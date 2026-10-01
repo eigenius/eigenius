@@ -1172,6 +1172,60 @@ pub const GOVERNED_PREPOSITIONS: &[(&str, &str)] = &[
     ("into", "prep_into"),
     ("of", "prep_of"),
     ("as", "prep_as"),
+    // Every other preposition a SPECIALIST frame names (D97 decision 3), most frequent first.
+    ("by", "prep_by"),
+    ("between", "prep_between"),
+    ("over", "prep_over"),
+    ("onto", "prep_onto"),
+    ("through", "prep_through"),
+    ("per", "prep_per"),
+    ("off", "prep_off"),
+    ("out of", "prep_out_of"),
+    ("after", "prep_after"),
+    ("due to", "prep_due_to"),
+    ("among", "prep_among"),
+    ("around", "prep_around"),
+    ("towards", "prep_towards"),
+    ("under", "prep_under"),
+    ("out", "prep_out"),
+    ("toward", "prep_toward"),
+    ("up", "prep_up"),
+    ("round", "prep_round"),
+    ("down", "prep_down"),
+    ("during", "prep_during"),
+    ("across", "prep_across"),
+    ("along", "prep_along"),
+    ("as to", "prep_as_to"),
+    ("without", "prep_without"),
+    ("before", "prep_before"),
+    ("following", "prep_following"),
+    ("according to", "prep_according_to"),
+    ("behind", "prep_behind"),
+    ("until", "prep_until"),
+    ("concerning", "prep_concerning"),
+    ("like", "prep_like"),
+    ("plus", "prep_plus"),
+    ("regarding", "prep_regarding"),
+    ("till", "prep_till"),
+    ("with regard to", "prep_with_regard_to"),
+    ("within", "prep_within"),
+    ("above", "prep_above"),
+    ("amongst", "prep_amongst"),
+    ("via", "prep_via"),
+    ("away from", "prep_away_from"),
+    ("below", "prep_below"),
+    ("beside", "prep_beside"),
+    ("by comparison with", "prep_by_comparison_with"),
+    ("from among", "prep_from_among"),
+    ("in behalf of", "prep_in_behalf_of"),
+    ("in favor of", "prep_in_favor_of"),
+    ("in relation to", "prep_in_relation_to"),
+    ("in terms of", "prep_in_terms_of"),
+    ("off of", "prep_off_of"),
+    ("on behalf of", "prep_on_behalf_of"),
+    ("past", "prep_past"),
+    ("unto", "prep_unto"),
+    ("up to", "prep_up_to"),
 ];
 
 /// The `lexicon:Prep` constructor a governed preposition's surface names, if it names one.
@@ -1180,6 +1234,15 @@ pub fn prep_constructor(surface: &str) -> Option<&'static str> {
         .iter()
         .find(|(s, _)| *s == surface)
         .map(|(_, ctor)| *ctor)
+}
+
+/// The preposition a constructor's name segment names — the constructor without `prep_`, as an
+/// importer writes it into an atom name (`deg_a00725772_rel_out_of`): `out_of` → `out of`.
+pub fn preposition_of_slug(slug: &str) -> Option<&'static str> {
+    GOVERNED_PREPOSITIONS
+        .iter()
+        .find(|(_, ctor)| ctor.strip_prefix("prep_") == Some(slug))
+        .map(|(surface, _)| *surface)
 }
 
 /// Whether `cat` **governs a named preposition** — `X/cat_pp_arg(prep_R)` for a CONCRETE `prep_R`.
@@ -1284,6 +1347,9 @@ mod tests {
             GOVERNED_PREPOSITIONS.iter().map(|(_, c)| *c).collect();
         assert_eq!(listed, declared);
         assert_eq!(prep_constructor("of"), Some("prep_of"));
+        assert_eq!(prep_constructor("out of"), Some("prep_out_of"));
+        assert_eq!(prep_constructor("than"), None, "the comparative's");
+        assert_eq!(preposition_of_slug("out_of"), Some("out of"));
         assert_eq!(prep_constructor("any"), None);
     }
 

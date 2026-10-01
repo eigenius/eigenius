@@ -966,9 +966,15 @@ pub fn adjective_frames() -> &'static BTreeMap<String, String> {
 /// names — [`Governance`] keeps only those, and the stative frames name only those — so a miss is a
 /// bug, not a `prep_any`.
 fn prep_ctor(prep: &str) -> String {
+    format!("lexicon:prep_{}", prep_slug(prep))
+}
+
+/// A governed preposition as it appears in an atom or entry name: its constructor without `prep_`,
+/// so a multiword preposition is one name segment (`out of` → `out_of`, `deg_{loc}_rel_out_of`).
+fn prep_slug(prep: &str) -> &'static str {
     let ctor = prep_constructor(prep)
         .unwrap_or_else(|| panic!("`{prep}` names no lexicon:Prep constructor"));
-    format!("lexicon:{ctor}")
+    &ctor["prep_".len()..]
 }
 
 /// Adjective synset → predicative entries. **Relational** (pertainym) adjectives are
@@ -1043,7 +1049,7 @@ fn push_adj(
         .iter()
         .flat_map(|l| governance.of(&syn.offset, l))
         .collect();
-    for p in &syn_preps {
+    for p in syn_preps.iter().map(|p| prep_slug(p)) {
         buf.push_str(&format!(
             "axiom wn:deg_{loc}_rel_{p} : {ENTITY_TOP} -> {ENTITY_TOP} -> core:float\n\n"
         ));
@@ -1126,16 +1132,17 @@ fn push_adj(
         // cat_measure/cat_pp_arg reading per preposition — `deg_rel_{p}` (ground, subject); `on X`
         // fills the ground → a cat_measure over the subject.
         for prep in governance.of(&syn.offset, lemma) {
+            let p = prep_slug(&prep);
             push_entry(
                 buf,
                 rep,
-                &format!("e_{loc}_{i}_r_{prep}"),
+                &format!("e_{loc}_{i}_r_{p}"),
                 lemma,
                 &format!(
                     "lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg({}))",
                     prep_ctor(&prep)
                 ),
-                &format!("deg_{loc}_rel_{prep}"),
+                &format!("deg_{loc}_rel_{p}"),
                 &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
                 &sense,
                 ranks,
@@ -1149,14 +1156,14 @@ fn push_adj(
             push_entry(
                 buf,
                 rep,
-                &format!("e_{loc}_{i}_rp_{prep}"),
+                &format!("e_{loc}_{i}_rp_{p}"),
                 lemma,
                 &format!(
                     "lexicon:fwd(lexicon:m_all, {}, lexicon:cat_pp_arg({}))",
                     adj_cat(),
                     prep_ctor(&prep)
                 ),
-                &format!("pos_rel_sem_{loc}_{prep}"),
+                &format!("pos_rel_sem_{loc}_{p}"),
                 &cmp_arrow,
                 &sense,
                 ranks,
@@ -1219,16 +1226,17 @@ fn push_adj(
                 // ground-taking `cat_measure/cat_pp_arg` reading per preposition, so `greater
                 // dependence ON WRN` threads.
                 for prep in &syn_preps {
+                    let p = prep_slug(prep);
                     push_entry(
                         buf,
                         rep,
-                        &format!("e_{loc}_dr_{}_{j}_{prep}", local(noun)),
+                        &format!("e_{loc}_dr_{}_{j}_{p}", local(noun)),
                         nlemma,
                         &format!(
                             "lexicon:fwd(lexicon:m_all, lexicon:cat_measure, lexicon:cat_pp_arg({}))",
                             prep_ctor(prep)
                         ),
-                        &format!("deg_{loc}_rel_{prep}"),
+                        &format!("deg_{loc}_rel_{p}"),
                         &format!("{ENTITY_TOP} -> {ENTITY_TOP} -> core:float"),
                         &sense_key(noun, nlemma),
                         ranks,

@@ -458,7 +458,7 @@ entry=E4
 \tcompl=pphr(for,np)
 \tcompl=pphr(to,np)
 \tcompl=pphr(than,np)
-\tcompl=pphr(over,np)
+\tcompl=pphr(beneath,np)
 }
 ";
 
@@ -535,7 +535,10 @@ entry=E4
                 ("responsible", "to"),
             ])
         );
-        assert_eq!(c.counts.outside, BTreeMap::from([("over".to_string(), 1)]));
+        assert_eq!(
+            c.counts.outside,
+            BTreeMap::from([("beneath".to_string(), 1)])
+        );
     }
 
     #[test]

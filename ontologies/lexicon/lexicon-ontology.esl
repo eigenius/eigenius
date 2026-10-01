@@ -177,8 +177,9 @@ data lexicon:Conn {
 // accepts, via the feature-meet. A gloss-governed adjective selects its specific prep
 // (`dependent` → `prep_on`, so `*dependent to` fails); a preposition-agnostic verb
 // frame (WordNet "----s PP") carries the `prep_any` wildcard (meets any marker). The
-// concrete ctors are the closed English oblique prepositions the importer's
-// `governed_preposition` extracts.
+// concrete ctors are every preposition a governed frame names: WordNet's convention and
+// SPECIALIST's complements (D97 decision 3), listed for the importers by the kernel's
+// `dcg::category::GOVERNED_PREPOSITIONS`, which a test keeps equal to this enum.
 data lexicon:Prep {
     description = "The governing preposition of an oblique ARGUMENT PP. SYNTACTIC, erased by ⟦·⟧ exactly as Num and Fin are: it routes which preposition a `cat_pp_arg`-seeking functor accepts, through the feature-meet. This is what makes *dependent to* ungrammatical while *dependent on* composes — a precision the grammar could not express while a PP was untyped.";
 
@@ -196,6 +197,62 @@ data lexicon:Prep {
     prep_of,      // "consists of", "composed of" — added 2026-07-26; `of` had a noun-post-modifier
                   // entry but no governed-arg one, so "MSI consists of repeats." gave 0 readings
     prep_as,      // essive / object-predicative "as": "identify X as Y", "regard X as Y" (D63 §5.3)
+    // Every other preposition a SPECIALIST frame names (D97 decision 3, `references/specialist/LEXICON`
+    // release 2026; `than` stays the comparative's), most frequent first; a multiword preposition's
+    // constructor joins its words with `_` (`out of` → `prep_out_of`).
+    prep_by,
+    prep_between,
+    prep_over,
+    prep_onto,
+    prep_through,
+    prep_per,
+    prep_off,
+    prep_out_of,
+    prep_after,
+    prep_due_to,
+    prep_among,
+    prep_around,
+    prep_towards,
+    prep_under,
+    prep_out,
+    prep_toward,
+    prep_up,
+    prep_round,
+    prep_down,
+    prep_during,
+    prep_across,
+    prep_along,
+    prep_as_to,
+    prep_without,
+    prep_before,
+    prep_following,
+    prep_according_to,
+    prep_behind,
+    prep_until,
+    prep_concerning,
+    prep_like,
+    prep_plus,
+    prep_regarding,
+    prep_till,
+    prep_with_regard_to,
+    prep_within,
+    prep_above,
+    prep_amongst,
+    prep_via,
+    prep_away_from,
+    prep_below,
+    prep_beside,
+    prep_by_comparison_with,
+    prep_from_among,
+    prep_in_behalf_of,
+    prep_in_favor_of,
+    prep_in_relation_to,
+    prep_in_terms_of,
+    prep_off_of,
+    prep_on_behalf_of,
+    prep_past,
+    prep_unto,
+    prep_up_to,
     prep_any,     // underspecified ⊤: meets any specific prep. Prep-agnostic verb frames
                   // carry this; a specific marker refines it at composition.
 }
