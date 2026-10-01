@@ -958,6 +958,85 @@ fn parse_reading_ledger(text: &str) -> Result<Vec<LedgerRow>, Vec<String>> {
     }
 }
 
+/// The sense ranker against the reading ledger (2026-10-01): how its rankings treat the senses the
+/// ledger's `correct` readings use. A word counts where one of its candidate senses names an atom
+/// of a `correct` reading of its sentence — a right sense for the word, twins included; an atom two
+/// words share («lines», «lineages») can count for both. Per such word: was a right sense kept
+/// (ranked, not omitted), ranked first, or eliminated; and how many of its candidates were kept.
+#[derive(Default, Debug, PartialEq)]
+struct SenseRankScore {
+    words: usize,
+    kept: usize,
+    first: usize,
+    candidates: usize,
+    kept_senses: usize,
+    /// One line per word whose right senses were all eliminated.
+    eliminated: Vec<String>,
+}
+
+fn score_sense_ranks(
+    records: &[eigenius_kernel::dcg::RankRecord],
+    ledger: &[LedgerRow],
+) -> SenseRankScore {
+    let mut right: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for r in ledger.iter().filter(|r| r.verdict == Verdict::Correct) {
+        right
+            .entry(r.sentence.trim())
+            .or_default()
+            .extend(sense_atoms(&r.sem));
+    }
+    let mut score = SenseRankScore::default();
+    for rec in records {
+        let Some(atoms) = right.get(rec.sentence.trim()) else {
+            continue;
+        };
+        for w in &rec.words {
+            let good: Vec<usize> = w
+                .sems
+                .iter()
+                .enumerate()
+                .filter(|(_, sem)| sense_atoms(sem).iter().any(|a| atoms.contains(a)))
+                .map(|(i, _)| i)
+                .collect();
+            if good.is_empty() {
+                continue;
+            }
+            score.words += 1;
+            score.candidates += w.senses.len();
+            score.kept_senses += w.order.len();
+            if w.order.first().is_some_and(|i| good.contains(i)) {
+                score.first += 1;
+            }
+            if w.order.iter().any(|i| good.contains(i)) {
+                score.kept += 1;
+            } else {
+                score.eliminated.push(format!(
+                    "«{}» in «{}»: kept {} of {}; eliminated {}",
+                    w.surface,
+                    rec.sentence.trim(),
+                    w.order.len(),
+                    w.senses.len(),
+                    good.iter()
+                        .map(|&i| w.sems[i].as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+        }
+    }
+    score
+}
+
+/// The run's sense rankings — recorded or replayed, `EIGENIUS_SENSE_RANKS` — scored against the
+/// reading ledger; `None` when the run has no rankings file.
+fn sense_rank_score() -> Option<SenseRankScore> {
+    let path = std::env::var("EIGENIUS_SENSE_RANKS").ok()?;
+    let text = std::fs::read_to_string(&path).ok()?;
+    let records: Vec<eigenius_kernel::dcg::RankRecord> = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("{path} is not a rankings file: {e}"));
+    Some(score_sense_ranks(&records, &load_reading_ledger()))
+}
+
 fn load_reading_ledger() -> Vec<LedgerRow> {
     let Ok(text) = std::fs::read_to_string(READING_ADJUDICATIONS) else {
         return Vec::new();
@@ -1037,6 +1116,50 @@ fn ledger_contradictions(rows: &[LedgerRow], pins: &BTreeMap<String, String>) ->
         }
     }
     out
+}
+
+/// The sense-rank score counts a word by the ledger's `correct` readings of its sentence: kept,
+/// first, or eliminated.
+#[test]
+fn a_ranking_is_scored_by_the_senses_the_ledger_rules_correct() {
+    use eigenius_kernel::dcg::{RankRecord, RankedWord};
+    let ledger = parse_reading_ledger(
+        "S.\tv00717358_p_to(kind_of(C5392067), n14239918)\tcorrect\tok\n\
+         S.\tv00718737_p_to(kind_of(C5392067), n14239918)\tcorrect\tok\n\
+         S.\tv00000001_t(n00000002, n00000003)\twrong\tno\tstructure\n",
+    )
+    .unwrap();
+    let word = |surface: &str, sems: &[&str], order: &[usize]| RankedWord {
+        surface: surface.into(),
+        senses: sems.iter().map(|s| format!("wn:{s}")).collect(),
+        sems: sems.iter().map(|s| s.to_string()).collect(),
+        order: order.to_vec(),
+    };
+    let records = [RankRecord {
+        sentence: "S.".into(),
+        context: String::new(),
+        words: vec![
+            // a right sense first
+            word(
+                "respond",
+                &["v00717358_i", "v00718737_i", "v00000009_i"],
+                &[0, 2],
+            ),
+            // a right sense kept, not first
+            word("blockade", &["n00000005", "C5392067"], &[0, 1]),
+            // the right sense eliminated
+            word("cancers", &["n14239918", "n00000006"], &[1]),
+            // no right sense among the candidates: not counted
+            word("some", &["n00000007", "n00000008"], &[0]),
+        ],
+    }];
+    let score = score_sense_ranks(&records, &ledger);
+    assert_eq!(
+        (score.words, score.kept, score.first, score.eliminated.len()),
+        (3, 2, 1, 1)
+    );
+    assert_eq!((score.kept_senses, score.candidates), (5, 7));
+    assert!(score.eliminated[0].starts_with("«cancers» in «S.»: kept 1 of 2"));
 }
 
 /// The ledger may not contradict itself or its pins — checked without a store, so a contradicting
@@ -4872,6 +4995,21 @@ fn summarize(report: &[UnitReport]) {
     // Persist the reranker's decisions (if recording) BEFORE the summary, so a run that produced a
     // number always leaves behind the artifact that makes it replayable.
     flush_sense_ranks();
+    if let Some(score) = sense_rank_score() {
+        for e in &score.eliminated {
+            eprintln!("  SENSE-ELIMINATED: {e}");
+        }
+        eprintln!(
+            "=== SENSE RANKS (against the reading ledger): words {}, right-sense-kept {}, \
+             right-sense-first {}, right-sense-eliminated {}, senses-kept {} of {} ===",
+            score.words,
+            score.kept,
+            score.first,
+            score.eliminated.len(),
+            score.kept_senses,
+            score.candidates
+        );
+    }
     eprintln!(
         "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
          open {open}, missing-lexeme {miss}, non-prose {non_prose}, grammar-gap {gap}, \

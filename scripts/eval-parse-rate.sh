@@ -176,6 +176,21 @@ if [[ -n "$SELSUM" ]]; then
   echo
 fi
 
+# ── Sense ranks against the reading ledger — from the `=== SENSE RANKS` line only (reported) ───
+# words = ranked words where a candidate sense is used by a `correct` ledger reading of the sentence;
+# of those, the right sense kept, ranked first, or eliminated; senses-kept = how much the ranker
+# prunes. A run without a rankings file (cap-only) prints no line.
+SRSUM="$(grep -m1 -E '^=== SENSE RANKS' "$LOG" || true)"
+if [[ -n "$SRSUM" ]]; then
+  SR_W=$(field 'words' "$SRSUM")
+  SR_K=$(field 'right-sense-kept' "$SRSUM")
+  SR_F=$(field 'right-sense-first' "$SRSUM")
+  SR_E=$(field 'right-sense-eliminated' "$SRSUM")
+  SR_SK="$(sed -E 's/.*senses-kept ([0-9]+ of [0-9]+).*/\1/' <<<"$SRSUM")"
+  echo "  SENSE RANKS (vs the reading ledger): $SR_W words — right sense kept $SR_K, first $SR_F, eliminated $SR_E; senses kept $SR_SK"
+  echo
+fi
+
 RC=0
 if [[ "$PROFILE" == "debug" ]]; then
   echo "  UNTRUSTWORTHY: DEBUG build. Debug stack frames overflow in NbE readback, killing parses"
