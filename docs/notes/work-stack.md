@@ -50,6 +50,18 @@ any detour.
 > (§7o). The owner adopted `jev-latest` as the reading ranker's default; selection re-baselined on
 > its first draw. **Next:** jev's prompt and presentation (the `state`, the per-option criteria, the
 > sense call's legend), each variant a draw, its replay, and the adjudication of its new verdicts.
+> **Presentation screened (`2026-09-30`, offline over `EIGENIUS_DUMP_DECISIONS`):** ten prompt variants
+> stayed within noise. The structural rendering had shown the verb-adjunct reading as "and we with
+> «sequencing»", which decided most PP attachments for jev; rendered faithfully, jev attaches to the
+> verb almost everywhere (structure ~31 → 28.75 of 41), while sonnet-4-6 gets 7 of 9 attachment units
+> (structure 33). The owner asked for the alternatives as a grammar book shows them — the sentence
+> bracketed, each contested phrase's grammatical function — and a question without a parser: «Which
+> grammatical analysis of `the_sentence` matches what it means in `document`?». A word-search prototype
+> raised jev's structure calls from 15.4 to 18.5 of 27. **Building it (owner's design):** the parser
+> records each item's derivation (`dcg::derivation`, a field on `Item`, drivers stamp it, leaves carry
+> their sense atoms); the structure call brackets what differs between analyses and names each
+> contested phrase's function. Then the model A/B (jev-latest, sonnet-4-6) on it, adjudication, and
+> the re-baseline.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change

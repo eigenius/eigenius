@@ -3553,6 +3553,8 @@ fn wrn_first_page_over_full_lexicon() {
     let (mut ledger_produced, mut ledger_conflicts) = (0usize, 0usize);
     let mut prior: Vec<eigenius_kernel::dcg::PriorSelection> = Vec::new();
     let (mut sel_eligible, mut sel_chose, mut sel_abstained) = (0usize, 0usize, 0usize);
+    // Readings the ranker sees, and how many lack a well-formed derivation over the whole unit.
+    let (mut deriv_readings, mut deriv_bad) = (0usize, 0usize);
     let (mut sel_read_correct, mut sel_read_wrong, mut sel_read_unadj) = (0usize, 0usize, 0usize);
     let mut sel_read_conflict = 0usize;
     let (mut sel_struct_correct, mut sel_curated, mut sel_invalid) = (0usize, 0usize, 0usize);
@@ -3603,6 +3605,22 @@ fn wrn_first_page_over_full_lexicon() {
             }
             Outcome::Ambiguous { readings, .. } => {
                 sel_eligible += 1;
+                let n = index.tokenize(&text).len();
+                for r in readings.iter() {
+                    deriv_readings += 1;
+                    let whole = r
+                        .derivation()
+                        .is_some_and(|d| d.span == (0, n - 1) && d.is_well_formed());
+                    if !whole {
+                        deriv_bad += 1;
+                        eprintln!(
+                            "  DERIVATION-MISSING: «{}» has a reading without a well-formed \
+                             derivation over its {n} tokens: {}",
+                            text.trim(),
+                            pretty_term(r.sem())
+                        );
+                    }
+                }
                 match index.select_reading(&selection_ranker, &page, &text, &lem, &prior, readings)
                 {
                     Some((_idx, sel)) => {
@@ -3793,6 +3811,11 @@ fn wrn_first_page_over_full_lexicon() {
          invalid-selected {sel_invalid}, \
          ledger-produced {ledger_produced}, ledger-conflicts {ledger_conflicts} ==="
     );
+    eprintln!(
+        "=== DERIVATIONS: {deriv_readings} readings of ambiguous units, {deriv_bad} without a \
+         well-formed derivation over the whole unit ==="
+    );
+    assert_eq!(deriv_bad, 0, "every reading carries its derivation (eigenius#264)");
 
     assert_replay_faithful();
     // A selection replay with misses is not the recorded experiment: each miss ABSTAINS, so the

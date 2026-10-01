@@ -108,6 +108,13 @@ pub(crate) fn multiword_protected_splits(
     protected
 }
 
+/// A categorial combination's result, recorded as built over `span` from `children` — the step
+/// named by the result's provenance. Shared by both chart drivers.
+pub(super) fn derived_combine(it: Item, span: (usize, usize), children: &[&Item]) -> Item {
+    let step = super::derivation::Step::Combine(it.prov());
+    it.derived(span, step, children)
+}
+
 /// The CKY table: `chart[i][j]` holds every item spanning tokens `i..=j`. Named, because a bare
 /// `Vec<Vec<Vec<Item>>>` in a signature tells the reader nothing.
 pub(super) type Chart = Vec<Vec<Vec<Item>>>;

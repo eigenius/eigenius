@@ -37,7 +37,7 @@ impl Parser {
         let nf = felicity_readback(&eval_env(it.sem(), &Rho::Nil, &env).ok()?)?;
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
-        Some(Item::from_parts(it.cat().clone(), nf, it.prov(), it.cost()))
+        Some(it.with_sem(nf))
     }
 
     /// Build-then-subsume (D3, `docs/notes/d63-nominal-modification-normal-form.md` §8; Eisner 1996's
@@ -149,8 +149,7 @@ impl Parser {
                 }
                 return None;
             }
-            let item = Item::from_parts(it.cat().clone(), nf, it.prov(), it.cost());
-            return Some(FelicitousOutcome::Closed(item));
+            return Some(FelicitousOutcome::Closed(it.with_sem(nf)));
         }
         // OPEN (D64): ABSTRACT each hole as a typed parameter, so the sem is a CLOSED function
         // `λ(h₀:T₀)…(hₙ:Tₙ). nf : Π(h₀:T₀)…(hₙ:Tₙ). ⟦cat⟧` — a *parametric* proposition, not a term
@@ -171,7 +170,7 @@ impl Parser {
         let pi_val = eval_env(&pi_ty, &Rho::Nil, &env).ok()?;
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
         check(&mut ctx, &abstracted, &pi_val).ok()?;
-        let item = Item::from_parts(it.cat().clone(), abstracted, it.prov(), it.cost());
+        let item = it.with_sem(abstracted);
         Some(FelicitousOutcome::Open(OpenParse { item, holes: infos }))
     }
 }

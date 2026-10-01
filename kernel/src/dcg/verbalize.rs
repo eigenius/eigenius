@@ -83,6 +83,13 @@ pub fn unit_sense_names(
             }
         }
     }
+    // A document's named individual has no lexicon label: its name is the span that introduced it
+    // («Project Achilles»), which a single token never is.
+    for (words, sense) in index.span_senses(text, lem) {
+        if let Some(key) = sense_key(&sense).filter(|k| k.starts_with(NAMED_INDIVIDUAL)) {
+            m.entry(key).or_insert(words);
+        }
+    }
     m
 }
 
@@ -97,14 +104,7 @@ pub fn unit_surface_names(
 ) -> BTreeMap<String, String> {
     let mut m: BTreeMap<String, String> = BTreeMap::new();
     for (words, sense) in index.span_senses(text, lem) {
-        let key = if let Some(rest) = sense.strip_prefix("wn:") {
-            match rest.rsplitn(3, '.').collect::<Vec<_>>().as_slice() {
-                [offset, tag, _lemma] => format!("{tag}{offset}"),
-                _ => continue,
-            }
-        } else if let Some(cui) = sense.strip_prefix("umls:") {
-            cui.to_string()
-        } else {
+        let Some(key) = sense_key(&sense) else {
             continue;
         };
         // The shortest span names an atom: `mismatch repair`, not `DNA mismatch repair` beside a
@@ -392,11 +392,59 @@ fn name_atom(local: &str, vb: &Vb) -> String {
 /// An atom's sense key: the `deg_`/`std_` adjective wrappers stripped, and any suffix after the key
 /// — a verb frame (`_t`/`_i`/…) or a relational degree's `_rel` / `_rel_{p}`.
 fn atom_key(local: &str) -> &str {
+    // A document's named individual (`ni_project_achilles`): its local name is the key.
+    if local.starts_with(NAMED_INDIVIDUAL) {
+        return local;
+    }
     let core = local
         .strip_prefix("deg_")
         .or_else(|| local.strip_prefix("std_"))
         .unwrap_or(local);
     core.split('_').next().unwrap_or(core)
+}
+
+/// The local-name prefix of a document's named individual (`glossary::named_entity_augmentation`
+/// mints `urn:eigenius:doc:ni_<slug>`; its lexical entry's sense is `doc:<slug>`).
+const NAMED_INDIVIDUAL: &str = "ni_";
+
+/// The atom key a lexical entry's sense names: `wn:{lemma}.{tag}.{offset}` → `{tag}{offset}`,
+/// `umls:{cui}` → the CUI, a document entry's `doc:{slug}` → its named individual `ni_{slug}`.
+fn sense_key(sense: &str) -> Option<String> {
+    if let Some(rest) = sense.strip_prefix("wn:") {
+        match rest.rsplitn(3, '.').collect::<Vec<_>>().as_slice() {
+            [offset, tag, _lemma] => Some(format!("{tag}{offset}")),
+            _ => None,
+        }
+    } else if let Some(cui) = sense.strip_prefix("umls:") {
+        Some(cui.to_string())
+    } else {
+        sense
+            .strip_prefix("doc:")
+            .map(|slug| format!("{NAMED_INDIVIDUAL}{slug}"))
+    }
+}
+
+/// The sense atoms a term mentions, by key ([`atom_key`]), each once in order of first mention: the
+/// concepts, senses and named individuals, not the grammatical constants around them.
+pub(crate) fn sense_atoms(e: &Exp) -> Vec<String> {
+    fn walk(e: &Exp, out: &mut Vec<String>) {
+        if let Some(local) = axiom_local(e) {
+            let key = atom_key(local);
+            let sense = key.starts_with(NAMED_INDIVIDUAL)
+                || key
+                    .split(|c: char| !c.is_ascii_digit())
+                    .any(|run| run.len() >= 4);
+            if sense && !out.iter().any(|k| k == key) {
+                out.push(key.to_string());
+            }
+        }
+        for c in child_exps(e) {
+            walk(c, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(e, &mut out);
+    out
 }
 
 /// An atom's plain word — its display label with no register markup.
@@ -469,6 +517,11 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                 }
                 if let Some(merged) = verb_pp(args[0], args[1], vb) {
                     return merged;
+                }
+                if vb.register == Register::Structural {
+                    if let Some(text) = verb_adjunct(args[0], args[1], vb) {
+                        return text;
+                    }
                 }
             }
             let op = if d.ends_with("And") { "and" } else { "or" };
@@ -553,6 +606,19 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                 );
             }
             ("is_a", 2) => {
+                // A kind as an instance — `is_a(kind_of(X), Y)`, the kind X is a Y — against
+                // `subclass_of(X, Y)`, every X is a Y: a structural difference, which the
+                // structure call must see. Expanded keeps the term's words.
+                if vb.register == Register::Structural {
+                    let (kh, ka) = app_spine(args[0]);
+                    if let (Some("kind_of"), [kind]) = (axiom_local(kh), ka.as_slice()) {
+                        return format!(
+                            "the kind {} is {}",
+                            bare_np(kind, vb),
+                            indefinite(args[1], vb)
+                        );
+                    }
+                }
                 return format!("{} is {}", verbalize(args[0], vb), indefinite(args[1], vb));
             }
             // Top-level gradable-adjective predication: `gt(deg_X(subj), std_X)` → "subj is X".
@@ -839,6 +905,40 @@ fn verb_pp(left: &Exp, right: &Exp, vb: &Vb) -> Option<String> {
         verbalize(subj, vb),
         name_atom(ll, vb),
     ))
+}
+
+/// A verb-adjunct PP after its clause, set off by a comma: "we «ascertained» a «status» …, with
+/// «sequencing»", where a noun's PP reads "a «status» … + with «sequencing»". The structural
+/// register's: Surface and Expanded keep the term's words ("… and we with «sequencing»"), and
+/// [`verb_pp`] already reads an intransitive verb's adjunct as one clause.
+fn verb_adjunct(clause: &Exp, pp: &Exp, vb: &Vb) -> Option<String> {
+    adjunct_verbs(clause, pp)?;
+    let (h, a) = app_spine(pp);
+    let (p, _, obj) = prep_parts(axiom_local(h)?, &a, vb)?;
+    Some(format!("{}, {p} {obj}", verbalize(clause, vb)))
+}
+
+/// The verbs a PP conjoined to a clause modifies: `And(clause, prep_X(s, o))` where every conjunct
+/// of `clause` is a verb frame whose subject is `s`. That is the verb-adjunct encoding («We
+/// ascertained MSI status with sequencing.», «Depletion of WRN promoted apoptosis and cell cycle
+/// arrest in MSI models.»): the PP is about the verb, though its first argument is the subject.
+/// `None` for any other conjunction.
+fn adjunct_verbs<'e>(clause: &'e Exp, pp: &Exp) -> Option<Vec<&'e str>> {
+    let (ph, pa) = app_spine(pp);
+    let pl = axiom_local(ph)?;
+    if !pl.starts_with("prep_") || pl.ends_with("_value") || pa.len() != 2 {
+        return None;
+    }
+    let subject = pretty_term(pa[0]);
+    let mut conj = Vec::new();
+    flatten_and_exp(clause, &mut conj);
+    conj.iter()
+        .map(|c| {
+            let (h, a) = app_spine(c);
+            let verb = axiom_local(h).filter(|l| is_verb_frame(l))?;
+            (pretty_term(a.last()?) == subject).then_some(verb)
+        })
+        .collect()
 }
 
 /// A PP relation's preposition, subject and rendered object: `prep_X(subj, obj)`, or a quantity
@@ -1281,6 +1381,23 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
             Some("poss_of") if a.len() == 2 || a.len() == 3 => {
                 parts.push(format!("possessed-by {}", verbalize(a[a.len() - 1], vb)))
             }
+            // An intersective adjective on the head: `a02734544(x)`, «genetic».
+            Some(adj) if is_adjective(adj) && matches!(a.as_slice(), [Exp::Var(_)]) => {
+                parts.push(format!("is {}", name_atom(adj, vb)))
+            }
+            // A counted relation to the head: `has_count(T, λy. prep_X(x, y), q)`, «an interaction
+            // between two genetic events» → "between 2 T".
+            Some("has_count") if a.len() == 3 => match counted_relation(a[1], vb) {
+                Some(p) => {
+                    let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
+                    parts.push(format!(
+                        "{p} {} {}",
+                        quantity_text(a[2], &unit),
+                        bare_np(a[0], vb)
+                    ));
+                }
+                None => parts.push(verbalize(c, vb)),
+            },
             // A comparative carries a STANDARD, and the standard is exactly what two readings of
             // an elided «stronger» differ by: `std_a…` (the norm) vs `deg_a…(t)` (than t,
             // recovered from the discourse). Dropping it made those two readings identical — the
@@ -1304,6 +1421,21 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
     } else {
         format!("{head} + {}", parts.join(" + "))
     }
+}
+
+/// The preposition of a count's predicate that relates the head to the counted phrase:
+/// `λy. prep_X(x, y)` → `X`. `None` for any other predicate.
+fn counted_relation<'e>(pred: &'e Exp, vb: &Vb) -> Option<&'e str> {
+    let Exp::Lam(Patt::Var(y), body) = pred else {
+        return None;
+    };
+    let (h, a) = app_spine(body);
+    let (p, _, _) = prep_parts(axiom_local(h)?, &a, vb)?;
+    let mut obj = *a.get(1)?;
+    while let Exp::Fst(x) | Exp::Snd(x) = obj {
+        obj = x;
+    }
+    matches!(obj, Exp::Var(v) if v == y).then_some(p)
 }
 
 fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
@@ -1346,6 +1478,27 @@ fn collect_links<'e>(e: &'e Exp, vb: &Vb, env: &mut Vec<(&'e str, String)>, out:
     if let Exp::Sig(p, dom, body) | Exp::Pi(p, dom, body) = e {
         collect_links(dom, vb, env, out);
         return with_binder(p, head_word(dom, vb, env), body, vb, env, out);
+    }
+    // The verb-adjunct encoding: the PP's link names the verbs, not their subject.
+    if let Some((iri, _, args)) = e.as_const_spine() {
+        if iri.as_str().ends_with("logic:And") && args.len() == 2 {
+            if let Some(verbs) = adjunct_verbs(args[0], args[1]) {
+                collect_links(args[0], vb, env, out);
+                let (ph, pa) = app_spine(args[1]);
+                let p = axiom_local(ph).and_then(|l| l.strip_prefix("prep_"));
+                if let (Some(p), [_, obj]) = (p, pa.as_slice()) {
+                    for v in verbs {
+                        out.push(Link {
+                            relation: p.to_string(),
+                            dependent: head_word(obj, vb, env),
+                            host: atom_word(v, vb),
+                        });
+                    }
+                    collect_links(obj, vb, env, out);
+                }
+                return;
+            }
+        }
     }
     let (h, args) = app_spine(e);
     if args.is_empty() {
@@ -1862,5 +2015,155 @@ mod register_tests {
                 },
             ]
         );
+    }
+
+    fn and(a: Exp, b: Exp) -> Exp {
+        let and = Exp::Const(Iri::parse("urn:eigenius:logic:And").expect("iri"), vec![]);
+        Exp::App(Box::new(Exp::App(Box::new(and), Box::new(a))), Box::new(b))
+    }
+
+    /// «We ascertained MSI status with sequencing.»: the verb-adjunct encoding conjoins the PP to
+    /// the clause with the subject as its first argument. The chooser's registers set it after the
+    /// clause and its link names the verb; a PP inside the object stays the object's.
+    #[test]
+    fn a_verb_adjunct_is_the_verbs() {
+        let l = layer();
+        let names: BTreeMap<String, String> = [
+            ("v00920000", "ascertained"),
+            ("n13945000", "status"),
+            ("n00649000", "sequencing"),
+            ("n13780719", "we"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let we = || cls("urn:eigenius:wn:n13780719");
+        let status = || {
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:wn:n13945000"),
+            )
+        };
+        let sequencing = || {
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:wn:n00649000"),
+            )
+        };
+        let adjunct = and(
+            app2("urn:eigenius:ontology:v00920000_t", status(), we()),
+            app2("urn:eigenius:ontology:prep_with", we(), sequencing()),
+        );
+        let vb = Vb::structural(&names, &l);
+        assert_eq!(
+            verbalize(&adjunct, &vb),
+            "«we» «ascertained» «status», with «sequencing»"
+        );
+        let link = |relation: &str, dependent: &str, host: &str| Link {
+            relation: relation.into(),
+            dependent: dependent.into(),
+            host: host.into(),
+        };
+        assert_eq!(
+            structure_links(&adjunct, &vb),
+            vec![
+                link("argument", "status", "ascertained"),
+                link("subject", "we", "ascertained"),
+                link("with", "sequencing", "ascertained"),
+            ]
+        );
+        // Surface keeps its words.
+        assert_eq!(
+            verbalize(&adjunct, &Vb::surface(&names, &l)),
+            "we ascertained status and we with sequencing"
+        );
+        // A PP whose first argument is not the verb's subject is no adjunct.
+        let not_adjunct = and(
+            app2("urn:eigenius:ontology:v00920000_t", status(), we()),
+            app2("urn:eigenius:ontology:prep_with", status(), sequencing()),
+        );
+        assert!(structure_links(&not_adjunct, &vb).contains(&link("with", "sequencing", "status")));
+    }
+
+    /// «Synthetic lethality is an interaction between two genetic events.»: the counted, adjectival
+    /// restrictor renders as relations of the head, and a kind as an instance says so.
+    #[test]
+    fn a_counted_relation_and_an_adjective_render_on_the_head() {
+        let l = layer();
+        let names: BTreeMap<String, String> = [
+            ("C4280020", "Synthetic lethality"),
+            ("n00039021", "interaction"),
+            ("n00029378", "events"),
+            ("a02734544", "genetic"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let two = Exp::InductiveCtor(
+            Iri::parse("urn:eigenius:units:Quantity").expect("iri"),
+            "mk_quantity".to_string(),
+            vec![
+                Exp::LitRat(crate::numeric::Rational::new(2.into(), 1.into()).expect("q")),
+                Exp::LitInt(0),
+            ],
+        );
+        let genetic_events = Exp::Sig(
+            Patt::Var("y0".into()),
+            Box::new(cls("urn:eigenius:wn:n00029378")),
+            Box::new(app1(
+                "urn:eigenius:ontology:a02734544",
+                Exp::Var("y0".into()),
+            )),
+        );
+        let between = Exp::Lam(
+            Patt::Var("y".into()),
+            Box::new(app2(
+                "urn:eigenius:ontology:prep_between",
+                Exp::Var("x0".into()),
+                Exp::Fst(Box::new(Exp::Var("y".into()))),
+            )),
+        );
+        let counted = Exp::App(
+            Box::new(app2(
+                "urn:eigenius:ontology:has_count",
+                genetic_events,
+                between,
+            )),
+            Box::new(two),
+        );
+        let reading = app2(
+            "urn:eigenius:ontology:is_a",
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:umlscui:C4280020"),
+            ),
+            sig(cls("urn:eigenius:wn:n00039021"), counted),
+        );
+        assert_eq!(
+            verbalize(&reading, &Vb::structural(&names, &l)),
+            "the kind «Synthetic lethality» is a «interaction» + between 2 «events» + is «genetic»"
+        );
+        // Expanded renders the restrictor the same way and keeps the term's `is_a` words.
+        assert_eq!(
+            verbalize(&reading, &Vb::expanded(&names, &l)),
+            "«Synthetic lethality» [C4280020] is a «interaction» [n00039021] + between 2 «events» \
+             [n00029378] + is «genetic» [a02734544]"
+        );
+    }
+
+    /// A document's named individual keeps its whole local name: «Project Achilles», not «ni».
+    #[test]
+    fn a_named_individual_is_named_whole() {
+        assert_eq!(atom_key("ni_project_achilles"), "ni_project_achilles");
+        assert_eq!(atom_key("v00618878_as"), "v00618878");
+        assert_eq!(
+            sense_key("doc:project_achilles").as_deref(),
+            Some("ni_project_achilles")
+        );
+        assert_eq!(
+            sense_key("wn:identify.v.00618878").as_deref(),
+            Some("v00618878")
+        );
+        assert_eq!(sense_key("umls:C0388246").as_deref(), Some("C0388246"));
     }
 }

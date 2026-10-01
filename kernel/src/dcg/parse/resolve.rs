@@ -132,12 +132,7 @@ impl Parser {
         // Closed re-gate: empty Γ, so any leftover hole is an unbound variable ⇒ fail closed.
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
-        Some(Item::from_parts(
-            open.item.cat().clone(),
-            nf,
-            open.item.prov(),
-            open.item.cost(),
-        ))
+        Some(open.item.with_sem(nf))
     }
 
     /// Apply every hole's antecedent in binder order and β-reduce to the normal form. `member`

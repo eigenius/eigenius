@@ -5790,3 +5790,52 @@ fn abbreviation_pipeline_end_to_end() {
         "the recovered parse denotes the grounded kind, nominalized"
     );
 }
+
+/// eigenius#264 — every reading carries its DERIVATION: which tokens each constituent spans, recorded
+/// by the chart drivers. Its root spans the whole sentence and every constituent's children lie
+/// inside it, in order — on the packed path, the unpacked one, and through pied-piping, coordination,
+/// the reciprocal and a fronted adverb.
+#[test]
+fn every_reading_carries_a_derivation_over_the_whole_sentence() {
+    type Case = (fn() -> Parser, &'static [&'static str]);
+    let demo = || index_over_bootstrap().1;
+    let cases: [Case; 2] = [
+        (
+            demo,
+            &[
+                "HeLa affects BRCA1",
+                "HeLa largely affects BRCA1",
+                "HeLa and BRCA1 affect HeLa",
+                "HeLa and BRCA1 affect each other",
+            ],
+        ),
+        (
+            parser_with_pied_prep,
+            &["the gene in which HeLa affects BRCA1 is large", PIED_BESIDE],
+        ),
+    ];
+    for (parser, sentences) in cases {
+        for packing in [true, false] {
+            let p = parser().with_packing(packing);
+            for sentence in sentences {
+                let n = p.tokenize(sentence).len();
+                let readings = p.parse(sentence, &Identity);
+                assert!(!readings.is_empty(), "control: «{sentence}» parses");
+                for r in &readings {
+                    let d = r.derivation().unwrap_or_else(|| {
+                        panic!(
+                            "«{sentence}» (packing {packing}): a reading without a derivation: {}",
+                            pretty_term(r.sem())
+                        )
+                    });
+                    assert_eq!(
+                        d.span,
+                        (0, n - 1),
+                        "«{sentence}»: the root spans the sentence"
+                    );
+                    assert!(d.is_well_formed(), "«{sentence}»: {d:?}");
+                }
+            }
+        }
+    }
+}

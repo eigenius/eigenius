@@ -39,6 +39,7 @@ pub mod category;
 pub(crate) mod chart;
 pub mod closed_class;
 pub mod decision;
+pub mod derivation;
 pub mod draw;
 pub mod formalizer;
 pub mod glossary;

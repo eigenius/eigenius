@@ -33,6 +33,7 @@ use super::super::category::{
     is_vp_adjunct_prep, kind_of, slash_parts,
 };
 use super::super::chart::{beam_cell, cell_histogram, Chart};
+use super::super::derivation::Derivation;
 use super::super::lexicon::{FormEntries, LexEntry};
 use super::super::rules::constructions::coordinate_np;
 use super::*;
@@ -765,6 +766,16 @@ impl Parser {
                             crate::dcg::pretty::pretty_term(it.cat())
                         );
                     }
+                }
+            }
+        }
+        // Every item in a seeded cell is a leaf of the derivations built over it: a lexical entry, or
+        // one lifted from it here.
+        for (i, row) in chart.iter_mut().enumerate() {
+            for (j, cell) in row.iter_mut().enumerate().skip(i) {
+                for it in cell.iter_mut() {
+                    let atoms = super::super::verbalize::sense_atoms(it.sem());
+                    it.derivation = Some(Derivation::leaf((i, j), atoms));
                 }
             }
         }
