@@ -873,8 +873,14 @@ mod anthropic {
                     none_faithful(ctx, &reply.rationale, reply.missing.as_deref());
                     return None;
                 }
-                // Numbered from 1 as shown; anything else is malformed ⇒ fail closed.
-                let n = reply.structure.filter(|n| (1..=groups.len()).contains(n))?;
+                // Numbered from 1 as shown; anything else is malformed ⇒ fail closed, and say so.
+                let Some(n) = reply.structure.filter(|n| (1..=groups.len()).contains(n)) else {
+                    malformed(
+                        ctx,
+                        &format!("structure {:?} of {}", reply.structure, groups.len()),
+                    );
+                    return None;
+                };
                 let others: Vec<usize> = reply
                     .runners_up
                     .iter()
@@ -898,11 +904,22 @@ mod anthropic {
                     none_faithful(ctx, &reply.rationale, reply.missing_sense.as_deref());
                     return None;
                 }
-                let c = reply.chosen.filter(|c| members.contains(c))?;
+                // The readings are numbered from 0 as shown; map back to the candidate list.
+                let Some(c) = reply.chosen.and_then(|c| members.get(c)) else {
+                    malformed(
+                        ctx,
+                        &format!("reading {:?} of {}", reply.chosen, members.len()),
+                    );
+                    return None;
+                };
+                let runners = reply
+                    .runners_up
+                    .iter()
+                    .filter_map(|&r| members.get(r).copied());
                 (
-                    c,
+                    *c,
                     Some(format!("SENSES: {}", reply.rationale)),
-                    reply.runners_up,
+                    runners.collect(),
                 )
             };
             // The chosen structure's other readings first, then each other structure's first.
@@ -947,6 +964,14 @@ mod anthropic {
         if std::env::var("EIGENIUS_DUMP_SELECT_PROMPT").is_ok() {
             eprintln!("\n===== READING-RANKER PROMPT =====\n{prompt}\n===== END PROMPT =====\n");
         }
+    }
+
+    /// A reply naming nothing that was shown: the ranker abstains, and the log says why.
+    fn malformed(ctx: &DocumentContext, what: &str) {
+        eprintln!(
+            "reading-ranker: MALFORMED reply on «{}» — {what}; abstained",
+            ctx.sentence.trim()
+        );
     }
 
     /// "No candidate is faithful" is a result, and its diagnostic names what the pool lacks.
@@ -1023,7 +1048,8 @@ mod anthropic {
     ) -> String {
         let listing: String = members
             .iter()
-            .map(|&i| format!("  [{i}] {}\n", candidates[i].gloss))
+            .enumerate()
+            .map(|(n, &i)| format!("  [{n}] {}\n", candidates[i].gloss))
             .collect();
         let named: Vec<super::ConceptNote> = ctx
             .concepts
