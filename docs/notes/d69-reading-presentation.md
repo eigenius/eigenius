@@ -766,6 +766,37 @@ its decomposition. Proposed, for the maintainer:
 - «for cancer therapeutics» (the open attachment) and the subject-oriented adverbial encoding;
 - `◇A ∨ ◇B` against `◇(A ∨ B)` treated as one option, as the «WRN dependency …» pin note says.
 
+## 7r. A multi-word concept as one marked term (`2026-10-01`)
+
+The first recommendation of `d69-structure-call-errors.md` (P1). A leaf over several tokens naming one
+concept is a term; analyses are compared by span and kind, so a term and a phrase composed over the
+same words differ, and both are shown — the term as `⟨…⟩` with ««…» is one term, a single named
+concept», the phrase in `[…]`:
+
+```text
+[1] Depletion of WRN induced ⟨double-stranded DNA breaks⟩.
+      «double-stranded DNA breaks» is one term, a single named concept
+[4] Depletion of WRN induced [double-stranded ⟨DNA breaks⟩].
+      «DNA breaks» is one term, a single named concept
+      «double-stranded» is an adjective describing «DNA breaks»
+```
+
+Screened (structure calls only, 27 units, eight jev runs): 19.4 before, 20.9 with terms, 20.0 with
+terms and a note explaining the notation. The note swung near-tied units both ways (−8 on «Some
+cancers do not respond …», +8 on «WRN dependency may require …») and is not sent.
+
+| structure call | reading-correct | structure-correct |
+|---|---|---|
+| before (§7q draws) | 28, 29, 28 | 31, 32, 32 |
+| terms marked | 28, 27, 28 | 32, 32, 33 |
+
+Over the three draws: «Depletion of WRN promoted …» takes the pinned concept (structure +3);
+«The use of immune checkpoint blockade …» +2 correct; «Some cancers do not respond …» takes the
+pinned structure twice, with the «respond» sense the 2026-08-13 ruling rules out; «Defects in DNA
+mismatch repair …» −3, where the term C1155661 is now visible and chosen against a compositional pin
+— recommendation 2, for the maintainer. Selection baseline unchanged at 28, tracked on
+`2026-10-01-terms-jev-latest-1` (0b26c2b).
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×
