@@ -1128,7 +1128,8 @@ impl eigenius_kernel::dcg::ReadingRanker for StructurePreview {
             "\n===== STRUCTURES «{}» ({} readings) =====\n{}",
             ctx.sentence.trim(),
             candidates.len(),
-            eigenius_kernel::dcg::reading_ranker::structure_question(candidates)
+            eigenius_kernel::dcg::reading_ranker::structure_question(ctx, candidates)
+                .unwrap_or_else(|| "(one analysis)".to_string())
         );
         self.0.select(ctx, candidates)
     }
@@ -1154,6 +1155,7 @@ impl eigenius_kernel::dcg::ReadingRanker for DecisionDump {
             let q = eigenius_kernel::dcg::decision_questions(ctx, candidates);
             let line = serde_json::json!({
                 "sentence": ctx.sentence.trim(),
+                "tokens": ctx.tokens,
                 "document": ctx.document,
                 "prior_selections": ctx.prior_selections,
                 "concepts": ctx.concepts.iter().map(|c| serde_json::json!({
@@ -1163,9 +1165,10 @@ impl eigenius_kernel::dcg::ReadingRanker for DecisionDump {
                     "sem": c.sem,
                     "skeleton": c.skeleton,
                     "gloss": c.gloss,
-                    "structure": c.structure,
+                    "constituents": c.constituents,
+                    "predication": c.predication,
                     "links": c.links.iter()
-                        .map(|l| [&l.relation, &l.dependent, &l.host])
+                        .map(|l| [format!("{:?}", l.function), l.dependent.clone(), l.host.clone()])
                         .collect::<Vec<_>>(),
                 })).collect::<Vec<_>>(),
                 "groups": q.groups,
@@ -3815,7 +3818,10 @@ fn wrn_first_page_over_full_lexicon() {
         "=== DERIVATIONS: {deriv_readings} readings of ambiguous units, {deriv_bad} without a \
          well-formed derivation over the whole unit ==="
     );
-    assert_eq!(deriv_bad, 0, "every reading carries its derivation (eigenius#264)");
+    assert_eq!(
+        deriv_bad, 0,
+        "every reading carries its derivation (eigenius#264)"
+    );
 
     assert_replay_faithful();
     // A selection replay with misses is not the recorded experiment: each miss ABSTAINS, so the

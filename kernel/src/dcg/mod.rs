@@ -33,6 +33,7 @@
 //!   + multi-span lemmatized seeding + CKY + the kernel felicity filter.
 
 pub mod abbrev;
+pub mod analysis;
 pub mod attribution;
 pub mod augment;
 pub mod category;

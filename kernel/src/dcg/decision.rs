@@ -41,7 +41,36 @@ pub struct Choice {
     /// mean). An empty list is left out.
     pub notes: Vec<(String, Vec<String>)>,
     /// The options, by key, each with what it means.
-    pub options: Vec<(String, String)>,
+    pub options: Vec<(String, Description)>,
+}
+
+/// What an option means: a text, or named fields in order (a grammatical analysis and the
+/// functions of its phrases).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(untagged)]
+pub enum Description {
+    Text(String),
+    Fields(Vec<(String, Field)>),
+}
+
+/// One field of a [`Description`].
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(untagged)]
+pub enum Field {
+    Text(String),
+    List(Vec<String>),
+}
+
+impl From<&str> for Description {
+    fn from(text: &str) -> Self {
+        Description::Text(text.to_string())
+    }
+}
+
+impl From<String> for Description {
+    fn from(text: String) -> Self {
+        Description::Text(text)
+    }
 }
 
 /// A provider's answer to a [`Choice`].
@@ -121,7 +150,23 @@ pub fn render_prompt(choice: &Choice) -> String {
     }
     out.push_str("Options:\n");
     for (key, description) in &choice.options {
-        out.push_str(&format!("  [{key}] {description}\n"));
+        match description {
+            Description::Text(text) => out.push_str(&format!("  [{key}] {text}\n")),
+            Description::Fields(fields) => {
+                out.push_str(&format!("  [{key}]\n"));
+                for (name, field) in fields {
+                    match field {
+                        Field::Text(text) => out.push_str(&format!("      {name}: {text}\n")),
+                        Field::List(items) => {
+                            out.push_str(&format!("      {name}:\n"));
+                            for item in items {
+                                out.push_str(&format!("        - {item}\n"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     for (name, lines) in choice.notes.iter().filter(|(_, l)| !l.is_empty()) {
         out.push_str(&format!("\n{name}:\n"));
@@ -178,7 +223,24 @@ pub fn render_typesafe(choice: &Choice, model: &str) -> String {
     let criteria = choice
         .options
         .iter()
-        .map(|(k, d)| (k.clone(), text(d)))
+        .map(|(k, d)| {
+            let criterion = match d {
+                Description::Text(t) => text(t),
+                Description::Fields(fields) => Ordered::Object(
+                    fields
+                        .iter()
+                        .map(|(name, field)| {
+                            let value = match field {
+                                Field::Text(t) => text(t),
+                                Field::List(items) => Ordered::Value(json!(items)),
+                            };
+                            (snake(name), value)
+                        })
+                        .collect(),
+                ),
+            };
+            (k.clone(), criterion)
+        })
         .collect();
     let question = Ordered::Object(vec![
         ("type".into(), text("choice")),
@@ -501,13 +563,49 @@ mod tests {
     #[test]
     fn a_typesafe_request_keeps_the_choices_order() {
         let mut c = choice();
-        c.options = (1..=11).map(|n| (n.to_string(), format!("s{n}"))).collect();
+        c.options = (1..=11)
+            .map(|n| (n.to_string(), format!("s{n}").into()))
+            .collect();
         let body = render_typesafe(&c, "jev-latest");
         let at = |needle: &str| body.find(needle).unwrap();
         assert!(at("\"document\"") < at("\"the_sentence\""));
         assert!(at("\"question\"") < at("\"how_the_structures_differ\""));
         assert!(at("\"2\":") < at("\"10\":"));
         assert!(at("\"state\"") < at("\"questions\""));
+    }
+
+    /// An option of named fields is an object of those fields for TypeSafe, in their order, and
+    /// indented lines in the prompt.
+    #[test]
+    fn an_option_of_fields_renders_as_its_fields() {
+        let mut c = choice();
+        c.options[0].1 = Description::Fields(vec![
+            (
+                "analysis".into(),
+                Field::Text("We ascertained [MSI status] with sequencing.".into()),
+            ),
+            (
+                "functions".into(),
+                Field::List(vec![
+                    "«with sequencing» is an adverbial of «ascertained»".into()
+                ]),
+            ),
+        ]);
+        let body = render_typesafe(&c, "jev-latest");
+        let req: Value = serde_json::from_str(&body).unwrap();
+        let one = &req["questions"][TYPESAFE_QUESTION]["criteria"]["1"];
+        assert_eq!(
+            one["analysis"],
+            json!("We ascertained [MSI status] with sequencing.")
+        );
+        assert_eq!(
+            one["functions"][0],
+            json!("«with sequencing» is an adverbial of «ascertained»")
+        );
+        assert!(body.find("\"analysis\"").unwrap() < body.find("\"functions\"").unwrap());
+        let p = render_prompt(&c);
+        assert!(p.contains("  [1]\n      analysis: We ascertained [MSI status] with sequencing.\n"));
+        assert!(p.contains("      functions:\n        - «with sequencing» is an adverbial"));
     }
 
     /// An answer naming no option is an error; runners-up naming none are dropped.

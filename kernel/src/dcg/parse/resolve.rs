@@ -27,8 +27,7 @@ use crate::dcg::reading_ranker::{
 };
 use crate::dcg::skeleton::skeleton_of;
 use crate::dcg::verbalize::{
-    concept_notes, resource_label, structure_links, unit_sense_names, unit_surface_names,
-    verbalize, Vb,
+    concept_notes, predication, resource_label, structure_links, unit_sense_names, verbalize, Vb,
 };
 use crate::ontology::Resource;
 
@@ -407,6 +406,8 @@ impl Parser {
                 let doc_ctx = DocumentContext {
                     document,
                     sentence: s,
+                    // The proposer reads no constituent spans.
+                    tokens: &[],
                     prior_selections: &prior,
                     // The proposer ranks ANTECEDENTS, not readings; its candidates carry their
                     // own surfaces, so there is no concept legend to add here.
@@ -625,14 +626,13 @@ impl Parser {
         // The chooser's register (D69 §4): the ranker is being asked which reading is right, and
         // in Surface these 120 readings render to 4 strings.
         let vb = Vb::expanded(&names, &self.grammar.layer);
-        // The structure alone, in the sentence's words — what the two-call ranker's structure
-        // call is shown, and what its contrasts are computed from (eigenius#264).
-        let mut surface = unit_surface_names(sentence, self, lemmatizer);
-        // An atom no span carries (a coordinated head) keeps its lemma name rather than its id.
-        for (key, name) in &names {
-            surface.entry(key.clone()).or_insert_with(|| name.clone());
-        }
-        let vbs = Vb::structural(&surface, &self.grammar.layer);
+        // The sentence as the parser split it: what each reading's derivation indexes, so its
+        // constituents and the words that introduced each concept can be shown (eigenius#264).
+        let tokens: Vec<String> = self
+            .tokenize(sentence)
+            .iter()
+            .map(|t| t.surface().to_string())
+            .collect();
         let skels: Vec<String> = closed.iter().map(|it| skeleton_of(it.sem())).collect();
         // Present GROUPED BY SKELETON (the stable sort keeps the forest's cost order within a
         // group), so structural alternatives sit side by side for the ranker.
@@ -640,12 +640,31 @@ impl Parser {
         order.sort_by(|&a, &b| skels[a].cmp(&skels[b]));
         let cands: Vec<ReadingCandidate> = order
             .iter()
-            .map(|&i| ReadingCandidate {
-                skeleton: skels[i].clone(),
-                gloss: verbalize(closed[i].sem(), &vb),
-                sem: pretty_term(closed[i].sem()),
-                structure: verbalize(closed[i].sem(), &vbs),
-                links: structure_links(closed[i].sem(), &vbs),
+            .map(|&i| {
+                let it = &closed[i];
+                // Each concept named by the words of the leaf that introduced it in THIS reading,
+                // else by its lemma; and the constituents its derivation builds.
+                let (mut words, constituents) = match it.derivation() {
+                    Some(d) => (
+                        d.leaf_words(&tokens),
+                        d.constituents()
+                            .into_iter()
+                            .filter(|&(a, b)| b > a)
+                            .collect(),
+                    ),
+                    None => (BTreeMap::new(), Vec::new()),
+                };
+                for (key, name) in &names {
+                    words.entry(key.clone()).or_insert_with(|| name.clone());
+                }
+                ReadingCandidate {
+                    skeleton: skels[i].clone(),
+                    gloss: verbalize(it.sem(), &vb),
+                    sem: pretty_term(it.sem()),
+                    constituents,
+                    links: structure_links(it.sem(), &Vb::surface(&words, &self.grammar.layer)),
+                    predication: predication(it.sem()).map(str::to_string),
+                }
             })
             .collect();
         // The legend: every concept these readings name, once, with the chain's definition
@@ -655,6 +674,7 @@ impl Parser {
         let ctx = DocumentContext {
             document,
             sentence,
+            tokens: &tokens,
             prior_selections: prior,
             concepts: &concepts,
         };

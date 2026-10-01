@@ -499,9 +499,8 @@ impl Parser {
     }
 
     /// Every sense a span of `text`'s tokens can take, with the span's words: the spans seeding
-    /// looks up, up to six tokens and never across a comma, and a derived adjective's base senses
-    /// on its own token. How the structural register names a multiword concept or a derived
-    /// adjective by its words rather than its label (eigenius#264).
+    /// looks up, up to six tokens and never across a comma. How a document's named individual is
+    /// named by the span that introduced it ([`crate::dcg::verbalize::unit_sense_names`]).
     pub fn span_senses(&self, text: &str, lemmatizer: &dyn Lemmatizer) -> Vec<(String, String)> {
         let tokens = self.tokenize(text);
         let n = tokens.len();
@@ -515,11 +514,6 @@ impl Parser {
                 let words = super::preprocess::join_surfaces(&tokens[i..=j]);
                 for (_closed, _cat, sense) in self.debug_form_entries(&words, lemmatizer) {
                     if !sense.is_empty() {
-                        out.push((words.clone(), sense));
-                    }
-                }
-                if i == j {
-                    for sense in self.derived_adjective_senses(&words) {
                         out.push((words.clone(), sense));
                     }
                 }

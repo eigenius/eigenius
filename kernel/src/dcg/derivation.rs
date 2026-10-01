@@ -22,7 +22,7 @@
 //! concept, cannot be told apart in the term. It is shared, not copied ([`Arc`]): a composition adds
 //! one node over its children's derivations.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use super::item::Combinator;
@@ -110,6 +110,22 @@ impl Derivation {
         for c in &self.children {
             c.collect_leaves(out);
         }
+    }
+
+    /// Each sense atom the leaves contribute, with the words that introduced it: `tokens` are the
+    /// sentence's, as the parser split it. An atom two leaves contribute keeps the first's words.
+    pub fn leaf_words(&self, tokens: &[String]) -> BTreeMap<String, String> {
+        let mut out = BTreeMap::new();
+        for leaf in self.leaves() {
+            let (i, j) = leaf.span;
+            let Some(words) = tokens.get(i..=j) else {
+                continue;
+            };
+            for atom in &leaf.atoms {
+                out.entry(atom.clone()).or_insert_with(|| words.join(" "));
+            }
+        }
+        out
     }
 
     /// Whether every constituent's children lie inside it, in sentence order and without
