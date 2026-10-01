@@ -518,9 +518,12 @@ fn as_meta_spine(neut: &Neut) -> Option<(MetaId, Vec<Val>)> {
 /// `NtFun` / `NtMatch` carry a `Rho`, and `TemplateVal` carries a payload this does not
 /// interpret; a variable can hide inside any of them. Rather than walk them wrongly, they answer
 /// `None`. That is the fail-closed direction: an undecidable solution is not solved.
-/// `ResourceVal` is NOT among them: it holds a stored [`Resource`](crate::ontology::resource::Resource),
-/// whose property values are strings, numbers, booleans, embedded resources and JSON — no type
-/// in it can hold a `Neut::Gen`, so a named individual is variable-free like a class.
+/// A `ResourceVal` WITH an `@id` is not among them: it is a stored chain individual, whose
+/// property values are strings, numbers, booleans, embedded resources and JSON — no type in it can
+/// hold a `Neut::Gen` — so it is variable-free like a class. One WITHOUT an `@id` is embedded, and
+/// may have been built by `Exp::Construct`, whose marshalling replaces a neutral field with an empty
+/// resource (`eval/marshal.rs`): the variable is gone from the value but the term depended on it, so
+/// it stays undecidable.
 ///
 /// Binders are entered the way readback enters them — instantiate the closure with a fresh
 /// generated variable, and record that level as BOUND so the walk does not report its own
@@ -551,10 +554,10 @@ fn walk_val(
         | Val::LitRat(_)
         | Val::LitUnit(_)
         // A `WitnessKey` — an IRI and a proposition hash. No variables.
-        | Val::ChainWitness(_)
-        // A stored resource — a named individual (`compound(g, AVPR2)`). Its payload is
+        | Val::ChainWitness(_) => Some(()),
+        // A stored chain individual (`compound(g, AVPR2)`): its payload is
         // `ontology::resource::Value`s, none of which can hold a `Neut::Gen`. No variables.
-        | Val::ResourceVal(_) => Some(()),
+        Val::ResourceVal(r) if r.id().is_some() => Some(()),
 
         Val::Pair(a, b) => {
             walk_val(a, depth, bound, out)?;
@@ -609,6 +612,9 @@ fn walk_val(
 
         // Carries a `Rho` or an uninterpreted payload — a variable can hide inside. Undecidable.
         Val::Record(..) | Val::Fun(..) | Val::Data(..) | Val::TemplateVal(..) => None,
+        // An embedded resource may come from `Exp::Construct`, whose marshalling erased a neutral
+        // field: no variable in the value, a dependence on one in the term. Undecidable.
+        Val::ResourceVal(_) => None,
     }
 }
 
@@ -1199,6 +1205,23 @@ mod tests {
         assert!(
             matches!(mctx.solution(id), Some(Val::Lam(_))),
             "the solution abstracts over the spine"
+        );
+    }
+
+    /// An EMBEDDED resource (no `@id`) stays undecidable: `Exp::Construct` builds one, and its
+    /// marshalling replaces a field that depends on a bound variable with an empty resource.
+    #[test]
+    fn an_embedded_resource_in_a_pattern_solution_is_refused() {
+        let constructed =
+            Val::ResourceVal(Box::new(crate::ontology::resource::Resource::new_embedded()));
+        let mut mctx = MetaCtx::new();
+        let id = mctx.fresh(0);
+        let m = Val::Nt(Neut::Meta(id, vec![bound_var(0)]));
+        let err = unify(1, &m, &constructed, &mut mctx)
+            .expect_err("an embedded resource may hide a dependence on a variable");
+        assert!(
+            matches!(err, UnifyError::Undecidable { .. }),
+            "expected an undecidable refusal, got {err:?}"
         );
     }
 

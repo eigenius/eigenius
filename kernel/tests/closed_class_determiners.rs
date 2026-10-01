@@ -575,23 +575,36 @@ fn derived_adjective_recognition_requires_a_known_base() {
         index.parse("HeLa is double-zorp", &Identity).is_empty(),
         "a hyphen compound with no adjective head does not seed a derived adjective"
     );
-    // The left half must be known too, and must be a modifier for the identity reading: dropping an
-    // unknown or nominal left half would drop whatever it says (`gene-primary` read as `primary`).
+    // The left half must be known too: dropping an unknown left half would drop whatever it says.
     assert!(
         index.parse("HeLa is zorp-primary", &Identity).is_empty(),
         "a hyphen compound with an unknown left half does not seed a derived adjective"
-    );
-    assert!(
-        index.parse("HeLa is gene-primary", &Identity).is_empty(),
-        "a noun left half over a head that governs no complement has no reading"
     );
 }
 
 /// A relational adjective in the shape the WordNet importer emits for a governed preposition
 /// (`push_adj`, C3-positive): `(S[adj]\NP)/cat_pp_arg(prep_to)` over a 2-place relation, complement
-/// first — beside its plain 1-place reading.
+/// first — beside its plain 1-place reading. And a common noun `pan` (WordNet's chimpanzee genus has
+/// the same letters as the bound prefix `pan-`).
 const RELATIONAL_ADJECTIVE_FIXTURE: &str = r#"
 namespace lexicon   = "urn:eigenius:lexicon";
+namespace fixture   = "urn:eigenius:test:compound-fixture";
+class fixture:Pan : lexicon:Entity { }
+resource fixture:e_pan : lexicon:LexicalEntry {
+    lexicon:form     = "pan";
+    lexicon:cat      = type_expr( lexicon:cat_n(fixture:Pan, lexicon:sg) );
+    lexicon:sem      = fixture:Pan;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:pan.n.02";
+}
+class fixture:Large : lexicon:Entity { }
+resource fixture:e_large_n : lexicon:LexicalEntry {
+    lexicon:form     = "large";
+    lexicon:cat      = type_expr( lexicon:cat_n(fixture:Large, lexicon:sg) );
+    lexicon:sem      = fixture:Large;
+    lexicon:sem_type = type_expr( Set );
+    lexicon:sense    = "wn:large.n.01";
+}
 axiom lexicon:responsive_rel : lexicon:Entity -> lexicon:Entity -> Prop
 resource lexicon:e_responsive_rp : lexicon:LexicalEntry {
     lexicon:form     = "responsive";
@@ -611,27 +624,87 @@ resource lexicon:e_responsive : lexicon:LexicalEntry {
 "#;
 
 #[test]
-fn noun_left_hyphen_compound_fills_the_heads_governed_complement() {
-    // D63 compound morphology §2a applied to Slice 1: `gene-responsive` ≡ `responsive to genes`. The
-    // noun left half fills the head adjective's governed `to`-complement as its kind, which is the
-    // term the phrase commits — not the identity reading, which would drop it to plain `responsive`.
+fn noun_left_hyphen_compound_keeps_the_noun() {
+    // D63 compound morphology §3, Slice 1: a noun left half is not dropped. Every reading keeps it —
+    // through the vague modifier relation `compound_kind` (the N-N compound rule's), and, where the
+    // head governs a preposition, also as the phrase the compound may abbreviate (§2a:
+    // `gene-responsive` ≡ `responsive to genes`, one proposition with one representation).
     let index = index_with_fixture(RELATIONAL_ADJECTIVE_FIXTURE);
-    let compound = index.parse("HeLa is gene-responsive", &PluralS);
-    assert!(!compound.is_empty(), "`gene-responsive` parses");
+
+    // A head that governs nothing: only the vague reading.
+    let primary = index.parse("HeLa is gene-primary", &PluralS);
+    assert!(!primary.is_empty(), "`gene-primary` parses");
+    for it in &primary {
+        let t = pretty_term(it.sem());
+        assert!(
+            t.contains("compound_kind") && t.contains("Gene"),
+            "every reading keeps the noun through compound_kind — got {t}"
+        );
+    }
+
+    // A head that governs `to`: the vague reading AND the phrase's.
+    let compound: Vec<String> = index
+        .parse("HeLa is gene-responsive", &PluralS)
+        .iter()
+        .map(|it| pretty_term(it.sem()))
+        .collect();
     let phrase: std::collections::BTreeSet<String> = index
         .parse("HeLa is responsive to genes", &PluralS)
         .iter()
         .map(|it| pretty_term(it.sem()))
         .collect();
-    for it in &compound {
-        let t = pretty_term(it.sem());
+    assert!(
+        compound.iter().all(|t| t.contains("Gene")),
+        "every reading keeps the noun — got {compound:?}"
+    );
+    assert!(
+        compound.iter().any(|t| t.contains("compound_kind")),
+        "the vague reading is among the candidates — got {compound:?}"
+    );
+    assert!(
+        compound.iter().any(|t| phrase.contains(t)),
+        "`responsive to genes` is among the candidates — {compound:?} vs {phrase:?}"
+    );
+
+    // A left half that is an adjective AND a noun (the demo adjective `large`, a noun in this
+    // fixture — WordNet's `double` is both) is a modifier: no nominal reading beside it.
+    let large: Vec<String> = index
+        .parse("HeLa is large-responsive", &PluralS)
+        .iter()
+        .map(|it| pretty_term(it.sem()))
+        .collect();
+    assert!(!large.is_empty(), "`large-responsive` parses");
+    assert!(
+        large.iter().all(|t| !t.contains("Large")),
+        "an adjective left half has only the modifier reading — got {large:?}"
+    );
+}
+
+#[test]
+fn a_bound_prefix_is_never_a_noun() {
+    // `pan-essential` once read as «essential for the genus Pan»: the left half was looked up as a
+    // word, and WordNet has a noun `pan`. A transparent prefix reads as its head (identity, v1); a
+    // prefix that negates or reverses (`non-`, `anti-`) has no reading rather than an inverted one.
+    let index = index_with_fixture(RELATIONAL_ADJECTIVE_FIXTURE);
+    let base: std::collections::BTreeSet<String> = index
+        .parse("HeLa is responsive", &PluralS)
+        .iter()
+        .map(|it| pretty_term(it.sem()))
+        .collect();
+    let pan: std::collections::BTreeSet<String> = index
+        .parse("HeLa is pan-responsive", &PluralS)
+        .iter()
+        .map(|it| pretty_term(it.sem()))
+        .collect();
+    assert!(!pan.is_empty(), "`pan-responsive` parses");
+    assert_eq!(
+        pan, base,
+        "`pan-` is transparent — the same claims as `responsive`"
+    );
+    for prefixed in ["HeLa is non-responsive", "HeLa is anti-responsive"] {
         assert!(
-            t.contains("responsive_rel") && t.contains("kind_of"),
-            "every reading keeps the noun, as the complement — got {t}"
-        );
-        assert!(
-            phrase.contains(&t),
-            "`gene-responsive` states the phrase's proposition — {t} is not among {phrase:?}"
+            index.parse(prefixed, &PluralS).is_empty(),
+            "{prefixed}: a negating prefix has no reading, not the head's"
         );
     }
 }

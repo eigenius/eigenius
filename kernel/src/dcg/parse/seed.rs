@@ -29,7 +29,7 @@
 //! and the flat beamed chart both build their leaf cells from.
 
 use super::super::category::{
-    governs_named_preposition, is_adjective_cat, is_binary_relation_cat, is_ctor,
+    governs_named_preposition, inductive_iri, is_adjective_cat, is_binary_relation_cat, is_ctor,
     is_vp_adjunct_prep, kind_of, slash_parts,
 };
 use super::super::chart::{beam_cell, cell_histogram, Chart};
@@ -444,50 +444,97 @@ impl Parser {
     /// The readings of a right-headed hyphen compound `L-H` whose head `H` is a known adjective (D63
     /// compound morphology §3, Slice 1). What `L` contributes depends on what `L` is:
     ///
+    /// * a **bound prefix** is a prefix, whatever the lexicon holds for the same letters (`Pan` is
+    ///   the chimpanzee genus, `anti` an adjective). A transparent one ([`is_transparent_hyphen_prefix`],
+    ///   `pan-essential`) reads as `H`, identity in v1 like `hypermutable`; the others
+    ///   ([`OPAQUE_HYPHEN_PREFIXES`]) have NO reading — `non-` negates and `anti-` reverses, so the
+    ///   identity reading would invert the claim;
     /// * an **adjective** modifies the head (`double-stranded`): the head's own items, `L`
-    ///   transparent (identity sem, v1);
-    /// * a **noun or name** fills the head's governed complement (`desmopressin-responsive` ≡
-    ///   `responsive to desmopressin`). The compound and the phrase are one proposition with one
-    ///   representation (§2a), so the head's relational entry `(S[adj]\NP)/cat_pp_arg(prep_P)`
-    ///   ([`governs_named_preposition`]) is applied to `L` — a common noun as its kind (`kind_of(C)`, as
-    ///   a bare argument commits), a name as itself.
+    ///   transparent (identity sem, v1). This takes precedence when `L` is also a noun — `double` is
+    ///   one in WordNet, and a nominal reading of every adjective modifier multiplies the readings of
+    ///   ordinary compounds (the reference page went from 652 to 796);
+    /// * a **noun or name** that is not an adjective keeps its content without a relation the compound does not write:
+    ///   `λx. H(x) ∧ compound_kind(x, L)` (`compound(x, L)` for a name), the vague modifier relation
+    ///   the N-N compound rule uses (`ontology.esl`). Where `H` governs a preposition, the compound may
+    ///   also be the phrase it abbreviates (`desmopressin-responsive` ≡ `responsive to desmopressin`,
+    ///   one proposition with one representation, §2a): the head's relational entry
+    ///   `(S[adj]\NP)/cat_pp_arg(prep_P)` ([`governs_named_preposition`]) applied to `L` — a common
+    ///   noun as its kind (`kind_of(C)`, as a bare argument commits), a name as itself. That reading is
+    ///   a CANDIDATE, not the reading: in `helicase-dead` the noun names what is dead, and `dead`'s
+    ///   governed `to` gives «unresponsive to helicases». Selection chooses between them.
     ///
-    /// A noun-left compound whose head governs no preposition gets NO reading. The identity reading
-    /// would drop `L` and the content it carries — `desmopressin-responsive` read as plain
-    /// `responsive` — and no relation is recorded to put `L` in. Empty unless `surface` is `L-H`.
+    /// Empty unless `surface` is `L-H`.
     fn hyphen_compound_items(&self, surface: &str) -> Vec<Item> {
         let Some((left, head)) = hyphen_compound_parts(surface) else {
             return Vec::new();
         };
-        let left_entries = self.lex.entries_for(left);
         let head_entries = self.lex.entries_for(head);
-        let mut out = Vec::new();
-        if left_entries.iter().any(|e| is_adjective_cat(e.item.cat())) {
-            out.extend(
-                head_entries
-                    .iter()
-                    .filter(|e| is_adjective_cat(e.item.cat()))
-                    .map(|e| e.item.clone()),
-            );
+        let head_adjectives = || {
+            head_entries
+                .iter()
+                .filter(|e| is_adjective_cat(e.item.cat()))
+        };
+        if is_transparent_hyphen_prefix(left) {
+            return head_adjectives().map(|e| e.item.clone()).collect();
         }
-        let complements: Vec<Exp> = left_entries
-            .iter()
-            .filter_map(|e| match is_ctor(e.item.cat(), "cat_n") {
-                Some([t, _]) => Some(kind_of(t.clone())),
-                _ => is_ctor(e.item.cat(), "cat_np").map(|_| e.item.sem().clone()),
-            })
-            .collect();
-        for h in head_entries
-            .iter()
-            .filter(|e| governs_named_preposition(e.item.cat()))
-        {
-            let Some((_m, adjective, _pp)) = slash_parts(h.item.cat(), "fwd") else {
-                continue;
+        if OPAQUE_HYPHEN_PREFIXES.contains(&left) {
+            return Vec::new();
+        }
+        let left_entries = self.lex.entries_for(left);
+        if left_entries.iter().any(|e| is_adjective_cat(e.item.cat())) {
+            return head_adjectives().map(|e| e.item.clone()).collect();
+        }
+        let mut out = Vec::new();
+        let and = inductive_iri(&self.grammar.layer, "urn:eigenius:logic:And");
+        for l in &left_entries {
+            // (the complement a governed preposition takes, the modifier relation, its argument)
+            let (complement, relation, modifier) = match is_ctor(l.item.cat(), "cat_n") {
+                Some([t, _]) => (kind_of(t.clone()), COMPOUND_KIND, l.item.sem().clone()),
+                _ if is_ctor(l.item.cat(), "cat_np").is_some() => {
+                    (l.item.sem().clone(), COMPOUND, l.item.sem().clone())
+                }
+                _ => continue,
             };
-            for c in &complements {
+            // The vague reading: `λx. H(x) ∧ relation(x, L)`.
+            if let Some(and) = &and {
+                for h in head_adjectives() {
+                    let x = "__hyc_theta";
+                    let sem = Exp::Lam(
+                        Patt::Var(x.to_string()),
+                        Box::new(Exp::const_applied(
+                            and.clone(),
+                            Vec::new(),
+                            vec![
+                                Exp::App(
+                                    Box::new(h.item.sem().clone()),
+                                    Box::new(Exp::Var(x.to_string())),
+                                ),
+                                Exp::App(
+                                    Box::new(Exp::App(
+                                        Box::new(Exp::EigonAxiom(
+                                            Iri::parse(relation).expect("modifier axiom iri"),
+                                        )),
+                                        Box::new(Exp::Var(x.to_string())),
+                                    )),
+                                    Box::new(modifier.clone()),
+                                ),
+                            ],
+                        )),
+                    );
+                    out.push(Item::with_cost(h.item.cat().clone(), sem, h.item.cost()));
+                }
+            }
+            // The phrase the compound may abbreviate: `H P L`.
+            for h in head_entries
+                .iter()
+                .filter(|e| governs_named_preposition(e.item.cat()))
+            {
+                let Some((_m, adjective, _pp)) = slash_parts(h.item.cat(), "fwd") else {
+                    continue;
+                };
                 out.push(Item::with_cost(
                     adjective.clone(),
-                    Exp::App(Box::new(h.item.sem().clone()), Box::new(c.clone())),
+                    Exp::App(Box::new(h.item.sem().clone()), Box::new(complement.clone())),
                     h.item.cost(),
                 ));
             }
@@ -1313,9 +1360,6 @@ fn adverb_bases(surface: &str) -> Vec<String> {
 /// v1 (identity sem — the derived word reuses the base's items), so only the stem is returned. A
 /// hyphenated surface has no prefix base; its halves are [`hyphen_compound_parts`].
 fn prefix_adjective_bases(surface: &str) -> Vec<String> {
-    // Productive biomedical adjective prefixes (a declarative closed set, not a corpus-frequency
-    // splitter — §2 "closed affix inventory, not frequency splitting").
-    const ADJ_PREFIXES: &[&str] = &["hyper", "hypo", "poly", "multi", "mono"];
     let s = surface.trim().to_lowercase();
     if s.contains('-') {
         return Vec::new();
@@ -1330,6 +1374,30 @@ fn prefix_adjective_bases(surface: &str) -> Vec<String> {
     bases.dedup();
     bases
 }
+
+/// Productive biomedical adjective prefixes, concatenated (`hypermutable`) — a declarative closed
+/// set, not a corpus-frequency splitter (§2 "closed affix inventory, not frequency splitting").
+const ADJ_PREFIXES: &[&str] = &["hyper", "hypo", "poly", "multi", "mono"];
+
+/// Whether `left` is a bound prefix read as TRANSPARENT in a hyphen compound (identity, v1 — degree
+/// and scope deferred, as for [`ADJ_PREFIXES`]): the concatenated set written with a hyphen, and
+/// `pan-` («pan-essential», «pan-nuclear»), which is written only with one.
+fn is_transparent_hyphen_prefix(left: &str) -> bool {
+    left == "pan" || ADJ_PREFIXES.contains(&left)
+}
+
+/// Bound prefixes whose meaning a hyphen compound does not get yet. They have NO reading rather than
+/// identity — `non-homologous` read as `homologous`, `anti-proliferative` as `proliferative` inverts
+/// the claim — and are never looked up as words (`anti` is a WordNet adjective, `self` a noun).
+const OPAQUE_HYPHEN_PREFIXES: &[&str] = &[
+    "anti", "co", "de", "inter", "intra", "meta", "mid", "non", "post", "pre", "pro", "re", "self",
+    "semi", "sub", "trans", "un",
+];
+
+/// The vague modifier relations of `ontology.esl`, as the N-N compound rules use them: a named
+/// modifier (`compound`) and a common-noun kind (`compound_kind`).
+const COMPOUND: &str = "urn:eigenius:ontology:compound";
+const COMPOUND_KIND: &str = "urn:eigenius:ontology:compound_kind";
 
 /// The halves `(left, head)` of a **right-headed hyphen compound** `L-H` (D63 compound morphology §3,
 /// Slice 1): the head (last segment) carries the category, and [`Parser::hyphen_compound_items`]

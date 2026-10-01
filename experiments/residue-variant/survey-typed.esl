@@ -20,22 +20,24 @@ namespace umlscui      = "urn:eigenius:umlscui";
 namespace wn           = "urn:eigenius:wn";
 namespace rv           = "urn:eigenius:uab:residue-variant";
 
-// Reading the body: a survey s (C0038951) that is nationwide (a00526984 above its standard), and an
-// AVPR2 genotype g (n04934043, compound with the gene C1332124) whose responsiveness to desmopressin
-// (a01999306, relational, ground C0011701) is above its standard, such that s reports x as g
+// Reading the body: a survey s (n00644503, «a detailed critical inspection») that is nationwide
+// (a00526984 above its standard), and an AVPR2 genotype g (n04934043, compound with the gene
+// C1332124) that is responsive (a01999306 above its standard) and related to desmopressin
+// (`compound_kind` with C0011701 — the hyphen compound «desmopressin-responsive» read without naming
+// the relation; the ranker chose this over «responsive to desmopressin»), such that s reports x as g
 // (v00966809, `report X as Y`: object, predicative complement, subject).
 def rv:SurveyReportsResponsive(x : lexicon:Entity) : Prop =
     forall (x0 : Prop) =>
-        (forall (x1 : exists x1 : umlscui:C0038951 =>
+        (forall (x1 : exists x1 : wn:n00644503 =>
                 measurements:gt(wn:deg_a00526984(x1), wn:std_a00526984)) =>
             (forall (x2 : Prop) =>
                 (forall (x3 : exists x3 : wn:n04934043 =>
                         logic:And(
-                            ontology:compound(x3, umlscui:C1332124),
-                            measurements:gt(
-                                wn:deg_a01999306_rel(ontology:kind_of(umlscui:C0011701), x3),
-                                wn:std_a01999306
-                            )
+                            logic:And(
+                                measurements:gt(wn:deg_a01999306(x3), wn:std_a01999306),
+                                ontology:compound_kind(x3, umlscui:C0011701)
+                            ),
+                            ontology:compound(x3, umlscui:C1332124)
                         )) =>
                     wn:v00966809_as(x, eigentt:fst(x3), eigentt:fst(x1)) -> x2)
                 -> x2)

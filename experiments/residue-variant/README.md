@@ -112,7 +112,7 @@ is built.
 |---|---|---|
 | `sentences.txt` | hand | The prose input |
 | `avpr2.esl` | hand | Vocabulary: `Variant`, `Residue`, `HasResidue`, `DDAVPResponsive`, the two variants, `Leu44`, and `Leu44`'s lexical entry. Chain-loaded at parse time (the snapshot does not carry it) and loaded first in the test |
-| `selections.json` | `prose-to-esl`, live LLM, once | The recorded reading choice per sentence (32 and 20 candidates). Replayed on every later run |
+| `selections.json` | `prose-to-esl`, live LLM, once | The recorded reading choice per sentence (80 and 20 candidates). Replayed on every later run; a run whose candidate pool differs fails closed instead of choosing |
 | `claims.esl` | `prose-to-esl` | The parsed claims: units, `EncodedClaim`s, `DeclarationTrace`s, `DecisionPoint`s with the ranker's rationale |
 | `survey-typed.esl` | hand, from `claims.esl` | `def rv:SurveyReportsResponsive(x : lexicon:Entity)` — `claim_1`'s term with `Leu44` abstracted. `SurveyReportsResponsive(Leu44)` unfolds to `claim_1`'s proposition. Rebuild it whenever `claims.esl` changes |
 | `bridge.esl` | hand | The declared bridge `∀ (v : Variant). SurveyReportsResponsive(v) → DDAVPResponsive(v)`, its trace, and the survey's warrant (the material does not cite the survey) |
@@ -162,6 +162,8 @@ Parse probes ran cap-only (no sense reranker) through `scripts/measure-parse-rat
 | 4 | same | `lists`/`reports`/`identifies` `Leu44 as a …` | `lists`: no parse. `reports`, `identifies`: 48 readings each, every one `report_as(Leu44, g, s)` with `g` a responsive AVPR2 genotype — `desmopressin` still dropped |
 | 5 | `uab-compound-aligned-2026-10-01` (after the compound fix and reseed) | `lists … among` and `reports … as` | 32 readings each; 32 of 32 keep desmopressin as `deg_responsive_rel(kind_of(C0011701), g)` |
 | 6 | same | `sentences.txt` | 32 and 20 readings; the ranker chose survey `umlscui:C0038951`, `report` `v00966809` ("announce as the result of an investigation"), `responsive` `a01999306` |
+| 7 | same | `WRN is pan-essential.` / `WRN is helicase-dead.` (full WRN paper words, not on the gated page) | `pan-essential`: «essential for the genus *Pan*» (`n02481629`, the chimpanzees), 64 readings. `helicase-dead`: «unresponsive to DNA helicases» (`a02107386`, `dead(p)`, «followed by `to'»), 4 readings. The rule of runs 5-6 read every noun left half as the head's governed complement |
+| 8 | same, after the compound rework (below) | runs 7 and 6 again | `pan-essential`: 10 readings, all a plain sense of `essential`. `helicase-dead`: 38 readings, the vague `dead(x) ∧ compound_kind(x, DNA Helicases)` among them beside the «dead to» ones. `sentences.txt`: 80 and 20 readings; the ranker chose survey `wn:n00644503` and the vague reading `responsive(g) ∧ compound_kind(g, desmopressin)` over «responsive to desmopressin» |
 
 Toy test runs, in order:
 
@@ -171,16 +173,17 @@ Toy test runs, in order:
 | 2 | A refused (its reason), C commits; B, D fail in `instantiate` | `T` inferred from the instance's principal type — fixed by the ascription above |
 | 3 | B, D fail solving `instantiate`'s `P` | The unifier's scope check treated a named individual (`umlscui:C1332124`, the AVPR2 gene) as able to hide a variable |
 | 4 | A, B refused for their reasons; C, D commit | — |
+| 5 | After the compound rework: replaying `selections.json` failed closed (sentence 1's pool grew from 32 to 80 readings). Re-recorded; `survey-typed.esl` rebuilt from the new `claim_1`. A, B refused for their reasons; C, D commit | — |
 
-## Changes made outside this directory (uncommitted)
+## Changes made outside this directory
 
 | Change | Files |
 |---|---|
-| A noun-left hyphen compound fills its head adjective's governed complement (`desmopressin-responsive` ≡ `responsive to desmopressin`); only an adjective left half is dropped (`double-stranded`); a noun left half over a head with no governed complement has no reading | `kernel/src/dcg/parse/seed.rs`, `kernel/tests/closed_class_determiners.rs` |
+| Hyphen compound `L-H` with an adjective head: a bound prefix is never looked up as a word — `pan-` (and `hyper-` … `mono-`) reads as `H`, `non-`, `anti-`, `pre-` and the other listed prefixes have no reading; an adjective `L` modifies `H` (`double-stranded`, `L` dropped as before), also when `L` is a noun too; a noun or name `L` that is not an adjective keeps its content as `H(x) ∧ compound_kind(x, L)`, and where `H` governs a preposition also as the phrase `H P L` (`responsive to desmopressin`), selection choosing between them | `kernel/src/dcg/parse/seed.rs`, `kernel/tests/closed_class_determiners.rs` |
 | `has_token` counts a hyphenated surface whose spaced form is an entry (`microsatellite-stable`) as known — it had been known only through the dropped-left-half rule | `kernel/src/dcg/parse/mod.rs` |
 | `responsive` governs `to` (SPECIALIST E0053052 `compl=pphr(to,np)`) | `crates/eigenius-wordnet/adjective-frames.tsv`, `crates/eigenius-wordnet/src/convert.rs` (test) |
 | `subst` passes `Exp::Const` as a leaf | `kernel/src/nbe/subst.rs` |
-| The unifier's scope walk treats `Val::ResourceVal` as variable-free: a stored resource's values are strings, numbers, booleans, embedded resources and JSON, none of which can hold a `Neut::Gen` | `kernel/src/nbe/unify.rs` |
+| The unifier's scope walk treats a `Val::ResourceVal` WITH an `@id` — a stored chain individual — as variable-free: its values are strings, numbers, booleans, embedded resources and JSON, none of which can hold a `Neut::Gen`. An embedded resource (no `@id`) stays undecidable: `Exp::Construct` builds those, and its marshalling replaces a field that depends on a bound variable with an empty resource (`eval/marshal.rs`) | `kernel/src/nbe/unify.rs` |
 | Snapshot builds run isolated per checkout: the kernel image tag is `EIGENIUS_KERNEL_TAG` (default `local`); the scripts look up the kernel container and the project's volume instead of hardcoding `eigenius-kernel-1` and `eigenius_eigenius_db` | `docker-compose.yml`, `scripts/reseed-lexicon-db.sh`, `scripts/add-layer-to-snapshot.sh` |
 
 The reseed ran as `COMPOSE_PROJECT_NAME=eigenius-uab EIGENIUS_KERNEL_TAG=uab`, so it used its own
@@ -190,7 +193,11 @@ volume and image. Its snapshots are named outside the `wordnet-umls-*` pattern t
 Reference-page gate on `uab-compound-aligned-2026-10-01` (replaying
 `experiments/parsing/ranks/2026-09-29-d95-slice8.json` and the matching selections): grammar-gap 0,
 expected-hits 62/62, total-readings 652, total-skeletons 212, selection 29/41 correct. HEAD's parser
-on the baseline snapshot gives the same 29/41; `baseline.json` records 30/41.
+on the baseline snapshot gives the same 29/41; `baseline.json` records 30/41. A first version of the
+compound rework gave a left half its nominal readings even when it is also an adjective; the gate
+measured total-readings 652 → 796 (ceiling 700) and 29 of 41 recorded selections abstaining. The
+page's adjective-left compounds, `double-stranded` and `large-scale`, have left halves that WordNet
+also lists as nouns. With the adjective reading taking precedence, the gate figures are those above.
 
 ## Open
 
@@ -200,3 +207,7 @@ on the baseline snapshot gives the same 29/41; `baseline.json` records 30/41.
   the variant-level predicate is grounded at nucleotide resolution.
 - `selections.json` was recorded against the cap-only parse (no sense ranks); the reading pool and
   therefore the choice depend on the snapshot.
+- The ranker chose the vague reading of «desmopressin-responsive» over «responsive to desmopressin»;
+  its rationale does not compare the two.
+- `non-`, `anti-` and the other opaque prefixes have no reading: their semantics (negation,
+  reversal) is not built.
