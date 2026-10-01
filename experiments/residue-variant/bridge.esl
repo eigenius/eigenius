@@ -1,0 +1,41 @@
+// The bridge from the survey's report to the variant-level predicate — DECLARED.
+//
+//   ∀ (v : Variant). SurveyReportsResponsive(v) → DDAVPResponsive(v)
+//
+// «A variant the survey reports as a desmopressin-responsive AVPR2 genotype responds to
+// desmopressin.» The quantifier ranges over VARIANTS, so the bridge lifts the survey's report only
+// for a subject at nucleotide resolution. The survey's subject is `Leu44`, a residue, which does
+// not inhabit `Variant` (`conclusions.esl`, case A); and the survey says nothing about c.131T>C
+// (case B).
+
+namespace core          = "urn:eigenius:core";
+namespace prov          = "urn:eigenius:prov";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace avpr2         = "urn:eigenius:uab:avpr2";
+namespace rv            = "urn:eigenius:uab:residue-variant";
+
+resource rv:bridge : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = rv:warrant_survey;
+    prov:rationale = "A variant the nationwide survey reports as a desmopressin-responsive AVPR2 genotype responds to desmopressin. Quantified over variants: the report lifts to DDAVPResponsive only for a subject at nucleotide resolution.";
+
+    eigentt:proposition = type_expr(
+        forall (v : avpr2:Variant) =>
+            rv:SurveyReportsResponsive(v) -> avpr2:DDAVPResponsive(v)
+    );
+}
+
+resource rv:bridge_trace : prov:DeclarationTrace {
+    prov:resource           = rv:bridge;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = rv:warrant_survey;
+    prov:timestamp          = "2026-10-01T00:00:00Z";
+}
+
+resource rv:warrant_survey : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:description = "The nationwide survey of desmopressin-responsive AVPR2 genotypes quoted in UAB Round 1, experiment 01 (residue-versus-variant.md:18). The material does not cite it; its bibliographic identity is not recorded here.";
+    core:short_name = "warrant_survey";
+}

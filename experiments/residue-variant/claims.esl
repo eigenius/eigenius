@@ -1,0 +1,152 @@
+// Decompiled from Eigon-JSON by `eigenius decompile`.
+
+namespace avpr2 = "urn:eigenius:uab:avpr2";
+namespace core = "urn:eigenius:core";
+namespace eigentt = "urn:eigenius:eigentt";
+namespace encoding = "urn:eigenius:encoding";
+namespace logic = "urn:eigenius:logic";
+namespace measurements = "urn:eigenius:measurements";
+namespace ontology = "urn:eigenius:ontology";
+namespace prov = "urn:eigenius:prov";
+namespace reference = "urn:eigenius:reference";
+namespace residue_variant = "urn:eigenius:uab:residue-variant";
+namespace umlscui = "urn:eigenius:umlscui";
+namespace units = "urn:eigenius:units";
+namespace wn = "urn:eigenius:wn";
+
+resource residue_variant:source : reference:Reference {
+    core:description = "The source this encoding was derived from: experiments/residue-variant/sentences.txt (sha256 2b46dd25d99ac39aa13a13e5255d5750e66bc6ce49dd6f5d8211fe82ace3c563). Minted document-locally — the file carries no DOI or PMID; pass an existing reference:Reference IRI to cite a bibliographic record instead.";
+}
+
+resource residue_variant:unit_1 : encoding:DiscourseUnit {
+    encoding:prose = "A nationwide survey reports Leu44 as a desmopressin-responsive AVPR2 genotype.";
+    encoding:source_document = "urn:eigenius:uab:residue-variant:source";
+    encoding:span_end = 78;
+    encoding:span_start = 0;
+    encoding:unit_kind = "urn:eigenius:encoding:kind_prose";
+}
+
+resource residue_variant:scoped_1 : encoding:ScopedUnit {
+    encoding:unit = "urn:eigenius:uab:residue-variant:unit_1";
+}
+
+resource residue_variant:claim_1 : encoding:EncodedClaim {
+    core:description = "«A nationwide survey reports Leu44 as a desmopressin-responsive AVPR2 genotype.» — the reading the ranker selected: ΠG#0:Prop. ΠG#1:ΣG#1:§. gt(§(G#1), §). ΠG#2:Prop. ΠG#3:ΣG#3:§. And(And(gt(§(G#3), §), compound_kind(G#3, §)), compound(G#3, §)). §(Leu44, G#3.1, G#1.1) → G#2 → G#2 → G#0 → G#0";
+    eigentt:proposition = type_expr(
+        forall (x0 : Prop) =>
+            (forall (x1 : exists x1 : wn:n00644503 =>
+                    measurements:gt(wn:deg_a00526984(x1), wn:std_a00526984)) =>
+                (forall (x2 : Prop) =>
+                    (forall (x3 : exists x3 : wn:n04934043 =>
+                            logic:And(
+                                logic:And(
+                                    measurements:gt(wn:deg_a01999306(x3), wn:std_a01999306),
+                                    ontology:compound_kind(x3, umlscui:C0011701)
+                                ),
+                                ontology:compound(x3, umlscui:C1332124)
+                            )) =>
+                        wn:v00966809_as(avpr2:Leu44, eigentt:fst(x3), eigentt:fst(x1)) -> x2)
+                    -> x2)
+                -> x0)
+            -> x0
+    );
+    encoding:from_unit = "urn:eigenius:uab:residue-variant:scoped_1";
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
+}
+
+resource residue_variant:trace_1 : prov:DeclarationTrace {
+    prov:resource = "urn:eigenius:uab:residue-variant:claim_1";
+    prov:timestamp = "2026-08-03T00:00:00Z";
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
+}
+
+resource residue_variant:decision_1 : encoding:DecisionPoint {
+    encoding:candidate_count = 80;
+    encoding:decision_unit = "urn:eigenius:uab:residue-variant:scoped_1";
+    encoding:runner_up_skeletons = ["ΠG#0:Prop. ΠG#1:ΣG#1:§. gt(§(G#1), §). ΠG#2:Prop. ΠG#3:ΣG#3:§. And(And(gt(§(G#3), §), compound_kind(G#3, §)), compound(G#3, §)). §(Leu44, G#3.1, G#1.1) → G#2 → G#2 → G#0 → G#0", "ΠG#0:Prop. ΠG#1:ΣG#1:§. gt(§(G#1), §). ΠG#2:Prop. ΠG#3:ΣG#3:§. And(And(gt(§(G#3), §), compound_kind(G#3, §)), compound(G#3, §)). §(Leu44, G#3.1, G#1.1) → G#2 → G#2 → G#0 → G#0", "ΠG#0:Prop. ΠG#1:ΣG#1:§. gt(§(G#1), §). ΠG#2:Prop. ΠG#3:ΣG#3:§. And(And(gt(§(G#3), §), compound_kind(G#3, §)), compound(G#3, §)). §(Leu44, G#3.1, G#1.1) → G#2 → G#2 → G#0 → G#0", "ΠG#0:Prop. ΠG#1:ΣG#1:§. gt(§(G#1), §). ΠG#2:Prop. ΠG#3:ΣG#3:§. And(And(gt(§(G#3), §), compound_kind(G#3, §)), compound_kind(G#3, §)). §(Leu44, G#3.1, G#1.1) → G#2 → G#2 → G#0 → G#0", "ΠG#0:Prop. ΠG#1:ΣG#1:§. gt(§(G#1), §). ΠG#2:Prop. ΠG#3:ΣG#3:§. And(compound(G#3, §), gt(§(kind_of(§), G#3), §)). §(Leu44, G#3.1, G#1.1) → G#2 → G#2 → G#0 → G#0", "ΠG#0:Prop. ΠG#1:ΣG#1:§. gt(§(G#1), §). ΠG#2:Prop. ΠG#3:ΣG#3:§. And(compound(G#3, §), gt(§(kind_of(§), G#3), §)). §(Leu44, G#3.1, G#1.1) → G#2 → G#2 → G#0 → G#0"];
+    encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
+    encoding:selected_claim = "urn:eigenius:uab:residue-variant:claim_1";
+    prov:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: The sentence describes a nationwide survey (a detailed critical inspection, n00644503) that announces/reports (v00966809 — \"announce as the result of an investigation\") Leu44 as a desmopressin-responsive AVPR2 genotype (n04934043 — the particular alleles at specified loci, which is the standard molecular-genetics sense) associated with the AVPR2 gene (C1332124), with \"responsive\" rendered via the degree-greater modifier (a01999306); reading [7] best captures this combination.";
+}
+
+resource residue_variant:unit_2 : encoding:DiscourseUnit {
+    encoding:prose = "Responders achieved 12.6–31.6% reductions in urine output.";
+    encoding:source_document = "urn:eigenius:uab:residue-variant:source";
+    encoding:span_end = 139;
+    encoding:span_start = 79;
+    encoding:unit_kind = "urn:eigenius:encoding:kind_prose";
+}
+
+resource residue_variant:scoped_2 : encoding:ScopedUnit {
+    encoding:unit = "urn:eigenius:uab:residue-variant:unit_2";
+}
+
+resource residue_variant:claim_2 : encoding:EncodedClaim {
+    core:description = "«Responders achieved 12.6–31.6% reductions in urine output.» — the reading the ranker selected: §(kind_of(ΣG#0:§. And(ΠG#1:Prop. ΠG#2:Quantity(<term>). And(And(le(<term>, mk_quantity(<term>, 0), G#2), le(<term>, G#2, mk_quantity(<term>, 0))), has_quantity(G#0, <term>, G#2)) → G#1 → G#1, prep_in(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §))))), kind_of(§))";
+    eigentt:proposition = type_expr(
+        wn:v02526085_t(
+            ontology:kind_of(
+                (exists x0 : wn:n00351638 =>
+                    logic:And(
+                        (forall (x1 : Prop) =>
+                            (forall (x2 : units:Quantity(u"1")) =>
+                                logic:And(
+                                    logic:And(
+                                        units:le(u"1", units:mk_quantity(r"63/500", 0), x2),
+                                        units:le(u"1", x2, units:mk_quantity(r"79/250", 0))
+                                    ),
+                                    ontology:has_quantity(x0, u"1", x2)
+                                )
+                                -> x1)
+                            -> x1),
+                        ontology:prep_in(
+                            x0,
+                            ontology:kind_of(
+                                (exists x1 : wn:n03287178 =>
+                                    ontology:compound_kind(x1, wn:n14855724))
+                            )
+                        )
+                    ))
+            ),
+            ontology:kind_of(wn:n10524413)
+        )
+    );
+    encoding:from_unit = "urn:eigenius:uab:residue-variant:scoped_2";
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
+}
+
+resource residue_variant:trace_2 : prov:DeclarationTrace {
+    prov:resource = "urn:eigenius:uab:residue-variant:claim_2";
+    prov:timestamp = "2026-08-03T00:00:00Z";
+    prov:was_attributed_to = "urn:eigenius:prov:agent:unattributed";
+}
+
+resource residue_variant:decision_2 : encoding:DecisionPoint {
+    encoding:candidate_count = 20;
+    encoding:decision_unit = "urn:eigenius:uab:residue-variant:scoped_2";
+    encoding:runner_up_skeletons = ["§(kind_of(ΣG#0:§. And(ΠG#1:Prop. ΠG#2:Quantity(<term>). And(And(le(<term>, mk_quantity(<term>, 0), G#2), le(<term>, G#2, mk_quantity(<term>, 0))), has_quantity(G#0, <term>, G#2)) → G#1 → G#1, prep_in(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §))))), kind_of(§))", "And(§(kind_of(ΣG#0:§. ΠG#1:Prop. ΠG#2:Quantity(<term>). And(And(le(<term>, mk_quantity(<term>, 0), G#2), le(<term>, G#2, mk_quantity(<term>, 0))), has_quantity(G#0, <term>, G#2)) → G#1 → G#1), kind_of(§)), prep_in(kind_of(§), kind_of(ΣG#0:§. compound_kind(G#0, §))))", "And(§(kind_of(ΣG#0:§. ΠG#1:Prop. ΠG#2:Quantity(<term>). And(And(le(<term>, mk_quantity(<term>, 0), G#2), le(<term>, G#2, mk_quantity(<term>, 0))), has_quantity(G#0, <term>, G#2)) → G#1 → G#1), kind_of(§)), prep_in(kind_of(§), kind_of(ΣG#0:§. compound_kind(G#0, §))))", "§(kind_of(ΣG#0:§. And(ΠG#1:Prop. ΠG#2:Quantity(<term>). And(And(le(<term>, mk_quantity(<term>, 0), G#2), le(<term>, G#2, mk_quantity(<term>, 0))), has_quantity(G#0, <term>, G#2)) → G#1 → G#1, prep_in(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §))))), kind_of(§))", "§(kind_of(ΣG#0:§. And(ΠG#1:Prop. ΠG#2:Quantity(<term>). And(And(le(<term>, mk_quantity(<term>, 0), G#2), le(<term>, G#2, mk_quantity(<term>, 0))), has_quantity(G#0, <term>, G#2)) → G#1 → G#1, prep_in(G#0, kind_of(ΣG#1:§. compound_kind(G#1, §))))), kind_of(§))", "And(§(kind_of(ΣG#0:§. ΠG#1:Prop. ΠG#2:Quantity(<term>). And(And(le(<term>, mk_quantity(<term>, 0), G#2), le(<term>, G#2, mk_quantity(<term>, 0))), has_quantity(G#0, <term>, G#2)) → G#1 → G#1), kind_of(§)), prep_in(kind_of(§), kind_of(ΣG#0:§. compound_kind(G#0, §))))", "And(§(kind_of(ΣG#0:§. ΠG#1:Prop. ΠG#2:Quantity(<term>). And(And(le(<term>, mk_quantity(<term>, 0), G#2), le(<term>, G#2, mk_quantity(<term>, 0))), has_quantity(G#0, <term>, G#2)) → G#1 → G#1), kind_of(§)), prep_in(kind_of(§), kind_of(ΣG#0:§. compound_kind(G#0, §))))"];
+    encoding:selected_by = "urn:eigenius:encoding:authority_ranker";
+    encoding:selected_claim = "urn:eigenius:uab:residue-variant:claim_2";
+    prov:rationale = "Reading selected by the READING RANKER (d63-reading-selection): an untrusted choice in document context, recorded for audit — every candidate type-checks, so no kernel veto exists; the reading-adjudication ledger and this record are the controls. Ranker rationale: Structure 3 correctly captures \"reductions in urine output\" as a reduction (act of decreasing, n00351638) that is located \"in\" urine output (n03287178, the physical product sense), with the quantity 12.6–31.6% (63/500 to 79/250); reading [8] uses the correct senses for both \"reduction\" (decreasing, not chemical reduction) and \"output\" (final product, not electronic signal).";
+}
+
+resource residue_variant:encoding_run : prov:Activity {
+    core:description = "eigenius-encoding prose-to-eigon: DCG parse (D63) of experiments/residue-variant/sentences.txt (source sha256 2b46dd25d99ac39aa13a13e5255d5750e66bc6ce49dd6f5d8211fe82ace3c563)";
+    core:short_name = "encoding_run";
+    prov:used = ["urn:eigenius:uab:residue-variant:source"];
+}
+
+resource residue_variant:run_trace : prov:ProgramTrace {
+    prov:resource = "urn:eigenius:uab:residue-variant:structure";
+    prov:timestamp = "2026-08-03T00:00:00Z";
+    prov:was_generated_by = "urn:eigenius:uab:residue-variant:encoding_run";
+}
+
+resource residue_variant:structure : encoding:ReasoningStructure {
+    core:description = "The encoding of experiments/residue-variant/sentences.txt: 2 claim(s), 0 unit(s) recorded as not encoding.";
+    encoding:claims = ["urn:eigenius:uab:residue-variant:claim_1", "urn:eigenius:uab:residue-variant:claim_2"];
+    encoding:document = "urn:eigenius:uab:residue-variant:source";
+    encoding:source_path = "experiments/residue-variant/sentences.txt";
+    encoding:source_sha256 = "2b46dd25d99ac39aa13a13e5255d5750e66bc6ce49dd6f5d8211fe82ace3c563";
+    prov:derivation = "urn:eigenius:uab:residue-variant:run_trace";
+}

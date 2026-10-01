@@ -463,6 +463,11 @@ impl Parser {
                 }
             }
         }
+        // A hyphenated surface whose SPACE form is an entry denotes that entry (D69 §7h) —
+        // [`Self::candidate_lemmas`] seeds it, so it is known.
+        if s_lc.contains('-') && !self.lex.entries_for(&s_lc.replace('-', " ")).is_empty() {
+            return true;
+        }
         // A productive `-ly` adverb whose adjective base is known, a lexicalized discourse adverb, or
         // a morphologically-derived adjective whose base is known (D63 compound morphology §3), is
         // parseable — *known*, not a missing lexeme.
