@@ -38,12 +38,18 @@ any detour.
 > protein, not the gene, and seven pins moved to the protein kind. Selection re-baselined at 25/41 on
 > the governed-preps draw. Not covered: «WRN is a synthetic-lethal vulnerability» keeps its
 > gene-individual pin.
-> **Next:** #264.
+> **#264 strand 1 done (`2026-09-30`):** the two-call ranker — a structure call in the sentence's own
+> words with how the structures differ, then a sense call — is the default. The A/B, three live
+> draws per arm on one snapshot, fully adjudicated: 29, 28, 30 of 41 correct against the flat
+> listing's 23, 21, 24 (`docs/notes/d69-reading-presentation.md` §7n). The structure call surfaced
+> three attachments the owner re-ruled (two library PPs as instruments, one locative over the
+> event). **Next:** strand 2, the model behind a client trait (TypeSafe.ai included; the kernel's
+> client forces a tool choice the Claude 5 models refuse).
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change
 > is a live draw, its replay, and the adjudication of every new verdict, on a fixed snapshot, against
-> the 25/41 baseline.
+> the selection baseline (29/41, the first two-call draw).
 >
 > **Exit gate:** #263 landed with its reseed and re-adjudicated pins; #264's first two strands measured
 > on a fixed snapshot and the third decided.

@@ -162,6 +162,12 @@ The sweep also audits every ledger row its forest produces: a `correct` row off 
 `departs` is a `LEDGER-CONFLICT`, counted in `ledger-conflicts` (gated to 0) and, when chosen, in
 `reading-conflict` rather than `reading-correct`. The ledger header has the field's grammar.
 
+The live ranker makes two calls (eigenius#264, the default from 2026-09-30): a structure call, which
+sees each structure once in the sentence's own words with how the structures differ, then a sense
+call over the chosen structure's readings. `--flat-ranker` runs the single flat listing it replaced;
+`EIGENIUS_DUMP_STRUCTURES=1` prints the structure questions on a replay. The A/B is in
+`docs/notes/d69-reading-presentation.md` §7n.
+
 Arms, mirroring the ranks discipline:
 
 ```bash

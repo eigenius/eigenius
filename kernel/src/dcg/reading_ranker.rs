@@ -1112,9 +1112,12 @@ mod anthropic {
             if candidates.len() < 2 {
                 return None; // nothing to disambiguate
             }
-            // eigenius#264: the two-call ranker is OPT-IN until its A/B against this flat listing
-            // (three live draws per arm on one snapshot) decides the default.
-            if std::env::var("EIGENIUS_SELECT_TWO_CALL").is_ok() {
+            // eigenius#264: two calls, structure then senses, is the default. The A/B of
+            // 2026-09-30 — three live draws per arm on one snapshot and one ranking, every reading
+            // adjudicated — scored 29, 28, 30 of 41 correct (structure 34, 35, 36) against this
+            // flat listing's 23, 21, 24 (27, 27, 28). `EIGENIUS_SELECT_FLAT` keeps the flat
+            // listing, so the A/B can be repeated.
+            if std::env::var("EIGENIUS_SELECT_FLAT").is_err() {
                 return self.select_two_call(ctx, candidates);
             }
             // Prior selections — the discourse the ranker must stay consistent with.

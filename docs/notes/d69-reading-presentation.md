@@ -582,6 +582,55 @@ independently correct and unrelated to the presentation question.
 slice 3's 30/40 — same code, same forest. Draw-to-draw variance is real at this scale, so a 2-decision
 difference is not a signal; the 6-decision gap to D69-B is.
 
+## 7n. The two-call ranker — eigenius#264 strand 1, DEFAULT (`2026-09-30`)
+
+The realisation §5 preferred, built on the owner's design (2026-09-30): a **structure call**, then a
+**sense call**. eigenius#264's witness was the ranker reasoning about senses when the candidates
+differed only in attachment — «The MSI relationship compared favourably to other strong biomarkers
+for vulnerabilities.», 36 readings, 2 skeletons, identical concept sets.
+
+- **The structure call** shows each structure once, in the **Structural register**
+  (`verbalize::Register::Structural`): Expanded's explicit relations and grouping, with every content
+  position named by the sentence's own words (`unit_surface_names`, over the spans seeding looks up,
+  shortest first, derived adjectives on their own token), so the readings of one structure render
+  alike. Groups are by skeleton first, so a sense the rendering cannot hide never splits a structure.
+  Under the structures it lists **how they differ**, from each reading's links
+  (`verbalize::structure_links`): per phrase, where it attaches, what it modifies, which verb it is an
+  argument of — «for vulnerabilities»: attaches to «relationship» in structures 1, 2; attaches to
+  «biomarkers» in structures 3, 4. The rationale must decide those lines.
+- **The sense call** is the flat listing, restricted to the chosen structure's readings, numbered from
+  0. A pool with one structure skips the first call; a structure with one reading the second.
+- `EIGENIUS_DUMP_STRUCTURES=1` prints every unit's structure question on a replay, without a model.
+
+**The A/B** (owner's protocol: three live draws per arm, snapshot
+`wordnet-umls-aligned-2026-09-30-governed-preps`, rankings `ranks/2026-09-29-d95-slice8.json`, every
+chosen reading adjudicated, each draw re-scored by replay against the final ledger):
+
+| arm | draw | reading-correct | structure-correct |
+|---|---|---|---|
+| flat | `2026-09-30-governed-preps` | 23/41 | 27 |
+| flat | `2026-09-30-ranker-baseline-2` | 21/41 | 27 |
+| flat | `2026-09-30-ranker-baseline-3` | 24/41 | 28 |
+| two-call | `2026-09-30-ranker-twocall-v2-1` | 29/41 | 34 |
+| two-call | `2026-09-30-ranker-twocall-v2-2` | 28/41 | 35 |
+| two-call | `2026-09-30-ranker-twocall-v2-3` | 30/41 | 36 |
+
+Means 22.7 against 29.0 correct, 27.3 against 35.0 structure; the ranges do not overlap, and §7m's
+draw-to-draw variance is 2. **Disposition: two calls are the default**; `EIGENIUS_SELECT_FLAT`
+(`measure-parse-rate.sh --flat-ranker`) keeps the flat listing so the A/B can be repeated.
+
+What the structure call surfaced, and the owner ruled the same day: on «Project Achilles screened
+cell lines with a CRISPR library.» and its DRIVE sibling the library is the instrument of the screening,
+not a property of the cell lines; on «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI
+models.» the locative scopes over both effects. All three pins moved to the verb-adjunct encoding,
+as the «with sequencing» pin already was; the July pins had verified other properties of these units.
+
+Two earlier versions are not arms. A pilot rendered atoms by concept labels and leaked senses through
+unrendered fragments (`⟦a02734544(G#0)⟧`), splitting one structure into two; and three draws of the
+first two-call build abstained four times, silently: the sense call listed a structure's readings
+under their indices in the whole list, and a reply by position fell outside the structure. The
+listing is numbered from 0 now, and a malformed reply is logged before the ranker abstains.
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×
