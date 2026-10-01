@@ -695,7 +695,7 @@ impl Parser {
         // with a rationale about whatever axes happen to be visible; the pin arm would match
         // several; the replay arm would key on an ambiguous presentation. Fail closed and name
         // the two sems, so the renderer gets fixed instead of the symptom.
-        if let Some((i, j)) = first_collision(&cands) {
+        if let Some((i, j)) = first_collision(&cands, ranker) {
             eprintln!(
                 "reading-ranker: ABSTAINED on «{}» — candidates [{i}] and [{j}] render                  identically, so the choice between them cannot be put to a ranker (D69).\n                   rendering: {}\n  sem [{i}]: {}\n  sem [{j}]: {}",
                 sentence.trim(),

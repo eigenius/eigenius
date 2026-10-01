@@ -156,6 +156,19 @@ pub trait ReadingRanker {
     fn model(&self) -> Option<String> {
         None
     }
+
+    /// Whether this ranker's presentation tells `a` and `b` apart (D69 §3) — two candidates it
+    /// cannot tell apart cannot be put to it. By default the two-call presentation (eigenius#264):
+    /// a reading's gloss and its grammatical analysis, which separates readings one gloss conflates —
+    /// `respond` taking «to immune checkpoint blockade» as its argument (`v00717358_p_to`) or as an
+    /// adverbial both render «it respond to Immune Checkpoint Blockade» (D97 slice 2). The pin-backed
+    /// and replay arms keep it: their draws were made under it.
+    fn tells_apart(&self, a: &ReadingCandidate, b: &ReadingCandidate) -> bool {
+        a.gloss != b.gloss
+            || a.constituents != b.constituents
+            || a.links != b.links
+            || a.predication != b.predication
+    }
 }
 
 impl<T: ReadingRanker + ?Sized> ReadingRanker for Box<T> {
@@ -169,6 +182,9 @@ impl<T: ReadingRanker + ?Sized> ReadingRanker for Box<T> {
     fn model(&self) -> Option<String> {
         (**self).model()
     }
+    fn tells_apart(&self, a: &ReadingCandidate, b: &ReadingCandidate) -> bool {
+        (**self).tells_apart(a, b)
+    }
 }
 
 impl<T: ReadingRanker + ?Sized> ReadingRanker for std::sync::Arc<T> {
@@ -181,6 +197,9 @@ impl<T: ReadingRanker + ?Sized> ReadingRanker for std::sync::Arc<T> {
     }
     fn model(&self) -> Option<String> {
         (**self).model()
+    }
+    fn tells_apart(&self, a: &ReadingCandidate, b: &ReadingCandidate) -> bool {
+        (**self).tells_apart(a, b)
     }
 }
 
@@ -399,6 +418,10 @@ impl<R: ReadingRanker> ReadingRanker for RecordingReadingRanker<R> {
         };
         self.log.lock().expect("selection log").insert(key, record);
         selection
+    }
+
+    fn tells_apart(&self, a: &ReadingCandidate, b: &ReadingCandidate) -> bool {
+        self.inner.tells_apart(a, b)
     }
 }
 
@@ -1295,6 +1318,11 @@ mod anthropic {
             Some(self.model.model.clone())
         }
 
+        /// The flat listing shows glosses only.
+        fn tells_apart(&self, a: &ReadingCandidate, b: &ReadingCandidate) -> bool {
+            a.gloss != b.gloss
+        }
+
         fn select(
             &self,
             ctx: &DocumentContext,
@@ -1441,20 +1469,21 @@ mod anthropic {
 #[cfg(feature = "use-llm")]
 pub use anthropic::AnthropicReadingRanker;
 
-/// The first pair of candidates that render identically (D69 §3) — `None` when the pool is
-/// injective, which is the required state before any pool is put to a ranker.
+/// The first pair of candidates `ranker` cannot tell apart ([`ReadingRanker::tells_apart`], D69 §3)
+/// — `None` when its presentation of the pool is injective, which is the required state before the
+/// pool is put to it.
 ///
 /// Checked by the CALLER, before any ranker sees the pool: the invariant is about what may be
 /// ASKED, so it must hold for the pin-backed and replay arms too, not only the live one.
-pub fn first_collision(candidates: &[ReadingCandidate]) -> Option<(usize, usize)> {
-    let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
-    for (i, c) in candidates.iter().enumerate() {
-        if let Some(&j) = seen.get(c.gloss.as_str()) {
-            return Some((j, i));
-        }
-        seen.insert(c.gloss.as_str(), i);
-    }
-    None
+pub fn first_collision<R: ReadingRanker + ?Sized>(
+    candidates: &[ReadingCandidate],
+    ranker: &R,
+) -> Option<(usize, usize)> {
+    (1..candidates.len()).find_map(|i| {
+        (0..i)
+            .find(|&j| !ranker.tells_apart(&candidates[j], &candidates[i]))
+            .map(|j| (j, i))
+    })
 }
 
 #[cfg(test)]
@@ -1508,6 +1537,42 @@ mod tests {
                 runners_up: (0..n - 1).rev().collect(),
             })
         }
+    }
+
+    /// «Some cancers do not respond to immune checkpoint blockade.»: `respond` taking the PP as its
+    /// argument (`v00717358_p_to`) and as an adverbial render one gloss; the analysis tells them
+    /// apart, so the two-call presentation may be asked and the flat listing may not.
+    #[test]
+    fn a_collision_is_what_the_ranker_cannot_tell_apart() {
+        use crate::dcg::verbalize::{Function, Link};
+        let link = |function: Function| Link {
+            function,
+            dependent: "blockade".into(),
+            host: "respond".into(),
+        };
+        let mut pool = cands(3);
+        for c in &mut pool {
+            c.gloss = "some «cancer», not (it «respond» to Immune Checkpoint Blockade)".into();
+        }
+        pool[0].links = vec![link(Function::PrepositionalObject)];
+        pool[1].links = vec![link(Function::Adverbial("to".into()))];
+        pool[2].links = vec![link(Function::Adverbial("to".into()))];
+        assert_eq!(first_collision(&pool[..2], &LastRanker), None);
+        assert_eq!(first_collision(&pool, &LastRanker), Some((1, 2)));
+        struct GlossOnly;
+        impl ReadingRanker for GlossOnly {
+            fn select(
+                &self,
+                _: &DocumentContext,
+                _: &[ReadingCandidate],
+            ) -> Option<ReadingSelection> {
+                None
+            }
+            fn tells_apart(&self, a: &ReadingCandidate, b: &ReadingCandidate) -> bool {
+                a.gloss != b.gloss
+            }
+        }
+        assert_eq!(first_collision(&pool[..2], &GlossOnly), Some((0, 1)));
     }
 
     #[test]
