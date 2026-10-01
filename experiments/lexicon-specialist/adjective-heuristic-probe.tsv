@@ -11,7 +11,7 @@ flabby	around	01019713	0.92	wrong	a place adjunct: «flabby around the middle»	
 obligated	to	01616474	0.90	wrong	a to-infinitive, not to + NP: «obligated to repay»	caused by law or conscience to follow a certain course; "felt obligated to repay the kindness"; "was obligated to pay off the student loan"
 dabbled	with	01695891	0.97	correct	«dabbled with moonlight»	covered with bright patches (often used in combination); "waves dabbled with moonlight"; "a blood-spattered room"; "gardens splashed with color"; "kitchen walls splattered with grease"
 chockablock	with	01084297	0.98	correct		packed full to capacity; "chowder chockablock with pieces of fish"
-down	by	02491961	0.93	unclear	«down by a run» marks a margin	being or moving lower in position or less in some value; "lay face down"; "the moon is down"; "our team is down by a run"; "down by a pawn"; "the stock market is down today"
+down	by	02491961	0.93	wrong	`by` measures the margin («down by a run»), which D95's `by` over a value reads	being or moving lower in position or less in some value; "lay face down"; "the moon is down"; "our team is down by a run"; "down by a pawn"; "the stock market is down today"
 self-conscious	about	00570991	0.85	correct		aware of yourself as an individual or of your own being and actions and thoughts; "self-conscious awareness"; "self-conscious about their roles as guardians of the social values"- D.M.Potter
 careful	with	01895099	0.95	correct	the gloss quotes «careful with money»	mindful of the future in spending money; "careful with money"
 atypical	of	02469928	0.92	correct		not representative of a group, class, or type; "a group that is atypical of the target audience"; "a class of atypical mosses"; "atypical behavior is not the accepted type of response that we expect from children"
@@ -30,5 +30,5 @@ certain	of	00336831	0.95	correct	«certain of success»	having or feeling no dou
 fringed	by	00258587	0.97	correct	«fringed by an industrial belt»	surrounded as with a border or fringe; sometimes used in combination; "a large suburban community...fringed by an industrial area"; "a grass-fringed stream"
 silly	by	00437223	0.85	wrong	the by-phrase is the passive verb's: «knocked silly by the impact»	dazed from or as if from repeated blows; "knocked silly by the impact"; "slaphappy with exhaustion"
 low	in	01212469	0.95	correct	«low in fat»	less than normal in degree or intensity or amount; "low prices"; "the reservoir is low"
-permissible	in	01762404	0.85	unclear	«permissible in cosmology» names a domain	that may be accepted or conceded; "a kind of speculation that was permissible in cosmology but inadmissible in medicine"
+permissible	in	01762404	0.85	wrong	a setting, «permissible in cosmology», not a complement	that may be accepted or conceded; "a kind of speculation that was permissible in cosmology but inadmissible in medicine"
 occupied	with	00293611	0.97	correct		having ones attention or mind or energy engaged; "she keeps herself fully occupied with volunteer activities"; "deeply engaged in conversation"

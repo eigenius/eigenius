@@ -313,7 +313,8 @@ for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 
      items 0.900 (468 of 520). A wording per kind lowered clause recall to 0.783;
      `claude-opus-5-5` (0.69–0.78) and `claude-fable-5-1` (0.82–0.85) say no where WordNet and
      Sonnet say yes; unions of runs reach 0.93 on clauses and objects, their added senses 0.73
-     precise. Of 67 misses reviewed, 47 are the judge's (`verb-gold-review.tsv`). Of 40 senses the
+     precise. Of 67 misses reviewed, 48 are the judge's; 16 are frames WordNet gives the synset that
+     fit another member, not this lemma; 3 fit no member (`verb-gold-review.tsv`). Of 40 senses the
      wording before its last fix (which says the preposition follows the verb directly) accepts
      beyond WordNet's frames, 36 are correct — `I warned you that…` on `warn`, whose gloss quotes it,
      `carbonize coal` — and 4 put the complement on a sibling sense or after an object
@@ -327,9 +328,9 @@ for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 
      adjacency test reads the sentence with WordNet's morphology and withdraws a yes whose sentence
      has no form of the verb directly followed by the preposition: 372 of 2,676 accepted senses, in
      a random 25 of them 24 object + PP — D97 slice 4's frame — and 1 with an adverb between. Every
-     sense WordNet's `to` and `on` frames confirm passes. With it the probe holds 32 correct, 6
-     wrong, 2 unclear (`verb-precision-probe.tsv`): particles, a passive by-phrase and senses
-     sibling to the one placed remain. *Rejected:* a second LLM pass over each placement against
+     sense WordNet's `to` and `on` frames confirm passes. With it the probe holds 33 correct and 7
+     wrong (`verb-precision-probe.tsv`): particles, a passive by-phrase and senses sibling to the
+     one placed remain. *Rejected:* a second LLM pass over each placement against
      its sentence. In two wordings it vetoed senses WordNet's frames confirm (object recall 0.887 →
      0.832–0.843) and, asked for a better sentence, wrote one where none exists.
 2. **Union or authority — decided: union.** Where WordNet has a frame SPECIALIST does not (a
@@ -453,8 +454,9 @@ for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 
      «aggravated by passive resistance»). Its 882 (lemma, preposition) items now go to the judge on
      the lemma's every gradable sense, a one-sense lemma included. The judge accepts 654 of the 815
      senses proposed with 3a's thirteen and 100 of 143 with the new ones. Of 30 accepted senses, 21
-     are correct, 7 wrong — to-infinitives read as `to` + NP («obligated to repay»), adjuncts
-     («flabby around the middle») — and 2 unclear (`adjective-heuristic-probe.tsv`). Placements: 1,339
+     are correct and 9 wrong — to-infinitives read as `to` + NP («obligated to repay»), adjuncts
+     («flabby around the middle», «permissible in cosmology»), a margin («down by a run»)
+     (`adjective-heuristic-probe.tsv`). Placements: 1,339
      items, 1,073 on senses accepted at 0.85, 98 below it, 168 gaps.
    - **Open for nouns:** 6,425 WordNet nouns, 3,329 with several senses — the same rule multiplies
      the judge's work several times over, so it is a budget question as well.

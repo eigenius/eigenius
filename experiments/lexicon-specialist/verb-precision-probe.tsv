@@ -3,7 +3,7 @@
 # Review each: correct | wrong | unclear, with a note.
 # lemma <TAB> complement <TAB> offset <TAB> confidence <TAB> review <TAB> note <TAB> gloss
 boggle	at	02640311	0.90	correct		hesitate when confronted with a problem, or when in doubt or fear
-hope	for	00706047	0.85	unclear	«hoped for a promotion» is the wish sense; this one is "intend", «I hope to have finished»	intend with some possibility of fulfilment; "I hope to have finished this work by tomorrow evening"
+hope	for	00706047	0.85	wrong	«hoped for a promotion» is the wish sense; this one is "intend", «I hope to have finished»	intend with some possibility of fulfilment; "I hope to have finished this work by tomorrow evening"
 come	to	00542120	0.99	correct	the gloss quotes «came to a boil»	reach or enter a state, relation, condition, use, or position; "The water came to a boil"; "We came to understand the true meaning of life"; "Their anger came to a boil"; "I came to realize the true meaning of life"; "The shoes came untied"; "come into contact with a terrorist group"; "his face went red"; "your wish will come true"
 brush	against	01240720	0.97	correct		touch lightly and briefly; "He brushed the wall lightly"
 embark	upon	02373336	0.87	correct		proceed somewhere despite the risk of possible dangers; "We ventured into the world of high-tech and bought a supercomputer"
@@ -41,4 +41,4 @@ back	into	01997119	0.99	correct	the gloss quotes «back into the driveway»	trav
 gossip	about	01038666	0.95	correct		talk socially without exchanging too much information; "the men were sitting in the cafe and shooting the breeze"
 climb	into	01923909	0.95	correct	a path after a motion verb	move with difficulty, by grasping
 turn	on	00146138	0.95	wrong	«The dog suddenly turned on its owner» is the attack sense; this one is "undergo a change"	undergo a transformation or a change of position or action; "We turned from Socialism to Capitalism"; "The people turned against the President when he stole the election"
-go	to	02372605	0.85	unclear	«The complaint had to go to the highest authority» reads as "be referred to"	follow a procedure or take a course; "We should go farther in this matter"; "She went through a lot of trouble"; "go about the world in a certain manner"; "Messages must go through diplomatic channels"
+go	to	02372605	0.85	correct	«The complaint had to go to the highest authority»: a route through a procedure, as its own «Messages must go through diplomatic channels»	follow a procedure or take a course; "We should go farther in this matter"; "She went through a lot of trouble"; "go about the world in a certain manner"; "Messages must go through diplomatic channels"

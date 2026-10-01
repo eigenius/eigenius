@@ -78,7 +78,7 @@ any detour.
 > emitted 590 (sense, lemma, kind) triples WordNet does not give). 1,702 open items. **The judge,
 > accepted below the 0.95 bar (the owner):** recall clause 0.883, object 0.887 (held-out 0.900),
 > preposition 0.927; ten wordings and models tried (D97 decision 1). A preposition is placed only
-> where the judge's sentence shows it right after the verb (372 object + PP withdrawn); probe 32 of
+> where the judge's sentence shows it right after the verb (372 object + PP withdrawn); probe 33 of
 > 40 correct. **Next:** the adjectives' gloss heuristic, widened by the 53 prepositions (586 entries
 > on them, many adjuncts: «scarce during») — the owner's call; then reseed, the sweep, the draws.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:

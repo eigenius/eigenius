@@ -3,9 +3,9 @@
 # is the frames WordNet gives the lemma in the sense (12/27 to, 13 on; 8-11/20/21 object; 26 clause), hidden
 # from the judge. Each row is a sense such a frame places and the judge did not accept at 0.85.
 # Review: judge wrong | synset-wide (WordNet gives the frame to the whole synset; it fits other members,
-# not this lemma) | unclear.
+# not this lemma) | frame does not fit (it fits no member of the synset in this sense).
 # lemma <TAB> complement <TAB> offset <TAB> judge <TAB> draft review <TAB> note <TAB> gloss
-discover	clause	00933821	no 0.88	unclear	"discover that" in the disclose sense is archaic	make known to the public information that was previously known only to a few people or that was meant to be kept a secret; "The auction house would not disclose the price at which the van Gogh had sold"; "The actress won't reveal how old she is"; "bring out the truth"; "he broke the news to her"; "unwrap the evidence in the murder case"
+discover	clause	00933821	no 0.88	synset-wide	«reveal that», «disclose that» fit the synset; «discover that» meaning disclose is archaic	make known to the public information that was previously known only to a few people or that was meant to be kept a secret; "The auction house would not disclose the price at which the van Gogh had sold"; "The actress won't reveal how old she is"; "bring out the truth"; "he broke the news to her"; "unwrap the evidence in the murder case"
 discover	clause	01637982	no 0.82	judge wrong	Researchers discovered that WRN is essential.	make a discovery, make a new finding; "Roentgen discovered X-rays"; "Physicists believe they found a new elementary particle"
 reckon	clause	00637259	no 0.9	judge wrong	He reckoned that the total was forty.	make a mathematical calculation or computation
 show	clause	00923793	no 0.85	judge wrong	synset {indicate, point, designate, show}: «The map shows that the exit is on the left.»	indicate a place, direction, person, or thing; either spatially or figuratively; "I showed the customer the glove section"; "He pointed to the empty parking space"; "he indicated his opponents"
@@ -16,28 +16,28 @@ read	clause	00593852	no 0.9	synset-wide	frame 26 fits «understand that» in {un
 resolve	clause	00699626	no 0.9	judge wrong	He resolved that he would never drink again.	reach a decision; "he resolved never to drink again"
 stipulate	clause	01019472	no 0.85	judge wrong	They stipulated that the prisoners be released.	give a guarantee or promise of; "They stipulated to release all the prisoners"
 hold	clause	00805376	no 0.9	judge wrong	«I hold that life is sacred.»	be in accord; be in agreement; "We agreed on the terms of the settlement"; "I can't agree with you!"; "I hold with those who say life is sacred"; "Both philosophers concord on this point"
-purpose	clause	00699626	no 0.85	unclear	"purpose that" is archaic	reach a decision; "he resolved never to drink again"
+purpose	clause	00699626	no 0.85	synset-wide	«decide that», «determine that» fit the synset; «purpose that» is archaic	reach a decision; "he resolved never to drink again"
 grizzle	clause	00907930	yes 0.82	judge wrong	«The child grizzled that nobody listened.» (judge yes, 0.82)	complain whiningly
-contend	clause	00869596	no 0.85	unclear	"contend that" is the assert sense	to make the subject of dispute, contention, or litigation; "They contested the outcome of the race"
+contend	clause	00869596	no 0.85	synset-wide	«contend that» is the assert sense; frame 26 fits «contest» here	to make the subject of dispute, contention, or litigation; "They contested the outcome of the race"
 charge	clause	00869931	no 0.85	judge wrong	Prosecutors charged that he had lied.	file a formal charge against; "The suspect was charged with murdering his wife"
 consider	clause	00813044	yes 0.8	judge wrong	«They considered that a strike was likely.» (judge yes, 0.80)	think about carefully; weigh; "They considered the possibility of a strike"; "Turn the proposal over in your mind"
 consider	clause	00950431	no 0.75	judge wrong	Consider that she is only twelve.	show consideration for; take into account; "You must consider her age"; "The judge considered the offender's youth and was lenient"
-tell	clause	00746718	no 0.9	unclear	instructions take an infinitive; a that-clause is marginal	give instructions to or direct somebody to do something with authority; "I said to him to go home"; "She ordered him to do the shopping"; "The mother told the child to get dressed"
+tell	clause	00746718	no 0.9	judge wrong	«She told him that he must go home»	give instructions to or direct somebody to do something with authority; "I said to him to go home"; "She ordered him to do the shopping"; "The mother told the child to get dressed"
 mind	clause	00848707	no 0.8	judge wrong	I do not mind that you smoke.	be offended or bothered by; take offense with, be bothered by; "I don't mind your behavior"
 gag	object	01570562	no 0.85	judge wrong	The tight collar gagged the dog.	be too tight; rub or press; "This neckband is choking the cat"
-rest	object	02731390	no 0.9	unclear	frame 11 on {lie, rest}; no object use found	have a place in relation to something else; "The fate of Bosnia lies in the hands of the West"; "The responsibility rests with the Allies"
+rest	object	02731390	no 0.9	frame does not fit	frame 11 on {lie, rest}: neither takes an object in this sense	have a place in relation to something else; "The fate of Bosnia lies in the hands of the West"; "The responsibility rests with the Allies"
 soak	object	01578513	no 0.88	judge wrong	Soak the beans overnight.	submerge in a liquid; "I soaked in the hot tub for an hour"
 rule	object	02716995	no 0.8	judge wrong	Mars rules Aries.	have an affinity with; of signs of the zodiac
 clean	object	00035758	no 0.9	judge wrong	Clean your fingernails.	clean one's body or parts thereof, as by washing; "clean up before you see your grandparents"; "clean your fingernails before dinner"
-fool	object	01195804	no 0.85	unclear	"fool away one's money" needs the particle	spend frivolously and unwisely; "Fritter away one's inheritance"
+fool	object	01195804	no 0.85	synset-wide	«fritter away», «dissipate» fit; «fool» needs the particle: «fool away one's money»	spend frivolously and unwisely; "Fritter away one's inheritance"
 fiddle	object	01586018	no 0.8	judge wrong	He fiddled the accounts.	play around with or alter or falsify, usually secretively or dishonestly; "Someone tampered with the documents on my desk"; "The reporter fiddle with the facts"
-fiddle	object	02463704	yes 0.75	unclear	"fiddle one's duties" is doubtful	avoid (one's assigned duties); "The derelict soldier shirked his duties"
+fiddle	object	02463704	yes 0.75	synset-wide	«shirk one's duties» fits; «fiddle one's duties» does not	avoid (one's assigned duties); "The derelict soldier shirked his duties"
 twist	object	01223182	no 0.85	judge wrong	Twist the wire into a spiral.	form into a spiral shape; "The cord is all twisted"
-conclude	object	01021420	no 0.8	unclear	"conclude the matter" belongs to the finish sense	reach a conclusion after a discussion or deliberation
-qualify	object	01018928	no 0.85	unclear	the frame belongs to "stipulate", "specify" in the synset	specify as a condition or requirement in a contract or agreement; make an express demand or provision in an agreement; "The will stipulates that she can live in the house for the rest of her life"; "The contract stipulates the dates of the payments"
+conclude	object	01021420	no 0.8	synset-wide	«resolve the question» fits; «conclude the matter» is the finish sense	reach a conclusion after a discussion or deliberation
+qualify	object	01018928	no 0.85	synset-wide	the frame fits «stipulate», «specify» in the synset	specify as a condition or requirement in a contract or agreement; make an express demand or provision in an agreement; "The will stipulates that she can live in the house for the rest of her life"; "The contract stipulates the dates of the payments"
 press	object	00759657	no 0.85	judge wrong	They pressed him for an answer. (judge yes, 0.80)	ask for or request earnestly; "The prophet bid all people to become good persons"
 press	object	02589576	no 0.82	synset-wide	frames 8, 9 fit «fight», «push» in {crusade, fight, press, campaign, push, agitate}	exert oneself continuously, vigorously, or obtrusively to gain an end or engage in a crusade for a certain cause or person; be an advocate for; "The liberal party pushed for reforms"; "She is crusading for women's rights"; "The Dean is pushing for his favorite candidate"
-range	object	02727039	no 0.92	unclear	frame 11 on {range, run}: a measure phrase? «The losses ran two billion dollars.»	change or be different within limits; "Estimates for the losses in the earthquake range as high as $2 billion"; "Interest rates run from 5 to 10 percent"; "The instruments ranged from tuba to cymbals"; "My students range from very bright to dull"
+range	object	02727039	no 0.92	frame does not fit	frame 11 on {range, run}: at most a measure phrase, no object	change or be different within limits; "Estimates for the losses in the earthquake range as high as $2 billion"; "Interest rates run from 5 to 10 percent"; "The instruments ranged from tuba to cymbals"; "My students range from very bright to dull"
 explode	object	00306017	no 0.93	judge wrong	frames 1 8 11: the sense includes its causative use, «They burst the balloon.»	burst outward, usually with noise; "The champagne bottle exploded"
 resolve	object	01021420	no 0.82	judge wrong	They resolved the question.	reach a conclusion after a discussion or deliberation
 bust	object	00333594	no 0.9	judge wrong	frames 1 8 11: «He bust the door open.»	break open or apart suddenly and forcefully; "The dam burst"
@@ -58,7 +58,7 @@ read	object	00922867	no 0.88	judge wrong	The thermometer read twenty degrees.	in
 read	object	02730813	no 0.9	judge wrong	The sign read "Stop".	have or contain a certain wording or form; "The passage reads as follows"; "What does the law say?"
 beetle	object	02697435	no 0.9	synset-wide	frame 11 fits «overhang the edge» in {overhang, beetle}	be suspended over or hang over; "This huge rock beetles over the edge of the town"
 attach	object	02538086	no 0.8	judge wrong	frame 10: «Shared memories attached her to the town.»	create social or emotional ties; "The grandparents want to bond with the child"
-blast	object	01134781	no 0.85	unclear	"blast the target" belongs to the shoot sense	fire a shot; "the gunman blasted away"
+blast	object	01134781	no 0.85	synset-wide	«blast the target» is the shoot-at sense; the frame fits «shoot» here	fire a shot; "the gunman blasted away"
 bull	object	02272373	yes 0.82	judge wrong	Speculators bulled the market. (judge yes, 0.82)	try to raise the price of stocks through speculative buying
 curl	object	01523986	no 0.85	judge wrong	She curled the ribbon around the box.	wind around something in coils or loops
 speak	object	00989201	no 0.85	synset-wide	frame 9 fits «address the board» in {address, speak}	give a speech to; "The chairman addressed the board of trustees"
@@ -68,7 +68,7 @@ trump	object	00975202	yes 0.8	judge wrong	«The papers trumped the victory.» (j
 push	object	01872645	no 0.85	judge wrong	She pushed the wall with all her strength.	press against forcefully without moving; "she pushed against the wall with all her strength"
 push	object	02589576	no 0.85	judge wrong	The party pushed reforms through parliament.	exert oneself continuously, vigorously, or obtrusively to gain an end or engage in a crusade for a certain cause or person; be an advocate for; "The liberal party pushed for reforms"; "She is crusading for women's rights"; "The Dean is pushing for his favorite candidate"
 rot	object	00209837	no 0.9	judge wrong	frames 1 11: «The damp rotted the wood.»	break down; "The bodies decomposed in the heat"
-retire	object	01994442	no 0.93	unclear	"retire the troops" belongs to the withdraw sense	pull back or move away or backward; "The enemy withdrew"; "The limo pulled away from the curb"
-move	on	00879356	no 0.9	unclear	"move on a motion" is doubtful	propose formally; in a debate or parliamentary meeting
+retire	object	01994442	no 0.93	synset-wide	«retire the troops» is the withdraw-from-service sense; the frame fits «withdraw» here	pull back or move away or backward; "The enemy withdrew"; "The limo pulled away from the curb"
+move	on	00879356	no 0.9	frame does not fit	frame 13 on {move, make a motion}: «move on a motion» is not English	propose formally; in a debate or parliamentary meeting
 talk	to	00830761	yes 0.7	judge wrong	«She talked to the students about genetics.» (judge yes, 0.70)	deliver a lecture or talk; "She will talk at Rutgers next week"; "Did you ever lecture at Harvard?"
 bow	to	00898691	no 0.85	judge wrong	He bowed to the King.	bend one's knee or body, or lower one's head; "He bowed before the King"; "She bowed her head in shame"
