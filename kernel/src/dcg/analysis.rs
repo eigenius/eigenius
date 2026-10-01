@@ -139,10 +139,10 @@ pub fn bracket(tokens: &[String], spans: &BTreeSet<((usize, usize), Group)>) -> 
     for (k, t) in tokens.iter().enumerate() {
         let mut opening: Vec<&((usize, usize), Group)> =
             spans.iter().filter(|((i, _), _)| *i == k).collect();
-        opening.sort_by(|a, b| b.0 .1.cmp(&a.0 .1));
+        opening.sort_by_key(|((_, j), _)| std::cmp::Reverse(*j));
         let mut closing: Vec<&((usize, usize), Group)> =
             spans.iter().filter(|((_, j), _)| *j == k).collect();
-        closing.sort_by(|a, b| b.0 .0.cmp(&a.0 .0));
+        closing.sort_by_key(|((i, _), _)| std::cmp::Reverse(*i));
         let glued = matches!(t.as_str(), "," | "." | ";" | ":" | "?" | "!" | ")");
         if k > 0 && !(glued && opening.is_empty()) {
             out.push(' ');
