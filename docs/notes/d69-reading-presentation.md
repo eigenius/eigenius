@@ -664,6 +664,62 @@ prompt and presentation are the next thing measured. The sense ranker and the ot
 `.reading_model`), and each seam's draws record their own model. The flat listing asks Anthropic
 models only and keeps `claude-sonnet-4-6`.
 
+## 7p. The grammatical analyses — derivations and a grammar-book structure call (`2026-09-30`)
+
+**What the structural register was deciding.** An offline screen of jev's requests
+(`EIGENIUS_DUMP_DECISIONS`, the TypeSafe API called directly; ten prompt variants: inline
+attachments, one question per phrase, paraphrases, yes/no per structure, the sentence alone as
+state, per-word sense questions, inline definitions) left jev within its run-to-run noise of ±1.5.
+The structural register rendered the verb-adjunct encoding as the subject's ("… and we with
+«sequencing»"), which reads as nonsense, so jev attached every PP to the noun — right on most of
+this page's pins. Rendered as the verb's, jev attached to the verb almost everywhere (structure
+~31 → 28.75 of 41) and got 2 of 9 attachment units; one sonnet-4-6 draw got 7 of 9 (structure 33).
+
+**The owner's design.** Show the alternatives as a grammar book does — the sentence bracketed where
+the analyses group its words differently, and each contested phrase's grammatical function — and
+ask «Which grammatical analysis of `the_sentence` matches what it means in `document`?», with no
+parser in the question. Asking whether an analysis is *correct* scored lower with jev (15.5 and
+17.0 of 27 structure calls, against 18.5 for *matches what it means*). The parser records how each
+chart entry was built and returns that trace with the reading:
+
+- `dcg::derivation` — a field on `Item`, stamped by the drivers (seeding, packed k-best's cube,
+  `materialize_unary`, the unpacked CKY); each leaf records the sense atoms its tokens contribute.
+  The sweep checks every reading of an ambiguous unit carries a well-formed derivation over the
+  whole unit (667 of 667).
+- `dcg::analysis` — an analysis brackets the constituents it builds and some other does not, and
+  states the functions of the links it does not share: subject, object, prepositional object,
+  object complement, noun modifier, adjective, predicate adjective, numeral, postmodifier, adverbial
+  of a verb or of a predicated adjective, second predicate, adjective complement. A predication
+  line separates a class generalisation from a statement about a kind. Phrases are named by the
+  words of the leaf that introduced them in that reading. Analyses alike in both are one option.
+
+```text
+[1] We [ascertained MSI status] with sequencing.
+      «with sequencing» is an adverbial of «ascertained»: it says how, where, when or why
+[2] We ascertained [MSI [status with sequencing]].
+      «with sequencing» postmodifies «status»: it says which or what kind of status
+```
+
+Screened (structure calls only, the 27 units whose pinned structure is offered, eight jev runs):
+15.4 for the replaced form, 18.5 for a word-search prototype, 19.9 for the built form.
+
+**The A/B** (three live draws per model, same snapshot and rankings, 12 new ledger rows, each draw
+re-scored by replay):
+
+| model | reading-correct | structure-correct | abstained |
+|---|---|---|---|
+| `jev-latest` | 28, 28, 27 | 31, 32, 30 | 3, 2, 3 |
+| `claude-sonnet-4-6` | 24, 24, 24 | 32, 32, 32 | 0 |
+
+The replaced presentation: jev 26, 26, 26 (structure 30, 30, 30); sonnet-4-6 26, 25, 26 (30, 29,
+30). jev's abstentions are `none` in the sense call. Under a correct structure sonnet chose a wrong
+sense on 8 units and jev on 5, the 5 shared; three of sonnet's are «analysed» v00644583, ruled out
+by the maintainer on 2026-08-13.
+
+**Disposition:** `jev-latest` stays the default; selection re-baselined at 28 on its first draw
+(`2026-09-30-analyses-jev-latest-1`, 15d9bd7). The Structural register, the span-based surface
+names and the structure contrasts are removed.
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×

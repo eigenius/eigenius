@@ -163,10 +163,13 @@ The sweep also audits every ledger row its forest produces: a `correct` row off 
 `reading-conflict` rather than `reading-correct`. The ledger header has the field's grammar.
 
 The live ranker makes two calls (eigenius#264, the default from 2026-09-30): a structure call, which
-sees each structure once in the sentence's own words with how the structures differ, then a sense
-call over the chosen structure's readings. `--flat-ranker` runs the single flat listing it replaced;
-`EIGENIUS_DUMP_STRUCTURES=1` prints the structure questions on a replay. The A/B is in
-`docs/notes/d69-reading-presentation.md` §7n.
+shows each grammatical analysis once — the sentence bracketed where the analyses' constituents
+differ, from each reading's derivation, and the function of each phrase on which they differ — then
+a sense call over the chosen analysis's readings. `--flat-ranker` runs the single flat listing it
+replaced; `EIGENIUS_DUMP_STRUCTURES=1` prints the structure questions on a replay, and
+`EIGENIUS_DUMP_DECISIONS=<file>` writes both calls' questions with their candidates, one JSON line
+per unit, for screening a presentation offline. The A/Bs are in
+`docs/notes/d69-reading-presentation.md` §7n and §7p.
 
 The live ranker's model is `jev-latest` (TypeSafe; needs `TYPESAFE_API_KEY`), the default from
 2026-09-30 by the model A/B in §7o; `--ranker-model <id>` names another (`claude-…` asks Anthropic).

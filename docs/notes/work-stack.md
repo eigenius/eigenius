@@ -57,11 +57,14 @@ any detour.
 > (structure 33). The owner asked for the alternatives as a grammar book shows them — the sentence
 > bracketed, each contested phrase's grammatical function — and a question without a parser: «Which
 > grammatical analysis of `the_sentence` matches what it means in `document`?». A word-search prototype
-> raised jev's structure calls from 15.4 to 18.5 of 27. **Building it (owner's design):** the parser
-> records each item's derivation (`dcg::derivation`, a field on `Item`, drivers stamp it, leaves carry
-> their sense atoms); the structure call brackets what differs between analyses and names each
-> contested phrase's function. Then the model A/B (jev-latest, sonnet-4-6) on it, adjudication, and
-> the re-baseline.
+> raised jev's structure calls from 15.4 to 18.5 of 27.
+> **Grammatical analyses done (`2026-09-30`, owner's design):** the parser records each item's
+> derivation (`dcg::derivation`); the structure call brackets what differs between analyses and
+> names each contested phrase's function (`dcg::analysis`). Structure calls 19.9 of 27 with jev. The
+> A/B, three draws each: jev-latest 28, 28, 27 of 41 (structure 31, 32, 30); sonnet-4-6 24, 24, 24
+> (32). jev stays the default; selection re-baselined at 28 (D69 note §7p). **Open:** jev answers
+> `none` in 2–3 sense calls a draw; the sense-ranker rework; strand 3 (whether attachment is
+> derivable); the «for cancer therapeutics» attachment for the maintainer; the combined #263+#264 PR.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change
