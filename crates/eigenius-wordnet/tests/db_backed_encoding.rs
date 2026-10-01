@@ -1134,6 +1134,51 @@ impl eigenius_kernel::dcg::ReadingRanker for StructurePreview {
     }
 }
 
+/// Appends, for every ambiguous unit, the two-call ranker's questions — the structure call and
+/// every shown structure's sense call — with the candidates they are about, one JSON line per unit,
+/// to the file `EIGENIUS_DUMP_DECISIONS` names, then lets the wrapped ranker decide. What a
+/// presentation change is screened against offline (eigenius#264).
+struct DecisionDump {
+    inner: Box<dyn eigenius_kernel::dcg::ReadingRanker>,
+    out: std::sync::Mutex<std::fs::File>,
+}
+
+impl eigenius_kernel::dcg::ReadingRanker for DecisionDump {
+    fn select(
+        &self,
+        ctx: &eigenius_kernel::dcg::reading_ranker::DocumentContext,
+        candidates: &[eigenius_kernel::dcg::reading_ranker::ReadingCandidate],
+    ) -> Option<eigenius_kernel::dcg::reading_ranker::ReadingSelection> {
+        use std::io::Write;
+        if candidates.len() > 1 {
+            let q = eigenius_kernel::dcg::decision_questions(ctx, candidates);
+            let line = serde_json::json!({
+                "sentence": ctx.sentence.trim(),
+                "document": ctx.document,
+                "prior_selections": ctx.prior_selections,
+                "concepts": ctx.concepts.iter().map(|c| serde_json::json!({
+                    "id": c.id, "label": c.label, "definition": c.definition,
+                })).collect::<Vec<_>>(),
+                "candidates": candidates.iter().map(|c| serde_json::json!({
+                    "sem": c.sem,
+                    "skeleton": c.skeleton,
+                    "gloss": c.gloss,
+                    "structure": c.structure,
+                    "links": c.links.iter()
+                        .map(|l| [&l.relation, &l.dependent, &l.host])
+                        .collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+                "groups": q.groups,
+                "structure_choice": q.structure,
+                "sense_choices": q.senses,
+            });
+            let mut f = self.out.lock().expect("dump file");
+            writeln!(f, "{line}").expect("write EIGENIUS_DUMP_DECISIONS");
+        }
+        self.inner.select(ctx, candidates)
+    }
+}
+
 /// The `(sentence, skeleton)` pairs adjudicated `invalid`. Missing file ⇒ empty (check inactive).
 fn load_invalid_adjudications() -> BTreeSet<(String, String)> {
     let Ok(text) = std::fs::read_to_string(ADJUDICATIONS) else {
@@ -3466,6 +3511,17 @@ fn wrn_first_page_over_full_lexicon() {
             Box::new(StructurePreview(inner_ranker))
         } else {
             inner_ranker
+        };
+    let inner_ranker: Box<dyn eigenius_kernel::dcg::ReadingRanker> =
+        match std::env::var("EIGENIUS_DUMP_DECISIONS") {
+            Ok(path) if !path.is_empty() => Box::new(DecisionDump {
+                inner: inner_ranker,
+                out: std::sync::Mutex::new(
+                    std::fs::File::create(&path)
+                        .unwrap_or_else(|e| panic!("EIGENIUS_DUMP_DECISIONS {path}: {e}")),
+                ),
+            }),
+            _ => inner_ranker,
         };
     let selection_ranker = eigenius_kernel::dcg::RecordingReadingRanker::new(inner_ranker);
     // Where the recorded decisions land: the live arm writes to its EIGENIUS_SELECTIONS path;

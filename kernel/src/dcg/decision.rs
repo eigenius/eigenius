@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use serde_json::{json, Value};
 
 /// One decision: what it is about, the question, the facts it rests on, and the options.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Choice {
     /// What the question is about, as named parts in order (the document, the earlier selections,
     /// the sentence). An empty part is left out.
@@ -154,34 +154,68 @@ pub fn reply_schema(choice: &Choice) -> Value {
 /// The id a question carries in a TypeSafe request; the answer comes back under it.
 pub const TYPESAFE_QUESTION: &str = "decision";
 
-/// The choice as a TypeSafe request: the context as `state`, the question with its notes as
-/// structured `instructions`, the options as a `choice` question's `criteria`.
-pub fn render_typesafe(choice: &Choice, model: &str) -> Value {
-    let mut state = serde_json::Map::new();
-    for (name, text) in choice.context.iter().filter(|(_, t)| !t.trim().is_empty()) {
-        state.insert(snake(name), Value::String(text.trim_end().to_string()));
-    }
-    let mut instructions = serde_json::Map::new();
-    instructions.insert("question".into(), Value::String(choice.question.clone()));
-    for (name, lines) in choice.notes.iter().filter(|(_, l)| !l.is_empty()) {
-        instructions.insert(snake(name), json!(lines));
-    }
-    let criteria: serde_json::Map<String, Value> = choice
+/// The choice as a TypeSafe request body: the context as `state`, the question with its notes as
+/// structured `instructions`, the options as a `choice` question's `criteria` — each in the
+/// choice's order. The model reads the JSON as text, and `serde_json::Map` would sort the keys:
+/// the notes before the question, option `10` before `2`.
+pub fn render_typesafe(choice: &Choice, model: &str) -> String {
+    let text = |t: &str| Ordered::Value(Value::String(t.to_string()));
+    let state = choice
+        .context
+        .iter()
+        .filter(|(_, t)| !t.trim().is_empty())
+        .map(|(name, t)| (snake(name), text(t.trim_end())))
+        .collect();
+    let instructions = std::iter::once(("question".to_string(), text(&choice.question)))
+        .chain(
+            choice
+                .notes
+                .iter()
+                .filter(|(_, l)| !l.is_empty())
+                .map(|(name, lines)| (snake(name), Ordered::Value(json!(lines)))),
+        )
+        .collect();
+    let criteria = choice
         .options
         .iter()
-        .map(|(k, d)| (k.clone(), Value::String(d.clone())))
+        .map(|(k, d)| (k.clone(), text(d)))
         .collect();
-    json!({
-        "state": state,
-        "model": model,
-        "questions": {
-            TYPESAFE_QUESTION: {
-                "type": "choice",
-                "instructions": instructions,
-                "criteria": criteria,
+    let question = Ordered::Object(vec![
+        ("type".into(), text("choice")),
+        ("instructions".into(), Ordered::Object(instructions)),
+        ("criteria".into(), Ordered::Object(criteria)),
+    ]);
+    let body = Ordered::Object(vec![
+        ("state".into(), Ordered::Object(state)),
+        ("model".into(), text(model)),
+        (
+            "questions".into(),
+            Ordered::Object(vec![(TYPESAFE_QUESTION.into(), question)]),
+        ),
+    ]);
+    serde_json::to_string(&body).expect("a JSON object of strings serializes")
+}
+
+/// JSON whose object keys keep the order they are given in.
+enum Ordered {
+    Value(Value),
+    Object(Vec<(String, Ordered)>),
+}
+
+impl serde::Serialize for Ordered {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Ordered::Value(v) => v.serialize(s),
+            Ordered::Object(fields) => {
+                let mut m = s.serialize_map(Some(fields.len()))?;
+                for (k, v) in fields {
+                    m.serialize_entry(k, v)?;
+                }
+                m.end()
             }
         }
-    })
+    }
 }
 
 /// A TypeSafe `choice` answer as [`Decided`]: the runners-up are the other options by probability.
@@ -348,7 +382,8 @@ mod providers {
                     let resp = client
                         .post(TYPESAFE_URL)
                         .bearer_auth(&self.api_key)
-                        .json(&body)
+                        .header(reqwest::header::CONTENT_TYPE, "application/json")
+                        .body(body.clone())
                         .send()
                         .await
                         .map_err(|e| format!("typesafe request failed: {e}"))?;
@@ -440,7 +475,7 @@ mod tests {
     /// options in `criteria`; its answer's runners-up follow the probabilities.
     #[test]
     fn a_typesafe_request_and_answer_round_trip() {
-        let req = render_typesafe(&choice(), "jev-latest");
+        let req: Value = serde_json::from_str(&render_typesafe(&choice(), "jev-latest")).unwrap();
         assert_eq!(req["state"]["the_sentence"], json!("S."));
         assert!(req["state"].get("earlier_selections").is_none());
         let q = &req["questions"][TYPESAFE_QUESTION];
@@ -460,6 +495,19 @@ mod tests {
         assert_eq!(d.runners_up, vec!["1".to_string()]);
         assert_eq!(d.model, "jev-1.13.0");
         assert_eq!(d.account(), "probabilities 2=0.90, 1=0.10");
+    }
+
+    /// The body keeps the choice's order: the question before its notes, option 2 before 10.
+    #[test]
+    fn a_typesafe_request_keeps_the_choices_order() {
+        let mut c = choice();
+        c.options = (1..=11).map(|n| (n.to_string(), format!("s{n}"))).collect();
+        let body = render_typesafe(&c, "jev-latest");
+        let at = |needle: &str| body.find(needle).unwrap();
+        assert!(at("\"document\"") < at("\"the_sentence\""));
+        assert!(at("\"question\"") < at("\"how_the_structures_differ\""));
+        assert!(at("\"2\":") < at("\"10\":"));
+        assert!(at("\"state\"") < at("\"questions\""));
     }
 
     /// An answer naming no option is an error; runners-up naming none are dropped.

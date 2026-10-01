@@ -831,16 +831,15 @@ impl<D: Decider> ReadingRanker for DecisionReadingRanker<D> {
         if candidates.len() < 2 {
             return None; // nothing to disambiguate
         }
-        let mut groups = structure_groups(candidates);
-        let total = groups.len();
-        let kept = total.min(MAX_STRUCTURES_SHOWN);
-        let dropped: usize = groups[kept..].iter().map(Vec::len).sum();
-        groups.truncate(kept);
-        if dropped > 0 {
+        let (groups, total) = shown_groups(candidates);
+        let kept = groups.len();
+        if kept < total {
+            let shown: usize = groups.iter().map(Vec::len).sum();
             eprintln!(
                 "reading-ranker: TRUNCATED «{}» — showed {kept} of {total} structures, omitting \
-                 {dropped} reading(s); the omitted ones cannot be chosen",
-                ctx.sentence.trim()
+                 {} reading(s); the omitted ones cannot be chosen",
+                ctx.sentence.trim(),
+                candidates.len() - shown
             );
         }
         // Option keys are numbers as shown, and `Decider::choose` checked the answer names one.
@@ -918,6 +917,46 @@ fn context_parts(ctx: &DocumentContext) -> Vec<(String, String)> {
         ),
         ("The sentence".into(), ctx.sentence.trim().to_string()),
     ]
+}
+
+/// The structures a structure call shows — the first [`MAX_STRUCTURES_SHOWN`] groups of
+/// [`structure_groups`] — and how many groups there were.
+fn shown_groups(candidates: &[ReadingCandidate]) -> (Vec<Vec<usize>>, usize) {
+    let mut groups = structure_groups(candidates);
+    let total = groups.len();
+    groups.truncate(MAX_STRUCTURES_SHOWN);
+    (groups, total)
+}
+
+/// The two-call ranker's questions for one unit, unasked (`EIGENIUS_DUMP_DECISIONS`): what a
+/// presentation change is measured against offline.
+pub struct DecisionQuestions {
+    /// The shown structures, as indices into the candidates.
+    pub groups: Vec<Vec<usize>>,
+    /// The structure call; `None` when one structure is shown.
+    pub structure: Option<Choice>,
+    /// Each shown structure's sense call; `None` for a structure with one reading.
+    pub senses: Vec<Option<Choice>>,
+}
+
+/// The questions [`DecisionReadingRanker`] would ask about `candidates`, the sense call for every
+/// shown structure rather than only the chosen one.
+pub fn decision_questions(
+    ctx: &DocumentContext,
+    candidates: &[ReadingCandidate],
+) -> DecisionQuestions {
+    let (groups, total) = shown_groups(candidates);
+    let structure = (groups.len() > 1)
+        .then(|| structure_choice(ctx, candidates, &groups, total - groups.len()));
+    let senses = groups
+        .iter()
+        .map(|g| (g.len() > 1).then(|| sense_choice(ctx, candidates, g)))
+        .collect();
+    DecisionQuestions {
+        groups,
+        structure,
+        senses,
+    }
 }
 
 /// The structure call: the shown structures, numbered from 1, and how they differ.

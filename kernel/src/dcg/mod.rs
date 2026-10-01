@@ -122,14 +122,14 @@ pub use proposer_record::{
     ProposalRecord, RecordedProposalCandidate, RecordingProposer, ReplayProposer,
 };
 pub use quantity::{ProseUnits, Quantity, UnitReading};
+pub use reading_ranker::{
+    decision_questions, DecisionQuestions, DecisionReadingRanker, DocumentContext,
+    LiveReadingRanker, PinReadingRanker, PriorSelection, ReadingCandidate, ReadingRanker,
+    ReadingSelection, RecordingReadingRanker, ReplayReadingRanker, SelectionRecord,
+};
 #[cfg(feature = "use-llm")]
 pub use reading_ranker::{
     live_reading_ranker, live_reading_ranker_from_env, AnthropicReadingRanker,
-};
-pub use reading_ranker::{
-    DecisionReadingRanker, DocumentContext, LiveReadingRanker, PinReadingRanker, PriorSelection,
-    ReadingCandidate, ReadingRanker, ReadingSelection, RecordingReadingRanker, ReplayReadingRanker,
-    SelectionRecord,
 };
 pub use rules::combinators::apply;
 pub use rules::constructions::{

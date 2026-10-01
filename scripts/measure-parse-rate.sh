@@ -206,6 +206,8 @@ RUN_ID+="-$([[ "$USE_LLM" == "1" ]] && echo reranked || echo caponly)"
 [[ -n "$RANKER_MODEL" ]] && RUN_ID+="-$RANKER_MODEL"
 RUN_DIR="$OUT_DIR/$RUN_ID"
 mkdir -p "$RUN_DIR"
+# ABSOLUTIZE (gotcha #1): the harness writes ranks and selections into the run dir from the crate dir.
+RUN_DIR="$(cd "$RUN_DIR" && pwd)"
 LOG="$RUN_DIR/run.log"
 
 # ── The reranker's decisions: RECORD, or REPLAY ──────────────────────────────
