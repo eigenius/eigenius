@@ -23,7 +23,10 @@
 //!
 //! The brackets come from each reading's derivation ([`crate::dcg::derivation`]), the functions
 //! from its links ([`crate::dcg::verbalize::structure_links`]). Only what differs is shown: a
-//! constituent every analysis builds, or a function every analysis gives, decides nothing.
+//! constituent every analysis builds, or a function every analysis gives, decides nothing. A
+//! multi-word concept is one TERM (`⟨double-stranded DNA breaks⟩`), not a phrase over the same
+//! words: an analysis taking the words as one concept and one composing them differ there, and
+//! both show it.
 
 use std::collections::BTreeSet;
 
@@ -33,6 +36,8 @@ use super::verbalize::{Function, Link};
 pub struct Parse<'a> {
     /// Its constituents' token spans (a derivation's, [`crate::dcg::derivation::Derivation::constituents`]).
     pub constituents: &'a [(usize, usize)],
+    /// The spans of its multi-word terms: leaves over several tokens that name one concept.
+    pub terms: &'a [(usize, usize)],
     pub links: &'a [Link],
     /// What its predication says, where its form makes a difference no link shows
     /// ([`crate::dcg::verbalize::predication`]).
@@ -49,11 +54,34 @@ pub struct Analysis {
     pub functions: Vec<String>,
 }
 
+/// What a constituent is: a phrase composed of its parts, or a term — several words naming one
+/// concept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Group {
+    Phrase,
+    Term,
+}
+
 /// Each reading's analysis against the others.
 pub fn analyses(tokens: &[String], parses: &[Parse]) -> Vec<Analysis> {
-    let sets: Vec<BTreeSet<(usize, usize)>> = parses
+    let sets: Vec<BTreeSet<((usize, usize), Group)>> = parses
         .iter()
-        .map(|p| p.constituents.iter().copied().collect())
+        .map(|p| {
+            p.constituents
+                .iter()
+                .chain(p.terms)
+                .map(|&s| {
+                    (
+                        s,
+                        if p.terms.contains(&s) {
+                            Group::Term
+                        } else {
+                            Group::Phrase
+                        },
+                    )
+                })
+                .collect()
+        })
         .collect();
     let common_spans = intersection(&sets);
     let link_sets: Vec<BTreeSet<&Link>> = parses.iter().map(|p| p.links.iter().collect()).collect();
@@ -64,16 +92,23 @@ pub fn analyses(tokens: &[String], parses: &[Parse]) -> Vec<Analysis> {
         .iter()
         .zip(&sets)
         .map(|(p, spans)| {
-            let shown: BTreeSet<(usize, usize)> = spans
+            let shown: BTreeSet<((usize, usize), Group)> = spans
                 .difference(&common_spans)
                 .copied()
-                .filter(|&(i, j)| j > i && (i, j) != whole)
+                .filter(|&((i, j), _)| j > i && (i, j) != whole)
                 .collect();
-            let mut functions: Vec<String> = p
-                .links
+            let terms = shown
                 .iter()
-                .filter(|l| !common_links.contains(l))
-                .map(function_line)
+                .filter(|(_, g)| *g == Group::Term)
+                .filter_map(|&((i, j), _)| tokens.get(i..=j))
+                .map(|w| format!("«{}» is one term, a single named concept", w.join(" ")));
+            let mut functions: Vec<String> = terms
+                .chain(
+                    p.links
+                        .iter()
+                        .filter(|l| !common_links.contains(l))
+                        .map(function_line),
+                )
                 .collect();
             if predications.len() > 1 {
                 functions.extend(p.predication.map(str::to_string));
@@ -92,20 +127,29 @@ fn intersection<T: Ord + Clone>(sets: &[BTreeSet<T>]) -> BTreeSet<T> {
     it.fold(first, |acc, s| acc.intersection(s).cloned().collect())
 }
 
-/// The sentence with a bracket around each span. The spans of one derivation nest or are disjoint,
-/// so counting the brackets that open before and close after each token renders them.
-pub fn bracket(tokens: &[String], spans: &BTreeSet<(usize, usize)>) -> String {
+/// The sentence with `[…]` around each phrase and `⟨…⟩` around each term. The spans of one
+/// derivation nest or are disjoint, so at each token the brackets open outermost first and close
+/// innermost first.
+pub fn bracket(tokens: &[String], spans: &BTreeSet<((usize, usize), Group)>) -> String {
+    let marks = |g: Group| match g {
+        Group::Phrase => ('[', ']'),
+        Group::Term => ('⟨', '⟩'),
+    };
     let mut out = String::new();
     for (k, t) in tokens.iter().enumerate() {
-        let opens = spans.iter().filter(|s| s.0 == k).count();
-        let closes = spans.iter().filter(|s| s.1 == k).count();
+        let mut opening: Vec<&((usize, usize), Group)> =
+            spans.iter().filter(|((i, _), _)| *i == k).collect();
+        opening.sort_by(|a, b| b.0 .1.cmp(&a.0 .1));
+        let mut closing: Vec<&((usize, usize), Group)> =
+            spans.iter().filter(|((_, j), _)| *j == k).collect();
+        closing.sort_by(|a, b| b.0 .0.cmp(&a.0 .0));
         let glued = matches!(t.as_str(), "," | "." | ";" | ":" | "?" | "!" | ")");
-        if k > 0 && !(glued && opens == 0) {
+        if k > 0 && !(glued && opening.is_empty()) {
             out.push(' ');
         }
-        out.push_str(&"[".repeat(opens));
+        out.extend(opening.iter().map(|(_, g)| marks(*g).0));
         out.push_str(t);
-        out.push_str(&"]".repeat(closes));
+        out.extend(closing.iter().map(|(_, g)| marks(*g).1));
     }
     out
 }
@@ -190,11 +234,13 @@ mod tests {
             &[
                 Parse {
                     constituents: &verb,
+                    terms: &[],
                     links: &verb_links,
                     predication: None,
                 },
                 Parse {
                     constituents: &noun,
+                    terms: &[],
                     links: &noun_links,
                     predication: None,
                 },
@@ -228,11 +274,13 @@ mod tests {
             &[
                 Parse {
                     constituents: &spans,
+                    terms: &[],
                     links: &[],
                     predication: Some("every one is"),
                 },
                 Parse {
                     constituents: &spans,
+                    terms: &[],
                     links: &[],
                     predication: Some("the kind is"),
                 },
@@ -249,7 +297,71 @@ mod tests {
     #[test]
     fn nested_spans_bracket_in_order() {
         let tokens = words("a b c d");
-        let spans: BTreeSet<(usize, usize)> = [(1, 3), (2, 3)].into_iter().collect();
-        assert_eq!(bracket(&tokens, &spans), "a [b [c d]]");
+        let spans: BTreeSet<((usize, usize), Group)> = [
+            ((1, 3), Group::Phrase),
+            ((2, 3), Group::Term),
+            ((1, 1), Group::Phrase),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(bracket(&tokens, &spans), "a [[b] ⟨c d⟩]");
+    }
+
+    /// «Depletion of WRN induced double-stranded DNA breaks.»: the pinned reading takes the three
+    /// words as one concept (C1511667), a rival composes them. Every reading builds a constituent
+    /// over the words; the term and the phrase differ, and both are shown.
+    #[test]
+    fn a_term_is_shown_against_a_phrase_over_the_same_words() {
+        let tokens = words("Depletion of WRN induced double-stranded DNA breaks");
+        let shared = [(0, 6), (0, 2), (3, 6), (4, 6)];
+        let composed: Vec<(usize, usize)> = shared.iter().copied().chain([(5, 6)]).collect();
+        let a = analyses(
+            &tokens,
+            &[
+                Parse {
+                    constituents: &shared,
+                    terms: &[(4, 6)],
+                    links: &[],
+                    predication: None,
+                },
+                Parse {
+                    constituents: &composed,
+                    terms: &[],
+                    links: &[],
+                    predication: None,
+                },
+            ],
+        );
+        assert_eq!(
+            a[0].bracketed,
+            "Depletion of WRN induced ⟨double-stranded DNA breaks⟩"
+        );
+        assert_eq!(
+            a[0].functions,
+            vec!["«double-stranded DNA breaks» is one term, a single named concept"]
+        );
+        assert_eq!(
+            a[1].bracketed,
+            "Depletion of WRN induced [double-stranded [DNA breaks]]"
+        );
+        // A term every analysis takes decides nothing and is not shown.
+        let both = analyses(
+            &tokens,
+            &[
+                Parse {
+                    constituents: &shared,
+                    terms: &[(4, 6)],
+                    links: &[],
+                    predication: None,
+                },
+                Parse {
+                    constituents: &[(0, 6), (0, 3), (4, 6)],
+                    terms: &[(4, 6)],
+                    links: &[],
+                    predication: None,
+                },
+            ],
+        );
+        assert!(both[0].functions.is_empty());
     }
 }

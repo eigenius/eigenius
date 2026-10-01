@@ -608,12 +608,27 @@ fn structure_groups(
         });
         groups[g].push(i);
     }
-    let parses: Vec<Parse> = groups
+    // A leaf over several words naming one concept is a term («double-stranded DNA breaks»,
+    // «Project Achilles»); a leaf naming several (a distributed coordination) is not.
+    let terms: Vec<Vec<(usize, usize)>> = groups
         .iter()
         .map(|g| {
+            candidates[g[0]]
+                .senses_at
+                .iter()
+                .filter(|w| w.span.1 > w.span.0 && w.atoms.len() == 1)
+                .map(|w| w.span)
+                .collect()
+        })
+        .collect();
+    let parses: Vec<Parse> = groups
+        .iter()
+        .zip(&terms)
+        .map(|(g, terms)| {
             let c = &candidates[g[0]];
             Parse {
                 constituents: &c.constituents,
+                terms,
                 links: &c.links,
                 predication: c.predication.as_deref(),
             }
