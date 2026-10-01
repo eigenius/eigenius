@@ -2206,6 +2206,14 @@ mod tests {
             governed_preposition("absolutely necessary; vitally necessary", "essential"),
             Some("for".to_string())
         );
+        // responsive.a.01's real gloss — `responsive` never precedes a preposition in it.
+        assert_eq!(
+            governed_preposition(
+                "readily reacting or replying to people or events or stimuli; showing emotion",
+                "responsive"
+            ),
+            Some("to".to_string())
+        );
         // A gloss-derived prep still wins (the fallback only fires when the gloss yields none).
         assert_eq!(
             governed_preposition("usually followed by `to'", "proportional"),

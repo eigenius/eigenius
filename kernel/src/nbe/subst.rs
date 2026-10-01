@@ -188,10 +188,12 @@ fn subst_inner(
             args.iter().map(&go).collect::<Result<Vec<_>, _>>()?,
         ),
 
-        // Leaves — nothing to substitute into.
+        // Leaves — nothing to substitute into. `Const` is how an inductive's NAME decodes (D76
+        // Phase B: `logic:And`, `justification:Grounds`); its levels are universe levels, not terms.
         Exp::Sort(_)
         | Exp::One
         | Exp::Unit
+        | Exp::Const(..)
         | Exp::EigonClass(_)
         | Exp::EigonAxiom(_)
         | Exp::Checked(_)
@@ -256,6 +258,26 @@ mod tests {
         let body = Exp::App(Box::new(v("f")), Box::new(v("x")));
         let out = subst(&body, "x", &cls(WRN)).unwrap();
         assert_eq!(out, Exp::App(Box::new(v("f")), Box::new(cls(WRN))));
+    }
+
+    /// An inductive's name decodes to `Const` (D76 Phase B), so a definition body over
+    /// `logic:And(…)` is `App(App(Const(And), a), b)`: the head is a leaf, the arguments are
+    /// substituted.
+    #[test]
+    fn passes_an_inductive_name_and_substitutes_its_arguments() {
+        let and = Exp::Const(Iri::parse("urn:eigenius:logic:And").unwrap(), Vec::new());
+        let body = Exp::App(
+            Box::new(Exp::App(Box::new(and.clone()), Box::new(v("x")))),
+            Box::new(v("y")),
+        );
+        let out = subst(&body, "x", &cls(WRN)).unwrap();
+        assert_eq!(
+            out,
+            Exp::App(
+                Box::new(Exp::App(Box::new(and), Box::new(cls(WRN)))),
+                Box::new(v("y")),
+            )
+        );
     }
 
     /// A binder of the same name shadows: the body below it must NOT be substituted.

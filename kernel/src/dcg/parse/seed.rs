@@ -385,21 +385,21 @@ impl Parser {
             .collect()
     }
 
-    /// Whether `surface` is a morphologically-derived adjective whose base is **known to the
-    /// lexicon** (D63 compound morphology, `docs/notes/d63-compound-morphology.md` §3, Slice 1): a
-    /// closed-prefix concatenation (`hypermutable` → `mutable`) or a right-headed hyphen compound
-    /// (`double-stranded` → `stranded`) whose base/head resolves to a predicative adjective. Shared
-    /// by [`Self::derived_adjective_items`] (seeding) and [`Self::has_token`] (the missing-lexeme
+    /// Whether `surface` is a morphologically-derived adjective whose parts are **known to the
+    /// lexicon** (D63 compound morphology, `docs/notes/d63-compound-morphology.md` §3): a
+    /// closed-prefix concatenation (`hypermutable` → `mutable`), a right-headed hyphen compound with a
+    /// reading ([`Self::hyphen_compound_items`]), or a denominal `X-<suffix>`. Shared by
+    /// [`Self::derived_adjective_items`] (seeding) and [`Self::has_token`] (the missing-lexeme
     /// diagnostic), so a derived adjective counts as *known*. Mirrors [`Self::is_derived_adverb`].
     pub(super) fn is_derived_adjective(&self, surface: &str) -> bool {
         let s = surface.trim().to_lowercase();
-        // Slice 1: a closed-prefix / hyphen compound whose base is a known adjective.
-        let slice1 = adjective_bases(&s).iter().any(|b| {
+        // Slice 1: a closed-prefix stem that is a known adjective, or a hyphen compound with a reading.
+        let slice1 = prefix_adjective_bases(&s).iter().any(|b| {
             self.lex
                 .entries_for(b)
                 .iter()
                 .any(|e| is_adjective_cat(e.item.cat()))
-        });
+        }) || !self.hyphen_compound_items(&s).is_empty();
         // Slice 2: `X-<suffix>` (denominal) where X is a known noun and the relation verb is available.
         slice1 || self.denominal_suffix_item(&s).is_some()
     }
@@ -424,17 +424,73 @@ impl Parser {
             return Vec::new();
         }
         let mut out = Vec::new();
-        // Slice 1 (identity): reuse the base adjective's own items.
-        for b in adjective_bases(&s) {
+        // Slice 1, closed prefix (identity): reuse the base adjective's own items.
+        for b in prefix_adjective_bases(&s) {
             for e in self.lex.entries_for(&b) {
                 if is_adjective_cat(e.item.cat()) {
                     out.push(e.item);
                 }
             }
         }
+        // Slice 1, hyphen compound: what the left half contributes depends on what it is.
+        out.extend(self.hyphen_compound_items(&s));
         // Slice 2 (denominal `X-<suffix>`): the constructed `rel(…)` predicate over the element's verb.
         if let Some(it) = self.denominal_suffix_item(&s) {
             out.push(it);
+        }
+        out
+    }
+
+    /// The readings of a right-headed hyphen compound `L-H` whose head `H` is a known adjective (D63
+    /// compound morphology §3, Slice 1). What `L` contributes depends on what `L` is:
+    ///
+    /// * an **adjective** modifies the head (`double-stranded`): the head's own items, `L`
+    ///   transparent (identity sem, v1);
+    /// * a **noun or name** fills the head's governed complement (`desmopressin-responsive` ≡
+    ///   `responsive to desmopressin`). The compound and the phrase are one proposition with one
+    ///   representation (§2a), so the head's relational entry `(S[adj]\NP)/cat_pp_arg(prep_P)`
+    ///   ([`governs_named_preposition`]) is applied to `L` — a common noun as its kind (`kind_of(C)`, as
+    ///   a bare argument commits), a name as itself.
+    ///
+    /// A noun-left compound whose head governs no preposition gets NO reading. The identity reading
+    /// would drop `L` and the content it carries — `desmopressin-responsive` read as plain
+    /// `responsive` — and no relation is recorded to put `L` in. Empty unless `surface` is `L-H`.
+    fn hyphen_compound_items(&self, surface: &str) -> Vec<Item> {
+        let Some((left, head)) = hyphen_compound_parts(surface) else {
+            return Vec::new();
+        };
+        let left_entries = self.lex.entries_for(left);
+        let head_entries = self.lex.entries_for(head);
+        let mut out = Vec::new();
+        if left_entries.iter().any(|e| is_adjective_cat(e.item.cat())) {
+            out.extend(
+                head_entries
+                    .iter()
+                    .filter(|e| is_adjective_cat(e.item.cat()))
+                    .map(|e| e.item.clone()),
+            );
+        }
+        let complements: Vec<Exp> = left_entries
+            .iter()
+            .filter_map(|e| match is_ctor(e.item.cat(), "cat_n") {
+                Some([t, _]) => Some(kind_of(t.clone())),
+                _ => is_ctor(e.item.cat(), "cat_np").map(|_| e.item.sem().clone()),
+            })
+            .collect();
+        for h in head_entries
+            .iter()
+            .filter(|e| governs_named_preposition(e.item.cat()))
+        {
+            let Some((_m, adjective, _pp)) = slash_parts(h.item.cat(), "fwd") else {
+                continue;
+            };
+            for c in &complements {
+                out.push(Item::with_cost(
+                    adjective.clone(),
+                    Exp::App(Box::new(h.item.sem().clone()), Box::new(c.clone())),
+                    h.item.cost(),
+                ));
+            }
         }
         out
     }
@@ -1249,46 +1305,41 @@ fn adverb_bases(surface: &str) -> Vec<String> {
     bases
 }
 
-/// Candidate adjective bases for a morphologically-derived adjective (D63 compound morphology,
-/// `docs/notes/d63-compound-morphology.md` §3, Slice 1) — orthographic reverse-derivation, each
-/// candidate probed against the lexicon in [`Parser::is_derived_adjective`] (data-driven, no
-/// hardcoded adjective list; a non-adjective base simply fails the probe). Two productive shapes:
-///   * a **closed prefix** `{hyper,hypo,poly,multi,mono}` concatenated onto a known adjective
-///     (`hypermutable` → `mutable`);
-///   * a **right-headed hyphen compound** whose head is a known adjective (`double-stranded` →
-///     `stranded`).
-///
-/// The affix / left modifier is transparent in v1 (identity sem — the derived word reuses the base's
-/// items), so only the base (prefix-stripped stem / compound head) is returned. Participial denominal
-/// tails (`-based`) are Slice 2, handled separately, and are excluded here so they do not pick up a
-/// wrong identity reading.
-fn adjective_bases(surface: &str) -> Vec<String> {
+/// Candidate adjective bases for a **closed-prefix** derived adjective (D63 compound morphology,
+/// `docs/notes/d63-compound-morphology.md` §3, Slice 1): a prefix `{hyper,hypo,poly,multi,mono}`
+/// concatenated onto a known adjective (`hypermutable` → `mutable`) — orthographic reverse-derivation,
+/// each candidate probed against the lexicon in [`Parser::is_derived_adjective`] (data-driven, no
+/// hardcoded adjective list; a non-adjective base simply fails the probe). The prefix is transparent in
+/// v1 (identity sem — the derived word reuses the base's items), so only the stem is returned. A
+/// hyphenated surface has no prefix base; its halves are [`hyphen_compound_parts`].
+fn prefix_adjective_bases(surface: &str) -> Vec<String> {
     // Productive biomedical adjective prefixes (a declarative closed set, not a corpus-frequency
     // splitter — §2 "closed affix inventory, not frequency splitting").
     const ADJ_PREFIXES: &[&str] = &["hyper", "hypo", "poly", "multi", "mono"];
     let s = surface.trim().to_lowercase();
-    let mut bases = Vec::new();
-    if let Some((_, head)) = s.rsplit_once('-') {
-        // Right-headed hyphen compound: the head (last segment) carries the category — UNLESS it is a
-        // denominal suffix (`-based`/`-like`/…), which are handled by [`denominal_suffix_item`], not the
-        // Slice-1 identity rule. Excluding them fixes the `-like` over-generation (§3b).
-        let is_denominal = DENOMINAL_SUFFIXES.iter().any(|(suf, _, _)| *suf == head);
-        if head.len() >= 3 && !is_denominal {
-            bases.push(head.to_string());
-        }
-    } else {
-        // Concatenated closed prefix.
-        for p in ADJ_PREFIXES {
-            if let Some(stem) = s.strip_prefix(p) {
-                if stem.len() >= 3 {
-                    bases.push(stem.to_string());
-                }
-            }
-        }
+    if s.contains('-') {
+        return Vec::new();
     }
+    let mut bases: Vec<String> = ADJ_PREFIXES
+        .iter()
+        .filter_map(|p| s.strip_prefix(p))
+        .filter(|stem| stem.len() >= 3)
+        .map(str::to_string)
+        .collect();
     bases.sort();
     bases.dedup();
     bases
+}
+
+/// The halves `(left, head)` of a **right-headed hyphen compound** `L-H` (D63 compound morphology §3,
+/// Slice 1): the head (last segment) carries the category, and [`Parser::hyphen_compound_items`]
+/// decides what the left half contributes. `None` for a head shorter than three letters, and for a
+/// denominal suffix (`-based`/`-like`/…), which [`Parser::denominal_suffix_item`] handles — excluding
+/// those fixes the `-like` over-generation (§3b).
+fn hyphen_compound_parts(surface: &str) -> Option<(&str, &str)> {
+    let (left, head) = surface.rsplit_once('-')?;
+    let is_denominal = DENOMINAL_SUFFIXES.iter().any(|(suf, _, _)| *suf == head);
+    (!left.is_empty() && head.len() >= 3 && !is_denominal).then_some((left, head))
 }
 
 /// Lexicalized (non-`-ly`) transparent **discourse adverbs** (D62 connectives batch): closed-class
@@ -1340,7 +1391,7 @@ const HAS_COUNT: &str = "urn:eigenius:ontology:has_count";
 ///     suffixes (`θ resembles / depends on X`) make θ the subject → `rel(X, θ)`. Under the object-first
 ///     verb convention both render `rel(a, b)` = "b ⟨rel⟩ a".
 ///
-/// Every tail here is also excluded from the Slice-1 hyphen-head identity rule ([`adjective_bases`]),
+/// Every tail here is also excluded from the Slice-1 hyphen-compound rule ([`hyphen_compound_parts`]),
 /// which fixes the `-like` over-generation (`like` is a WordNet adjective, so Slice-1 would otherwise
 /// seed identity `like(x)` and drop `X`). A tail whose `relation_lemma` is absent from the lexicon just
 /// fails the probe → the token stays OOV (fail-safe), never a wrong reading. `-specific` is omitted

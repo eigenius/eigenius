@@ -1,0 +1,55 @@
+// AVPR2 codon 44 — vocabulary for the residue-versus-variant toy (UAB Round 1, experiment 01:
+// `01-toy-residue-variant/residue-versus-variant.md`; the material is not in this repository).
+//
+// Two classes at two resolutions:
+//
+//   Variant   a sequence variant at nucleotide resolution, named by its HGVS coding change
+//   Residue   an amino-acid position of the protein, which several variants can change
+//
+// `HasResidue` is not injective: c.130C>T and c.131T>C both change Leu44. `DDAVPResponsive` is
+// indexed by `Variant`, so it cannot be stated of a residue.
+//
+// «Leu44» enters the lexicon as a proper noun naming the RESIDUE, because that is what the token
+// denotes. The lexicon snapshot does not carry it; `prose-to-esl --chain-load` puts this file on
+// the parse's chain. The entry follows the NCBI gene importer's named-entity shape
+// (`crates/eigenius-ncbi-gene/src/convert.rs`).
+
+namespace core    = "urn:eigenius:core";
+namespace lexicon = "urn:eigenius:lexicon";
+namespace avpr2   = "urn:eigenius:uab:avpr2";
+
+class avpr2:Variant : lexicon:Entity {
+    description = "A sequence variant of AVPR2 at nucleotide resolution, named by its HGVS coding change (c.130C>T).";
+}
+
+class avpr2:Residue : lexicon:Entity {
+    description = "An amino-acid position of the AVPR2 protein (Leu44). Several variants can change the same residue.";
+}
+
+// «v changes residue r». Two variants can change one residue.
+data avpr2:HasResidue : avpr2:Variant -> avpr2:Residue -> Prop {
+}
+
+// «v responds to desmopressin (DDAVP)». Stated of a variant; a residue does not inhabit `Variant`.
+data avpr2:DDAVPResponsive : avpr2:Variant -> Prop {
+}
+
+resource avpr2:Leu44 : avpr2:Residue {
+    core:description = "Leucine at codon 44 of AVPR2.";
+}
+
+resource avpr2:c_130C_T : avpr2:Variant {
+    core:description = "AVPR2 c.130C>T; protein change p.Leu44Phe.";
+}
+
+resource avpr2:c_131T_C : avpr2:Variant {
+    core:description = "AVPR2 c.131T>C; protein change p.Leu44Pro.";
+}
+
+resource avpr2:Leu44_np : lexicon:LexicalEntry {
+    lexicon:form     = "Leu44";
+    lexicon:cat      = type_expr( lexicon:cat_np(avpr2:Residue, lexicon:sg) );
+    lexicon:sem      = avpr2:Leu44;
+    lexicon:sem_type = type_expr( avpr2:Residue );
+    lexicon:sense    = "avpr2:Leu44";
+}

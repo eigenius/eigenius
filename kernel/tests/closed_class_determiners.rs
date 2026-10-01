@@ -524,9 +524,11 @@ fn ly_adverb_recognition_requires_a_known_adjective_base() {
 #[test]
 fn derived_adjective_reuses_its_base_and_is_transparent() {
     // D63 compound morphology §3, Slice 1: a closed-prefix concatenation (`hyperprimary` ← `primary`)
-    // and a right-headed hyphen compound (`double-primary` ← `primary`) each seed the base
-    // adjective's own items on the whole-token span, so the derived word parses identically to its
-    // base — the affix / left modifier is transparent in v1 (identity sem, like the `-ly` adverbs).
+    // and a right-headed hyphen compound with an ADJECTIVE left half (`large-primary` ← `primary`)
+    // each seed the base adjective's own items on the whole-token span, so the derived word parses
+    // identically to its base — the affix / left modifier is transparent in v1 (identity sem, like
+    // the `-ly` adverbs). A noun left half is not a modifier; see
+    // `noun_left_hyphen_compound_fills_the_heads_governed_complement`.
     let (_layer, index) = index_over_bootstrap();
 
     let base = index.parse("HeLa is primary", &Identity);
@@ -541,13 +543,13 @@ fn derived_adjective_reuses_its_base_and_is_transparent() {
         "`hyperprimary` is transparent — same claim as `primary`"
     );
 
-    // Right-headed hyphen compound.
-    let compound = index.parse("HeLa is double-primary", &Identity);
+    // Right-headed hyphen compound, adjective left half.
+    let compound = index.parse("HeLa is large-primary", &Identity);
     assert!(!compound.is_empty(), "the hyphen compound adjective parses");
     assert_eq!(
         pretty_term(compound[0].sem()),
         pretty_term(base[0].sem()),
-        "`double-primary` is transparent — same claim as `primary`"
+        "`large-primary` is transparent — same claim as `primary`"
     );
 
     // Attributive (prenominal) use — the real target (`hypermutable cells`): the derived adjective
@@ -573,6 +575,65 @@ fn derived_adjective_recognition_requires_a_known_base() {
         index.parse("HeLa is double-zorp", &Identity).is_empty(),
         "a hyphen compound with no adjective head does not seed a derived adjective"
     );
+    // The left half must be known too, and must be a modifier for the identity reading: dropping an
+    // unknown or nominal left half would drop whatever it says (`gene-primary` read as `primary`).
+    assert!(
+        index.parse("HeLa is zorp-primary", &Identity).is_empty(),
+        "a hyphen compound with an unknown left half does not seed a derived adjective"
+    );
+    assert!(
+        index.parse("HeLa is gene-primary", &Identity).is_empty(),
+        "a noun left half over a head that governs no complement has no reading"
+    );
+}
+
+/// A relational adjective in the shape the WordNet importer emits for a governed preposition
+/// (`push_adj`, C3-positive): `(S[adj]\NP)/cat_pp_arg(prep_to)` over a 2-place relation, complement
+/// first — beside its plain 1-place reading.
+const RELATIONAL_ADJECTIVE_FIXTURE: &str = r#"
+namespace lexicon   = "urn:eigenius:lexicon";
+axiom lexicon:responsive_rel : lexicon:Entity -> lexicon:Entity -> Prop
+resource lexicon:e_responsive_rp : lexicon:LexicalEntry {
+    lexicon:form     = "responsive";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)), lexicon:cat_pp_arg(lexicon:prep_to)) );
+    lexicon:sem      = lexicon:responsive_rel;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:responsive.a.01";
+}
+axiom lexicon:responsive_adj : lexicon:Entity -> Prop
+resource lexicon:e_responsive : lexicon:LexicalEntry {
+    lexicon:form     = "responsive";
+    lexicon:cat      = type_expr( lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:responsive_adj;
+    lexicon:sem_type = type_expr( lexicon:Entity -> Prop );
+    lexicon:sense    = "wn:responsive.a.01";
+}
+"#;
+
+#[test]
+fn noun_left_hyphen_compound_fills_the_heads_governed_complement() {
+    // D63 compound morphology §2a applied to Slice 1: `gene-responsive` ≡ `responsive to genes`. The
+    // noun left half fills the head adjective's governed `to`-complement as its kind, which is the
+    // term the phrase commits — not the identity reading, which would drop it to plain `responsive`.
+    let index = index_with_fixture(RELATIONAL_ADJECTIVE_FIXTURE);
+    let compound = index.parse("HeLa is gene-responsive", &PluralS);
+    assert!(!compound.is_empty(), "`gene-responsive` parses");
+    let phrase: std::collections::BTreeSet<String> = index
+        .parse("HeLa is responsive to genes", &PluralS)
+        .iter()
+        .map(|it| pretty_term(it.sem()))
+        .collect();
+    for it in &compound {
+        let t = pretty_term(it.sem());
+        assert!(
+            t.contains("responsive_rel") && t.contains("kind_of"),
+            "every reading keeps the noun, as the complement — got {t}"
+        );
+        assert!(
+            phrase.contains(&t),
+            "`gene-responsive` states the phrase's proposition — {t} is not among {phrase:?}"
+        );
+    }
 }
 
 /// Synthetic relations for the denominal-suffix rule (D63 compound morphology §3b): a transitive `base`
@@ -606,7 +667,8 @@ resource lexicon:e_like : lexicon:LexicalEntry {
 }
 "#;
 
-fn denominal_index() -> Parser {
+/// Bootstrap + the demo domain, with `fixture` layered on top.
+fn index_with_fixture(fixture: &str) -> Parser {
     let ctx = testing::bootstrap_context();
     let demo = esl::compile(DEMO, ctx.head()).expect("demo compiles");
     let mut b = LayerBuilder::new("demo", Some(Arc::clone(ctx.head())));
@@ -614,12 +676,16 @@ fn denominal_index() -> Parser {
         b.add_resource(r).expect("add demo");
     }
     let demo_layer = Arc::new(b.build(LayerStorage::in_memory()));
-    let fix = esl::compile(DENOMINAL_FIXTURE, &demo_layer).expect("denominal fixture compiles");
-    let mut b2 = LayerBuilder::new("denominal", Some(Arc::clone(&demo_layer)));
+    let fix = esl::compile(fixture, &demo_layer).expect("fixture compiles");
+    let mut b2 = LayerBuilder::new("fixture", Some(Arc::clone(&demo_layer)));
     for r in fix {
-        b2.add_resource(r).expect("add denominal relation");
+        b2.add_resource(r).expect("add fixture resource");
     }
     Parser::build(Arc::new(b2.build(LayerStorage::in_memory())))
+}
+
+fn denominal_index() -> Parser {
+    index_with_fixture(DENOMINAL_FIXTURE)
 }
 
 #[test]
