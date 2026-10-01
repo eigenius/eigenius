@@ -99,6 +99,7 @@ fn the_served_run_emits_the_same_artifact_as_the_cli() {
         timestamp: "2026-08-03T00:00:00Z".to_string(),
         scope: None,
         model: Default::default(),
+        reading_model: eigenius_kernel::dcg::model_config::ModelConfig::reading(),
         // The demo's caps, which the committed draws were recorded under.
         sense_cap: Some(2),
         cell_beam: Some(64),

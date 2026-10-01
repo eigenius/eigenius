@@ -551,10 +551,11 @@ message ParseSentenceResponse {
 // configured value. One message rather than N loose fields so adding a knob
 // later does not reshape the request.
 message FormalizationOptions {
-  // Anthropic model id for this run's untrusted proposers. Also what each
-  // recorded draw names as its answerer (`enc:draw_model`). Empty = server default.
+  // Model id for this run's untrusted proposers other than the reading ranker.
+  // Also what each of their recorded draws names as its answerer
+  // (`enc:draw_model`). Empty = server default (claude-sonnet-4-6).
   string model = 1;
-  // Reply cap for those calls. 0 = default.
+  // Reply cap for the calls to an Anthropic model. 0 = the model's default.
   uint32 max_tokens = 2;
   // Adaptive-supertagging per-lemma sense cap (Lever A). 0 = server default.
   uint32 sense_cap = 3;
@@ -564,6 +565,10 @@ message FormalizationOptions {
   // `enc:CutItem`. Default false: an interactive surface wants the failing units
   // NAMED, not an aborted run (D71 §8).
   bool strict = 5;
+  // Model id for the reading ranker (the reading-selection seam), and what its
+  // recorded draws name as their answerer. `jev-…` asks TypeSafe, `claude-…`
+  // Anthropic. Empty = server default (jev-latest).
+  string reading_model = 6;
   // NOTE: temperature is deliberately absent. It is pinned at 0 because every
   // call here ranks or classifies rather than writing prose, and sampling made
   // the canonical parse-rate measurement irreproducible between runs of

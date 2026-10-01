@@ -55,13 +55,14 @@
 #   scripts/measure-parse-rate.sh --attribution    # + page ambiguity roll-up (read-only; see README §7)
 #   scripts/measure-parse-rate.sh --context-window # reranker sees +/-2 sentences — CHANGES the result (unproven)
 #   scripts/measure-parse-rate.sh --flat-ranker    # ARM: the flat reading listing, one call (before eigenius#264)
-#   scripts/measure-parse-rate.sh --ranker-model <id>  # ARM: the reading ranker's model (default claude-sonnet-4-6;
-#                                                    #   jev-* asks TypeSafe and needs TYPESAFE_API_KEY)
+#   scripts/measure-parse-rate.sh --ranker-model <id>  # ARM: the reading ranker's model (default jev-latest,
+#                                                    #   claude-sonnet-4-6 under --flat-ranker; jev-* asks TypeSafe)
 #   scripts/measure-parse-rate.sh --snapshot /path/to/store
 #
 # Env overrides:
 #   EIGENIUS_DB_SNAPSHOT  snapshot store dir (takes precedence over --snapshot / autodetect)
 #   ANTHROPIC_API_KEY     required for the live reranker (unless --no-llm)
+#   TYPESAFE_API_KEY      required for a live selection draw by a jev-* reading ranker (the default)
 #   SNAPSHOT_ROOT         where to autodetect the newest snapshot (default: ../db-snapshot)
 #   OUT_DIR               where run directories are written (default: experiments/parsing/results)
 #
@@ -138,6 +139,10 @@ ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PA
 [[ "$FLAT_RANKER" == "1" ]] && ENV_STRIP+=(EIGENIUS_SELECT_FLAT=1)
 # The reading ranker's model (eigenius#264 strand 2) — which provider and model answer a live draw.
 [[ -n "$RANKER_MODEL" ]] && ENV_STRIP+=(EIGENIUS_SELECT_MODEL="$RANKER_MODEL")
+# The model a live selection draw asks — the defaults of `live_reading_ranker_from_env`.
+if [[ -n "$RANKER_MODEL" ]]; then SELECT_MODEL="$RANKER_MODEL"
+elif [[ "$FLAT_RANKER" == "1" ]]; then SELECT_MODEL="claude-sonnet-4-6"
+else SELECT_MODEL="jev-latest"; fi
 
 # ── resolve the page (named shortcut → absolute; else realpath from the invocation dir) ──
 case "$PAGE_ARG" in
@@ -241,17 +246,22 @@ if [[ -n "$SEL_REPLAY" ]]; then
     ENV_STRIP+=(EIGENIUS_SELECTIONS="$SELECTIONS" EIGENIUS_SELECTIONS_OUT="$RUN_DIR/selections.json")
   else
     [[ "$USE_LLM" == "1" ]] || { echo "error: --selections names a MISSING file (live-record mode) but --no-llm is set" >&2; exit 1; }
-    SELECTIONS_MODE="LIVE AnthropicReadingRanker → RECORD $SELECTIONS"
+    SELECTIONS_MODE="LIVE reading ranker ($SELECT_MODEL) → RECORD $SELECTIONS"
     ENV_STRIP+=(EIGENIUS_SELECTIONS="$SELECTIONS")
   fi
 elif [[ "$USE_LLM" == "1" && -z "$REPLAY" ]]; then
   SELECTIONS="$RUN_DIR/selections.json"
-  SELECTIONS_MODE="LIVE AnthropicReadingRanker → RECORD $SELECTIONS"
+  SELECTIONS_MODE="LIVE reading ranker ($SELECT_MODEL) → RECORD $SELECTIONS"
   ENV_STRIP+=(EIGENIUS_SELECTIONS="$SELECTIONS")
 else
   SELECTIONS="$RUN_DIR/selections.json"
   SELECTIONS_MODE="pin-backed arm → $SELECTIONS"
   ENV_STRIP+=(EIGENIUS_SELECTIONS_OUT="$SELECTIONS")
+fi
+# A live draw by a TypeSafe model fails every selection without its key; fail here instead.
+if [[ "$SELECTIONS_MODE" == LIVE* && "$SELECT_MODEL" == jev-* && -z "${TYPESAFE_API_KEY:-}" ]]; then
+  echo "error: live selection draw by $SELECT_MODEL but TYPESAFE_API_KEY is unset (pass --ranker-model claude-… or --selections <existing file>)" >&2
+  exit 1
 fi
 
 # ── Provenance header — a log without it cannot be reproduced or trusted ─────
@@ -266,7 +276,7 @@ KNOBS="$(grep -hoE 'const (SENSE_CAP|CELL_BEAM): usize = [0-9]+' \
   echo "# snapshot:  $SNAP"
   echo "# reranker:  $RERANKER"
   echo "# profile:   release"
-  echo "# config:    pos_prune=$POS_PRUNE combinatory_core=$COMB_CORE attribution=$ATTRIBUTION context_window=$CONTEXT_WINDOW flat_ranker=$FLAT_RANKER ranker_model=${RANKER_MODEL:-default} $KNOBS"
+  echo "# config:    pos_prune=$POS_PRUNE combinatory_core=$COMB_CORE attribution=$ATTRIBUTION context_window=$CONTEXT_WINDOW flat_ranker=$FLAT_RANKER ranker_model=$SELECT_MODEL $KNOBS"
   echo "# rust_min_stack: ${RUST_MIN_STACK:-default}"
   echo "# ranks:     $RANKS_MODE"
   echo "# selections: $SELECTIONS_MODE"

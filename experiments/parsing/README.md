@@ -168,6 +168,11 @@ call over the chosen structure's readings. `--flat-ranker` runs the single flat 
 `EIGENIUS_DUMP_STRUCTURES=1` prints the structure questions on a replay. The A/B is in
 `docs/notes/d69-reading-presentation.md` §7n.
 
+The live ranker's model is `jev-latest` (TypeSafe; needs `TYPESAFE_API_KEY`), the default from
+2026-09-30 by the model A/B in §7o; `--ranker-model <id>` names another (`claude-…` asks Anthropic).
+The flat listing asks Anthropic models only and defaults to `claude-sonnet-4-6`. The sense ranker and
+the other proposers stay on `claude-sonnet-4-6`.
+
 Arms, mirroring the ranks discipline:
 
 ```bash

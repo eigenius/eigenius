@@ -631,6 +631,39 @@ first two-call build abstained four times, silently: the sense call listed a str
 under their indices in the whole list, and a reply by position fell outside the structure. The
 listing is numbered from 0 now, and a malformed reply is logged before the ranker abstains.
 
+## 7o. The model — eigenius#264 strand 2, `jev-latest` DEFAULT (`2026-09-30`)
+
+The owner's design (2026-09-30): the two calls go through a provider-neutral decision interface
+(`dcg::decision`: a `Choice` of context, question, notes and keyed options; a `Decider` returns the
+chosen key, runners-up, probabilities where the provider gives them, and a rationale where it gives
+one). Two deciders: Anthropic (the forced `emit` tool, or the JSON-schema output mode on the Claude 5
+models, which reject a forced tool choice) and TypeSafe System One (`render_typesafe`: the context as
+`state`, one `choice` question whose criteria are the options; no rationale, so the record holds the
+probabilities). Every arm sees the same context as Claude.
+
+**The A/B** (three live draws per model, same snapshot and rankings as §7n, 28 new ledger rows,
+each draw re-scored by replay; harness run time per draw, the forest replayed):
+
+| model | reading-correct | structure-correct | decisions identical in all 3 draws | time |
+|---|---|---|---|---|
+| `claude-sonnet-4-6` | 26, 25, 26 | 30, 29, 30 | 38/41 | ~400 s |
+| `claude-sonnet-5-5` | 29, 24, 28 | 33, 30, 33 | 20/41 | ~270 s |
+| `jev-latest` | 26, 26, 26 | 30, 30, 30 | 37/41 | ~60 s |
+
+The Claude 5 models reject `temperature`, which accounts for sonnet-5-5's spread. sonnet-4-6 scored
+29, 28, 30 (structure 34, 35, 36) on §7n's dedicated prompt over the same forest and ledger: the
+neutral rendering (`decision::render_prompt`) costs it about 3 readings. Two differences from the
+§7n prompt: the final instruction no longer names what to decide (where each phrase attaches, and
+why), and structures are labelled `[1]` rather than `Structure 1:`. jev reads `render_typesafe`,
+not `render_prompt`.
+
+**Disposition (owner, 2026-09-30): `jev-latest` is the reading ranker's default**
+(`model_config::DEFAULT_READING_MODEL`), at sonnet-4-6's accuracy in a sixth of the time, and its
+prompt and presentation are the next thing measured. The sense ranker and the other proposers stay on
+`DEFAULT_MODEL`. A formalization request names the two separately (`FormalizationOptions.model`,
+`.reading_model`), and each seam's draws record their own model. The flat listing asks Anthropic
+models only and keeps `claude-sonnet-4-6`.
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×

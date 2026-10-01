@@ -510,8 +510,16 @@ export interface FormalizeOptions {
   sourcePath?: string;
   sourceRef?: string;
   ns?: string;
-  /** Model for this run's proposers; also what each recorded draw names as its answerer. */
+  /**
+   * Model for this run's proposers other than the reading ranker; also what each of their
+   * recorded draws names as its answerer.
+   */
   model?: string;
+  /**
+   * Model for the reading ranker (`jev-…` asks TypeSafe, `claude-…` Anthropic); also what its
+   * recorded draws name as their answerer. Default jev-latest.
+   */
+  readingModel?: string;
   senseCap?: number;
   cellBeam?: number;
   /** Abort on the first non-encoding unit instead of recording an `enc:CutItem`. */
@@ -837,6 +845,7 @@ export class Eigen {
         format: options.format ?? "",
         options: create(FormalizationOptionsSchema, {
           model: options.model ?? "",
+          readingModel: options.readingModel ?? "",
           senseCap: options.senseCap ?? 0,
           cellBeam: options.cellBeam ?? 0,
           strict: options.strict ?? false,

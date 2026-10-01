@@ -43,13 +43,18 @@ any detour.
 > draws per arm on one snapshot, fully adjudicated: 29, 28, 30 of 41 correct against the flat
 > listing's 23, 21, 24 (`docs/notes/d69-reading-presentation.md` §7n). The structure call surfaced
 > three attachments the owner re-ruled (two library PPs as instruments, one locative over the
-> event). **Next:** strand 2, the model behind a client trait (TypeSafe.ai included; the kernel's
-> client forces a tool choice the Claude 5 models refuse).
+> event).
+> **#264 strand 2 done (`2026-09-30`):** the two calls go through a provider-neutral decision
+> interface with Anthropic and TypeSafe deciders. Three draws per model: sonnet-4-6 26, 25, 26;
+> sonnet-5-5 29, 24, 28; jev-latest 26, 26, 26, in ~60 s a draw against ~400 s for sonnet-4-6
+> (§7o). The owner adopted `jev-latest` as the reading ranker's default; selection re-baselined on
+> its first draw. **Next:** jev's prompt and presentation (the `state`, the per-option criteria, the
+> sense call's legend), each variant a draw, its replay, and the adjudication of its new verdicts.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change
 > is a live draw, its replay, and the adjudication of every new verdict, on a fixed snapshot, against
-> the selection baseline (29/41, the first two-call draw).
+> the selection baseline (26/41, the first `jev-latest` draw).
 >
 > **Exit gate:** #263 landed with its reseed and re-adjudicated pins; #264's first two strands measured
 > on a fixed snapshot and the third decided.

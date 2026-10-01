@@ -1031,14 +1031,20 @@ pub fn live_reading_ranker(
         .map(|d| Box::new(DecisionReadingRanker::new(d)) as LiveReadingRanker)
 }
 
-/// [`live_reading_ranker`] for the model in `EIGENIUS_SELECT_MODEL`, else the default model.
+/// [`live_reading_ranker`] for the model in `EIGENIUS_SELECT_MODEL`, else the reading ranker's
+/// default ([`DEFAULT_READING_MODEL`](crate::dcg::model_config::DEFAULT_READING_MODEL)). The flat
+/// listing defaults to [`DEFAULT_MODEL`](crate::dcg::model_config::DEFAULT_MODEL), the model its
+/// measurements used: it asks Anthropic models only.
 #[cfg(feature = "use-llm")]
 pub fn live_reading_ranker_from_env() -> Option<LiveReadingRanker> {
-    let model = std::env::var("EIGENIUS_SELECT_MODEL")
-        .ok()
-        .filter(|m| !m.is_empty())
-        .unwrap_or_else(|| crate::dcg::model_config::DEFAULT_MODEL.to_string());
-    live_reading_ranker(crate::dcg::model_config::ModelConfig::with_model(model))
+    use crate::dcg::model_config::{ModelConfig, DEFAULT_MODEL, DEFAULT_READING_MODEL};
+    let default = if std::env::var("EIGENIUS_SELECT_FLAT").is_ok() {
+        DEFAULT_MODEL
+    } else {
+        DEFAULT_READING_MODEL
+    };
+    let model = std::env::var("EIGENIUS_SELECT_MODEL").unwrap_or_default();
+    live_reading_ranker(ModelConfig::requested(&model, default, 0))
 }
 
 #[cfg(feature = "use-llm")]

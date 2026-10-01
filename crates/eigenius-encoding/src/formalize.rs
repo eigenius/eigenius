@@ -475,7 +475,7 @@ impl DocumentFormalizer for EncodingFormalizer {
                 &req.ns,
                 seam,
                 &keyed,
-                Some(&req.model.model),
+                Some(&req.model_for(seam).model),
                 &req.timestamp,
             )?);
         }
@@ -575,8 +575,8 @@ impl Arms {
             None => {
                 #[cfg(feature = "use-llm")]
                 {
-                    let live = eigenius_kernel::dcg::live_reading_ranker(req.model.clone())
-                        .ok_or("no selection recording and the model's API key is unset")?;
+                    let live = eigenius_kernel::dcg::live_reading_ranker(req.reading_model.clone())
+                        .ok_or("no selection recording and the reading model's API key is unset")?;
                     let a = Arc::new(RecordingReadingRanker::new(live));
                     rec.selection = Some(Arc::clone(&a));
                     Some(Box::new(ArcSelection(a)))

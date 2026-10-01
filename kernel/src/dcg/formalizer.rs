@@ -132,8 +132,11 @@ pub struct FormalizeRequest {
     pub timestamp: String,
     /// D65 §4 parse scope — ordered `lexicon:Lexicon` IRIs. `None` is the whole chain.
     pub scope: Option<Vec<Iri>>,
-    /// Which model the run's untrusted proposers call, and what its draws record as the answerer.
+    /// Which model the run's untrusted proposers call, and what their draws record as the
+    /// answerer — every seam except the reading selection.
     pub model: ModelConfig,
+    /// Which model the reading ranker calls, and what its draws record as the answerer.
+    pub reading_model: ModelConfig,
     /// Per-run scale controls. `None` takes the server's configured value.
     pub sense_cap: Option<usize>,
     pub cell_beam: Option<usize>,
@@ -144,6 +147,16 @@ pub struct FormalizeRequest {
     pub draws: DrawSource,
     /// How the artifact should come back.
     pub format: ArtifactFormat,
+}
+
+impl FormalizeRequest {
+    /// The model `seam`'s live proposer calls.
+    pub fn model_for(&self, seam: DrawSeam) -> &ModelConfig {
+        match seam {
+            DrawSeam::ReadingSelection => &self.reading_model,
+            DrawSeam::SenseRank | DrawSeam::Anaphora | DrawSeam::DiscourseKind => &self.model,
+        }
+    }
 }
 
 /// What a run produced.

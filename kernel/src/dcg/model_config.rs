@@ -31,6 +31,14 @@ const MAX_TOKENS_THINKING: u32 = 16_000;
 /// model the `allms` path used, so behaviour is unchanged apart from the transport.
 pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 
+/// The model id the reading ranker (the selection seam) calls when none is given. Separate from
+/// [`DEFAULT_MODEL`] because it was chosen by its own A/B (eigenius#264 strand 2, three draws per
+/// arm over the CNL-v3 page, same forest): `jev-latest` scored 26/26/26 reading-correct and
+/// 30/30/30 structure-correct with 37/41 selections stable across draws in ~60 s a draw;
+/// `claude-sonnet-4-6` 26/25/26, 30/29/30, 38/41, ~400 s; `claude-sonnet-5-5` 29/24/28,
+/// 33/30/33, 20/41, ~270 s.
+pub const DEFAULT_READING_MODEL: &str = "jev-latest";
+
 /// How one run's untrusted proposers call the model.
 ///
 /// Carried per RUN rather than compiled in, so a formalization request can select the model and a
@@ -73,6 +81,21 @@ impl ModelConfig {
             MAX_TOKENS
         };
         Self { model, max_tokens }
+    }
+
+    /// The reading ranker's default configuration ([`DEFAULT_READING_MODEL`]).
+    pub fn reading() -> Self {
+        Self::with_model(DEFAULT_READING_MODEL)
+    }
+
+    /// `model` (the `default` when empty) with `max_tokens` (the model's default when 0) — how a
+    /// request's optional model fields become a configuration.
+    pub fn requested(model: &str, default: &str, max_tokens: u32) -> Self {
+        let mut cfg = Self::with_model(if model.is_empty() { default } else { model });
+        if max_tokens > 0 {
+            cfg.max_tokens = max_tokens;
+        }
+        cfg
     }
 
     /// Who serves the model.
@@ -169,6 +192,19 @@ mod tests {
         assert_eq!(
             ModelConfig::with_model("jev-latest").provider(),
             Provider::TypeSafe
+        );
+    }
+
+    #[test]
+    fn a_request_fills_its_unset_fields_from_the_defaults() {
+        let reading = ModelConfig::requested("", DEFAULT_READING_MODEL, 0);
+        assert_eq!(reading, ModelConfig::reading());
+        assert_eq!(reading.provider(), Provider::TypeSafe);
+        let sonnet55 = ModelConfig::requested("claude-sonnet-5-5", DEFAULT_MODEL, 0);
+        assert_eq!(sonnet55.max_tokens, MAX_TOKENS_THINKING);
+        assert_eq!(
+            ModelConfig::requested("", DEFAULT_MODEL, 900).max_tokens,
+            900
         );
     }
 }
