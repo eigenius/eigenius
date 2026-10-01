@@ -720,6 +720,50 @@ by the maintainer on 2026-08-13.
 (`2026-09-30-analyses-jev-latest-1`, 15d9bd7). The Structural register, the span-based surface
 names and the structure contrasts are removed.
 
+## 7q. One question per word in the sense call (`2026-10-01`)
+
+**The owner's design:** an independent choice for each word whose sense differs among the chosen
+analysis's readings, asked together. The decision interface carries several questions over one
+context (`decision::Choice { context, questions }`): one TypeSafe request with a `choice` per id,
+one Anthropic prompt whose reply schema has an answer per id. Each reading's senses come from its
+derivation's leaves (`ReadingCandidate::senses_at`). The sense call asks «Which sense of «w» matches
+what `the_sentence` means in `document`?» per word, each sense shown with its label and definition,
+and takes the reading the answers support most (`Decided::weight`: the probability, or a falling
+weight down a ranking). Readings that differ in no word's sense are put as whole readings.
+
+The whole-reading question listed every combination of senses — 144 readings in one unit, near
+TypeSafe's 255-option limit for one choice; per word, the same unit is a few short questions.
+
+| sense call | reading-correct | structure-correct | abstained |
+|---|---|---|---|
+| whole readings (§7p draws) | 28, 28, 27 | 31, 32, 30 | 3, 2, 3 |
+| one question per word | 28, 29, 28 | 31, 32, 32 | 0, 0, 0 |
+
+Three live jev-latest draws, 5 new ledger rows, each re-scored by replay. The word question has no
+`none`, so every unit is decided. One word question decided a structure: «MLH1» as the protein or the
+gene modifying «promoter» gives the readings different skeletons in one analysis. Selection
+re-baselined at 28 on the first draw (`2026-10-01-word-senses-jev-latest-1`, 13aa718).
+
+**The structure call's errors, analysed** (six draws of §7p, 81 structure decisions per model):
+the pin was offered in all 27 calls; jev chose another structure in 25, sonnet-4-6 in 24, over 10
+units. By cause: presentation 9 and 12, a pin or ledger row open to question 15 and 12, model error
+under a clear presentation 0 and 0, one undetermined. 31 of the 49 are a multiword concept against
+its decomposition. Proposed, for the maintainer:
+- a concept taking a whole span («double-stranded DNA breaks» C1511667, «immune checkpoint blockade»
+  C5392067) shows no bracket, because every analysis builds a constituent over that span — show it as
+  one term, with a function line saying so;
+- one policy for a lexicalised concept against its compositional twin (pins with alternates, or the
+  structure diagnostic accepting `departs`), and a review of row 59 and the «MSI results from
+  deficient DNA mismatch repair.» pin, whose stated ground («drops the compound») does not hold: its
+  C1155661 covers «DNA mismatch repair»;
+- «Many cancers exhibit an impairment of a DNA repair pathway.»: only readings taking «a DNA» as
+  C0000702 «DNA, A-Form» match the pin, which the ledger's BEST row rejects — re-pin, and gate «a DNA»
+  → C0000702 in the lexicon;
+- the predication lines (kind against generalisation) in the sentence's words; a numeral line for
+  `the_count`; a degree term rendered apart from a plain adjective;
+- «for cancer therapeutics» (the open attachment) and the subject-oriented adverbial encoding;
+- `◇A ∨ ◇B` against `◇(A ∨ B)` treated as one option, as the «WRN dependency …» pin note says.
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×

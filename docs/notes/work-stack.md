@@ -62,9 +62,13 @@ any detour.
 > derivation (`dcg::derivation`); the structure call brackets what differs between analyses and
 > names each contested phrase's function (`dcg::analysis`). Structure calls 19.9 of 27 with jev. The
 > A/B, three draws each: jev-latest 28, 28, 27 of 41 (structure 31, 32, 30); sonnet-4-6 24, 24, 24
-> (32). jev stays the default; selection re-baselined at 28 (D69 note §7p). **Open:** jev answers
-> `none` in 2–3 sense calls a draw; the sense-ranker rework; strand 3 (whether attachment is
-> derivable); the «for cancer therapeutics» attachment for the maintainer; the combined #263+#264 PR.
+> (32). jev stays the default; selection re-baselined at 28 (D69 note §7p).
+> **One question per word in the sense call (`2026-10-01`, owner's design):** 28, 29, 28 of 41 with no
+> abstentions (§7q); selection re-baselined at 28 on 41 decisions. The structure call's errors are
+> analysed in §7q: no model error under a clear presentation; the multiword-concept display and the
+> pin policy for lexicalised twins come first. **Open:** those presentation and pin fixes; the
+> sense-ranker rework; strand 3 (whether attachment is derivable); the «for cancer therapeutics»
+> attachment for the maintainer; the combined #263+#264 PR.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change
