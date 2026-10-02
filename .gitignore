@@ -102,6 +102,7 @@ experiments/*/results/
 # Derived from the committed alignment.jsonl + the source corpora — regenerate, don't store.
 # Globbed: a future `candidates-v3.jsonl` must not slip past the pattern (a 37 MB `-v2` file did).
 experiments/lexicon-align/alignment*.esl
+experiments/lexicon-align/hpo-alignment.esl
 experiments/lexicon-align/candidates*.jsonl
 notes.md
 experiments.tgz

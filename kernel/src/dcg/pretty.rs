@@ -22,9 +22,16 @@
 use crate::nbe::term::{Exp, Patt};
 use crate::ontology::Iri;
 
-/// The local segment of an IRI (the part after the final `:`), for compact display.
+/// The local segment of an IRI (the part after the final `:`), for compact display — except an OBO
+/// term (`urn:obo:HP:0012126`), whose final segment is a bare number that names nothing: it prints
+/// as OBO's own identifier, `HP_0012126` (the IRI tail `…/obo/HP_0012126`, and the importer's
+/// `short_name`). Not the CURIE `HP:0012126`: the skeleton eraser splits at `:`, and `HP:§` would
+/// make an HPO reading's structure differ from the same reading over any other concept.
 fn local(iri: &Iri) -> String {
     let s = iri.as_str();
+    if let Some(curie) = s.strip_prefix("urn:obo:") {
+        return curie.replace(':', "_");
+    }
     s.rsplit(':').next().unwrap_or(s).to_string()
 }
 
@@ -142,5 +149,22 @@ fn exp_kind(e: &Exp) -> &'static str {
         Exp::Map(_, _) => "<map>",
         Exp::Reduce(_, _, _) => "<reduce>",
         _ => "<term>",
+    }
+}
+
+#[cfg(test)]
+mod obo_local_tests {
+    use super::*;
+
+    /// An HPO class prints as `HP_0012126`, and erases to `§` like any sense atom, so its reading's
+    /// skeleton is the same as over a UMLS or WordNet concept.
+    #[test]
+    fn an_obo_term_prints_as_its_obo_identifier_and_erases_to_a_sense() {
+        let e = Exp::EigonClass(Iri::parse("urn:obo:HP:0012126").unwrap());
+        assert_eq!(pretty_term(&e), "HP_0012126");
+        assert_eq!(
+            crate::dcg::skeleton::erase_senses(&format!("kind_of({})", pretty_term(&e))),
+            "kind_of(§)"
+        );
     }
 }

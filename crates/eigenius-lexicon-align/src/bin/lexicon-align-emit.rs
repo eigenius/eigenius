@@ -25,9 +25,10 @@ use std::sync::Arc;
 
 use clap::Parser;
 use eigenius_kernel::bootstrap::bootstrap_persistent;
-use eigenius_kernel::ontology::{Iri, Value};
+use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::storage::PersistentBackend;
 use eigenius_lexicon_align::emit::{load_merges, render, Rewrite, HEADER};
+use eigenius_lexicon_align::read::{as_str, cat_n_num, qname};
 use eigenius_storage_rocksdb::RocksStore;
 
 #[derive(Parser, Debug)]
@@ -44,52 +45,6 @@ struct Args {
     /// Highest form-index to probe per concept (entry IRIs are `e_<CUI>_<i>`).
     #[arg(long, default_value_t = 400)]
     max_form_index: usize,
-}
-
-/// The `num` argument of a `cat_n(umlscui:<CUI>, num)` category, or `None` if the category is not
-/// that shape — which is how a **named individual** (`cat_np(umlssty:<TUI>, sg)`) is excluded: it is
-/// an instance, not a class, and pointing it at a WordNet class would be a type error.
-fn cat_n_num(cat: &Value, cui: &str, layer: &eigenius_kernel::layer::Layer) -> Option<String> {
-    // Reads the value in EITHER shape. It matched only `Value::Json`, and a `lexicon:cat` is a
-    // value resource since D85 §5 step 4 — so every category read as "not a `cat_n`" and every
-    // entry was counted a named individual. The emitter reported 40 405 skips, a plausible
-    // number, and wrote an empty layer; the kernel then panicked on the empty commit batch.
-    let j = match cat {
-        Value::Json(j) => j.clone(),
-        Value::Embedded(r) => {
-            eigenius_kernel::program::eigentt_type_mirror::ctor_view(r, layer).ok()?
-        }
-        _ => return None,
-    };
-    let s = j.to_string();
-    if !s.contains("\"cat_n\"") {
-        return None; // cat_np (named individual) or anything else — skip.
-    }
-    if !s.contains(&format!("urn:eigenius:umlscui:{cui}")) {
-        return None; // the category does not index THIS concept — do not touch it.
-    }
-    for n in ["num_any", "mass", "sg", "pl"] {
-        if s.contains(&format!("\"{n}\"")) {
-            return Some(n.to_string());
-        }
-    }
-    None
-}
-
-fn as_str(v: Option<&Value>) -> Option<String> {
-    match v {
-        Some(Value::String(s)) => Some(s.clone()),
-        _ => None,
-    }
-}
-
-fn qname(iri: &str) -> String {
-    for (ns, pfx) in [("urn:eigenius:lexicon:", "lexicon:")] {
-        if let Some(local) = iri.strip_prefix(ns) {
-            return format!("{pfx}{local}");
-        }
-    }
-    iri.to_string()
 }
 
 fn main() -> ExitCode {
@@ -153,7 +108,7 @@ fn main() -> ExitCode {
                 body.push_str(&render(&Rewrite {
                     entry_iri: iri_s.clone(),
                     num,
-                    wn_offset: (*off).to_string(),
+                    class: format!("wn:n{off}"),
                     form,
                     sense: as_str(r.get(&Iri::parse("urn:eigenius:lexicon:sense").unwrap()))
                         .unwrap_or_default(),

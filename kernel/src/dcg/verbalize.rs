@@ -92,6 +92,13 @@ pub fn unit_sense_names(
 /// (callers fall back to the IRI local name — the fail-honest degradation).
 pub fn resource_label(iri: &Iri, layer: &Arc<Layer>) -> Option<String> {
     let res = layer.resolve(iri)?;
+    // A declared label wins: an OBO import carries the term's name in `rdfs:label` (the OBO
+    // meta-ontology), and its description is the definition alone, with no label to split off.
+    if let Some(Value::String(l)) = res.get(&Iri::parse("urn:rdfs:label").ok()?) {
+        if !l.trim().is_empty() {
+            return Some(l.trim().to_string());
+        }
+    }
     let d = res.get(&Iri::parse("urn:eigenius:core:description").ok()?)?;
     let Value::String(d) = d else {
         return None;
@@ -155,7 +162,7 @@ fn collect_concepts(e: &Exp, vb: &Vb, out: &mut BTreeMap<String, ConceptNote>) {
     if let Exp::EigonClass(iri) | Exp::EigonAxiom(iri) = e {
         // The gloss prints the STRIPPED key (`name_atom` drops the `_t`/`deg_` wrappers), so the
         // legend must key on that to line up — while the DEFINITION lives at the full IRI.
-        let local = iri.as_str().rsplit(':').next().unwrap_or("");
+        let local = atom_key(iri.as_str());
         let core = local
             .strip_prefix("deg_")
             .or_else(|| local.strip_prefix("std_"))
@@ -304,12 +311,20 @@ fn app_spine(e: &Exp) -> (&Exp, Vec<&Exp>) {
 /// `core:description`); only the extractor was refusing to hand it the key.
 fn axiom_local(e: &Exp) -> Option<&str> {
     match e {
-        Exp::EigonAxiom(i) | Exp::EigonClass(i) => {
-            Some(i.as_str().rsplit(':').next().unwrap_or(""))
-        }
-        Exp::EigonResource(r) => r.id().map(|i| i.as_str().rsplit(':').next().unwrap_or("")),
+        Exp::EigonAxiom(i) | Exp::EigonClass(i) => Some(atom_key(i.as_str())),
+        Exp::EigonResource(r) => r.id().map(|i| atom_key(i.as_str())),
         _ => None,
     }
+}
+
+/// The key an atom renders by: its IRI's local name (`C1148824`, `n00407535`) — or, for an OBO
+/// term (`urn:obo:HP:0100615`), its CURIE (`HP:0100615`), since an OBO local part alone is a bare
+/// number that names nothing.
+fn atom_key(iri: &str) -> &str {
+    if let Some(curie) = iri.strip_prefix("urn:obo:") {
+        return curie;
+    }
+    iri.rsplit(':').next().unwrap_or("")
 }
 
 /// `logic:False` — the negation codomain. It is built as `Exp::const_applied(logic:False.iri.clone(), Vec::new(), [])`
@@ -350,6 +365,11 @@ fn atom_label(key: &str, vb: &Vb) -> Option<String> {
     }
     if key.starts_with('C') && key[1..].chars().all(|c| c.is_ascii_digit()) {
         return cui_label(key, vb.layer);
+    }
+    // An OBO term's key is its CURIE ([`atom_key`]); its name is on the chain.
+    if key.contains(':') {
+        let iri = Iri::parse(&format!("urn:obo:{key}")).ok()?;
+        return resource_label(&iri, vb.layer);
     }
     None
 }
@@ -1238,6 +1258,38 @@ mod register_tests {
             )),
             Box::new(b),
         )
+    }
+
+    /// An OBO term renders by its label and CURIE, `«Ovarian neoplasm» [HP:0100615]`, and its
+    /// definition reaches the legend. Its IRI's last segment alone is `0100615`, which named nothing
+    /// — the ranker chose between HPO readings without seeing what they were.
+    #[test]
+    fn an_obo_term_renders_by_its_label_and_curie() {
+        let iri = Iri::parse("urn:obo:HP:0100615").unwrap();
+        let mut r = crate::ontology::resource::Resource::new(iri);
+        r.set(
+            Iri::parse("urn:rdfs:label").unwrap(),
+            Value::String("Ovarian neoplasm".into()),
+        );
+        r.set(
+            Iri::parse("urn:eigenius:core:description").unwrap(),
+            Value::String("A tumor (abnormal growth of tissue) of the ovary.".into()),
+        );
+        let mut b = LayerBuilder::new("t", None);
+        b.add_resource(r).unwrap();
+        let l = Arc::new(b.build(LayerStorage::in_memory()));
+        let names = BTreeMap::new();
+        let vb = Vb::expanded(&names, &l);
+        let term = cls("urn:obo:HP:0100615");
+        assert_eq!(verbalize(&term, &vb), "«Ovarian neoplasm» [HP:0100615]");
+        let notes = concept_notes(&[&term], &vb);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].id, "HP:0100615");
+        assert_eq!(notes[0].label, "Ovarian neoplasm");
+        assert_eq!(
+            notes[0].definition.as_deref(),
+            Some("A tumor (abnormal growth of tissue) of the ovary.")
+        );
     }
 
     /// THE MEASURED COLLISION (D69 §1). «exonuclease activity» is C1148824's own label, so the

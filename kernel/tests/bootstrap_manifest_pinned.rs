@@ -50,6 +50,12 @@
 //! `closed-class` (the factor comparatives, `a median`, `compared to`, `compared with`); then on
 //! `closed-class` again when the factor comparatives came to state the plain comparative's order.
 //!
+//! IT FIRED FOR THE OBO IMPORTER (`2026-10-01`) on `obo`, importing HPO: the four synonym scopes
+//! became `core:value_array` (declared single strings, written as arrays — 12,745 type errors on
+//! HPO), `inverseOf` became `core:resource_array` (edge objects accumulate), and the meta-ontology
+//! came to declare `rdfs:label` (an OBO node's label, which had been put in `core:short_name`) and
+//! `subPropertyOf` (which had been folded into `core:is_a`).
+//!
 //! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
 //! (`docs/design/d95-implementation-plan.md`, slice 5): `units` (standard gravity, `molar`, `week`,
 //! `units:Difference`), `lexicon` (`lexicon:Reading`, `cat_mp`, `cat_unit_forall`,
@@ -213,7 +219,7 @@ const EXPECTED: &str = "core:14935ac5c54e8f210410ec86f5545ba3f1162b72c44b5be9f3f
 program:429718a323b6bfcc3ff858277f73b2c15de724f9d1c1c2c2c220748295b3c726
 program-traces:b6ad0b141167e2020fd5f5ce993cde229e28c8519cd6a728256e301fcdd4da44
 prov:694b3195028f88f8043209f81f70824fb12bdee45f8e57db381a041c96687c5d
-obo:b515192765257daf466b28bb4154d6155461c8c2d1302f945ec785f8a00bb959
+obo:22d42e3f64eea75fb162ae07444d4b66bf33210f154a8dd206e97b69b11094bc
 institution:f1103b50112903896a8349d0aec681a2c199c11f76c70a5c7a2cfe07bb589e94
 runtime:ada851931aeff9eed036621b306ca3eb25c0044d600c84dcad77c67973c1a22e
 formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023

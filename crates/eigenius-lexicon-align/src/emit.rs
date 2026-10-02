@@ -41,14 +41,16 @@
 
 use std::collections::BTreeMap;
 
-/// One entry rewrite: the entry's IRI, and the WordNet class it should now denote.
+/// One entry rewrite: the entry's IRI, and the class it should now denote.
 #[derive(Debug, Clone)]
 pub struct Rewrite {
     pub entry_iri: String,
     /// The `num` argument of the original `cat_n(C, num)` — `num_any` or `mass`. **Preserved**: the
     /// additive mass variant must stay a mass variant.
     pub num: String,
-    pub wn_offset: String,
+    /// The canonical class, as an ESL name the layer's header declares a namespace for:
+    /// `wn:n00024720` (WordNet↔UMLS), `hp:'0001250'` (HPO↔UMLS, [`crate::hpo::hp_qname`]).
+    pub class: String,
     /// Everything else, passed through verbatim.
     pub form: String,
     pub sense: String,
@@ -78,6 +80,25 @@ namespace umlscui    = \"urn:eigenius:umlscui\";
 namespace wn         = \"urn:eigenius:wn\";
 ";
 
+/// The header of the HPO↔UMLS layer ([`crate::hpo`]). Same mechanism, same guarantees: only `cat`
+/// and `sem` change, no class is created or modified, no `subclass_of` edge is emitted.
+pub const HPO_HEADER: &str = "\
+// ════════════════════════════════════════════════════════════════════
+// HPO↔UMLS concept unification — the ALIGNMENT LAYER.
+//
+// Each resource below REDEFINES a UMLS lexical entry whose concept NLM maps (MRCONSO, SAB=HPO) to
+// exactly one live HPO class, and whose surface is one of that class's own HPO names. Only `cat` and
+// `sem` change: the entry now denotes the HPO class.
+// Every other property is passed through from the committed entry unchanged. Concepts the
+// WordNet↔UMLS layer already took to a synset are left to WordNet.
+//
+// No class is created or modified; no `subclass_of` edge is emitted.
+// ════════════════════════════════════════════════════════════════════
+namespace lexicon    = \"urn:eigenius:lexicon\";
+namespace umlscui    = \"urn:eigenius:umlscui\";
+namespace hp         = \"urn:obo:HP\";
+";
+
 fn esc(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -92,14 +113,14 @@ pub fn render(r: &Rewrite) -> String {
     format!(
         "resource umlscui:{local} : lexicon:LexicalEntry {{\n\
          \x20   lexicon:form       = \"{form}\";\n\
-         \x20   lexicon:cat        = type_expr( lexicon:cat_n(wn:n{off}, lexicon:{num}) );\n\
-         \x20   lexicon:sem        = wn:n{off};\n\
+         \x20   lexicon:cat        = type_expr( lexicon:cat_n({class}, lexicon:{num}) );\n\
+         \x20   lexicon:sem        = {class};\n\
          \x20   lexicon:sem_type   = type_expr( {sem_type} );\n\
          \x20   lexicon:sense      = \"{sense}\";\n\
          \x20   lexicon:in_lexicon = {in_lexicon};\n\
          }}\n\n",
         form = esc(&r.form),
-        off = r.wn_offset,
+        class = r.class,
         num = r.num,
         sem_type = r.sem_type,
         sense = esc(&r.sense),
@@ -136,7 +157,7 @@ mod tests {
         let r = Rewrite {
             entry_iri: "urn:eigenius:umlscui:e_C1442792_0".into(),
             num: "num_any".into(),
-            wn_offset: "00024720".into(),
+            class: "wn:n00024720".into(),
             form: "State".into(),
             sense: "umls:C1442792".into(),
             in_lexicon: "lexicon:umls".into(),
@@ -165,7 +186,7 @@ mod tests {
         let r = Rewrite {
             entry_iri: "urn:eigenius:umlscui:e_C1442792_0_mass".into(),
             num: "mass".into(),
-            wn_offset: "00024720".into(),
+            class: "wn:n00024720".into(),
             form: "State".into(),
             sense: "umls:C1442792".into(),
             in_lexicon: "lexicon:umls".into(),
@@ -174,5 +195,23 @@ mod tests {
         let esl = render(&r);
         assert!(esl.contains("lexicon:cat_n(wn:n00024720, lexicon:mass)"));
         assert!(esl.contains("resource umlscui:e_C1442792_0_mass :"));
+    }
+
+    #[test]
+    fn an_hpo_redefinition_points_the_entry_at_the_hp_class() {
+        let r = Rewrite {
+            entry_iri: "urn:eigenius:umlscui:e_C0036572_0".into(),
+            num: "num_any".into(),
+            class: crate::hpo::hp_qname("HP:0001250"),
+            form: "Seizures".into(),
+            sense: "umls:C0036572".into(),
+            in_lexicon: "lexicon:umls".into(),
+            sem_type: "Set".into(),
+        };
+        let esl = render(&r);
+        assert!(esl.contains("lexicon:cat_n(hp:'0001250', lexicon:num_any)"));
+        assert!(esl.contains("lexicon:sem        = hp:'0001250';"));
+        assert!(esl.contains("resource umlscui:e_C0036572_0 :"));
+        assert!(!esl.contains("subclass"));
     }
 }
