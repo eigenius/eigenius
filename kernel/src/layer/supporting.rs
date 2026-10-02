@@ -62,7 +62,7 @@ use std::sync::Arc;
 /// O(|external_refs| · |walked_ancestors|) for the chain walk, which
 /// short-circuits at the first ancestor that contributes.
 pub fn compute_supporting_layer(
-    resources: &BTreeMap<Iri, Resource>,
+    resources: &BTreeMap<Iri, Arc<Resource>>,
     defined_iris: &BTreeSet<Iri>,
     parent: Option<&Arc<Layer>>,
 ) -> Option<LayerId> {
@@ -129,7 +129,7 @@ pub fn compute_supporting_layer(
 /// storage, so nothing could rely on it — and this walk is schema-blind by design: it runs
 /// while the layer is being built, before any schema is resolvable.
 fn collect_external_references(
-    resources: &BTreeMap<Iri, Resource>,
+    resources: &BTreeMap<Iri, Arc<Resource>>,
     defined_iris: &BTreeSet<Iri>,
 ) -> BTreeSet<Iri> {
     let mut refs = BTreeSet::new();

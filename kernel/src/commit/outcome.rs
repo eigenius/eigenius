@@ -235,9 +235,8 @@ impl LayerEmission {
     /// Handler callers (the gRPC Load / RunProgram / Reflect / Query
     /// INTO / SubmitResolution / CapabilityInstall handlers — D41 §10)
     /// use this to convert their accumulated working builder into the
-    /// orchestrator's root emission. The builder's resources and
-    /// tombstones are extracted by clone; the builder itself is
-    /// consumed.
+    /// orchestrator's root emission. The builder is consumed and its
+    /// resources and tombstones move into the emission.
     ///
     /// `role`, `name`, `pipeline`, `kind` are caller-specified — the
     /// builder's own name is discarded because the orchestrator will
@@ -255,15 +254,14 @@ impl LayerEmission {
         kind: EmissionKind,
         builder: LayerBuilder,
     ) -> Self {
-        // LayerBuilder exposes `resources()` (by reference,
-        // `&BTreeMap<Iri, Resource>`) and `tombstoned_iris()`
-        // (`&BTreeSet<Iri>`). Both are private fields with no
-        // `into_parts`-style consumer, so we clone. The volumes are
-        // bounded by the originating RPC's payload — handler-side
-        // builders never accumulate more than one batch's worth of
-        // resources before the orchestrator runs.
-        let resources: Vec<Resource> = builder.resources().values().cloned().collect();
-        let tombstones: BTreeSet<Iri> = builder.tombstoned_iris().clone();
+        // Moved, not cloned: one load RPC's batch is a whole lexicon chunk, and the clone held a
+        // second copy of it beside the parsed one (3.2 GB for a 100 MiB chunk, 2026-10-01). The
+        // builder is consumed, so each `Arc` is the only one and unwraps without a copy.
+        let (resources, tombstones) = builder.into_contents();
+        let resources: Vec<Resource> = resources
+            .into_values()
+            .map(|r| Arc::try_unwrap(r).unwrap_or_else(|shared| (*shared).clone()))
+            .collect();
         Self {
             role,
             name,

@@ -1055,10 +1055,16 @@ impl std::error::Error for LayerError {}
 /// addressed `LayerId` and produces an immutable `Layer`. Phase 14e:
 /// supports N parents for trivial-merge layers via
 /// `LayerBuilder::with_parents`.
+///
+/// A resource is immutable once added, so the builder holds it behind an `Arc`, the form `build`
+/// stages it in. Cloning a builder copies the map and the pointers, not the resources: the commit
+/// pipeline clones its builder so a cascade can rebuild from it, and when that clone was deep it
+/// held a second copy of every resource through validation and persist — 3.3 GB of the 8.3 GB
+/// peak for a 100 MiB lexicon chunk, measured with the jemalloc heap profiler on 2026-10-01.
 #[derive(Clone)]
 pub struct LayerBuilder {
     name: String,
-    resources: BTreeMap<Iri, Resource>,
+    resources: BTreeMap<Iri, Arc<Resource>>,
     parents: Vec<Arc<Layer>>,
     tombstoned_iris: BTreeSet<Iri>,
 }
@@ -1110,7 +1116,7 @@ impl LayerBuilder {
             return Err(LayerError::CoreNamespaceViolation { iri });
         }
 
-        self.resources.insert(iri, resource);
+        self.resources.insert(iri, Arc::new(resource));
         Ok(())
     }
 
@@ -1150,12 +1156,18 @@ impl LayerBuilder {
 
     /// Get a resource from the builder by IRI.
     pub fn get_resource(&self, iri: &Iri) -> Option<&Resource> {
-        self.resources.get(iri)
+        self.resources.get(iri).map(Arc::as_ref)
     }
 
     /// Returns the resources accumulated so far.
-    pub fn resources(&self) -> &BTreeMap<Iri, Resource> {
+    pub fn resources(&self) -> &BTreeMap<Iri, Arc<Resource>> {
         &self.resources
+    }
+
+    /// The builder's resources and tombstones, moved out: a consumer that takes the builder
+    /// takes its content without copying it.
+    pub fn into_contents(self) -> (BTreeMap<Iri, Arc<Resource>>, BTreeSet<Iri>) {
+        (self.resources, self.tombstoned_iris)
     }
 
     /// Build the immutable `Layer`.
@@ -1199,7 +1211,7 @@ impl LayerBuilder {
         // away — the mistake `canonicalise_resource_refs` made, described below.
         for derived in ctor_classes::derive(&self.resources, &self.parents) {
             if let Some(id) = derived.id().cloned() {
-                self.resources.insert(id, derived);
+                self.resources.insert(id, Arc::new(derived));
             }
         }
 
@@ -1237,11 +1249,7 @@ impl LayerBuilder {
         // can't evict them is what lets a layer larger than the cache budget commit
         // without losing resources. `store_layer` drains this entry once the resources
         // are on the backend; thereafter reads page through the cache. (D23 write path.)
-        let staged: BTreeMap<Iri, Arc<Resource>> = self
-            .resources
-            .into_iter()
-            .map(|(iri, resource)| (iri, Arc::new(resource)))
-            .collect();
+        let staged: BTreeMap<Iri, Arc<Resource>> = self.resources;
         storage
             .pending
             .write()
@@ -1355,7 +1363,7 @@ pub fn populate_layer_indexes(layer: &Layer) {
 /// hash together with the sorted parent ids to produce the position
 /// hash that addresses the layer's slot in the DAG.
 pub fn compute_content_hash(
-    resources: &BTreeMap<Iri, Resource>,
+    resources: &BTreeMap<Iri, Arc<Resource>>,
     tombstoned_iris: &BTreeSet<Iri>,
 ) -> ContentHash {
     let mut hasher = Sha256::new();

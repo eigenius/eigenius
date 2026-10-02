@@ -1,6 +1,39 @@
-# Reseed OOM — memory investigation (RESOLVED: environmental, not a kernel bug)
+# Reseed OOM — memory investigation
 
-**Status: RESOLVED (`2026-07-07`).** The kernel is **not** the problem. A native `serve` load of the
+**`2026-10-01`: the kernel's per-chunk peak, two whole-layer copies.** Three docker reseeds in a row
+died with the OOM killer taking the kernel at 21–24 GB anon-rss during the WordNet chain (`dmesg`;
+`MALLOC_ARENA_MAX=2` set). A native `serve` with the system allocator reproduced it: 8.1 GB before
+chunk 001 reached `commit.build`, 10.6 GB after it, killed by a watchdog at 18.7 GB inside chunk 002.
+The jemalloc profile of chunk 001 (`--features jemalloc-prof`, method below) put the live heap at
+8.25 GB at its peak and 0.36 GB after the commit, so nothing accumulates across chunks; the peak is
+per chunk:
+
+| allocation site | live at the peak |
+|---|---|
+| `commit::phases::build`: `builder.clone()`, kept for the cascade's rebuilds | 3.27 GB |
+| `LayerEmission::from_builder`: `resources().values().cloned()` | 3.23 GB |
+| `store_layer`: every resource's CBOR collected before the batch | 0.92 GB |
+| triples, value entries, text postings | 0.34 GB |
+
+A parsed lexical entry is ~12 KB in memory (3.2 GB / 263,813), against ~3.5 KB as CBOR, so §3.6's
+estimate of the 250k-entry cache (0.5–1.25 GiB) is ~3 GB today.
+
+Fixed: `LayerBuilder` holds its resources as `Arc<Resource>` (the form `build` stages them in), so a
+builder clone copies pointers; `from_builder` moves them out through `LayerBuilder::into_contents`;
+`store_layer` serializes each resource straight into the batch. Base + chunk 001 under jemalloc:
+peak live heap 8.25 → 4.25 GB, peak RSS 10.88 → 6.53 GB. With the system allocator and
+`MALLOC_ARENA_MAX=2`, WordNet + UMLS 001–008: chunk 002 peaks at 13.26 GB (was > 18.7), and RSS then
+holds at ~12.5 GB through UMLS 008. What remains of the peak is one copy of the parsed chunk
+(~2.9 GB) plus the batch; the gap from 4.25 GB live to 12.5 GB resident is glibc holding freed pages.
+
+The July conclusion below ("environmental") compared a native run, profiled under jemalloc, with
+the docker kernel, which runs on glibc; the note does not record which allocator its ~6 GiB RSS
+figure came from. Today's native glibc run reproduces the docker OOM, so the environment is not
+needed to explain it.
+
+---
+
+**Status `2026-07-07` (superseded above): RESOLVED.** The kernel is **not** the problem. A native `serve` load of the
 identical WordNet(`--all`, C3-precision) + all 27 UMLS chunks — same binary, same chains — **peaks at
 ~6 GiB RSS and completes**, producing a full 2.6 GB store at `/tmp/probe-db`. jemalloc heap profile at
 the high-water mark: **live heap 3954 MB**, dominated by BTreeSet/BTreeMap cloning in the load path
