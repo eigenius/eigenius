@@ -1,0 +1,71 @@
+// D99 §2, §6 — who carries what, on `ontologies/clinical/clinical.esl`. Synthetic: the probands of
+// UAB experiment 02's SYN-26-001 and SYN-26-002.
+
+namespace core          = "urn:eigenius:core";
+namespace lexicon       = "urn:eigenius:lexicon";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace prov          = "urn:eigenius:prov";
+namespace variant       = "urn:eigenius:variant";
+namespace clinical      = "urn:eigenius:clinical";
+namespace syn           = "urn:eigenius:test:syngene";
+
+resource syn:proband_002 : clinical:Individual {
+    core:description = "SYN-26-002's proband.";
+    clinical:birth_year = 2023;
+    clinical:sex = clinical:male;
+}
+
+resource syn:proband_001 : clinical:Individual {
+    core:description = "SYN-26-001's proband.";
+    clinical:birth_year = 2021;
+    clinical:sex = clinical:male;
+}
+
+resource syn:case_002 : clinical:Case {
+    clinical:case_id = "SYN-26-002";
+    clinical:subject = [syn:proband_002];
+}
+
+resource syn:SYNSYN3 : lexicon:Entity {
+    core:description = "A synthetic gene (SYN-26-001's third variant row).";
+}
+
+resource syn:synsyn3_protein : variant:ProteinProduct {
+    core:description = "SYNSYN3's protein product.";
+    variant:accession = "HGNC:000003:p";
+    variant:gene = syn:SYNSYN3;
+}
+
+resource syn:p_Gly88Ser : variant:ProteinAllele {
+    variant:reference = "HGNC:000003:p";
+    variant:start = 88;
+    variant:end = 88;
+    variant:ref_state = "Gly";
+    variant:alt = "Ser";
+    variant:hgvs = "p.Gly88Ser";
+}
+
+resource syn:carries_131 : justification:Declaration {
+    core:description = "SYN-26-002's proband carries c.131T>C, hemizygous.";
+    prov:was_attributed_to = syn:author;
+    eigentt:proposition = type_expr(clinical:Carries(syn:proband_002, syn:c_131T_C, clinical:hemizygous));
+}
+
+// The protein-only row (D99 §2): some nucleotide allele that translates to p.Gly88Ser.
+resource syn:carries_gly88ser : justification:Declaration {
+    core:description = "SYN-26-001's proband carries a variant of SYNSYN3 changing Gly88 to Ser, heterozygous; the nucleotide change is not recorded.";
+    prov:was_attributed_to = syn:author;
+    eigentt:proposition = type_expr(
+        forall (R : Prop) =>
+            (forall (a : exists a : variant:NucleotideAllele => variant:TranslatesTo(a, syn:p_Gly88Ser)) =>
+                clinical:Carries(syn:proband_001, eigentt:fst(a), clinical:heterozygous) -> R)
+            -> R);
+}
+
+// REFUSED — a person carries sequence: Carries takes a nucleotide allele.
+resource syn:carries_protein : justification:Declaration {
+    core:description = "SYN-26-001's proband carries p.Gly88Ser — ill-typed.";
+    prov:was_attributed_to = syn:author;
+    eigentt:proposition = type_expr(clinical:Carries(syn:proband_001, syn:p_Gly88Ser, clinical:heterozygous));
+}
