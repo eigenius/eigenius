@@ -94,8 +94,11 @@ any detour.
 > (`e551712`): old prompt readings 646 / skeletons 229 / 62 of 62; S-guide2 714 / 205 / 62 of 62. 18 of
 > the 24 skeletons are «… showed greater dependence on WRN than …», where S-guide2 seeds the
 > comparative marker over UMLS's "Greater" qualifier; the extra readings are runners-up on content
-> words. **Next:** the owner on S-guide2 and the readings ceiling (700); a live recording on this
-> snapshot as the tracked ranks file; the draws.
+> words. **Adopted by the owner; re-baselined** (`baseline.json`): live at `aeb67c3`, readings 738,
+> skeletons 210, 62 of 62, readings ceiling 700 → 775; record and replay agree. Strict mode's grammar
+> limit cost two sentences on the first attempt; a choice is now asked in parts of eight questions
+> (`aeb67c3`). **Next:** the draws on this snapshot — the live draw left 9 selections unadjudicated
+> (26 correct, 7 wrong) — then the selection baseline.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change
