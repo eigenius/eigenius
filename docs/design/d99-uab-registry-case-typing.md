@@ -478,7 +478,27 @@ The PMI team's answers to the five questions of the shared write-up change conve
   | hypernatremic dehydration | HP:0004918 (wrong; HP:0004906) | `hp:'0004906'` |
 
   - **Failure to thrive and renal insufficiency** (C2315100, C1565489 among others) kept a `_name` entry pointing at the UMLS concept: traced and fixed (§11).
-  - **Polyuria, polydipsia, nocturia** reach the WordNet synset: decision 11 links them.
+  - **Polyuria, nocturia, renal insufficiency** reach the WordNet synset: decision 11 links them.
+  - **Polydipsia** had no link: the WordNet↔UMLS adjudicator judged UMLS polydipsia (C0085602,
+    "chronic excessive intake of water") and WordNet's (n14040966, "excessive thirst") different
+    (`same=false`, 0.75). The owner overrode it (2026-10-02): HPO HP:0001959 is "excessive thirst
+    manifested by excessive fluid intake". The override is a recorded correction,
+    `experiments/lexicon-align/maintainer-verdicts.jsonl`, that both resolve steps apply; the merge
+    set grows 38,389 → 38,391.
+- **Half of HPO did not stand bare** (found 2026-10-02 on `uab-d99-hpo-aligned-2026-10-02`). The
+  UMLS importer mints the bare-standing `_name` entry (D70) only for diseases and neoplasms, so a
+  symptom- or finding-typed concept had a count entry alone, and "he has polydipsia" could not take
+  the HPO reading: 20,133 of 39,049 HPO-name surfaces, 8,918 of 18,419 HP classes. The owner's
+  choice (2026-10-02): the HPO alignment adds a `_name` entry where a surface has neither `_mass`
+  nor `_name`, because an HPO term is a named condition whatever its UMLS semantic type.
+- **Result** (`uab-d99-r2-hpo-aligned-2026-10-02`):
+  - the HPO↔UMLS layer is 81,223 entries; 864 equivalences;
+  - all six SYN-26-002 phenotypes parse in "He has …" to their HP class or to a synset an
+    equivalence links to it;
+  - the parse gate holds: expected hits 62/62, readings 612 (652), skeletons 212, selection 30/41,
+    0 unadjudicated. The selection score counts the owner's 2026-10-02 verdict that «analysed»
+    v00644583 is a valid reading of «We analysed two independent cancer dependency data sets.»;
+    rows 124, 142 and 163 were revised to match.
 - **"The patient …" does not parse** ("The patient has polyuria.", "The patient has a fever."), while "The boy has polyuria." and "Patients have polyuria." do. A lexical gap in singular *patient*.
 - **Threshold *k* in 8c.** The notes give <4% for p.Leu44Pro and "wild-type levels" for p.Leu44Phe.
 - **The HP:0004918 row.** Report it to UAB, or declare HP:0004906 for the experiment.

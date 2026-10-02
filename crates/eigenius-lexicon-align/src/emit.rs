@@ -92,6 +92,9 @@ pub const HPO_HEADER: &str = "\
 // Every other property is passed through from the committed entry unchanged. Concepts the
 // WordNet↔UMLS layer already took to a synset are left to WordNet.
 //
+// An HPO name stands bare: where the surface has neither a `_mass` nor a D70 `_name` entry, a
+// `_name` entry (`cat_n(<HP class>, name)`) is added beside it.
+//
 // No class is created or modified; no `subclass_of` edge is emitted.
 // ════════════════════════════════════════════════════════════════════
 namespace lexicon    = \"urn:eigenius:lexicon\";

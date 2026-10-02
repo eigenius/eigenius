@@ -44,9 +44,9 @@ pub const UMLS_LEXICON: &str = "lexicon:umls";
 /// The suffix of a concept's plain entry for a surface: `e_<CUI>_<i>`.
 const COUNT_SUFFIX: &str = "";
 /// The additive mass-noun entry (`cat_n(C, mass)`) of a mass-denoting concept.
-const MASS_SUFFIX: &str = "_mass";
+pub const MASS_SUFFIX: &str = "_mass";
 /// The additive named-condition entry (`cat_n(C, name)`, D70) of a disease or neoplasm.
-const NAME_SUFFIX: &str = "_name";
+pub const NAME_SUFFIX: &str = "_name";
 
 /// Every suffix this importer mints a lexical entry under: a concept's entries for its `i`-th
 /// surface are `umlscui:e_<CUI>_<i><suffix>` for each of these that applies. A consumer that

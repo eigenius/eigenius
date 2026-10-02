@@ -195,6 +195,20 @@ is its job.
     common-word surface without curating prefixes. Entity-tagged SNOMED concepts a real noun carries
     (`(finding)`, `(procedure)`, `(substance)`) are deliberately left in — they are genuine senses.
 
+## `maintainer-verdicts.jsonl` — corrections to the adjudication (2026-10-02)
+
+`alignment.jsonl` stays the recorded LLM output and is never edited. A maintainer who disagrees with
+a verdict records a row here — `{cui, offset, surface, same, reason, by, date}` — and both resolve
+steps (`merges`, `drops`) replace the adjudicator's verdicts on that `(cui, synset)` pair with it
+(`merge::apply_maintainer_verdicts`, confidence 1.0). The correction is attributed and dated, and
+removing the row restores the adjudicator's answer.
+
+| Pair | Adjudicator | Maintainer | Effect |
+|---|---|---|---|
+| `C0085602` polydipsia ↔ WordNet `14040966` | `same=false`, 0.75 — "excessive water intake" vs "excessive thirst" | `same=true` — HPO HP:0001959 is "excessive thirst manifested by excessive fluid intake", both glosses at once | merges 38 389 → 38 391 (polydipsia, polydipsias); drops unchanged; the HPO ≡ WordNet ≡ UMLS layer (D99 §11) gains the concept |
+
+`merges-lemma-keyed.json` below was derived before this file existed and does not carry its rows.
+
 ## `merges-lemma-keyed.json` — a DERIVED artifact (2026-07-26)
 
 `merges.json` stays the recorded adjudication: 38 389 LLM verdicts, never hand-edited. This file is

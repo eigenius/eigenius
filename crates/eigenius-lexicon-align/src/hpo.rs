@@ -39,6 +39,12 @@
 //! An entry is redefined only when its surface is one of the HP code's own HPO strings in the
 //! concept; the concept's other surfaces keep denoting the UMLS concept. A wrong merge destroys the
 //! correct reading, a missed one leaves things as they were.
+//!
+//! **An HPO name stands bare.** An HPO term is a phenotype — a named condition — so "he has
+//! polydipsia" takes it without an article. The UMLS importer mints the bare-standing `_name` entry
+//! (D70) only for diseases and neoplasms; a surface the concept carries as a count noun alone gets
+//! one here, denoting the HP class. 8,918 of the 18,419 HP classes reached had no bare-standing
+//! surface before (2026-10-02).
 
 use std::collections::{BTreeMap, BTreeSet};
 

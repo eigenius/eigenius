@@ -36,6 +36,7 @@ use eigenius_lexicon_align::emit::{
 use eigenius_lexicon_align::hpo::{hp_qname, hpo_atoms, is_hpo_name, plan};
 use eigenius_lexicon_align::read::{as_str, cat_n_num, entries_of, qname};
 use eigenius_storage_rocksdb::RocksStore;
+use eigenius_umls::convert::{MASS_SUFFIX, NAME_SUFFIX};
 
 #[derive(Parser, Debug)]
 #[command(about = "Emit the HPO↔UMLS alignment layer from the committed chain")]
@@ -116,8 +117,8 @@ fn main() -> ExitCode {
     let in_lexicon = Iri::parse("urn:eigenius:lexicon:in_lexicon").unwrap();
 
     let mut body = String::new();
-    let (mut written, mut skipped_named, mut no_entry, mut other_names) =
-        (0usize, 0usize, 0usize, 0usize);
+    let (mut written, mut skipped_named, mut no_entry, mut other_names, mut bare_added) =
+        (0usize, 0usize, 0usize, 0usize, 0usize);
     let mut classes: BTreeSet<&str> = BTreeSet::new();
     for (cui, code) in &p.merges {
         let entries = entries_of(head, cui, args.max_form_index, 30);
@@ -125,6 +126,8 @@ fn main() -> ExitCode {
             no_entry += 1;
             continue;
         }
+        // Every entry IRI the concept has, so a surface's bare-standing variants can be looked up.
+        let present: BTreeSet<String> = entries.iter().map(|(i, _)| i.clone()).collect();
         for (iri_s, r) in entries {
             let Some(f) = as_str(r.get(&form)) else {
                 continue;
@@ -137,17 +140,36 @@ fn main() -> ExitCode {
                 skipped_named += 1; // named individual (cat_np) — cannot denote a class
                 continue;
             };
-            body.push_str(&render(&Rewrite {
-                entry_iri: iri_s,
+            let rewrite = Rewrite {
+                entry_iri: iri_s.clone(),
                 num,
                 class: hp_qname(code),
                 form: f,
                 sense: as_str(r.get(&sense)).unwrap_or_default(),
                 in_lexicon: qname(&as_str(r.get(&in_lexicon)).unwrap_or_default()),
                 sem_type: "Set".to_string(),
-            }));
+            };
+            body.push_str(&render(&rewrite));
             written += 1;
             classes.insert(code);
+            // An HPO term is a phenotype, a named condition, so its name stands bare — "he has
+            // polydipsia" — whatever UMLS semantic type the concept carries. D70 mints that
+            // `cat_n(C, name)` entry only for diseases and neoplasms, so a symptom- or finding-typed
+            // concept arrives with a count entry alone and the HPO reading needs an article.
+            let is_plain = ![MASS_SUFFIX, NAME_SUFFIX]
+                .iter()
+                .any(|suffix| iri_s.ends_with(suffix));
+            let stands_bare = [MASS_SUFFIX, NAME_SUFFIX]
+                .iter()
+                .any(|suffix| present.contains(&format!("{iri_s}{suffix}")));
+            if is_plain && !stands_bare {
+                body.push_str(&render(&Rewrite {
+                    entry_iri: format!("{iri_s}{NAME_SUFFIX}"),
+                    num: "name".to_string(),
+                    ..rewrite
+                }));
+                bare_added += 1;
+            }
         }
     }
 
@@ -196,6 +218,7 @@ fn main() -> ExitCode {
         "  entries redefined             : {written}  ({} HP classes)",
         classes.len()
     );
+    eprintln!("  bare-standing entries added   : {bare_added}  (`_name`, where the surface had neither `_mass` nor `_name`)");
     eprintln!("  kept (another source's name)  : {other_names}");
     eprintln!("  skipped (named individual)    : {skipped_named}");
     eprintln!(

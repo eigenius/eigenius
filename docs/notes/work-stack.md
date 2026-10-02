@@ -27,11 +27,13 @@ any detour.
 > the HPO ≡ WordNet ≡ UMLS layer it carries (863 equivalences); the `_name`-entry gap in both
 > alignment emitters, which left 8,107 named-condition entries on their UMLS concept (traced from
 > "failure to thrive").
-> **Next:** one reseed (covers `4b07e11`'s bootstrap move, the codec constructors,
-> `EquivalentClasses`, and both alignments rebuilt with the fixed emitters) and the parse gate
-> rerun; the phenotype predicate; the converter, the SYN-26-002 chain, the integration test, the
-> README. **Blocked:** Docker Desktop publishes no host port (`/forwards/expose` 500,
-> `2026-10-02`), and the reseed scripts load through one.
+> Reseeded `2026-10-02` from `e39d231` (`uab-d99-2026-10-02`); the chain for experiment 02 is
+> `uab-d99-r2-hpo-aligned-2026-10-02` (polydipsia maintainer override, bare-standing HPO names).
+> Gate: 62/62, readings 612, skeletons 212, selection 30/41. Docker: host ports in Windows'
+> reserved range (50060–50159 since the restart) fail; the isolated kernel uses 18051.
+> **Next:** record the r2 draw as the tracked selections/ranks/baseline (required before merge);
+> the phenotype predicate (the parse gives `have(kind_of(C), x)`); the converter, the SYN-26-002
+> chain, the integration test, the README.
 >
 > **Exit gate:** D99's steps 1–7 built and tested; the branch reseeded and merged.
 
