@@ -79,8 +79,23 @@ any detour.
 > accepted below the 0.95 bar (the owner):** recall clause 0.883, object 0.887 (held-out 0.900),
 > preposition 0.927; ten wordings and models tried (D97 decision 1). A preposition is placed only
 > where the judge's sentence shows it right after the verb (372 object + PP withdrawn); probe 33 of
-> 40 correct. **Next:** the adjectives' gloss heuristic, widened by the 53 prepositions (586 entries
-> on them, many adjuncts: «scarce during») — the owner's call; then reseed, the sweep, the draws.
+> 40 correct. The gloss heuristic's proposals go to the judge (the owner). Measured on
+> `wordnet-umls-aligned-2026-10-01-verbs`: 62/62, readings 656, skeletons 220. **Next:** the draws.
+> **The sense ranker on the decision interface (`2026-10-01`, the owner's plan):** an instrument
+> scores the sense ranks against the reading ledger (SENSE RANKS line); the ranker asks one question
+> per word, and a probability floor (0.02) eliminates. The question was chosen on an offline screen
+> (S-guide2: "a grammatical word has one reading here"). Its first live run lost «Each event alone does
+> not lead to cell death.»: the lexicon filed «does» under two sense keys with one gloss, and the
+> model kept the question entry — fixed, do-support is one sense (`c5d6d28`), with a test that a form's
+> sense keys have distinct glosses. A reply missing a question's answer left a sentence unranked —
+> the forced tool is now `strict` (`54cb6d1`). The reseed then died three times at 21–24 GB: the
+> commit held two whole-layer copies of a chunk — fixed (`e551712`, peak 13.3 GB;
+> `reseed-oom-memory-investigation.md`). Replayed on `wordnet-umls-aligned-2026-10-01-do-sense`
+> (`e551712`): old prompt readings 646 / skeletons 229 / 62 of 62; S-guide2 714 / 205 / 62 of 62. 18 of
+> the 24 skeletons are «… showed greater dependence on WRN than …», where S-guide2 seeds the
+> comparative marker over UMLS's "Greater" qualifier; the extra readings are runners-up on content
+> words. **Next:** the owner on S-guide2 and the readings ceiling (700); a live recording on this
+> snapshot as the tracked ranks file; the draws.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change
