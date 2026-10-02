@@ -23,7 +23,10 @@
 //! A concept is merged when exactly one **live** HP code names it. It is left alone when
 //!
 //! - its entries already denote a WordNet synset (the D63 alignment) — WordNet stays canonical for
-//!   them, so a concept is never split between two classes;
+//!   them, so a concept is never split between two classes. Where one live HP code names such a
+//!   concept, the HP class, the synset and the concept are declared EQUIVALENT instead
+//!   (`core:EquivalentClasses`, D99 §11): the lexicon keeps one reading, and subsumption links the
+//!   three;
 //! - it carries several live HP codes — UMLS put distinct HPO terms in one concept, and choosing one
 //!   would assert an identity NLM did not;
 //! - none of its HP codes is live on the chain — obsolete in the current release, or newer than the
@@ -74,6 +77,9 @@ pub fn is_hpo_name(atoms: &HpoAtoms, cui: &str, code: &str, form: &str) -> bool 
 pub struct Plan {
     /// `CUI → HP code`: the concept's entries will denote the HP class.
     pub merges: BTreeMap<String, String>,
+    /// `CUI → HP code` for concepts WordNet took that exactly one live HP code names: the HP class
+    /// is declared equivalent to the synset and the concept (D99 §11).
+    pub left_to_wordnet: BTreeMap<String, String>,
     pub skipped_wordnet: usize,
     pub skipped_ambiguous: usize,
     pub skipped_not_live: usize,
@@ -88,11 +94,14 @@ pub fn plan(
 ) -> Plan {
     let mut p = Plan::default();
     for (cui, codes) in atoms {
+        let live: Vec<&String> = codes.keys().filter(|c| is_live(c)).collect();
         if wordnet_cuis.contains(cui) {
             p.skipped_wordnet += 1;
+            if let [one] = live.as_slice() {
+                p.left_to_wordnet.insert(cui.clone(), (*one).clone());
+            }
             continue;
         }
-        let live: Vec<&String> = codes.keys().filter(|c| is_live(c)).collect();
         match live.as_slice() {
             [] => p.skipped_not_live += 1,
             [one] => {
@@ -188,6 +197,11 @@ mod tests {
         assert_eq!(
             (p.skipped_wordnet, p.skipped_ambiguous, p.skipped_not_live),
             (1, 1, 1)
+        );
+        // WordNet's concept keeps its synset; its one live HP code is recorded for an equivalence.
+        assert_eq!(
+            p.left_to_wordnet,
+            BTreeMap::from([("C5".to_string(), "HP:0002664".to_string())])
         );
     }
 

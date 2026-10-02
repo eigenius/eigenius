@@ -30,7 +30,9 @@ use clap::Parser;
 use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::ontology::{Iri, Value};
 use eigenius_kernel::storage::PersistentBackend;
-use eigenius_lexicon_align::emit::{load_merges, render, Rewrite, HPO_HEADER};
+use eigenius_lexicon_align::emit::{
+    load_merges, render, render_equivalence, Rewrite, HPO_EQUIVALENCE_HEADER, HPO_HEADER,
+};
 use eigenius_lexicon_align::hpo::{hp_qname, hpo_atoms, is_hpo_name, plan};
 use eigenius_lexicon_align::read::{as_str, cat_n_num, entries_of, qname};
 use eigenius_storage_rocksdb::RocksStore;
@@ -50,6 +52,9 @@ struct Args {
     merges: PathBuf,
     #[arg(long, default_value = "experiments/lexicon-align/hpo-alignment.esl")]
     out: PathBuf,
+    /// The class-equivalence layer (D99 §11): HPO ≡ WordNet ≡ UMLS for the concepts WordNet took.
+    #[arg(long, default_value = "experiments/lexicon-align/hpo-equivalences.esl")]
+    equivalences: PathBuf,
     /// Highest form-index to probe per concept (entry IRIs are `e_<CUI>_<i>`).
     #[arg(long, default_value_t = 400)]
     max_form_index: usize,
@@ -58,13 +63,22 @@ struct Args {
 fn main() -> ExitCode {
     let args = Args::parse();
 
-    let wordnet_cuis: BTreeSet<String> = match load_merges(&args.merges) {
-        Ok(m) => m.keys().map(|(cui, _)| cui.clone()).collect(),
+    let merges = match load_merges(&args.merges) {
+        Ok(m) => m,
         Err(e) => {
             eprintln!("error: {} — {e}", args.merges.display());
             return ExitCode::from(1);
         }
     };
+    let wordnet_cuis: BTreeSet<String> = merges.keys().map(|(cui, _)| cui.clone()).collect();
+    // `CUI → {synset offsets}` — a concept the adjudication split across synsets has no single one.
+    let mut synsets_of: std::collections::BTreeMap<&str, BTreeSet<&str>> = Default::default();
+    for ((cui, _), off) in &merges {
+        synsets_of
+            .entry(cui.as_str())
+            .or_default()
+            .insert(off.as_str());
+    }
     let atoms = match std::fs::File::open(&args.mrconso) {
         Ok(f) => {
             let lines: Vec<String> = std::io::BufReader::new(f)
@@ -146,10 +160,35 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
 
+    // D99 §11 — HPO ≡ WordNet ≡ UMLS for the concepts WordNet took.
+    let mut equivalences = String::new();
+    let (mut equivalent, mut split_synsets) = (0usize, 0usize);
+    for (cui, code) in &p.left_to_wordnet {
+        let Some(offsets) = synsets_of.get(cui.as_str()) else {
+            continue;
+        };
+        let [off] = offsets.iter().collect::<Vec<_>>()[..] else {
+            split_synsets += 1;
+            continue;
+        };
+        equivalences.push_str(&render_equivalence(cui, code, &hp_qname(code), off));
+        equivalent += 1;
+    }
+    let eq_doc = format!("{HPO_EQUIVALENCE_HEADER}\n{equivalences}");
+    if std::fs::write(&args.equivalences, &eq_doc).is_err() {
+        eprintln!("error: cannot write {}", args.equivalences.display());
+        return ExitCode::from(1);
+    }
+
     eprintln!("\n=== HPO↔UMLS ALIGNMENT LAYER ===");
     eprintln!("  UMLS concepts with an HP code : {}", atoms.len());
     eprintln!("  merged concepts               : {}", p.merges.len());
     eprintln!("  left to WordNet               : {}", p.skipped_wordnet);
+    eprintln!(
+        "    declared equivalent (§11)   : {equivalent}  (→ {})",
+        args.equivalences.display()
+    );
+    eprintln!("    synset not unique           : {split_synsets}");
     eprintln!("  several live HP codes         : {}", p.skipped_ambiguous);
     eprintln!("  no live HP code on the chain  : {}", p.skipped_not_live);
     eprintln!("  merged concepts with no entry : {no_entry}");

@@ -28,7 +28,7 @@ use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::storage::PersistentBackend;
 use eigenius_lexicon_align::emit::{load_merges, render, Rewrite, HEADER};
-use eigenius_lexicon_align::read::{as_str, cat_n_num, qname};
+use eigenius_lexicon_align::read::{as_str, cat_n_num, entries_of, qname};
 use eigenius_storage_rocksdb::RocksStore;
 
 #[derive(Parser, Debug)]
@@ -75,57 +75,38 @@ fn main() -> ExitCode {
     let mut body = String::new();
     let (mut written, mut skipped_named, mut not_found) = (0usize, 0usize, 0usize);
 
+    let form_iri = Iri::parse("urn:eigenius:lexicon:form").unwrap();
+    let cat_iri = Iri::parse("urn:eigenius:lexicon:cat").unwrap();
+    let sense_iri = Iri::parse("urn:eigenius:lexicon:sense").unwrap();
+    let in_lexicon_iri = Iri::parse("urn:eigenius:lexicon:in_lexicon").unwrap();
     for (cui, wanted) in &by_cui {
+        // Every entry the importer minted for the concept, under every suffix it mints
+        // (`read::entries_of`). This loop kept its own `["", "_mass"]`, and so never aligned D70's
+        // `_name` entries.
         let mut hit = 0usize;
-        let mut miss_run = 0usize;
-        for i in 0..args.max_form_index {
-            if miss_run > 30 && hit >= wanted.len() {
-                break; // this concept's merged surfaces are all accounted for
-            }
-            let mut found_any = false;
-            for suffix in ["", "_mass"] {
-                let iri_s = format!("urn:eigenius:umlscui:e_{cui}_{i}{suffix}");
-                let Ok(iri) = Iri::parse(&iri_s) else {
-                    continue;
-                };
-                let Some(r) = head.resolve(&iri) else {
-                    continue;
-                };
-                found_any = true;
-                let Some(form) = as_str(r.get(&Iri::parse("urn:eigenius:lexicon:form").unwrap()))
-                else {
-                    continue;
-                };
-                let key = form.to_lowercase();
-                let Some((_, off)) = wanted.iter().find(|(s, _)| *s == key) else {
-                    continue; // this surface of the concept was NOT merged — leave it alone
-                };
-                let cat = r.get(&Iri::parse("urn:eigenius:lexicon:cat").unwrap());
-                let Some(num) = cat.and_then(|c| cat_n_num(c, cui, head)) else {
-                    skipped_named += 1; // named individual (cat_np) — cannot denote a class
-                    continue;
-                };
-                body.push_str(&render(&Rewrite {
-                    entry_iri: iri_s.clone(),
-                    num,
-                    class: format!("wn:n{off}"),
-                    form,
-                    sense: as_str(r.get(&Iri::parse("urn:eigenius:lexicon:sense").unwrap()))
-                        .unwrap_or_default(),
-                    in_lexicon: qname(
-                        &as_str(r.get(&Iri::parse("urn:eigenius:lexicon:in_lexicon").unwrap()))
-                            .unwrap_or_default(),
-                    ),
-                    sem_type: "Set".to_string(),
-                }));
-                written += 1;
-                hit += 1;
-            }
-            if found_any {
-                miss_run = 0;
-            } else {
-                miss_run += 1;
-            }
+        for (iri_s, r) in entries_of(head, cui, args.max_form_index, 30) {
+            let Some(form) = as_str(r.get(&form_iri)) else {
+                continue;
+            };
+            let key = form.to_lowercase();
+            let Some((_, off)) = wanted.iter().find(|(s, _)| *s == key) else {
+                continue; // this surface of the concept was NOT merged — leave it alone
+            };
+            let Some(num) = r.get(&cat_iri).and_then(|c| cat_n_num(c, cui, head)) else {
+                skipped_named += 1; // named individual (cat_np) — cannot denote a class
+                continue;
+            };
+            body.push_str(&render(&Rewrite {
+                entry_iri: iri_s,
+                num,
+                class: format!("wn:n{off}"),
+                form,
+                sense: as_str(r.get(&sense_iri)).unwrap_or_default(),
+                in_lexicon: qname(&as_str(r.get(&in_lexicon_iri)).unwrap_or_default()),
+                sem_type: "Set".to_string(),
+            }));
+            written += 1;
+            hit += 1;
         }
         if hit == 0 {
             not_found += 1;

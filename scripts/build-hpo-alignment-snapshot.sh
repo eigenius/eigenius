@@ -17,7 +17,11 @@
 # Build an HPO↔UMLS-aligned snapshot from a snapshot that carries HPO (obograph-import) on top of the
 # WordNet↔UMLS alignment, in ONE step:
 #
-#   MRCONSO (SAB=HPO) + merges.json ──emit(reads the base chain)──▶  hpo-alignment.esl  ──load──▶  snapshot
+#   MRCONSO (SAB=HPO) + merges.json ──emit(reads the base chain)──▶  hpo-alignment.esl     ──load──▶  snapshot
+#                                                                    hpo-equivalences.esl  ──load──▶  (above it)
+#
+# The second layer declares HPO ≡ WordNet ≡ UMLS (`core:EquivalentClasses`, D99 §11) for the concepts
+# the WordNet↔UMLS alignment took, which the first leaves to WordNet.
 #
 # The ESL is a build artefact of this run and is never a hand-carried input — for the reason
 # scripts/build-alignment-snapshot.sh gives (a stale layer loads cleanly and nothing fails).
@@ -57,6 +61,7 @@ say() { echo; echo "=== $* ==="; }
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 ESL="$WORK/hpo-alignment.esl"
+EQUIV="$WORK/hpo-equivalences.esl"
 
 # The emitter opens RocksDB read-write, so it reads a COPY; the base is never opened in place.
 say "copying the base chain for the emitter to read ($(du -sh "$BASE" | cut -f1))"
@@ -64,15 +69,16 @@ cp -a "$BASE" "$WORK/chain"
 
 say "emitting the HPO↔UMLS layer from $(basename "$MRCONSO") (SAB=HPO), leaving $(basename "$MERGES")'s concepts to WordNet"
 cargo run --release --features chain --bin lexicon-align-hpo-emit -- \
-  --snapshot "$WORK/chain" --mrconso "$MRCONSO" --merges "$MERGES" --out "$ESL"
+  --snapshot "$WORK/chain" --mrconso "$MRCONSO" --merges "$MERGES" --out "$ESL" --equivalences "$EQUIV"
 rm -rf "$WORK/chain"
 
 say "loading the layer onto a fresh copy of the base → $OUT"
-scripts/add-layer-to-snapshot.sh --base "$BASE" --out "$OUT" "$ESL"
+scripts/add-layer-to-snapshot.sh --base "$BASE" --out "$OUT" "$ESL" "$EQUIV"
 
 if [[ -f "$OUT/PROVENANCE" ]]; then
     {
         echo "hpo_umls_alignment : $(basename "$MRCONSO") SAB=HPO, excluding $(basename "$MERGES") (layered by scripts/build-hpo-alignment-snapshot.sh)"
+        echo "hpo_equivalences   : HPO ≡ WordNet ≡ UMLS for the concepts in $(basename "$MERGES") (D99 §11)"
         echo "hpo_aligned_from   : $(basename "$BASE")"
         echo "hpo_aligned_at     : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } >> "$OUT/PROVENANCE"
@@ -80,4 +86,5 @@ fi
 
 # Next to the merge set for inspection; gitignored, regenerated on every run.
 cp "$ESL" experiments/lexicon-align/hpo-alignment.esl
-echo "(a copy of the emitted layer is at experiments/lexicon-align/hpo-alignment.esl — inspection only)"
+cp "$EQUIV" experiments/lexicon-align/hpo-equivalences.esl
+echo "(copies of the emitted layers are at experiments/lexicon-align/hpo-alignment.esl and hpo-equivalences.esl — inspection only)"

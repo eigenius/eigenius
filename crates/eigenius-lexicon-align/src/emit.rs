@@ -132,6 +132,40 @@ pub fn render(r: &Rewrite) -> String {
 pub type Merges = BTreeMap<(String, String), String>;
 
 /// Load `merges.json` (the adjudicated, conflict-resolved alignment).
+/// The class-equivalence layer (D99 §11): one `core:EquivalentClasses` per UMLS concept that the
+/// WordNet↔UMLS alignment took to a synset and exactly one live HPO code names.
+pub const HPO_EQUIVALENCE_HEADER: &str = "\
+// ════════════════════════════════════════════════════════════════════
+// HPO ≡ WordNet ≡ UMLS — the CLASS-EQUIVALENCE LAYER (D99 §11).
+//
+// Each resource below declares an HPO class, a WordNet synset and a UMLS concept equivalent: NLM maps
+// the HPO code to the concept (MRCONSO, SAB=HPO), and the WordNet↔UMLS adjudication maps the concept
+// to the synset (merges.json) — a chain of two published mappings, semapv:MappingChaining.
+//
+// No class is created or modified. Subsumption reads the equivalence; class definitions do not.
+// ════════════════════════════════════════════════════════════════════
+namespace core       = \"urn:eigenius:core\";
+namespace prov       = \"urn:eigenius:prov\";
+namespace agent      = \"urn:eigenius:prov:agent\";
+namespace umlscui    = \"urn:eigenius:umlscui\";
+namespace wn         = \"urn:eigenius:wn\";
+namespace hp         = \"urn:obo:HP\";
+namespace hpoequiv   = \"urn:eigenius:align:hpo-wordnet\";
+";
+
+/// One equivalence of [`HPO_EQUIVALENCE_HEADER`]'s layer.
+pub fn render_equivalence(cui: &str, hp_code: &str, hp_class: &str, wn_offset: &str) -> String {
+    format!(
+        "resource hpoequiv:{cui} : core:EquivalentClasses {{\n\
+         \x20   core:description = \"{hp_code}, WordNet synset {wn_offset} and UMLS concept {cui} name one class (D99 §11).\";\n\
+         \x20   core:classes = [{hp_class}, wn:n{wn_offset}, umlscui:{cui}];\n\
+         \x20   core:mapping_justification = \"semapv:MappingChaining\";\n\
+         \x20   prov:was_attributed_to = agent:eigenius_core_team;\n\
+         \x20   prov:rationale = \"MRCONSO (SAB=HPO) maps {hp_code} to {cui}; the WordNet-UMLS adjudication (merges.json) maps {cui} to synset {wn_offset}.\";\n\
+         }}\n\n"
+    )
+}
+
 pub fn load_merges(path: &std::path::Path) -> std::io::Result<Merges> {
     #[derive(serde::Deserialize)]
     struct M {
