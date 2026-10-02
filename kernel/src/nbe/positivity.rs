@@ -526,7 +526,7 @@ pub fn has_ind_occurrence(decl: &InductiveDecl, exp: &Exp) -> bool {
             };
             args_contain || has_ind_occurrence(decl, e)
         }
-        Exp::DecEq(a, x, y) => {
+        Exp::Apart(a, x, y) => {
             has_ind_occurrence(decl, a)
                 || has_ind_occurrence(decl, x)
                 || has_ind_occurrence(decl, y)

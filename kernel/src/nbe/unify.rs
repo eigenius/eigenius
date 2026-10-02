@@ -644,6 +644,17 @@ fn walk_neut(
         }
         Neut::Fst(inner) | Neut::Snd(inner) => walk_neut(inner, depth, bound, out),
         Neut::PropAccess(inner, _) => walk_neut(inner, depth, bound, out),
+        Neut::IdJ(five, p) => {
+            for v in five.iter() {
+                walk_val(v, depth, bound, out)?;
+            }
+            walk_neut(p, depth, bound, out)
+        }
+        Neut::Apart(a, x, y) => {
+            walk_val(a, depth, bound, out)?;
+            walk_val(x, depth, bound, out)?;
+            walk_val(y, depth, bound, out)
+        }
         Neut::NtMap(f, inner) => {
             walk_val(f, depth, bound, out)?;
             walk_neut(inner, depth, bound, out)
@@ -718,6 +729,12 @@ fn meta_occurs_neut(meta: MetaId, n: &Neut) -> bool {
         Neut::Meta(id, spine) => *id == meta || spine.iter().any(|v| meta_occurs(meta, v)),
         Neut::App(k, v) => meta_occurs_neut(meta, k) || meta_occurs(meta, v),
         Neut::Fst(k) | Neut::Snd(k) | Neut::PropAccess(k, _) => meta_occurs_neut(meta, k),
+        Neut::Apart(a, x, y) => {
+            meta_occurs(meta, a) || meta_occurs(meta, x) || meta_occurs(meta, y)
+        }
+        Neut::IdJ(five, p) => {
+            five.iter().any(|v| meta_occurs(meta, v)) || meta_occurs_neut(meta, p)
+        }
         Neut::NtFun(_, _, k) => meta_occurs_neut(meta, k),
         Neut::NtMap(f, k) => meta_occurs(meta, f) || meta_occurs_neut(meta, k),
         Neut::NtReduce(f, acc, k) => {

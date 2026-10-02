@@ -56,6 +56,14 @@
 //! came to declare `rdfs:label` (an OBO node's label, which had been put in `core:short_name`) and
 //! `subPropertyOf` (which had been folded into `core:is_a`).
 //!
+//! IT FIRED FOR D99 §10 (`2026-10-02`) on `core` and `justification`, for kernel-checked
+//! disequality: `eigentt:Term` gained `Refl`, `IdJ`, `Apart` and `PropAccess`, so a proof that two
+//! resources differ in a field is a chain term; and `justification:proof_judgement` lost its
+//! `domain justification:Conclusion`, implementing D89 §2 — a proof rides on any
+//! proposition-bearing resource, and a declaration with one is Verified. Then on `core` again
+//! for D99 §11: `core:EquivalentClasses`, `core:classes` and `core:mapping_justification`, OWL's
+//! class equivalence as a resource the subsumption walk reads. One reseed with the obo move above.
+//!
 //! IT FIRED ACROSS D95 (`2026-09-26`–`2026-09-27`), on four layers, which pay ONE reseed together
 //! (`docs/design/d95-implementation-plan.md`, slice 5): `units` (standard gravity, `molar`, `week`,
 //! `units:Difference`), `lexicon` (`lexicon:Reading`, `cat_mp`, `cat_unit_forall`,
@@ -215,7 +223,7 @@ use eigenius_kernel::bootstrap::current_manifest;
 
 /// The manifest as committed. Update it in the SAME commit as any bootstrap ontology edit — see the
 /// panic message for the rest of the follow-through.
-const EXPECTED: &str = "core:14935ac5c54e8f210410ec86f5545ba3f1162b72c44b5be9f3f4c8abcfde702d
+const EXPECTED: &str = "core:314aa1d7ac9350068ea4a29b4b734cba6725b235792d62905bc45af9a7583e43
 program:429718a323b6bfcc3ff858277f73b2c15de724f9d1c1c2c2c220748295b3c726
 program-traces:b6ad0b141167e2020fd5f5ce993cde229e28c8519cd6a728256e301fcdd4da44
 prov:694b3195028f88f8043209f81f70824fb12bdee45f8e57db381a041c96687c5d
@@ -225,7 +233,7 @@ runtime:ada851931aeff9eed036621b306ca3eb25c0044d600c84dcad77c67973c1a22e
 formulas:f7b3e06c4d26eb9fd41e3674051cc32d2277dd55a83aa6a31808e61f6d70a023
 lean-runtime-classes:d0368fbeab60fc209aba97a41cf4ff57c25d35e954638bff26a0ffb8a0ce72cc
 lean-institution:3a4cd1b1a75a5032fda484dea529bcf79678ec4d4fd060e13c6ef00d782e5fc2
-justification:3544a09a5fa235332df6bfb40bc0c68ce266b72704d86d85a08d6a63f785ae2f
+justification:0fcd229f8640b47dc4c93751cc76f97f327da71999bbaead34ea86bceee261f9
 units:f125f3ca24c57533565d17dac682640fe0f4ec8963c166c83950946a0559cbe8
 statistics:8c955279b691648a948061c47cd8ff2ada4c9edd9a05c756b373a5aa83c3b466
 notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997

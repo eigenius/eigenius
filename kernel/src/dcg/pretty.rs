@@ -141,7 +141,7 @@ fn exp_kind(e: &Exp) -> &'static str {
         Exp::Refl(_) => "<refl>",
         Exp::IdJ(_) => "<idj>",
         Exp::NativeDecide(_, _) => "<native-decide>",
-        Exp::DecEq(_, _, _) => "<deceq>",
+        Exp::Apart(_, _, _) => "<apart>",
         Exp::EigonPrimitive(_) => "<primitive>",
         Exp::PropAccess(_, _) => "<prop-access>",
         Exp::Template(_, _) => "<template>",

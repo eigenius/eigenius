@@ -345,6 +345,22 @@ pub(crate) fn encode_term(exp: &Exp, names: &CodecNames) -> Result<Value, Encode
         Exp::Lam(_, _) => Err(EncodeError::LamWithoutAnnotation),
         Exp::One => term(names, "One", vec![]),
         Exp::Id(ty, x, y) => term(names, "Id", vec![enc(ty)?, enc(x)?, enc(y)?]),
+        // D99 §10 — the proof-level ctors a disequality proof needs: congruence is `IdJ` over a
+        // `PropAccess`, closed by `Apart`. `IdJ`'s motive and method are lambdas, which encode
+        // only where their binder types are known (the ESL compiler's encoder, `encode_lam_chain`);
+        // a bare `Exp::Lam` here fails as it does in any other position.
+        Exp::Refl(t) => term(names, "Refl", vec![enc(t)?]),
+        Exp::IdJ(six) => term(
+            names,
+            "IdJ",
+            six.iter().map(enc).collect::<Result<Vec<_>, _>>()?,
+        ),
+        Exp::Apart(ty, x, y) => term(names, "Apart", vec![enc(ty)?, enc(x)?, enc(y)?]),
+        Exp::PropAccess(e, prop) => term(
+            names,
+            "PropAccess",
+            vec![enc(e)?, Value::String(prop.as_str().to_string())],
+        ),
         Exp::EigonClass(iri) | Exp::EigonAxiom(iri) => const_ref(names, iri.as_str(), &[]),
         Exp::EigonResource(res) => {
             let iri = res.id().ok_or_else(|| {
@@ -956,6 +972,36 @@ fn decode_value(r: &Resource, ctx: &DecodeCtx<'_>) -> Result<Exp, DecodeError> {
             let lhs = decode_arg(args[1], ctx)?;
             let rhs = decode_arg(args[2], ctx)?;
             Ok(Exp::Id(Box::new(ty), Box::new(lhs), Box::new(rhs)))
+        }
+        "Refl" => {
+            expect_arg_count("Refl", 1, args)?;
+            Ok(Exp::Refl(Box::new(decode_arg(args[0], ctx)?)))
+        }
+        "IdJ" => {
+            expect_arg_count("IdJ", 6, args)?;
+            Ok(Exp::IdJ(Box::new([
+                decode_arg(args[0], ctx)?,
+                decode_arg(args[1], ctx)?,
+                decode_arg(args[2], ctx)?,
+                decode_arg(args[3], ctx)?,
+                decode_arg(args[4], ctx)?,
+                decode_arg(args[5], ctx)?,
+            ])))
+        }
+        "Apart" => {
+            expect_arg_count("Apart", 3, args)?;
+            let ty = decode_arg(args[0], ctx)?;
+            let lhs = decode_arg(args[1], ctx)?;
+            let rhs = decode_arg(args[2], ctx)?;
+            Ok(Exp::Apart(Box::new(ty), Box::new(lhs), Box::new(rhs)))
+        }
+        "PropAccess" => {
+            expect_arg_count("PropAccess", 2, args)?;
+            let subject = decode_arg(args[0], ctx)?;
+            let prop = arg_string("PropAccess", 1, args[1])?;
+            let prop = Iri::parse(&prop)
+                .map_err(|_| wrong_shape("PropAccess", 1, "expected a property IRI"))?;
+            Ok(Exp::PropAccess(Box::new(subject), prop))
         }
         "App" => {
             expect_arg_count("App", 2, args)?;
@@ -1846,10 +1892,41 @@ mod tests {
 
     #[test]
     fn rejects_non_type_level_exp() {
-        // Refl is a term-level form, not a type. Should be rejected.
-        let refl = Exp::Refl(Box::new(Exp::Unit));
-        let err = encode_type(&refl, crate::testing::codec_names()).unwrap_err();
+        // A template carries embedded property references; no `eigentt:Term` constructor encodes
+        // it. (This used `Refl`, which D99 §10 made a constructor.)
+        let template = Exp::Template("{{x}}".to_string(), Vec::new());
+        let err = encode_type(&template, crate::testing::codec_names()).unwrap_err();
         assert!(matches!(err, EncodeError::NotATypeLevelExp(_)));
+    }
+
+    /// D99 §10 — the proof-level constructors round-trip, so a disequality proof (congruence over
+    /// a field, closed by `Apart`) is a chain term.
+    #[test]
+    fn the_proof_level_ctors_round_trip() {
+        use crate::nbe::term::PrimitiveType;
+        let int = || Exp::EigonPrimitive(PrimitiveType::Integer);
+        let one = || Exp::LitInt(1);
+        let start = Iri::parse("urn:eigenius:test:start").unwrap();
+        for exp in [
+            Exp::Refl(Box::new(one())),
+            Exp::Apart(
+                Box::new(int()),
+                Box::new(Exp::LitInt(130)),
+                Box::new(Exp::LitInt(131)),
+            ),
+            Exp::PropAccess(Box::new(Exp::Var("x".to_string())), start),
+            Exp::IdJ(Box::new([
+                int(),
+                Exp::Var("c".to_string()),
+                Exp::Var("d".to_string()),
+                one(),
+                one(),
+                Exp::Refl(Box::new(one())),
+            ])),
+        ] {
+            let v = encode_type(&exp, crate::testing::codec_names()).unwrap();
+            assert_eq!(decode_type(&v, &empty_layer()).unwrap(), exp);
+        }
     }
 
     // ---------- decoder tests ----------

@@ -32,6 +32,7 @@ mod cache;
 mod consolidate;
 pub(crate) mod ctor_classes;
 pub mod declaration_order;
+mod equivalence;
 mod handle;
 mod index;
 mod index_discovery;
@@ -349,6 +350,10 @@ pub struct Layer {
     /// function of the layer's resources, so the env is recomputable and
     /// not persisted separately.
     axiom_env: std::sync::OnceLock<std::sync::Arc<crate::program::axiom_env::AxiomEnv>>,
+    /// D99 §11 — the class-equivalence groups visible from this layer, read once from the triple
+    /// index on first use by [`Layer::is_subclass_of`]. A pure function of the chain, so it is
+    /// recomputable and not persisted.
+    class_equivalences: std::sync::OnceLock<std::sync::Arc<equivalence::ClassEquivalences>>,
 }
 
 impl fmt::Debug for Layer {
@@ -440,6 +445,7 @@ impl Layer {
             created_at: handle.created_at,
             has_witness_candidates: handle.has_witness_candidates,
             axiom_env: std::sync::OnceLock::new(),
+            class_equivalences: std::sync::OnceLock::new(),
         }
     }
 
@@ -467,6 +473,7 @@ impl Layer {
             created_at: handle.created_at,
             has_witness_candidates: handle.has_witness_candidates,
             axiom_env: std::sync::OnceLock::new(),
+            class_equivalences: std::sync::OnceLock::new(),
         }
     }
 
@@ -890,11 +897,21 @@ impl Layer {
         let Ok(prop) = Iri::parse(crate::ontology::well_known::PARENT_CLASSES) else {
             return false;
         };
+        // D99 §11 — a class declared equivalent to one on the walk is on the walk too, in both
+        // directions. Read for subsumption only; the walk's `seen` set is what makes the cycle an
+        // equivalence introduces harmless here.
+        let equivalences = self.class_equivalences();
         let mut stack = vec![sub.clone()];
         let mut seen: BTreeSet<Iri> = BTreeSet::new();
         while let Some(cur) = stack.pop() {
             if !seen.insert(cur.clone()) {
                 continue;
+            }
+            for e in equivalences.equivalents(&cur) {
+                if e == super_ {
+                    return true;
+                }
+                stack.push(e.clone());
             }
             let Some(def) = self.resolve(&cur) else {
                 continue;
@@ -910,6 +927,12 @@ impl Layer {
             }
         }
         false
+    }
+
+    /// The class-equivalence groups visible from this layer (D99 §11), built on first use.
+    pub fn class_equivalences(&self) -> &equivalence::ClassEquivalences {
+        self.class_equivalences
+            .get_or_init(|| std::sync::Arc::new(equivalence::ClassEquivalences::build(self)))
     }
 
     /// Everything a class declares a property for: `requires` ∪ `recommends` ∪ every
@@ -1280,6 +1303,7 @@ impl LayerBuilder {
             // witnesses; an in-flight layer is probed anyway.
             has_witness_candidates: true,
             axiom_env: std::sync::OnceLock::new(),
+            class_equivalences: std::sync::OnceLock::new(),
         };
         // Index lifecycle (D65): derived indexes are materialised at the
         // **persist** step — `PersistentBackend::store_layer` calls

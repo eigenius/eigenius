@@ -1,0 +1,145 @@
+// D99 §10 — two resources are proved distinct by a field that holds distinct literals.
+//
+// Each claim is a `justification:Declaration` that carries its proof — a manually authored claim
+// with a checked proof, `Verified` beside its `Declared` provenance (D89 §2).
+//
+// `eigentt:J` carries `Id(Allele, a, b)` to `Id(T, a.f, b.f)` (congruence over the field `f`), and
+// `eigentt:apart(T, x, y)` refutes `Id(T, x, y)` for distinct canonical literals. Nothing here
+// assumes unique names: `c131_twin` agrees with `c131` on every field, and no proof that the two
+// differ type-checks.
+
+namespace core          = "urn:eigenius:core";
+namespace lexicon       = "urn:eigenius:lexicon";
+namespace logic         = "urn:eigenius:logic";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace prov          = "urn:eigenius:prov";
+namespace fx            = "urn:eigenius:test:apart";
+
+resource fx:author : prov:Organization {
+    core:description = "The author of this fixture's claims.";
+    core:short_name = "author";
+}
+
+class fx:Allele : lexicon:Entity {
+    description = "A sequence allele, named by its identity fields.";
+    requires fx:start, fx:alt;
+}
+
+property fx:start : core:integer {
+    description = "The allele's start position on its reference.";
+    domain fx:Allele;
+}
+
+property fx:alt : core:string {
+    description = "The allele's alternate state.";
+    domain fx:Allele;
+}
+
+resource fx:c130 : fx:Allele {
+    core:description = "c.130C>T";
+    fx:start = 130;
+    fx:alt = "T";
+}
+
+resource fx:c131 : fx:Allele {
+    core:description = "c.131T>C";
+    fx:start = 131;
+    fx:alt = "C";
+}
+
+resource fx:c131_twin : fx:Allele {
+    core:description = "c.131T>C under a second name: every field agrees with fx:c131.";
+    fx:start = 131;
+    fx:alt = "C";
+}
+
+resource fx:by_start : justification:Declaration {
+    core:description = "c.130C>T is not c.131T>C: their start positions are 130 and 131.";
+    prov:was_attributed_to = fx:author;
+    eigentt:proposition = type_expr(eigentt:Eq(fx:Allele, fx:c130, fx:c131) -> logic:False);
+    justification:proof_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(
+                   fun (p : eigentt:Eq(fx:Allele, fx:c130, fx:c131)) =>
+                       eigentt:apart(core:integer, 130, 131,
+                           eigentt:J(fx:Allele,
+                               fun (x : fx:Allele, y : fx:Allele, q : eigentt:Eq(fx:Allele, x, y)) =>
+                                   eigentt:Eq(core:integer, eigentt:field(x, fx:start), eigentt:field(y, fx:start)),
+                               fun (z : fx:Allele) => eigentt:refl(eigentt:field(z, fx:start)),
+                               fx:c130, fx:c131, p))
+               ),
+               type_expr(eigentt:Eq(fx:Allele, fx:c130, fx:c131) -> logic:False) );
+}
+
+resource fx:by_alt : justification:Declaration {
+    core:description = "c.130C>T is not c.131T>C: their alternate states are T and C.";
+    prov:was_attributed_to = fx:author;
+    eigentt:proposition = type_expr(eigentt:Eq(fx:Allele, fx:c130, fx:c131) -> logic:False);
+    justification:proof_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(
+                   fun (p : eigentt:Eq(fx:Allele, fx:c130, fx:c131)) =>
+                       eigentt:apart(core:string, "T", "C",
+                           eigentt:J(fx:Allele,
+                               fun (x : fx:Allele, y : fx:Allele, q : eigentt:Eq(fx:Allele, x, y)) =>
+                                   eigentt:Eq(core:string, eigentt:field(x, fx:alt), eigentt:field(y, fx:alt)),
+                               fun (z : fx:Allele) => eigentt:refl(eigentt:field(z, fx:alt)),
+                               fx:c130, fx:c131, p))
+               ),
+               type_expr(eigentt:Eq(fx:Allele, fx:c130, fx:c131) -> logic:False) );
+}
+
+// REFUSED — the twin agrees on `start`, so the congruence lands on Id(131, 131), which no
+// literal apartness refutes.
+resource fx:twin : justification:Declaration {
+    core:description = "c.131T>C is not its twin — not provable: every field agrees.";
+    prov:was_attributed_to = fx:author;
+    eigentt:proposition = type_expr(eigentt:Eq(fx:Allele, fx:c131, fx:c131_twin) -> logic:False);
+    justification:proof_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(
+                   fun (p : eigentt:Eq(fx:Allele, fx:c131, fx:c131_twin)) =>
+                       eigentt:apart(core:integer, 131, 131,
+                           eigentt:J(fx:Allele,
+                               fun (x : fx:Allele, y : fx:Allele, q : eigentt:Eq(fx:Allele, x, y)) =>
+                                   eigentt:Eq(core:integer, eigentt:field(x, fx:start), eigentt:field(y, fx:start)),
+                               fun (z : fx:Allele) => eigentt:refl(eigentt:field(z, fx:start)),
+                               fx:c131, fx:c131_twin, p))
+               ),
+               type_expr(eigentt:Eq(fx:Allele, fx:c131, fx:c131_twin) -> logic:False) );
+}
+
+// REFUSED — two names are not literals; distinct IRIs may denote one thing.
+resource fx:by_name : justification:Declaration {
+    core:description = "c.131T>C is not its twin, by name — not provable: names are not apart.";
+    prov:was_attributed_to = fx:author;
+    eigentt:proposition = type_expr(eigentt:Eq(fx:Allele, fx:c131, fx:c131_twin) -> logic:False);
+    justification:proof_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(
+                   fun (p : eigentt:Eq(fx:Allele, fx:c131, fx:c131_twin)) =>
+                       eigentt:apart(fx:Allele, fx:c131, fx:c131_twin, p)
+               ),
+               type_expr(eigentt:Eq(fx:Allele, fx:c131, fx:c131_twin) -> logic:False) );
+}
+
+// REFUSED — `apart` refutes Id(130, 132), but the congruence yields Id(130, 131): the proof must
+// connect to the fields it is about.
+resource fx:disconnected : justification:Declaration {
+    core:description = "c.130C>T is not c.131T>C, by an apartness about the wrong literals.";
+    prov:was_attributed_to = fx:author;
+    eigentt:proposition = type_expr(eigentt:Eq(fx:Allele, fx:c130, fx:c131) -> logic:False);
+    justification:proof_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(
+                   fun (p : eigentt:Eq(fx:Allele, fx:c130, fx:c131)) =>
+                       eigentt:apart(core:integer, 130, 132,
+                           eigentt:J(fx:Allele,
+                               fun (x : fx:Allele, y : fx:Allele, q : eigentt:Eq(fx:Allele, x, y)) =>
+                                   eigentt:Eq(core:integer, eigentt:field(x, fx:start), eigentt:field(y, fx:start)),
+                               fun (z : fx:Allele) => eigentt:refl(eigentt:field(z, fx:start)),
+                               fx:c130, fx:c131, p))
+               ),
+               type_expr(eigentt:Eq(fx:Allele, fx:c130, fx:c131) -> logic:False) );
+}

@@ -1,0 +1,33 @@
+// The equivalences, one layer above the classes they name.
+
+namespace core          = "urn:eigenius:core";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace prov          = "urn:eigenius:prov";
+namespace fx            = "urn:eigenius:test:equiv";
+
+resource fx:polyuria : core:EquivalentClasses {
+    core:description = "Polyuria, in HPO, WordNet and UMLS.";
+    core:classes = [fx:HP_0000103, fx:wn_polyuria, fx:C0032617];
+    core:mapping_justification = "semapv:MappingChaining";
+    prov:was_attributed_to = fx:author;
+}
+
+// An instance of the WordNet class inhabits the HPO predicate.
+resource fx:observed_episode : justification:Declaration {
+    core:description = "The episode is an observed HPO polyuria.";
+    prov:was_attributed_to = fx:author;
+    eigentt:proposition = type_expr(fx:Observed(fx:episode));
+}
+
+// REFUSED — fx:Demanding requires fx:grade, the HPO class requires nothing.
+resource fx:unequal : core:EquivalentClasses {
+    core:description = "Classes with different obligations.";
+    core:classes = [fx:HP_0001959, fx:Demanding];
+}
+
+// REFUSED — one class is not an equivalence.
+resource fx:lonely : core:EquivalentClasses {
+    core:description = "A single class.";
+    core:classes = [fx:HP_0001959];
+}

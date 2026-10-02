@@ -199,9 +199,8 @@ property justification:grounds_judgement : core:inductive {
 }
 
 property justification:proof_judgement : core:inductive {
-    description = "An optional SECOND judgement: `holds(logic, t, P)`, a proof of the conclusion's proposition in a logic the system hosts a checker for. Distinct from justification:grounds_judgement and never merged with it — that one says `c grounds P`, this one says `t proves P`, and conflating them is the substitution the two-stratum separation exists to make inexpressible. A conclusion carrying this is the Verified configuration: the chain holds a proof of P itself, not only grounds for a claim to it. Present only where a proof term exists; its absence is the normal case and carries no penalty.";
+    description = "A proof: `holds(logic, t, P)`, a term `t` proving the proposition `P` in a logic the system hosts a checker for. Distinct from justification:grounds_judgement and never merged with it — that one says `c grounds P`, this one says `t proves P`, and conflating them is the substitution the two-stratum separation exists to make inexpressible. A resource carrying this is the Verified configuration: the chain holds a proof of P itself, not only grounds for a claim to it. Carried by any proposition-bearing resource (D89 §2): a justification:Declaration with one is a manually authored claim with a checked proof — Verified beside its Declared provenance — and a justification:Conclusion with one holds a proof besides its grounds. No domain, for that reason: it was declared on Conclusion alone, which required grounds of a proved proposition, and a proved proposition has none but itself. Present only where a proof term exists; its absence is the normal case and carries no penalty.";
     class_types eigentt:Judgement;
-    domain justification:Conclusion;
 }
 
 // `justification:subject_iri` and `justification:refutes` were declared here and are gone (D89 §3).
