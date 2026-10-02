@@ -14,10 +14,9 @@
 
 //! Eigenius CLI — primary developer interface for the Eigenius platform.
 
-// Heap-profiling allocator (opt-in, `--features jemalloc-prof`). Swaps in jemalloc so a `serve`
-// process dumps live-heap profiles under `_RJEM_MALLOC_CONF` (diagnosing the reseed OOM,
-// docs/notes/reseed-oom-memory-investigation.md §6). Off by default → the system allocator, zero impact.
-#[cfg(feature = "jemalloc-prof")]
+// jemalloc, not the system allocator: glibc held freed pages from a reseed's per-chunk peaks (see
+// `tikv-jemallocator` in Cargo.toml). `--features jemalloc-prof` adds heap profiling.
+#[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 

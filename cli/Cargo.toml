@@ -65,11 +65,13 @@ tokio.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-# Heap profiling (opt-in, `--features jemalloc-prof`): swaps in jemalloc as the global allocator with
-# profiling enabled so a `serve` process can dump live-heap profiles (jeprof flame graphs) — used to
-# diagnose the reseed OOM (docs/notes/reseed-oom-memory-investigation.md §6). Off by default: zero
-# impact on normal builds/tests/CI.
-tikv-jemallocator = { version = "0.6", features = ["profiling"], optional = true }
+
+# jemalloc is the global allocator (`src/main.rs`). glibc kept freed pages: a lexicon reseed held
+# ~12.5 GB resident against a ~4.25 GB live peak, even with `MALLOC_ARENA_MAX=2`
+# (docs/notes/reseed-oom-memory-investigation.md). `background_threads` purges decayed pages while
+# the server is idle. Not on MSVC, where jemalloc does not build.
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6", features = ["background_threads"] }
 
 [features]
 # Forwarded to `eigenius-embedder-candle`. Build the CLI with
@@ -77,8 +79,10 @@ tikv-jemallocator = { version = "0.6", features = ["profiling"], optional = true
 # the binary still runs on CPU when `[embedder].device = "cpu"` or
 # the GPU isn't visible at runtime.
 default = []
-# Heap-profiling allocator (see the dep note above). Diagnostic-only.
-jemalloc-prof = ["dep:tikv-jemallocator"]
+# Heap profiling: jemalloc built with `--enable-prof`, so a `serve` process dumps live-heap profiles
+# under `_RJEM_MALLOC_CONF` (docs/notes/reseed-oom-memory-investigation.md, method note).
+# Diagnostic-only.
+jemalloc-prof = ["tikv-jemallocator/profiling"]
 cuda = ["eigenius-embedder-candle/cuda"]
 metal = ["eigenius-embedder-candle/metal"]
 # D63/GH#97 Lever 1: enable the contextual LLM sense reranker in the served/local parse path

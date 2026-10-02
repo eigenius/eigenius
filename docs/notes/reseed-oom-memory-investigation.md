@@ -26,6 +26,24 @@ peak live heap 8.25 → 4.25 GB, peak RSS 10.88 → 6.53 GB. With the system all
 holds at ~12.5 GB through UMLS 008. What remains of the peak is one copy of the parsed chunk
 (~2.9 GB) plus the batch; the gap from 4.25 GB live to 12.5 GB resident is glibc holding freed pages.
 
+**`2026-10-02`: jemalloc is the kernel's allocator** (`cli/Cargo.toml`, `background_threads`). The
+same native load (WordNet + UMLS 001–008), allocator the only variable:
+
+| | peak RSS | after the load |
+|---|---|---|
+| glibc, `MALLOC_ARENA_MAX=2` | 13.26 GB | ~12.5 GB held |
+| jemalloc | 9.53 GB | 5.02 GB 30 s idle (4 `jemalloc_bg_thd`) |
+
+Under jemalloc the per-chunk peak rises with chain depth (UMLS 001 7.48 GB → 008 9.53 GB); glibc's
+plateau hid it. The idle 5 GB is consistent with the 250k-entry resource cache at ~12 KB an entry.
+
+**What a parsed entry is made of** (WordNet chunk 003, 20,827 entries, walked after `esl::compile`):
+14.7 embedded resource nodes, 47.6 property keys (18 distinct, 1,494 B of key text), 23.6 IRI-valued
+strings (689 B). `Iri` is 24 B, `Value` 32 B, `Resource` 48 B. Each embedded node's `BTreeMap` leaf is
+allocated at its 11-slot capacity, ~630 B however few properties it holds. Estimated per entry: leaf
+nodes ~9.4 KB (~70%), key strings ~1.9 KB, IRI value strings ~0.8 KB, `Box<Resource>` ~0.7 KB, arrays
+~0.5 KB — ~13.5 KB, against the ~12 KB measured.
+
 The July conclusion below ("environmental") compared a native run, profiled under jemalloc, with
 the docker kernel, which runs on glibc; the note does not record which allocator its ~6 GiB RSS
 figure came from. Today's native glibc run reproduces the docker OOM, so the environment is not

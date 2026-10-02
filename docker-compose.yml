@@ -48,17 +48,10 @@ services:
     environment:
       - EIGENIUS_ORCHESTRATOR_ENDPOINT=http://orchestrator:8080
       - RUST_LOG=${RUST_LOG:-info}
-      # Cap glibc's per-thread malloc arenas. The kernel runs on the system allocator (jemalloc is
-      # opt-in, `--features jemalloc-prof`), and glibc gives a tokio/tonic server up to 8×ncores
-      # arenas that grow independently and never hand pages back — so a bulk load's allocation churn
-      # (JSON decode + Rule 21 type-check on millions of `lexicon:cat` values) inflates RSS far past
-      # what is live. MEASURED on the WordNet chain, identical load, allocator the only variable
-      # (docs/notes/2026-08-03-reseed-memory-profile.md):
-      #     default arenas   peak 15.66 GB
-      #     ARENA_MAX=2      peak  9.41 GB     ← 40% less, and it is the difference between a
-      #                                          lexicon reseed fitting a 32 GB host and not
-      # Not mystery tuning: delete this and the reseed goes back to running at the edge of RAM.
-      - MALLOC_ARENA_MAX=${MALLOC_ARENA_MAX:-2}
+      # No MALLOC_ARENA_MAX: the kernel's allocator is jemalloc (cli/Cargo.toml), which purges freed
+      # pages in background threads. Loading WordNet and eight UMLS chunks, glibc capped at two arenas
+      # peaked at 13.3 GB and held ~12.5 GB; jemalloc peaked at 9.5 GB and idled at 5.0 GB
+      # (docs/notes/reseed-oom-memory-investigation.md).
       # D71 formalization: a run with no recorded draws asks the model. Unset
       # here is harmless — the proposers report a missing key and the run fails
       # closed rather than silently degrading to an unranked parse.
