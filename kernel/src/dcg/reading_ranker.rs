@@ -1212,7 +1212,7 @@ mod anthropic {
         /// `chose` when one candidate faithfully expresses the sentence; `none_faithful` when
         /// none does.
         verdict: Verdict,
-        /// The index of the faithful reading. Required when `verdict` is `chose`; omit otherwise.
+        /// The index of the faithful reading when `verdict` is `chose`; null otherwise.
         chosen: Option<usize>,
         /// When `verdict` is `none_faithful`: which sense or structure the candidates lack, e.g.
         /// "no disease sense of «cancer» — only the crab genus and the astrological sign".

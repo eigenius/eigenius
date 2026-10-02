@@ -136,7 +136,7 @@ pub enum Provider {
 /// How a model is asked for a structured reply.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StructuredOutput {
-    /// One `emit` tool whose input schema is the reply's, forced with `tool_choice`.
+    /// One `strict` `emit` tool whose input schema is the reply's, forced with `tool_choice`.
     ForcedTool,
     /// `output_config.format` with the reply's JSON schema.
     JsonSchema,

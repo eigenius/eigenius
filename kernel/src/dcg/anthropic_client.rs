@@ -23,7 +23,8 @@
 //! onto a single `emit` tool whose `input_schema` is the reply's JSON Schema, which makes the model
 //! return a `tool_use` block whose `input` the API itself parses; or, on the models that reject
 //! forced tool use (the Claude 5 generation, eigenius#264), `output_config.format` with the same
-//! schema. Neither admits surrounding prose. Feature-gated behind `use-llm`. The provider-neutral
+//! schema. Neither admits surrounding prose, and both constrain the reply to the schema: the tool is
+//! `strict`. Feature-gated behind `use-llm`. The provider-neutral
 //! interface the reading ranker uses is [`super::decision`]; this is one transport under it.
 
 pub use super::model_config::{ModelConfig, StructuredOutput, DEFAULT_MODEL};
@@ -87,18 +88,21 @@ pub async fn anthropic_json(
     if cfg.accepts_temperature() {
         body["temperature"] = json!(TEMPERATURE);
     }
+    restrict_for_output_format(&mut schema);
     let structured = cfg.structured_output();
     match structured {
+        // `strict`, or the schema is advice: `claude-sonnet-4-6` answered a ten-question sense
+        // choice without `q2` (2026-10-01), and the whole sentence went unranked.
         StructuredOutput::ForcedTool => {
             body["tools"] = json!([{
                 "name": TOOL_NAME,
                 "description": "Emit the structured result.",
+                "strict": true,
                 "input_schema": schema,
             }]);
             body["tool_choice"] = json!({ "type": "tool", "name": TOOL_NAME });
         }
         StructuredOutput::JsonSchema => {
-            restrict_for_output_format(&mut schema);
             body["output_config"] =
                 json!({ "format": { "type": "json_schema", "schema": schema } });
         }
@@ -155,10 +159,19 @@ pub async fn anthropic_json(
     }
 }
 
-/// The JSON-schema output mode takes a subset of JSON Schema: every object closed
+/// Strict tool use and the JSON-schema output mode take a subset of JSON Schema: every object closed
 /// (`additionalProperties: false`), and no numeric, string-length or array-size constraints, nor
-/// formats beyond its own list. `schemars` emits `minimum: 0` and `format: "uint"` for a `usize`;
-/// the bound is the caller's to check (every caller already range-checks an index it is given).
+/// formats beyond its own list, and `anyOf` but not `oneOf`. `schemars` emits `minimum: 0` and
+/// `format: "uint"` for a `usize`; the bound is the caller's to check (every caller already
+/// range-checks an index it is given). It emits `oneOf` for an enum whose variants carry doc
+/// comments (the reading ranker's `Verdict`), one single-value alternative per variant; those are
+/// disjoint, so `anyOf` admits the same values.
+///
+/// Every property is made REQUIRED. Under strict decoding the model may end an object after its
+/// required properties, and it did: the reading ranker's `chosen` (an `Option`, so not required)
+/// came back missing beside `verdict: chose` (2026-10-01). An `Option` field's schema already admits
+/// `null` and a defaulted field takes an explicit value, so the replies that deserialize are the
+/// same; the model answers every field, `null` where it does not apply.
 fn restrict_for_output_format(schema: &mut Value) {
     const DROPPED: &[&str] = &[
         "minimum",
@@ -201,6 +214,13 @@ fn restrict_for_output_format(schema: &mut Value) {
             {
                 obj.insert("additionalProperties".into(), Value::Bool(false));
             }
+            if let Some(Value::Object(properties)) = obj.get("properties") {
+                let every: Vec<Value> = properties.keys().cloned().map(Value::String).collect();
+                obj.insert("required".into(), Value::Array(every));
+            }
+            if let Some(alternatives) = obj.remove("oneOf") {
+                obj.insert("anyOf".into(), alternatives);
+            }
             for v in obj.values_mut() {
                 restrict_for_output_format(v);
             }
@@ -223,9 +243,22 @@ mod tests {
                 "chosen": { "type": ["integer", "null"], "format": "uint", "minimum": 0.0 },
                 "at": { "type": "string", "format": "date" },
                 "nested": { "type": "object", "properties": { "n": { "type": "integer" } } },
+                "verdict": { "oneOf": [
+                    { "type": "string", "enum": ["chose"] },
+                    { "type": "string", "enum": ["none_faithful"] },
+                ] },
             },
         });
         restrict_for_output_format(&mut schema);
+        assert_eq!(
+            schema["required"],
+            json!(["at", "chosen", "nested", "verdict"])
+        );
+        assert!(schema["properties"]["verdict"].get("oneOf").is_none());
+        assert_eq!(
+            schema["properties"]["verdict"]["anyOf"][1]["enum"],
+            json!(["none_faithful"])
+        );
         assert_eq!(schema["additionalProperties"], json!(false));
         assert_eq!(
             schema["properties"]["nested"]["additionalProperties"],
