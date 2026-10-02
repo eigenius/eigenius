@@ -473,19 +473,45 @@ mod providers {
         }
     }
 
+    /// Questions per request. The reply's schema is strict, and the API compiles it into a grammar
+    /// it refuses past a size: a sense choice of 11 questions (`choice`, `rationale`, `runners_up`
+    /// each) failed with "The compiled grammar is too large", and 10 compiled with 204 options
+    /// (2026-10-01). The count of answer fields drives it, not the options.
+    pub(crate) const STRICT_QUESTIONS: usize = 8;
+
+    /// A choice asked in parts of at most [`STRICT_QUESTIONS`] questions, each with the whole
+    /// context. The questions are independent, so the parts' answers concatenate in order.
+    pub(crate) fn strict_parts(choice: &Choice) -> Vec<Choice> {
+        choice
+            .questions
+            .chunks(STRICT_QUESTIONS)
+            .map(|questions| Choice {
+                context: choice.context.clone(),
+                questions: questions.to_vec(),
+            })
+            .collect()
+    }
+
     impl Decider for AnthropicDecider {
         fn choose(&self, choice: &Choice) -> Result<Vec<Decided>, String> {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(|e| e.to_string())?;
-            let reply = rt.block_on(anthropic_json(
-                &self.api_key,
-                &self.cfg,
-                &render_prompt(choice),
-                reply_schema(choice),
-            ))?;
-            checked_all(choice, read_reply(&reply, choice, &self.cfg.model)?)
+            let mut decided = Vec::with_capacity(choice.questions.len());
+            for part in strict_parts(choice) {
+                let reply = rt.block_on(anthropic_json(
+                    &self.api_key,
+                    &self.cfg,
+                    &render_prompt(&part),
+                    reply_schema(&part),
+                ))?;
+                decided.extend(checked_all(
+                    &part,
+                    read_reply(&reply, &part, &self.cfg.model)?,
+                )?);
+            }
+            Ok(decided)
         }
 
         fn model(&self) -> &str {
@@ -789,6 +815,29 @@ mod tests {
         assert!(checked(&question(), d("3", &[])).is_err());
         let ok = checked(&question(), d("1", &["9", "2", "2", "1"])).unwrap();
         assert_eq!(ok.runners_up, vec!["2".to_string()]);
+    }
+
+    /// A choice past the strict grammar's reach is asked in parts that keep the whole context and,
+    /// concatenated, are the choice's questions in order.
+    #[cfg(feature = "use-llm")]
+    #[test]
+    fn a_large_choice_is_asked_in_parts_that_keep_its_context_and_order() {
+        use super::providers::{strict_parts, STRICT_QUESTIONS};
+        let mut big = choice();
+        big.questions = (0..2 * STRICT_QUESTIONS + 3)
+            .map(|n| Question {
+                question: format!("Which sense of word {n}?"),
+                ..question()
+            })
+            .collect();
+        let parts = strict_parts(&big);
+        assert_eq!(
+            parts.iter().map(|p| p.questions.len()).collect::<Vec<_>>(),
+            vec![STRICT_QUESTIONS, STRICT_QUESTIONS, 3]
+        );
+        assert!(parts.iter().all(|p| p.context == big.context));
+        let rejoined: Vec<Question> = parts.into_iter().flat_map(|p| p.questions).collect();
+        assert_eq!(rejoined, big.questions);
     }
 }
 
