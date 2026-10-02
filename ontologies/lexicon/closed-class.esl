@@ -210,6 +210,12 @@ resource lexicon:which_obj : lexicon:LexicalEntry {
 // declarative, `mood`-tagged `q`. `do`-support is semantically vacuous (tense
 // erased): the sem is `λsubj. λV. V(subj)`. The `bse` complement slot makes the
 // `Fin`-meet reject `*does HeLa affects …`.
+//
+// These three and the declarative three below share ONE sense, `do`: a question and a
+// declarative differ in category, not in meaning, and the sense ranker chooses among
+// meanings. With a key per category, «does» offered the ranker two senses under one
+// gloss, and keeping only `does` (the question entry) dropped every declarative reading
+// of «Each event alone does not lead to cell death.»
 
 resource lexicon:do_aux_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
@@ -220,12 +226,12 @@ resource lexicon:do_aux_sem : lexicon:SemTerm {
 
 // does — present, 3sg do-support.
 resource lexicon:does_aux : lexicon:LexicalEntry {
-    core:description = "grammatical: third-person singular DO-support auxiliary, carrying tense in negation ('does not lead to cell death').";
+    core:description = "grammatical: third-person singular DO-support auxiliary, carrying tense in negation and questions ('does not lead to cell death').";
     lexicon:form     = "does";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
     lexicon:sem      = lexicon:do_aux_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> Prop );
-    lexicon:sense    = "does";
+    lexicon:sense    = "do";
 }
 // do — present, non-3sg do-support.
 resource lexicon:do_aux : lexicon:LexicalEntry {
@@ -243,7 +249,7 @@ resource lexicon:did_aux : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:do_aux_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> Prop );
-    lexicon:sense    = "did";
+    lexicon:sense    = "do";
 }
 
 // ── Copula `be` — predicative (D63 §8.5, Slice 3a) ────────────────────
@@ -404,9 +410,10 @@ resource lexicon:not_adj : lexicon:LexicalEntry {
     lexicon:sense    = "not";
     lexicon:scope_bearing = true;
 }
-// Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`.
+// Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`. Sense
+// `do`, shared with the question entries (see `lexicon:does_aux`).
 resource lexicon:does_decl : lexicon:LexicalEntry {
-    core:description = "grammatical: third-person singular DO-support auxiliary, carrying tense in negation ('does not lead to cell death').";
+    core:description = "grammatical: third-person singular DO-support auxiliary, carrying tense in negation and questions ('does not lead to cell death').";
     lexicon:form     = "does";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -762,7 +769,7 @@ resource lexicon:that_comp_sem : lexicon:SemTerm {
     lexicon:term = type_expr( ( fun (p : Prop) => p : Prop -> Prop ) );
 }
 resource lexicon:that_comp : lexicon:LexicalEntry {
-    core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
+    core:description = "grammatical: the complementiser introducing a clause ('showed that WRN is essential').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_cp, lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
     lexicon:sem      = lexicon:that_comp_sem;
@@ -2641,7 +2648,7 @@ resource lexicon:this_obj : lexicon:LexicalEntry {
     lexicon:sense    = "this";
 }
 resource lexicon:that_dem_subj : lexicon:LexicalEntry {
-    core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
+    core:description = "grammatical: singular distal demonstrative determiner ('that gene').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:dem_ref_subj_sem;
@@ -2649,7 +2656,7 @@ resource lexicon:that_dem_subj : lexicon:LexicalEntry {
     lexicon:sense    = "that_dem";
 }
 resource lexicon:that_dem_obj : lexicon:LexicalEntry {
-    core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
+    core:description = "grammatical: singular distal demonstrative determiner ('that gene').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:dem_ref_obj_sem;

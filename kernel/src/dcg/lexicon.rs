@@ -755,3 +755,58 @@ mod scope_bearing_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod sense_gloss_tests {
+    use super::{iri, LexicalIndex, LexicalLookup};
+    use crate::ontology::resource::Value;
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::sync::Arc;
+
+    /// **A closed-class form's sense keys are told apart by their glosses.**
+    ///
+    /// The sense ranker sees one candidate per sense key, glossed by an entry's `core:description`
+    /// (`Parser::contextual_sense_ranks`), and keeps only the keys it names. Two keys under one gloss
+    /// give it a choice it cannot make: «does» had `does` (the question entry) and `do` (the
+    /// declarative one) under one description, and a ranker that kept `does` alone dropped every
+    /// declarative reading of «Each event alone does not lead to cell death.» Entries that differ
+    /// only in category share a key; keys that differ in meaning need descriptions that say how.
+    #[test]
+    fn a_form_s_senses_are_told_apart_by_their_glosses() {
+        let ctx = crate::testing::bootstrap_context();
+        let entry_class = iri("urn:eigenius:lexicon:LexicalEntry");
+        let form_prop = iri("urn:eigenius:lexicon:form");
+        let forms: BTreeSet<String> = ctx
+            .head()
+            .iter_all_resources()
+            .filter(|(_, r)| r.is_instance_of(&entry_class))
+            .filter_map(|(_, r)| match r.get(&form_prop) {
+                Some(Value::String(f)) => Some(f.trim().to_lowercase()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            forms.contains("does"),
+            "the bootstrap carries the closed class"
+        );
+
+        let lex = LexicalIndex::build(Arc::clone(ctx.head()));
+        let mut collisions = Vec::new();
+        for form in &forms {
+            let mut keys: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            for e in lex.entries_for(form) {
+                if let (Some(sense), Some(gloss)) = (e.sense, e.gloss) {
+                    keys.entry(gloss).or_default().insert(sense);
+                }
+            }
+            for (gloss, senses) in keys.into_iter().filter(|(_, s)| s.len() > 1) {
+                collisions.push(format!("«{form}» {senses:?}: {gloss}"));
+            }
+        }
+        assert!(
+            collisions.is_empty(),
+            "sense keys sharing a gloss:\n{}",
+            collisions.join("\n")
+        );
+    }
+}
