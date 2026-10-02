@@ -727,6 +727,33 @@ fn schwartz_hearst_binds_msi_mss_from_the_original_page() {
 /// Share one [`ReplaySenseRanker`] between the parser and the miss-check.
 struct ArcReplay(std::sync::Arc<eigenius_kernel::dcg::ReplaySenseRanker>);
 
+/// `EIGENIUS_DUMP_SENSE_QUESTIONS=<file>`: append every sense-ranking question — the sentence, its
+/// context, each word's candidate senses with their glosses and denotations — as a JSON line, so
+/// presentations can be screened offline against the reading ledger (2026-10-01).
+fn dump_sense_question(sentence: &str, context: &str, words: &[eigenius_kernel::dcg::WordSenses]) {
+    let Ok(path) = std::env::var("EIGENIUS_DUMP_SENSE_QUESTIONS") else {
+        return;
+    };
+    let line = serde_json::json!({
+        "sentence": sentence,
+        "context": context,
+        "words": words.iter().map(|w| serde_json::json!({
+            "surface": w.surface,
+            "candidates": w.candidates.iter().map(|c| serde_json::json!({
+                "sense": c.sense, "gloss": c.gloss, "sem": c.sem,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    });
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
 impl eigenius_kernel::dcg::SenseRanker for ArcReplay {
     fn rank(
         &self,
@@ -734,6 +761,7 @@ impl eigenius_kernel::dcg::SenseRanker for ArcReplay {
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
     ) -> Option<Vec<eigenius_kernel::dcg::WordRanking>> {
+        dump_sense_question(sentence, context, words);
         self.0.rank(sentence, context, words)
     }
     fn model(&self) -> Option<String> {

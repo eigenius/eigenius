@@ -410,12 +410,21 @@ impl SenseRanker for ReplaySenseRanker {
 // ───────────────────────── the live ranker: a decision per word ─────────────────────────
 
 /// A sense call's question about one word. A sense the sentence rules out is left out of a
-/// ranking: Anthropic's models rank, and an unranked sense weighs least; TypeSafe's give it a low
+/// ranking: Anthropic's models rank, and an unranked sense weighs 0; TypeSafe's give it a low
 /// probability. Either way the parser's floor eliminates it.
+///
+/// Chosen on an offline screen of ten wordings and response shapes over the WRN page's 422 ranked
+/// words, scored against the reading ledger (2026-10-01): with `claude-sonnet-4-6` the right sense is
+/// among the two the parser seeds for 208–209 of 213 words and first for 184–186 (the prompt it
+/// replaced: 207–208, 186), at 396 seeded senses against its 377–384. Without the closing sentence
+/// the ranker pads one-sense words with runners-up (413 seeded); without the rationale it eliminates
+/// right senses.
 fn sense_question(surface: &str) -> String {
     format!(
         "Which sense of «{surface}» does `the_sentence` use? A sense `the_sentence` rules out is \
-         not a runner-up."
+         not a runner-up: leave a sense out only when it is impossible here, not merely unlikely. A \
+         grammatical word («of», «may», «a») has one reading here; its domain-specific noun senses \
+         are never right. If only one sense is possible here, give no runners-up."
     )
 }
 
@@ -649,11 +658,12 @@ mod tests {
         ];
         let choice = sense_choice("Some cancers do not respond.", "", &words);
         assert_eq!(choice.questions.len(), 2);
-        assert_eq!(
-            choice.questions[0].question,
-            "Which sense of «respond» does `the_sentence` use? A sense `the_sentence` rules out \
-             is not a runner-up."
-        );
+        assert!(choice.questions[0]
+            .question
+            .starts_with("Which sense of «respond» does `the_sentence` use?"));
+        assert!(choice.questions[0]
+            .question
+            .ends_with("If only one sense is possible here, give no runners-up."));
         assert_eq!(
             choice.questions[0].options[1],
             ("2".to_string(), "gloss 1".into())
