@@ -212,7 +212,7 @@ Decided: `clinical` classes, one per element the registry fills (the vocabulary 
 | `Ethnicity` | an OMB category | Declared |
 | `Diagnosis`, `Symptoms`, `Case History`, `Medications`, `Case Review Next Steps`, `Outcome (Details)` | `enc:DiscourseUnit` text; no proposition until parsed | Declared |
 | `Participant/Family Goal` | questions (§8a) | Declared |
-| HP Terms | a phenotypic feature: `clinical:HasPhenotype(individual, <HP class>)` | Declared; label checked (§7) |
+| HP Terms | `wn:v00065370_t(kind_of(<HP class>), individual)` — WordNet's *have*, "suffer from; be ill with", over the phenotype as a kind: the form the parser builds for "he has polyuria" (decided 2026-10-02) | Declared; label checked (§7) |
 | Gene Info row | `clinical:Carries` (6a), `clinical:ClassifiedAs` (6b), `variant:Impact` (6c) | Declared |
 | `Confirmed de novo` | `true` → `clinical:DeNovo(a, individual)`; `false` → nothing (§7) | Declared |
 | `Status`, `New Status Tags`, `Analyst Case Status`, `Case Category`, `Case Origin` | workflow state, with its timestamp | Declared |
@@ -322,7 +322,7 @@ grounds of its own; it names the conclusion it rests on.
 
 ### 9. Vocabulary placement
 
-- **Location.** `variant` (`ontologies/variant/`) and `clinical` (`ontologies/clinical/`) are chain-loaded layers, not bootstrap ontologies. A bootstrap edit moves the manifest and forces a reseed (about 12 minutes) and a gate rerun.
+- **Location.** `variant` (`ontologies/variant/`), `clinical` (`ontologies/clinical/`) and `clinvar` (`ontologies/clinvar/`, 8b's release vocabulary) are chain-loaded layers, not bootstrap ontologies. A bootstrap edit moves the manifest and forces a reseed (about 12 minutes) and a gate rerun.
 - **Synthetic genes.** They are minted in an experiment namespace (`syngene:`, `synsyn3:`, …) and are never `ncbi:Gene` resources.
 - **Real genes.** These resolve by HGNC id to `ncbi:Gene`. That needs the HGNC xref out of the dbXrefs string.
 
@@ -451,11 +451,11 @@ WordNet↔UMLS layer. `eigenius-umls` now exports `ENTRY_SUFFIXES`, both emitter
    - `Carries` of a nucleotide allele, the protein-only row as an existential, and `Carries` of a protein allele refused.
 
    `clinical` has no phenotype predicate yet. It waits on the parse of "the patient has polyuria".
-3. **Reseed.** One reseed from a clean tree covers the OBO meta-ontology change of 4b07e11 and step 1's `core-ontology.json` and `justification.esl` changes. Record selections, ranks and `baseline.json` against the new snapshot. Required before a merge to main.
-4. **Converter.** Convert `synthetic-cases.json` to an ESL layer without the parser. It applies decision 5's grounds, 6d's consent rule and §7's checks (HP label against the release history, HGVS consistency), and reports the HP:0004918 row.
-5. **SYN-26-002 chain.** Encode the seven claims and the four items, with claim 6 restated per decision 3 and the 8a "no" resting on step 1.
-6. **Integration test.** Add an ignored test against the snapshot. It asserts each claim's ground kind, the claim-6 refusal and the Verified disequality.
-7. **README.** Write it in the experiment directory: the analyst table mapped to chain resources, and the supply table.
+3. **Reseed.** One reseed from a clean tree covers the OBO meta-ontology change of 4b07e11 and step 1's `core-ontology.json` and `justification.esl` changes. Record selections, ranks and `baseline.json` against the new snapshot. Required before a merge to main. *Done 2026-10-02: `uab-d99-r2-hpo-aligned-2026-10-02`; selections `experiments/parsing/selections/2026-10-02-uab-d99-r2.json`.*
+4. **Converter.** Convert `synthetic-cases.json` to an ESL layer without the parser. It applies decision 5's grounds, 6d's consent rule and §7's checks (HP label against the release history, HGVS consistency), and reports the HP:0004918 row. *Built 2026-10-02: `crates/eigenius-pmi-registry` (`pmi-registry-convert`), output `experiments/pmi-registry/registry.esl` and `registry-report.md`.*
+5. **SYN-26-002 chain.** Encode the seven claims and the four items, with claim 6 restated per decision 3 and the 8a "no" resting on step 1. *Built 2026-10-02: `experiments/pmi-registry/`. Choices this note leaves open (who declares `ProteinMediated`, the cut-point behind `Responsive`, the bridge's 4%, the reading of the mother's first question, undated declarations) are listed in its README.*
+6. **Integration test.** Add an ignored test against the snapshot. It asserts each claim's ground kind, the claim-6 refusal and the Verified disequality. *Built 2026-10-02: `crates/eigenius-pmi-registry/tests/syn_26_002_on_snapshot.rs` (passes on `uab-d99-r2-hpo-aligned-2026-10-02`), and the same checks with WordNet and HPO stubbed in `syn_26_002_chain.rs`, which CI runs.*
+7. **README.** Write it in the experiment directory: the analyst table mapped to chain resources, and the supply table. *Written 2026-10-02: `experiments/pmi-registry/README.md`.*
 8. **Optional: parse prose.** Parse `Case History` and Notes prose with the HPO-aligned lexicon, under its own gate.
 
 The PMI team's answers to the five questions of the shared write-up change converter rules only (step 4); the defaults are §7's and 6d's.
@@ -464,8 +464,8 @@ The PMI team's answers to the five questions of the shared write-up change conve
 
 - **Phenotype-annotation form.** Read off a parse (2026-10-02, the `uab` kernel over `uab-hpo-umls-aligned-2026-10-01`). "He has hypernatremic dehydration." parses to `wn:v02203362_t(kind_of(hp:'0004906'), <he>)`.
   - The phenotype is a KIND: the class as a value, through `kind_of`, not an existential over instances.
-  - The verb is WordNet's possession sense of *have*, `v02203362`.
-  - Open: whether registry rows state this same form, or a `clinical:HasPhenotype` aligned to it, and whether *have* in its "suffer from" sense is the right verb.
+  - The verb the parse picked is WordNet's possession sense of *have*, `v02203362`: without the reranker the sense cap keeps *have*'s two most frequent senses, and the illness sense is the twelfth.
+  - **Decided (2026-10-02):** a registry row states the parser's form with the illness sense, `wn:v00065370_t(kind_of(<HP class>), individual)` — `00065370` "suffer from; be ill with; 'She has arthritis'" (frame 8, transitive). No clinical predicate; a parse that ranks the illness sense yields the same proposition.
 - **The parser's class is not the registry's.** Five of SYN-26-002's six phenotypes parse to a class other than their HP code. Registry rows (HP codes) and parsed prose would not meet without a link between the two:
 
   | Phenotype | Registry | Parser |
@@ -500,6 +500,6 @@ The PMI team's answers to the five questions of the shared write-up change conve
     v00644583 is a valid reading of «We analysed two independent cancer dependency data sets.»;
     rows 124, 142 and 163 were revised to match.
 - **"The patient …" does not parse** ("The patient has polyuria.", "The patient has a fever."), while "The boy has polyuria." and "Patients have polyuria." do. A lexical gap in singular *patient*.
-- **Threshold *k* in 8c.** The notes give <4% for p.Leu44Pro and "wild-type levels" for p.Leu44Phe.
-- **The HP:0004918 row.** Report it to UAB, or declare HP:0004906 for the experiment.
+- **Threshold *k* in 8c.** The notes give <4% for p.Leu44Pro and "wild-type levels" for p.Leu44Phe. The bridge is declared at 4% (`syn002:mechanism`).
+- **The HP:0004918 row.** Report it to UAB, or declare HP:0004906 for the experiment. The converter holds it back.
 - **Consent scope for coded variants** (6d).

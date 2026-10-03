@@ -1,0 +1,58 @@
+// What SYN-26-002's chain refuses (UAB experiment 02, D99 §3, claims 6 and 7). Every conclusion
+// here fails its commit-time check; `crates/eigenius-pmi-registry/tests/syn_26_002_chain.rs`
+// asserts each refusal and its reason. Loaded above `syn-26-002-conclusions.esl`, never committed.
+
+namespace core          = "urn:eigenius:core";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace variant       = "urn:eigenius:variant";
+namespace pmi           = "urn:eigenius:pmi";
+namespace allele        = "urn:eigenius:variant:allele";
+namespace location      = "urn:eigenius:variant:location";
+namespace syngene       = "urn:eigenius:uab:syngene";
+namespace syn002        = "urn:eigenius:uab:syn-26-002";
+
+// Claim 6 — the nephrologist's inference. The survey's claim is that SOME responsive protein allele
+// is at Leu44; it is not a claim about p.Leu44Pro, so no witness grounds Responsive(p.Leu44Pro).
+resource syn002:responsive_pro : justification:Conclusion {
+    core:description = "p.Leu44Pro is responsive, citing the survey.";
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(declared(
+                   "urn:eigenius:uab:syngene:claim_6",
+                   syngene:Responsive(allele:HGNC_000010_p_44_Pro),
+                   ())),
+               type_expr(justification:Grounds(syngene:Responsive(allele:HGNC_000010_p_44_Pro))) );
+}
+
+// The same inference at the resolution the proband carries: unstatable. Responsiveness is stated
+// of protein alleles (decision 3), and c.131T>C is a nucleotide allele.
+resource syn002:responsive_c131 : justification:Conclusion {
+    core:description = "c.131T>C is responsive, citing the survey.";
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(declared(
+                   "urn:eigenius:uab:syngene:claim_6",
+                   syngene:Responsive(allele:NM_000010_7_131_C),
+                   ())),
+               type_expr(justification:Grounds(syngene:Responsive(allele:NM_000010_7_131_C))) );
+}
+
+// Claim 7 — the chaperone hypothesis cited as if somebody had declared it.
+resource syn002:chaperone_works : justification:Conclusion {
+    core:description = "The chaperone-class agents reduce SYN-26-002's urine output, citing the hypothesis.";
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(
+                   declared(
+                       "urn:eigenius:uab:syn-26-002:chaperone_hypothesis",
+                       syngene:RescuesTraffickingInCells(syngene:chaperone_agents)
+                       -> syngene:ReducesOutput(syngene:chaperone_agents, pmi:SYN_26_002_proband),
+                       ()),
+                   declared(
+                       "urn:eigenius:uab:syngene:claim_7_cells",
+                       syngene:RescuesTraffickingInCells(syngene:chaperone_agents),
+                       ()))),
+               type_expr(justification:Grounds(
+                   syngene:ReducesOutput(syngene:chaperone_agents, pmi:SYN_26_002_proband))) );
+}

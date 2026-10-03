@@ -135,3 +135,33 @@ def variant:At(a : variant:Allele, l : variant:Location) : Prop =
 data variant:ProteinMediated : variant:NucleotideAllele -> Prop {
     description = "The allele acts through its protein consequence: no splice effect, no nonsense-mediated decay. What lets a claim about the protein allele it translates to apply to it (D99 §3). Declared per allele; a frameshift with predicted NMD has no true one.";
 }
+
+// ── Functional consequence (D99 §6c) ──────────────────────────────────────────────────────
+
+class variant:Morph {
+    description = "Muller's classes of an allele's effect on function. Closed: the four the PMI registry's Variant Impact field names (its fifth value, Unknown, writes nothing). Aligned to the Sequence Ontology's functional-consequence terms once SO is loaded, as Cat-VRS's FunctionConstraint names them.";
+}
+
+resource variant:amorphic : variant:Morph {
+    core:description = "Amorphic: complete loss of function.";
+    core:short_name = "amorphic";
+}
+
+resource variant:hypomorphic : variant:Morph {
+    core:description = "Hypomorphic: partial loss of function.";
+    core:short_name = "hypomorphic";
+}
+
+resource variant:hypermorphic : variant:Morph {
+    core:description = "Hypermorphic: gain of function.";
+    core:short_name = "hypermorphic";
+}
+
+resource variant:antimorphic : variant:Morph {
+    core:description = "Antimorphic: dominant negative.";
+    core:short_name = "antimorphic";
+}
+
+data variant:Impact : variant:Allele -> variant:Morph -> Prop {
+    description = "The allele's effect on function is of the morph. Typed on Allele, so a protein-only row and a predicted-NMD frameshift can both carry one.";
+}

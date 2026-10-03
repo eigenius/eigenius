@@ -31,9 +31,13 @@ any detour.
 > `uab-d99-r2-hpo-aligned-2026-10-02` (polydipsia maintainer override, bare-standing HPO names).
 > Gate: 62/62, readings 612, skeletons 212, selection 30/41. Docker: host ports in Windows'
 > reserved range (50060–50159 since the restart) fail; the isolated kernel uses 18051.
-> **Next:** record the r2 draw as the tracked selections/ranks/baseline (required before merge);
-> the phenotype predicate (the parse gives `have(kind_of(C), x)`); the converter, the SYN-26-002
-> chain, the integration test, the README.
+> Recorded the r2 draw as the tracked selections and baseline. The phenotype form is decided:
+> `wn:v00065370_t(kind_of(<HP class>), individual)`, WordNet's illness sense of *have*.
+> **Built (uncommitted, 2026-10-02):** D99 steps 4–7 — the converter
+> (`crates/eigenius-pmi-registry`), the SYN-26-002 chain and README (`experiments/pmi-registry/`),
+> the `clinvar` release layer, and the chain tests (in-memory, and on the r2 snapshot; both pass).
+> **Next:** the owner's review of the README's "Choices made in building the chain"; then the
+> merge to main. Step 8 (parse the prose) is optional and needs singular *patient*.
 >
 > **Exit gate:** D99's steps 1–7 built and tested; the branch reseeded and merged.
 
