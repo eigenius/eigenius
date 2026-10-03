@@ -3,7 +3,7 @@
 // literature makes. SYNTHETIC: the gene, the survey, the assay and the cell-model reports are the
 // package's inventions; no source here has a real identifier, and none is given one.
 //
-// Loaded above `registry.esl`, which mints NM_000010.7:c.131T>C and p.Leu44Pro. The two alleles
+// Loaded above `04-registry.esl`, which mints NM_000010.7:c.131T>C and p.Leu44Pro. The two alleles
 // minted here follow its naming (D99 §4): an allele's IRI is its reference, interval and alt.
 //
 // Decision 3: binding, trafficking and drug response are stated of PROTEIN alleles.
@@ -61,7 +61,7 @@ resource syngene:chaperone_agents : lexicon:Entity {
 }
 
 resource syngene:survey_cohort : lexicon:Entity {
-    core:description = "The patients of the 2026 nationwide survey the nephrologist cited. They carried c.130C>T (`syn-26-002.esl`, the analyst's reading of the survey).";
+    core:description = "The patients of the 2026 nationwide survey the nephrologist cited. They carried c.130C>T (`06-syn-26-002.esl`, the analyst's reading of the survey).";
 }
 
 data syngene:MembraneSitesBelow : variant:ProteinAllele -> core:rational -> Prop {
@@ -170,7 +170,7 @@ resource syngene:survey_cutpoint_trace : prov:DeclarationTrace {
 
 // ── Claim 6 — the survey lists Leu44 among the responsive genotypes ──────────────────────
 // Decision 3: some responsive protein allele is at Leu44. It names no allele, so it grounds
-// nothing about p.Leu44Pro (`refused.esl`).
+// nothing about p.Leu44Pro (`08-refused.esl`).
 
 resource syngene:claim_6 : justification:Declaration {
     core:description = "A nationwide survey lists Leu44 among the responsive genotypes.";
@@ -191,7 +191,7 @@ resource syngene:claim_6_trace : prov:DeclarationTrace {
 }
 
 // ── Claim 7, first half — chaperone rescue in cell models ────────────────────────────────
-// The step from cells to the proband is a hypothesis (`syn-26-002.esl`), not a declaration.
+// The step from cells to the proband is a hypothesis (`06-syn-26-002.esl`), not a declaration.
 
 resource syngene:claim_7_cells : justification:Declaration {
     core:description = "Chaperone-class agents rescue trafficking of comparable trafficking-defective mutants in cell models.";

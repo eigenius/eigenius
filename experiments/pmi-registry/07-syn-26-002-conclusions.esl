@@ -1,5 +1,5 @@
 // SYN-26-002's conclusions, recommendation and questions (UAB experiment 02, D99 step 5, items
-// 8a and 8c). Loaded above `syn-26-002.esl`, so every witness a certificate cites is committed.
+// 8a and 8c). Loaded above `06-syn-26-002.esl`, so every witness a certificate cites is committed.
 
 namespace core          = "urn:eigenius:core";
 namespace lexicon       = "urn:eigenius:lexicon";

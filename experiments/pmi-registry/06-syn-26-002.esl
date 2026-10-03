@@ -1,8 +1,8 @@
 // SYN-26-002 beyond its registry row (UAB experiment 02, D99 step 5): what the analyst's notes,
 // the case history and the registry's Notes say, each as a declaration by whoever said it.
 //
-// Loaded above `syngene.esl`. The conclusions that cite these are one layer up
-// (`syn-26-002-conclusions.esl`): a citation needs its witness in a committed parent.
+// Loaded above `05-syngene.esl`. The conclusions that cite these are one layer up
+// (`07-syn-26-002-conclusions.esl`): a citation needs its witness in a committed parent.
 //
 // Dates: a declaration whose own date is not in the package carries the date its source reached
 // PMI — medical records received 2026-06-04, analyst work-up 2026-07-15 — and says so.
@@ -46,7 +46,7 @@ resource syn002:panel_lab : prov:Organization {
 }
 
 // ── Claim 1 — the proband carries c.131T>C, hemizygous ───────────────────────────────────
-// `registry.esl` declares it, and that it translates to p.Leu44Pro, by the registry. The panel
+// `04-registry.esl` declares it, and that it translates to p.Leu44Pro, by the registry. The panel
 // report is tier 3 and not held, so neither is Observed (D99 §5).
 //
 // The report's classification is the lab's (D99 6b), beside the registry's transcription of it.
@@ -314,7 +314,7 @@ resource syn002:mechanism_trace : prov:DeclarationTrace {
 // ── Claim 7 — chaperone rescue, cell model to child ──────────────────────────────────────
 // A hypothesis: the analyst flags it, and nobody declares it — "the leap from a trafficking rescue
 // in vitro to urine output in a three-year-old is not supported by anything we found". No trace,
-// so no witness: nothing can cite it as a ground (`refused.esl`).
+// so no witness: nothing can cite it as a ground (`08-refused.esl`).
 
 resource syn002:chaperone_hypothesis : enc:Hypothesis {
     core:description = "If the chaperone-class agents rescue trafficking in cell models, they reduce this child's urine output.";

@@ -18,7 +18,8 @@
 //! ```text
 //! pmi-registry-convert \
 //!   --cases "experiments/uab/UAB Round 1/02-synthetic-pmi-registry/synthetic-cases.json" \
-//!   --out registry.esl --report registry-report.md
+//!   --out experiments/pmi-registry/04-registry.esl \
+//!   --report experiments/pmi-registry/04-registry-report.md
 //! ```
 //!
 //! The HP-label check needs `references/hpo/hp.json` (the loaded release) and

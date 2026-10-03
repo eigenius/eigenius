@@ -24,32 +24,41 @@ use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::storage::PersistentBackend;
 use eigenius_kernel::validation::Validator;
-use eigenius_pmi_registry::record::Package;
 
-pub const CASES: &str = include_str!(
-    "../../../../experiments/uab/UAB Round 1/02-synthetic-pmi-registry/synthetic-cases.json"
-);
-
-const EXPERIMENT: [(&str, &str); 5] = [
+/// The experiment's files in load order (`experiments/pmi-registry/`, `01`–`08`). The first three
+/// are the folder's links to `ontologies/`.
+const FILES: [(&str, &str); 8] = [
+    (
+        "variant",
+        include_str!("../../../../experiments/pmi-registry/01-variant.esl"),
+    ),
+    (
+        "clinical",
+        include_str!("../../../../experiments/pmi-registry/02-clinical.esl"),
+    ),
+    (
+        "clinvar",
+        include_str!("../../../../experiments/pmi-registry/03-clinvar.esl"),
+    ),
     (
         "registry",
-        include_str!("../../../../experiments/pmi-registry/registry.esl"),
+        include_str!("../../../../experiments/pmi-registry/04-registry.esl"),
     ),
     (
         "syngene",
-        include_str!("../../../../experiments/pmi-registry/syngene.esl"),
+        include_str!("../../../../experiments/pmi-registry/05-syngene.esl"),
     ),
     (
         "syn-26-002",
-        include_str!("../../../../experiments/pmi-registry/syn-26-002.esl"),
+        include_str!("../../../../experiments/pmi-registry/06-syn-26-002.esl"),
     ),
     (
         "syn-26-002-conclusions",
-        include_str!("../../../../experiments/pmi-registry/syn-26-002-conclusions.esl"),
+        include_str!("../../../../experiments/pmi-registry/07-syn-26-002-conclusions.esl"),
     ),
     (
         "refused",
-        include_str!("../../../../experiments/pmi-registry/refused.esl"),
+        include_str!("../../../../experiments/pmi-registry/08-refused.esl"),
     ),
 ];
 
@@ -96,7 +105,8 @@ pub trait Base {
     fn build(&self, name: &str, src: &str, parent: &Arc<Layer>, branch: &str) -> Arc<Layer>;
 }
 
-/// The bootstrap chain, with the one WordNet verb and the HP classes the cases code stubbed.
+/// The bootstrap chain, with the one WordNet verb and the HP classes the registry layer names
+/// stubbed.
 pub struct BootstrapBase;
 
 impl Base for BootstrapBase {
@@ -148,12 +158,13 @@ impl Base for SnapshotBase {
     }
 }
 
+/// The WordNet verb and the HP classes `04-registry.esl` names.
 fn stubs() -> String {
-    let package: Package = serde_json::from_str(CASES).unwrap();
-    let mut ids: Vec<&str> = package
-        .cases
-        .iter()
-        .flat_map(|c| c.linked_records.hp_terms.iter().map(|t| t.hp_id.as_str()))
+    let registry = FILES[3].1;
+    let mut ids: Vec<&str> = registry
+        .split("hp:'")
+        .skip(1)
+        .filter_map(|rest| rest.split('\'').next())
         .collect();
     ids.sort();
     ids.dedup();
@@ -165,8 +176,7 @@ fn stubs() -> String {
     );
     for id in ids {
         s.push_str(&format!(
-            "class hp:'{}' {{ description = \"{id} (stub)\"; }}\n",
-            &id[3..]
+            "class hp:'{id}' {{ description = \"HP:{id} (stub)\"; }}\n"
         ));
     }
     s
@@ -189,28 +199,11 @@ impl Chain {
     }
 }
 
-/// base → `variant` → `clinical` → `clinvar` → the experiment's files; `refused.esl` on its own
-/// branch.
+/// base → `01` … `07`; `08-refused.esl` on its own branch.
 pub fn chain_on(base: &dyn Base) -> Chain {
     let mut layers = Vec::new();
     let mut parent = base.head();
-    for (name, src) in [
-        (
-            "variant",
-            include_str!("../../../../ontologies/variant/variant.esl"),
-        ),
-        (
-            "clinical",
-            include_str!("../../../../ontologies/clinical/clinical.esl"),
-        ),
-        (
-            "clinvar",
-            include_str!("../../../../ontologies/clinvar/clinvar.esl"),
-        ),
-    ]
-    .into_iter()
-    .chain(EXPERIMENT)
-    {
+    for (name, src) in FILES {
         if name == "refused" {
             let refused = base.build(name, src, &parent, "refused");
             return Chain { layers, refused };
@@ -219,7 +212,7 @@ pub fn chain_on(base: &dyn Base) -> Chain {
         layers.push((name, Arc::clone(&layer)));
         parent = layer;
     }
-    unreachable!("refused.esl is the last layer")
+    unreachable!("08-refused.esl is the last file")
 }
 
 // ── The checks, over either base ──────────────────────────────────────────────────────────
@@ -232,7 +225,7 @@ pub fn check_chain_validates(chain: &Chain) {
     }
 }
 
-/// `refused.esl`'s three conclusions are refused, each for its reason.
+/// `08-refused.esl`'s three conclusions are refused, each for its reason.
 pub fn check_refusals(chain: &Chain) {
     for (local, reason) in [
         // Claim 6 names no allele: nothing grounds Responsive(p.Leu44Pro).
@@ -283,6 +276,14 @@ pub fn check_grounds(base: &dyn Base, chain: &Chain) {
                 expected,
                 "claim {claim}, cited as {ground}: {errors:#?}"
             );
+            if ground == "observed" {
+                assert!(
+                    errors
+                        .iter()
+                        .any(|e| e.contains("no admitted IsObservedAs witness")),
+                    "claim {claim}, cited as observed: {errors:#?}"
+                );
+            }
         }
     }
 }
@@ -297,7 +298,7 @@ pub enum Ground {
 }
 
 /// The analyst's seven claims and the four untyped items, each as the resource that grounds it,
-/// its proposition (ESL), and its ground. `refused.esl` holds what grounds nothing.
+/// its proposition (ESL), and its ground. `08-refused.esl` holds what grounds nothing.
 pub const GROUNDS: &[(&str, &str, &str, Ground)] = &[
     (
         "1  carries c.131T>C, hemizygous",

@@ -1,6 +1,6 @@
 // What SYN-26-002's chain refuses (UAB experiment 02, D99 §3, claims 6 and 7). Every conclusion
 // here fails its commit-time check; `crates/eigenius-pmi-registry/tests/syn_26_002_chain.rs`
-// asserts each refusal and its reason. Loaded above `syn-26-002-conclusions.esl`, never committed.
+// asserts each refusal and its reason. Loaded above `07-syn-26-002-conclusions.esl`, never committed.
 
 namespace core          = "urn:eigenius:core";
 namespace eigentt       = "urn:eigenius:eigentt";
