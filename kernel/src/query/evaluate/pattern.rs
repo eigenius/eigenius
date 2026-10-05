@@ -20,7 +20,7 @@
 
 use crate::layer::{is_indexable_predicate, scan_chain, Layer};
 use crate::ontology::iri::Iri;
-use crate::ontology::resource::{Resource, Value};
+use crate::ontology::resource::{PropertyMap, Resource, Value};
 use crate::ontology::well_known as wk;
 use crate::query::ast::Resolved;
 use crate::query::ast::*;
@@ -33,7 +33,7 @@ pub(super) type Binding = BTreeMap<String, Value>;
 
 /// A pattern's candidate rows: `(subject IRI, property map)` pairs collected from
 /// the layer chain (and FIBER overlay) before brace refinement / join.
-type Candidates = Vec<(Option<Iri>, BTreeMap<Iri, Value>)>;
+type Candidates = Vec<(Option<Iri>, PropertyMap)>;
 
 /// What a pattern is matched AGAINST — the chain, the derived relations, the FIBER
 /// overlay, and the similarity pre-pass.
@@ -405,7 +405,7 @@ fn class_with_subclass_closure(class_iri: &Iri, layer: &Layer) -> BTreeSet<Iri> 
 /// join step over the running frontier of partial bindings.
 fn try_match_resource(
     pattern: &Pattern<Resolved>,
-    resource_props: &BTreeMap<Iri, Value>,
+    resource_props: &PropertyMap,
     resource_iri: &Option<Iri>,
     existing: &Binding,
 ) -> Result<Vec<Binding>, QueryError> {

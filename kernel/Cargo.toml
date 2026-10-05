@@ -78,3 +78,9 @@ tonic-prost-build = "0.14"
 
 [dev-dependencies]
 proptest.workspace = true
+criterion.workspace = true
+
+# Resource construction and property lookup over a WordNet chunk (`benches/resources.rs`).
+[[bench]]
+name = "resources"
+harness = false
