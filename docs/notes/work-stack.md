@@ -20,7 +20,7 @@ any detour.
 > plus one event argument, the event quantifier closed inside each verb's entry, governed PPs
 > positional, adjunct PPs and adverbs as event conditions. No partial path exists: the type change
 > is one slice (316 of 465 closed-class entries, the converter, coordination, the verbaliser, a
-> reseed, at least 51 of 62 pins, 213 of 228 ledger rows, 71 of them re-adjudicated).
+> reseed, at least 51 of 62 pins, 213 of 228 ledger rows, 74 of them re-adjudicated).
 > Decided by the owner on `2026-10-06`, recorded in the draft's "Decided so far": verbs as relations
 > with an event slot (not event-type families); frames, a clause-level reading
 > `frame_in(S(K), x)` for PPs that say where a claim holds; copular predicates eventless with their
@@ -33,9 +33,10 @@ any detour.
 > VPs and states Katz's stative adverb gap for copular predicates (9); governed readings stay the
 > pins, the free adjunct of a governed preposition becomes `correct` with `departs` under events,
 > and a selection rule demotes free-adjunct and frame readings of a preposition the lexicon names on
-> the verb's sense (4).
-> **Next:** open questions 5–7 (U1's purpose «for», coordination and quantified PP objects, generic
-> negation); then slice 1 (`lexicon:Eventuality` and the `frame_*` axioms).
+> the verb's sense (4); U1's «for» attaches to «exploit», re-pinned in slice 2, and purpose «for»
+> stays one opaque `prep_for` (5).
+> **Next:** open questions 6–7 (coordination and quantified PP objects, generic negation); then
+> slice 1 (`lexicon:Eventuality` and the `frame_*` axioms).
 > #264's strand 3 (whether attachment is derivable) is answered by question 4 for prepositions the
 > lexicon names on a sense; other attachments stay with the ranker. #271 (the «a DNA» atom) is
 > independent.

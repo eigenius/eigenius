@@ -14,6 +14,7 @@
 - **Framing prepositions** (2026-10-06, open question 8 (ii)): «in» and «with», in both positions, which are the two the page uses as frames. CGEL's other realisations of domain adjuncts are a planned augmentation, not left to attestation (slice 4): the other spatial-location prepositions and the dedicated domain PPs («with respect to», «as regards», «regarding», «from a … point of view», «as far as … is concerned»). The design keeps each addition to one `frame_*` axiom and its entries.
 - **Frames inside embedded clauses** (2026-10-06, open question 8 (iii)): main clauses and «that»-complements take the clause-level frames as they are. Relative clauses take a VP-level frame, `λx.λV.λs.λK. frame_in(V(s)(K), x)`, for «in» and «with» on finite VPs. Where a PP could frame more than one clause, the frame restricts the smallest clause whose unrestricted content the paper would not assert, and all of that clause, so a main-clause frame sits above a quantified subject.
 - **Governed prepositions** (2026-10-06, open question 4). The governed reading stays the pin, as the 2026-09-30 and 2026-10-05 rulings made it. Under events the free-adjunct reading of a governed preposition no longer contradicts the sentence, so slice 2's re-adjudication rules it `correct` with `departs`. Selection demotes, before the ranker sees the candidates, any reading that hangs a preposition as a free adjunct or a frame on a verb whose sense the lexicon names it on (`v{offset}_p_{prep}`); WordNet's any-preposition frame names no preposition and stays with the ranker. This answers #264's strand 3 for those prepositions.
+- **Purpose «for»** (2026-10-06, open question 5). U1's «for cancer therapeutics» attaches to «exploit», as the purpose of the exploiting: `Possible(∃e. exploit(SL, S, e) ∧ prep_for(e, T))`. U1 is re-pinned in slice 2, since today's encoding would pin the purpose of the scientists. Purpose «for» stays the one opaque `prep_for`; under events its eventuality anchor tells it from a noun-level «for».
 - **An eventivity feature on `S` keeps VP adjuncts off copular VPs** (2026-10-06, open question 9). `cat_s(mood, fin, evt)` gains `lexicon:Eventivity` (`eventive | eventless`), erased by ⟦·⟧ like Fin, Num, Prep and Mode. Verbs build eventive VPs and the copula eventless ones; VP adjuncts select eventive VPs; entries that pass a VP through bind the feature, entries that close a clause accept either, and a coordination is eventive only if every conjunct is. The grammar thereby states Katz's stative adverb gap for copular predicates.
 
 **Recommendation.** Every verb gets one Davidsonian event argument, placed after its positional arguments. The subject, the object and any governed PP (`respond to`, `arise from`) stay positional in the verb's named relation. Adjunct PPs and adverbs become conjuncts on the event, and a PP that says where the claim holds can instead frame the whole clause. The event quantifier closes inside the verb's own lexical entry, as Champollion (2015) proposes and as ccg2lambda and lightblue implement.
@@ -295,7 +296,14 @@ The Davidson/CGEL objection that purpose is not an extensional participant relat
 - PropBank uses ARGM-PRP ([Bonial et al. 2015, §1.4.10](https://github.com/propbank/propbank-documentation/blob/master/annotation-guidelines/Propbank-Annotation-Guidelines.pdf));
 - PropBank's own `respond.01` example annotates a following *for*-PP inside ARG1 ([respond.xml](https://github.com/propbank/propbank-frames/blob/main/frames/respond.xml)).
 
-The attachment stays the maintainer's call (U1 in `docs/notes/d69-structure-call-errors.md`).
+*Decided (2026-10-06), open question 5: the VP attachment* (U1 in `docs/notes/d69-structure-call-errors.md`).
+
+- Both ranker models chose it in all 6 structure-call decisions (jev at 0.96–0.98), and «exploit X for Y» states the purpose of the exploiting, as the 2026-09-30 ruling moved the instrument PPs of «screened» and «analysed» to the verb.
+- The noun attachment restricts «synthetic lethality» to a subtype the page never introduces; the page defines it generically («Synthetic lethality is an interaction between two genetic events.»).
+- Today's verb-adjunct encoding predicates the purpose of the scientists, so U1 is re-pinned in slice 2, on the event condition.
+- U1's 3 `correct` noun-attachment rows become `wrong` on structure. Of its 6 verb-attachment rows, the 3 with the sense the correct rows use (v01164273, "make good use of") are re-adjudicated as event conditions; the other 3, and the remaining noun-attachment row, keep their sense ground (v01162754, "use or manipulate to one's advantage").
+
+Purpose «for» stays the one opaque `prep_for`. Under events the anchor separates its uses: `prep_for(e, T)` on an eventuality is an event-level «for», `prep_for(n, T)` on a noun's referent a noun-level one («biomarker for WRN dependency», «drug target for MSI cancers»).
 
 ### Locatives over coordinated events: «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.»
 
@@ -406,8 +414,8 @@ This states Katz's stative adverb gap in the grammar for copular predicates: an 
 | Verbaliser | `adjunct_of` matches the PP to the verb atom by the shared event variable instead of by the subject's printed string. Its adjective and copula branches lose their input; a frame rendering ("«in MSI models» says where the claim holds") replaces them | `kernel/src/dcg/verbalize.rs:1497–1569` |
 | Selection | a rule before the ranker demotes readings that hang a preposition as a free adjunct or frame on a verb whose sense the lexicon names it on (open question 4); recorded draws of the affected sentences stop replaying | 5 page sentences, 18 ledger rows |
 | Forest | every clause-final «in» or «with» PP gets a frame reading beside its other attachments; a PP that ends a «that»-complement and its main clause gets one frame reading per clause; the VP-level frame adds a reading only under a quantified subject. The ranker chooses among more readings | 15 of 62 page sentences end in an «in» or «with» PP; growth derived, not measured |
-| Pins | each verb adds `ΠG#k:Prop. ΠG#k+1:§.`, one argument and one `→ G#k → G#k`; later binders renumber | ≥51 of 62 pins reprint: the 48 pinned sentences whose ledger rows carry a verb atom, and 3 verbless copular adjunct pins. The 15 adjunct pins change meaning (7 verbal, 8 copular or adjectival); at least 36 reprint mechanically |
-| Ledger | rows are keyed on the printed term, so every verb row is re-keyed. The D64 re-pin precedent was "transformed mechanically and checked against the new forest". | 213 of 228 rows re-keyed. 142 verb rows with no PP on the subject carry their verdict mechanically. 71 hang a PP on the subject and need re-adjudication: 46 on a verb (11 `correct`, 35 `wrong`, 14 of the `wrong` grounded on subject predication; 18 of the `wrong` are free adjuncts of a governed preposition, of which 17 become `correct` with `departs` by open question 4) and 25 on an adjective or copula (13 `correct`, 12 `wrong`; 20 of them in verbless rows, 1 inside a relative clause). The 15 verbless rows without such a PP are unchanged. |
+| Pins | each verb adds `ΠG#k:Prop. ΠG#k+1:§.`, one argument and one `→ G#k → G#k`; later binders renumber | ≥51 of 62 pins reprint: the 48 pinned sentences whose ledger rows carry a verb atom, and 3 verbless copular adjunct pins. 16 change meaning: the 15 adjunct pins (7 verbal, 8 copular or adjectival) and U1, re-pinned to the verb (open question 5); at least 35 reprint mechanically |
+| Ledger | rows are keyed on the printed term, so every verb row is re-keyed. The D64 re-pin precedent was "transformed mechanically and checked against the new forest". | 213 of 228 rows re-keyed. 139 verb rows carry their verdict mechanically. 74 need re-adjudication: U1's 3 `correct` noun-attachment rows, which become `wrong` on structure (open question 5), and 71 that hang a PP on the subject: 46 on a verb (11 `correct`, 35 `wrong`, 14 of the `wrong` grounded on subject predication; 18 of the `wrong` are free adjuncts of a governed preposition, of which 17 become `correct` with `departs` by open question 4) and 25 on an adjective or copula (13 `correct`, 12 `wrong`; 20 of them in verbless rows, 1 inside a relative clause). The 15 verbless rows without such a PP are unchanged. |
 | Canonical hashing | D47 stores binder names as strings, and readback names binders `G#<level>` (`kernel/src/nbe/readback.rs:392`), so α-variants already hash alike. Conjunct order is attachment order, first-attached innermost; the identity closure leaves no `True`. | every `enc:EncodedClaim` with a verb gets a new proposition and witness key; regenerate by drop-and-reseed |
 | Term size | positional: +2 binders, +1 argument per verb. Neo-Davidsonian roles would add two role atoms per transitive verb on top; PMB gold has 7,516 role clauses beside 7,545 concept clauses ([van Noord et al. 2018, Table 1](https://aclanthology.org/L18-1267.pdf)) | derived, not measured |
 
@@ -445,10 +453,10 @@ This states Katz's stative adverb gap in the grammar for copular predicates: an 
 
 The same PR transforms the pins and ledger mechanically:
 
-- at least 36 verb pins without an adjunct PP;
-- 142 ledger rows.
+- at least 35 verb pins;
+- 139 ledger rows.
 
-It also brings the 15 adjunct pins and 71 ledger rows to the maintainer as a re-adjudication batch, because the parse gates fail on stale pins otherwise.
+It also brings the 15 adjunct pins, U1's re-pin and 74 ledger rows to the maintainer as a re-adjudication batch, because the parse gates fail on stale pins otherwise.
 
 **Slice 3 (persisted claims).** Drop and reseed the encoded artefacts. Every verb-bearing claim gets a new D47 term and witness key.
 
@@ -503,7 +511,7 @@ What selection does with these readings:
 - (b) suppress them in the parser. Rejected: the grammar can state it only if every VP records which governed prepositions its head has not consumed; otherwise it is a filter on derivations, a guard, and the forest gate stops seeing them.
 - (c) keep them in the forest and demote them by rule before the ranker sees the candidates: a reading that hangs a preposition as a free adjunct or a frame on a verb whose sense the lexicon names it on (`v{offset}_p_{prep}`). **Chosen.** Demoted, not removed, so the reading stays selectable when nothing else parses. WordNet's any-preposition frame names no preposition, so readings after those verbs («MSI occurs in …», v02612368) stay with the ranker; treating that frame as governance would demote instruments too. The rule changes the candidate lists, so the recorded draws of the 5 affected sentences stop replaying; slice 2 draws anew anyway.
 
-**5. Purpose *for*.** Rule U1's attachment. Then decide whether purpose *for* stays the one opaque `prep_for` it shares with benefactive and «essential for», or becomes a distinct relation.
+**5. Purpose *for*.** *Decided 2026-10-06: U1 attaches to the verb, re-pinned in slice 2; purpose «for» stays the one opaque `prep_for`* (see "Purpose PPs"). Rejected: keeping the noun-attachment pin, which every ranker decision missed; a distinct purpose relation, which needs the parser to choose a preposition's sense at parse time, as for no other preposition, and gives every verbal «for» PP two readings for one purpose «for» on the page.
 
 **6. Coordination and quantified PP objects.**
 
