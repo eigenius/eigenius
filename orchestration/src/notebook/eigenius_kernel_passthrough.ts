@@ -33,7 +33,12 @@
  * methods that already exist there).
  */
 
-import { Code, ConnectError, type ConnectRouter } from "@connectrpc/connect";
+import {
+  Code,
+  ConnectError,
+  type ConnectRouter,
+  type ServiceImpl,
+} from "@connectrpc/connect";
 import { EigeniusKernel } from "../gen/eigenius_pb.ts";
 import type { KernelClient } from "../client/kernel_client.ts";
 import { operation, withRpcGuard } from "../observability/mod.ts";
@@ -80,9 +85,22 @@ export function registerEigeniusKernelPassthrough(
   router: ConnectRouter,
   deps: EigeniusKernelPassthroughDeps,
 ): void {
+  router.service(EigeniusKernel, eigeniusKernelPassthroughMethods(deps));
+}
+
+/**
+ * The curated subset itself: the EigeniusKernel methods the orchestrator
+ * forwards. `router.service` registers a handler for EVERY method of the
+ * service and answers UNIMPLEMENTED for the ones missing here, so the
+ * router's handler list is the proto's method list, not this one. This map
+ * is what decides what the browser can reach.
+ */
+export function eigeniusKernelPassthroughMethods(
+  deps: EigeniusKernelPassthroughDeps,
+): Partial<ServiceImpl<typeof EigeniusKernel>> {
   const { kernel } = deps;
 
-  router.service(EigeniusKernel, {
+  return {
     // Read-only methods exposed in the MVP. Each is a thin call
     // through to the kernel; no orchestrator-side processing.
     inspect: (req) =>
@@ -294,5 +312,5 @@ export function registerEigeniusKernelPassthrough(
     //
     // Add an entry here when the corresponding notebook feature is
     // ready to consume it.
-  });
+  };
 }
