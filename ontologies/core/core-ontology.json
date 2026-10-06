@@ -222,6 +222,48 @@
     ]
   },
   {
+    "@id": "urn:eigenius:core:EquivalentClasses",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:description": "Classes that denote the same thing — OWL 2's n-ary EquivalentClasses(C1 … Cn) axiom, as a resource of its own (D99 §11). It names classes already declared; none of them refers to it, so it adds no edge to the declaration-order graph, and two vocabularies' classes for one concept (an HPO phenotype, the WordNet synset, the UMLS concept) are linked without redefining any of them. Its effect is on SUBSUMPTION only: Layer::is_subclass_of — and so type inhabitation and the query engine's subclass closure — treats any two classes listed together as subclasses of each other. A class's definition never consults it (its record type and inherited properties come from subclass_of alone), which is what keeps it from being the mutual-subclass_of cycle that declaration ordering refuses. The listed classes must require the same properties, so an instance of one never inhabits another without carrying its obligations. How the equivalence was established is recorded SSSOM-style: core:mapping_justification names a SEMAPV process, and prov: properties carry attribution and source.",
+    "urn:eigenius:core:short_name": "EquivalentClasses",
+    "urn:eigenius:core:requires": [
+      "urn:eigenius:core:classes"
+    ],
+    "urn:eigenius:core:recommends": [
+      "urn:eigenius:core:mapping_justification",
+      "urn:eigenius:core:description"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:classes",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "The classes an EquivalentClasses resource declares equivalent — two or more. Resource-typed, so the triple index covers it.",
+    "urn:eigenius:core:short_name": "classes",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:resource_array",
+    "urn:eigenius:core:class_types": [
+      "urn:eigenius:core:Class"
+    ],
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:core:EquivalentClasses"
+    ]
+  },
+  {
+    "@id": "urn:eigenius:core:mapping_justification",
+    "urn:eigenius:core:is_a": [
+      "urn:eigenius:core:Property"
+    ],
+    "urn:eigenius:core:description": "How an equivalence was established, as a SEMAPV process CURIE — the SSSOM mapping_justification slot: semapv:MappingChaining (composed from two published mappings), semapv:ManualMappingCuration, semapv:LexicalMatching, … (https://w3id.org/semapv/vocab/). Kept as the external CURIE so the record exports to SSSOM unchanged.",
+    "urn:eigenius:core:short_name": "mapping_justification",
+    "urn:eigenius:core:data_type": "urn:eigenius:core:string",
+    "urn:eigenius:core:domain": [
+      "urn:eigenius:core:EquivalentClasses"
+    ]
+  },
+  {
     "@id": "urn:eigenius:core:requires",
     "urn:eigenius:core:is_a": [
       "urn:eigenius:core:Property"
@@ -962,7 +1004,7 @@
       "urn:eigenius:core:InductiveType"
     ],
     "urn:eigenius:core:short_name": "Term",
-    "urn:eigenius:core:description": "Chain-mirrored EigenTT type fragment. Encodes closed EigenTT type expressions (axiom statements, theorem statements, propositional institutional artifacts) as queryable chain values. Covers the type-level subset of EigenTT's Exp — universes, dependent binders, propositional equality, references to chain-declared type formers, and the size sort. One ctor is not type-level: `Checked(payload_iri)` (D87 §4.2), a reference to a proof an external checker verified, which appears only as `eigentt:Judgement.holds`'s `term` argument. It is its own ctor rather than a `ConstRef` because `ConstRef` resolves by the target's class and yields EigonClass / EigonAxiom / Const, none of which a `lean:LeanProofPayload` instance is — and because putting 'asserted without proof' and 'checked by nanoda' in one form is the conflation D87 §4.1 withdrew. The kernel's `check` REFUSES it: it has no proof of the proposition and will not manufacture one, so a hand-authored `holds(logic_lean4, Checked(_), _)` is rejected at commit, while an institution-emitted one — minted after the checker returned — never reaches validation, because `structural_validate` runs before `autoonload_dispatch` and the followup pipeline slice has no validation phase. Declared in CORE rather than beside eigentt:Axiom because core:param_kind and core:type_name carry eigentt:Term values and a lower layer cannot reference a higher one; the IRI keeps its eigentt: prefix because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4). The value shape follows D32 §3.7's `{\"ctor\": <name>, \"args\": [...]}` form; the validator checks each value tree against the ctor schema declared here. See D47.",
+    "urn:eigenius:core:description": "Chain-mirrored EigenTT type fragment. Encodes closed EigenTT type expressions (axiom statements, theorem statements, propositional institutional artifacts) as queryable chain values. Covers the type-level subset of EigenTT's Exp — universes, dependent binders, propositional equality, references to chain-declared type formers, and the size sort. One ctor is not type-level: `Checked(payload_iri)` (D87 §4.2), a reference to a proof an external checker verified, which appears only as `eigentt:Judgement.holds`'s `term` argument. It is its own ctor rather than a `ConstRef` because `ConstRef` resolves by the target's class and yields EigonClass / EigonAxiom / Const, none of which a `lean:LeanProofPayload` instance is — and because putting 'asserted without proof' and 'checked by nanoda' in one form is the conflation D87 §4.1 withdrew. The kernel's `check` REFUSES it: it has no proof of the proposition and will not manufacture one, so a hand-authored `holds(logic_lean4, Checked(_), _)` is rejected at commit, while an institution-emitted one — minted after the checker returned — never reaches validation, because `structural_validate` runs before `autoonload_dispatch` and the followup pipeline slice has no validation phase. Four more are proof-level (D99 §10): `Refl`, `IdJ` (the identity eliminator) and `PropAccess` (a resource's field), with which congruence over a field is a chain term; and `Apart(ty, lhs, rhs)`, a proof of `Id(ty, lhs, rhs) -> logic:False` that the kernel admits only when lhs and rhs evaluate to distinct canonical literals (string, integer, boolean, rational, unit). Together they prove two resources distinct when a field of theirs holds distinct literals, without assuming unique names. Declared in CORE rather than beside eigentt:Axiom because core:param_kind and core:type_name carry eigentt:Term values and a lower layer cannot reference a higher one; the IRI keeps its eigentt: prefix because a namespace is a naming convention, not a layer assertion (eigenius#188 / N4). The value shape follows D32 §3.7's `{\"ctor\": <name>, \"args\": [...]}` form; the validator checks each value tree against the ctor schema declared here. See D47.",
     "urn:eigenius:core:ctors": [
       {
         "urn:eigenius:core:is_a": [
@@ -1298,6 +1340,194 @@
                 "urn:eigenius:eigentt:Term-ConstRef"
               ],
               "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:core:InductiveCtor"
+        ],
+        "urn:eigenius:core:ctor_name": "Refl",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "term",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:core:InductiveCtor"
+        ],
+        "urn:eigenius:core:ctor_name": "IdJ",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "ty",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          },
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "motive",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          },
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "method",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          },
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "lhs",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          },
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "rhs",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          },
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "proof",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:core:InductiveCtor"
+        ],
+        "urn:eigenius:core:ctor_name": "Apart",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "ty",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          },
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "lhs",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          },
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "rhs",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          }
+        ]
+      },
+      {
+        "urn:eigenius:core:is_a": [
+          "urn:eigenius:core:InductiveCtor"
+        ],
+        "urn:eigenius:core:ctor_name": "PropAccess",
+        "urn:eigenius:core:arg_types": [
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "subject",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:eigentt:Term",
+              "urn:eigenius:eigentt:Term-ConstRef-levels": []
+            }
+          },
+          {
+            "urn:eigenius:core:is_a": [
+              "urn:eigenius:core:InductiveArgType"
+            ],
+            "urn:eigenius:core:arg_name": "property",
+            "urn:eigenius:core:type_name": {
+              "urn:eigenius:core:is_a": [
+                "urn:eigenius:eigentt:Term-ConstRef"
+              ],
+              "urn:eigenius:eigentt:Term-ConstRef-iri": "urn:eigenius:core:iri",
               "urn:eigenius:eigentt:Term-ConstRef-levels": []
             }
           }

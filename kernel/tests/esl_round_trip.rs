@@ -54,6 +54,10 @@ const CORPUS: &[&str] = &[
     // `forall (m : Set)` and `inference.esl` two. So quantified terms are still round-tripped, but
     // DEEP nesting is not. If the printer/parser regresses on nested binders this corpus will no
     // longer catch it — worth a purpose-built fixture rather than relying on a demo artifact.
+    //
+    // D99 §10 — the identity type and the proof-level forms (`eigentt:Eq`, `refl`, `J`, `apart`,
+    // `field`), including `apart` applied to its proof and three-binder `J` motives.
+    "tests/fixtures/disequality_by_field.esl",
 ];
 
 /// A D47 node: an object carrying `ctor` + `args`.

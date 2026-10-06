@@ -1,0 +1,209 @@
+// SYNGENE in the literature (UAB experiment 02, D99 step 5): the location and alleles the analyst's
+// notes name beyond the registry row, the predicates the claims are stated in, and the claims the
+// literature makes. SYNTHETIC: the gene, the survey, the assay and the cell-model reports are the
+// package's inventions; no source here has a real identifier, and none is given one.
+//
+// Loaded above `04-registry.esl`, which mints NM_000010.7:c.131T>C and p.Leu44Pro. The two alleles
+// minted here follow its naming (D99 §4): an allele's IRI is its reference, interval and alt.
+//
+// Decision 3: binding, trafficking and drug response are stated of PROTEIN alleles.
+
+namespace core          = "urn:eigenius:core";
+namespace lexicon       = "urn:eigenius:lexicon";
+namespace logic         = "urn:eigenius:logic";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace prov          = "urn:eigenius:prov";
+namespace variant       = "urn:eigenius:variant";
+namespace clinical      = "urn:eigenius:clinical";
+namespace allele        = "urn:eigenius:variant:allele";
+namespace location      = "urn:eigenius:variant:location";
+namespace syngene       = "urn:eigenius:uab:syngene";
+
+// ── The other allele at codon 44, and the location both sit at ───────────────────────────
+
+resource allele:NM_000010_7_130_T : variant:NucleotideAllele {
+    core:description = "NM_000010.7:c.130C>T, one nucleotide from the proband's c.131T>C. The survey cohort's allele.";
+    variant:reference = "NM_000010.7";
+    variant:start = 130;
+    variant:end = 130;
+    variant:ref_state = "C";
+    variant:alt = "T";
+    variant:hgvs = "NM_000010.7:c.130C>T";
+}
+
+resource allele:HGNC_000010_p_44_Phe : variant:ProteinAllele {
+    core:description = "p.Leu44Phe, the protein consequence of c.130C>T.";
+    variant:reference = "HGNC:000010:p";
+    variant:start = 44;
+    variant:end = 44;
+    variant:ref_state = "Leu";
+    variant:alt = "Phe";
+    variant:hgvs = "p.Leu44Phe";
+}
+
+resource location:HGNC_000010_p_44 : variant:Location {
+    core:description = "Leu44: position 44 of SYNGENE's protein product, reference state leucine. What the survey names; p.Leu44Phe and p.Leu44Pro are both at it.";
+    variant:reference = "HGNC:000010:p";
+    variant:start = 44;
+    variant:end = 44;
+    variant:ref_state = "Leu";
+}
+
+// ── What the claims are about ─────────────────────────────────────────────────────────────
+
+resource syngene:first_line_agent : lexicon:Entity {
+    core:description = "The standard first-line agent for SYNGENE's tubulopathy: a ligand-side agent, acting through the receptor at the membrane. Not named in the package.";
+}
+
+resource syngene:chaperone_agents : lexicon:Entity {
+    core:description = "The two chaperone-class agents the analyst flags for team discussion. Not named in the package.";
+}
+
+resource syngene:survey_cohort : lexicon:Entity {
+    core:description = "The patients of the 2026 nationwide survey the nephrologist cited. They carried c.130C>T (`06-syn-26-002.esl`, the analyst's reading of the survey).";
+}
+
+data syngene:MembraneSitesBelow : variant:ProteinAllele -> core:rational -> Prop {
+    description = "Cells expressing the protein allele have fewer ligand binding sites at the membrane than the fraction of wild type.";
+}
+
+data syngene:CarriersReduceBy : variant:ProteinAllele -> core:rational -> Prop {
+    description = "Carriers of the protein allele, on the first-line agent, reduce their urine output by at least the fraction.";
+}
+
+axiom syngene:survey_cutpoint : core:rational
+
+def syngene:Responsive(q : variant:ProteinAllele) : Prop =
+    syngene:CarriersReduceBy(q, syngene:survey_cutpoint);
+
+data syngene:RespondersReducedWithin : lexicon:Entity -> core:rational -> core:rational -> Prop {
+    description = "The group's responders reduced their urine output on the first-line agent by between the two fractions.";
+}
+
+data syngene:CohortCarried : lexicon:Entity -> variant:NucleotideAllele -> Prop {
+    description = "The group's patients carried the allele.";
+}
+
+data syngene:RescuesTraffickingInCells : lexicon:Entity -> Prop {
+    description = "The agent rescues membrane trafficking of trafficking-defective SYNGENE receptor mutants in cell models.";
+}
+
+data syngene:ReducesOutput : lexicon:Entity -> clinical:Individual -> Prop {
+    description = "The agent, at some dose, reduces the individual's urine output.";
+}
+
+// ── Who said it, and where ────────────────────────────────────────────────────────────────
+
+resource syngene:survey_authors : prov:Organization {
+    core:description = "The authors of the 2026 nationwide survey (synthetic).";
+    core:short_name = "survey_authors";
+}
+
+resource syngene:assay_authors : prov:Organization {
+    core:description = "The authors of the published cell assay of p.Leu44Pro (synthetic).";
+    core:short_name = "assay_authors";
+}
+
+resource syngene:cell_model_authors : prov:Organization {
+    core:description = "The authors of the cell-model reports of chaperone rescue (synthetic).";
+    core:short_name = "cell_model_authors";
+}
+
+resource syngene:survey : prov:Source {
+    core:description = "A 2026 nationwide survey listing Leu44 among the responsive genotypes, with responders achieving 12.6–31.6% reductions in urine output. Synthetic: the package cites no publication.";
+}
+
+resource syngene:binding_assay : prov:Source {
+    core:description = "A published cell assay reporting under 4% of wild-type ligand binding sites at the membrane for p.Leu44Pro. Synthetic: the package cites no publication.";
+}
+
+resource syngene:chaperone_reports : prov:Source {
+    core:description = "Published rescue of trafficking-defective mutants comparable to p.Leu44Pro by chaperone-class agents, in cell models only. Synthetic: the package cites no publication.";
+}
+
+// ── Claim 3 — p.Leu44Pro yields <4% of wild-type binding sites ───────────────────────────
+// Observed by the assay's authors; Declared with citation here.
+
+resource syngene:claim_3 : justification:Declaration {
+    core:description = "p.Leu44Pro yields under 4% of wild-type ligand binding sites at the membrane.";
+    prov:was_attributed_to = syngene:assay_authors;
+    prov:had_primary_source = syngene:binding_assay;
+    eigentt:proposition = type_expr(syngene:MembraneSitesBelow(allele:HGNC_000010_p_44_Pro, 0.04r));
+}
+
+resource syngene:claim_3_trace : prov:DeclarationTrace {
+    prov:resource = syngene:claim_3;
+    prov:was_attributed_to = syngene:assay_authors;
+    prov:had_primary_source = syngene:binding_assay;
+    prov:rationale = "The publication date is not in the package: the timestamp is the analyst work-up that reports the claim.";
+    prov:timestamp = "2026-07-15";
+}
+
+// ── Claim 4 — responders achieved 12.6–31.6% reductions ──────────────────────────────────
+
+resource syngene:claim_4 : justification:Declaration {
+    core:description = "The survey's responders achieved 12.6–31.6% reductions in urine output.";
+    prov:was_attributed_to = syngene:survey_authors;
+    prov:had_primary_source = syngene:survey;
+    eigentt:proposition = type_expr(syngene:RespondersReducedWithin(syngene:survey_cohort, 0.126r, 0.316r));
+}
+
+resource syngene:claim_4_trace : prov:DeclarationTrace {
+    prov:resource = syngene:claim_4;
+    prov:was_attributed_to = syngene:survey_authors;
+    prov:had_primary_source = syngene:survey;
+    prov:timestamp = "2026";
+}
+
+// ── Claim 5 — "responsive" is a cut-point somebody chose ─────────────────────────────────
+// `Responsive` is defined as a reduction of at least `survey_cutpoint`. The cut-point is the
+// survey authors' choice and its value is not in the package: the trace attributes it to them.
+
+resource syngene:survey_cutpoint_trace : prov:DeclarationTrace {
+    prov:resource = syngene:survey_cutpoint;
+    prov:was_attributed_to = syngene:survey_authors;
+    prov:had_primary_source = syngene:survey;
+    prov:rationale = "The survey classes a genotype responsive by a cut-point on the reduction in urine output; the package does not state the cut-point.";
+    prov:timestamp = "2026";
+}
+
+// ── Claim 6 — the survey lists Leu44 among the responsive genotypes ──────────────────────
+// Decision 3: some responsive protein allele is at Leu44. It names no allele, so it grounds
+// nothing about p.Leu44Pro (`08-refused.esl`).
+
+resource syngene:claim_6 : justification:Declaration {
+    core:description = "A nationwide survey lists Leu44 among the responsive genotypes.";
+    prov:was_attributed_to = syngene:survey_authors;
+    prov:had_primary_source = syngene:survey;
+    eigentt:proposition = type_expr(
+        forall (R : Prop) =>
+            (forall (q : exists q : variant:ProteinAllele => variant:At(q, location:HGNC_000010_p_44)) =>
+                syngene:Responsive(eigentt:fst(q)) -> R)
+            -> R);
+}
+
+resource syngene:claim_6_trace : prov:DeclarationTrace {
+    prov:resource = syngene:claim_6;
+    prov:was_attributed_to = syngene:survey_authors;
+    prov:had_primary_source = syngene:survey;
+    prov:timestamp = "2026";
+}
+
+// ── Claim 7, first half — chaperone rescue in cell models ────────────────────────────────
+// The step from cells to the proband is a hypothesis (`06-syn-26-002.esl`), not a declaration.
+
+resource syngene:claim_7_cells : justification:Declaration {
+    core:description = "Chaperone-class agents rescue trafficking of comparable trafficking-defective mutants in cell models.";
+    prov:was_attributed_to = syngene:cell_model_authors;
+    prov:had_primary_source = syngene:chaperone_reports;
+    eigentt:proposition = type_expr(syngene:RescuesTraffickingInCells(syngene:chaperone_agents));
+}
+
+resource syngene:claim_7_cells_trace : prov:DeclarationTrace {
+    prov:resource = syngene:claim_7_cells;
+    prov:was_attributed_to = syngene:cell_model_authors;
+    prov:had_primary_source = syngene:chaperone_reports;
+    prov:rationale = "The publication date is not in the package: the timestamp is the analyst work-up that reports the claim.";
+    prov:timestamp = "2026-07-15";
+}

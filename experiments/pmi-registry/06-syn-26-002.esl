@@ -1,0 +1,325 @@
+// SYN-26-002 beyond its registry row (UAB experiment 02, D99 step 5): what the analyst's notes,
+// the case history and the registry's Notes say, each as a declaration by whoever said it.
+//
+// Loaded above `05-syngene.esl`. The conclusions that cite these are one layer up
+// (`07-syn-26-002-conclusions.esl`): a citation needs its witness in a committed parent.
+//
+// Dates: a declaration whose own date is not in the package carries the date its source reached
+// PMI — medical records received 2026-06-04, analyst work-up 2026-07-15 — and says so.
+
+namespace core          = "urn:eigenius:core";
+namespace lexicon       = "urn:eigenius:lexicon";
+namespace logic         = "urn:eigenius:logic";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace justification = "urn:eigenius:justification";
+namespace prov          = "urn:eigenius:prov";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace enc           = "urn:eigenius:encoding";
+namespace variant       = "urn:eigenius:variant";
+namespace clinical      = "urn:eigenius:clinical";
+namespace clinvar       = "urn:eigenius:clinvar";
+namespace pmi           = "urn:eigenius:pmi";
+namespace allele        = "urn:eigenius:variant:allele";
+namespace syngene       = "urn:eigenius:uab:syngene";
+namespace syn002        = "urn:eigenius:uab:syn-26-002";
+
+// ── The people ────────────────────────────────────────────────────────────────────────────
+
+resource syn002:mother : prov:Person {
+    core:description = "SYN-26-002's mother: an asymptomatic heterozygous carrier of c.131T>C.";
+    core:short_name = "mother";
+}
+
+resource syn002:nephrologist : prov:Person {
+    core:description = "SYN-26-002's treating nephrologist.";
+    core:short_name = "nephrologist";
+}
+
+resource syn002:analyst : prov:Person {
+    core:description = "The PMI analyst who drafted SYN-26-002's working notes (redacted in the package).";
+    core:short_name = "analyst";
+}
+
+resource syn002:panel_lab : prov:Organization {
+    core:description = "The laboratory that issued SYN-26-002's renal gene panel report (not named in the package).";
+    core:short_name = "panel_lab";
+}
+
+// ── Claim 1 — the proband carries c.131T>C, hemizygous ───────────────────────────────────
+// `04-registry.esl` declares it, and that it translates to p.Leu44Pro, by the registry. The panel
+// report is tier 3 and not held, so neither is Observed (D99 §5).
+//
+// The report's classification is the lab's (D99 6b), beside the registry's transcription of it.
+
+resource syn002:classified_lp : justification:Declaration {
+    core:description = "The panel report classifies c.131T>C Likely Pathogenic.";
+    prov:was_attributed_to = syn002:panel_lab;
+    prov:had_primary_source = pmi:SYN_26_002_medical_records;
+    eigentt:proposition = type_expr(clinical:ClassifiedAs(allele:NM_000010_7_131_C, clinical:likely_pathogenic));
+}
+
+resource syn002:classified_lp_trace : prov:DeclarationTrace {
+    prov:resource = syn002:classified_lp;
+    prov:was_attributed_to = syn002:panel_lab;
+    prov:had_primary_source = pmi:SYN_26_002_medical_records;
+    prov:rationale = "The report's date is not in the package: the timestamp is when the medical records were received.";
+    prov:timestamp = "2026-06-04";
+}
+
+// D99 §7: `Confirmed de novo = false` writes nothing; inheritance comes from the row's Notes.
+resource syn002:inherited_maternal : justification:Declaration {
+    core:description = "The proband inherited c.131T>C from his mother.";
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_medical_records;
+    eigentt:proposition = type_expr(clinical:InheritedFrom(pmi:SYN_26_002_proband, allele:NM_000010_7_131_C, clinical:maternal));
+}
+
+resource syn002:inherited_maternal_trace : prov:DeclarationTrace {
+    prov:resource = syn002:inherited_maternal;
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_medical_records;
+    prov:rationale = "Transcribed from the Gene Info row's Notes: 'Maternally inherited; mother is a heterozygous carrier, asymptomatic.'";
+    prov:timestamp = "2026-05-19";
+}
+
+// D99 §3: a protein-level claim reaches a nucleotide allele through TranslatesTo and this.
+resource syn002:protein_mediated : justification:Declaration {
+    core:description = "c.131T>C acts through its protein consequence: no splice effect, no nonsense-mediated decay.";
+    prov:was_attributed_to = syn002:analyst;
+    prov:had_primary_source = pmi:SYN_26_002_case_notes;
+    eigentt:proposition = type_expr(variant:ProteinMediated(allele:NM_000010_7_131_C));
+}
+
+resource syn002:protein_mediated_trace : prov:DeclarationTrace {
+    prov:resource = syn002:protein_mediated;
+    prov:was_attributed_to = syn002:analyst;
+    prov:had_primary_source = pmi:SYN_26_002_case_notes;
+    prov:rationale = "A missense change with no splice effect reported. The notes do not state it; their mechanism argument, which runs through the receptor at the membrane, assumes it.";
+    prov:timestamp = "2026-07-15";
+}
+
+// ── Claim 2 and item 8d — neither trial reduced urine output ─────────────────────────────
+
+resource syn002:trial_1 : clinical:Trial {
+    core:description = "The first trial of the first-line agent.";
+    clinical:treated = pmi:SYN_26_002_proband;
+    clinical:agent = syngene:first_line_agent;
+}
+
+resource syn002:trial_2 : clinical:Trial {
+    core:description = "The second trial of the first-line agent, at a higher dose.";
+    clinical:treated = pmi:SYN_26_002_proband;
+    clinical:agent = syngene:first_line_agent;
+}
+
+resource syn002:trial_1_trace : prov:DeclarationTrace {
+    prov:resource = syn002:trial_1;
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_medical_records;
+    prov:rationale = "Case History: 'Treating nephrologist trialed the standard first-line agent twice, at escalating dose.'";
+    prov:timestamp = "2026-05-19";
+}
+
+resource syn002:trial_2_trace : prov:DeclarationTrace {
+    prov:resource = syn002:trial_2;
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_medical_records;
+    prov:rationale = "Case History: 'Treating nephrologist trialed the standard first-line agent twice, at escalating dose.'";
+    prov:timestamp = "2026-05-19";
+}
+
+// 8d: a physician's summary of a measurement is not the measurement.
+resource syn002:trial_1_outcome : justification:Declaration {
+    core:description = "Trial 1 produced no measurable reduction in urine output.";
+    prov:was_attributed_to = syn002:nephrologist;
+    prov:had_primary_source = pmi:SYN_26_002_medical_records;
+    eigentt:proposition = type_expr(clinical:NoMeasurableReduction(syn002:trial_1));
+}
+
+resource syn002:trial_1_outcome_trace : prov:DeclarationTrace {
+    prov:resource = syn002:trial_1_outcome;
+    prov:was_attributed_to = syn002:nephrologist;
+    prov:had_primary_source = pmi:SYN_26_002_medical_records;
+    prov:rationale = "A clinic note records the failure with no pre/post volumes, so it stays Declared. The note's date is not in the package: the timestamp is when the medical records were received.";
+    prov:timestamp = "2026-06-04";
+}
+
+resource syn002:trial_2_outcome : justification:Declaration {
+    core:description = "Trial 2 produced no measurable reduction in urine output.";
+    prov:was_attributed_to = syn002:nephrologist;
+    prov:had_primary_source = pmi:SYN_26_002_medical_records;
+    eigentt:proposition = type_expr(clinical:NoMeasurableReduction(syn002:trial_2));
+}
+
+resource syn002:trial_2_outcome_trace : prov:DeclarationTrace {
+    prov:resource = syn002:trial_2_outcome;
+    prov:was_attributed_to = syn002:nephrologist;
+    prov:had_primary_source = pmi:SYN_26_002_medical_records;
+    prov:rationale = "The clinic notes hold pre/post volumes (tier 3, not held); with them in hand this is Observed. The note's date is not in the package: the timestamp is when the medical records were received.";
+    prov:timestamp = "2026-06-04";
+}
+
+// ── Item 8b — ClinVar ─────────────────────────────────────────────────────────────────────
+// About a release, not about the allele. The synthetic alleles cannot be looked up, so the
+// statements are the registry's, transcribed from the row's Notes.
+
+resource syn002:clinvar_release : clinvar:Release {
+    core:description = "The ClinVar release consulted for SYN-26-002. Neither the registry nor the analyst records which.";
+}
+
+resource syn002:clinvar_release_trace : prov:DeclarationTrace {
+    prov:resource = syn002:clinvar_release;
+    prov:was_attributed_to = pmi:registry;
+    prov:timestamp = "2026-05-19";
+}
+
+resource syn002:c131_not_in_clinvar : justification:Declaration {
+    core:description = "c.131T>C is absent from ClinVar.";
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_case_notes;
+    eigentt:proposition = type_expr(clinvar:NotListed(syn002:clinvar_release, allele:NM_000010_7_131_C));
+}
+
+resource syn002:c131_not_in_clinvar_trace : prov:DeclarationTrace {
+    prov:resource = syn002:c131_not_in_clinvar;
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_case_notes;
+    prov:rationale = "Gene Info Notes: 'Absent from ClinVar.' No release, no date of the lookup.";
+    prov:timestamp = "2026-05-19";
+}
+
+resource syn002:c130_in_clinvar : justification:Declaration {
+    core:description = "c.130C>T is in ClinVar as pathogenic.";
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_case_notes;
+    eigentt:proposition = type_expr(clinvar:ListedAs(syn002:clinvar_release, allele:NM_000010_7_130_T, clinical:pathogenic));
+}
+
+resource syn002:c130_in_clinvar_trace : prov:DeclarationTrace {
+    prov:resource = syn002:c130_in_clinvar;
+    prov:was_attributed_to = pmi:registry;
+    prov:had_primary_source = pmi:SYN_26_002_case_notes;
+    prov:rationale = "Gene Info Notes: 'a DIFFERENT variant at the same codon (c.130C>T, p.Leu44Phe) is in ClinVar as pathogenic'. No release, no date of the lookup.";
+    prov:timestamp = "2026-05-19";
+}
+
+// ── Item 8a — the grounds of the "no" ────────────────────────────────────────────────────
+
+resource syn002:cohort_c130 : justification:Declaration {
+    core:description = "The survey's cohort carried c.130C>T.";
+    prov:was_attributed_to = syn002:analyst;
+    prov:had_primary_source = syngene:survey;
+    eigentt:proposition = type_expr(syngene:CohortCarried(syngene:survey_cohort, allele:NM_000010_7_130_T));
+}
+
+resource syn002:cohort_c130_trace : prov:DeclarationTrace {
+    prov:resource = syn002:cohort_c130;
+    prov:was_attributed_to = syn002:analyst;
+    prov:had_primary_source = syngene:survey;
+    prov:rationale = "The analyst's reading of the survey: 'Our patient has the second. The survey is about the first.'";
+    prov:timestamp = "2026-07-15";
+}
+
+// D99 §10: congruence over `start` carries Id(c.130C>T, c.131T>C) to Id(130, 131), which
+// `apart` refutes. A checked proof, so Verified.
+resource syn002:c130_not_c131 : justification:Declaration {
+    core:description = "c.130C>T is not c.131T>C: their start positions are 130 and 131.";
+    prov:was_attributed_to = agent:eigenius_core_team;
+    eigentt:proposition = type_expr(
+        eigentt:Eq(variant:NucleotideAllele, allele:NM_000010_7_130_T, allele:NM_000010_7_131_C) -> logic:False);
+    justification:proof_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(
+                   fun (p : eigentt:Eq(variant:NucleotideAllele, allele:NM_000010_7_130_T, allele:NM_000010_7_131_C)) =>
+                       eigentt:apart(core:integer, 130, 131,
+                           eigentt:J(variant:NucleotideAllele,
+                               fun (x : variant:NucleotideAllele, y : variant:NucleotideAllele,
+                                    q : eigentt:Eq(variant:NucleotideAllele, x, y)) =>
+                                   eigentt:Eq(core:integer, eigentt:field(x, variant:start), eigentt:field(y, variant:start)),
+                               fun (z : variant:NucleotideAllele) => eigentt:refl(eigentt:field(z, variant:start)),
+                               allele:NM_000010_7_130_T, allele:NM_000010_7_131_C, p))
+               ),
+               type_expr(
+                   eigentt:Eq(variant:NucleotideAllele, allele:NM_000010_7_130_T, allele:NM_000010_7_131_C) -> logic:False) );
+}
+
+resource syn002:c130_not_c131_trace : prov:DeclarationTrace {
+    prov:resource = syn002:c130_not_c131;
+    prov:was_attributed_to = agent:eigenius_core_team;
+    prov:timestamp = "2026-10-02";
+}
+
+// The step from the two grounds to the answer is logic, so it is proved, not declared: if the
+// cohort carried c.130C>T and c.130C>T is not c.131T>C, then not every allele the cohort carried
+// is c.131T>C.
+resource syn002:not_about_his_variant : justification:Declaration {
+    core:description = "If the survey's cohort carried c.130C>T, and c.130C>T is not c.131T>C, then the survey was not about c.131T>C alone.";
+    prov:was_attributed_to = agent:eigenius_core_team;
+    eigentt:proposition = type_expr(
+        syngene:CohortCarried(syngene:survey_cohort, allele:NM_000010_7_130_T)
+        -> (eigentt:Eq(variant:NucleotideAllele, allele:NM_000010_7_130_T, allele:NM_000010_7_131_C) -> logic:False)
+        -> (forall (v : variant:NucleotideAllele) =>
+                syngene:CohortCarried(syngene:survey_cohort, v)
+                -> eigentt:Eq(variant:NucleotideAllele, v, allele:NM_000010_7_131_C))
+        -> logic:False);
+    justification:proof_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(
+                   fun (c : syngene:CohortCarried(syngene:survey_cohort, allele:NM_000010_7_130_T),
+                        d : eigentt:Eq(variant:NucleotideAllele, allele:NM_000010_7_130_T, allele:NM_000010_7_131_C) -> logic:False,
+                        h : forall (v : variant:NucleotideAllele) =>
+                                syngene:CohortCarried(syngene:survey_cohort, v)
+                                -> eigentt:Eq(variant:NucleotideAllele, v, allele:NM_000010_7_131_C)) =>
+                       d(h(allele:NM_000010_7_130_T, c))
+               ),
+               type_expr(
+                   syngene:CohortCarried(syngene:survey_cohort, allele:NM_000010_7_130_T)
+                   -> (eigentt:Eq(variant:NucleotideAllele, allele:NM_000010_7_130_T, allele:NM_000010_7_131_C) -> logic:False)
+                   -> (forall (v : variant:NucleotideAllele) =>
+                           syngene:CohortCarried(syngene:survey_cohort, v)
+                           -> eigentt:Eq(variant:NucleotideAllele, v, allele:NM_000010_7_131_C))
+                   -> logic:False) );
+}
+
+resource syn002:not_about_his_variant_trace : prov:DeclarationTrace {
+    prov:resource = syn002:not_about_his_variant;
+    prov:was_attributed_to = agent:eigenius_core_team;
+    prov:timestamp = "2026-10-02";
+}
+
+// ── Item 8c, step 3 — the mechanism bridge ───────────────────────────────────────────────
+
+resource syn002:mechanism : justification:Declaration {
+    core:description = "A hemizygous carrier of a protein-mediated allele whose protein reaches under 4% of wild-type binding sites at the membrane gets no reduction in urine output from the first-line agent at any dose.";
+    prov:was_attributed_to = syn002:analyst;
+    prov:had_primary_source = pmi:SYN_26_002_case_notes;
+    eigentt:proposition = type_expr(
+        forall (i : clinical:Individual) => forall (a : variant:NucleotideAllele) => forall (q : variant:ProteinAllele) =>
+            clinical:Carries(i, a, clinical:hemizygous)
+            -> variant:TranslatesTo(a, q)
+            -> variant:ProteinMediated(a)
+            -> syngene:MembraneSitesBelow(q, 0.04r)
+            -> syngene:ReducesOutput(syngene:first_line_agent, i)
+            -> logic:False);
+}
+
+resource syn002:mechanism_trace : prov:DeclarationTrace {
+    prov:resource = syn002:mechanism;
+    prov:was_attributed_to = syn002:analyst;
+    prov:had_primary_source = pmi:SYN_26_002_case_notes;
+    prov:rationale = "'The mechanism predicts it cannot work: the receptor does not reach the membrane in sufficient quantity for a ligand-side intervention to matter.' The notes state no threshold; the bridge is stated at 4%, the value the case needs. Below which fraction it holds (k) is open.";
+    prov:timestamp = "2026-07-15";
+}
+
+// ── Claim 7 — chaperone rescue, cell model to child ──────────────────────────────────────
+// A hypothesis: the analyst flags it, and nobody declares it — "the leap from a trafficking rescue
+// in vitro to urine output in a three-year-old is not supported by anything we found". No trace,
+// so no witness: nothing can cite it as a ground (`08-refused.esl`).
+
+resource syn002:chaperone_hypothesis : enc:Hypothesis {
+    core:description = "If the chaperone-class agents rescue trafficking in cell models, they reduce this child's urine output.";
+    prov:was_attributed_to = syn002:analyst;
+    eigentt:proposition = type_expr(
+        syngene:RescuesTraffickingInCells(syngene:chaperone_agents)
+        -> syngene:ReducesOutput(syngene:chaperone_agents, pmi:SYN_26_002_proband));
+}

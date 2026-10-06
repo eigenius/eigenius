@@ -1250,6 +1250,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-pmi-registry"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "eigenius-encoding",
+ "eigenius-kernel",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "eigenius-r"
 version = "0.1.0"
 dependencies = [

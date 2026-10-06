@@ -72912,6 +72912,18 @@
     "confidence": 0.93
   },
   {
+    "cui": "C0085602",
+    "offset": "14040966",
+    "surface": "polydipsia",
+    "confidence": 1.0
+  },
+  {
+    "cui": "C0085602",
+    "offset": "14040966",
+    "surface": "polydipsias",
+    "confidence": 1.0
+  },
+  {
     "cui": "C0085619",
     "offset": "14369913",
     "surface": "orthopnea",

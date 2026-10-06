@@ -9,6 +9,38 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **entry 3 (`2026-10-02`). UAB experiment 02 — typing a PMI registry case, on
+> `uab-experiment-02`. ACTIVE.**
+>
+> **Done on this branch:** HPO 2026-09-01 imported and aligned with UMLS (`4b07e11`); the design,
+> `docs/design/d99-uab-registry-case-typing.md` (`6b3c307`), all ten decisions decided
+> `2026-10-02` (decision 3: functional predicates on the protein allele; decision 10: disequality
+> by congruence plus a literal-apartness kernel rule, and `DecEq` removed); a findings write-up
+> shared with the PMI team (five questions open; D99's defaults stand in until they answer).
+> **Built (uncommitted):** decision 10 — `Apart`, a J rule that checks its motive, the codec and
+> ESL identity forms, `proof_judgement` on any resource (D89 §2), `DecEq` removed
+> (`kernel/tests/disequality_by_field.rs`).
+> Also built: the `variant` and `clinical` layers (`kernel/tests/d99_layers.rs`; `case` is an ESL
+> keyword), with witness keys hashed in normal form on both ends.
+> Also built: D99 decision 11 — `core:EquivalentClasses` (OWL's class equivalence as a resource,
+> subsumption only, Rule 26, SSSOM-style justification; `kernel/tests/class_equivalence.rs`) and
+> the HPO ≡ WordNet ≡ UMLS layer it carries (863 equivalences); the `_name`-entry gap in both
+> alignment emitters, which left 8,107 named-condition entries on their UMLS concept (traced from
+> "failure to thrive").
+> Reseeded `2026-10-02` from `e39d231` (`uab-d99-2026-10-02`); the chain for experiment 02 is
+> `uab-d99-r2-hpo-aligned-2026-10-02` (polydipsia maintainer override, bare-standing HPO names).
+> Gate: 62/62, readings 612, skeletons 212, selection 30/41. Docker: host ports in Windows'
+> reserved range (50060–50159 since the restart) fail; the isolated kernel uses 18051.
+> Recorded the r2 draw as the tracked selections and baseline. The phenotype form is decided:
+> `wn:v00065370_t(kind_of(<HP class>), individual)`, WordNet's illness sense of *have*.
+> **Built (uncommitted, 2026-10-02):** D99 steps 4–7 — the converter
+> (`crates/eigenius-pmi-registry`), the SYN-26-002 chain and README (`experiments/pmi-registry/`),
+> the `clinvar` release layer, and the chain tests (in-memory, and on the r2 snapshot; both pass).
+> **Next:** the owner's review of the README's "Choices made in building the chain"; then the
+> merge to main. Step 8 (parse the prose) is optional and needs singular *patient*.
+>
+> **Exit gate:** D99's steps 1–7 built and tested; the branch reseeded and merged.
+
 > **entry 2 (`2026-09-30`). D95 follow-up, on `d95-fold-states-the-order`. ACTIVE.**
 >
 > **Found after the merge:** the factor comparatives stated only the opaque `fold_lower`, so nothing

@@ -26,3 +26,8 @@ chain = ["dep:eigenius-kernel", "dep:eigenius-storage-rocksdb"]
 name = "lexicon-align-emit"
 path = "src/bin/lexicon-align-emit.rs"
 required-features = ["chain"]
+
+[[bin]]
+name = "lexicon-align-hpo-emit"
+path = "src/bin/lexicon-align-hpo-emit.rs"
+required-features = ["chain"]

@@ -387,7 +387,14 @@ fn class_with_subclass_closure(class_iri: &Iri, layer: &Layer) -> BTreeSet<Iri> 
         return closure;
     }
     let mut frontier: Vec<Iri> = vec![class_iri.clone()];
+    // D99 §11 — a class declared equivalent to one in the closure is in it, with its subclasses.
+    let equivalences = layer.class_equivalences();
     while let Some(parent) = frontier.pop() {
+        for e in equivalences.equivalents(&parent) {
+            if closure.insert(e.clone()) {
+                frontier.push(e.clone());
+            }
+        }
         for sub in scan_chain(layer, &subclass_of, &parent) {
             if closure.insert(sub.clone()) {
                 frontier.push(sub);

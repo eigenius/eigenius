@@ -134,10 +134,21 @@ pub enum Exp {
     /// Used for min_value, max_value, pattern, format, etc.
     NativeDecide(Constraint, Box<Exp>),
 
-    /// Decidable equality: DecEq(A, x, y) reduces to Refl if x = y,
-    /// or a neutral term if undecidable. Works on ground types (String,
-    /// Integer, Float, Boolean, IRI).
-    DecEq(Box<Exp>, Box<Exp>, Box<Exp>),
+    /// Literal apartness: `Apart(A, x, y) : Id(A, x, y) -> logic:False` (D99 §10).
+    ///
+    /// Well-typed only when `x` and `y` evaluate to DISTINCT canonical literals — a string,
+    /// an integer, a boolean, an exact rational or a unit (see [`crate::nbe::eval::literals_apart`]).
+    /// Canonical forms make that sound: two distinct canonical literals are distinct values, so
+    /// no `Id(A, x, y)` between them is inhabited. Floats are excluded — `NaN` is not equal to
+    /// itself and `0.0` equals `-0.0`, so `!=` on `f64` is not apartness. So are resources and
+    /// classes: two IRIs may name one thing, and nothing here assumes unique names.
+    ///
+    /// With congruence (`IdJ`) and field access (`PropAccess`), it proves two resources
+    /// distinct whenever one of their fields holds distinct literals.
+    ///
+    /// Replaced `DecEq(A, x, y)`, which was typed `Id(A, x, y)` whether or not `x ≡ y` and so
+    /// inhabited a false equality whenever they differed.
+    Apart(Box<Exp>, Box<Exp>, Box<Exp>),
 
     /// Non-dependent function type: A → B (sugar for Π _ : A. B)
     Arrow(Box<Exp>, Box<Exp>),
@@ -855,7 +866,7 @@ impl Exp {
                 go(&six[5]),
             ])),
             Exp::NativeDecide(c, b) => Exp::NativeDecide(c.clone(), bx(b)),
-            Exp::DecEq(a, b, c) => Exp::DecEq(bx(a), bx(b), bx(c)),
+            Exp::Apart(a, b, c) => Exp::Apart(bx(a), bx(b), bx(c)),
             Exp::Arrow(a, b) => Exp::Arrow(bx(a), bx(b)),
             Exp::Times(a, b) => Exp::Times(bx(a), bx(b)),
             Exp::PropAccess(a, i) => Exp::PropAccess(bx(a), i.clone()),

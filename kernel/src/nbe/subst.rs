@@ -118,9 +118,16 @@ fn collect_free(e: &Exp, bound: &mut BTreeSet<String>, out: &mut BTreeSet<String
             collect_free(a, bound, out);
             collect_free(b, bound, out);
         }
-        Exp::Fst(a) | Exp::Snd(a) | Exp::Refl(a) => collect_free(a, bound, out),
-        Exp::Id(a, b, c) => {
+        Exp::Fst(a) | Exp::Snd(a) | Exp::Refl(a) | Exp::PropAccess(a, _) => {
+            collect_free(a, bound, out)
+        }
+        Exp::Id(a, b, c) | Exp::Apart(a, b, c) => {
             for x in [a, b, c] {
+                collect_free(x, bound, out);
+            }
+        }
+        Exp::IdJ(six) => {
+            for x in six.iter() {
                 collect_free(x, bound, out);
             }
         }
@@ -181,6 +188,19 @@ fn subst_inner(
         Exp::Snd(a) => Exp::Snd(Box::new(go(a)?)),
         Exp::Refl(a) => Exp::Refl(Box::new(go(a)?)),
         Exp::Id(a, b, c) => Exp::Id(Box::new(go(a)?), Box::new(go(b)?), Box::new(go(c)?)),
+        // D99 §10 — the identity eliminator, field access and literal apartness, which the codec
+        // carries so a disequality proof (congruence over a field, then `Apart`) is a chain term.
+        // None binds a variable: `IdJ`'s motive and method are themselves terms (lambdas).
+        Exp::Apart(a, b, c) => Exp::Apart(Box::new(go(a)?), Box::new(go(b)?), Box::new(go(c)?)),
+        Exp::PropAccess(a, prop) => Exp::PropAccess(Box::new(go(a)?), prop.clone()),
+        Exp::IdJ(six) => Exp::IdJ(Box::new([
+            go(&six[0])?,
+            go(&six[1])?,
+            go(&six[2])?,
+            go(&six[3])?,
+            go(&six[4])?,
+            go(&six[5])?,
+        ])),
 
         Exp::InductiveCtor(d, n, args) => Exp::InductiveCtor(
             d.clone(),
@@ -202,7 +222,9 @@ fn subst_inner(
         | Exp::LitString(_)
         | Exp::LitInt(_)
         | Exp::LitFloat(_)
-        | Exp::LitBool(_) => body.clone(),
+        | Exp::LitBool(_)
+        | Exp::LitRat(_)
+        | Exp::LitUnit(_) => body.clone(),
 
         // Everything else is outside the fragment. Refusing is the point — see the module docs.
         other => return Err(SubstError::OutsideFragment(variant_name(other))),
@@ -216,10 +238,7 @@ fn variant_name(e: &Exp) -> &'static str {
         Exp::Data(..) => "Data",
         Exp::Case(..) => "Case",
         Exp::Dec(..) => "Dec",
-        Exp::IdJ(..) => "IdJ",
         Exp::NativeDecide(..) => "NativeDecide",
-        Exp::DecEq(..) => "DecEq",
-        Exp::PropAccess(..) => "PropAccess",
         Exp::Template(..) => "Template",
         Exp::Construct(..) => "Construct",
         Exp::Map(..) => "Map",

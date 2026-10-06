@@ -41,14 +41,16 @@
 
 use std::collections::BTreeMap;
 
-/// One entry rewrite: the entry's IRI, and the WordNet class it should now denote.
+/// One entry rewrite: the entry's IRI, and the class it should now denote.
 #[derive(Debug, Clone)]
 pub struct Rewrite {
     pub entry_iri: String,
     /// The `num` argument of the original `cat_n(C, num)` — `num_any` or `mass`. **Preserved**: the
     /// additive mass variant must stay a mass variant.
     pub num: String,
-    pub wn_offset: String,
+    /// The canonical class, as an ESL name the layer's header declares a namespace for:
+    /// `wn:n00024720` (WordNet↔UMLS), `hp:'0001250'` (HPO↔UMLS, [`crate::hpo::hp_qname`]).
+    pub class: String,
     /// Everything else, passed through verbatim.
     pub form: String,
     pub sense: String,
@@ -78,6 +80,28 @@ namespace umlscui    = \"urn:eigenius:umlscui\";
 namespace wn         = \"urn:eigenius:wn\";
 ";
 
+/// The header of the HPO↔UMLS layer ([`crate::hpo`]). Same mechanism, same guarantees: only `cat`
+/// and `sem` change, no class is created or modified, no `subclass_of` edge is emitted.
+pub const HPO_HEADER: &str = "\
+// ════════════════════════════════════════════════════════════════════
+// HPO↔UMLS concept unification — the ALIGNMENT LAYER.
+//
+// Each resource below REDEFINES a UMLS lexical entry whose concept NLM maps (MRCONSO, SAB=HPO) to
+// exactly one live HPO class, and whose surface is one of that class's own HPO names. Only `cat` and
+// `sem` change: the entry now denotes the HPO class.
+// Every other property is passed through from the committed entry unchanged. Concepts the
+// WordNet↔UMLS layer already took to a synset are left to WordNet.
+//
+// An HPO name stands bare: where the surface has neither a `_mass` nor a D70 `_name` entry, a
+// `_name` entry (`cat_n(<HP class>, name)`) is added beside it.
+//
+// No class is created or modified; no `subclass_of` edge is emitted.
+// ════════════════════════════════════════════════════════════════════
+namespace lexicon    = \"urn:eigenius:lexicon\";
+namespace umlscui    = \"urn:eigenius:umlscui\";
+namespace hp         = \"urn:obo:HP\";
+";
+
 fn esc(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -92,14 +116,14 @@ pub fn render(r: &Rewrite) -> String {
     format!(
         "resource umlscui:{local} : lexicon:LexicalEntry {{\n\
          \x20   lexicon:form       = \"{form}\";\n\
-         \x20   lexicon:cat        = type_expr( lexicon:cat_n(wn:n{off}, lexicon:{num}) );\n\
-         \x20   lexicon:sem        = wn:n{off};\n\
+         \x20   lexicon:cat        = type_expr( lexicon:cat_n({class}, lexicon:{num}) );\n\
+         \x20   lexicon:sem        = {class};\n\
          \x20   lexicon:sem_type   = type_expr( {sem_type} );\n\
          \x20   lexicon:sense      = \"{sense}\";\n\
          \x20   lexicon:in_lexicon = {in_lexicon};\n\
          }}\n\n",
         form = esc(&r.form),
-        off = r.wn_offset,
+        class = r.class,
         num = r.num,
         sem_type = r.sem_type,
         sense = esc(&r.sense),
@@ -111,6 +135,40 @@ pub fn render(r: &Rewrite) -> String {
 pub type Merges = BTreeMap<(String, String), String>;
 
 /// Load `merges.json` (the adjudicated, conflict-resolved alignment).
+/// The class-equivalence layer (D99 §11): one `core:EquivalentClasses` per UMLS concept that the
+/// WordNet↔UMLS alignment took to a synset and exactly one live HPO code names.
+pub const HPO_EQUIVALENCE_HEADER: &str = "\
+// ════════════════════════════════════════════════════════════════════
+// HPO ≡ WordNet ≡ UMLS — the CLASS-EQUIVALENCE LAYER (D99 §11).
+//
+// Each resource below declares an HPO class, a WordNet synset and a UMLS concept equivalent: NLM maps
+// the HPO code to the concept (MRCONSO, SAB=HPO), and the WordNet↔UMLS adjudication maps the concept
+// to the synset (merges.json) — a chain of two published mappings, semapv:MappingChaining.
+//
+// No class is created or modified. Subsumption reads the equivalence; class definitions do not.
+// ════════════════════════════════════════════════════════════════════
+namespace core       = \"urn:eigenius:core\";
+namespace prov       = \"urn:eigenius:prov\";
+namespace agent      = \"urn:eigenius:prov:agent\";
+namespace umlscui    = \"urn:eigenius:umlscui\";
+namespace wn         = \"urn:eigenius:wn\";
+namespace hp         = \"urn:obo:HP\";
+namespace hpoequiv   = \"urn:eigenius:align:hpo-wordnet\";
+";
+
+/// One equivalence of [`HPO_EQUIVALENCE_HEADER`]'s layer.
+pub fn render_equivalence(cui: &str, hp_code: &str, hp_class: &str, wn_offset: &str) -> String {
+    format!(
+        "resource hpoequiv:{cui} : core:EquivalentClasses {{\n\
+         \x20   core:description = \"{hp_code}, WordNet synset {wn_offset} and UMLS concept {cui} name one class (D99 §11).\";\n\
+         \x20   core:classes = [{hp_class}, wn:n{wn_offset}, umlscui:{cui}];\n\
+         \x20   core:mapping_justification = \"semapv:MappingChaining\";\n\
+         \x20   prov:was_attributed_to = agent:eigenius_core_team;\n\
+         \x20   prov:rationale = \"MRCONSO (SAB=HPO) maps {hp_code} to {cui}; the WordNet-UMLS adjudication (merges.json) maps {cui} to synset {wn_offset}.\";\n\
+         }}\n\n"
+    )
+}
+
 pub fn load_merges(path: &std::path::Path) -> std::io::Result<Merges> {
     #[derive(serde::Deserialize)]
     struct M {
@@ -136,7 +194,7 @@ mod tests {
         let r = Rewrite {
             entry_iri: "urn:eigenius:umlscui:e_C1442792_0".into(),
             num: "num_any".into(),
-            wn_offset: "00024720".into(),
+            class: "wn:n00024720".into(),
             form: "State".into(),
             sense: "umls:C1442792".into(),
             in_lexicon: "lexicon:umls".into(),
@@ -165,7 +223,7 @@ mod tests {
         let r = Rewrite {
             entry_iri: "urn:eigenius:umlscui:e_C1442792_0_mass".into(),
             num: "mass".into(),
-            wn_offset: "00024720".into(),
+            class: "wn:n00024720".into(),
             form: "State".into(),
             sense: "umls:C1442792".into(),
             in_lexicon: "lexicon:umls".into(),
@@ -174,5 +232,23 @@ mod tests {
         let esl = render(&r);
         assert!(esl.contains("lexicon:cat_n(wn:n00024720, lexicon:mass)"));
         assert!(esl.contains("resource umlscui:e_C1442792_0_mass :"));
+    }
+
+    #[test]
+    fn an_hpo_redefinition_points_the_entry_at_the_hp_class() {
+        let r = Rewrite {
+            entry_iri: "urn:eigenius:umlscui:e_C0036572_0".into(),
+            num: "num_any".into(),
+            class: crate::hpo::hp_qname("HP:0001250"),
+            form: "Seizures".into(),
+            sense: "umls:C0036572".into(),
+            in_lexicon: "lexicon:umls".into(),
+            sem_type: "Set".into(),
+        };
+        let esl = render(&r);
+        assert!(esl.contains("lexicon:cat_n(hp:'0001250', lexicon:num_any)"));
+        assert!(esl.contains("lexicon:sem        = hp:'0001250';"));
+        assert!(esl.contains("resource umlscui:e_C0036572_0 :"));
+        assert!(!esl.contains("subclass"));
     }
 }

@@ -405,6 +405,11 @@ pub const IS_A: &str = "urn:eigenius:core:is_a";
 pub const DESCRIPTION: &str = "urn:eigenius:core:description";
 pub const SHORT_NAME: &str = "urn:eigenius:core:short_name";
 pub const PARENT_CLASSES: &str = "urn:eigenius:core:subclass_of";
+/// `core:EquivalentClasses` — classes that denote the same thing (D99 §11, OWL 2's
+/// `EquivalentClasses`). Consulted by [`crate::layer::Layer::is_subclass_of`] for subsumption only.
+pub const EQUIVALENT_CLASSES: &str = "urn:eigenius:core:EquivalentClasses";
+/// `core:classes` — the classes an [`EQUIVALENT_CLASSES`] resource lists.
+pub const EQUIVALENT_CLASSES_MEMBERS: &str = "urn:eigenius:core:classes";
 pub const REQUIRES: &str = "urn:eigenius:core:requires";
 pub const RECOMMENDS: &str = "urn:eigenius:core:recommends";
 pub const DATA_TYPE_PROP: &str = "urn:eigenius:core:data_type";
@@ -634,6 +639,10 @@ pub const IS_A_TYPE: &str = "urn:eigenius:eigentt:is_a_type";
 pub const CHAIN_WITNESS_IS_DECLARED_AS: &str = "urn:eigenius:witness:IsDeclaredAs";
 pub const CHAIN_WITNESS_IS_OBSERVED_AS: &str = "urn:eigenius:witness:IsObservedAs";
 pub const CHAIN_WITNESS_IS_VERIFIED_AS: &str = "urn:eigenius:witness:IsVerifiedAs";
+
+/// `logic:False` — bottom, the codomain of a negation (`ontologies/logic/logic.esl`). Named here
+/// because the kernel's own `Exp::Apart` rule types its proof as `Id(A, x, y) -> logic:False`.
+pub const LOGIC_FALSE: &str = "urn:eigenius:logic:False";
 
 /// Helper: map a class IRI for one of the three `ChainWitness.IsXxAs`
 /// predicate types to its `WitnessCategory`, or `None` if the IRI is

@@ -63,6 +63,12 @@ struct Args {
     /// the graph IRI — e.g. ingesting a community-curated subset.
     #[arg(long)]
     declared_by: Option<String>,
+
+    /// Place every live root class under this class (`core:subclass_of`) — e.g.
+    /// `urn:eigenius:lexicon:Entity`, so an ontology imported for the lexicon sits in its
+    /// `Entity` lattice. Omitted, the roots stay parentless.
+    #[arg(long)]
+    root_anchor: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -85,6 +91,7 @@ fn main() -> ExitCode {
 
     let opts = ConvertOptions {
         declared_by: args.declared_by.clone(),
+        root_anchor: args.root_anchor.clone(),
     };
     let report = convert_document_with(&doc, &opts);
 

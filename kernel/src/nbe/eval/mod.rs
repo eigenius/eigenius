@@ -531,8 +531,21 @@ pub(crate) fn eval_impl<T: Tracer>(
                     Ok((result, T::combine(vec![p_node, d_node, app_node])))
                 }
                 Val::Nt(n) => {
-                    // Blocked — all args become neutral
-                    Ok((Val::Nt(Neut::App(Box::new(n), Box::new(Val::Unit))), p_node))
+                    // Blocked on a neutral proof: a normal form that keeps every argument, so
+                    // readback reconstructs the J (D99 §10).
+                    let [a, c, d, x, y, _] = args.as_ref();
+                    let (a_val, a_node) = ev(a)?;
+                    let (c_val, c_node) = ev(c)?;
+                    let (d_val, d_node) = ev(d)?;
+                    let (x_val, x_node) = ev(x)?;
+                    let (y_val, y_node) = ev(y)?;
+                    Ok((
+                        Val::Nt(Neut::IdJ(
+                            Box::new([a_val, c_val, d_val, x_val, y_val]),
+                            Box::new(n),
+                        )),
+                        T::combine(vec![p_node, a_node, c_node, d_node, x_node, y_node]),
+                    ))
                 }
                 _ => {
                     // Stuck — proof argument is neither Refl nor neutral.
@@ -612,16 +625,20 @@ pub(crate) fn eval_impl<T: Tracer>(
             Ok((result, node))
         }
 
-        // Decidable equality on ground types
-        Exp::DecEq(_a, x, y) => {
+        // Literal apartness (D99 §10): a proof of `Id(A, x, y) -> logic:False`, with no
+        // reduction rule. Whether `x` and `y` ARE apart is the type rule's question, not this one.
+        Exp::Apart(a, x, y) => {
+            let (a_val, an) = ev(a)?;
             let (x_val, xn) = ev(x)?;
             let (y_val, yn) = ev(y)?;
-            let result = if ground_values_equal(&x_val, &y_val) {
-                Val::Refl(Box::new(x_val))
-            } else {
-                Val::Nt(Neut::Gen(usize::MAX, "__deceq_false".to_string()))
-            };
-            Ok((result, T::combine(vec![xn, yn])))
+            Ok((
+                Val::Nt(Neut::Apart(
+                    Box::new(a_val),
+                    Box::new(x_val),
+                    Box::new(y_val),
+                )),
+                T::combine(vec![an, xn, yn]),
+            ))
         }
 
         // Template literal — evaluate type expressions for each reference
@@ -890,36 +907,25 @@ fn match_dispatch<T: Tracer>(
     eval_impl::<T>(&arm.body, &env, ctx)
 }
 
-/// Check equality of ground-type values.
-/// Returns true for equal concrete values, false otherwise.
-/// Handles: EigonPrimitive-wrapped resources, EigonClass IRIs, Unit.
-fn ground_values_equal(x: &Val, y: &Val) -> bool {
+/// Whether two values are DISTINCT canonical literals — the side condition of `Exp::Apart`
+/// (D99 §10), so the soundness of that rule rests on this function.
+///
+/// True only for two literals of one carrier whose canonical forms differ: strings, integers,
+/// booleans, exact rationals (canonical by construction, D94) and units (canonical by
+/// construction, D93). Everything else is `false`, which refuses the proof rather than admitting
+/// it:
+///
+/// - **floats** — `NaN != NaN` and `0.0 == -0.0`, so `!=` on `f64` is not apartness;
+/// - **resources and classes** — two IRIs may name one thing, and nothing assumes unique names;
+///   two resources are apart through a field (`PropAccess`), never by their names;
+/// - **neutrals and anything structured** — not yet a value, or not a literal.
+pub fn literals_apart(x: &Val, y: &Val) -> bool {
     match (x, y) {
-        (Val::Unit, Val::Unit) => true,
-        (Val::EigonClass(a), Val::EigonClass(b)) => a == b,
-        (Val::EigonPrimitive(a), Val::EigonPrimitive(b)) => a == b,
-        // eigenius#142 — literals are ground values; without these
-        // `DecEq(LitInt(1), LitInt(1))` fell through to `false`.
-        (Val::LitString(a), Val::LitString(b)) => a == b,
-        (Val::LitInt(a), Val::LitInt(b)) => a == b,
-        (Val::LitFloat(a), Val::LitFloat(b)) => a == b,
-        (Val::LitBool(a), Val::LitBool(b)) => a == b,
-        // Canonical form is what makes this structural: two rationals are equal iff their
-        // components are, so `conv` does no arithmetic (D94).
-        (Val::LitRat(a), Val::LitRat(b)) => a == b,
-        // Same for units (D93): `units::Unit` is a fixed-order array of reduced exponents, canonical
-        // by construction, so `m·s^-1·m` and `m^2·s^-1` ARE the same value and compare equal without
-        // normalising here.
-        (Val::LitUnit(a), Val::LitUnit(b)) => a == b,
-        (Val::ResourceVal(a), Val::ResourceVal(b)) => {
-            // Compare resource contents for equality
-            a.properties() == b.properties() && a.id() == b.id()
-        }
-        (Val::Con(c1, v1), Val::Con(c2, v2)) => c1 == c2 && ground_values_equal(v1, v2),
-        (Val::Pair(a1, b1), Val::Pair(a2, b2)) => {
-            ground_values_equal(a1, a2) && ground_values_equal(b1, b2)
-        }
-        (Val::Refl(a), Val::Refl(b)) => ground_values_equal(a, b),
+        (Val::LitString(a), Val::LitString(b)) => a != b,
+        (Val::LitInt(a), Val::LitInt(b)) => a != b,
+        (Val::LitBool(a), Val::LitBool(b)) => a != b,
+        (Val::LitRat(a), Val::LitRat(b)) => a != b,
+        (Val::LitUnit(a), Val::LitUnit(b)) => a != b,
         _ => false,
     }
 }
@@ -994,28 +1000,25 @@ mod tests {
         Ok(())
     }
 
-    /// D94 — canonical form is what lets `conv` compare rationals structurally. Without the
-    /// `LitRat` arm in `ground_values_equal`, `DecEq(LitRat(1/2), LitRat(1/2))` falls through to
-    /// false, which is the bug eigenius#142 fixed for `LitInt`.
+    /// D94 — canonical form is what makes rationals comparable structurally: `1/2` and `50/100`
+    /// are one value, so they are not apart, while `1/2` and `1/3` are.
     #[test]
-    fn equal_rationals_are_definitionally_equal_however_written() -> Result<(), EvalError> {
+    fn equal_rationals_are_not_apart_however_written() -> Result<(), EvalError> {
         let rat = |n: i64, d: i64| {
             Exp::LitRat(crate::numeric::Rational::new(n.into(), d.into()).expect("admissible"))
         };
         let half = eval(&rat(1, 2), &Rho::Nil)?;
         let also_half = eval(&rat(50, 100), &Rho::Nil)?;
         let third = eval(&rat(1, 3), &Rho::Nil)?;
-        assert!(ground_values_equal(&half, &also_half));
-        assert!(!ground_values_equal(&half, &third));
+        assert!(!literals_apart(&half, &also_half));
+        assert!(literals_apart(&half, &third));
         Ok(())
     }
 
-    /// D93 — the arm the compiler does NOT flag. `units::Unit` canonicalises on construction, so
-    /// `m·s⁻¹·m` and `m²·s⁻¹` are one value and must compare equal; without the `LitUnit` arm in
-    /// `ground_values_equal` they fall through to `false`, which is eigenius#142's bug on a new
-    /// carrier.
+    /// D93 — `units::Unit` canonicalises on construction, so `m·s⁻¹·m` and `m²·s⁻¹` are one
+    /// value and must not be apart; `m·s⁻¹·m` and `m` are.
     #[test]
-    fn equal_units_are_definitionally_equal_however_written() -> Result<(), EvalError> {
+    fn equal_units_are_not_apart_however_written() -> Result<(), EvalError> {
         use crate::units::{BaseDimension, Exponent, Unit};
         let m = Unit::base(BaseDimension::Length);
         let s_ = Unit::base(BaseDimension::Time);
@@ -1031,8 +1034,8 @@ mod tests {
         let a = eval(&Exp::LitUnit(long), &Rho::Nil)?;
         let b = eval(&Exp::LitUnit(short), &Rho::Nil)?;
         let c = eval(&Exp::LitUnit(m.clone()), &Rho::Nil)?;
-        assert!(ground_values_equal(&a, &b));
-        assert!(!ground_values_equal(&a, &c));
+        assert!(!literals_apart(&a, &b));
+        assert!(literals_apart(&a, &c));
         Ok(())
     }
 

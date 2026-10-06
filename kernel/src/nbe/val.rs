@@ -265,6 +265,18 @@ pub enum Neut {
     /// round-trip — reading a `Checked` back as an `EigonAxiom` would put "asserted without
     /// proof" and "checked by nanoda" in one form, which is exactly what D87 §4.1 withdrew.
     Checked(Iri),
+    /// `Exp::Apart(A, x, y)`'s value: a proof of `Id(A, x, y) -> logic:False` (D99 §10).
+    ///
+    /// A `Neut` for the reason `EigonAxiom` is one: it has no reduction rule. It is only ever
+    /// applied to a proof of `Id(A, x, y)`, which cannot exist for apart literals, so the
+    /// application stays a normal form of type `logic:False`. The indices are kept so readback
+    /// reconstructs the term and two of these compare by them.
+    Apart(Box<Val>, Box<Val>, Box<Val>),
+    /// `J(A, C, d, x, y, p)` blocked on a neutral proof `p` of `Id(A, x, y)` — the first five
+    /// arguments as values, then the blocked proof. It reduces once `p` is `refl`; until then it
+    /// is a normal form of type `C(x, y, p)`, and reads back to the `Exp::IdJ` it came from. A
+    /// blocked J used to evaluate to `p` applied to `()`, which reads back ill-typed.
+    IdJ(Box<[Val; 5]>, Box<Neut>),
     /// Property access on a neutral resource
     PropAccess(Box<Neut>, Iri),
 

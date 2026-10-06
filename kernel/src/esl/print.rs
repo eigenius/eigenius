@@ -441,6 +441,45 @@ impl Printer<'_> {
         }
     }
 
+    /// An identity form (D99 §10): `eigentt:Eq` / `refl` / `J` / `apart` / `field`, with its own
+    /// arguments and then any it is applied to, in one argument list.
+    fn identity_form(
+        &mut self,
+        ctor: &str,
+        own: &[Value],
+        extra: &[Value],
+        path: &str,
+        ind: usize,
+    ) -> Result<String, PrintError> {
+        let (a, _) = self
+            .ns
+            .split("urn:eigenius:eigentt:x")
+            .map_err(|e| self.err(e, path))?;
+        let spelling = match ctor {
+            "Id" => "Eq",
+            "Refl" => "refl",
+            "IdJ" => "J",
+            "Apart" => "apart",
+            _ => "field",
+        };
+        let mut parts = Vec::with_capacity(own.len() + extra.len());
+        for (i, arg) in own.iter().enumerate() {
+            parts.push(if ctor == "PropAccess" && i == 1 {
+                let iri = arg
+                    .as_str()
+                    .ok_or_else(|| self.err("`PropAccess` arg 1 must be a property IRI", path))?;
+                let (pa, pl) = self.ns.split(iri).map_err(|e| self.err(e, path))?;
+                format!("{pa}:{pl}")
+            } else {
+                self.go(arg, Prec::Arrow, &format!("{path}{ctor}[{i}]."), ind + STEP)?
+            });
+        }
+        for (i, arg) in extra.iter().enumerate() {
+            parts.push(self.go(arg, Prec::Arrow, &format!("{path}App#{i}."), ind + STEP)?);
+        }
+        Ok(format!("{a}:{spelling}({})", parts.join(", ")))
+    }
+
     fn go(&mut self, v: &Value, ctx: Prec, path: &str, ind: usize) -> Result<String, PrintError> {
         // Composite forms are the only ones with anywhere to break; everything else is an atom
         // whose flat rendering is the only rendering.
@@ -574,6 +613,13 @@ impl Printer<'_> {
                 Ok(format!("{prefix}{inner})"))
             }
 
+            // D99 §10 — the identity type and the proof-level forms, as their `eigentt:`
+            // pseudo-applications (`Compiler`'s `IdentityForm`). `Id` prints as `eigentt:Eq`:
+            // `eigentt:Id` would reparse as the quoted-term constructor `Id`.
+            "Id" | "Refl" | "IdJ" | "Apart" | "PropAccess" => {
+                self.identity_form(ctor, args, &[], path, ind)
+            }
+
             "Ann" => {
                 let e = self.go(&args[0], Prec::Binder, &sub(0), ind + STEP)?;
                 let t = self.go(&args[1], Prec::Binder, &sub(1), ind + STEP)?;
@@ -625,6 +671,19 @@ impl Printer<'_> {
                 // Unfold the curried spine: ESL writes `f(a, b)`, never `f(a)(b)`.
                 let (head, spine) = unfold_app(v);
                 let head_path = format!("{path}{}", "App[0].".repeat(spine.len()));
+                // An identity form applied — `eigentt:apart(T, x, y, p)` — takes the spine as
+                // extra arguments, the inverse of the compiler's curried reading.
+                if let Some(hctor @ ("Id" | "Refl" | "IdJ" | "Apart" | "PropAccess")) =
+                    head.get("ctor").and_then(Value::as_str)
+                {
+                    let own = head
+                        .get("args")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    let extra: Vec<Value> = spine.iter().map(|a| (*a).clone()).collect();
+                    return self.identity_form(hctor, &own, &extra, &head_path, ind);
+                }
                 let h = self.go(head, Prec::Atom, &head_path, ind)?;
                 let arg_col = ind + STEP;
                 let mut parts = Vec::with_capacity(spine.len());
@@ -823,6 +882,10 @@ const D47_CTORS: &[&str] = &[
     "ConstRef",
     "CtorApp",
     "Id",
+    "Refl",
+    "IdJ",
+    "Apart",
+    "PropAccess",
     "LitString",
     "LitInt",
     "LitRat",

@@ -27,7 +27,9 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use eigenius_lexicon_align::adjudicate::Verdict;
 use eigenius_lexicon_align::drops::{resolve_drops, DROP_CONFIDENCE};
-use eigenius_lexicon_align::merge::{resolve, MERGE_CONFIDENCE};
+use eigenius_lexicon_align::merge::{
+    apply_maintainer_verdicts, resolve, MaintainerVerdict, MERGE_CONFIDENCE,
+};
 use eigenius_lexicon_align::{candidates, gold, Candidate, GOLD_JACCARD};
 
 #[derive(Parser, Debug)]
@@ -119,6 +121,12 @@ enum Cmd {
         candidates: PathBuf,
         #[arg(long, default_value = "experiments/lexicon-align/alignment.jsonl")]
         verdicts: PathBuf,
+        /// Maintainer corrections to the verdicts (replace the adjudicator's on their pair).
+        #[arg(
+            long,
+            default_value = "experiments/lexicon-align/maintainer-verdicts.jsonl"
+        )]
+        maintainer_verdicts: PathBuf,
         #[arg(long, default_value = "experiments/lexicon-align/merges.json")]
         out: PathBuf,
     },
@@ -131,6 +139,12 @@ enum Cmd {
         candidates: PathBuf,
         #[arg(long, default_value = "experiments/lexicon-align/alignment.jsonl")]
         verdicts: PathBuf,
+        /// Maintainer corrections to the verdicts (replace the adjudicator's on their pair).
+        #[arg(
+            long,
+            default_value = "experiments/lexicon-align/maintainer-verdicts.jsonl"
+        )]
+        maintainer_verdicts: PathBuf,
         #[arg(long, default_value = "experiments/lexicon-align/drops.json")]
         out: PathBuf,
     },
@@ -144,11 +158,49 @@ fn load_candidates(p: &std::path::Path) -> std::io::Result<Vec<Candidate>> {
         .collect())
 }
 
+/// The adjudicator's verdicts with the maintainer's corrections applied
+/// ([`eigenius_lexicon_align::merge::apply_maintainer_verdicts`]). A missing file is no corrections;
+/// an unreadable row is an error, not a skipped correction.
+fn with_maintainer_verdicts(
+    verdicts: Vec<Verdict>,
+    mpath: &std::path::Path,
+) -> Result<Vec<Verdict>, ExitCode> {
+    let text = match std::fs::read_to_string(mpath) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(verdicts),
+        Err(e) => {
+            eprintln!("error: {} — {e}", mpath.display());
+            return Err(ExitCode::FAILURE);
+        }
+    };
+    let mut maintainer = Vec::new();
+    for (i, line) in text
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| !l.trim().is_empty())
+    {
+        match serde_json::from_str::<MaintainerVerdict>(line) {
+            Ok(m) => maintainer.push(m),
+            Err(e) => {
+                eprintln!("error: {}:{} — {e}", mpath.display(), i + 1);
+                return Err(ExitCode::FAILURE);
+            }
+        }
+    }
+    eprintln!(
+        "maintainer verdicts   {}   ({})",
+        maintainer.len(),
+        mpath.display()
+    );
+    Ok(apply_maintainer_verdicts(verdicts, &maintainer))
+}
+
 /// Verdicts + candidates → `merges.json`. The rules live in [`eigenius_lexicon_align::merge`]; this
 /// only does the IO and reports what the resolution dropped.
 fn build_merges(
     cpath: &std::path::Path,
     vpath: &std::path::Path,
+    mpath: &std::path::Path,
     out: &std::path::Path,
 ) -> ExitCode {
     let cands = match load_candidates(cpath) {
@@ -169,6 +221,10 @@ fn build_merges(
         .lines()
         .filter_map(|l| serde_json::from_str::<Verdict>(l).ok())
         .collect();
+    let verdicts = match with_maintainer_verdicts(verdicts, mpath) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
 
     let (merges, stats) = resolve(&cands, &verdicts);
 
@@ -201,6 +257,7 @@ fn build_merges(
 fn build_drops(
     cpath: &std::path::Path,
     vpath: &std::path::Path,
+    mpath: &std::path::Path,
     out: &std::path::Path,
 ) -> ExitCode {
     let cands = match load_candidates(cpath) {
@@ -221,6 +278,10 @@ fn build_drops(
         .lines()
         .filter_map(|l| serde_json::from_str::<Verdict>(l).ok())
         .collect();
+    let verdicts = match with_maintainer_verdicts(verdicts, mpath) {
+        Ok(v) => v,
+        Err(code) => return code,
+    };
 
     let (drops, stats) = resolve_drops(&cands, &verdicts);
 
@@ -287,13 +348,15 @@ fn main() -> ExitCode {
         Cmd::Merges {
             candidates: cpath,
             verdicts: vpath,
+            maintainer_verdicts: mpath,
             out,
-        } => build_merges(&cpath, &vpath, &out),
+        } => build_merges(&cpath, &vpath, &mpath, &out),
         Cmd::Drops {
             candidates: cpath,
             verdicts: vpath,
+            maintainer_verdicts: mpath,
             out,
-        } => build_drops(&cpath, &vpath, &out),
+        } => build_drops(&cpath, &vpath, &mpath, &out),
         Cmd::Candidates {
             meta_dir,
             dict,
