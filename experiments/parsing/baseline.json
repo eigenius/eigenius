@@ -1,18 +1,18 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "aeb67c3 (branch prepositions-and-ranker: D97 slice 2 verbs, the sense ranker on the decision interface, do-support one sense)",
-    "date": "2026-10-01",
+    "commit": "89ceffb (branch prepositions-and-ranker after merging origin/main a2a1076, UAB experiment 02)",
+    "date": "2026-10-05",
     "profile": "release",
     "features": [
       "use-llm"
     ],
     "reranker": "DecisionSenseRanker over AnthropicDecider, claude-sonnet-4-6, strict tool, choices of at most eight questions per request; the S-guide2 question (sense_ranker.rs sense_question), floor 0.02",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-aligned-2026-10-01-do-sense",
-    "ranks": "experiments/parsing/ranks/2026-10-01-do-sense.json",
-    "selections": "experiments/parsing/selections/2026-10-01-do-sense.json",
-    "replay": "62 hits, 0 misses; selection replay 42 hits, 0 misses — the live recording and its replay agree on every figure"
+    "snapshot": "wordnet-umls-hpo-aligned-2026-10-05-merge",
+    "ranks": "experiments/parsing/ranks/2026-10-01-do-sense.json, REPLAYED (62 hits, 0 misses)",
+    "selections": "experiments/parsing/selections/2026-10-05-hpo-merge-1.json",
+    "replay": "62 hits, 0 misses; selection replay 42 hits, 0 misses — the live selection draw and its replay agree on every figure"
   },
   "_provenance_note_2026-10-01-sense-ranker": "RE-BASELINE (the owner adopted S-guide2, 2026-10-01). Three changes since 93f3a64: D97 slice 2 (verbs), measured on wordnet-umls-aligned-2026-10-01-verbs at 656 readings / 220 skeletons / 62 of 62 with the old ranking prompt; the sense ranker moved onto the decision interface, one question per word, with the question chosen on an offline screen (S-guide2: a grammatical word has one reading here); and do-support as one sense key (c5d6d28), after S-guide2 kept «does»'s question entry and lost «Each event alone does not lead to cell death.». Deterministic replays of offline answers on this snapshot, same code: old prompt 646 / 229 / 62, S-guide2 714 / 205 / 62. 18 of the 24 fewer skeletons are «MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.» (36 -> 18), where S-guide2 seeds the comparative marker wn:great.a.01 over UMLS's 'Greater' qualifier C1704243; the extra readings are runners-up on content words, which an Anthropic answer cannot weigh (no probabilities, so the floor keeps every runner-up). THIS RECORDING (live, aeb67c3): 738 readings, 210 skeletons, 62 of 62, encoded 0 (the two units encoded under the old prompt, «MSI contributes to several cancers.» and «MSI occurs in colon, gastric, endometrial and ovarian cancers.», keep a second sense of «MSI»). The first live attempt lost two sentences to the strict grammar's size limit (804 / 236, discarded); aeb67c3 asks a choice in parts of eight questions. The live selection draw (jev-latest) scored 26 correct, 7 wrong, 9 unadjudicated; the selection baseline is re-derived separately, after adjudication.",
   "_provenance_note_2026-08-17-faithful-remeasure": "RE-MEASURED on a FAITHFUL run (2026-08-17, D69 slice 3). The tracked ranks draw (2026-08-13-d69-corrected) had been replaying 61/62 against the d70b snapshot ever since the D70 reseed — D70 changed candidate sense lists, so one rank key stopped matching — which means the 2026-08-15 d70b figures in this file were recorded with ONE SENTENCE UNRANKED, falling back to seed order. The protocol calls that 'a different experiment, not a reproduction'. Re-recorded live on d70b as ranks/2026-08-17-d70b.json; the live run and its replay now agree exactly (62 hits/0 misses, selection replay 40/0). NUMBERS MOVE, all improvements: total-readings 637 -> 613, total-skeletons 175 -> 170. UNCHANGED and confirmed on the faithful run: grammar-gap 0, encoded 2, expected-hits 62/62 with an empty miss-set — so D70's conclusions stand, they were simply measured imprecisely.",
@@ -41,7 +41,7 @@
     "open": 20,
     "encoded": 0,
     "total_readings_ceiling": 775,
-    "total_readings": 738,
+    "total_readings": 679,
     "skeletons_ceiling": 250,
     "skeletons": 210,
     "expected_reading_hits": 62,
@@ -121,6 +121,14 @@
     "instrument_caveat": "ranks.json records the RERANKER'S CANDIDATE LIST, built BEFORE lookup_span's dedup and cap. It shows what the model was ASKED, not what SEEDED. It cannot tell you how many cap slots a merge freed. (Misread three times on 2026-07-11/12.) The `sems` field makes merges visible — two senses with different labels and the SAME sem are one concept — but the pre-dedup caveat still stands."
   },
   "history": [
+    {
+      "date": "2026-10-05",
+      "commit": "89ceffb",
+      "encoded": 0,
+      "skeletons": 210,
+      "readings": 679,
+      "note": "The merged tree (origin/main a2a1076) on the HPO chain wordnet-umls-hpo-aligned-2026-10-05-merge. Do-sense ranks replayed (62/0); readings 738 -> 679; new live selection draw, replayed 42/0."
+    },
     {
       "date": "2026-10-02",
       "commit": "52d0af9",
@@ -592,5 +600,6 @@
   "_provenance_note_2026-09-30-ledger-checks": "Seven pins moved to the WRN PROTEIN kind on the maintainer's rulings of 2026-09-30 (need-claims — essential, dispensable, dependency, dependent on — take the protein, and so does a drug target, the protein a drug acts on): «WRN was dispensable in models of microsatellite-stable cancers.», «We found that WRN was selectively essential in MSI models.», «We evaluated MSI as a biomarker for WRN dependency.», «Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines.», «These observations suggest that WRN dependency is not simply a result of MMR deficiency.», «MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.», «These findings show that WRN is a promising drug target for MSI cancers.». Every gene skeleton in these units has a protein twin in the forest. Replayed at ea85d49 on the same snapshot and rankings: expected-hits 62/62, no misses, readings 668, skeletons 215 — every gated figure unchanged. «WRN dependency may require…» keeps its kind-form pin, now with the reason. See selection-baseline.json's note of the same date. «These findings show that WRN is a synthetic-lethal vulnerability for MSI cancers.» keeps its gene-individual pin; the rulings do not cover it.",
   "_provenance_note_2026-09-30-attachments": "Three pins moved to the verb-adjunct encoding on the maintainer's rulings of 2026-09-30 (eigenius#264): «Project Achilles screened cell lines with a CRISPR library.» and «Project DRIVE analysed cell lines with an RNA interference library.» (the library is the instrument), and «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.» (the locative scopes over both effects). Replayed at cf0e84f on the same snapshot and rankings: expected-hits 62/62, no misses, readings 668, skeletons 215 — every gated figure unchanged.",
   "_provenance_note_2026-10-02-uab-d99": "UAB EXPERIMENT 02 RESEED (2026-10-02, branch uab-experiment-02). Reseeded from e39d231 (uab-d99-2026-10-02: the OBO meta-ontology of 4b07e11, the eigentt:Term proof constructors and core:EquivalentClasses of 7878e8d) and aligned with the corrected emitters; the measured chain is uab-d99-r2-hpo-aligned-2026-10-02 (WordNet↔UMLS, HPO, HPO↔UMLS + HPO≡WordNet≡UMLS equivalences, the polydipsia maintainer override and bare-standing HPO names of 52d0af9). Measured at 52d0af9, clean tree. Readings 652 -> 612, every other figure equal (grammar-gap 0, encoded 1, expected hits 62/62, skeletons 212). The drop appeared on the first d99 alignment (uab-d99-hpo-aligned-2026-10-02, 612) and is attributed to cecbe94: both alignment emitters had left D70's `_name` entries on the UMLS concept (8,107 entries), so a named condition carried a UMLS reading beside its aligned one; the equivalence layer and the r2 changes do not move it. The slice-8 rankings replay with 0 misses; the selection draw is new (the forest changed), and the ledger records the owner's 2026-10-02 verdict on its one novel reading.",
-  "_provenance_note_2026-10-05-merge-main": "MERGED origin/main a2a1076 (UAB experiment 02, #269) on 2026-10-05. Both branches changed bootstrap ontologies (main: core, obo, clinvar, variant; this branch: lexicon, closed-class), and no snapshot has been seeded from the merged bootstrap: the merged code refuses wordnet-umls-aligned-2026-10-01-do-sense with ManifestDrift. `provenance` and `expected` therefore describe this branch before the merge (2574984) until a reseed with the merged importers is measured. Main's measurement, on uab-d99-r2-hpo-aligned-2026-10-02, is in _provenance_note_2026-10-02-uab-d99. The merge took the maintainer's ruling of 2026-10-02 that «analysed» v00644583 is a faithful reading of analysing a data set, which re-rules rows on «We analysed two independent cancer dependency data sets.»."
+  "_provenance_note_2026-10-05-merge-main": "MERGED origin/main a2a1076 (UAB experiment 02, #269) on 2026-10-05. Both branches changed bootstrap ontologies (main: core, obo, clinvar, variant; this branch: lexicon, closed-class), and no snapshot has been seeded from the merged bootstrap: the merged code refuses wordnet-umls-aligned-2026-10-01-do-sense with ManifestDrift. `provenance` and `expected` therefore describe this branch before the merge (2574984) until a reseed with the merged importers is measured. Main's measurement, on uab-d99-r2-hpo-aligned-2026-10-02, is in _provenance_note_2026-10-02-uab-d99. The merge took the maintainer's ruling of 2026-10-02 that «analysed» v00644583 is a faithful reading of analysing a data set, which re-rules rows on «We analysed two independent cancer dependency data sets.». MEASURED the same day: see _provenance_note_2026-10-05-hpo-chain.",
+  "_provenance_note_2026-10-05-hpo-chain": "RE-BASELINED on the HPO chain, which the maintainer chose for the gate (2026-10-05). Built from 89ceffb in main's order, isolated in its own compose project: reseed --umls-all (wordnet-umls-2026-10-05-merge); the WordNet<->UMLS alignment, 38,391 merges with the polydipsia maintainer verdict (wordnet-umls-aligned-2026-10-05-merge); HPO 2026-09-01 by obograph-import --root-anchor urn:eigenius:lexicon:Entity, 20,533 resources (wordnet-umls-hpo-2026-10-05-merge); the HPO<->UMLS layer, 61,092 entries redefined onto 18,418 HP classes and 20,131 bare-standing `_name` entries, and 864 HPO ≡ WordNet ≡ UMLS equivalences (wordnet-umls-hpo-aligned-2026-10-05-merge) — main's chain had 81,223 entries and 864 equivalences. The do-sense rankings replay with 62 hits, 0 misses. Readings 738 -> 679; every other gated figure equal (grammar-gap 0, encoded 0, expected hits 62/62, skeletons 210). Main recorded a drop of the same kind (652 -> 612) when cecbe94 aligned D70's `_name` entries, which this merge brings in; this drop is not attributed further. The readings ceiling stays 775."
 }
