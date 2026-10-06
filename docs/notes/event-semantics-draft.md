@@ -16,6 +16,7 @@
 - **Governed prepositions** (2026-10-06, open question 4). The governed reading stays the pin, as the 2026-09-30 and 2026-10-05 rulings made it. Under events the free-adjunct reading of a governed preposition no longer contradicts the sentence, so slice 2's re-adjudication rules it `correct` with `departs`. Selection demotes, before the ranker sees the candidates, any reading that hangs a preposition as a free adjunct or a frame on a verb whose sense the lexicon names it on (`v{offset}_p_{prep}`); WordNet's any-preposition frame names no preposition and stays with the ranker. This answers #264's strand 3 for those prepositions.
 - **Purpose «for»** (2026-10-06, open question 5). U1's «for cancer therapeutics» attaches to «exploit», as the purpose of the exploiting: `Possible(∃e. exploit(SL, S, e) ∧ prep_for(e, T))`. U1 is re-pinned in slice 2, since today's encoding would pin the purpose of the scientists. Purpose «for» stays the one opaque `prep_for`; under events its eventuality anchor tells it from a noun-level «for».
 - **Quantified PP objects scope over the event quantifier** (2026-10-06, open question 6 (ii)): «in every model» gives `∀m. model(m) → ∃e. … ∧ in(e, m)`, as in de Groote & Winter and Champollion. The lexicon test already requires it: an entry may extend `K` only with an atomic relation, so the quantifier wraps `V(s)(K)` from outside.
+- **Negation stays `¬∃e` under the subject quantifier** (2026-10-06, open question 7). «Some cancers do not respond to immune checkpoint blockade.» means: there exists `c`, an instance of Cancer, for which «responds to» is false, `∃c:Cancer. (∃e:Ev. respond_to(icb, c, e)) → False`. For an individual, not responding is the absence of a responding event of it. Generic and dispositional readings arise only for kind-level subjects and are deferred.
 - **Coordination stays distributive** (2026-10-06, open question 6 (i)): one event per conjunct, for coordinated subjects and objects alike, until a task needs sum events. «in MSI models» on «promoted apoptosis and cell cycle arrest» is covered: as an event condition the shared continuation puts it on both events, and as a frame it wraps the coordination once from outside.
 - **An eventivity feature on `S` keeps VP adjuncts off copular VPs** (2026-10-06, open question 9). `cat_s(mood, fin, evt)` gains `lexicon:Eventivity` (`eventive | eventless`), erased by ⟦·⟧ like Fin, Num, Prep and Mode. Verbs build eventive VPs and the copula eventless ones; VP adjuncts select eventive VPs; entries that pass a VP through bind the feature, entries that close a clause accept either, and a coordination is eventive only if every conjunct is. The grammar thereby states Katz's stative adverb gap for copular predicates.
 
@@ -173,7 +174,7 @@ Today's pinned reading is `ΠG#0:Prop. ΠG#1:§. §(kind_of(§), G#1) → False 
 2. Adding the subject gives `λK. ∃x:Cancer. (∃e. K(…)(e)) → False`.
 3. Closing with the identity gives `some Cancer (λx. ¬∃e:Ev. respond_to(icb, x, e))`.
 
-The scope is GQ > ¬ > `∃e`. This is Champollion's (29b) pattern, with a quantified subject ([Champollion 2015, p. 47](https://champollion.com/wp-content/uploads/2018/06/2015-interaction-paper.pdf)).
+The scope is GQ > ¬ > `∃e`. This is Champollion's (29b) pattern, with a quantified subject ([Champollion 2015, p. 47](https://champollion.com/wp-content/uploads/2018/06/2015-interaction-paper.pdf)). It is the reading the maintainer gave for the sentence (open question 7): there exists `c`, an instance of Cancer, for which «responds to» is false. Only a responding event of that same `c` contradicts it.
 
 «Some cancers can respond …» gives `some Cancer (λx. Possible(∃e. …))`. «MSI can arise from Lynch syndrome.» has a kind subject, not a GQ, and gives `Possible(∃e:Ev. arise_from(lynch, msi, e))`, so the modal is outermost as in today's pin.
 
@@ -479,7 +480,7 @@ Each preposition adds one `frame_*` axiom, its entries and a frame reading on ev
 - Kimian states, if state anaphora is needed. The eventivity feature already states the stative adverb gap for copular predicates;
 - the stative adverb gap for stative verbs, on the argument's class once a stativity source exists;
 - sum events for measure adjuncts;
-- the generic reading of present-tense negation.
+- generic and dispositional readings of kind-level subjects, which need tense in the semantics, a Gen closure that lexical closure leaves room for, and a survey of the genericity literature.
 
 ## Open questions for the maintainer
 
@@ -520,7 +521,13 @@ What selection does with these readings:
 - Should the distributive two-event reading of coordinated objects be the only one until sum events exist? *Decided 2026-10-06: yes, for subjects and objects alike.*
 - Should quantified PP objects scope over the event quantifier (de Groote & Winter, Champollion) rather than under it (ccg2lambda)? *Decided 2026-10-06: over, as the lexicon test requires.*
 
-**7. Negation in present-tense scientific claims.** «Some cancers do not respond …» comes out as `¬∃e`, meaning no responding event occurs. A generic or dispositional reading, with Gen binding `e` as in Kratzer and Diesing via Maienborn, is not covered by any source read.
+**7. Negation in present-tense scientific claims.** *Decided 2026-10-06: (a), `¬∃e` under the subject quantifier.* «Some cancers do not respond …» is `∃c:Cancer. ¬∃e. respond_to(icb, c, e)`: the maintainer's reading, an instance of Cancer for which «responds to» is false. The other present-tense negated verb on the page, «Each event alone does not lead to cell death.», also quantifies over instances. The options were:
+
+- (a) keep `¬∃e`, the reading lexical closure gives, as in Champollion, ccg2lambda and lightblue. **Chosen.**
+- (b) a generic operator now. Rejected for now: the grammar erases tense, lexical closure leaves no event outside the verb for Gen to bind (it would need a second entry per verb sense or a separate occasion variable), and no source read covers genericity (Kratzer and Diesing's Gen appear only via Maienborn).
+- (c) present-tense verbs as eventless dispositional relations. Rejected: it undoes question 3 and needs tense too.
+
+Generic and dispositional readings arise for kind-level subjects («Defects in DNA mismatch repair promote a hypermutable state» gives `∃e. promote(…, e)`, which the generic claim entails but does not equal) and are deferred to their own design.
 
 **8. Frames.** The frame reading leaves three choices:
 

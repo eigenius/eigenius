@@ -36,10 +36,11 @@ any detour.
 > the verb's sense (4); U1's «for» attaches to «exploit», re-pinned in slice 2, and purpose «for»
 > stays one opaque `prep_for` (5); quantified PP objects scope over the event quantifier, as the
 > lexicon test requires (6 (ii)); coordination stays distributive until a task needs sum events
-> (6 (i)).
-> **Next:** open question 7 (generic negation) and the tie-break between a frame and a
-> noun-internal reading that both restrict the claim; then slice 1 (`lexicon:Eventuality` and the
-> `frame_*` axioms).
+> (6 (i)); negation stays `¬∃e` under the subject quantifier, «Some cancers do not respond …» being
+> an instance of Cancer for which «responds to» is false, with generic readings of kind-level
+> subjects deferred (7).
+> **Next:** the tie-break between a frame and a noun-internal reading that both restrict the claim;
+> then slice 1 (`lexicon:Eventuality` and the `frame_*` axioms).
 > #264's strand 3 (whether attachment is derivable) is answered by question 4 for prepositions the
 > lexicon names on a sense; other attachments stay with the ranker. #271 (the «a DNA» atom) is
 > independent.
