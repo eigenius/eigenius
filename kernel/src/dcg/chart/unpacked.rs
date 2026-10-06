@@ -27,6 +27,7 @@
 //! escalates the beam here (and only the sense cap on the packed path).
 
 use super::super::category::{is_ctor, is_sentence_premod, is_vp_adjunct_prep, slash_parts};
+use super::super::derivation::Step;
 use super::super::grammar::Grammar;
 use super::super::item::Item;
 use super::super::preprocess::Token;
@@ -35,7 +36,7 @@ use super::super::reserved::ReservedKind;
 use super::super::rules::combinators::{apply, apply_core};
 use super::super::rules::constructions::pied_pipe;
 use super::super::rules::registry::unary_shifts;
-use super::{beam_cell, cell_histogram};
+use super::{beam_cell, cell_histogram, derived_combine};
 
 impl Grammar {
     /// Run the item-level CKY over a seeded `chart`, in place. Returns the number of items the per-cell
@@ -74,12 +75,16 @@ impl Grammar {
                     for l in lefts {
                         for r in rights {
                             if let Some(item) = apply(l, r, &self.layer, rctx) {
-                                produced.push(item);
+                                produced.push(derived_combine(item, (i, j), &[l, r]));
                             }
                             // Combinatory-core spike: the extra CCG combinators (crossed + backward
                             // composition), applied alongside the hand-built rules when enabled.
                             if combinatory_core {
-                                produced.extend(apply_core(l, r, &self.layer, rctx));
+                                produced.extend(
+                                    apply_core(l, r, &self.layer, rctx)
+                                        .into_iter()
+                                        .map(|it| derived_combine(it, (i, j), &[l, r])),
+                                );
                             }
                         }
                     }
@@ -92,10 +97,11 @@ impl Grammar {
                 for site in self.binary_sites(tokens, i, j) {
                     let lefts = &chart[site.left.0][site.left.1];
                     let rights = &chart[site.right.0][site.right.1];
+                    let step = Step::Binary(Self::bin_rule_name(site.rule));
                     for l in lefts {
                         for r in rights {
                             if let Some(item) = self.apply_bin_rule(site.rule, l, r) {
-                                produced.push(item);
+                                produced.push(item.derived((i, j), step, &[l, r]));
                             }
                         }
                     }
@@ -154,14 +160,21 @@ impl Grammar {
                                         {
                                             // Sum EVERY operand's cost, the preposition included — as
                                             // every other rule does.
-                                            produced.push(Item::with_cost(
-                                                cat,
-                                                sem,
-                                                noun.cost()
-                                                    .saturating_add(prep.cost())
-                                                    .saturating_add(subj.cost())
-                                                    .saturating_add(vp.cost()),
-                                            ));
+                                            produced.push(
+                                                Item::with_cost(
+                                                    cat,
+                                                    sem,
+                                                    noun.cost()
+                                                        .saturating_add(prep.cost())
+                                                        .saturating_add(subj.cost())
+                                                        .saturating_add(vp.cost()),
+                                                )
+                                                .derived(
+                                                    (i, j),
+                                                    Step::PiedPipe,
+                                                    &[noun, *prep, subj, vp],
+                                                ),
+                                            );
                                         }
                                     }
                                 }
@@ -178,9 +191,15 @@ impl Grammar {
                 // forest's edge-creation loop (single source of truth: `registry::unary_shifts`). Every
                 // shift is per-item-independent, so the flat-map equals the former whole-cell calls.
                 for shift in unary_shifts() {
+                    let step = Step::Unary(shift.name);
                     let produced: Vec<Item> = chart[i][j]
                         .iter()
-                        .flat_map(|it| shift.run(self, it, (i, j), rctx))
+                        .flat_map(|it| {
+                            shift
+                                .run(self, it, (i, j), rctx)
+                                .into_iter()
+                                .map(move |o| o.derived((i, j), step, &[it]))
+                        })
                         .collect();
                     chart[i][j].extend(produced);
                 }
@@ -193,7 +212,7 @@ impl Grammar {
                     let absorbed: Vec<Item> = chart[i][j - 1]
                         .iter()
                         .filter(|it| is_sentence_premod(it.cat()))
-                        .cloned()
+                        .map(|it| it.clone().derived((i, j), Step::AbsorbComma, &[it]))
                         .collect();
                     chart[i][j].extend(absorbed);
                 }

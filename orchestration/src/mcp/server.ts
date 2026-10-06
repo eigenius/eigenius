@@ -494,8 +494,13 @@ export function createMcpServer(client: KernelClient): McpServer {
         "A lexicon:LexiconProfile IRI naming that ordered list.",
       ),
       model: z.string().optional().describe(
-        "Anthropic model for this run's proposers; also what each recorded " +
-          "draw names as its answerer.",
+        "Model for this run's proposers other than the reading ranker; also " +
+          "what each of their recorded draws names as its answerer.",
+      ),
+      readingModel: z.string().optional().describe(
+        "Model for the reading ranker (jev-… asks TypeSafe, claude-… " +
+          "Anthropic; default jev-latest); also what its recorded draws name " +
+          "as their answerer.",
       ),
       strict: z.boolean().optional().describe(
         "Abort on the first unit that does not encode, instead of recording " +
@@ -522,6 +527,7 @@ export function createMcpServer(client: KernelClient): McpServer {
         scope?: string[];
         profile?: string;
         model?: string;
+        readingModel?: string;
         strict?: boolean;
         format?: string;
       },
@@ -540,6 +546,7 @@ export function createMcpServer(client: KernelClient): McpServer {
           format: args.format ?? "",
           options: create(FormalizationOptionsSchema, {
             model: args.model ?? "",
+            readingModel: args.readingModel ?? "",
             strict: args.strict ?? false,
           }),
         }),

@@ -187,7 +187,7 @@ fn resource_to_cbor(resource: &Resource) -> ciborium::Value {
         ));
     }
 
-    // Add properties (BTreeMap iteration is sorted)
+    // Add properties, which iterate in IRI order
     for (prop_iri, value) in resource.properties() {
         entries.push((
             ciborium::Value::Text(prop_iri.as_str().to_string()),

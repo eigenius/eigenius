@@ -128,6 +128,14 @@ impl Grammar {
         sites
     }
 
+    /// The name a derivation records for a token-keyed rule.
+    pub(crate) fn bin_rule_name(rule: BinRule) -> &'static str {
+        bin_rules()
+            .iter()
+            .find(|d| d.kind == rule.kind())
+            .map_or("token-keyed", |d| d.name)
+    }
+
     /// Materialise a token-keyed [`BinRule`] for one (left, right) item-pair — the
     /// single builder BOTH chart paths use (the unpacked CKY calls it per item-pair; the packed path
     /// calls it on representatives to decide an edge, and again per item-pair in `cube` to
@@ -149,8 +157,7 @@ impl Grammar {
 /// and [`Grammar::apply_bin_rule`] are interpreters over the [`bin_rules`] table; the trigger/build
 /// logic stays named functions (as the categorial builders do), the SET of rules is the data.
 struct TokBinRule {
-    /// Rule identity — for tracing / on-chain naming; carried, not consumed at runtime.
-    #[allow(dead_code)]
+    /// Rule identity — what a derivation records ([`Grammar::bin_rule_name`]).
     name: &'static str,
     /// Discriminant linking a firing site's [`BinRule`] tag back to this descriptor.
     kind: BinKind,
@@ -926,9 +933,8 @@ pub(crate) enum UnaryKind {
 /// drivers keep inline.
 pub(crate) struct UnaryShift {
     pub(crate) kind: UnaryKind,
-    /// Rule identity — tracing / on-chain naming; carried, not consumed at runtime.
-    #[allow(dead_code)]
-    name: &'static str,
+    /// Rule identity — what a derivation records.
+    pub(crate) name: &'static str,
     apply: UnaryApply,
 }
 

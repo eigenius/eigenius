@@ -41,6 +41,7 @@ use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
 use eigenius_wordnet::convert::{render_document, render_sections, MassNouns, ESL_HEADER};
+use eigenius_wordnet::governance::{self, Governance, Placements};
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::wndb::Pos;
 
@@ -89,6 +90,86 @@ struct Args {
     /// ⇒ no mass marking (count-only, the prior behaviour).
     #[arg(long, default_value = "references/wiktionary/uncountable-nouns.txt")]
     countability: PathBuf,
+    /// **The SPECIALIST Lexicon** (D97): an adjective's governed prepositions are read from its
+    /// complements beside WordNet's own (eigenius#263). Required — `scripts/provision-specialist.sh`.
+    #[arg(long, default_value = "references/specialist/LEXICON")]
+    specialist: PathBuf,
+    /// The adjective sense judge's placements (D97 decision 7), committed: the senses a lemma-level
+    /// preposition goes on where the evidence does not decide. An open item it does not place stops
+    /// the import.
+    #[arg(
+        long,
+        default_value = "experiments/lexicon-specialist/adjective-senses.tsv"
+    )]
+    adjective_senses: PathBuf,
+    /// The verb sense judge's placements (D97 slice 2), committed: the senses a SPECIALIST object,
+    /// preposition or clause goes on where the lemma has several. An open item it does not place
+    /// stops the import.
+    #[arg(long, default_value = "experiments/lexicon-specialist/verb-senses.tsv")]
+    verb_senses: PathBuf,
+}
+
+/// A judge's placements; a missing file is empty, so an open item stops the import there.
+fn read_placements(part: &str, path: &Path) -> Result<Placements, String> {
+    if path.exists() {
+        Placements::read(path)
+    } else {
+        eprintln!(
+            "{part} senses: {} not found — no judged placements",
+            path.display()
+        );
+        Ok(Placements::default())
+    }
+}
+
+/// The adjectives' governed prepositions (eigenius#263): WordNet's, SPECIALIST's and the curated
+/// frames', placed on senses by the evidence and the judge's committed placements (D97 decision 7);
+/// and the verbs' SPECIALIST complements, placed the same way (D97 slice 2).
+fn load_governance(
+    dict: &Path,
+    specialist: &Path,
+    adjective_senses: &Path,
+    verb_senses: &Path,
+) -> Result<Governance, String> {
+    let placements = read_placements("adjective", adjective_senses)?;
+    let verb_placements = read_placements("verb", verb_senses)?;
+    let (governance, counts, verb_counts) =
+        governance::build(dict, specialist, &placements, &verb_placements)?;
+    let (pairs, preps) = governance.totals();
+    eprintln!(
+        "governed prepositions: {} adjective lemmas attested by SPECIALIST or the curated frames, \
+         {} items in lexicon:Prep — {} on the one sense, {} placed by the judge ({} of them gaps, on \
+         no sense; {} placements read); {} items on lemmas with no gradable sense; outside lexicon:Prep, not placed: {:?}; \
+         {} (sense, lemma) pairs carry {} prepositions ({} from WordNet's convention; the gloss \
+         heuristic proposed {} (sense, lemma) pairs, {} items for the judge)",
+        counts.lemmas_attested,
+        counts.items,
+        counts.one_sense,
+        governance.judged,
+        governance.gaps,
+        placements.len(),
+        counts.no_gradable_sense,
+        counts.outside,
+        pairs,
+        preps,
+        counts.convention_senses,
+        counts.heuristic_senses,
+        counts.heuristic_items,
+    );
+    let (pairs, complements) = governance.verbs.totals();
+    eprintln!(
+        "verb complements: {} verb lemmas SPECIALIST names a complement for; by kind {:?}; {} placed by the judge ({} of them gaps; {} placements read); outside lexicon:Prep, not placed: {:?}; \
+         {} (sense, lemma) pairs carry {} complements",
+        verb_counts.lemmas_attested,
+        verb_counts.by_kind,
+        governance.verbs.judged,
+        governance.verbs.gaps,
+        verb_placements.len(),
+        verb_counts.outside,
+        pairs,
+        complements,
+    );
+    Ok(governance)
 }
 
 /// Load the countability lexicon (one lemma per line; `#`/blank ignored), lowercased. A missing
@@ -161,14 +242,26 @@ fn main() -> ExitCode {
     // is non-fatal (ranks default 0).
     let ranks = read_sense_ranks(&args.dict, &spec.pos).unwrap_or_default();
     let mass = load_countability(&args.countability);
+    let governance = match load_governance(
+        &args.dict,
+        &args.specialist,
+        &args.adjective_senses,
+        &args.verb_senses,
+    ) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("error: governed prepositions: {e}");
+            return ExitCode::from(2);
+        }
+    };
 
     // Partitioned emit: a base layer (descriptor + all synset classes/axioms) + entry
     // batches, each under the size cap. The single-document path stays for small imports.
     if let Some(dir) = &args.out_dir {
-        return emit_partitioned(&chosen, &ranks, &mass, dir, args.split_bytes);
+        return emit_partitioned(&chosen, &ranks, &mass, &governance, dir, args.split_bytes);
     }
 
-    let (doc, rep) = render_document(&chosen, &ranks, &mass);
+    let (doc, rep) = render_document(&chosen, &ranks, &mass, &governance);
     eprintln!(
         "wordnet import: {} synsets selected → {} noun classes, {} instances, {} verb axioms, \
          {} adj axioms, {} entries ({} of them ger/pss participle forms) \
@@ -184,8 +277,9 @@ fn main() -> ExitCode {
     );
     eprintln!(
         "  ({} additive mass-noun entries from the countability lexicon; \
-         {} entries withheld on closed-class surfaces)",
-        rep.mass_entries, rep.closed_class_skipped
+         {} entries withheld on closed-class surfaces; {} verb frame kinds from SPECIALIST, {} \
+         any-preposition frames replaced by a named one)",
+        rep.mass_entries, rep.closed_class_skipped, rep.specialist_verb_kinds, rep.any_pp_replaced
     );
 
     if let Some(path) = &args.out {
@@ -231,6 +325,7 @@ fn emit_partitioned(
     synsets: &[eigenius_wordnet::wndb::Synset],
     ranks: &eigenius_wordnet::convert::SenseRanks,
     mass: &MassNouns,
+    governance: &Governance,
     dir: &Path,
     split_bytes: usize,
 ) -> ExitCode {
@@ -239,7 +334,7 @@ fn emit_partitioned(
         return ExitCode::from(1);
     }
 
-    let (base, entries, rep) = render_sections(synsets, ranks, mass);
+    let (base, entries, rep) = render_sections(synsets, ranks, mass, governance);
 
     let mut files: Vec<PathBuf> = Vec::new();
     let base_path = dir.join("wordnet-000-base.esl");
@@ -299,8 +394,9 @@ fn emit_partitioned(
     );
     eprintln!(
         "  ({} additive mass-noun entries from the countability lexicon; \
-         {} entries withheld on closed-class surfaces)",
-        rep.mass_entries, rep.closed_class_skipped
+         {} entries withheld on closed-class surfaces; {} verb frame kinds from SPECIALIST, {} \
+         any-preposition frames replaced by a named one)",
+        rep.mass_entries, rep.closed_class_skipped, rep.specialist_verb_kinds, rep.any_pp_replaced
     );
     eprintln!(
         "wrote {} files → {} (base + {} entry chunks; load in filename order as a chain)",

@@ -1,0 +1,34 @@
+# The adjective sense judge on the gloss heuristic's proposals (D97 decision 7, revised 2026-10-01) — DRAFT
+# for the owner's review: a fixed sample of 30 of the 820 senses it accepts at 0.85 on lemmas no source
+# attests. Review: correct | wrong | unclear, with a note.
+# lemma <TAB> preposition <TAB> offset <TAB> confidence <TAB> review <TAB> note <TAB> gloss
+harmonious	with	00894029	0.85	correct		exhibiting equivalence or correspondence among constituents of an entity or between different entities
+moist	with	02548820	0.97	correct	«eyes moist with tears»	slightly wet; "clothes damp with perspiration"; "a moist breeze"; "eyes moist with tears"
+hitless	for	02334717	0.92	wrong	a duration adjunct: «hitless for three innings»	(of a batter) without a hit; "he went hitless for three innings"
+woven	into	02579469	0.95	correct	«woven into a whole»	made or constructed by interlacing threads or strips of material or other elements into a whole; "woven fabrics"; "woven baskets"; "the incidents woven into the story"; "folk songs woven into a symphony"
+unburdened	by	00870303	0.97	correct		not burdened with difficulties or responsibilities; "unburdened by an overarching theory"- Alex Inkeles
+flabby	around	01019713	0.92	wrong	a place adjunct: «flabby around the middle»	out of condition; not strong or robust; incapable of exertion or endurance; "he was too soft for the army"; "flabby around the middle"; "flaccid cheeks"
+obligated	to	01616474	0.90	wrong	a to-infinitive, not to + NP: «obligated to repay»	caused by law or conscience to follow a certain course; "felt obligated to repay the kindness"; "was obligated to pay off the student loan"
+dabbled	with	01695891	0.97	correct	«dabbled with moonlight»	covered with bright patches (often used in combination); "waves dabbled with moonlight"; "a blood-spattered room"; "gardens splashed with color"; "kitchen walls splattered with grease"
+chockablock	with	01084297	0.98	correct		packed full to capacity; "chowder chockablock with pieces of fish"
+down	by	02491961	0.93	wrong	`by` measures the margin («down by a run»), which D95's `by` over a value reads	being or moving lower in position or less in some value; "lay face down"; "the moon is down"; "our team is down by a run"; "down by a pawn"; "the stock market is down today"
+self-conscious	about	00570991	0.85	correct		aware of yourself as an individual or of your own being and actions and thoughts; "self-conscious awareness"; "self-conscious about their roles as guardians of the social values"- D.M.Potter
+careful	with	01895099	0.95	correct	the gloss quotes «careful with money»	mindful of the future in spending money; "careful with money"
+atypical	of	02469928	0.92	correct		not representative of a group, class, or type; "a group that is atypical of the target audience"; "a class of atypical mosses"; "atypical behavior is not the accepted type of response that we expect from children"
+untrue	to	00584403	0.88	correct	«untrue to her husband»	(used especially of persons) not dependable in devotion or affection; unfaithful; "a false friend"; "when lovers prove untrue"
+certain	to	00340239	0.85	wrong	a to-infinitive, not to + NP: «certain to fail»	certain to occur; destined or inevitable; "he was certain to fail"; "his fate is certain"; "In this life nothing is certain but death and taxes"- Benjamin Franklin; "he faced certain death"; "sudden but sure regret"; "he is sure to win"
+on guard	against	00162661	0.95	correct	the gloss quotes «on guard against con artists»	vigilant; "on guard against con artists"; "must remain on your guard in such a situation"
+unfeasible	in	01823574	0.88	wrong	an adjunct	not capable of being carried out or put into practice; "refloating the sunken ship proved impracticable because of its fragility"; "a suggested reform that was unfeasible in the prevailing circumstances"
+laid up	with	02545484	0.98	correct	the gloss quotes «laid up with a bad cold»	ill and usually confined; "laid up with a bad cold"
+combed	to	02429066	0.90	wrong	a direction adjunct: «hair combed to the side»	(of hair) made tidy with a comb; "with hair combed to the side"
+astonished	by	02357810	0.97	correct		filled with the emotional impact of overwhelming surprise or shock; "an amazed audience gave the magician a standing ovation"; "I stood enthralled, astonished by the vastness and majesty of the cathedral"; "astounded viewers wept at the pictures from the Oklahoma City bombing"; "stood in stunned silence"; "stunned scientists found not one but at least three viruses"
+correct	in	00633410	0.90	correct	«correct in his judgment»	correct in opinion or judgment; "time proved him right"
+acceptive	of	01985557	0.95	correct	the gloss quotes «acceptive of every new idea»	accepting willingly; "acceptive of every new idea"; "an acceptant type of mind"
+acceptable	for	01124768	0.85	correct	«acceptable for publication»	meeting requirements; "the step makes a satisfactory seat"
+accessible	to	00533221	0.85	correct	the gloss quotes «accessible to the nonprofessional reader»	capable of being read with comprehension; "readily accessible to the nonprofessional reader"; "the tales seem more approachable than his more difficult novels"
+certain	of	00336831	0.95	correct	«certain of success»	having or feeling no doubt or uncertainty; confident and assured; "felt certain of success"; "was sure (or certain) she had seen it"; "was very sure in his beliefs"; "sure of her friends"
+fringed	by	00258587	0.97	correct	«fringed by an industrial belt»	surrounded as with a border or fringe; sometimes used in combination; "a large suburban community...fringed by an industrial area"; "a grass-fringed stream"
+silly	by	00437223	0.85	wrong	the by-phrase is the passive verb's: «knocked silly by the impact»	dazed from or as if from repeated blows; "knocked silly by the impact"; "slaphappy with exhaustion"
+low	in	01212469	0.95	correct	«low in fat»	less than normal in degree or intensity or amount; "low prices"; "the reservoir is low"
+permissible	in	01762404	0.85	wrong	a setting, «permissible in cosmology», not a complement	that may be accepted or conceded; "a kind of speculation that was permissible in cosmology but inadmissible in medicine"
+occupied	with	00293611	0.97	correct		having ones attention or mind or energy engaged; "she keeps herself fully occupied with volunteer activities"; "deeply engaged in conversation"

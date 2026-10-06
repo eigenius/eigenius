@@ -305,6 +305,7 @@ mod tests {
 
     fn doc<'a>(document: &'a str, sentence: &'a str) -> DocumentContext<'a> {
         DocumentContext {
+            tokens: &[],
             document,
             sentence,
             prior_selections: &[],

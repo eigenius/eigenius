@@ -34,6 +34,7 @@ pub mod hpo;
 pub mod merge;
 #[cfg(feature = "chain")]
 pub mod read;
+pub mod senses;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;

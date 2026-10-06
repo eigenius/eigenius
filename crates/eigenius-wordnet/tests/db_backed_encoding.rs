@@ -36,7 +36,7 @@
 //!     cargo test -p eigenius-wordnet --test db_backed_encoding -- --ignored --nocapture
 //!     cargo test -p eigenius-wordnet --features use-llm --test db_backed_encoding -- --ignored --nocapture
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -321,8 +321,11 @@ impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
         sentence: &str,
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
-    ) -> Option<Vec<Vec<usize>>> {
+    ) -> Option<Vec<eigenius_kernel::dcg::WordRanking>> {
         self.0.rank(sentence, context, words)
+    }
+    fn model(&self) -> Option<String> {
+        self.0.model()
     }
 }
 
@@ -330,7 +333,7 @@ impl eigenius_kernel::dcg::SenseRanker for ArcRanker {
 // is no LLM to record, so recording is a no-op (a replay still works — it needs no ranker at all).
 #[cfg(feature = "use-llm")]
 type Recorder = std::sync::Arc<
-    eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::AnthropicSenseRanker>,
+    eigenius_kernel::dcg::RecordingSenseRanker<eigenius_kernel::dcg::LiveSenseRanker>,
 >;
 
 thread_local! {
@@ -395,6 +398,7 @@ fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Par
         lex = lex.with_document_augmentation(aug);
     }
     let index = Parser::over(Arc::new(lex), Arc::clone(head))
+        .with_sense_floor(sense_floor())
         .with_sense_cap(SENSE_CAP)
         .with_cell_beam(CELL_BEAM)
         .with_combinatory_core(core)
@@ -430,10 +434,11 @@ fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Par
     }
     #[cfg(feature = "use-llm")]
     {
-        if let Some(ranker) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
+        if let Some(ranker) = eigenius_kernel::dcg::live_sense_ranker_from_env() {
+            let model = ranker.model().unwrap_or_default();
             if let Some(p) = ranks_path {
                 eprintln!(
-                    "contextual reranker: AnthropicSenseRanker (live) — RECORDING to {}",
+                    "contextual reranker: {model} (live) — RECORDING to {}",
                     p.display()
                 );
                 let rec =
@@ -442,10 +447,10 @@ fn build_index_over(head: &Arc<Layer>, aug: Option<&LexiconAugmentation>) -> Par
                     .with(|slot| *slot.borrow_mut() = Some((std::sync::Arc::clone(&rec), p)));
                 return index.with_sense_ranker(Box::new(ArcRanker(rec)));
             }
-            eprintln!("contextual reranker: AnthropicSenseRanker (live)");
-            return index.with_sense_ranker(Box::new(ranker));
+            eprintln!("contextual reranker: {model} (live)");
+            return index.with_sense_ranker(ranker);
         }
-        eprintln!("contextual reranker: none (ANTHROPIC_API_KEY unset) — cap-only");
+        eprintln!("contextual reranker: none (the sense model's API key is unset) — cap-only");
     }
     #[cfg(not(feature = "use-llm"))]
     {
@@ -722,14 +727,45 @@ fn schwartz_hearst_binds_msi_mss_from_the_original_page() {
 /// Share one [`ReplaySenseRanker`] between the parser and the miss-check.
 struct ArcReplay(std::sync::Arc<eigenius_kernel::dcg::ReplaySenseRanker>);
 
+/// `EIGENIUS_DUMP_SENSE_QUESTIONS=<file>`: append every sense-ranking question — the sentence, its
+/// context, each word's candidate senses with their glosses and denotations — as a JSON line, so
+/// presentations can be screened offline against the reading ledger (2026-10-01).
+fn dump_sense_question(sentence: &str, context: &str, words: &[eigenius_kernel::dcg::WordSenses]) {
+    let Ok(path) = std::env::var("EIGENIUS_DUMP_SENSE_QUESTIONS") else {
+        return;
+    };
+    let line = serde_json::json!({
+        "sentence": sentence,
+        "context": context,
+        "words": words.iter().map(|w| serde_json::json!({
+            "surface": w.surface,
+            "candidates": w.candidates.iter().map(|c| serde_json::json!({
+                "sense": c.sense, "gloss": c.gloss, "sem": c.sem,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    });
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
 impl eigenius_kernel::dcg::SenseRanker for ArcReplay {
     fn rank(
         &self,
         sentence: &str,
         context: &str,
         words: &[eigenius_kernel::dcg::WordSenses],
-    ) -> Option<Vec<Vec<usize>>> {
+    ) -> Option<Vec<eigenius_kernel::dcg::WordRanking>> {
+        dump_sense_question(sentence, context, words);
         self.0.rank(sentence, context, words)
+    }
+    fn model(&self) -> Option<String> {
+        self.0.model()
     }
 }
 
@@ -835,27 +871,495 @@ const ADJUDICATIONS: &str = concat!(
 /// authored by adjudicating recorded selection draws. This is the ledger the gated
 /// `reading-correct` scores against; a chosen reading with no row (or an `uncertain` row) counts
 /// UNADJUDICATED, which must be 0 on the tracked replay. TAB-separated:
-/// `sentence <TAB> sem <TAB> verdict <TAB> evidence`. Missing file ⇒ empty.
+/// `sentence <TAB> sem <TAB> verdict <TAB> evidence [<TAB> basis]`. Missing file ⇒ empty.
 const READING_ADJUDICATIONS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../experiments/parsing/reading-adjudications.tsv"
 );
 
-fn load_reading_adjudications() -> std::collections::BTreeMap<(String, String), String> {
-    let Ok(text) = std::fs::read_to_string(READING_ADJUDICATIONS) else {
-        return std::collections::BTreeMap::new();
-    };
-    text.lines()
-        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
-        .filter_map(|l| {
-            let mut f = l.split('\t');
-            let (s, sem, v) = (f.next()?, f.next()?, f.next()?);
-            Some((
-                (s.trim().to_string(), sem.trim().to_string()),
-                v.trim().to_string(),
-            ))
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Verdict {
+    Correct,
+    Wrong,
+    /// Scores as UNADJUDICATED.
+    Uncertain,
+}
+
+/// What a ledger verdict rests on — the fifth field, `;`-separated grounds. A `wrong` row names
+/// what it rules out: `structure` (its skeleton is not the pin's) and/or `sense <atom>…` (senses
+/// wrong for their words in this sentence). A `correct` row is empty or `departs`: its structure
+/// differs from the pin and was ruled faithful anyway.
+#[derive(Default, Debug, PartialEq, Eq)]
+struct Basis {
+    structure: bool,
+    senses: BTreeSet<String>,
+    departs: bool,
+}
+
+impl Basis {
+    fn parse(field: &str) -> Result<Basis, String> {
+        let mut b = Basis::default();
+        for ground in field.split(';').map(str::trim).filter(|g| !g.is_empty()) {
+            let mut words = ground.split_whitespace();
+            match (words.next(), words.clone().next()) {
+                (Some("structure"), None) => b.structure = true,
+                (Some("departs"), None) => b.departs = true,
+                (Some("sense"), Some(_)) => b.senses.extend(words.map(str::to_string)),
+                _ => {
+                    return Err(format!(
+                        "basis ground {ground:?} is not `structure`, `sense <atom>…` or `departs`"
+                    ))
+                }
+            }
+        }
+        Ok(b)
+    }
+}
+
+/// One row of the reading ledger.
+struct LedgerRow {
+    /// 1-based line in the TSV, for messages.
+    line: usize,
+    sentence: String,
+    sem: String,
+    verdict: Verdict,
+    basis: Basis,
+}
+
+impl LedgerRow {
+    /// The skeleton `select_reading` reports for this sem (`chosen_skeleton`).
+    fn skeleton(&self) -> String {
+        erase_senses(&self.sem)
+    }
+
+    /// A `correct` row whose structure is not its sentence's pin and which does not say so
+    /// (`departs`). The row cannot count: the reading gold and the grammar gold disagree.
+    fn contradicts_pin(&self, pin: Option<&String>) -> bool {
+        self.verdict == Verdict::Correct
+            && !self.basis.departs
+            && pin.is_some_and(|p| *p != self.skeleton())
+    }
+}
+
+/// The sense atoms of a pretty-printed sem: each `_`-separated segment of an identifier that
+/// carries a run of ≥4 digits — the tokens [`erase_senses`] erases, with their `deg_`/`std_`/`_t`
+/// wrappers split off, so `deg_a00993885` yields `a00993885`.
+fn sense_atoms(sem: &str) -> BTreeSet<&str> {
+    sem.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .flat_map(|tok| tok.split('_'))
+        .filter(|seg| {
+            seg.split(|c: char| !c.is_ascii_digit())
+                .any(|run| run.len() >= 4)
         })
         .collect()
+}
+
+/// Parse the ledger. Fails closed: a malformed row is an error, not a skipped line.
+fn parse_reading_ledger(text: &str) -> Result<Vec<LedgerRow>, Vec<String>> {
+    let (mut rows, mut errors) = (Vec::new(), Vec::new());
+    for (i, l) in text.lines().enumerate() {
+        if l.trim().is_empty() || l.starts_with('#') {
+            continue;
+        }
+        let line = i + 1;
+        let f: Vec<&str> = l.split('\t').collect();
+        if !(4..=5).contains(&f.len()) {
+            errors.push(format!("line {line}: {} fields, want 4 or 5", f.len()));
+            continue;
+        }
+        let verdict = match f[2].trim() {
+            "correct" => Verdict::Correct,
+            "wrong" => Verdict::Wrong,
+            "uncertain" => Verdict::Uncertain,
+            v => {
+                errors.push(format!("line {line}: verdict {v:?}"));
+                continue;
+            }
+        };
+        match Basis::parse(f.get(4).copied().unwrap_or("")) {
+            Ok(basis) => rows.push(LedgerRow {
+                line,
+                sentence: f[0].trim().to_string(),
+                sem: f[1].trim().to_string(),
+                verdict,
+                basis,
+            }),
+            Err(e) => errors.push(format!("line {line}: {e}")),
+        }
+    }
+    if errors.is_empty() {
+        Ok(rows)
+    } else {
+        Err(errors)
+    }
+}
+
+/// The sense ranker against the reading ledger (2026-10-01): how its rankings treat the senses the
+/// ledger's `correct` readings use. A word counts where one of its candidate senses names an atom
+/// of a `correct` reading of its sentence — a right sense for the word, twins included; an atom two
+/// words share («lines», «lineages») can count for both. Per such word: was a right sense kept
+/// (ranked, not omitted), ranked first, or eliminated; and how many of its candidates were kept.
+#[derive(Default, Debug, PartialEq)]
+struct SenseRankScore {
+    words: usize,
+    kept: usize,
+    first: usize,
+    candidates: usize,
+    kept_senses: usize,
+    /// One line per word whose right senses were all eliminated.
+    eliminated: Vec<String>,
+}
+
+/// The sense floor this run's parser cuts at: `EIGENIUS_SENSE_FLOOR`, else the parser's default.
+fn sense_floor() -> f64 {
+    std::env::var("EIGENIUS_SENSE_FLOOR")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(eigenius_kernel::dcg::DEFAULT_SENSE_FLOOR)
+}
+
+/// Score `records` against `ledger`, a weighted ranking at `floor` — the senses the parser kept.
+fn score_sense_ranks(
+    records: &[eigenius_kernel::dcg::RankRecord],
+    ledger: &[LedgerRow],
+    floor: f64,
+) -> SenseRankScore {
+    let mut right: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for r in ledger.iter().filter(|r| r.verdict == Verdict::Correct) {
+        right
+            .entry(r.sentence.trim())
+            .or_default()
+            .extend(sense_atoms(&r.sem));
+    }
+    let mut score = SenseRankScore::default();
+    for rec in records {
+        let Some(atoms) = right.get(rec.sentence.trim()) else {
+            continue;
+        };
+        for w in &rec.words {
+            let good: Vec<usize> = w
+                .sems
+                .iter()
+                .enumerate()
+                .filter(|(_, sem)| sense_atoms(sem).iter().any(|a| atoms.contains(a)))
+                .map(|(i, _)| i)
+                .collect();
+            if good.is_empty() {
+                continue;
+            }
+            let kept: Vec<usize> = w
+                .order
+                .iter()
+                .copied()
+                .filter(|&i| w.weights.get(i).is_none_or(|&x| x >= floor))
+                .collect();
+            score.words += 1;
+            score.candidates += w.senses.len();
+            score.kept_senses += kept.len();
+            if kept.first().is_some_and(|i| good.contains(i)) {
+                score.first += 1;
+            }
+            if kept.iter().any(|i| good.contains(i)) {
+                score.kept += 1;
+            } else {
+                score.eliminated.push(format!(
+                    "«{}» in «{}»: kept {} of {}; eliminated {}",
+                    w.surface,
+                    rec.sentence.trim(),
+                    kept.len(),
+                    w.senses.len(),
+                    good.iter()
+                        .map(|&i| w.sems[i].as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+        }
+    }
+    score
+}
+
+/// The run's sense rankings — recorded or replayed, `EIGENIUS_SENSE_RANKS` — scored against the
+/// reading ledger; `None` when the run has no rankings file.
+fn sense_rank_score() -> Option<(Vec<eigenius_kernel::dcg::RankRecord>, Vec<LedgerRow>)> {
+    let path = std::env::var("EIGENIUS_SENSE_RANKS").ok()?;
+    let text = std::fs::read_to_string(&path).ok()?;
+    let records: Vec<eigenius_kernel::dcg::RankRecord> = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("{path} is not a rankings file: {e}"));
+    Some((records, load_reading_ledger()))
+}
+
+fn load_reading_ledger() -> Vec<LedgerRow> {
+    let Ok(text) = std::fs::read_to_string(READING_ADJUDICATIONS) else {
+        return Vec::new();
+    };
+    parse_reading_ledger(&text)
+        .unwrap_or_else(|e| panic!("reading-adjudications.tsv:\n  {}", e.join("\n  ")))
+}
+
+/// Where the ledger contradicts itself or its pins, checked without a parse. The sweep checks the
+/// rest — a `correct` row the forest still produces must have the pin's structure or say
+/// `departs` ([`LedgerRow::contradicts_pin`]) — because a row whose reading no longer parses is
+/// history: its pin may have moved on since.
+fn ledger_contradictions(rows: &[LedgerRow], pins: &BTreeMap<String, String>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut keys: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    for r in rows {
+        let (line, b) = (r.line, &r.basis);
+        if let Some(first) = keys.insert((&r.sentence, &r.sem), line) {
+            out.push(format!(
+                "line {line}: same sentence and sem as line {first}"
+            ));
+        }
+        match r.verdict {
+            Verdict::Wrong if !b.structure && b.senses.is_empty() => out.push(format!(
+                "line {line}: a `wrong` row names what it rules out (`structure`, `sense <atom>…`)"
+            )),
+            Verdict::Wrong if b.departs => {
+                out.push(format!("line {line}: `departs` on a `wrong` row"))
+            }
+            Verdict::Correct if b.structure || !b.senses.is_empty() => out.push(format!(
+                "line {line}: a `correct` row rules nothing out (basis empty or `departs`)"
+            )),
+            Verdict::Uncertain if *b != Basis::default() => {
+                out.push(format!("line {line}: an `uncertain` row has no basis"))
+            }
+            _ => {}
+        }
+        let atoms = sense_atoms(&r.sem);
+        for a in b.senses.iter().filter(|a| !atoms.contains(a.as_str())) {
+            out.push(format!(
+                "line {line}: rules out {a}, which its sem does not contain"
+            ));
+        }
+        let pin = pins.get(&r.sentence);
+        if b.structure && pin == Some(&r.skeleton()) {
+            out.push(format!(
+                "line {line}: rules out its structure, which is the pin"
+            ));
+        }
+        if b.departs && pin.is_none_or(|p| *p == r.skeleton()) {
+            out.push(format!(
+                "line {line}: `departs`, but there is no other pin to depart from"
+            ));
+        }
+    }
+    let mut by_sentence: BTreeMap<&str, Vec<&LedgerRow>> = BTreeMap::new();
+    for r in rows {
+        by_sentence.entry(&r.sentence).or_default().push(r);
+    }
+    for same in by_sentence.values() {
+        for w in same.iter().filter(|r| r.verdict == Verdict::Wrong) {
+            for c in same.iter().filter(|r| r.verdict == Verdict::Correct) {
+                if w.basis.structure && c.skeleton() == w.skeleton() {
+                    out.push(format!(
+                        "line {} is `correct` with the structure line {} rules out",
+                        c.line, w.line
+                    ));
+                }
+                let held = sense_atoms(&c.sem);
+                for a in w.basis.senses.iter().filter(|a| held.contains(a.as_str())) {
+                    out.push(format!(
+                        "line {} is `correct` with {a}, which line {} rules out for this sentence",
+                        c.line, w.line
+                    ));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The sense-rank score counts a word by the ledger's `correct` readings of its sentence: kept,
+/// first, or eliminated.
+#[test]
+fn a_ranking_is_scored_by_the_senses_the_ledger_rules_correct() {
+    use eigenius_kernel::dcg::{RankRecord, RankedWord};
+    let ledger = parse_reading_ledger(
+        "S.\tv00717358_p_to(kind_of(C5392067), n14239918)\tcorrect\tok\n\
+         S.\tv00718737_p_to(kind_of(C5392067), n14239918)\tcorrect\tok\n\
+         S.\tv00000001_t(n00000002, n00000003)\twrong\tno\tstructure\n",
+    )
+    .unwrap();
+    let word = |surface: &str, sems: &[&str], order: &[usize]| RankedWord {
+        surface: surface.into(),
+        senses: sems.iter().map(|s| format!("wn:{s}")).collect(),
+        sems: sems.iter().map(|s| s.to_string()).collect(),
+        order: order.to_vec(),
+        weights: Vec::new(),
+    };
+    let records = [RankRecord {
+        sentence: "S.".into(),
+        context: String::new(),
+        words: vec![
+            // a right sense first
+            word(
+                "respond",
+                &["v00717358_i", "v00718737_i", "v00000009_i"],
+                &[0, 2],
+            ),
+            // a right sense kept, not first
+            word("blockade", &["n00000005", "C5392067"], &[0, 1]),
+            // the right sense eliminated
+            word("cancers", &["n14239918", "n00000006"], &[1]),
+            // no right sense among the candidates: not counted
+            word("some", &["n00000007", "n00000008"], &[0]),
+        ],
+        model: String::new(),
+    }];
+    let score = score_sense_ranks(&records, &ledger, 0.02);
+    assert_eq!(
+        (score.words, score.kept, score.first, score.eliminated.len()),
+        (3, 2, 1, 1)
+    );
+    assert_eq!((score.kept_senses, score.candidates), (5, 7));
+    assert!(score.eliminated[0].starts_with("«cancers» in «S.»: kept 1 of 2"));
+}
+
+/// The ledger may not contradict itself or its pins — checked without a store, so a contradicting
+/// row fails `cargo test` before a sweep scores against it.
+#[test]
+fn reading_ledger_is_consistent() {
+    let pins = load_expected_readings()
+        .into_iter()
+        .map(|e| (e.sentence, e.skeleton))
+        .collect();
+    let problems = ledger_contradictions(&load_reading_ledger(), &pins);
+    assert!(
+        problems.is_empty(),
+        "reading-adjudications.tsv:\n  {}",
+        problems.join("\n  ")
+    );
+}
+
+/// Each contradiction the ledger check names, on a synthetic ledger.
+#[test]
+fn ledger_contradictions_name_each_kind() {
+    let s = "S.";
+    let pin = "f(§, kind_of(§))";
+    let pins = BTreeMap::from([(s.to_string(), pin.to_string())]);
+    let rows = |tsv: &str| parse_reading_ledger(tsv).unwrap();
+    let check = |tsv: &str| ledger_contradictions(&rows(tsv), &pins);
+    // Consistent: a sense ruled out on one row, a different sense correct on another.
+    assert!(check(concat!(
+        "S.\tf(n00000001, kind_of(n00000002))\twrong\tev\tsense n00000002\n",
+        "S.\tf(n00000001, kind_of(n00000003))\tcorrect\tev\n",
+    ))
+    .is_empty());
+    // A correct row holding an atom another row rules out.
+    assert_eq!(
+        check(concat!(
+            "S.\tf(n00000001, kind_of(n00000002))\twrong\tev\tsense n00000002\n",
+            "S.\tf(n00000004, kind_of(deg_n00000002))\tcorrect\tev\n",
+        )),
+        ["line 2 is `correct` with n00000002, which line 1 rules out for this sentence"]
+    );
+    // A correct row with a structure another row rules out.
+    assert_eq!(
+        check(concat!(
+            "S.\tg(n00000001)\twrong\tev\tstructure\n",
+            "S.\tg(n00000002)\tcorrect\tev\n",
+        )),
+        ["line 2 is `correct` with the structure line 1 rules out"]
+    );
+    // Grounds that do not hold of the row itself.
+    assert_eq!(
+        check("S.\tf(n00000001, kind_of(n00000002))\twrong\tev\tstructure; sense n00000009\n"),
+        [
+            "line 1: rules out n00000009, which its sem does not contain",
+            "line 1: rules out its structure, which is the pin",
+        ]
+    );
+    assert_eq!(
+        check(concat!(
+            "S.\tf(n00000001, kind_of(n00000003))\tcorrect\tev\tdeparts\n",
+            "S.\tg(n00000001)\twrong\tev\n",
+            "S.\tg(n00000002)\tcorrect\tev\tsense n00000002\n",
+        )),
+        [
+            "line 1: `departs`, but there is no other pin to depart from",
+            "line 2: a `wrong` row names what it rules out (`structure`, `sense <atom>…`)",
+            "line 3: a `correct` row rules nothing out (basis empty or `departs`)",
+        ]
+    );
+    // The sweep's check: a correct row off the pin counts only with `departs`.
+    let off_pin = rows("S.\tg(n00000001)\tcorrect\tev\n");
+    assert!(off_pin[0].contradicts_pin(pins.get(s)));
+    let departs = rows("S.\tg(n00000001)\tcorrect\tev\tdeparts\n");
+    assert!(!departs[0].contradicts_pin(pins.get(s)));
+    assert!(parse_reading_ledger("S.\tg(n00000001)\tright\tev\n").is_err());
+    assert!(parse_reading_ledger("S.\tg(n00000001)\twrong\tev\tsense\n").is_err());
+}
+
+/// Prints the two-call ranker's structure question for each unit, then defers to the ranker it
+/// wraps (`EIGENIUS_DUMP_STRUCTURES`, eigenius#264).
+struct StructurePreview(Box<dyn eigenius_kernel::dcg::ReadingRanker>);
+
+impl eigenius_kernel::dcg::ReadingRanker for StructurePreview {
+    fn select(
+        &self,
+        ctx: &eigenius_kernel::dcg::reading_ranker::DocumentContext,
+        candidates: &[eigenius_kernel::dcg::reading_ranker::ReadingCandidate],
+    ) -> Option<eigenius_kernel::dcg::reading_ranker::ReadingSelection> {
+        eprintln!(
+            "\n===== STRUCTURES «{}» ({} readings) =====\n{}",
+            ctx.sentence.trim(),
+            candidates.len(),
+            eigenius_kernel::dcg::reading_ranker::structure_question(ctx, candidates)
+                .unwrap_or_else(|| "(one analysis)".to_string())
+        );
+        self.0.select(ctx, candidates)
+    }
+}
+
+/// Appends, for every ambiguous unit, the two-call ranker's questions — the structure call and
+/// every shown structure's sense call — with the candidates they are about, one JSON line per unit,
+/// to the file `EIGENIUS_DUMP_DECISIONS` names, then lets the wrapped ranker decide. What a
+/// presentation change is screened against offline (eigenius#264).
+struct DecisionDump {
+    inner: Box<dyn eigenius_kernel::dcg::ReadingRanker>,
+    out: std::sync::Mutex<std::fs::File>,
+}
+
+impl eigenius_kernel::dcg::ReadingRanker for DecisionDump {
+    fn select(
+        &self,
+        ctx: &eigenius_kernel::dcg::reading_ranker::DocumentContext,
+        candidates: &[eigenius_kernel::dcg::reading_ranker::ReadingCandidate],
+    ) -> Option<eigenius_kernel::dcg::reading_ranker::ReadingSelection> {
+        use std::io::Write;
+        if candidates.len() > 1 {
+            let q = eigenius_kernel::dcg::decision_questions(ctx, candidates);
+            let line = serde_json::json!({
+                "sentence": ctx.sentence.trim(),
+                "tokens": ctx.tokens,
+                "document": ctx.document,
+                "prior_selections": ctx.prior_selections,
+                "concepts": ctx.concepts.iter().map(|c| serde_json::json!({
+                    "id": c.id, "label": c.label, "definition": c.definition,
+                })).collect::<Vec<_>>(),
+                "candidates": candidates.iter().map(|c| serde_json::json!({
+                    "sem": c.sem,
+                    "skeleton": c.skeleton,
+                    "gloss": c.gloss,
+                    "constituents": c.constituents,
+                    "predication": c.predication,
+                    "senses_at": c.senses_at.iter()
+                        .map(|w| serde_json::json!({"span": w.span, "words": w.words, "atoms": w.atoms}))
+                        .collect::<Vec<_>>(),
+                    "links": c.links.iter()
+                        .map(|l| [format!("{:?}", l.function), l.dependent.clone(), l.host.clone()])
+                        .collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+                "groups": q.groups,
+                "structure_choice": q.structure,
+                "sense_choices": q.senses,
+            });
+            let mut f = self.out.lock().expect("dump file");
+            writeln!(f, "{line}").expect("write EIGENIUS_DUMP_DECISIONS");
+        }
+        self.inner.select(ctx, candidates)
+    }
 }
 
 /// The `(sentence, skeleton)` pairs adjudicated `invalid`. Missing file ⇒ empty (check inactive).
@@ -1037,8 +1541,8 @@ fn verify_sense_lever_at_page_beam() {
     let mut variants: Vec<(String, Parser)> = vec![("baseline".into(), mk())];
     #[cfg(feature = "use-llm")]
     {
-        if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
-            variants.push(("+llm".into(), mk().with_sense_ranker(Box::new(r))));
+        if let Some(r) = eigenius_kernel::dcg::live_sense_ranker_from_env() {
+            variants.push(("+llm".into(), mk().with_sense_ranker(r)));
         }
     }
 
@@ -1309,7 +1813,7 @@ fn verify_governed_preposition_at_scale() {
         let mut rels: Vec<String> = c
             .iter()
             .map(|it| pretty_term(it.sem()))
-            .filter(|t| t.contains("_rel("))
+            .filter(|t| t.contains("_rel(") || t.contains("_rel_"))
             .collect();
         rels.sort();
         rels.dedup();
@@ -2626,13 +3130,16 @@ fn measure_pile_cell_population() {
     // Attach the live contextual reranker when built with --features use-llm (mirrors build_index),
     // so this probe measures the reranked serving path, not cap-only.
     #[cfg(feature = "use-llm")]
-    let index = match eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
+    let index = match eigenius_kernel::dcg::live_sense_ranker_from_env() {
         Some(r) => {
-            eprintln!("contextual reranker: AnthropicSenseRanker (live)");
-            index.with_sense_ranker(Box::new(r))
+            eprintln!(
+                "contextual reranker: {} (live)",
+                r.model().unwrap_or_default()
+            );
+            index.with_sense_ranker(r)
         }
         None => {
-            eprintln!("contextual reranker: none (ANTHROPIC_API_KEY unset)");
+            eprintln!("contextual reranker: none (the sense model's API key is unset)");
             index
         }
     };
@@ -3118,7 +3625,7 @@ fn wrn_first_page_over_full_lexicon() {
     // `EIGENIUS_SENSE_RANKS` discipline:
     //   EIGENIUS_SELECTIONS file EXISTS → REPLAY it (deterministic, no LLM; a miss ABSTAINS and
     //                                     is asserted 0 after the run — see the tail assert)
-    //   file ABSENT + live ranker       → LIVE AnthropicReadingRanker, RECORDED to that path
+    //   file ABSENT + live ranker       → the LIVE ranker (live_reading_ranker_from_env), RECORDED
     //   env unset                       → the deterministic PIN-BACKED arm (abstains on unpinned
     //                                     sentences and skeleton ties, so correct == curated by
     //                                     construction; recorded to EIGENIUS_SELECTIONS_OUT)
@@ -3155,19 +3662,20 @@ fn wrn_first_page_over_full_lexicon() {
             // test binary's CWD is the crate dir, not the repo root).
             #[cfg(feature = "use-llm")]
             {
-                let Some(r) = eigenius_kernel::dcg::AnthropicReadingRanker::from_env() else {
+                let Some(r) = eigenius_kernel::dcg::live_reading_ranker_from_env() else {
                     panic!(
-                        "EIGENIUS_SELECTIONS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                        "EIGENIUS_SELECTIONS={} does not exist and the model's API key is unset — \
                          cannot record a live selection draw",
                         p.display()
                     );
                 };
                 eprintln!(
-                    "reading ranker: AnthropicReadingRanker (live) — RECORDING to {}",
+                    "reading ranker: live, {} — RECORDING to {}",
+                    r.model().unwrap_or_default(),
                     p.display()
                 );
                 selection_arm = "live";
-                Box::new(r)
+                r
             }
             #[cfg(not(feature = "use-llm"))]
             panic!(
@@ -3182,6 +3690,25 @@ fn wrn_first_page_over_full_lexicon() {
             Box::new(eigenius_kernel::dcg::PinReadingRanker::new(pins.clone()))
         }
     };
+    // `EIGENIUS_DUMP_STRUCTURES=1` prints, for every ambiguous unit, the two-call ranker's
+    // structure question (eigenius#264) without calling a model, so a replay previews it.
+    let inner_ranker: Box<dyn eigenius_kernel::dcg::ReadingRanker> =
+        if std::env::var("EIGENIUS_DUMP_STRUCTURES").is_ok() {
+            Box::new(StructurePreview(inner_ranker))
+        } else {
+            inner_ranker
+        };
+    let inner_ranker: Box<dyn eigenius_kernel::dcg::ReadingRanker> =
+        match std::env::var("EIGENIUS_DUMP_DECISIONS") {
+            Ok(path) if !path.is_empty() => Box::new(DecisionDump {
+                inner: inner_ranker,
+                out: std::sync::Mutex::new(
+                    std::fs::File::create(&path)
+                        .unwrap_or_else(|e| panic!("EIGENIUS_DUMP_DECISIONS {path}: {e}")),
+                ),
+            }),
+            _ => inner_ranker,
+        };
     let selection_ranker = eigenius_kernel::dcg::RecordingReadingRanker::new(inner_ranker);
     // Where the recorded decisions land: the live arm writes to its EIGENIUS_SELECTIONS path;
     // the other arms to EIGENIUS_SELECTIONS_OUT (per-run artifact).
@@ -3192,10 +3719,30 @@ fn wrn_first_page_over_full_lexicon() {
             .ok()
             .map(PathBuf::from)
     };
-    let reading_gold = load_reading_adjudications();
+    // The READING ledger is checked before it scores anything: a ledger that contradicts itself
+    // makes `reading-correct` a count of whichever of two opposite rulings a draw happens to hit.
+    let ledger = load_reading_ledger();
+    let contradictions = ledger_contradictions(&ledger, &pins);
+    assert!(
+        contradictions.is_empty(),
+        "reading-adjudications.tsv contradicts itself — fix the ledger before scoring:\n  {}",
+        contradictions.join("\n  ")
+    );
+    let reading_gold: BTreeMap<(String, String), &LedgerRow> = ledger
+        .iter()
+        .map(|r| ((r.sentence.clone(), r.sem.clone()), r))
+        .collect();
+    let mut ledger_by_sentence: BTreeMap<&str, Vec<&LedgerRow>> = BTreeMap::new();
+    for r in &ledger {
+        ledger_by_sentence.entry(&r.sentence).or_default().push(r);
+    }
+    let (mut ledger_produced, mut ledger_conflicts) = (0usize, 0usize);
     let mut prior: Vec<eigenius_kernel::dcg::PriorSelection> = Vec::new();
     let (mut sel_eligible, mut sel_chose, mut sel_abstained) = (0usize, 0usize, 0usize);
+    // Readings the ranker sees, and how many lack a well-formed derivation over the whole unit.
+    let (mut deriv_readings, mut deriv_bad) = (0usize, 0usize);
     let (mut sel_read_correct, mut sel_read_wrong, mut sel_read_unadj) = (0usize, 0usize, 0usize);
+    let mut sel_read_conflict = 0usize;
     let (mut sel_struct_correct, mut sel_curated, mut sel_invalid) = (0usize, 0usize, 0usize);
 
     let mut report: Vec<UnitReport> = Vec::new();
@@ -3208,6 +3755,28 @@ fn wrn_first_page_over_full_lexicon() {
             t.elapsed().as_secs_f64(),
             tag(&outcome)
         );
+        // LEDGER AUDIT (`ledger-conflicts`, gated to 0): every `correct` row whose reading this
+        // forest produces must have the pin's structure or say `departs` — chosen by a draw or not.
+        if let Some(rows) = ledger_by_sentence.get(text.trim()) {
+            let closed: Vec<&Item> = match &outcome {
+                Outcome::Encoded { reading, .. } => vec![reading],
+                Outcome::Ambiguous { readings, .. } => readings.iter().collect(),
+                _ => Vec::new(),
+            };
+            let sems: BTreeSet<String> = closed.iter().map(|it| pretty_term(it.sem())).collect();
+            for r in rows.iter().filter(|r| sems.contains(&r.sem)) {
+                ledger_produced += 1;
+                if r.contradicts_pin(pins.get(text.trim())) {
+                    ledger_conflicts += 1;
+                    eprintln!(
+                        "  LEDGER-CONFLICT: «{}» line {} is `correct`, but its structure is not \
+                         the pin (revise the row, or mark it `departs` with the reason)",
+                        text.trim(),
+                        r.line
+                    );
+                }
+            }
+        }
         // Reading selection, in document order (prior selections accumulate into the ranker's
         // context). An Encoded unit contributes its single reading's gloss; an Ambiguous unit is
         // put to the ranker via the SAME `select_reading` the pipeline's discourse loop runs.
@@ -3222,19 +3791,38 @@ fn wrn_first_page_over_full_lexicon() {
             }
             Outcome::Ambiguous { readings, .. } => {
                 sel_eligible += 1;
+                let n = index.tokenize(&text).len();
+                for r in readings.iter() {
+                    deriv_readings += 1;
+                    let whole = r
+                        .derivation()
+                        .is_some_and(|d| d.span == (0, n - 1) && d.is_well_formed());
+                    if !whole {
+                        deriv_bad += 1;
+                        eprintln!(
+                            "  DERIVATION-MISSING: «{}» has a reading without a well-formed \
+                             derivation over its {n} tokens: {}",
+                            text.trim(),
+                            pretty_term(r.sem())
+                        );
+                    }
+                }
                 match index.select_reading(&selection_ranker, &page, &text, &lem, &prior, readings)
                 {
                     Some((_idx, sel)) => {
                         sel_chose += 1;
                         // READING-level scoring — the gated metric (d63-reading-selection.md §5):
                         // the ledger verdict for this exact (sentence, sem). No row / `uncertain`
-                        // ⇒ UNADJUDICATED (must be 0 on the tracked replay).
-                        match reading_gold
+                        // ⇒ UNADJUDICATED (must be 0 on the tracked replay). A `correct` row off
+                        // its pin without `departs` counts as neither: it is a LEDGER-CONFLICT.
+                        let pinned = pins.get(text.trim());
+                        let row = reading_gold
                             .get(&(text.trim().to_string(), sel.chosen_sem.clone()))
-                            .map(String::as_str)
-                        {
-                            Some("correct") => sel_read_correct += 1,
-                            Some("wrong") => sel_read_wrong += 1,
+                            .copied();
+                        match row {
+                            Some(r) if r.contradicts_pin(pinned) => sel_read_conflict += 1,
+                            Some(r) if r.verdict == Verdict::Correct => sel_read_correct += 1,
+                            Some(r) if r.verdict == Verdict::Wrong => sel_read_wrong += 1,
                             _ => {
                                 sel_read_unadj += 1;
                                 eprintln!(
@@ -3247,7 +3835,6 @@ fn wrn_first_page_over_full_lexicon() {
                         // STRUCTURE diagnostic (reported, not gated): does the chosen reading sit
                         // in the pin's human-verified structure? The pins are the GRAMMAR
                         // instrument; here they are only evidence.
-                        let pinned = pins.get(text.trim());
                         if pinned.is_some() {
                             sel_curated += 1;
                         }
@@ -3265,8 +3852,13 @@ fn wrn_first_page_over_full_lexicon() {
                             );
                         }
                         eprintln!(
-                            "  selected 1 of {}: {}",
-                            sel.candidates, sel.chosen_skeleton
+                            "  selected 1 of {}: {}  [{}]",
+                            sel.candidates,
+                            sel.chosen_skeleton,
+                            row.map_or("no ledger row".to_string(), |r| format!(
+                                "ledger line {}: {:?}",
+                                r.line, r.verdict
+                            ))
                         );
                         prior.push(eigenius_kernel::dcg::PriorSelection {
                             ordinal: i,
@@ -3400,8 +3992,18 @@ fn wrn_first_page_over_full_lexicon() {
         "=== SELECTION ({selection_arm}): eligible {sel_eligible}, chose {sel_chose}, \
          abstained {sel_abstained}, reading-correct {sel_read_correct}, \
          reading-wrong {sel_read_wrong}, reading-unadjudicated {sel_read_unadj}, \
+         reading-conflict {sel_read_conflict}, \
          structure-correct {sel_struct_correct}, curated {sel_curated}, \
-         invalid-selected {sel_invalid} ==="
+         invalid-selected {sel_invalid}, \
+         ledger-produced {ledger_produced}, ledger-conflicts {ledger_conflicts} ==="
+    );
+    eprintln!(
+        "=== DERIVATIONS: {deriv_readings} readings of ambiguous units, {deriv_bad} without a \
+         well-formed derivation over the whole unit ==="
+    );
+    assert_eq!(
+        deriv_bad, 0,
+        "every reading carries its derivation (eigenius#264)"
     );
 
     assert_replay_faithful();
@@ -3652,7 +4254,7 @@ fn resolve_document_discourse_close_out() {
     // INSIDE the discourse loop, choosing over the pool of closed ∪ resolved-open readings).
     // Same three-arm discipline as every other recorded stage:
     //   EIGENIUS_SELECTIONS file EXISTS → REPLAY (deterministic, no LLM; misses ABSTAIN)
-    //   file ABSENT + live ranker       → LIVE AnthropicReadingRanker, RECORDED to that path
+    //   file ABSENT + live ranker       → the LIVE ranker (live_reading_ranker_from_env), RECORDED
     //   env unset                       → NO ranker: multi-reading pools stay Ambiguous. This is
     //                                     the arm the pinned tallies below are measured on — it
     //                                     isolates the RESOLVER, which is what those pins gate.
@@ -3682,19 +4284,20 @@ fn resolve_document_discourse_close_out() {
         Some(p) => {
             #[cfg(feature = "use-llm")]
             {
-                let Some(r) = eigenius_kernel::dcg::AnthropicReadingRanker::from_env() else {
+                let Some(r) = eigenius_kernel::dcg::live_reading_ranker_from_env() else {
                     panic!(
-                        "EIGENIUS_SELECTIONS={} does not exist and ANTHROPIC_API_KEY is unset — \
+                        "EIGENIUS_SELECTIONS={} does not exist and the model's API key is unset — \
                          cannot record a live selection draw",
                         p.display()
                     );
                 };
                 eprintln!(
-                    "reading ranker: AnthropicReadingRanker (live) — RECORDING to {}",
+                    "reading ranker: live, {} — RECORDING to {}",
+                    r.model().unwrap_or_default(),
                     p.display()
                 );
                 selection_arm = "live";
-                Some(Box::new(r) as Box<dyn eigenius_kernel::dcg::ReadingRanker>)
+                Some(r as Box<dyn eigenius_kernel::dcg::ReadingRanker>)
             }
             #[cfg(not(feature = "use-llm"))]
             panic!(
@@ -4246,10 +4849,12 @@ fn probe_blocking_word() {
             sentence: &str,
             context: &str,
             words: &[eigenius_kernel::dcg::WordSenses],
-        ) -> Option<Vec<Vec<usize>>> {
+        ) -> Option<Vec<eigenius_kernel::dcg::WordRanking>> {
             let mut r = self.inner.rank(sentence, context, words)?;
             if let Some(v) = r.get_mut(self.blank) {
-                v.clear(); // this word only: out of the map ⇒ static frequency, as Pass 2 does
+                // this word only: out of the map ⇒ static frequency, as Pass 2 does
+                v.order.clear();
+                v.weights.clear();
             }
             Some(r)
         }
@@ -4449,6 +5054,38 @@ fn summarize(report: &[UnitReport]) {
     // Persist the reranker's decisions (if recording) BEFORE the summary, so a run that produced a
     // number always leaves behind the artifact that makes it replayable.
     flush_sense_ranks();
+    if let Some((records, ledger)) = sense_rank_score() {
+        // Where the ranker weighed its senses, how the floor trades the right sense against
+        // pruning — the floor's calibration, no API call needed.
+        if records
+            .iter()
+            .any(|r| r.words.iter().any(|w| !w.weights.is_empty()))
+        {
+            for floor in [0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2] {
+                let s = score_sense_ranks(&records, &ledger, floor);
+                eprintln!(
+                    "  sense floor {floor}: right sense kept {} of {}, first {}, senses kept {} of {}",
+                    s.kept, s.words, s.first, s.kept_senses, s.candidates
+                );
+            }
+        }
+        let floor = sense_floor();
+        let score = score_sense_ranks(&records, &ledger, floor);
+        for e in &score.eliminated {
+            eprintln!("  SENSE-ELIMINATED: {e}");
+        }
+        eprintln!(
+            "=== SENSE RANKS (against the reading ledger, floor {floor}): words {}, \
+             right-sense-kept {}, right-sense-first {}, right-sense-eliminated {}, senses-kept {} \
+             of {} ===",
+            score.words,
+            score.kept,
+            score.first,
+            score.eliminated.len(),
+            score.kept_senses,
+            score.candidates
+        );
+    }
     eprintln!(
         "\n=== WRN first page over FULL lexicon: {} units → encoded {enc}, ambiguous {amb}, \
          open {open}, missing-lexeme {miss}, non-prose {non_prose}, grammar-gap {gap}, \

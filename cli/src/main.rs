@@ -14,10 +14,9 @@
 
 //! Eigenius CLI — primary developer interface for the Eigenius platform.
 
-// Heap-profiling allocator (opt-in, `--features jemalloc-prof`). Swaps in jemalloc so a `serve`
-// process dumps live-heap profiles under `_RJEM_MALLOC_CONF` (diagnosing the reseed OOM,
-// docs/notes/reseed-oom-memory-investigation.md §6). Off by default → the system allocator, zero impact.
-#[cfg(feature = "jemalloc-prof")]
+// jemalloc, not the system allocator: glibc held freed pages from a reseed's per-chunk peaks (see
+// `tikv-jemallocator` in Cargo.toml). `--features jemalloc-prof` adds heap profiling.
+#[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
@@ -439,10 +438,14 @@ enum Commands {
         /// An existing `reference:Reference` IRI to cite instead of minting one.
         #[arg(long)]
         source_ref: Option<String>,
-        /// Model for this run's untrusted proposers; also what each recorded draw names
-        /// as its answerer.
+        /// Model for this run's untrusted proposers other than the reading ranker; also
+        /// what each of their recorded draws names as its answerer.
         #[arg(long)]
         model: Option<String>,
+        /// Model for the reading ranker (`jev-…` asks TypeSafe, `claude-…` Anthropic);
+        /// also what its recorded draws name as their answerer. Default jev-latest.
+        #[arg(long)]
+        reading_model: Option<String>,
         /// Abort on the first unit that does not encode, instead of recording it as an
         /// `enc:CutItem`. Default is to record: an artifact should state what did not
         /// encode rather than vanish.
@@ -1262,6 +1265,7 @@ async fn main() {
                 ns,
                 source_ref,
                 model,
+                reading_model,
                 strict,
                 no_wait,
             } => {
@@ -1278,6 +1282,7 @@ async fn main() {
                         ns: ns.as_deref(),
                         source_ref: source_ref.as_deref(),
                         model: model.as_deref(),
+                        reading_model: reading_model.as_deref(),
                         strict,
                         no_wait,
                     },
@@ -2284,8 +2289,8 @@ fn cmd_lexicon_parse(
     }
     #[cfg(feature = "use-llm")]
     if pc.use_ranker {
-        if let Some(r) = eigenius_kernel::dcg::AnthropicSenseRanker::from_env() {
-            index = index.with_sense_ranker(Box::new(r));
+        if let Some(r) = eigenius_kernel::dcg::live_sense_ranker_from_env() {
+            index = index.with_sense_ranker(r);
         }
     }
     let forest = index.parse_scoped(sentence, &*pc.lemmatizer, scope_iris.as_deref());
@@ -2323,6 +2328,7 @@ struct FormalizeArgs<'a> {
     ns: Option<&'a str>,
     source_ref: Option<&'a str>,
     model: Option<&'a str>,
+    reading_model: Option<&'a str>,
     strict: bool,
     no_wait: bool,
 }
@@ -2381,6 +2387,7 @@ async fn remote_formalize(endpoint: &str, args: FormalizeArgs<'_>, json_output: 
             profile: args.profile.unwrap_or("").to_string(),
             options: Some(pb::FormalizationOptions {
                 model: args.model.unwrap_or("").to_string(),
+                reading_model: args.reading_model.unwrap_or("").to_string(),
                 strict: args.strict,
                 ..Default::default()
             }),

@@ -96,8 +96,9 @@ pub struct Synset {
     /// the synset maps to the NP archetype (an `EigonResource`, §8.7.3), typed
     /// at these classes; empty ⇒ a common-noun class.
     pub instance_of: Vec<Offset>,
-    /// Verb sentence-frame numbers (empty for non-verbs).
-    pub frames: Vec<u8>,
+    /// Verb sentence frames (empty for non-verbs), each for the whole synset or for one of its words
+    /// ([`Frame`]). Read them per word with [`Self::frames_of`].
+    pub frames: Vec<Frame>,
     /// True if this synset has a `\` **pertainym** pointer — i.e. it is a *relational*
     /// adjective ("atomic" \→ "atom"), which is **non-gradable** (D63 §8.12 6-cmp). A
     /// descriptive (gradable) adjective lacks it. (On adverbs `\` means "derived from
@@ -112,6 +113,47 @@ pub struct Synset {
     /// numbers are not kept, and the projection is per synset. As a list, 1,085 WordNet 3.0
     /// adjectives emitted their degree-noun entries once per pointer: 5,534 duplicates.
     pub derivational: BTreeSet<(Offset, String)>,
+}
+
+/// One verb sentence frame as `data.verb` records it: `+ f_num w_num`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Frame {
+    /// The frame, 1–35 (`dict/frames.vrb`: 8 is `Somebody ----s something`).
+    pub number: u8,
+    /// The word it holds for, 1-based into [`Synset::words`]; 0 for every word of the synset.
+    /// WordNet restricts 365 of its 21,649 frame entries to one word (`chew over` 8 in the synset
+    /// of `reflect`, 00630380).
+    pub word: u8,
+}
+
+impl Frame {
+    /// A frame for every word of the synset.
+    pub fn all(number: u8) -> Frame {
+        Frame { number, word: 0 }
+    }
+}
+
+impl Synset {
+    /// The frame numbers that hold for the word at `index` (0-based into [`Self::words`]): the
+    /// synset-wide frames and those WordNet restricts to that word, in number order.
+    pub fn frames_of(&self, index: usize) -> BTreeSet<u8> {
+        self.frames
+            .iter()
+            .filter(|f| f.word == 0 || usize::from(f.word) == index + 1)
+            .map(|f| f.number)
+            .collect()
+    }
+
+    /// The frame numbers that hold for `lemma`, compared without case — every word of the synset
+    /// that spells it.
+    pub fn frames_of_lemma(&self, lemma: &str) -> BTreeSet<u8> {
+        self.words
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| w.eq_ignore_ascii_case(lemma))
+            .flat_map(|(i, _)| self.frames_of(i))
+            .collect()
+    }
 }
 
 /// Strip a WordNet **adjective syntactic marker** — `(a)` attributive, `(p)` predicative,
@@ -177,9 +219,11 @@ pub fn parse_data_line(line: &str) -> Option<Synset> {
         if let Some(f_cnt) = tok.get(i).and_then(|s| s.parse::<usize>().ok()) {
             i += 1;
             for _ in 0..f_cnt {
-                // each frame is `+ f_num w_num`
-                if let Some(fnum) = tok.get(i + 1).and_then(|s| s.parse::<u8>().ok()) {
-                    frames.push(fnum);
+                // each frame is `+ f_num w_num`, the word number in hex (`00`: every word)
+                let number = tok.get(i + 1).and_then(|s| s.parse::<u8>().ok());
+                let word = tok.get(i + 2).and_then(|s| u8::from_str_radix(s, 16).ok());
+                if let (Some(number), Some(word)) = (number, word) {
+                    frames.push(Frame { number, word });
                 }
                 i += 3;
             }
@@ -220,6 +264,9 @@ mod tests {
     // Real gene synset (words + `@` hypernym), p_cnt trimmed to the 3 pointers shown.
     const GENE_N: &str = "05444328 08 n 03 gene 0 cistron 0 factor 0 003 @ 08476263 n 0000 #p 14854534 n 0000 #p 05449707 n 0000 | (genetics) a segment of DNA  ";
     const BREATHE_V: &str = "00001740 29 v 04 breathe 0 take_a_breath 0 respire 0 suspire 3 021 * 00005041 v 0000 * 00004227 v 0000 + 03121972 a 0301 + 00832852 n 0303 + 04087945 n 0301 + 04257960 n 0105 + 00832852 n 0101 ^ 00004227 v 0103 ^ 00005041 v 0103 $ 00002325 v 0000 $ 00002573 v 0000 ~ 00002573 v 0000 ~ 00002724 v 0000 ~ 00002942 v 0000 ~ 00003826 v 0000 ~ 00004032 v 0000 ~ 00004227 v 0000 ~ 00005041 v 0000 ~ 00006697 v 0000 ~ 00007328 v 0000 ~ 00017024 v 0000 02 + 02 00 + 08 00 | draw air into, and expel out of, the lungs";
+    /// `data.verb` 00630380, its pointers cut to the hypernym; the words and frames as WordNet 3.0
+    /// records them.
+    const REFLECT_V: &str = "00630380 31 v 0c chew_over 0 think_over 0 meditate 0 ponder 0 excogitate 0 contemplate 0 muse 0 reflect 0 mull 0 mull_over 0 ruminate 0 speculate 0 001 @ 00630153 v 0000 03 + 08 01 + 08 02 + 22 00 | reflect deeply on a subject";
     const EAT_V: &str = "00275082 30 v 03 corrode 1 eat 0 rust 1 007 @ 00259743 v 0000 + 14913630 n 0301 + 13573473 n 0301 + 00590069 a 0102 + 13474601 n 0101 + 13474601 n 0102 $ 00274762 v 0000 01 + 11 00 | cause to deteriorate";
     // Real instance synset: Einstein `@i` physicist (an individual, not a class);
     // the `+` is a derivational pointer, not a hypernym.
@@ -283,7 +330,8 @@ mod tests {
         assert_eq!(s.pos, Pos::Verb);
         assert_eq!(s.words, ["breathe", "take a breath", "respire", "suspire"]);
         // frame 2 = "Somebody ----s" (intransitive), 8 = "Somebody ----s something".
-        assert_eq!(s.frames, [2, 8]);
+        assert_eq!(s.frames, [Frame::all(2), Frame::all(8)]);
+        assert_eq!(s.frames_of(3), BTreeSet::from([2, 8]));
         assert!(s.hypernyms.is_empty()); // breathe has no `@` hypernym in this synset
     }
 
@@ -291,7 +339,25 @@ mod tests {
     fn verb_hypernym_and_frame() {
         let s = parse_data_line(EAT_V).unwrap();
         assert_eq!(s.hypernyms, ["00259743"]); // `@` (troponymy)
-        assert_eq!(s.frames, [11]); // "Something ----s something" (transitive)
+        assert_eq!(s.frames, [Frame::all(11)]); // "Something ----s something" (transitive)
+    }
+
+    /// A frame WordNet restricts to one word holds for that word only: in 00630380 (`reflect`,
+    /// `ponder`, …) frame 8 is `chew over`'s and `think over`'s.
+    #[test]
+    fn a_word_restricted_frame_holds_for_its_word_only() {
+        let s = parse_data_line(REFLECT_V).unwrap();
+        assert_eq!(
+            s.frames,
+            [
+                Frame { number: 8, word: 1 },
+                Frame { number: 8, word: 2 },
+                Frame::all(22)
+            ]
+        );
+        assert_eq!(s.frames_of_lemma("chew over"), BTreeSet::from([8, 22]));
+        assert_eq!(s.frames_of_lemma("Reflect"), BTreeSet::from([22]));
+        assert!(s.frames_of_lemma("swim").is_empty());
     }
 
     #[test]

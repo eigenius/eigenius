@@ -19,7 +19,6 @@
 //! has an optional IRI identity and a set of property values.
 
 use crate::ontology::iri::Iri;
-use std::collections::BTreeMap;
 
 /// A property value in the Eigon data model.
 ///
@@ -148,10 +147,8 @@ impl Value {
 pub struct Resource {
     /// IRI identity. `None` for embedded resources.
     id: Option<Iri>,
-    /// Property values indexed by property IRI.
-    /// BTreeMap for deterministic ordering (required for canonical hashing)
-    /// and cache-friendly sequential access.
-    properties: BTreeMap<Iri, Value>,
+    /// Property values indexed by property IRI, in IRI order (canonical hashing depends on it).
+    properties: PropertyMap,
 }
 
 impl Resource {
@@ -159,7 +156,7 @@ impl Resource {
     pub fn new(id: Iri) -> Self {
         Self {
             id: Some(id),
-            properties: BTreeMap::new(),
+            properties: PropertyMap::new(),
         }
     }
 
@@ -167,7 +164,7 @@ impl Resource {
     pub fn new_embedded() -> Self {
         Self {
             id: None,
-            properties: BTreeMap::new(),
+            properties: PropertyMap::new(),
         }
     }
 
@@ -208,8 +205,8 @@ impl Resource {
         self.properties.contains_key(property)
     }
 
-    /// Returns all properties as a reference to the underlying BTreeMap.
-    pub fn properties(&self) -> &BTreeMap<Iri, Value> {
+    /// Returns all properties, in IRI order.
+    pub fn properties(&self) -> &PropertyMap {
         &self.properties
     }
 
@@ -236,6 +233,146 @@ impl Resource {
     /// Returns an iterator over all property IRIs on this resource.
     pub fn property_iris(&self) -> impl Iterator<Item = &Iri> {
         self.properties.keys()
+    }
+}
+
+/// A resource's properties, kept sorted by property IRI.
+///
+/// A sorted `Vec`, not a `BTreeMap`: iteration is in IRI order either way, which canonical hashing
+/// and both codecs depend on, but a `BTreeMap` allocates its leaf node at its full eleven-slot
+/// capacity, ~630 bytes for an embedded type-expression node holding two or three properties. A
+/// parsed WordNet entry carries ~15 such nodes, and their leaves were ~70% of its ~13.5 KB
+/// (docs/notes/reseed-oom-memory-investigation.md). Lookup scans forward up to
+/// [`LINEAR_SCAN_MAX`] entries and binary-searches above it; an insert in order, which is how the
+/// codecs and the ESL compiler build a resource, is a push.
+#[derive(Clone, PartialEq, Default)]
+pub struct PropertyMap {
+    entries: Vec<(Iri, Value)>,
+}
+
+/// The most entries a lookup scans forward rather than binary-searching.
+///
+/// Measured by `benches/resources.rs`, group `search`, on keys sharing a 30-byte prefix: at 3
+/// entries a hit takes 3.6 ns scanning against 7.8 ns searching, at 16 entries 12.9 against 16.7,
+/// and the two are even at 24. A scan's comparisons come out `Less` until the last, which the
+/// branch predictor learns; each step of a binary search goes either way. Lexicon nodes hold at
+/// most 8 properties, 72% of them 3.
+const LINEAR_SCAN_MAX: usize = 16;
+
+impl PropertyMap {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Where `key` is (`Ok`) or would be inserted (`Err`).
+    fn position(&self, key: &Iri) -> Result<usize, usize> {
+        if self.entries.len() > LINEAR_SCAN_MAX {
+            return self.entries.binary_search_by(|(k, _)| k.cmp(key));
+        }
+        for (i, (k, _)) in self.entries.iter().enumerate() {
+            match k.cmp(key) {
+                std::cmp::Ordering::Less => {}
+                std::cmp::Ordering::Equal => return Ok(i),
+                std::cmp::Ordering::Greater => return Err(i),
+            }
+        }
+        Err(self.entries.len())
+    }
+
+    pub fn get(&self, key: &Iri) -> Option<&Value> {
+        self.position(key).ok().map(|i| &self.entries[i].1)
+    }
+
+    /// Set `key` to `value`, returning the value it replaces.
+    pub fn insert(&mut self, key: Iri, value: Value) -> Option<Value> {
+        if self.entries.last().is_none_or(|(last, _)| *last < key) {
+            self.entries.push((key, value));
+            return None;
+        }
+        match self.position(&key) {
+            Ok(i) => Some(std::mem::replace(&mut self.entries[i].1, value)),
+            Err(i) => {
+                self.entries.insert(i, (key, value));
+                None
+            }
+        }
+    }
+
+    pub fn remove(&mut self, key: &Iri) -> Option<Value> {
+        self.position(key).ok().map(|i| self.entries.remove(i).1)
+    }
+
+    pub fn contains_key(&self, key: &Iri) -> bool {
+        self.position(key).is_ok()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// The properties in IRI order.
+    pub fn iter(&self) -> Iter<'_> {
+        Iter(self.entries.iter())
+    }
+
+    pub fn keys(&self) -> impl DoubleEndedIterator<Item = &Iri> + ExactSizeIterator + Clone {
+        self.entries.iter().map(|(k, _)| k)
+    }
+
+    pub fn values(&self) -> impl DoubleEndedIterator<Item = &Value> + ExactSizeIterator + Clone {
+        self.entries.iter().map(|(_, v)| v)
+    }
+}
+
+/// Later entries win, as repeated inserts into a map would.
+impl FromIterator<(Iri, Value)> for PropertyMap {
+    fn from_iter<I: IntoIterator<Item = (Iri, Value)>>(iter: I) -> Self {
+        let mut map = PropertyMap::new();
+        for (k, v) in iter {
+            map.insert(k, v);
+        }
+        map
+    }
+}
+
+/// Printed as a map, as the `BTreeMap` it replaced was.
+impl std::fmt::Debug for PropertyMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map().entries(self.iter()).finish()
+    }
+}
+
+/// Iterator over a [`PropertyMap`]'s `(property, value)` pairs in IRI order.
+#[derive(Clone)]
+pub struct Iter<'a>(std::slice::Iter<'a, (Iri, Value)>);
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = (&'a Iri, &'a Value);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|(k, v)| (k, v))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl DoubleEndedIterator for Iter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back().map(|(k, v)| (k, v))
+    }
+}
+
+impl ExactSizeIterator for Iter<'_> {}
+
+impl<'a> IntoIterator for &'a PropertyMap {
+    type Item = (&'a Iri, &'a Value);
+    type IntoIter = Iter<'a>;
+    fn into_iter(self) -> Iter<'a> {
+        self.iter()
     }
 }
 
@@ -317,5 +454,85 @@ mod tests {
 
         let keys: Vec<&str> = r.property_iris().map(|i| i.as_str()).collect();
         assert_eq!(keys, vec!["urn:a:prop", "urn:m:prop", "urn:z:prop"]);
+    }
+
+    #[test]
+    fn a_property_map_keeps_iri_order_whatever_the_insertion_order() {
+        let mut m = PropertyMap::new();
+        for k in ["urn:m:p", "urn:z:p", "urn:a:p", "urn:q:p"] {
+            assert_eq!(m.insert(iri(k), Value::String(k.into())), None);
+        }
+        let keys: Vec<&str> = m.keys().map(|k| k.as_str()).collect();
+        assert_eq!(keys, vec!["urn:a:p", "urn:m:p", "urn:q:p", "urn:z:p"]);
+        assert_eq!(
+            m.get(&iri("urn:q:p")).and_then(Value::as_str),
+            Some("urn:q:p")
+        );
+        assert!(m.get(&iri("urn:b:p")).is_none());
+    }
+
+    #[test]
+    fn a_property_map_replaces_and_removes_like_a_map() {
+        let mut m = PropertyMap::new();
+        m.insert(iri("urn:a:p"), Value::Integer(1));
+        m.insert(iri("urn:b:p"), Value::Integer(2));
+        assert_eq!(
+            m.insert(iri("urn:a:p"), Value::Integer(3)),
+            Some(Value::Integer(1))
+        );
+        assert_eq!(m.len(), 2);
+        assert_eq!(m.remove(&iri("urn:a:p")), Some(Value::Integer(3)));
+        assert_eq!(m.remove(&iri("urn:a:p")), None);
+        assert!(!m.contains_key(&iri("urn:a:p")) && m.contains_key(&iri("urn:b:p")));
+    }
+
+    #[test]
+    fn a_property_map_finds_the_same_keys_scanning_or_searching() {
+        let key = |i: usize| iri(&format!("urn:p:{i:03}"));
+        for n in 1..=LINEAR_SCAN_MAX + 8 {
+            let mut m = PropertyMap::new();
+            // Even keys, inserted last first, so every insert lands at the front.
+            for i in (0..n).rev() {
+                assert_eq!(m.insert(key(2 * i), Value::Integer(i as i64)), None);
+            }
+            assert!(
+                m.keys().zip(m.keys().skip(1)).all(|(a, b)| a < b),
+                "n = {n}"
+            );
+            for i in 0..n {
+                assert_eq!(
+                    m.get(&key(2 * i)),
+                    Some(&Value::Integer(i as i64)),
+                    "n = {n}"
+                );
+                assert!(m.get(&key(2 * i + 1)).is_none(), "n = {n}");
+            }
+            assert_eq!(
+                m.remove(&key(2 * (n / 2))),
+                Some(Value::Integer((n / 2) as i64))
+            );
+            assert!(
+                !m.contains_key(&key(2 * (n / 2))) && m.len() == n - 1,
+                "n = {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn property_maps_with_the_same_content_are_equal_and_print_as_maps() {
+        let a: PropertyMap = [("urn:b:p", 2), ("urn:a:p", 1)]
+            .into_iter()
+            .map(|(k, n)| (iri(k), Value::Integer(n)))
+            .collect();
+        let b: PropertyMap = [("urn:a:p", 9), ("urn:b:p", 2), ("urn:a:p", 1)]
+            .into_iter()
+            .map(|(k, n)| (iri(k), Value::Integer(n)))
+            .collect();
+        assert_eq!(a, b);
+        let printed = format!("{a:?}");
+        assert!(
+            printed.starts_with('{') && printed.contains("Integer(1)"),
+            "{printed}"
+        );
     }
 }

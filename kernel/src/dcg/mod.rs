@@ -33,11 +33,14 @@
 //!   + multi-span lemmatized seeding + CKY + the kernel felicity filter.
 
 pub mod abbrev;
+pub mod analysis;
 pub mod attribution;
 pub mod augment;
 pub mod category;
 pub(crate) mod chart;
 pub mod closed_class;
+pub mod decision;
+pub mod derivation;
 pub mod draw;
 pub mod formalizer;
 pub mod glossary;
@@ -107,6 +110,7 @@ pub use lexicon::{
     LexicalIndex, LexicalLookup,
 };
 pub use named_entity::{extract_named_entities_with, NamedEntity};
+pub use parse::DEFAULT_SENSE_FLOOR;
 pub use parse::{
     Candidate, ClaimLander, DiscourseRun, HoleInfo, HoleKind, OpenParse, ParseConfig, Parser,
     Proposal, ProposeCtx, Proposer, ResolutionOutcome, ResolvedBinding, SelectionOutcome,
@@ -121,11 +125,14 @@ pub use proposer_record::{
     ProposalRecord, RecordedProposalCandidate, RecordingProposer, ReplayProposer,
 };
 pub use quantity::{ProseUnits, Quantity, UnitReading};
-#[cfg(feature = "use-llm")]
-pub use reading_ranker::AnthropicReadingRanker;
 pub use reading_ranker::{
-    DocumentContext, PinReadingRanker, PriorSelection, ReadingCandidate, ReadingRanker,
+    decision_questions, DecisionQuestions, DecisionReadingRanker, DocumentContext,
+    LiveReadingRanker, PinReadingRanker, PriorSelection, ReadingCandidate, ReadingRanker,
     ReadingSelection, RecordingReadingRanker, ReplayReadingRanker, SelectionRecord,
+};
+#[cfg(feature = "use-llm")]
+pub use reading_ranker::{
+    live_reading_ranker, live_reading_ranker_from_env, AnthropicReadingRanker,
 };
 pub use rules::combinators::apply;
 pub use rules::constructions::{
@@ -135,9 +142,9 @@ pub use rules::constructions::{
 pub use rules::RightContext;
 pub use segment::segment_sentences;
 #[cfg(feature = "use-llm")]
-pub use sense_ranker::AnthropicSenseRanker;
+pub use sense_ranker::{live_sense_ranker, live_sense_ranker_from_env};
 pub use sense_ranker::{
-    IdentityRanker, RankRecord, RankedWord, RecordingSenseRanker, ReplaySenseRanker,
-    SenseCandidate, SenseRanker, WordSenses,
+    sense_choice, DecisionSenseRanker, IdentityRanker, LiveSenseRanker, RankRecord, RankedWord,
+    RecordingSenseRanker, ReplaySenseRanker, SenseCandidate, SenseRanker, WordRanking, WordSenses,
 };
 pub use verbalize::{resource_label, unit_sense_names, verbalize, Vb};

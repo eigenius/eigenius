@@ -23,10 +23,12 @@ use super::*;
 
 use crate::dcg::pretty::pretty_term;
 use crate::dcg::reading_ranker::{
-    first_collision, DocumentContext, PriorSelection, ReadingCandidate, ReadingRanker,
+    first_collision, DocumentContext, PriorSelection, ReadingCandidate, ReadingRanker, SenseAt,
 };
 use crate::dcg::skeleton::skeleton_of;
-use crate::dcg::verbalize::{concept_notes, resource_label, unit_sense_names, verbalize, Vb};
+use crate::dcg::verbalize::{
+    concept_notes, predication, resource_label, structure_links, unit_sense_names, verbalize, Vb,
+};
 use crate::ontology::Resource;
 
 /// Cap on FULL re-gates ([`Parser::resolve_open`] calls) per [`Parser::resolve_with`] search —
@@ -129,12 +131,7 @@ impl Parser {
         // Closed re-gate: empty Γ, so any leftover hole is an unbound variable ⇒ fail closed.
         let mut ctx = CheckCtx::with_layer(Rho::Nil, Vec::new(), Arc::clone(&self.grammar.layer));
         check(&mut ctx, &nf, &expected_val).ok()?;
-        Some(Item::from_parts(
-            open.item.cat().clone(),
-            nf,
-            open.item.prov(),
-            open.item.cost(),
-        ))
+        Some(open.item.with_sem(nf))
     }
 
     /// Apply every hole's antecedent in binder order and β-reduce to the normal form. `member`
@@ -409,6 +406,8 @@ impl Parser {
                 let doc_ctx = DocumentContext {
                     document,
                     sentence: s,
+                    // The proposer reads no constituent spans.
+                    tokens: &[],
                     prior_selections: &prior,
                     // The proposer ranks ANTECEDENTS, not readings; its candidates carry their
                     // own surfaces, so there is no concept legend to add here.
@@ -627,6 +626,13 @@ impl Parser {
         // The chooser's register (D69 §4): the ranker is being asked which reading is right, and
         // in Surface these 120 readings render to 4 strings.
         let vb = Vb::expanded(&names, &self.grammar.layer);
+        // The sentence as the parser split it: what each reading's derivation indexes, so its
+        // constituents and the words that introduced each concept can be shown (eigenius#264).
+        let tokens: Vec<String> = self
+            .tokenize(sentence)
+            .iter()
+            .map(|t| t.surface().to_string())
+            .collect();
         let skels: Vec<String> = closed.iter().map(|it| skeleton_of(it.sem())).collect();
         // Present GROUPED BY SKELETON (the stable sort keeps the forest's cost order within a
         // group), so structural alternatives sit side by side for the ranker.
@@ -634,10 +640,43 @@ impl Parser {
         order.sort_by(|&a, &b| skels[a].cmp(&skels[b]));
         let cands: Vec<ReadingCandidate> = order
             .iter()
-            .map(|&i| ReadingCandidate {
-                skeleton: skels[i].clone(),
-                gloss: verbalize(closed[i].sem(), &vb),
-                sem: pretty_term(closed[i].sem()),
+            .map(|&i| {
+                let it = &closed[i];
+                // Each concept named by the words of the leaf that introduced it in THIS reading,
+                // else by its lemma; and the constituents its derivation builds.
+                let (mut words, constituents, senses_at) = match it.derivation() {
+                    Some(d) => (
+                        d.leaf_words(&tokens),
+                        d.constituents()
+                            .into_iter()
+                            .filter(|&(a, b)| b > a)
+                            .collect(),
+                        d.leaves()
+                            .into_iter()
+                            .filter(|l| !l.atoms.is_empty())
+                            .filter_map(|l| {
+                                Some(SenseAt {
+                                    span: l.span,
+                                    words: tokens.get(l.span.0..=l.span.1)?.join(" "),
+                                    atoms: l.atoms.clone(),
+                                })
+                            })
+                            .collect(),
+                    ),
+                    None => (BTreeMap::new(), Vec::new(), Vec::new()),
+                };
+                for (key, name) in &names {
+                    words.entry(key.clone()).or_insert_with(|| name.clone());
+                }
+                ReadingCandidate {
+                    skeleton: skels[i].clone(),
+                    gloss: verbalize(it.sem(), &vb),
+                    sem: pretty_term(it.sem()),
+                    constituents,
+                    links: structure_links(it.sem(), &Vb::surface(&words, &self.grammar.layer)),
+                    predication: predication(it.sem()).map(str::to_string),
+                    senses_at,
+                }
             })
             .collect();
         // The legend: every concept these readings name, once, with the chain's definition
@@ -647,6 +686,7 @@ impl Parser {
         let ctx = DocumentContext {
             document,
             sentence,
+            tokens: &tokens,
             prior_selections: prior,
             concepts: &concepts,
         };
@@ -655,7 +695,7 @@ impl Parser {
         // with a rationale about whatever axes happen to be visible; the pin arm would match
         // several; the replay arm would key on an ambiguous presentation. Fail closed and name
         // the two sems, so the renderer gets fixed instead of the symptom.
-        if let Some((i, j)) = first_collision(&cands) {
+        if let Some((i, j)) = first_collision(&cands, ranker) {
             eprintln!(
                 "reading-ranker: ABSTAINED on «{}» — candidates [{i}] and [{j}] render                  identically, so the choice between them cannot be put to a ranker (D69).\n                   rendering: {}\n  sem [{i}]: {}\n  sem [{j}]: {}",
                 sentence.trim(),

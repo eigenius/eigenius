@@ -28,11 +28,13 @@
 //! same registry the flat chart uses, so the two drivers cannot drift apart.
 
 use super::super::category::is_sentence_premod;
+use super::super::derivation::Step;
 use super::super::grammar::Grammar;
 use super::super::item::Item;
 use super::super::preprocess::Token;
 use super::super::rules::combinators::apply;
 use super::super::rules::registry::{unary_shifts, BinRule, UnaryKind};
+use super::derived_combine;
 use super::forest::{self as packed, CubeCandidate, Edge, Forest, NodeId, Sig};
 
 impl Grammar {
@@ -64,14 +66,18 @@ impl Grammar {
                     let rk = self.kbest(forest, r, k, memo);
                     let layer = &self.layer;
                     let rctx = forest.nodes[node_id].rctx;
-                    self.cube(&lk, &rk, k, &mut cands, |l, r| apply(l, r, layer, rctx));
+                    self.cube(&lk, &rk, k, &mut cands, |l, r| {
+                        apply(l, r, layer, rctx).map(|it| derived_combine(it, span, &[l, r]))
+                    });
                 }
                 packed::Edge::Binary { left, right, rule } => {
                     let (l, r, rule) = (*left, *right, *rule);
                     let lk = self.kbest(forest, l, k, memo);
                     let rk = self.kbest(forest, r, k, memo);
+                    let step = Step::Binary(Self::bin_rule_name(rule));
                     self.cube(&lk, &rk, k, &mut cands, |l, r| {
                         self.apply_bin_rule(rule, l, r)
+                            .map(|it| it.derived(span, step, &[l, r]))
                     });
                 }
                 packed::Edge::Unary { child, kind } => {
@@ -230,10 +236,16 @@ impl Grammar {
         // re-check here; the span widens but cat/sem/cost are identical. Every other shift comes from
         // the shared `unary_shifts()` table (Phase 2d), so materialisation cannot drift from build.
         match kind {
-            UnaryKind::AbsorbComma => out.push(it.clone()),
+            UnaryKind::AbsorbComma => out.push(it.clone().derived(span, Step::AbsorbComma, &[it])),
             _ => {
                 if let Some(shift) = unary_shifts().iter().find(|s| s.kind == kind) {
-                    out.extend(shift.run(self, it, span, rctx));
+                    let step = Step::Unary(shift.name);
+                    out.extend(
+                        shift
+                            .run(self, it, span, rctx)
+                            .into_iter()
+                            .map(|o| o.derived(span, step, &[it])),
+                    );
                 }
             }
         }

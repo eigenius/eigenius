@@ -32,7 +32,11 @@
 
 import { assertEquals } from "@std/assert";
 import { createConnectRouter } from "@connectrpc/connect";
-import { registerEigeniusKernelPassthrough } from "../src/notebook/eigenius_kernel_passthrough.ts";
+import {
+  eigeniusKernelPassthroughMethods,
+  registerEigeniusKernelPassthrough,
+} from "../src/notebook/eigenius_kernel_passthrough.ts";
+import { EigeniusKernel } from "../src/gen/eigenius_pb.ts";
 import type { KernelClient } from "../src/client/kernel_client.ts";
 
 // ---------------------------------------------------------------------------
@@ -53,23 +57,19 @@ const EXPECTED_METHODS = [
   "formalizeDocument",
   "getBranch",
   "getFormalizationResult",
-  "getSchema",
   "getTaskStatus",
   "health",
   "inspect",
-  "layerTopology",
   "listBranches",
   "listInstitutions",
   "listTags",
   "listTasks",
   "load",
   "mergeBranches",
-  "parseSentence",
   "prepareMerge",
   "previewCascade",
   "previewMerge",
   "query",
-  "reflect",
   "runGc",
   "runProgram",
   "runProgramByIri",
@@ -77,16 +77,27 @@ const EXPECTED_METHODS = [
   "validateProgram",
 ].sort();
 
+const deps = { kernel: { raw: {} } as unknown as KernelClient };
+
+// The methods the passthrough implements. `router.service` registers a handler
+// for every method of the service and answers UNIMPLEMENTED for the rest, so
+// the router's handler list is the proto's method list: pinning it pinned the
+// proto (it failed when `StartSweep` and three other task RPCs were added, and
+// it listed `reflect`, `getSchema`, `layerTopology` and `parseSentence`, which
+// were never forwarded), and it could not catch a missing implementation.
 function routedMethods(): string[] {
-  const router = createConnectRouter();
-  registerEigeniusKernelPassthrough(router, {
-    kernel: { raw: {} } as unknown as KernelClient,
-  });
-  return router.handlers.map((h) => h.method.localName).sort();
+  return Object.keys(eigeniusKernelPassthroughMethods(deps)).sort();
 }
 
 Deno.test("the passthrough exposes exactly the curated method set", () => {
   assertEquals(routedMethods(), EXPECTED_METHODS);
+});
+
+Deno.test("the router serves the EigeniusKernel service", () => {
+  const router = createConnectRouter();
+  registerEigeniusKernelPassthrough(router, deps);
+  const served = new Set(router.handlers.map((h) => h.service.typeName));
+  assertEquals([...served], [EigeniusKernel.typeName]);
 });
 
 Deno.test("a formalize cell's whole call sequence is routed", () => {

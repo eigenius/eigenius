@@ -103,21 +103,15 @@ fn generate_stative_participle_layer() {
     let (mut n_syn, mut n_entry) = (0usize, 0usize);
     for (off, syn) in &synsets {
         // One preposition per synset: the lowest-numbered naming frame, so the choice is deterministic.
+        let naming =
+            |f: &u8| only.as_ref().is_none_or(|o| o.contains(f)) && frame_prep(*f).is_some();
         let Some(prep) = syn
             .frames
             .iter()
-            .copied()
-            .filter(|f| only.as_ref().is_none_or(|o| o.contains(f)))
-            .filter_map(frame_prep)
+            .map(|f| f.number)
+            .filter(naming)
             .min()
-            .or_else(|| {
-                syn.frames
-                    .iter()
-                    .copied()
-                    .filter(|f| only.as_ref().is_none_or(|o| o.contains(f)))
-                    .filter_map(frame_prep)
-                    .next()
-            })
+            .and_then(frame_prep)
         else {
             continue;
         };
@@ -127,6 +121,14 @@ fn generate_stative_participle_layer() {
             esc(&syn.gloss)
         ));
         for (i, lemma) in syn.words.iter().enumerate() {
+            // The words the naming frame holds for (WordNet restricts some frames to one word).
+            if !syn
+                .frames_of(i)
+                .iter()
+                .any(|f| naming(f) && frame_prep(*f) == Some(prep))
+            {
+                continue;
+            }
             for (k, pp) in head_pps(lemma).iter().enumerate() {
                 buf.push_str(&format!(
                     "resource wn:e_v{off}_rel_{i}_{k} : lexicon:LexicalEntry {{\n    \

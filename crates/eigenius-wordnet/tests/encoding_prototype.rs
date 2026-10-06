@@ -44,6 +44,7 @@ use eigenius_kernel::nbe::env::Rho;
 use eigenius_kernel::nbe::readback::readback_val;
 use eigenius_kernel::nbe::term::Exp;
 use eigenius_wordnet::convert::{render_document, MassNouns};
+use eigenius_wordnet::governance::{self, Governance, Placements};
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 
@@ -54,7 +55,37 @@ const DICT: &str = concat!(
     "/../../references/WordNet-3.0/dict"
 );
 
+/// The governance as the importer builds it (eigenius#263, D97 slice 2): the whole dict,
+/// the provisioned SPECIALIST Lexicon and the judges' committed placements.
+fn governance() -> Governance {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let placements = Placements::read(
+        &std::path::Path::new(root).join("experiments/lexicon-specialist/adjective-senses.tsv"),
+    )
+    .expect("the adjective sense judge's placements are committed");
+    let verb_placements = Placements::read(
+        &std::path::Path::new(root).join("experiments/lexicon-specialist/verb-senses.tsv"),
+    )
+    .expect("the verb sense judge's placements are committed");
+    governance::build(
+        std::path::Path::new(DICT),
+        &std::path::Path::new(root).join("references/specialist/LEXICON"),
+        &placements,
+        &verb_placements,
+    )
+    .expect("governed prepositions")
+    .0
+}
+
 fn dict_missing() -> bool {
+    let specialist = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../references/specialist/LEXICON"
+    );
+    if !std::path::Path::new(specialist).exists() {
+        eprintln!("SKIP: SPECIALIST not provisioned — run scripts/provision-specialist.sh");
+        return true;
+    }
     if std::path::Path::new(DICT).join("data.noun").exists() {
         return false;
     }
@@ -66,7 +97,7 @@ fn dict_missing() -> bool {
 fn stand_up(spec: &SeedSpec) -> Arc<Layer> {
     let chosen = select_synsets(std::path::Path::new(DICT), spec).expect("read WordNet dict");
     let ranks = read_sense_ranks(std::path::Path::new(DICT), &spec.pos).expect("read index ranks");
-    let (doc, _rep) = render_document(&chosen, &ranks, &MassNouns::new());
+    let (doc, _rep) = render_document(&chosen, &ranks, &MassNouns::new(), &governance());
     let ctx = eigenius_kernel::testing::bootstrap_context();
     let resources = esl::compile(&doc, ctx.head()).expect("wn compiles");
     let mut b = LayerBuilder::new("wn", Some(Arc::clone(ctx.head())));

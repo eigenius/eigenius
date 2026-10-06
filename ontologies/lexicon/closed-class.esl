@@ -210,6 +210,12 @@ resource lexicon:which_obj : lexicon:LexicalEntry {
 // declarative, `mood`-tagged `q`. `do`-support is semantically vacuous (tense
 // erased): the sem is `λsubj. λV. V(subj)`. The `bse` complement slot makes the
 // `Fin`-meet reject `*does HeLa affects …`.
+//
+// These three and the declarative three below share ONE sense, `do`: a question and a
+// declarative differ in category, not in meaning, and the sense ranker chooses among
+// meanings. With a key per category, «does» offered the ranker two senses under one
+// gloss, and keeping only `does` (the question entry) dropped every declarative reading
+// of «Each event alone does not lead to cell death.»
 
 resource lexicon:do_aux_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
@@ -220,12 +226,12 @@ resource lexicon:do_aux_sem : lexicon:SemTerm {
 
 // does — present, 3sg do-support.
 resource lexicon:does_aux : lexicon:LexicalEntry {
-    core:description = "grammatical: third-person singular DO-support auxiliary, carrying tense in negation ('does not lead to cell death').";
+    core:description = "grammatical: third-person singular DO-support auxiliary, carrying tense in negation and questions ('does not lead to cell death').";
     lexicon:form     = "does";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:sg)) );
     lexicon:sem      = lexicon:do_aux_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> Prop );
-    lexicon:sense    = "does";
+    lexicon:sense    = "do";
 }
 // do — present, non-3sg do-support.
 resource lexicon:do_aux : lexicon:LexicalEntry {
@@ -243,7 +249,7 @@ resource lexicon:did_aux : lexicon:LexicalEntry {
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:q, lexicon:fin), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
     lexicon:sem      = lexicon:do_aux_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> (lexicon:Entity -> Prop) -> Prop );
-    lexicon:sense    = "did";
+    lexicon:sense    = "do";
 }
 
 // ── Copula `be` — predicative (D63 §8.5, Slice 3a) ────────────────────
@@ -404,9 +410,10 @@ resource lexicon:not_adj : lexicon:LexicalEntry {
     lexicon:sense    = "not";
     lexicon:scope_bearing = true;
 }
-// Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`.
+// Declarative do-support (verbal negation / emphatic) — finiteness-lifting `λP.P`. Sense
+// `do`, shared with the question entries (see `lexicon:does_aux`).
 resource lexicon:does_decl : lexicon:LexicalEntry {
-    core:description = "grammatical: third-person singular DO-support auxiliary, carrying tense in negation ('does not lead to cell death').";
+    core:description = "grammatical: third-person singular DO-support auxiliary, carrying tense in negation and questions ('does not lead to cell death').";
     lexicon:form     = "does";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:bse), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
     lexicon:sem      = lexicon:copula_sem;
@@ -762,7 +769,7 @@ resource lexicon:that_comp_sem : lexicon:SemTerm {
     lexicon:term = type_expr( ( fun (p : Prop) => p : Prop -> Prop ) );
 }
 resource lexicon:that_comp : lexicon:LexicalEntry {
-    core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
+    core:description = "grammatical: the complementiser introducing a clause ('showed that WRN is essential').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_cp, lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
     lexicon:sem      = lexicon:that_comp_sem;
@@ -1788,8 +1795,8 @@ resource lexicon:less_deg : lexicon:LexicalEntry {
 // `to X`. The **Prep feature** (D63 §5.3 C3-precision) tags each marker with its preposition, so a
 // governed adjective selects the RIGHT one: `dependent` (prep_on) composes with `on` but not `to`
 // (`*dependent to`). These are IN ADDITION to each preposition's VP-adjunct + noun-modifier entries
-// above (the argument reading is a third parse, selected only by a subcategorizing head). The set
-// mirrors `governed_preposition`'s extracted vocabulary (crates/eigenius-wordnet/src/convert.rs).
+// above (the argument reading is a third parse, selected only by a subcategorizing head). There is
+// one per `lexicon:Prep` constructor but the wildcard (`dcg::category::GOVERNED_PREPOSITIONS`).
 resource lexicon:argmarker_sem : lexicon:SemTerm {
     lexicon:term = type_expr( ( fun (y : lexicon:Entity) => y : lexicon:Entity -> lexicon:Entity ) );
 }
@@ -1904,6 +1911,435 @@ resource lexicon:as_arg : lexicon:LexicalEntry {
     lexicon:sem      = lexicon:argmarker_sem;
     lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
     lexicon:sense    = "as";
+}
+
+// Argument markers for every other preposition a SPECIALIST frame names (D97 decision 3): a word that
+// governs one (`abide by`, `rely on`, `consist of`, `out of`) binds its object through it. Each is the
+// `to_arg` shape. They do not put the word on the importers' closed-class list (decision 10, as
+// proposed): `over`, `past` and `like` keep their content senses.
+resource lexicon:by_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'by' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "by";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_by), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "by";
+}
+resource lexicon:between_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'between' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "between";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_between), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "between";
+}
+resource lexicon:over_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'over' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "over";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_over), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "over";
+}
+resource lexicon:onto_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'onto' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "onto";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_onto), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "onto";
+}
+resource lexicon:through_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'through' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "through";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_through), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "through";
+}
+resource lexicon:per_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'per' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "per";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_per), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "per";
+}
+resource lexicon:off_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'off' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "off";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_off), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "off";
+}
+resource lexicon:out_of_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'out of' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "out of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_out_of), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "out of";
+}
+resource lexicon:after_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'after' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "after";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_after), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "after";
+}
+resource lexicon:due_to_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'due to' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "due to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_due_to), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "due to";
+}
+resource lexicon:among_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'among' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "among";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_among), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "among";
+}
+resource lexicon:around_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'around' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "around";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_around), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "around";
+}
+resource lexicon:towards_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'towards' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "towards";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_towards), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "towards";
+}
+resource lexicon:under_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'under' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "under";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_under), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "under";
+}
+resource lexicon:out_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'out' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "out";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_out), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "out";
+}
+resource lexicon:toward_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'toward' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "toward";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_toward), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "toward";
+}
+resource lexicon:up_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'up' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "up";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_up), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "up";
+}
+resource lexicon:round_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'round' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "round";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_round), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "round";
+}
+resource lexicon:down_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'down' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "down";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_down), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "down";
+}
+resource lexicon:during_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'during' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "during";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_during), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "during";
+}
+resource lexicon:across_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'across' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "across";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_across), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "across";
+}
+resource lexicon:along_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'along' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "along";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_along), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "along";
+}
+resource lexicon:as_to_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'as to' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "as to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_as_to), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "as to";
+}
+resource lexicon:without_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'without' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "without";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_without), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "without";
+}
+resource lexicon:before_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'before' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "before";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_before), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "before";
+}
+resource lexicon:following_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'following' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "following";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_following), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "following";
+}
+resource lexicon:according_to_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'according to' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "according to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_according_to), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "according to";
+}
+resource lexicon:behind_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'behind' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "behind";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_behind), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "behind";
+}
+resource lexicon:until_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'until' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "until";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_until), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "until";
+}
+resource lexicon:concerning_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'concerning' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "concerning";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_concerning), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "concerning";
+}
+resource lexicon:like_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'like' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "like";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_like), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "like";
+}
+resource lexicon:plus_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'plus' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "plus";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_plus), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "plus";
+}
+resource lexicon:regarding_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'regarding' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "regarding";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_regarding), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "regarding";
+}
+resource lexicon:till_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'till' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "till";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_till), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "till";
+}
+resource lexicon:with_regard_to_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'with regard to' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "with regard to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_with_regard_to), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "with regard to";
+}
+resource lexicon:within_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'within' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "within";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_within), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "within";
+}
+resource lexicon:above_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'above' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "above";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_above), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "above";
+}
+resource lexicon:amongst_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'amongst' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "amongst";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_amongst), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "amongst";
+}
+resource lexicon:via_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'via' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "via";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_via), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "via";
+}
+resource lexicon:away_from_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'away from' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "away from";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_away_from), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "away from";
+}
+resource lexicon:below_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'below' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "below";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_below), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "below";
+}
+resource lexicon:beside_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'beside' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "beside";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_beside), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "beside";
+}
+resource lexicon:by_comparison_with_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'by comparison with' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "by comparison with";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_by_comparison_with), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "by comparison with";
+}
+resource lexicon:from_among_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'from among' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "from among";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_from_among), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "from among";
+}
+resource lexicon:in_behalf_of_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'in behalf of' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "in behalf of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_in_behalf_of), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "in behalf of";
+}
+resource lexicon:in_favor_of_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'in favor of' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "in favor of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_in_favor_of), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "in favor of";
+}
+resource lexicon:in_relation_to_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'in relation to' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "in relation to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_in_relation_to), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "in relation to";
+}
+resource lexicon:in_terms_of_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'in terms of' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "in terms of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_in_terms_of), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "in terms of";
+}
+resource lexicon:off_of_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'off of' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "off of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_off_of), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "off of";
+}
+resource lexicon:on_behalf_of_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'on behalf of' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "on behalf of";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_on_behalf_of), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "on behalf of";
+}
+resource lexicon:past_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'past' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "past";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_past), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "past";
+}
+resource lexicon:unto_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'unto' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "unto";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_unto), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "unto";
+}
+resource lexicon:up_to_arg : lexicon:LexicalEntry {
+    core:description = "grammatical: argument-marker preposition 'up to' for a word that governs it (D97 decision 3).";
+    lexicon:form     = "up to";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_pp_arg(lexicon:prep_up_to), lexicon:cat_np(lexicon:Entity, lexicon:num_any)) );
+    lexicon:sem      = lexicon:argmarker_sem;
+    lexicon:sem_type = type_expr( lexicon:Entity -> lexicon:Entity );
+    lexicon:sense    = "up to";
 }
 
 // ── Determiner entries (D63 §8.3 Phase 2) ─────────────────────────────
@@ -2212,7 +2648,7 @@ resource lexicon:this_obj : lexicon:LexicalEntry {
     lexicon:sense    = "this";
 }
 resource lexicon:that_dem_subj : lexicon:LexicalEntry {
-    core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
+    core:description = "grammatical: singular distal demonstrative determiner ('that gene').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
     lexicon:sem      = lexicon:dem_ref_subj_sem;
@@ -2220,7 +2656,7 @@ resource lexicon:that_dem_subj : lexicon:LexicalEntry {
     lexicon:sense    = "that_dem";
 }
 resource lexicon:that_dem_obj : lexicon:LexicalEntry {
-    core:description = "grammatical: singular distal demonstrative determiner, or the complementiser introducing a clause ('showed that WRN is essential').";
+    core:description = "grammatical: singular distal demonstrative determiner ('that gene').";
     lexicon:form     = "that";
     lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
     lexicon:sem      = lexicon:dem_ref_obj_sem;

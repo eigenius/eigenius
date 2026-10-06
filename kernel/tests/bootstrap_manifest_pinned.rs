@@ -31,6 +31,17 @@
 //! everywhere, and it is the same value the drift check compares, so it fires on exactly the condition
 //! that invalidates stores.
 //!
+//! IT FIRED ON THE SENSE KEYS OF DO-SUPPORT (`2026-10-01`), on ONE layer, `closed-class`: the
+//! question entries `does_aux` and `did_aux` moved from the keys `does` and `did` to `do`, the key of
+//! their declarative twins, and the complementiser and demonstrative `that` got descriptions of their
+//! own. The sense ranker had dropped the declarative `does` because both keys shared a gloss
+//! (`a_form_s_senses_are_told_apart_by_their_glosses`).
+//!
+//! IT FIRED FOR D97 SLICE 2 (`2026-10-01`), on two layers: `lexicon` (53 `lexicon:Prep`
+//! constructors, `prep_by` … `prep_up_to`, the prepositions SPECIALIST names on verb complements)
+//! and `closed-class` (their argument-marker entries, `by_arg` … `up_to_arg`). The reseed after the
+//! verb importer lands pays for both.
+//!
 //! IT FIRED FOR D95 SLICE 6 (`2026-09-29`), on three layers: `units` (`units:lt`, `le`, `approx`,
 //! the order a bound states), `lexicon` (`cat_mpc`, the measure constraint) and `closed-class` (the
 //! bound markers `less than` … `roughly`; then the symbols `<` … `≈` and `=`, and the postfix `or more`
@@ -240,9 +251,9 @@ notebook:0ad4665c915db5a156dbeed1fada61175fe193a0a367dbd6360fa59ebad27997
 ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
-lexicon:46ef79a03ba22b61609186218ed356bcddf329656cad8a018778f3d322fb7eda
+lexicon:82614092af0234a157175961a7ed6a82d2aa1e50b23b3697c507474f23531702
 ontology:1bb0d263b7dd3a090594105061e9edc4e2a2c3946dc576311551a0f2ceb1668e
-closed-class:217615b7392275251fbe0a6176f02afebbc9e4e3c346be34e75a4ca73cab0a28
+closed-class:b13d6f26123ff21dadfca89b9d0dddc0342e82c92d4be0310d8b40d16a71d963
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 

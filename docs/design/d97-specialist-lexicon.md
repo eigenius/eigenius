@@ -1,7 +1,8 @@
 # D97 — The SPECIALIST Lexicon as the lexicon's syntactic authority
 
 **Status: proposed** (2026-09-27), **parked** (2026-09-29) while the branch finishes D95; provisioning
-is done (`scripts/provision-specialist.sh`). Measured against the imported lexicon at the lexicon
+is done (`scripts/provision-specialist.sh`). Slice 3a (adjectives) built on `prepositions-and-ranker`
+(eigenius#263, 2026-09-30); **slice 2 (verbs) in progress there** (2026-10-01). Measured against the imported lexicon at the lexicon
 level; the parse-level measurement is slice 1. Decisions 1–4 are taken (2026-09-27), and 5 for verbs
 whose noun names a concept; the rest of 5 and decisions 6–10 are open.
 
@@ -226,6 +227,12 @@ attested = WordNet's "followed by" convention ∪ SPECIALIST's `compl=pphr` ∪ 
 gloss heuristic only where none speaks, never `as`. The `governed-prepositions` branch's single
 kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
 
+*Scope decided 2026-09-30 (the owner):* #263 builds the adjectives' part of slice 3 before slice 2,
+for the prepositions `lexicon:Prep` already names — 694 of the 758 items. The 64 that name another
+(`by` 44, `over` 9, `towards` 6, …) wait for slice 2's inventory, whose argument entries every
+`prep_any` verb frame would also take; they are counted, not dropped silently. Nouns stay with slice
+3. It needs from slice 1 the reader and the sense judge, which #263 builds for adjectives first.
+
 ## Decisions
 
 1. **Lemma or sense — decided: the senses the evidence picks, and an LLM judge where it picks
@@ -277,10 +284,65 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    says otherwise (`mediate`'s "occupy an intermediate position X"); and the evidenced senses only,
    which drops the frame wherever a several-sense verb has no evidence: 923 cases over the three
    kinds, 865 with no nominalization and 58 where no sense points to it.
+
+   **Revised for verbs (the owner, 2026-10-01): the judge places every several-sense item, as for
+   adjectives (decision 7); the pointers decide nothing.** Decision 7's evidence carries over: the
+   pointers link a sense to the nominalization, which says nothing about its complement. Witness:
+   `respond` takes `to` (SPECIALIST `tran=pphr(to,np)`), its nominalization is `response`, and no
+   sense's pointers reach it (they reach `respondent`, `reaction`, `reply`); WordNet gives v00718737
+   "respond favorably or as hoped" frames 1 and 2 only, though its own example is «The cancer
+   responded to the aggressive therapy». The judge sees each sense's gloss and examples. WordNet's
+   examples attest a PP complement for 217 (sense, lemma) pairs with no PP frame (162 verbs), but a
+   sample of 40 holds about 12 adjuncts, infinitives and particles («playing for hours», «was called
+   to discuss», «burn off calories»), so they are evidence for the judge, not a rule.
+   - **What the judge decides.** A preposition goes to the judge on every several-sense lemma; an
+     object or a clause only where WordNet gives no sense of the lemma a frame of that kind (where
+     it gives some sense one, it has placed the complement per sense, and those items score the
+     judge instead). Counted over WordNet 3.0: 1,702 open items over 1,019 lemmas (1,563
+     preposition, 108 object, 31 clause), 740 on one sense.
+   - **Its gold** is the frames WordNet gives the lemma in each sense — 12 and 27 `to`, 13 `on`,
+     8–11/20/21 an object, 26 a clause — hidden from it, with the other frames shown. WordNet
+     restricts 365 of its 21,649 frame entries to one word of the synset (frame 8 in 00630380 is
+     `chew over`'s, not `reflect`'s); the reader dropped that word number until 2026-10-01, which
+     both put frames on the wrong lemmas in the gold and emitted 590 (sense, lemma, kind) triples
+     WordNet does not give.
+   - **Validated below the adjectives' bar (the owner, 2026-10-01).** Ten configurations on a
+     tuning sample of 299 gold items (150 object, 113 clause, 36 preposition): `claude-sonnet-4-6`
+     with one wording for the three kinds is the best single judge — recall clause 0.883 (159 of
+     180 senses), object 0.887 (385 of 434), preposition 0.927 (38 of 41); on 150 held-out object
+     items 0.900 (468 of 520). A wording per kind lowered clause recall to 0.783;
+     `claude-opus-5-5` (0.69–0.78) and `claude-fable-5-1` (0.82–0.85) say no where WordNet and
+     Sonnet say yes; unions of runs reach 0.93 on clauses and objects, their added senses 0.73
+     precise. Of 67 misses reviewed, 48 are the judge's; 16 are frames WordNet gives the synset that
+     fit another member, not this lemma; 3 fit no member (`verb-gold-review.tsv`). Of 40 senses the
+     wording before its last fix (which says the preposition follows the verb directly) accepts
+     beyond WordNet's frames, 36 are correct — `I warned you that…` on `warn`, whose gloss quotes it,
+     `carbonize coal` — and 4 put the complement on a sibling sense or after an object
+     (`verb-precision-review.tsv`); the final wording keeps 34 of the 36 and all 4. Accepted at that
+     recall: a missed sense keeps the frames WordNet
+     gives it. `aerosolize`, as an object, is refused by every model tried and stays unjudged.
+   - **A preposition is placed only where the judge's sentence shows it right after the verb**
+     (the owner, 2026-10-01). A probe of 40 placed senses held 8 wrong, 6 of them where the judge's
+     own sentence shows another construction: an object before the preposition («He turned the
+     dial to the highest setting»), a particle («box up the old books»), a passive by-phrase. The
+     adjacency test reads the sentence with WordNet's morphology and withdraws a yes whose sentence
+     has no form of the verb directly followed by the preposition: 372 of 2,676 accepted senses, in
+     a random 25 of them 24 object + PP — D97 slice 4's frame — and 1 with an adverb between. Every
+     sense WordNet's `to` and `on` frames confirm passes. With it the probe holds 33 correct and 7
+     wrong (`verb-precision-probe.tsv`): particles, a passive by-phrase and senses sibling to the
+     one placed remain. *Rejected:* a second LLM pass over each placement against
+     its sentence. In two wordings it vetoed senses WordNet's frames confirm (object recall 0.887 →
+     0.832–0.843) and, asked for a better sentence, wrote one where none exists.
 2. **Union or authority — decided: union.** Where WordNet has a frame SPECIALIST does not (a
    PP-oblique `prep_any` beside SPECIALIST's named preposition), SPECIALIST's frame joins it. Both
    entries carry the sense's axiom, so they yield the same sem wherever both apply; slice 1 measures
    the readings that remain.
+   - **Refined for verbs (the owner, 2026-10-01), after decision 6.** One relation per preposition
+     makes the any-preposition frame (`v{offset}_p`, WordNet's 4 and 22) a second relation beside a
+     named one (`v{offset}_p_to`), with the same meaning. **Where SPECIALIST's prepositions are placed
+     on a sense (decision 1), they are its PP frames and replace the any-preposition frame; it stays
+     on the senses SPECIALIST names no preposition for.** WordNet's own named frames are named
+     relations: 12 and 27 (`----s to somebody`) are `to`, 13 (`----s on something`) is `on`.
 3. **The preposition inventory — decided: every preposition SPECIALIST names.** `lexicon:Prep`
    names 13. Over verbs, adjectives and nouns,
    SPECIALIST records 30,950 governed prepositions (a record × a preposition), 14,174 of them on a
@@ -336,7 +398,8 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    synset where it is a WordNet noun (80 verbs, 112 senses). See "A verb no other source has is the
    verb sense of its concept". **Open for the 3,790 with no concept to attach to**: no entry, or a
    sense-less predicate that records SPECIALIST's syntax alone.
-6. **Whether a governed preposition reaches the meaning.** `lexicon:Prep` is syntactic, erased by
+6. **Whether a governed preposition reaches the meaning — decided: one relation per sense and
+   preposition** (the owner, 2026-09-30). `lexicon:Prep` is syntactic, erased by
    ⟦·⟧: a sense's PP-oblique reading is one relation, `v{offset}_p`, and on the
    `governed-prepositions` branch an adjective's relational readings share one `deg_{loc}_rel`
    whatever the preposition (`crates/eigenius-wordnet/src/convert.rs`). While WordNet named no
@@ -346,15 +409,57 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    - Reach, over WordNet lemmas: 485 verbs whose PP argument names two or more prepositions
      (`account for`/`to`, `abound in`/`with`), 435 whose object + PP frames do (`acquit of`/`on`,
      `adapt for`/`to`), 130 adjectives, 2,404 nouns.
-   - *Proposed:* one relation per sense and preposition (`v{offset}_p_from`, `v{offset}_p_into`), so
-     the preposition is part of the predicate. It changes the axiom and entry shape of every
-     governed-PP reading, eigenius#263's adjectives with them. Keeping one relation conflates the
-     claims, which R2 of the style guide forbids.
-7. **Decision 1 for adjectives and nouns.** Decision 1 chooses the senses a verb frame goes on.
-   SPECIALIST's governed prepositions on adjectives and nouns are per lemma as well: 590 WordNet
-   adjectives, 354 with several senses; 6,425 WordNet nouns, 3,329 with several senses. Does the
-   same rule apply — derivational pointers where they discriminate, the judge otherwise? For nouns
-   that multiplies the judge's work several times over, so it is a budget question as well.
+   - **Decided:** one relation per sense and preposition (`v{offset}_p_from`, `v{offset}_p_into`;
+     for an adjective `deg_{loc}_rel_to`, `deg_{loc}_rel_for`), so the preposition is part of the
+     predicate. It changes the axiom and entry shape of every governed-PP reading; eigenius#263's
+     adjectives take it first, verbs with slice 2. Synonymous prepositions (`dependent on`/`upon`)
+     become distinct relations, which an alignment may merge later.
+   - *Rejected:* one relation per sense. It conflates `responsible for X` with `responsible to Y` and
+     `treat X with Y` with `treat X for Y`, which R2 of the style guide forbids.
+7. **Decision 1 for adjectives and nouns — decided for adjectives: the same rule** (the owner,
+   2026-09-30). SPECIALIST's governed prepositions on adjectives and nouns are per lemma as well.
+   Counted 2026-09-30 against WordNet 3.0: 599 WordNet adjectives get one (758 lemma × preposition
+   items, 135 lemmas with several prepositions), 359 of them with several senses. Over those 359 the
+   derivational pointers (an adjective sense's `+` to a noun synset holding one of SPECIALIST's
+   nominalizations) pick some senses and not all for 160; every sense points for 75, none for 49, and
+   75 have no nominalization — 199 lemmas for the judge.
+   - **Decided for adjectives:** decision 1's rule. One sense takes the preposition; where the
+     pointers pick some senses, those; the 199 open lemmas go to the judge, validated first, its
+     verdicts committed; where it accepts no sense, every sense takes it.
+   - **Revised the same day, on the judge's evidence (the owner): the judge places every item on
+     several senses; the pointers decide nothing for adjectives.** Counted over gradable senses: 560
+     lemmas, 691 items in `lexicon:Prep`, 263 on one sense, 428 for the judge. Where the pointers
+     picked some senses and not all (205 items), the judge disagreed on 440 senses; in a random 32 of
+     those disagreements it was right 25 times, the pointers 3 (`convenient to` "suited to your
+     comfort", `concordant with` "being of the same opinion", `confident in`), 4 unclear. The
+     pointers link a sense to the nominalization, which says nothing about its complement: they put
+     `alive to` on "possessing life" and missed `responsible for` on "being the agent or cause".
+   - **And where the judge accepts no sense at 0.85 (the owner):** the senses it said yes to below
+     the threshold (28 items, `confident in`, `quick with`); where it said no to every sense, no
+     sense — a recorded gap (27 items), mostly uses WordNet has no sense for: the evaluative `ADJ of
+     NP` (`it was good of you`), `reflective of` ("indicative of"), `insistent on`. Decision 1's
+     every-sense fallback would have put `good of` on all 21 senses of `good`.
+   - **The judge, validated** (`crates/eigenius-lexicon-align`, `specialist-senses`;
+     `experiments/lexicon-specialist/`): gold recall 45 of 45 on the senses whose own gloss names
+     the preposition (WordNet's convention, the one per-sense fact); a fixed precision sample of 40
+     placed senses reviewed 40 correct, 0 wrong (`precision-probe.tsv`; adopted by the owner
+     2026-09-30, who ruled the draft's one unclear row, `one with`, correct). Model
+     `claude-sonnet-4-6`: the kernel's structured client forces
+     a tool choice, which the Claude 5 models refuse (eigenius#264's client). Placements: 373 on the
+     senses accepted at 0.85, 28 below it, 27 gaps (`adjective-senses.tsv`).
+   - **The gloss heuristic proposes; the judge places (the owner, 2026-10-01).** The heuristic placed
+     a preposition directly where an adjective's own gloss shows it after the lemma, on lemmas no
+     source attests: 773 (sense, lemma) pairs with 3a's 13 prepositions. Slice 2's 53 widened it to
+     921, the new ones mostly adjuncts and passive agents («scarce during», «boggy under foot»,
+     «aggravated by passive resistance»). Its 882 (lemma, preposition) items now go to the judge on
+     the lemma's every gradable sense, a one-sense lemma included. The judge accepts 654 of the 815
+     senses proposed with 3a's thirteen and 100 of 143 with the new ones. Of 30 accepted senses, 21
+     are correct and 9 wrong — to-infinitives read as `to` + NP («obligated to repay»), adjuncts
+     («flabby around the middle», «permissible in cosmology»), a margin («down by a run»)
+     (`adjective-heuristic-probe.tsv`). Placements: 1,339
+     items, 1,073 on senses accepted at 0.85, 98 below it, 168 gaps.
+   - **Open for nouns:** 6,425 WordNet nouns, 3,329 with several senses — the same rule multiplies
+     the judge's work several times over, so it is a budget question as well.
 8. **What a "no sense fits" verdict leads to.** The judge will name frames whose sense WordNet
    lacks (`mediate` as in `WRN mediates repair`). Decision 1 keeps such a frame on every sense. Open:
    whether it also yields a new sense — the verb sense of the concept its noun names, by decision
@@ -381,6 +486,38 @@ kernel list (`GOVERNED_PREPOSITIONS`) is where decision 3 lands.
    constructors and closed-class argument entries (decision 3), and the kernel's single preposition
    list. Frame 13 moves to the PP-oblique kind, as `on`.
 3. **Adjectives and nouns**: eigenius#263's attested set.
+
+   **3a — adjectives (eigenius#263)**, built before slice 2 (scope decided 2026-09-30), in this order:
+   1. *The kernel's single list:* `dcg::category::GOVERNED_PREPOSITIONS`, checked against `data
+      lexicon:Prep` by a test; the importer derives its governance check and its constructors from
+      it.
+   2. *The reader:* `crates/eigenius-specialist` parses `LEXICON` — records, spelling variants,
+      `compl=pphr(p, …)` prepositions, nominalizations.
+   3. *The evidence:* per WordNet adjective lemma, the attested prepositions — WordNet's `followed
+      by` convention, which is per sense; SPECIALIST's complements and the curated frames, which are
+      per lemma — and the senses decision 7 places a per-lemma preposition on: the one sense; else
+      the judge's (decision 7 as revised). The gloss heuristic speaks only for a lemma no source
+      attests, and never names `as`.
+   4. *The judge:* the lemma, the preposition with an example (`X is dependent on Y`), each sense's
+      gloss and examples; per sense, whether the preposition fits, with a confidence. Validated on
+      the senses whose gloss carries WordNet's convention (recall) and on a reviewed sample of its
+      placements (precision); verdicts committed, the run resumable and closed on failure.
+   5. *The importer:* behind `--specialist`, per sense the prepositions placed, one relation each
+      (`deg_{loc}_rel_{p}`; decision 6); an open item with no verdict stops the import; a
+      preposition outside `lexicon:Prep` is counted in the report.
+   6. *Reseed and measure:* the import diff by preposition; the page and the quantity corpus; the
+      pins that move re-adjudicated (`… predictive of MMR deficiency`); a new selection draw where
+      the renamed relations change the candidates.
+
+   **3a — built and measured** (2026-09-30, `93f3a64`; eigenius#263). The import: 465,939 → 468,807
+   WordNet entries; relational adjective entries 4,117 → 7,033, `of` 0 → 1,003; 1,601 (sense, lemma)
+   pairs carry 1,728 prepositions (104 from WordNet's convention, 773 from the gloss heuristic). The
+   reseed (`wordnet-umls-aligned-2026-09-30-governed-preps`): the recorded rankings replay with 0 misses;
+   grammar gaps 0, expected hits 62 of 62; readings 652 → 668 and skeletons 212 → 215, in two units —
+   `… predictive of MMR deficiency` gains the relational reading and is re-pinned to it; `PARP-1
+   inhibitors are successful in cancers with deficiencies in homologous recombination` gains two
+   readings attaching the last PP to the subject, its pinned reading unchanged. The selection draw
+   scores 29 of 41, as before.
 4. **Object + PP**: the `((S\NP)/cat_pp_arg(p))/NP` category, its passive (`were treated with
    etoposide`), and the importer's frames 20/21.
 5. **Verb senses of concepts**: the UMLS importer emits them through SPECIALIST's nominalizations,

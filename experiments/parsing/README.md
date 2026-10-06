@@ -154,6 +154,28 @@ baseline gates the grammar+lexicon (the produced forest), the selection baseline
 `invalid-selected == 0` (the ranker has **no kernel veto** — every candidate type-checks — so the
 ledger and the validity check are its controls).
 
+The ledger is checked before it scores (2026-09-30). Each `wrong` row names what it rules out in a
+fifth field (`structure`, `sense <atom>…`), and a `correct` row whose structure differs from its pin
+says `departs`. The `reading_ledger_is_consistent` test, and the sweep before it scores, reject a
+`correct` row that holds a structure or an atom that a `wrong` row of the same sentence rules out.
+The sweep also audits every ledger row its forest produces: a `correct` row off its pin without
+`departs` is a `LEDGER-CONFLICT`, counted in `ledger-conflicts` (gated to 0) and, when chosen, in
+`reading-conflict` rather than `reading-correct`. The ledger header has the field's grammar.
+
+The live ranker makes two calls (eigenius#264, the default from 2026-09-30): a structure call, which
+shows each grammatical analysis once — the sentence bracketed where the analyses' constituents
+differ, from each reading's derivation, and the function of each phrase on which they differ — then
+a sense call over the chosen analysis's readings. `--flat-ranker` runs the single flat listing it
+replaced; `EIGENIUS_DUMP_STRUCTURES=1` prints the structure questions on a replay, and
+`EIGENIUS_DUMP_DECISIONS=<file>` writes both calls' questions with their candidates, one JSON line
+per unit, for screening a presentation offline. The A/Bs are in
+`docs/notes/d69-reading-presentation.md` §7n and §7p.
+
+The live ranker's model is `jev-latest` (TypeSafe; needs `TYPESAFE_API_KEY`), the default from
+2026-09-30 by the model A/B in §7o; `--ranker-model <id>` names another (`claude-…` asks Anthropic).
+The flat listing asks Anthropic models only and defaults to `claude-sonnet-4-6`. The sense ranker and
+the other proposers stay on `claude-sonnet-4-6`.
+
 Arms, mirroring the ranks discipline:
 
 ```bash

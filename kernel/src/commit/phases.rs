@@ -57,8 +57,8 @@ use crate::observability::{field, operation};
 ///
 /// Builds from a *clone* of `state.builder` so the original survives
 /// for [`retroactive_with_cascade`]'s per-iteration rebuilds (D41 §3.3).
-/// The cost is one `BTreeMap` clone + a few `Arc` bumps — negligible
-/// against the validation work that dwarfs it.
+/// The clone copies the map and one `Arc` per resource, not the
+/// resources: [`crate::layer::LayerBuilder`] holds them shared.
 ///
 /// Returns [`PhaseControl::SkipEmptyCommit`] if the builder is empty
 /// (no resources and no tombstones) so the pipeline can short-circuit

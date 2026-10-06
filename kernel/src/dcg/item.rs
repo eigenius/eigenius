@@ -24,6 +24,9 @@
 //! `parser.rs` alongside the combinators — which meant every module that merely needed to *hold* an item
 //! had to import the module that *composes* them.
 
+use std::sync::Arc;
+
+use super::derivation::{Derivation, Step};
 use crate::nbe::term::Exp;
 
 /// The combinator that produced a constituent — its **provenance**, tracked so the
@@ -250,6 +253,10 @@ pub struct SemanticPayload {
 pub struct Item {
     pub category: CategoryPayload,
     pub semantics: SemanticPayload,
+    /// How the item was built — recorded by the chart drivers, never consulted by a rule
+    /// ([`crate::dcg::derivation`]). `None` for an item no chart built: a lexical entry before
+    /// seeding, or a rule's output before its driver records it.
+    pub derivation: Option<Arc<Derivation>>,
 }
 
 /// Arrow depth of `⟦cat⟧` — the number of arguments a category declares.
@@ -359,6 +366,7 @@ impl Item {
         Item {
             category: CategoryPayload { cat, prov, cost },
             semantics: SemanticPayload { sem },
+            derivation: None,
         }
     }
 
@@ -400,6 +408,30 @@ impl Item {
     /// Replace the sem in place (the per-span hole freshening).
     pub fn set_sem(&mut self, sem: Exp) {
         self.semantics.sem = sem;
+    }
+
+    /// The same item with another sem — category, provenance, cost and derivation kept. How a
+    /// reading's sem is normalised or its holes filled after the parse.
+    pub fn with_sem(&self, sem: Exp) -> Self {
+        let mut it = Self::from_parts(self.cat().clone(), sem, self.prov(), self.cost());
+        it.derivation = self.derivation.clone();
+        it
+    }
+
+    /// How the item was built, where a chart built it.
+    pub fn derivation(&self) -> Option<&Arc<Derivation>> {
+        self.derivation.as_ref()
+    }
+
+    /// This item as built by `step` over `span` from `children`. Without every child's derivation it
+    /// has none: a missing record stays visible rather than becoming a wrong one.
+    pub(crate) fn derived(mut self, span: (usize, usize), step: Step, children: &[&Item]) -> Self {
+        self.derivation = children
+            .iter()
+            .map(|c| c.derivation.clone())
+            .collect::<Option<Vec<_>>>()
+            .map(|cs| Derivation::node(span, step, cs));
+        self
     }
 }
 

@@ -139,18 +139,16 @@ impl EigeniusService {
 
         let opts = req.options.unwrap_or_default();
         let cfg = &self.parse_config;
-        let model = ModelConfig {
-            model: if opts.model.is_empty() {
-                crate::dcg::model_config::DEFAULT_MODEL.to_string()
-            } else {
-                opts.model.clone()
-            },
-            max_tokens: if opts.max_tokens == 0 {
-                ModelConfig::default().max_tokens
-            } else {
-                opts.max_tokens
-            },
-        };
+        let model = ModelConfig::requested(
+            &opts.model,
+            crate::dcg::model_config::DEFAULT_MODEL,
+            opts.max_tokens,
+        );
+        let reading_model = ModelConfig::requested(
+            &opts.reading_model,
+            crate::dcg::model_config::DEFAULT_READING_MODEL,
+            opts.max_tokens,
+        );
 
         let draws = match (&req.inline_draws, req.live_draws) {
             (Some(d), _) => {
@@ -189,6 +187,7 @@ impl EigeniusService {
             },
             scope,
             model,
+            reading_model,
             sense_cap: (opts.sense_cap > 0)
                 .then_some(opts.sense_cap as usize)
                 .or(cfg.sense_cap),

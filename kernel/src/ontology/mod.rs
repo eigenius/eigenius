@@ -29,4 +29,4 @@ pub mod value_refs;
 pub mod well_known;
 
 pub use iri::Iri;
-pub use resource::{Resource, Value};
+pub use resource::{PropertyMap, Resource, Value};

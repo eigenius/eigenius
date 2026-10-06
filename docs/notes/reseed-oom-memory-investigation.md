@@ -1,6 +1,113 @@
-# Reseed OOM — memory investigation (RESOLVED: environmental, not a kernel bug)
+# Reseed OOM — memory investigation
 
-**Status: RESOLVED (`2026-07-07`).** The kernel is **not** the problem. A native `serve` load of the
+**`2026-10-01`: the kernel's per-chunk peak, two whole-layer copies.** Three docker reseeds in a row
+died with the OOM killer taking the kernel at 21–24 GB anon-rss during the WordNet chain (`dmesg`;
+`MALLOC_ARENA_MAX=2` set). A native `serve` with the system allocator reproduced it: 8.1 GB before
+chunk 001 reached `commit.build`, 10.6 GB after it, killed by a watchdog at 18.7 GB inside chunk 002.
+The jemalloc profile of chunk 001 (`--features jemalloc-prof`, method below) put the live heap at
+8.25 GB at the largest of the run's last 60 dumps and 0.36 GB after the commit, so nothing accumulates
+across chunks; the peak is per chunk. The earlier dumps were not read, so 8.25 GB is a lower bound on
+the peak (corrected `2026-10-02`, below). At that dump:
+
+| allocation site | live at the peak |
+|---|---|
+| `commit::phases::build`: `builder.clone()`, kept for the cascade's rebuilds | 3.27 GB |
+| `LayerEmission::from_builder`: `resources().values().cloned()` | 3.23 GB |
+| `store_layer`: every resource's CBOR collected before the batch | 0.92 GB |
+| triples, value entries, text postings | 0.34 GB |
+
+A parsed lexical entry is ~12 KB in memory (3.2 GB / 263,813), against ~3.5 KB as CBOR, so §3.6's
+estimate of the 250k-entry cache (0.5–1.25 GiB) is ~3 GB today.
+
+Fixed: `LayerBuilder` holds its resources as `Arc<Resource>` (the form `build` stages them in), so a
+builder clone copies pointers; `from_builder` moves them out through `LayerBuilder::into_contents`;
+`store_layer` serializes each resource straight into the batch. Base + chunk 001 under jemalloc:
+peak live heap ≥ 8.25 → 5.72 GB, peak RSS 10.88 → 6.53 GB. The 5.72 GB is the largest of all dumps,
+measured `2026-10-02` at `8e58e90`, whose load path is `e551712`'s; this paragraph first recorded
+4.25 GB, read off the last 60 dumps only. With the system allocator and
+`MALLOC_ARENA_MAX=2`, WordNet + UMLS 001–008: chunk 002 peaks at 13.26 GB (was > 18.7), and RSS then
+holds at ~12.5 GB through UMLS 008. What remains of the peak is one copy of the parsed chunk
+(~2.9 GB) plus the batch; the gap from 5.72 GB live to 12.5 GB resident is glibc holding freed pages.
+
+**`2026-10-02`: jemalloc is the kernel's allocator** (`cli/Cargo.toml`, `background_threads`). The
+same native load (WordNet + UMLS 001–008), allocator the only variable:
+
+| | peak RSS | after the load |
+|---|---|---|
+| glibc, `MALLOC_ARENA_MAX=2` | 13.26 GB | ~12.5 GB held |
+| jemalloc | 9.53 GB | 5.02 GB 30 s idle (4 `jemalloc_bg_thd`) |
+
+Under jemalloc the per-chunk peak rises with chain depth (UMLS 001 7.48 GB → 008 9.53 GB); glibc's
+plateau hid it. The idle 5 GB is consistent with the 250k-entry resource cache at ~12 KB an entry.
+
+**What a parsed entry is made of** (WordNet chunk 003, 20,827 entries, walked after `esl::compile`):
+14.7 embedded resource nodes, 47.6 property keys (18 distinct, 1,494 B of key text), 23.6 IRI-valued
+strings (689 B). `Iri` is 24 B, `Value` 32 B, `Resource` 48 B. Each embedded node's `BTreeMap` leaf is
+allocated at its 11-slot capacity, ~630 B however few properties it holds. Estimated per entry: leaf
+nodes ~9.4 KB (~70%), key strings ~1.9 KB, IRI value strings ~0.8 KB, `Box<Resource>` ~0.7 KB, arrays
+~0.5 KB — ~13.5 KB, against the ~12 KB measured.
+
+**`2026-10-02`: a resource's properties are a sorted `Vec`** (branch `property-map`), looked up by
+binary search until `2026-10-05`, below.
+`Resource.properties` is a `PropertyMap` (`kernel/src/ontology/resource.rs`), a `Vec<(Iri, Value)>`
+kept in IRI order, replacing the `BTreeMap` whose leaves the estimate above puts at ~70% of an entry.
+Iteration order is unchanged, so content hashes and CBOR bytes are too: the bootstrap-manifest pin
+holds and no reseed is needed. Native release builds under jemalloc, full load = WordNet 000–003 +
+UMLS 000–008:
+
+| | `8e58e90` | `8e58e90` + `PropertyMap` |
+|---|---|---|
+| full load, peak RSS | 9.34, 9.55, 9.40 GB | 7.14, 7.48, 7.22, 7.30 GB |
+| full load, time on a quiet machine | 419, 463, 425 s | 449, 448 s |
+| base + chunk 001, peak live heap over all dumps | 5.72 GB | 4.13 GB |
+| WRN parse replay | 45.3, 44.1 s | 49.1, 43.4 s |
+
+The load times leave out two `PropertyMap` runs (457 s, 527 s) made while another session's
+`cargo test --workspace` held the load average at 24–27; a fourth `8e58e90` run was lost to a machine
+restart. RSS at the last sample after the load overlaps between the builds (3.22–4.97 GB against
+4.21–4.96 GB). Both replays give readings 738, skeletons 210, 62 of 62, and selections 26 correct,
+7 wrong, 9 unadjudicated.
+
+**`2026-10-05`: lookups scan forward up to 16 entries** (`PropertyMap::position`,
+`LINEAR_SCAN_MAX`) and binary-search above. `kernel/benches/resources.rs` (criterion,
+`cargo bench -p eigenius-kernel --bench resources`) times the map's paths over `wordnet-003.esl`
+through `Resource`'s API alone, so it runs on either representation: 32,298 resources, 462,955
+nodes, 1,441,406 property keys; 72% of nodes hold 3 properties and none more than 8.
+
+| chunk benchmark | `BTreeMap` | binary search | forward scan |
+|---|---|---|---|
+| `esl_compile`, from the parsed file | 339 ms | 304 ms | 309 ms |
+| `cbor_encode` | 162 ms | 138 ms | 138 ms |
+| `cbor_decode` | 569 ms | 530 ms | 526 ms |
+| `clone` | 341 ms | 281 ms | 308 ms |
+| every node gets each of its own keys | 53.5 ms | 56.1 ms | 44.1 ms |
+| every node gets five well-known keys | 61.1 ms | 67.3 ms | 46.3 ms |
+
+A second `BTreeMap` run put `esl_compile` at 369 ms and `clone` at 336 ms. Binary search made
+lookups 6–9% slower than `BTreeMap`, which searches a node by scanning it forward. On one sorted
+slice of keys sharing a 30-byte prefix (group `search`), a forward scan beats binary search below
+24 entries — 3.6 against 7.8 ns a hit at 3, 12.9 against 16.7 at 16 — and loses above it, 28.9
+against 22.7 at 32.
+
+Full load, three runs of each build alternating: `serve --db <fresh>`, then `eigenius --endpoint …
+load <chunk>` for each chunk in chain order, the kernel's `VmRSS` read once a second:
+
+| | `8e58e90` | `8e58e90` + `PropertyMap`, forward scan |
+|---|---|---|
+| full load, time | 433, 419, 416 s | 407, 406, 404 s |
+| full load, peak RSS | 10.10, 9.97, 9.87 GB | 8.30, 7.60, 7.42 GB |
+
+Peak RSS reads 0.3–0.8 GB higher on both builds than in the `2026-10-02` runs, whose sampling
+interval was not recorded. RSS 30 s after the load overlaps (3.44–5.22 GB against 4.11–5.22 GB).
+
+The July conclusion below ("environmental") compared a native run, profiled under jemalloc, with
+the docker kernel, which runs on glibc; the note does not record which allocator its ~6 GiB RSS
+figure came from. Today's native glibc run reproduces the docker OOM, so the environment is not
+needed to explain it.
+
+---
+
+**Status `2026-07-07` (superseded above): RESOLVED.** The kernel is **not** the problem. A native `serve` load of the
 identical WordNet(`--all`, C3-precision) + all 27 UMLS chunks — same binary, same chains — **peaks at
 ~6 GiB RSS and completes**, producing a full 2.6 GB store at `/tmp/probe-db`. jemalloc heap profile at
 the high-water mark: **live heap 3954 MB**, dominated by BTreeSet/BTreeMap cloning in the load path
@@ -19,8 +126,10 @@ secondary optimisation (not the OOM): `Arc` the per-layer `defined_iris` sets in
 **Method note:** the jemalloc harness is `cli` feature `jemalloc-prof` (feature-gated
 `tikv-jemallocator`, `#[global_allocator]` in `cli/src/main.rs`); run `eigenius serve` under
 `_RJEM_MALLOC_CONF=prof:true,prof_active:true,lg_prof_interval:31,prof_prefix:…`; analyse with
-`perl <tikv-jemalloc-sys OUT_DIR>/bin/jeprof --text <binary> <dump>.heap`. Harness script:
-scratchpad `profiled_load.sh`.
+`perl <tikv-jemalloc-sys OUT_DIR>/bin/jeprof --text <binary> <dump>.heap`. The peak live heap is
+the largest `Total` over every dump of the run: the `2026-10-01` figures read only the last 60, which
+put the post-fix peak at 4.25 GB against 5.72 GB over all dumps. The harness scripts
+(`profiled_load.sh`, `bench.sh`, `memload.sh`) lived in session scratchpads and did not survive them.
 
 ---
 

@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 eigenius-wordnet = { path = "../eigenius-wordnet" }
 eigenius-umls = { path = "../eigenius-umls" }
+eigenius-specialist = { path = "../eigenius-specialist" }
 eigenius-kernel = { path = "../../kernel", optional = true }
 tokio = { workspace = true, optional = true }
 schemars = { version = "0.8.12", optional = true }

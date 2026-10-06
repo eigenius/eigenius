@@ -617,22 +617,23 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
                 layer.parents().iter().map(|p| p.id().clone()).collect();
             let canonical_parent = all_parents.first().cloned();
 
-            // Pre-serialize resources so we can both stamp the handle's
-            // `byte_size` (sum of encoded resource bytes — drives GC's
-            // reclaim estimate) and write the values into the batch
-            // without re-encoding.
-            // One walk, three stamps: the encoded bytes, `byte_size`, and the D66
-            // witness-scan skip hint.
+            let mut batch = rocksdb::WriteBatch::default();
+
+            // One walk, three stamps: each resource's encoded bytes go straight into the batch,
+            // and their sum (`byte_size`, GC's reclaim estimate) and the D66 witness-scan skip
+            // hint go onto the handle. The bytes are not collected first: the batch holds them
+            // anyway, and a collected copy was 0.95 GB of a 100 MiB lexicon chunk's commit peak
+            // (2026-10-01). Order within a batch does not matter — the write is atomic — so the
+            // handle and bloom keys follow the resources.
             let mut has_witness_candidates = false;
-            let encoded: Vec<(Iri, Vec<u8>)> = layer
-                .iter_resources()
-                .map(|(iri, resource)| {
-                    has_witness_candidates |=
-                        eigenius_kernel::layer::is_witness_candidate(&resource);
-                    (iri, eigon_cbor::serialize_resource(&resource))
-                })
-                .collect();
-            let byte_size = encoded.iter().map(|(_, v)| v.len() as u64).sum::<u64>();
+            let mut byte_size = 0u64;
+            for (iri, resource) in layer.iter_resources() {
+                has_witness_candidates |= eigenius_kernel::layer::is_witness_candidate(&resource);
+                let value = eigon_cbor::serialize_resource(&resource);
+                byte_size += value.len() as u64;
+                let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
+                batch.put(key.as_bytes(), &value);
+            }
 
             let handle = LayerHandle {
                 id: id.clone(),
@@ -655,8 +656,6 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             };
             let bloom = BloomFilter::for_layer(layer.defined_iris(), layer.tombstoned_iris());
 
-            // Encode CBOR payloads outside the batch — encoding is CPU work
-            // and can fail; no point holding the batch while computing.
             let mut handle_bytes = Vec::new();
             ciborium::into_writer(&handle, &mut handle_bytes)
                 .map_err(|e| StorageError::Internal(format!("encode LayerHandle: {e}")))?;
@@ -664,18 +663,11 @@ impl eigenius_kernel::storage::PersistentBackend for RocksStore {
             ciborium::into_writer(&bloom, &mut bloom_bytes)
                 .map_err(|e| StorageError::Internal(format!("encode BloomFilter: {e}")))?;
 
-            let mut batch = rocksdb::WriteBatch::default();
-
             let topo_key = format!("{TOPO_PREFIX}{}", hex::encode(id.0));
             batch.put(topo_key.as_bytes(), &handle_bytes);
 
             let bloom_key = format!("{BLOOM_PREFIX}{}", hex::encode(id.0));
             batch.put(bloom_key.as_bytes(), &bloom_bytes);
-
-            for (iri, value) in &encoded {
-                let key = format!("layer:{}:res:{}", hex::encode(id.0), iri.as_str());
-                batch.put(key.as_bytes(), value);
-            }
 
             let chain_key = format!("chain:{}", hex::encode(id.0));
             let chain_value = match canonical_parent.as_ref() {

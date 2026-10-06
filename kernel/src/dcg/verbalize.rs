@@ -83,6 +83,13 @@ pub fn unit_sense_names(
             }
         }
     }
+    // A document's named individual has no lexicon label: its name is the span that introduced it
+    // («Project Achilles»), which a single token never is.
+    for (words, sense) in index.span_senses(text, lem) {
+        if let Some(key) = sense_key(&sense).filter(|k| k.starts_with(NAMED_INDIVIDUAL)) {
+            m.entry(key).or_insert(words);
+        }
+    }
     m
 }
 
@@ -162,7 +169,7 @@ fn collect_concepts(e: &Exp, vb: &Vb, out: &mut BTreeMap<String, ConceptNote>) {
     if let Exp::EigonClass(iri) | Exp::EigonAxiom(iri) = e {
         // The gloss prints the STRIPPED key (`name_atom` drops the `_t`/`deg_` wrappers), so the
         // legend must key on that to line up — while the DEFINITION lives at the full IRI.
-        let local = atom_key(iri.as_str());
+        let local = iri_key(iri.as_str());
         let core = local
             .strip_prefix("deg_")
             .or_else(|| local.strip_prefix("std_"))
@@ -255,10 +262,6 @@ impl<'a> Vb<'a> {
             register: Register::Expanded,
         }
     }
-
-    fn expanded_mode(&self) -> bool {
-        self.register == Register::Expanded
-    }
 }
 
 /// Which register [`verbalize`] renders in (D69).
@@ -311,8 +314,8 @@ fn app_spine(e: &Exp) -> (&Exp, Vec<&Exp>) {
 /// `core:description`); only the extractor was refusing to hand it the key.
 fn axiom_local(e: &Exp) -> Option<&str> {
     match e {
-        Exp::EigonAxiom(i) | Exp::EigonClass(i) => Some(atom_key(i.as_str())),
-        Exp::EigonResource(r) => r.id().map(|i| atom_key(i.as_str())),
+        Exp::EigonAxiom(i) | Exp::EigonClass(i) => Some(iri_key(i.as_str())),
+        Exp::EigonResource(r) => r.id().map(|i| iri_key(i.as_str())),
         _ => None,
     }
 }
@@ -320,7 +323,7 @@ fn axiom_local(e: &Exp) -> Option<&str> {
 /// The key an atom renders by: its IRI's local name (`C1148824`, `n00407535`) — or, for an OBO
 /// term (`urn:obo:HP:0100615`), its CURIE (`HP:0100615`), since an OBO local part alone is a bare
 /// number that names nothing.
-fn atom_key(iri: &str) -> &str {
+fn iri_key(iri: &str) -> &str {
     if let Some(curie) = iri.strip_prefix("urn:obo:") {
         return curie;
     }
@@ -340,14 +343,9 @@ fn is_false(e: &Exp) -> bool {
 /// The word for a sense atom: the unit's own lemma map first, then the concept's layer label
 /// (via `cui_label`), else the local name.
 fn name_atom(local: &str, vb: &Vb) -> String {
-    // Normalise: strip the `deg_`/`std_` adjective wrappers and any verb frame suffix (`_t`/`_i`/…).
-    let core = local
-        .strip_prefix("deg_")
-        .or_else(|| local.strip_prefix("std_"))
-        .unwrap_or(local);
-    let key = core.split('_').next().unwrap_or(core);
+    let key = atom_key(local);
     let label = atom_label(key, vb);
-    if vb.expanded_mode() {
+    if vb.register == Register::Expanded {
         // Label AND identity: two concepts routinely share a label (C1148824's label IS
         // "exonuclease activity"), and the identity is what a chooser needs.
         return match label {
@@ -356,6 +354,75 @@ fn name_atom(local: &str, vb: &Vb) -> String {
         };
     }
     label.unwrap_or_else(|| key.to_string())
+}
+
+/// An atom's sense key: the `deg_`/`std_` adjective wrappers stripped, and any suffix after the key
+/// — a verb frame (`_t`/`_i`/…) or a relational degree's `_rel` / `_rel_{p}`.
+fn atom_key(local: &str) -> &str {
+    // A document's named individual (`ni_project_achilles`): its local name is the key.
+    if local.starts_with(NAMED_INDIVIDUAL) {
+        return local;
+    }
+    let core = local
+        .strip_prefix("deg_")
+        .or_else(|| local.strip_prefix("std_"))
+        .unwrap_or(local);
+    core.split('_').next().unwrap_or(core)
+}
+
+/// The local-name prefix of a document's named individual (`glossary::named_entity_augmentation`
+/// mints `urn:eigenius:doc:ni_<slug>`; its lexical entry's sense is `doc:<slug>`).
+const NAMED_INDIVIDUAL: &str = "ni_";
+
+/// The atom key a lexical entry's sense names: `wn:{lemma}.{tag}.{offset}` → `{tag}{offset}`,
+/// `umls:{cui}` → the CUI, a document entry's `doc:{slug}` → its named individual `ni_{slug}`.
+fn sense_key(sense: &str) -> Option<String> {
+    if let Some(rest) = sense.strip_prefix("wn:") {
+        match rest.rsplitn(3, '.').collect::<Vec<_>>().as_slice() {
+            [offset, tag, _lemma] => Some(format!("{tag}{offset}")),
+            _ => None,
+        }
+    } else if let Some(cui) = sense.strip_prefix("umls:") {
+        Some(cui.to_string())
+    } else {
+        sense
+            .strip_prefix("doc:")
+            .map(|slug| format!("{NAMED_INDIVIDUAL}{slug}"))
+    }
+}
+
+/// The sense atoms a term mentions, by key ([`atom_key`]), each once in order of first mention: the
+/// concepts, senses and named individuals, not the grammatical constants around them.
+pub(crate) fn sense_atoms(e: &Exp) -> Vec<String> {
+    fn walk(e: &Exp, out: &mut Vec<String>) {
+        if let Some(local) = axiom_local(e) {
+            let key = atom_key(local);
+            let sense = key.starts_with(NAMED_INDIVIDUAL)
+                || key
+                    .split(|c: char| !c.is_ascii_digit())
+                    .any(|run| run.len() >= 4);
+            if sense && !out.iter().any(|k| k == key) {
+                out.push(key.to_string());
+            }
+        }
+        for c in child_exps(e) {
+            walk(c, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(e, &mut out);
+    out
+}
+
+/// An atom's plain word — its display label with no register markup.
+fn atom_word(local: &str, vb: &Vb) -> String {
+    let key = atom_key(local);
+    atom_label(key, vb).unwrap_or_else(|| key.to_string())
+}
+
+/// The fail-honest bracket around a shape the verbaliser does not render.
+fn bracket(sem: &Exp) -> String {
+    format!("⟦{}⟧", pretty_term(sem))
 }
 
 /// The display label for an atom's key, or `None` when the lexicon offers none.
@@ -450,7 +517,7 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
             }
             return format!("every {}", quant_clause(dom, binder, cod, vb));
         }
-        return format!("⟦{}⟧", pretty_term(sem)); // other Π — not verbalizable yet
+        return bracket(sem); // other Π — not verbalizable yet
     }
     if let Exp::Sig(_, base, restr) = sem {
         let np = noun_phrase(base, restr, vb);
@@ -520,15 +587,17 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                 let (h1, a1) = app_spine(args[1]);
                 let l0 = axiom_local(h0);
                 if let (Some(d0), Some(d1)) = (l0, axiom_local(h1)) {
-                    if d0.ends_with("_rel") && d0 == d1 && a0.len() == 2 && a1.len() == 2 {
-                        let word = if local == "gt" { "more" } else { "less" };
-                        return format!(
-                            "{} is {word} {} on {} than {}",
-                            verbalize(a0[1], vb),
-                            name_atom(d0, vb),
-                            verbalize(a0[0], vb),
-                            verbalize(a1[1], vb)
-                        );
+                    if let Some(prep) = relational_degree_preposition(d0) {
+                        if d0 == d1 && a0.len() == 2 && a1.len() == 2 {
+                            let word = if local == "gt" { "more" } else { "less" };
+                            return format!(
+                                "{} is {word} {} {prep} {} than {}",
+                                verbalize(a0[1], vb),
+                                name_atom(d0, vb),
+                                verbalize(a0[0], vb),
+                                verbalize(a1[1], vb)
+                            );
+                        }
                     }
                 }
                 if let (Some(dl), Some(subj)) = (l0, a0.first()) {
@@ -712,14 +781,18 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
         // `eigenius-wordnet` `convert.rs`).
         if local.starts_with('v') && local.contains('_') {
             let verb = name_atom(local, vb);
-            // The frame tag is the suffix after the last `_` (the importer's frame tags: `_i` intransitive,
-            // `_t` transitive, `_p` PP-oblique, `_as` ESSIVE, `_d` ditransitive). A 3-argument
-            // frame had no arm at all, so every essive clause — "identified WRN AS the top
-            // dependency", "evaluated MSI AS a biomarker" — bracketed in full.
-            let tag = local.rsplit('_').next().unwrap_or("");
+            // The frame tag follows the offset (the importer's frame tags: `_i` intransitive,
+            // `_t` transitive, `_p` PP-oblique with any preposition, `_p_to` with a named one, `_as`
+            // ESSIVE, `_d` ditransitive). A 3-argument frame had no arm at all, so every essive
+            // clause — "identified WRN AS the top dependency", "evaluated MSI AS a biomarker" —
+            // bracketed in full.
+            let tag = verb_frame(local);
             return match args.as_slice() {
                 [subj] => format!("{} {verb}", verbalize(subj, vb)),
-                [obj, subj] => format!("{} {verb} {}", verbalize(subj, vb), verbalize(obj, vb)),
+                [obj, subj] => match named_preposition(tag) {
+                    Some(p) => format!("{} {verb} {p} {}", verbalize(subj, vb), verbalize(obj, vb)),
+                    None => format!("{} {verb} {}", verbalize(subj, vb), verbalize(obj, vb)),
+                },
                 [obj, comp, subj] if tag == "as" => format!(
                     "{} {verb} {} as {}",
                     verbalize(subj, vb),
@@ -732,14 +805,14 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
                     verbalize(a, vb),
                     verbalize(b, vb)
                 ),
-                _ => format!("⟦{}⟧", pretty_term(sem)),
+                _ => bracket(sem),
             };
         }
     }
     if let Some(local) = axiom_local(sem) {
         return name_atom(local, vb);
     }
-    format!("⟦{}⟧", pretty_term(sem))
+    bracket(sem)
 }
 
 /// `And(V(subj), prep_X(subj, obj))` → "subj V prep obj" when the two share a subject; else `None`.
@@ -793,6 +866,17 @@ fn factor_comparison(order: &Exp, fold: &Exp, vb: &Vb) -> Option<String> {
         _ => false,
     };
     agrees.then(|| verbalize(fold, vb))
+}
+
+/// The preposition a relational degree governs, from its atom: `deg_{loc}_rel_{p}` names `p`, one
+/// relation per preposition (eigenius#263, D97 decision 6); a bare `…_rel` is read with `on`, as
+/// before the preposition joined the name. `None` for any other atom.
+fn relational_degree_preposition(atom: &str) -> Option<&'static str> {
+    if atom.ends_with("_rel") {
+        return Some("on");
+    }
+    let (_, slug) = atom.split_once("_rel_")?;
+    crate::dcg::category::preposition_of_slug(slug)
 }
 
 /// The number of `T` a count comparative compares, as `(T, x, median)`: `card(T, x)`, or with its
@@ -1082,7 +1166,7 @@ fn bare_np(e: &Exp, vb: &Vb) -> String {
 /// the measured collision lives, because "modifier head" is also how a single concept whose
 /// label happens to be two words comes out.
 fn noun_phrase(base: &Exp, restr: &Exp, vb: &Vb) -> String {
-    if vb.expanded_mode() {
+    if vb.register == Register::Expanded {
         return noun_phrase_expanded(base, restr, vb);
     }
     let head = verbalize(base, vb);
@@ -1195,6 +1279,23 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
             Some("poss_of") if a.len() == 2 || a.len() == 3 => {
                 parts.push(format!("possessed-by {}", verbalize(a[a.len() - 1], vb)))
             }
+            // An intersective adjective on the head: `a02734544(x)`, «genetic».
+            Some(adj) if is_adjective(adj) && matches!(a.as_slice(), [Exp::Var(_)]) => {
+                parts.push(format!("is {}", name_atom(adj, vb)))
+            }
+            // A counted relation to the head: `has_count(T, λy. prep_X(x, y), q)`, «an interaction
+            // between two genetic events» → "between 2 T".
+            Some("has_count") if a.len() == 3 => match counted_relation(a[1], vb) {
+                Some(p) => {
+                    let unit = Exp::LitUnit(crate::units::Unit::dimensionless());
+                    parts.push(format!(
+                        "{p} {} {}",
+                        quantity_text(a[2], &unit),
+                        bare_np(a[0], vb)
+                    ));
+                }
+                None => parts.push(verbalize(c, vb)),
+            },
             // A comparative carries a STANDARD, and the standard is exactly what two readings of
             // an elided «stronger» differ by: `std_a…` (the norm) vs `deg_a…(t)` (than t,
             // recovered from the discourse). Dropping it made those two readings identical — the
@@ -1220,6 +1321,21 @@ fn noun_phrase_expanded(base: &Exp, restr: &Exp, vb: &Vb) -> String {
     }
 }
 
+/// The preposition of a count's predicate that relates the head to the counted phrase:
+/// `λy. prep_X(x, y)` → `X`. `None` for any other predicate.
+fn counted_relation<'e>(pred: &'e Exp, vb: &Vb) -> Option<&'e str> {
+    let Exp::Lam(Patt::Var(y), body) = pred else {
+        return None;
+    };
+    let (h, a) = app_spine(body);
+    let (p, _, _) = prep_parts(axiom_local(h)?, &a, vb)?;
+    let mut obj = *a.get(1)?;
+    while let Exp::Fst(x) | Exp::Snd(x) = obj {
+        obj = x;
+    }
+    matches!(obj, Exp::Var(v) if v == y).then_some(p)
+}
+
 fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
     if let Some((iri, _, args)) = e.as_const_spine() {
         if iri.as_str().ends_with("logic:And") && args.len() == 2 {
@@ -1231,9 +1347,420 @@ fn flatten_and_exp<'a>(e: &'a Exp, out: &mut Vec<&'a Exp>) {
     out.push(e);
 }
 
+/// What a reading's predication says, where its form decides something no link shows: a class
+/// generalisation (`subclass_of(X, Y)`, every X is a Y) against a statement about a kind as a whole
+/// (`is_a(kind_of(X), Y)`). `None` for any other predication.
+pub fn predication(sem: &Exp) -> Option<&'static str> {
+    let (h, a) = app_spine(sem);
+    match (axiom_local(h)?, a.as_slice()) {
+        ("subclass_of", [_, _]) => {
+            Some("a generalisation: it says something of every member of the subject's class")
+        }
+        ("is_a", [subject, _]) if axiom_local(app_spine(subject).0) == Some("kind_of") => {
+            Some("a statement about the subject's kind as a whole")
+        }
+        _ => None,
+    }
+}
+
+/// One way a phrase hangs on another in a reading, by grammatical function: the `dependent` is the
+/// `function` of its `host` — «with sequencing» an adverbial of «ascertained», «MSI» a noun
+/// modifier of «status». Both ends are named by their head word. Two analyses that attach a phrase
+/// differently differ in a link, which the ranker's structure call states (eigenius#264).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Link {
+    pub function: Function,
+    pub dependent: String,
+    pub host: String,
+}
+
+/// A grammatical function, as a grammar of English names it. A preposition-headed function carries
+/// its preposition.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Function {
+    /// The subject of a verb.
+    Subject,
+    /// A verb's object.
+    Object,
+    /// The object of a prepositional verb, which takes it through a preposition («respond to X»).
+    PrepositionalObject,
+    /// A verb's object complement, marked by its preposition («identified WRN as the top
+    /// dependency»).
+    ObjectComplement(String),
+    /// A noun modifying a noun, the relation between them unstated («MSI status»).
+    NounModifier,
+    /// An adjective in a noun phrase («genetic events»).
+    Adjective,
+    /// An adjective predicated of its subject («WRN was essential»).
+    PredicateAdjective,
+    /// A numeral counting the host; the dependent is empty.
+    Numeral,
+    /// A prepositional phrase after a noun, inside its phrase («data from screens»).
+    Postmodifier(String),
+    /// A prepositional phrase modifying a verb («ascertained … with sequencing»).
+    Adverbial(String),
+    /// A prepositional phrase modifying a predicated adjective («essential in MSI models»).
+    PredicateAdverbial(String),
+    /// A prepositional phrase predicated of a copula's subject beside its complement («X is an
+    /// interaction» and «X is between two events»).
+    SecondPredicate(String),
+    /// The prepositional complement an adjective governs («dependent on WRN»).
+    AdjectiveComplement(String),
+}
+
+/// The [`Link`]s of a reading, sorted and deduplicated. Pass names that give each sense atom the
+/// words that introduced it (the reading's derivation knows them), so the links of one analysis
+/// name the same words whatever senses its readings take.
+pub fn structure_links(sem: &Exp, vb: &Vb) -> Vec<Link> {
+    let mut out = Vec::new();
+    collect_links(sem, vb, &mut Vec::new(), &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// What a bound variable stands for while the links of its scope are collected: its variable, the
+/// head word of its phrase, and whether it binds a noun phrase's restrictor (`Σ`, a count's
+/// predicate) — where an adjective is attributive — or a quantifier's scope (`Π`), where it is
+/// predicated.
+type Binding<'e> = (&'e str, String, bool);
+
+/// Walk a reading, tracking what each bound variable stands for, and record every link on the way.
+fn collect_links<'e>(e: &'e Exp, vb: &Vb, env: &mut Vec<Binding<'e>>, out: &mut Vec<Link>) {
+    if let Exp::Sig(p, dom, body) | Exp::Pi(p, dom, body) = e {
+        collect_links(dom, vb, env, out);
+        let restrictor = matches!(e, Exp::Sig(..));
+        return with_binder(p, head_word(dom, vb, env), restrictor, body, vb, env, out);
+    }
+    if let Some((iri, _, args)) = e.as_const_spine() {
+        if iri.as_str().ends_with("logic:And") && args.len() == 2 {
+            return conjunction_links(e, vb, env, out);
+        }
+    }
+    let (h, args) = app_spine(e);
+    if args.is_empty() {
+        for c in child_exps(e) {
+            collect_links(c, vb, env, out);
+        }
+        return;
+    }
+    // An application is read once, with all its arguments, then each argument is walked: a
+    // partial application would read `v(obj)` as a verb whose only argument is its subject.
+    // `has_count(ΣG:N. …, λG. P(G), q)` — the predicate's variable is the counted N.
+    if let (Some("has_count"), [counted, Exp::Lam(p, body), rest @ ..]) =
+        (axiom_local(h), args.as_slice())
+    {
+        collect_links(counted, vb, env, out);
+        let head = head_word(counted, vb, env);
+        out.push(Link {
+            function: Function::Numeral,
+            dependent: String::new(),
+            host: head.clone(),
+        });
+        with_binder(p, head, true, body, vb, env, out);
+        for r in rest {
+            collect_links(r, vb, env, out);
+        }
+        return;
+    }
+    if let Some(local) = axiom_local(h) {
+        out.extend(link_of(local, &args, vb, env));
+        if is_verb_frame(local) {
+            verb_links(local, &args, vb, env, out);
+        }
+    }
+    collect_links(h, vb, env, out);
+    for a in args {
+        collect_links(a, vb, env, out);
+    }
+}
+
+fn with_binder<'e>(
+    p: &'e Patt,
+    head: String,
+    restrictor: bool,
+    body: &'e Exp,
+    vb: &Vb,
+    env: &mut Vec<Binding<'e>>,
+    out: &mut Vec<Link>,
+) {
+    match p {
+        Patt::Var(v) => {
+            env.push((v.as_str(), head, restrictor));
+            collect_links(body, vb, env, out);
+            env.pop();
+        }
+        _ => collect_links(body, vb, env, out),
+    }
+}
+
+/// A conjunction's links. A PP conjoined with a clause whose subject is its first argument — the
+/// verb-adjunct encoding, `And(V(…, s), prep_P(s, o))` («We ascertained MSI status with
+/// sequencing.») — is about that clause's verb, predicated adjective or copula, not the subject.
+/// Every other conjunct is walked as itself.
+fn conjunction_links<'e>(e: &'e Exp, vb: &Vb, env: &mut Vec<Binding<'e>>, out: &mut Vec<Link>) {
+    let mut conj = Vec::new();
+    flatten_and_exp(e, &mut conj);
+    for &c in &conj {
+        match adjunct_of(c, &conj, vb, env) {
+            Some((function, obj, hosts)) => {
+                let dependent = head_word(obj, vb, env);
+                for host in hosts {
+                    out.push(Link {
+                        function: function.clone(),
+                        dependent: dependent.clone(),
+                        host,
+                    });
+                }
+                collect_links(obj, vb, env, out);
+            }
+            None => collect_links(c, vb, env, out),
+        }
+    }
+}
+
+/// The function a conjoined PP `prep_P(s, o)` has, its object, and the words it modifies, when a
+/// sibling conjunct has `s` as its subject: an adverbial of each such verb; else of a predicated
+/// adjective; else a second predicate beside a copula. `None` for any other conjunct.
+fn adjunct_of<'e>(
+    pp: &'e Exp,
+    conj: &[&'e Exp],
+    vb: &Vb,
+    env: &[Binding<'e>],
+) -> Option<(Function, &'e Exp, Vec<String>)> {
+    let (h, a) = app_spine(pp);
+    let p = axiom_local(h)?.strip_prefix("prep_")?;
+    let [subject, obj] = a.as_slice() else {
+        return None;
+    };
+    if p.ends_with("_value") {
+        return None;
+    }
+    let subject = pretty_term(subject);
+    let about = |e: &Exp| pretty_term(e) == subject;
+    let (mut verbs, mut adjectives, mut copula) = (Vec::new(), Vec::new(), false);
+    for &c in conj.iter().filter(|&&c| !std::ptr::eq(c, pp)) {
+        let (ch, ca) = app_spine(c);
+        match axiom_local(ch) {
+            Some(l) if is_verb_frame(l) && ca.last().is_some_and(|s| about(s)) => {
+                verbs.push(atom_word(l, vb))
+            }
+            Some("is_a") if ca.first().is_some_and(|s| about(s)) => copula = true,
+            _ => {
+                if let Some((adj, s)) = predicated_adjective(c) {
+                    if about(s) {
+                        adjectives.push(atom_word(adj, vb));
+                    }
+                }
+            }
+        }
+    }
+    let p = p.to_string();
+    if !verbs.is_empty() {
+        Some((Function::Adverbial(p), obj, verbs))
+    } else if !adjectives.is_empty() {
+        Some((Function::PredicateAdverbial(p), obj, adjectives))
+    } else if copula {
+        let (_, a) = app_spine(pp);
+        Some((
+            Function::SecondPredicate(p),
+            obj,
+            vec![head_word(a[0], vb, env)],
+        ))
+    } else {
+        None
+    }
+}
+
+/// An adjective predicated of a subject: a gradable one's `gt(deg_{a}(s), std_{a})` or an
+/// intersective one's `{a}(s)`. The adjective's atom and the subject.
+fn predicated_adjective(c: &Exp) -> Option<(&str, &Exp)> {
+    let (h, a) = app_spine(c);
+    let local = axiom_local(h)?;
+    match (local, a.as_slice()) {
+        ("gt" | "lt", [degree, _]) => {
+            let (dh, da) = app_spine(degree);
+            let adj = axiom_local(dh)?;
+            match da.as_slice() {
+                [s] if is_adjective(adj) => Some((adj, s)),
+                _ => None,
+            }
+        }
+        (adj, [s]) if is_adjective(adj) => Some((adj, s)),
+        _ => None,
+    }
+}
+
+/// Whether `e` is a variable bound by a noun phrase's restrictor (through projections).
+fn in_restrictor(e: &Exp, env: &[Binding]) -> bool {
+    let mut e = e;
+    while let Exp::Fst(x) | Exp::Snd(x) = e {
+        e = x;
+    }
+    matches!(e, Exp::Var(v) if env.iter().rev().find(|(b, _, _)| *b == v.as_str()).is_some_and(|(_, _, r)| *r))
+}
+
+/// The link an application states, if it is one: `prep_p(host, dependent)`, a compound
+/// `compound_kind(head, modifier)`, a governed degree `deg_{loc}_rel_{p}(dependent, subject)`, or
+/// an adjective on a phrase.
+fn link_of(local: &str, args: &[&Exp], vb: &Vb, env: &[Binding]) -> Option<Link> {
+    let link = |function: Function, dependent: &Exp, host: String| Link {
+        function,
+        dependent: head_word(dependent, vb, env),
+        host,
+    };
+    match args {
+        [host, obj] if local.starts_with("prep_") && !local.ends_with("_value") => Some(link(
+            Function::Postmodifier(local["prep_".len()..].to_string()),
+            obj,
+            head_word(host, vb, env),
+        )),
+        [head, modifier] if matches!(local, "compound_kind" | "compound") => Some(link(
+            Function::NounModifier,
+            modifier,
+            head_word(head, vb, env),
+        )),
+        [obj, _subject] if local.starts_with("deg_") => {
+            let prep = relational_degree_preposition(local)?;
+            Some(link(
+                Function::AdjectiveComplement(prep.to_string()),
+                obj,
+                atom_word(local, vb),
+            ))
+        }
+        // An adjective on a phrase: a gradable one's degree `deg_{a}(x)`, or an intersective one's
+        // predicate `{a}(x)` — attributive inside a restrictor, predicated elsewhere.
+        [subject] if is_adjective(local) => Some(Link {
+            function: if in_restrictor(subject, env) {
+                Function::Adjective
+            } else {
+                Function::PredicateAdjective
+            },
+            dependent: atom_word(local, vb),
+            host: head_word(subject, vb, env),
+        }),
+        _ => None,
+    }
+}
+
+/// A verb's arguments, as links to the verb: its last argument is the subject, the others its
+/// object and complements (`v…_t(object, subject)`, `v…_as(object, complement, subject)`). A
+/// PP-oblique verb's object (`v…_p`) is a prepositional object; an essive verb's middle argument
+/// its `as` complement. A clausal argument names no phrase and is skipped.
+fn verb_links(local: &str, args: &[&Exp], vb: &Vb, env: &[Binding], out: &mut Vec<Link>) {
+    let verb = atom_word(local, vb);
+    let frame = verb_frame(local);
+    let last = args.len().saturating_sub(1);
+    for (i, a) in args.iter().enumerate().filter(|(_, a)| is_phrase(a)) {
+        let function = match (i, frame) {
+            (i, _) if i == last => Function::Subject,
+            (0, f) if f == "p" || named_preposition(f).is_some() => Function::PrepositionalObject,
+            (1, "as") => Function::ObjectComplement("as".to_string()),
+            _ => Function::Object,
+        };
+        out.push(Link {
+            function,
+            dependent: head_word(a, vb, env),
+            host: verb.clone(),
+        });
+    }
+}
+
+/// A verb atom's frame tag, after the offset: `t` in `v00254150_t`, `p_to` in `v00717358_p_to`.
+fn verb_frame(local: &str) -> &str {
+    local.split_once('_').map_or("", |(_, f)| f)
+}
+
+/// The preposition a PP-oblique frame tag names (`p_to` → `to`, `p_out_of` → `out of`, D97 slice 2);
+/// `None` for any other tag, the any-preposition `p` among them.
+fn named_preposition(frame: &str) -> Option<&'static str> {
+    crate::dcg::category::preposition_of_slug(frame.strip_prefix("p_")?)
+}
+
+/// A verb's frame atom: `v{offset}_{frame}`.
+fn is_verb_frame(local: &str) -> bool {
+    local.split_once('_').is_some_and(|(key, _)| {
+        key.len() == 9 && key.starts_with('v') && key[1..].bytes().all(|b| b.is_ascii_digit())
+    })
+}
+
+/// A term that names a phrase (an entity or a kind), not a clause.
+fn is_phrase(e: &Exp) -> bool {
+    match e {
+        Exp::Var(_)
+        | Exp::Sig(..)
+        | Exp::Fst(_)
+        | Exp::EigonClass(_)
+        | Exp::EigonResource(_)
+        | Exp::EigonAxiom(_) => true,
+        _ => matches!(
+            app_spine(e),
+            (h, args) if !args.is_empty()
+                && matches!(axiom_local(h), Some("kind_of" | "the" | "the_count" | "has_count"))
+        ),
+    }
+}
+
+/// An adjective's degree (`deg_a01580306`) or predicate (`a02734544`) — not a governed degree, a
+/// standard, or a verb.
+fn is_adjective(local: &str) -> bool {
+    let bare = local.strip_prefix("deg_").unwrap_or(local);
+    bare.len() > 4 && bare.starts_with(['a', 's']) && bare[1..].bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The head word of a phrase: an atom's word, a bound variable's phrase, or the head of the
+/// first argument through `kind_of`, `the`, a count, or a projection.
+fn head_word(e: &Exp, vb: &Vb, env: &[Binding]) -> String {
+    match e {
+        Exp::Var(v) => env
+            .iter()
+            .rev()
+            .find(|(b, _, _)| *b == v.as_str())
+            .map(|(_, h, _)| h.clone())
+            .unwrap_or_else(|| "…".to_string()),
+        Exp::Sig(_, dom, _) | Exp::Pi(_, dom, _) => head_word(dom, vb, env),
+        Exp::Fst(x) | Exp::Snd(x) | Exp::Ann(x, _) => head_word(x, vb, env),
+        _ => match app_spine(e) {
+            (_, args) if !args.is_empty() => head_word(args[0], vb, env),
+            (h, _) => match axiom_local(h) {
+                Some(local) if local.bytes().filter(u8::is_ascii_digit).count() >= 4 => {
+                    atom_word(local, vb)
+                }
+                _ => verbalize(e, vb)
+                    .trim_matches(|c| c == '«' || c == '»')
+                    .to_string(),
+            },
+        },
+    }
+}
+
 #[cfg(test)]
 mod register_tests {
     use super::*;
+
+    /// eigenius#263 (D97 decision 6): a relational degree's atom carries its preposition, which the
+    /// comparative reads back; a bare `…_rel` keeps the `on` it was read with before.
+    #[test]
+    fn a_relational_degree_names_its_preposition() {
+        assert_eq!(
+            relational_degree_preposition("deg_a00725772_rel_on"),
+            Some("on")
+        );
+        assert_eq!(
+            relational_degree_preposition("deg_a00482049_rel_with"),
+            Some("with")
+        );
+        assert_eq!(
+            relational_degree_preposition("deg_dependent_rel"),
+            Some("on")
+        );
+        assert_eq!(
+            relational_degree_preposition("deg_a01234567_rel_out_of"),
+            Some("out of")
+        );
+        assert_eq!(relational_degree_preposition("deg_a00725772"), None);
+        assert_eq!(relational_degree_preposition("deg_a00725772_rel_xyz"), None);
+    }
     use crate::layer::{LayerBuilder, LayerStorage};
     use crate::nbe::term::Patt;
 
@@ -1436,5 +1963,349 @@ mod register_tests {
             verbalize(&e, &Vb::surface(&names, &l)),
             "an exonuclease activity"
         );
+    }
+
+    fn app1(axiom: &str, a: Exp) -> Exp {
+        Exp::App(
+            Box::new(Exp::EigonAxiom(Iri::parse(axiom).expect("iri"))),
+            Box::new(a),
+        )
+    }
+
+    /// «other strong biomarkers for vulnerabilities» with the PP inside the biomarkers phrase.
+    fn nested(vulnerability: &str) -> Exp {
+        sig(
+            cls("urn:eigenius:umlscui:C0005516"),
+            app2(
+                "urn:eigenius:ontology:prep_for",
+                Exp::Var("x0".into()),
+                app1("urn:eigenius:ontology:kind_of", cls(vulnerability)),
+            ),
+        )
+    }
+
+    fn surface_names() -> BTreeMap<String, String> {
+        [
+            ("C0005516", "biomarkers"),
+            ("C1821973", "vulnerabilities"),
+            ("n05042871", "vulnerabilities"),
+            ("n13780719", "relationship"),
+            ("a00725772", "dependent"),
+            ("C0388246", "WRN"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+    }
+
+    fn link(function: Function, dependent: &str, host: &str) -> Link {
+        Link {
+            function,
+            dependent: dependent.into(),
+            host: host.into(),
+        }
+    }
+
+    /// The contrast of eigenius#264's witness: «for vulnerabilities» postmodifies the biomarkers
+    /// (the Σ's head, through its bound variable) or «the relationship» (through `the(…).1`).
+    #[test]
+    fn links_name_where_a_phrase_attaches() {
+        let (l, names) = (layer(), surface_names());
+        let vb = Vb::surface(&names, &l);
+        let for_ = |host: &str| {
+            link(
+                Function::Postmodifier("for".into()),
+                "vulnerabilities",
+                host,
+            )
+        };
+        assert_eq!(
+            structure_links(&nested("urn:eigenius:umlscui:C1821973"), &vb),
+            vec![for_("biomarkers")]
+        );
+        let the_relationship = Exp::Fst(Box::new(app1(
+            "urn:eigenius:ontology:the",
+            cls("urn:eigenius:wn:n13780719"),
+        )));
+        let flat = app2(
+            "urn:eigenius:ontology:prep_for",
+            the_relationship,
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:umlscui:C1821973"),
+            ),
+        );
+        assert_eq!(structure_links(&flat, &vb), vec![for_("relationship")]);
+        // A governed preposition is the adjective's complement (D97 decision 6).
+        let dependent_on = app2(
+            "urn:eigenius:ontology:deg_a00725772_rel_on",
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:umlscui:C0388246"),
+            ),
+            Exp::Var("x0".into()),
+        );
+        assert_eq!(
+            structure_links(&dependent_on, &vb),
+            vec![link(
+                Function::AdjectiveComplement("on".into()),
+                "WRN",
+                "dependent"
+            )]
+        );
+    }
+
+    /// An adjective is attributive inside a noun phrase's restrictor and predicated outside it.
+    #[test]
+    fn an_adjective_in_a_restrictor_is_attributive() {
+        let l = layer();
+        let names: BTreeMap<String, String> = [
+            ("n00029378", "events"),
+            ("a02734544", "genetic"),
+            ("C0388246", "WRN"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let vb = Vb::surface(&names, &l);
+        let events = sig(
+            cls("urn:eigenius:wn:n00029378"),
+            app1("urn:eigenius:wn:a02734544", Exp::Var("x0".into())),
+        );
+        assert_eq!(
+            structure_links(&events, &vb),
+            vec![link(Function::Adjective, "genetic", "events")]
+        );
+        let wrn_is_genetic = app1(
+            "urn:eigenius:wn:a02734544",
+            cls("urn:eigenius:umlscui:C0388246"),
+        );
+        assert_eq!(
+            structure_links(&wrn_is_genetic, &vb),
+            vec![link(Function::PredicateAdjective, "genetic", "WRN")]
+        );
+    }
+
+    /// A verb's arguments are links to it — read once, with the whole application, so the object
+    /// is never also taken for a one-argument verb's subject. A PP-oblique verb's object is a
+    /// prepositional object.
+    #[test]
+    fn a_verb_links_its_object_and_subject_once() {
+        let (l, names) = (layer(), surface_names());
+        let vb = Vb::surface(&names, &l);
+        let with_frame = |frame: &str| {
+            app2(
+                &format!("urn:eigenius:ontology:v00644583_{frame}"),
+                app1(
+                    "urn:eigenius:ontology:kind_of",
+                    cls("urn:eigenius:umlscui:C0005516"),
+                ),
+                cls("urn:eigenius:wn:n13780719"),
+            )
+        };
+        let verb = "v00644583";
+        assert_eq!(
+            structure_links(&with_frame("t"), &vb),
+            vec![
+                link(Function::Subject, "relationship", verb),
+                link(Function::Object, "biomarkers", verb),
+            ]
+        );
+        for frame in ["p", "p_to", "p_out_of"] {
+            assert_eq!(
+                structure_links(&with_frame(frame), &vb),
+                vec![
+                    link(Function::Subject, "relationship", verb),
+                    link(Function::PrepositionalObject, "biomarkers", verb),
+                ],
+                "{frame}"
+            );
+        }
+        // The gloss says a named preposition (D97 slice 2); the any-preposition frame has none to say.
+        let named = verbalize(&with_frame("p_to"), &vb);
+        let any = verbalize(&with_frame("p"), &vb);
+        assert_eq!(named.replacen(" to ", " ", 1), any, "{named}");
+        // A tag that only starts like a named one is not a PP frame.
+        assert_eq!(named_preposition("p_nowhere"), None);
+        assert_eq!(named_preposition("p_out_of"), Some("out of"));
+    }
+
+    fn and(a: Exp, b: Exp) -> Exp {
+        let and = Exp::Const(Iri::parse("urn:eigenius:logic:And").expect("iri"), vec![]);
+        Exp::App(Box::new(Exp::App(Box::new(and), Box::new(a))), Box::new(b))
+    }
+
+    /// «We ascertained MSI status with sequencing.»: the verb-adjunct encoding conjoins the PP to
+    /// the clause with the subject as its first argument; the PP is an adverbial of the verb. Beside
+    /// a predicated adjective it is the predicate's adverbial, beside a copula a second predicate.
+    #[test]
+    fn a_conjoined_pp_is_about_its_clause() {
+        let l = layer();
+        let names: BTreeMap<String, String> = [
+            ("v00920000", "ascertained"),
+            ("n13945000", "status"),
+            ("n00649000", "sequencing"),
+            ("n13780719", "we"),
+            ("a01000000", "essential"),
+            ("n00039021", "interaction"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let vb = Vb::surface(&names, &l);
+        let we = || cls("urn:eigenius:wn:n13780719");
+        let status = || {
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:wn:n13945000"),
+            )
+        };
+        let sequencing = || {
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:wn:n00649000"),
+            )
+        };
+        let with = |s: Exp| app2("urn:eigenius:ontology:prep_with", s, sequencing());
+        let adjunct = and(
+            app2("urn:eigenius:ontology:v00920000_t", status(), we()),
+            with(we()),
+        );
+        let adverbial = link(
+            Function::Adverbial("with".into()),
+            "sequencing",
+            "ascertained",
+        );
+        assert_eq!(
+            structure_links(&adjunct, &vb),
+            vec![
+                link(Function::Subject, "we", "ascertained"),
+                link(Function::Object, "status", "ascertained"),
+                adverbial.clone(),
+            ]
+        );
+        // A second adjunct of the same clause, nested in another conjunction, is the verb's too.
+        let nested = and(adjunct.clone(), with(we()));
+        assert!(structure_links(&nested, &vb).contains(&adverbial));
+        // Surface keeps its words.
+        assert_eq!(
+            verbalize(&adjunct, &Vb::surface(&names, &l)),
+            "we ascertained status and we with sequencing"
+        );
+        // A PP whose first argument is not the verb's subject is no adjunct.
+        let not_adjunct = and(
+            app2("urn:eigenius:ontology:v00920000_t", status(), we()),
+            with(status()),
+        );
+        assert!(structure_links(&not_adjunct, &vb).contains(&link(
+            Function::Postmodifier("with".into()),
+            "sequencing",
+            "status"
+        )));
+        // Beside a predicated adjective, the predicate's adverbial.
+        let essential = app2(
+            "urn:eigenius:ontology:gt",
+            app1("urn:eigenius:ontology:deg_a01000000", we()),
+            Exp::EigonAxiom(Iri::parse("urn:eigenius:ontology:std_a01000000").expect("iri")),
+        );
+        assert!(
+            structure_links(&and(essential, with(we())), &vb).contains(&link(
+                Function::PredicateAdverbial("with".into()),
+                "sequencing",
+                "essential"
+            ))
+        );
+        // Beside a copula, a second predicate of the subject.
+        let is_a = app2(
+            "urn:eigenius:ontology:is_a",
+            we(),
+            cls("urn:eigenius:wn:n00039021"),
+        );
+        assert!(structure_links(&and(is_a, with(we())), &vb).contains(&link(
+            Function::SecondPredicate("with".into()),
+            "sequencing",
+            "we"
+        )));
+    }
+
+    /// «Synthetic lethality is an interaction between two genetic events.»: the counted,
+    /// adjectival restrictor renders as relations of the head, not as a bracketed fragment.
+    #[test]
+    fn a_counted_relation_and_an_adjective_render_on_the_head() {
+        let l = layer();
+        let names: BTreeMap<String, String> = [
+            ("C4280020", "Synthetic lethality"),
+            ("n00039021", "interaction"),
+            ("n00029378", "events"),
+            ("a02734544", "genetic"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        let two = Exp::InductiveCtor(
+            Iri::parse("urn:eigenius:units:Quantity").expect("iri"),
+            "mk_quantity".to_string(),
+            vec![
+                Exp::LitRat(crate::numeric::Rational::new(2.into(), 1.into()).expect("q")),
+                Exp::LitInt(0),
+            ],
+        );
+        let genetic_events = Exp::Sig(
+            Patt::Var("y0".into()),
+            Box::new(cls("urn:eigenius:wn:n00029378")),
+            Box::new(app1(
+                "urn:eigenius:ontology:a02734544",
+                Exp::Var("y0".into()),
+            )),
+        );
+        let between = Exp::Lam(
+            Patt::Var("y".into()),
+            Box::new(app2(
+                "urn:eigenius:ontology:prep_between",
+                Exp::Var("x0".into()),
+                Exp::Fst(Box::new(Exp::Var("y".into()))),
+            )),
+        );
+        let counted = Exp::App(
+            Box::new(app2(
+                "urn:eigenius:ontology:has_count",
+                genetic_events,
+                between,
+            )),
+            Box::new(two),
+        );
+        let reading = app2(
+            "urn:eigenius:ontology:is_a",
+            app1(
+                "urn:eigenius:ontology:kind_of",
+                cls("urn:eigenius:umlscui:C4280020"),
+            ),
+            sig(cls("urn:eigenius:wn:n00039021"), counted),
+        );
+        assert_eq!(
+            verbalize(&reading, &Vb::expanded(&names, &l)),
+            "«Synthetic lethality» [C4280020] is a «interaction» [n00039021] + between 2 «events» \
+             [n00029378] + is «genetic» [a02734544]"
+        );
+        assert_eq!(
+            predication(&reading),
+            Some("a statement about the subject's kind as a whole")
+        );
+    }
+
+    /// A document's named individual keeps its whole local name: «Project Achilles», not «ni».
+    #[test]
+    fn a_named_individual_is_named_whole() {
+        assert_eq!(atom_key("ni_project_achilles"), "ni_project_achilles");
+        assert_eq!(atom_key("v00618878_as"), "v00618878");
+        assert_eq!(
+            sense_key("doc:project_achilles").as_deref(),
+            Some("ni_project_achilles")
+        );
+        assert_eq!(
+            sense_key("wn:identify.v.00618878").as_deref(),
+            Some("v00618878")
+        );
+        assert_eq!(sense_key("umls:C0388246").as_deref(), Some("C0388246"));
     }
 }

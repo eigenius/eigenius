@@ -24,9 +24,14 @@
 //! the kernel felicity gate still decides validity, and widen-on-failure recovers a wrongly
 //! down-ranked sense (a bad rank costs a re-parse, never a missed parse).
 //!
-//! Impls: a deterministic mock ([`IdentityRanker`]) for CI, and a feature-gated live Anthropic
-//! ranker ([`AnthropicSenseRanker`], `use-llm` feature, tool-use-constrained). Both behind the one
-//! [`SenseRanker`] trait, so the (future) parser-cap integration is impl-agnostic.
+//! Impls: a deterministic mock ([`IdentityRanker`]) for CI, and the live ranker
+//! ([`DecisionSenseRanker`]): one question per word put to a [`Decider`] (eigenius#264's decision
+//! interface), so any provider answers it — Anthropic with a ranking, TypeSafe with a probability
+//! per sense. A ranking carries a weight per sense, and the parser eliminates a sense whose weight
+//! is below its floor (`Parser::with_sense_floor`), so the floor is tuned on a replay, not
+//! re-asked.
+
+use crate::dcg::decision::{Choice, Decider, Question};
 
 /// One candidate sense of a content word: its lexicon `sense` label (e.g. `wn:bank.n.01`) and a
 /// short human-readable gloss the ranker reasons over.
@@ -51,11 +56,40 @@ pub struct WordSenses<'a> {
     pub candidates: &'a [SenseCandidate],
 }
 
+/// One word's ranking: candidate indices, most plausible in context first, and — where the ranker
+/// gives them — a weight per candidate, aligned with the candidates: the provider's probability,
+/// or for a ranking without probabilities 1 for a ranked sense and 0 for one it leaves out.
+///
+/// Without weights, a candidate left out of `order` is ELIMINATED (the rankers before 2026-10-01,
+/// and every recording they made). With weights, `order` holds every candidate and the parser
+/// eliminates the ones whose weight is below its floor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WordRanking {
+    pub order: Vec<usize>,
+    pub weights: Vec<f64>,
+}
+
+impl WordRanking {
+    /// A ranking without weights: `order`'s candidates kept, the rest eliminated.
+    pub fn ordered(order: Vec<usize>) -> Self {
+        WordRanking {
+            order,
+            weights: Vec::new(),
+        }
+    }
+
+    /// The candidates kept at `floor`: `order`, less those weighted below it.
+    pub fn kept(&self, floor: f64) -> impl Iterator<Item = usize> + '_ {
+        self.order
+            .iter()
+            .copied()
+            .filter(move |&i| self.weights.get(i).is_none_or(|&w| w >= floor))
+    }
+}
+
 /// The **untrusted** contextual sense reranker. Given the `sentence` and one [`WordSenses`] per
-/// content word, return a **ranking per word**: a permutation of that word's candidate indices,
-/// most-plausible-in-context first. The returned `Vec` is aligned with `words` (one inner `Vec`
-/// per word); each inner `Vec` should be a permutation of `0..candidates.len()` (callers must
-/// tolerate a malformed reply — e.g. an LLM omission — by falling back to the seed order).
+/// content word, return a [`WordRanking`] per word, aligned with `words` (callers must tolerate a
+/// malformed reply by falling back to the seed order).
 pub trait SenseRanker {
     /// One ranking per word, or `None` when this ranker DID NOT ANSWER — a transport/API failure,
     /// a malformed reply, or a replay miss.
@@ -69,7 +103,13 @@ pub trait SenseRanker {
     /// the parse, and why the reading ranker was later asked to choose between them. A `None`
     /// cannot be mistaken for an answer: the caller falls back to seed order, and the RECORDER
     /// writes nothing, so a re-run retries instead of inheriting the failure.
-    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Option<Vec<Vec<usize>>>;
+    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses])
+        -> Option<Vec<WordRanking>>;
+
+    /// The model that answers, for a ranker that asks one — what a recording names (D71 §9).
+    fn model(&self) -> Option<String> {
+        None
+    }
 }
 
 /// The trivial deterministic ranker: keep each word's candidates in seed order (identity
@@ -83,11 +123,11 @@ impl SenseRanker for IdentityRanker {
         _sentence: &str,
         _context: &str,
         words: &[WordSenses],
-    ) -> Option<Vec<Vec<usize>>> {
+    ) -> Option<Vec<WordRanking>> {
         Some(
             words
                 .iter()
-                .map(|w| (0..w.candidates.len()).collect())
+                .map(|w| WordRanking::ordered((0..w.candidates.len()).collect()))
                 .collect(),
         )
     }
@@ -108,6 +148,9 @@ pub struct RankRecord {
     /// Per word: the surface form, its candidate sense labels **in seed order**, and the
     /// permutation the ranker returned (indices into `senses`, most-plausible-first).
     pub words: Vec<RankedWord>,
+    /// The model that answered, where the ranker names one (recordings before 2026-10-01 do not).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
 }
 
 /// One word's recorded ranking.
@@ -120,6 +163,10 @@ pub struct RankedWord {
     #[serde(default)]
     pub sems: Vec<String>,
     pub order: Vec<usize>,
+    /// The ranker's weight per sense, aligned with `senses` — see [`WordRanking`]. Empty in a
+    /// recording whose ranker gave none: there a sense left out of `order` was eliminated.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub weights: Vec<f64>,
 }
 
 /// The lookup key for a ranking: the sentence plus every word's candidate sense-set **in seed
@@ -226,7 +273,16 @@ impl<R: SenseRanker> RecordingSenseRanker<R> {
 }
 
 impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
-    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Option<Vec<Vec<usize>>> {
+    fn model(&self) -> Option<String> {
+        self.inner.model()
+    }
+
+    fn rank(
+        &self,
+        sentence: &str,
+        context: &str,
+        words: &[WordSenses],
+    ) -> Option<Vec<WordRanking>> {
         // A NON-ANSWER IS NEVER RECORDED. Writing the fallback would freeze a failed call into the
         // artifact, where it replays as "keep every sense" and reports a HIT — the 2026-07-29 crab
         // bug. Nothing recorded ⇒ the next run asks again.
@@ -236,10 +292,9 @@ impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
         // the run can still be repeated, rather than leaving it to be discovered in a draw months
         // later.
         if words.len() > 1
-            && words
-                .iter()
-                .zip(order.iter())
-                .all(|(w, o)| o.iter().copied().eq(0..w.candidates.len()))
+            && words.iter().zip(order.iter()).all(|(w, o)| {
+                o.weights.is_empty() && o.order.iter().copied().eq(0..w.candidates.len())
+            })
         {
             eprintln!(
                 "sense-ranks: SUSPICIOUS — every word of «{}» kept every sense in seed order \
@@ -259,9 +314,11 @@ impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
                     surface: w.surface.to_string(),
                     senses: w.candidates.iter().map(|c| c.sense.clone()).collect(),
                     sems: w.candidates.iter().map(|c| c.sem.clone()).collect(),
-                    order: o.clone(),
+                    order: o.order.clone(),
+                    weights: o.weights.clone(),
                 })
                 .collect(),
+            model: self.inner.model().unwrap_or_default(),
         };
         self.log
             .lock()
@@ -278,7 +335,7 @@ impl<R: SenseRanker> SenseRanker for RecordingSenseRanker<R> {
 /// reproduction. A non-zero count means the lexicon or the page changed under the recording, and
 /// the run is a different experiment.
 pub struct ReplaySenseRanker {
-    by_key: std::collections::BTreeMap<String, Vec<Vec<usize>>>,
+    by_key: std::collections::BTreeMap<String, Vec<WordRanking>>,
     misses: std::sync::atomic::AtomicUsize,
     hits: std::sync::atomic::AtomicUsize,
 }
@@ -299,7 +356,16 @@ impl ReplaySenseRanker {
         for r in records {
             // The key comes from the recorded question, so it matches what `rank` will compute.
             let key = record_key(&r);
-            by_key.insert(key, r.words.iter().map(|w| w.order.clone()).collect());
+            by_key.insert(
+                key,
+                r.words
+                    .iter()
+                    .map(|w| WordRanking {
+                        order: w.order.clone(),
+                        weights: w.weights.clone(),
+                    })
+                    .collect(),
+            );
         }
         Ok(Self {
             by_key,
@@ -321,7 +387,12 @@ impl ReplaySenseRanker {
 }
 
 impl SenseRanker for ReplaySenseRanker {
-    fn rank(&self, sentence: &str, context: &str, words: &[WordSenses]) -> Option<Vec<Vec<usize>>> {
+    fn rank(
+        &self,
+        sentence: &str,
+        context: &str,
+        words: &[WordSenses],
+    ) -> Option<Vec<WordRanking>> {
         match self.by_key.get(&rank_key(sentence, context, words)) {
             Some(order) => {
                 self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -336,182 +407,175 @@ impl SenseRanker for ReplaySenseRanker {
     }
 }
 
-// ───────────────────────── live Anthropic ranker (use-llm feature) ─────────────────────────
+// ───────────────────────── the live ranker: a decision per word ─────────────────────────
 
-#[cfg(feature = "use-llm")]
-mod anthropic {
-    use super::{SenseRanker, WordSenses};
-    use schemars::JsonSchema;
-    use serde::Deserialize;
+/// A sense call's question about one word. A sense the sentence rules out is left out of a
+/// ranking: Anthropic's models rank, and an unranked sense weighs 0; TypeSafe's give it a low
+/// probability. Either way the parser's floor eliminates it.
+///
+/// Chosen on an offline screen of ten wordings and response shapes over the WRN page's 422 ranked
+/// words, scored against the reading ledger (2026-10-01): with `claude-sonnet-4-6` the right sense is
+/// among the two the parser seeds for 208–209 of 213 words and first for 184–186 (the prompt it
+/// replaced: 207–208, 186), at 396 seeded senses against its 377–384. Without the closing sentence
+/// the ranker pads one-sense words with runners-up (413 seeded); without the rationale it eliminates
+/// right senses.
+fn sense_question(surface: &str) -> String {
+    format!(
+        "Which sense of «{surface}» does `the_sentence` use? A sense `the_sentence` rules out is \
+         not a runner-up: leave a sense out only when it is impossible here, not merely unlikely. A \
+         grammatical word («of», «may», «a») has one reading here; its domain-specific noun senses \
+         are never right. If only one sense is possible here, give no runners-up."
+    )
+}
 
-    /// The model's structured reply: one ranking per word (each a list of candidate indices,
-    /// most-plausible-first), aligned with the request order.
-    #[derive(Deserialize, JsonSchema)]
-    struct SenseRankingReply {
-        /// One ranking per word, in the same order the words were given; each is that word's
-        /// candidate indices reordered most-plausible-in-context first.
-        rankings: Vec<Vec<usize>>,
-    }
-
-    /// A [`SenseRanker`] backed by Anthropic Claude via the direct tool-use client
-    /// ([`crate::dcg::anthropic_client`]). On any error it returns the **seed order** (identity) so
-    /// the caller degrades gracefully — the reranker only reorders a beam, never gates validity.
-    pub struct AnthropicSenseRanker {
-        api_key: String,
-        model: crate::dcg::anthropic_client::ModelConfig,
-    }
-
-    impl AnthropicSenseRanker {
-        pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
-            Self::with_config(
-                api_key,
-                crate::dcg::anthropic_client::ModelConfig::with_model(model),
-            )
-        }
-
-        /// Build with an explicit [`ModelConfig`] — how a formalization run selects the model it
-        /// wants, and what a recorded draw names as the answerer (D71 §7.1 / §9).
-        pub fn with_config(
-            api_key: impl Into<String>,
-            model: crate::dcg::anthropic_client::ModelConfig,
-        ) -> Self {
-            Self {
-                api_key: api_key.into(),
-                model,
-            }
-        }
-
-        /// From `$ANTHROPIC_API_KEY`, defaulting to a fast model. `None` if the key is unset.
-        pub fn from_env() -> Option<Self> {
-            Self::from_env_with(Default::default())
-        }
-
-        /// From `$ANTHROPIC_API_KEY` with an explicit [`ModelConfig`]. The formalization service
-        /// threads one config to every proposer in a run, so a draw's recorded model is the run's,
-        /// not a per-seam default (D71 §7.1 / §9).
-        pub fn from_env_with(cfg: crate::dcg::anthropic_client::ModelConfig) -> Option<Self> {
-            std::env::var("ANTHROPIC_API_KEY")
-                .ok()
-                .filter(|k| !k.is_empty())
-                .map(|k| Self::with_config(k, cfg.clone()))
-        }
-
-        fn ask(&self, instructions: &str) -> Option<SenseRankingReply> {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .ok()?;
-            match rt.block_on(crate::dcg::anthropic_client::anthropic_structured::<
-                SenseRankingReply,
-            >(&self.api_key, &self.model, instructions))
-            {
-                Ok(r) => Some(r),
-                Err(e) => {
-                    eprintln!("anthropic sense-ranker error: {e}");
-                    None
-                }
-            }
-        }
-    }
-
-    impl SenseRanker for AnthropicSenseRanker {
-        fn rank(
-            &self,
-            sentence: &str,
-            context: &str,
-            words: &[WordSenses],
-        ) -> Option<Vec<Vec<usize>>> {
-            if words.is_empty() {
-                return Some(Vec::new());
-            }
-            // DOCUMENT CONTEXT (D63, 2026-07-21): the neighbouring sentences. A sense that is
-            // plausible for an isolated sentence is often obviously wrong in the passage — "regions"
-            // pulls UMLS "Geographic Locations" until the surrounding genomics text rules it out.
-            let context_block = if context.trim().is_empty() {
-                String::new()
-            } else {
-                format!("Passage (for context only — do NOT rank its words):\n  {context}\n\n")
-            };
-            let mut prompt = format!(
-                "{context_block}In the sentence:\n  \"{sentence}\"\nrank each word's candidate senses by \
-                 contextual plausibility (most-likely sense first). Return `rankings`: one list \
-                 per word (in the given order), listing that word's candidate indices \
-                 most-plausible first.\n\n\
-                 IMPORTANT — you may ELIMINATE a sense by OMITTING its index. Omit any sense that \
-                 is not a possible reading of the word in THIS sentence. Do not pad the list: if \
-                 only one sense is possible, return only that one index. A grammatical word like \
-                 \"of\", \"may\" or \"a\" usually has exactly one reading here, and the \
-                 domain-specific noun senses of such a word are never right — omit them.\n\
-                 Omit a sense only when it is impossible, not merely unlikely: a sense you omit \
-                 cannot be recovered.\n\nWords and candidate senses:\n"
-            );
-            for (wi, w) in words.iter().enumerate() {
-                prompt.push_str(&format!("Word {wi} = \"{}\":\n", w.surface));
-                for (ci, c) in w.candidates.iter().enumerate() {
-                    prompt.push_str(&format!("  [{ci}] {}\n", c.gloss));
-                }
-            }
-            // `EIGENIUS_DUMP_RANK_PROMPT=1` prints the exact prompt sent for each sentence — the
-            // reranker decides which senses reach the parser, so being able to READ what it was
-            // asked is the difference between debugging it and guessing at it.
-            if std::env::var("EIGENIUS_DUMP_RANK_PROMPT").is_ok() {
-                eprintln!("\n===== SENSE-RANKER PROMPT =====\n{prompt}\n===== END PROMPT =====\n");
-            }
-            // A failed call and a malformed reply are NON-ANSWERS, not rankings. Returning the
-            // identity permutation here is what froze a failure into `ranks/2026-07-29-…` and put
-            // the crab genus in front of the reading ranker months later (D69 §7e).
-            let reply = self.ask(&prompt)?;
-            if reply.rankings.len() != words.len() {
-                eprintln!(
-                    "anthropic sense-ranker: malformed reply for «{}» ({} rankings for {} words) \
-                     — treating as NO ANSWER",
-                    sentence.trim(),
-                    reply.rankings.len(),
-                    words.len()
-                );
-                return None;
-            }
-            let ranked: Vec<Vec<usize>> = reply
-                .rankings
-                .into_iter()
-                .zip(words)
-                .map(|(ranking, w)| {
-                    let n = w.candidates.len();
-                    let valid: Vec<usize> = ranking.into_iter().filter(|&i| i < n).collect();
-                    // **An index the model OMITTED is ELIMINATED.** It used to be appended back here
-                    // ("preserving completeness"), which destroyed the only signal the ranker has for
-                    // saying "this sense is impossible" — a permutation can reorder but never drop.
-                    // That is how `of` kept a reading of `BRIP1 wt Allele` and `may` kept `Month of
-                    // May`: the model ranked the correct sense #0, and the cap, obliged to fill its
-                    // quota of 2, took the next one off the restored list.
-                    //
-                    // Eliminated indices are still appended — but AFTER every ranked one, so
-                    // `sense_cap_key` sorts them last and `lookup_span` can cut at the ranked count
-                    // (see its `effective cap`). They remain reachable by widen-on-failure, so a
-                    // wrong elimination costs a slower parse, never a grammar gap.
-                    let mut seen = vec![false; n];
-                    let mut out = Vec::with_capacity(n);
-                    for i in valid {
-                        if !seen[i] {
-                            seen[i] = true;
-                            out.push(i);
-                        }
-                    }
-                    // NOTE: omitted indices are NOT appended. They are absent from the flattened
-                    // `sense → rank` map, so `sense_cap_key` sorts them after every ranked sense
-                    // (its first key is `ctx.is_none()`), and `lookup_span` cuts at the ranked
-                    // count. They remain seedable once widen-on-failure raises the cap, so a wrong
-                    // elimination costs a slower parse, never a grammar gap.
-                    out
-                })
-                .collect();
-            Some(ranked)
-        }
+/// The sentence's sense ranking as one [`Choice`]: the passage (when the parser's context window
+/// gives one) and the sentence, and one question per word, its senses keyed `1`, `2`, … by their
+/// glosses.
+pub fn sense_choice(sentence: &str, context: &str, words: &[WordSenses]) -> Choice {
+    Choice {
+        context: vec![
+            ("document".to_string(), context.to_string()),
+            ("the_sentence".to_string(), sentence.trim().to_string()),
+        ],
+        questions: words
+            .iter()
+            .map(|w| Question {
+                question: sense_question(w.surface),
+                notes: Vec::new(),
+                options: w
+                    .candidates
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| ((i + 1).to_string(), c.gloss.trim().into()))
+                    .collect(),
+            })
+            .collect(),
     }
 }
 
+/// **The live sense ranker** (eigenius#264's decision interface; D63 phase 2): the sentence's words
+/// as one [`Choice`], one question per word, put to a [`Decider`]. Each answer becomes a
+/// [`WordRanking`] over every sense: with the provider's probabilities, ordered and weighted by
+/// them; with a ranking, its order, a ranked sense weighing 1 and a left-out one 0. The parser's
+/// floor does the eliminating. A decider error or an answer that does not cover every
+/// word is NO ANSWER (D69 §7e): the caller falls back to seed order and nothing is recorded.
+pub struct DecisionSenseRanker<D: Decider> {
+    decider: D,
+}
+
+impl<D: Decider> DecisionSenseRanker<D> {
+    pub fn new(decider: D) -> Self {
+        Self { decider }
+    }
+}
+
+impl<D: Decider> SenseRanker for DecisionSenseRanker<D> {
+    fn model(&self) -> Option<String> {
+        Some(self.decider.model().to_string())
+    }
+
+    fn rank(
+        &self,
+        sentence: &str,
+        context: &str,
+        words: &[WordSenses],
+    ) -> Option<Vec<WordRanking>> {
+        if words.is_empty() {
+            return Some(Vec::new());
+        }
+        let choice = sense_choice(sentence, context, words);
+        // `EIGENIUS_DUMP_RANK_PROMPT=1` prints what the ranker was asked: it decides which senses
+        // reach the parser, so reading the question is how it is debugged.
+        if std::env::var("EIGENIUS_DUMP_RANK_PROMPT").is_ok() {
+            eprintln!(
+                "\n===== SENSE-RANKER CHOICE =====\n{}\n===== END =====\n",
+                crate::dcg::decision::render_prompt(&choice)
+            );
+        }
+        let decided = match self.decider.choose(&choice) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("sense-ranker ({}): {e}", self.decider.model());
+                return None;
+            }
+        };
+        if decided.len() != words.len() {
+            eprintln!(
+                "sense-ranker: {} answers for {} words of «{}» — treating as NO ANSWER",
+                decided.len(),
+                words.len(),
+                sentence.trim()
+            );
+            return None;
+        }
+        Some(
+            words
+                .iter()
+                .zip(&decided)
+                .map(|(w, d)| word_ranking(d, w.candidates.len()))
+                .collect(),
+        )
+    }
+}
+
+/// One answer as a ranking of `n` senses keyed `1`…`n`. With probabilities: every sense, by
+/// probability. Without: the choice and the runners-up in the answer's order, weighing 1, then the
+/// senses the answer leaves out, weighing 0.
+fn word_ranking(d: &crate::dcg::decision::Decided, n: usize) -> WordRanking {
+    let key = |i: usize| (i + 1).to_string();
+    if !d.probabilities.is_empty() {
+        let weights: Vec<f64> = (0..n)
+            .map(|i| d.probabilities.get(&key(i)).copied().unwrap_or(0.0))
+            .collect();
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&a, &b| weights[b].total_cmp(&weights[a]).then(a.cmp(&b)));
+        return WordRanking { order, weights };
+    }
+    let mut order: Vec<usize> = std::iter::once(&d.choice)
+        .chain(&d.runners_up)
+        .filter_map(|k| (0..n).find(|&i| key(i) == *k))
+        .collect();
+    let mut weights = vec![0.0; n];
+    for &i in &order {
+        weights[i] = 1.0;
+    }
+    order.extend((0..n).filter(|i| weights[*i] == 0.0));
+    WordRanking { order, weights }
+}
+
+/// A live sense ranker, whichever provider answers it.
+pub type LiveSenseRanker = Box<dyn SenseRanker + Send + Sync>;
+
+/// The live sense ranker for `cfg`'s model, over its provider's decider; `None` without the
+/// provider's key in the environment.
 #[cfg(feature = "use-llm")]
-pub use anthropic::AnthropicSenseRanker;
+pub fn live_sense_ranker(cfg: &crate::dcg::model_config::ModelConfig) -> Option<LiveSenseRanker> {
+    crate::dcg::decision::decider_from_env(cfg)
+        .map(|d| Box::new(DecisionSenseRanker::new(d)) as LiveSenseRanker)
+}
+
+/// [`live_sense_ranker`] for the model in `EIGENIUS_SENSE_MODEL`, else
+/// [`DEFAULT_MODEL`](crate::dcg::model_config::DEFAULT_MODEL).
+#[cfg(feature = "use-llm")]
+pub fn live_sense_ranker_from_env() -> Option<LiveSenseRanker> {
+    use crate::dcg::model_config::{ModelConfig, DEFAULT_MODEL};
+    let model = std::env::var("EIGENIUS_SENSE_MODEL").unwrap_or_default();
+    live_sense_ranker(&ModelConfig::requested(&model, DEFAULT_MODEL, 0))
+}
+
+impl<T: SenseRanker + ?Sized> SenseRanker for Box<T> {
+    fn rank(
+        &self,
+        sentence: &str,
+        context: &str,
+        words: &[WordSenses],
+    ) -> Option<Vec<WordRanking>> {
+        (**self).rank(sentence, context, words)
+    }
+    fn model(&self) -> Option<String> {
+        (**self).model()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -542,17 +606,110 @@ mod tests {
         }];
         assert_eq!(
             IdentityRanker.rank("s", "", &words),
-            Some(vec![vec![0, 1, 2]])
+            Some(vec![WordRanking::ordered(vec![0, 1, 2])])
         );
     }
 
-    /// Live WSD: a real model must pick the contextual sense (JSON-Schema-constrained). Skips
-    /// without a key; runs live with `--features use-llm` + `ANTHROPIC_API_KEY`.
+    /// A decider that answers each word with fixed probabilities over its senses: `1` most likely,
+    /// the last sense near zero.
+    struct Probabilities;
+    impl Decider for Probabilities {
+        fn choose(&self, choice: &Choice) -> Result<Vec<crate::dcg::decision::Decided>, String> {
+            Ok(choice
+                .questions
+                .iter()
+                .map(|q| {
+                    let n = q.options.len();
+                    let probabilities = (1..=n)
+                        .map(|k| {
+                            let p = if k == n { 0.001 } else { 1.0 / k as f64 };
+                            (k.to_string(), p)
+                        })
+                        .collect();
+                    crate::dcg::decision::Decided {
+                        choice: "1".into(),
+                        runners_up: (2..=n).map(|k| k.to_string()).collect(),
+                        probabilities,
+                        rationale: String::new(),
+                        model: "fixed".into(),
+                    }
+                })
+                .collect())
+        }
+        fn model(&self) -> &str {
+            "fixed"
+        }
+    }
+
+    /// The decision ranker asks one question per word and orders every sense by its weight; the
+    /// floor, not the ranker, eliminates.
+    #[test]
+    fn the_decision_ranker_weights_every_sense_and_the_floor_eliminates() {
+        let c = cands(3);
+        let words = vec![
+            WordSenses {
+                surface: "respond",
+                candidates: &c,
+            },
+            WordSenses {
+                surface: "cancers",
+                candidates: &c[..2],
+            },
+        ];
+        let choice = sense_choice("Some cancers do not respond.", "", &words);
+        assert_eq!(choice.questions.len(), 2);
+        assert!(choice.questions[0]
+            .question
+            .starts_with("Which sense of «respond» does `the_sentence` use?"));
+        assert!(choice.questions[0]
+            .question
+            .ends_with("If only one sense is possible here, give no runners-up."));
+        assert_eq!(
+            choice.questions[0].options[1],
+            ("2".to_string(), "gloss 1".into())
+        );
+        let r = DecisionSenseRanker::new(Probabilities)
+            .rank("Some cancers do not respond.", "", &words)
+            .unwrap();
+        assert_eq!(r[0].order, [0, 1, 2]);
+        assert_eq!(r[0].weights, [1.0, 0.5, 0.001]);
+        assert_eq!(r[0].kept(0.02).collect::<Vec<_>>(), [0, 1]);
+        assert_eq!(
+            r[1].kept(0.02).collect::<Vec<_>>(),
+            [0],
+            "0.001 is below the floor"
+        );
+        assert_eq!(
+            WordRanking::ordered(vec![2, 0])
+                .kept(0.5)
+                .collect::<Vec<_>>(),
+            [2, 0],
+            "without weights, `order` is what is kept"
+        );
+        // A ranking without probabilities: the ranked senses weigh 1, a left-out one 0, so any
+        // floor above 0 eliminates exactly what the ranker left out, however long the ranking.
+        let ranked = crate::dcg::decision::Decided {
+            choice: "3".into(),
+            runners_up: vec!["1".into()],
+            probabilities: Default::default(),
+            rationale: "loans".into(),
+            model: "claude".into(),
+        };
+        let r = word_ranking(&ranked, 3);
+        assert_eq!(r.order, [2, 0, 1]);
+        assert_eq!(r.weights, [1.0, 0.0, 1.0]);
+        assert_eq!(r.kept(DEFAULT_FLOOR_FOR_TEST).collect::<Vec<_>>(), [2, 0]);
+    }
+
+    const DEFAULT_FLOOR_FOR_TEST: f64 = crate::dcg::parse::DEFAULT_SENSE_FLOOR;
+
+    /// Live WSD through the decision interface: a real model must put the contextual sense first.
+    /// Skips without a key; runs live with `--features use-llm` and the provider's key.
     #[cfg(feature = "use-llm")]
     #[test]
-    fn live_anthropic_sense_ranker_picks_the_contextual_sense() {
-        let Some(ranker) = AnthropicSenseRanker::from_env() else {
-            eprintln!("SKIP live_anthropic_sense_ranker: ANTHROPIC_API_KEY unset");
+    fn live_sense_ranker_picks_the_contextual_sense() {
+        let Some(ranker) = live_sense_ranker_from_env() else {
+            eprintln!("SKIP live_sense_ranker: no key for the sense model");
             return;
         };
         let cands = vec![
@@ -571,16 +728,16 @@ mod tests {
             surface: "bank",
             candidates: &cands,
         }];
-        let r = ranker.rank(
-            "The bank approved the loan after reviewing the application.",
-            "",
-            &words,
-        );
-        let r = r.expect("the live ranker answered");
+        let r = ranker
+            .rank(
+                "The bank approved the loan after reviewing the application.",
+                "",
+                &words,
+            )
+            .expect("the live ranker answered");
         assert_eq!(r.len(), 1, "one ranking for the one word");
-        assert_eq!(r[0].len(), 2, "a permutation of both candidates");
         assert_eq!(
-            r[0][0], 0,
+            r[0].order[0], 0,
             "the financial sense ranks first in a loan context, got {:?}",
             r[0]
         );
@@ -595,7 +752,7 @@ mod tests {
     fn a_ranker_that_does_not_answer_records_nothing() {
         struct NoAnswer;
         impl SenseRanker for NoAnswer {
-            fn rank(&self, _s: &str, _c: &str, _w: &[WordSenses]) -> Option<Vec<Vec<usize>>> {
+            fn rank(&self, _s: &str, _c: &str, _w: &[WordSenses]) -> Option<Vec<WordRanking>> {
                 None
             }
         }
@@ -626,11 +783,11 @@ mod tests {
     /// non-identity order, so a replay that silently fell back to the seed order would be caught.
     struct ReverseRanker;
     impl SenseRanker for ReverseRanker {
-        fn rank(&self, _s: &str, _c: &str, words: &[WordSenses]) -> Option<Vec<Vec<usize>>> {
+        fn rank(&self, _s: &str, _c: &str, words: &[WordSenses]) -> Option<Vec<WordRanking>> {
             Some(
                 words
                     .iter()
-                    .map(|w| (0..w.candidates.len()).rev().collect())
+                    .map(|w| WordRanking::ordered((0..w.candidates.len()).rev().collect()))
                     .collect(),
             )
         }
@@ -658,7 +815,7 @@ mod tests {
         let live = rec.rank("we sat on the bank", "", &words);
         assert_eq!(
             live,
-            Some(vec![vec![2, 1, 0]]),
+            Some(vec![WordRanking::ordered(vec![2, 1, 0])]),
             "the inner ranker's answer passes through"
         );
 

@@ -9,6 +9,120 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **entry 3 (`2026-09-30`). #263 and #264 — governed prepositions and the reading ranker, on
+> `prepositions-and-ranker`. ACTIVE.**
+>
+> **#263:** the WordNet importer decides an adjective's governed preposition against its own list of
+> eleven, which never gained `lexicon:Prep`'s `of` and `as`; it keeps one preposition per lemma, and
+> its gloss heuristic reads equatives and infinitives as governance. The parked WIP `8a226ef`
+> (`origin/governed-prepositions`: one list in the kernel, every preposition WordNet names) does not
+> apply to `main` as is — its `dcg/category.rs` hunk conflicts with D95. The issue's proposal: attested
+> = WordNet's convention ∪ SPECIALIST's complements ∪ the curated frames (`scripts/provision-specialist.sh`,
+> D97), with attested ∪ the heuristic's first match as the loss-free interim. It lands with a reseed and
+> re-adjudicated pins (`… predictive of MMR deficiency`).
+> **#263 built (`2026-09-30`):** D97 decisions 6 and 7 decided for adjectives (7 revised the same day:
+> the judge places every multi-sense item; below-threshold yes votes place, a no to every sense is a
+> gap); the reader (`crates/eigenius-specialist`), the governance table (`eigenius-wordnet`,
+> `governance.rs`), the judge (`specialist-senses`: gold recall 45/45, precision sample 40/40,
+> adopted by the owner), one relation per preposition (`deg_{loc}_rel_{p}`). The import: 4,117 → 7,033 relational
+> adjective entries, `of` 0 → 1,003. **Measured** (`wordnet-umls-aligned-2026-09-30-governed-preps`):
+> grammar gaps 0, 62/62 expected hits, readings 652 → 668, skeletons 212 → 215; `… predictive of MMR
+> deficiency` re-pinned to its relational reading; selection 29/41 on a new draw.
+> **The reading ledger checks itself (`2026-09-30`, `ea85d49`, the owner's rule):** a reading whose
+> structure differs from its pin cannot count as correct, and a row contradicting another row's ruling
+> on its sentence is flagged. Each `wrong` row names what it rules out (a fifth field); the
+> `reading_ledger_is_consistent` test and the sweep check rows against each other, and the sweep
+> audits every row its forest produces (`ledger-conflicts`, gated to 0). 19 rows `correct` → `wrong`,
+> 3 `wrong` → `correct`. The owner's rulings: C0600688 «Toxic effect» and `arise` v02625786 are faithful
+> twins; need-claims (essential, dispensable, dependency, dependent on) and a drug target take the WRN
+> protein, not the gene, and seven pins moved to the protein kind. Selection re-baselined at 25/41 on
+> the governed-preps draw. Not covered: «WRN is a synthetic-lethal vulnerability» keeps its
+> gene-individual pin.
+> **#264 strand 1 done (`2026-09-30`):** the two-call ranker — a structure call in the sentence's own
+> words with how the structures differ, then a sense call — is the default. The A/B, three live
+> draws per arm on one snapshot, fully adjudicated: 29, 28, 30 of 41 correct against the flat
+> listing's 23, 21, 24 (`docs/notes/d69-reading-presentation.md` §7n). The structure call surfaced
+> three attachments the owner re-ruled (two library PPs as instruments, one locative over the
+> event).
+> **#264 strand 2 done (`2026-09-30`):** the two calls go through a provider-neutral decision
+> interface with Anthropic and TypeSafe deciders. Three draws per model: sonnet-4-6 26, 25, 26;
+> sonnet-5-5 29, 24, 28; jev-latest 26, 26, 26, in ~60 s a draw against ~400 s for sonnet-4-6
+> (§7o). The owner adopted `jev-latest` as the reading ranker's default; selection re-baselined on
+> its first draw. **Next:** jev's prompt and presentation (the `state`, the per-option criteria, the
+> sense call's legend), each variant a draw, its replay, and the adjudication of its new verdicts.
+> **Presentation screened (`2026-09-30`, offline over `EIGENIUS_DUMP_DECISIONS`):** ten prompt variants
+> stayed within noise. The structural rendering had shown the verb-adjunct reading as "and we with
+> «sequencing»", which decided most PP attachments for jev; rendered faithfully, jev attaches to the
+> verb almost everywhere (structure ~31 → 28.75 of 41), while sonnet-4-6 gets 7 of 9 attachment units
+> (structure 33). The owner asked for the alternatives as a grammar book shows them — the sentence
+> bracketed, each contested phrase's grammatical function — and a question without a parser: «Which
+> grammatical analysis of `the_sentence` matches what it means in `document`?». A word-search prototype
+> raised jev's structure calls from 15.4 to 18.5 of 27.
+> **Grammatical analyses done (`2026-09-30`, owner's design):** the parser records each item's
+> derivation (`dcg::derivation`); the structure call brackets what differs between analyses and
+> names each contested phrase's function (`dcg::analysis`). Structure calls 19.9 of 27 with jev. The
+> A/B, three draws each: jev-latest 28, 28, 27 of 41 (structure 31, 32, 30); sonnet-4-6 24, 24, 24
+> (32). jev stays the default; selection re-baselined at 28 (D69 note §7p).
+> **One question per word in the sense call (`2026-10-01`, owner's design):** 28, 29, 28 of 41 with no
+> abstentions (§7q); selection re-baselined at 28 on 41 decisions. The structure call's errors are
+> analysed in §7q: no model error under a clear presentation; the multiword-concept display and the
+> pin policy for lexicalised twins come first. **Open:** those presentation and pin fixes; the
+> sense-ranker rework; strand 3 (whether attachment is derivable); the «for cancer therapeutics»
+> attachment for the maintainer; the combined #263+#264 PR.
+> **D97 slice 2 (verbs) joins the branch (`2026-10-01`, the owner):** «Some cancers do not respond to
+> immune checkpoint blockade» needs `respond to` on v00718737, which WordNet gives no PP frame. Decided:
+> a SPECIALIST preposition placed on a sense replaces the any-preposition frame there; the judge places
+> every several-sense item. Committed: 53 `lexicon:Prep` constructors with argument entries
+> (`651c4ed`). Then the verb governance, named PP relations `v{off}_p_{slug}` (frame 13 → `on`), the
+> judge for verbs, and the reader's per-word frames (WordNet restricts 365 frame entries to one word; reading them per synset
+> emitted 590 (sense, lemma, kind) triples WordNet does not give). 1,702 open items. **The judge,
+> accepted below the 0.95 bar (the owner):** recall clause 0.883, object 0.887 (held-out 0.900),
+> preposition 0.927; ten wordings and models tried (D97 decision 1). A preposition is placed only
+> where the judge's sentence shows it right after the verb (372 object + PP withdrawn); probe 33 of
+> 40 correct. The gloss heuristic's proposals go to the judge (the owner). Measured on
+> `wordnet-umls-aligned-2026-10-01-verbs`: 62/62, readings 656, skeletons 220. **Next:** the draws.
+> **The sense ranker on the decision interface (`2026-10-01`, the owner's plan):** an instrument
+> scores the sense ranks against the reading ledger (SENSE RANKS line); the ranker asks one question
+> per word, and a probability floor (0.02) eliminates. The question was chosen on an offline screen
+> (S-guide2: "a grammatical word has one reading here"). Its first live run lost «Each event alone does
+> not lead to cell death.»: the lexicon filed «does» under two sense keys with one gloss, and the
+> model kept the question entry — fixed, do-support is one sense (`c5d6d28`), with a test that a form's
+> sense keys have distinct glosses. A reply missing a question's answer left a sentence unranked —
+> the forced tool is now `strict` (`54cb6d1`). The reseed then died three times at 21–24 GB: the
+> commit held two whole-layer copies of a chunk — fixed (`e551712`, peak 13.3 GB;
+> `reseed-oom-memory-investigation.md`). Replayed on `wordnet-umls-aligned-2026-10-01-do-sense`
+> (`e551712`): old prompt readings 646 / skeletons 229 / 62 of 62; S-guide2 714 / 205 / 62 of 62. 18 of
+> the 24 skeletons are «… showed greater dependence on WRN than …», where S-guide2 seeds the
+> comparative marker over UMLS's "Greater" qualifier; the extra readings are runners-up on content
+> words. **Adopted by the owner; re-baselined** (`baseline.json`): live at `aeb67c3`, readings 738,
+> skeletons 210, 62 of 62, readings ceiling 700 → 775; record and replay agree. Strict mode's grammar
+> limit cost two sentences on the first attempt; a choice is now asked in parts of eight questions
+> (`aeb67c3`). The draws on this snapshot are done: the 9 open selections adjudicated, three draws
+> scoring 31, 31, 31 of 42 (`2574984`).
+> **The owner's rulings of `2026-10-05`** (`638ae2d`, D69 structure-call note recommendation 2): a
+> preposition the lexicon places on a verb's sense is pinned as the verb's governed object (`result
+> from`, `arise from`, as `respond to`), its free-adjunct reading `wrong`; a multi-word span the lexicon
+> has as one concept is pinned as that term (C1155661 over «DNA mismatch repair»), its decomposition
+> `correct, departs`. The 2026-10-02 «analysed» ruling from main covers data from screens (`89ceffb`).
+> **Merged `origin/main` (`fd5460f`, UAB experiment 02) and re-baselined on the HPO chain** the owner
+> chose for the gate (`958525d`, `wordnet-umls-hpo-aligned-2026-10-05-merge`): readings 679,
+> skeletons 210, 62 of 62; selection 32 of 42 on three identical draws.
+> **The sense ranker's arms closed (`2026-10-06`, D69 note §7s):** part-of-speech labels on the options,
+> `claude-sonnet-5-5` and `claude-opus-5-5` with thinking — none beats S-guide2 (right sense first
+> 175–193 against 191; Opus refuses 5–7 calls as "bio"). The owner wrapped the ranker work here.
+> **Open:** the verb-adjunct encoding — D63 §(B)'s `And(V(s), prep(s, x))` puts every adjunct PP on
+> the subject (8 pins), the ground of the «from» ruling, and U1 («for cancer therapeutics») waits on
+> it; the lexicon gate on «a DNA» (a reseed; U2 itself was re-pinned to C1511689 on `2026-10-06`); the
+> combined #263+#264 PR.
+> **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
+> the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
+> behind a client trait; whether attachment is derivable at all (after the measurement). Each change
+> is a live draw, its replay, and the adjudication of every new verdict, on a fixed snapshot, against
+> the selection baseline (26/41, the first `jev-latest` draw).
+>
+> **Exit gate:** #263 landed with its reseed and re-adjudicated pins; #264's first two strands measured
+> on a fixed snapshot and the third decided.
+
 > **entry 3 (`2026-10-02`). UAB experiment 02 — typing a PMI registry case, on
 > `uab-experiment-02`. ACTIVE.**
 >
@@ -41,23 +155,22 @@ any detour.
 >
 > **Exit gate:** D99's steps 1–7 built and tested; the branch reseeded and merged.
 
-> **entry 2 (`2026-09-30`). D95 follow-up, on `d95-fold-states-the-order`. ACTIVE.**
+> **entry 2 (`2026-09-30`). D95 follow-up. The parse results remain; entry 3 detours from it.**
 >
 > **Found after the merge:** the factor comparatives stated only the opaque `fold_lower`, so nothing
-> derived their order and a query for `fewer` missed every one. **Built on this branch:** they state
-> the plain comparative's order beside the factor (`docs/design/d95-implementation-plan.md`, slice 9,
-> 9d); the bootstrap moved on `closed-class`, so a reseed follows.
+> derived their order and a query for `fewer` missed every one. **Merged as #266 (`c21cff6`):** they
+> state the plain comparative's order beside the factor (`docs/design/d95-implementation-plan.md`,
+> slice 9, 9d); reseeded as `wordnet-umls-aligned-2026-09-30-fold-order`, the page unchanged.
 > **Then the parse results** (the owner, `2026-09-30`: revisit as a follow-up):
-> - the selection baseline: the gate reads 29/41 against 30 on `main`; ledger lines 89, 98 and 138
->   contradict the ledger's own structure rule, and with them corrected both draws score 28
->   (`experiments/parsing/selection-baseline.json`, the note of 2026-09-29 on slices 6–8);
+> - ~~the selection baseline~~ DONE `2026-09-30` on `prepositions-and-ranker` (entry 3): the owner
+>   ruled the structure rule and the open senses; the ledger checks itself, and the baseline is 25/41;
 > - slice 9 decision 3's scope, the median over both counts or the subject's only;
 > - the lexical gaps the quantity corpus found over the full lexicon: `confluence` is count-only and
 >   `sgRNAs` no plural count noun (`experiments/parsing/quantities/README.md`); `incubate` and
 >   `electroporate` go with D97.
 >
-> **Exit gate:** this branch merged and reseeded; the owner's selection ruling applied; each lexical
-> gap assigned.
+> **Exit gate:** ~~the owner's selection ruling applied~~ (done); decision 3's scope reviewed; each
+> lexical gap assigned.
 >
 > **Parked on the way (not on this entry's path):** D96 (JATS, decided, unbuilt), D97 (SPECIALIST,
 > proposed; motivated by D95's lexicon gaps `incubate` and `electroporate`), D98 (qualifiers,

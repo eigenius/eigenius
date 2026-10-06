@@ -74,11 +74,14 @@ enum TargetKind {
     Class,
 }
 
-fn target_kind(target: &Iri, own: &BTreeMap<Iri, Resource>, parents: &[Arc<Layer>]) -> TargetKind {
+fn target_kind(
+    target: &Iri,
+    own: &BTreeMap<Iri, Arc<Resource>>,
+    parents: &[Arc<Layer>],
+) -> TargetKind {
     let found = own
         .get(target)
         .cloned()
-        .map(Arc::new)
         .or_else(|| parents.iter().find_map(|p| p.resolve(target)));
     match found {
         Some(r) if r.is_a().contains(&iri(wk::DATA_TYPE)) => TargetKind::DataType,
@@ -121,7 +124,7 @@ fn const_ref_target(r: &Resource) -> Option<Iri> {
 /// Rule 21 and the NbE checker.
 fn arg_property_type(
     type_name: Option<&Value>,
-    own: &BTreeMap<Iri, Resource>,
+    own: &BTreeMap<Iri, Arc<Resource>>,
     parents: &[Arc<Layer>],
 ) -> (String, Option<String>) {
     let fallback = || (wk::RESOURCE.to_string(), None);
@@ -278,7 +281,10 @@ pub(crate) fn arg_names_of(
     Some(out)
 }
 
-pub(crate) fn derive(resources: &BTreeMap<Iri, Resource>, parents: &[Arc<Layer>]) -> Vec<Resource> {
+pub(crate) fn derive(
+    resources: &BTreeMap<Iri, Arc<Resource>>,
+    parents: &[Arc<Layer>],
+) -> Vec<Resource> {
     let inductive = iri(wk::INDUCTIVE_TYPE);
     let mut out: BTreeMap<Iri, Resource> = BTreeMap::new();
 

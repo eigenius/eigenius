@@ -582,6 +582,256 @@ independently correct and unrelated to the presentation question.
 slice 3's 30/40 — same code, same forest. Draw-to-draw variance is real at this scale, so a 2-decision
 difference is not a signal; the 6-decision gap to D69-B is.
 
+## 7n. The two-call ranker — eigenius#264 strand 1, DEFAULT (`2026-09-30`)
+
+The realisation §5 preferred, built on the owner's design (2026-09-30): a **structure call**, then a
+**sense call**. eigenius#264's witness was the ranker reasoning about senses when the candidates
+differed only in attachment — «The MSI relationship compared favourably to other strong biomarkers
+for vulnerabilities.», 36 readings, 2 skeletons, identical concept sets.
+
+- **The structure call** shows each structure once, in the **Structural register**
+  (`verbalize::Register::Structural`): Expanded's explicit relations and grouping, with every content
+  position named by the sentence's own words (`unit_surface_names`, over the spans seeding looks up,
+  shortest first, derived adjectives on their own token), so the readings of one structure render
+  alike. Groups are by skeleton first, so a sense the rendering cannot hide never splits a structure.
+  Under the structures it lists **how they differ**, from each reading's links
+  (`verbalize::structure_links`): per phrase, where it attaches, what it modifies, which verb it is an
+  argument of — «for vulnerabilities»: attaches to «relationship» in structures 1, 2; attaches to
+  «biomarkers» in structures 3, 4. The rationale must decide those lines.
+- **The sense call** is the flat listing, restricted to the chosen structure's readings, numbered from
+  0. A pool with one structure skips the first call; a structure with one reading the second.
+- `EIGENIUS_DUMP_STRUCTURES=1` prints every unit's structure question on a replay, without a model.
+
+**The A/B** (owner's protocol: three live draws per arm, snapshot
+`wordnet-umls-aligned-2026-09-30-governed-preps`, rankings `ranks/2026-09-29-d95-slice8.json`, every
+chosen reading adjudicated, each draw re-scored by replay against the final ledger):
+
+| arm | draw | reading-correct | structure-correct |
+|---|---|---|---|
+| flat | `2026-09-30-governed-preps` | 23/41 | 27 |
+| flat | `2026-09-30-ranker-baseline-2` | 21/41 | 27 |
+| flat | `2026-09-30-ranker-baseline-3` | 24/41 | 28 |
+| two-call | `2026-09-30-ranker-twocall-v2-1` | 29/41 | 34 |
+| two-call | `2026-09-30-ranker-twocall-v2-2` | 28/41 | 35 |
+| two-call | `2026-09-30-ranker-twocall-v2-3` | 30/41 | 36 |
+
+Means 22.7 against 29.0 correct, 27.3 against 35.0 structure; the ranges do not overlap, and §7m's
+draw-to-draw variance is 2. **Disposition: two calls are the default**; `EIGENIUS_SELECT_FLAT`
+(`measure-parse-rate.sh --flat-ranker`) keeps the flat listing so the A/B can be repeated.
+
+What the structure call surfaced, and the owner ruled the same day: on «Project Achilles screened
+cell lines with a CRISPR library.» and its DRIVE sibling the library is the instrument of the screening,
+not a property of the cell lines; on «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI
+models.» the locative scopes over both effects. All three pins moved to the verb-adjunct encoding,
+as the «with sequencing» pin already was; the July pins had verified other properties of these units.
+
+Two earlier versions are not arms. A pilot rendered atoms by concept labels and leaked senses through
+unrendered fragments (`⟦a02734544(G#0)⟧`), splitting one structure into two; and three draws of the
+first two-call build abstained four times, silently: the sense call listed a structure's readings
+under their indices in the whole list, and a reply by position fell outside the structure. The
+listing is numbered from 0 now, and a malformed reply is logged before the ranker abstains.
+
+## 7o. The model — eigenius#264 strand 2, `jev-latest` DEFAULT (`2026-09-30`)
+
+The owner's design (2026-09-30): the two calls go through a provider-neutral decision interface
+(`dcg::decision`: a `Choice` of context, question, notes and keyed options; a `Decider` returns the
+chosen key, runners-up, probabilities where the provider gives them, and a rationale where it gives
+one). Two deciders: Anthropic (the forced `emit` tool, or the JSON-schema output mode on the Claude 5
+models, which reject a forced tool choice) and TypeSafe System One (`render_typesafe`: the context as
+`state`, one `choice` question whose criteria are the options; no rationale, so the record holds the
+probabilities). Every arm sees the same context as Claude.
+
+**The A/B** (three live draws per model, same snapshot and rankings as §7n, 28 new ledger rows,
+each draw re-scored by replay; harness run time per draw, the forest replayed):
+
+| model | reading-correct | structure-correct | decisions identical in all 3 draws | time |
+|---|---|---|---|---|
+| `claude-sonnet-4-6` | 26, 25, 26 | 30, 29, 30 | 38/41 | ~400 s |
+| `claude-sonnet-5-5` | 29, 24, 28 | 33, 30, 33 | 20/41 | ~270 s |
+| `jev-latest` | 26, 26, 26 | 30, 30, 30 | 37/41 | ~60 s |
+
+The Claude 5 models reject `temperature`, which accounts for sonnet-5-5's spread. sonnet-4-6 scored
+29, 28, 30 (structure 34, 35, 36) on §7n's dedicated prompt over the same forest and ledger: the
+neutral rendering (`decision::render_prompt`) costs it about 3 readings. Two differences from the
+§7n prompt: the final instruction no longer names what to decide (where each phrase attaches, and
+why), and structures are labelled `[1]` rather than `Structure 1:`. jev reads `render_typesafe`,
+not `render_prompt`.
+
+**Disposition (owner, 2026-09-30): `jev-latest` is the reading ranker's default**
+(`model_config::DEFAULT_READING_MODEL`), at sonnet-4-6's accuracy in a sixth of the time, and its
+prompt and presentation are the next thing measured. The sense ranker and the other proposers stay on
+`DEFAULT_MODEL`. A formalization request names the two separately (`FormalizationOptions.model`,
+`.reading_model`), and each seam's draws record their own model. The flat listing asks Anthropic
+models only and keeps `claude-sonnet-4-6`.
+
+## 7p. The grammatical analyses — derivations and a grammar-book structure call (`2026-09-30`)
+
+**What the structural register was deciding.** An offline screen of jev's requests
+(`EIGENIUS_DUMP_DECISIONS`, the TypeSafe API called directly; ten prompt variants: inline
+attachments, one question per phrase, paraphrases, yes/no per structure, the sentence alone as
+state, per-word sense questions, inline definitions) left jev within its run-to-run noise of ±1.5.
+The structural register rendered the verb-adjunct encoding as the subject's ("… and we with
+«sequencing»"), which reads as nonsense, so jev attached every PP to the noun — right on most of
+this page's pins. Rendered as the verb's, jev attached to the verb almost everywhere (structure
+~31 → 28.75 of 41) and got 2 of 9 attachment units; one sonnet-4-6 draw got 7 of 9 (structure 33).
+
+**The owner's design.** Show the alternatives as a grammar book does — the sentence bracketed where
+the analyses group its words differently, and each contested phrase's grammatical function — and
+ask «Which grammatical analysis of `the_sentence` matches what it means in `document`?», with no
+parser in the question. Asking whether an analysis is *correct* scored lower with jev (15.5 and
+17.0 of 27 structure calls, against 18.5 for *matches what it means*). The parser records how each
+chart entry was built and returns that trace with the reading:
+
+- `dcg::derivation` — a field on `Item`, stamped by the drivers (seeding, packed k-best's cube,
+  `materialize_unary`, the unpacked CKY); each leaf records the sense atoms its tokens contribute.
+  The sweep checks every reading of an ambiguous unit carries a well-formed derivation over the
+  whole unit (667 of 667).
+- `dcg::analysis` — an analysis brackets the constituents it builds and some other does not, and
+  states the functions of the links it does not share: subject, object, prepositional object,
+  object complement, noun modifier, adjective, predicate adjective, numeral, postmodifier, adverbial
+  of a verb or of a predicated adjective, second predicate, adjective complement. A predication
+  line separates a class generalisation from a statement about a kind. Phrases are named by the
+  words of the leaf that introduced them in that reading. Analyses alike in both are one option.
+
+```text
+[1] We [ascertained MSI status] with sequencing.
+      «with sequencing» is an adverbial of «ascertained»: it says how, where, when or why
+[2] We ascertained [MSI [status with sequencing]].
+      «with sequencing» postmodifies «status»: it says which or what kind of status
+```
+
+Screened (structure calls only, the 27 units whose pinned structure is offered, eight jev runs):
+15.4 for the replaced form, 18.5 for a word-search prototype, 19.9 for the built form.
+
+**The A/B** (three live draws per model, same snapshot and rankings, 12 new ledger rows, each draw
+re-scored by replay):
+
+| model | reading-correct | structure-correct | abstained |
+|---|---|---|---|
+| `jev-latest` | 28, 28, 27 | 31, 32, 30 | 3, 2, 3 |
+| `claude-sonnet-4-6` | 24, 24, 24 | 32, 32, 32 | 0 |
+
+The replaced presentation: jev 26, 26, 26 (structure 30, 30, 30); sonnet-4-6 26, 25, 26 (30, 29,
+30). jev's abstentions are `none` in the sense call. Under a correct structure sonnet chose a wrong
+sense on 8 units and jev on 5, the 5 shared; three of sonnet's are «analysed» v00644583, ruled out
+by the maintainer on 2026-08-13.
+
+**Disposition:** `jev-latest` stays the default; selection re-baselined at 28 on its first draw
+(`2026-09-30-analyses-jev-latest-1`, 15d9bd7). The Structural register, the span-based surface
+names and the structure contrasts are removed.
+
+## 7q. One question per word in the sense call (`2026-10-01`)
+
+**The owner's design:** an independent choice for each word whose sense differs among the chosen
+analysis's readings, asked together. The decision interface carries several questions over one
+context (`decision::Choice { context, questions }`): one TypeSafe request with a `choice` per id,
+one Anthropic prompt whose reply schema has an answer per id. Each reading's senses come from its
+derivation's leaves (`ReadingCandidate::senses_at`). The sense call asks «Which sense of «w» matches
+what `the_sentence` means in `document`?» per word, each sense shown with its label and definition,
+and takes the reading the answers support most (`Decided::weight`: the probability, or a falling
+weight down a ranking). Readings that differ in no word's sense are put as whole readings.
+
+The whole-reading question listed every combination of senses — 144 readings in one unit, near
+TypeSafe's 255-option limit for one choice; per word, the same unit is a few short questions.
+
+| sense call | reading-correct | structure-correct | abstained |
+|---|---|---|---|
+| whole readings (§7p draws) | 28, 28, 27 | 31, 32, 30 | 3, 2, 3 |
+| one question per word | 28, 29, 28 | 31, 32, 32 | 0, 0, 0 |
+
+Three live jev-latest draws, 5 new ledger rows, each re-scored by replay. The word question has no
+`none`, so every unit is decided. One word question decided a structure: «MLH1» as the protein or the
+gene modifying «promoter» gives the readings different skeletons in one analysis. Selection
+re-baselined at 28 on the first draw (`2026-10-01-word-senses-jev-latest-1`, 13aa718).
+
+**The structure call's errors, analysed** (six draws of §7p, 81 structure decisions per model;
+per unit with the options shown, the models' answers and the evidence:
+`d69-structure-call-errors.md`):
+the pin was offered in all 27 calls; jev chose another structure in 25, sonnet-4-6 in 24, over 10
+units. By cause: presentation 9 and 12, a pin or ledger row open to question 15 and 12, model error
+under a clear presentation 0 and 0, one undetermined. 31 of the 49 are a multiword concept against
+its decomposition. Proposed, for the maintainer:
+- a concept taking a whole span («double-stranded DNA breaks» C1511667, «immune checkpoint blockade»
+  C5392067) shows no bracket, because every analysis builds a constituent over that span — show it as
+  one term, with a function line saying so;
+- one policy for a lexicalised concept against its compositional twin (pins with alternates, or the
+  structure diagnostic accepting `departs`), and a review of row 59 and the «MSI results from
+  deficient DNA mismatch repair.» pin, whose stated ground («drops the compound») does not hold: its
+  C1155661 covers «DNA mismatch repair»;
+- «Many cancers exhibit an impairment of a DNA repair pathway.»: only readings taking «a DNA» as
+  C0000702 «DNA, A-Form» match the pin, which the ledger's BEST row rejects — re-pin, and gate «a DNA»
+  → C0000702 in the lexicon;
+- the predication lines (kind against generalisation) in the sentence's words; a numeral line for
+  `the_count`; a degree term rendered apart from a plain adjective;
+- «for cancer therapeutics» (the open attachment) and the subject-oriented adverbial encoding;
+- `◇A ∨ ◇B` against `◇(A ∨ B)` treated as one option, as the «WRN dependency …» pin note says.
+
+## 7r. A multi-word concept as one marked term (`2026-10-01`)
+
+The first recommendation of `d69-structure-call-errors.md` (P1). A leaf over several tokens naming one
+concept is a term; analyses are compared by span and kind, so a term and a phrase composed over the
+same words differ, and both are shown — the term as `⟨…⟩` with ««…» is one term, a single named
+concept», the phrase in `[…]`:
+
+```text
+[1] Depletion of WRN induced ⟨double-stranded DNA breaks⟩.
+      «double-stranded DNA breaks» is one term, a single named concept
+[4] Depletion of WRN induced [double-stranded ⟨DNA breaks⟩].
+      «DNA breaks» is one term, a single named concept
+      «double-stranded» is an adjective describing «DNA breaks»
+```
+
+Screened (structure calls only, 27 units, eight jev runs): 19.4 before, 20.9 with terms, 20.0 with
+terms and a note explaining the notation. The note swung near-tied units both ways (−8 on «Some
+cancers do not respond …», +8 on «WRN dependency may require …») and is not sent.
+
+| structure call | reading-correct | structure-correct |
+|---|---|---|
+| before (§7q draws) | 28, 29, 28 | 31, 32, 32 |
+| terms marked | 28, 27, 28 | 32, 32, 33 |
+
+Over the three draws: «Depletion of WRN promoted …» takes the pinned concept (structure +3);
+«The use of immune checkpoint blockade …» +2 correct; «Some cancers do not respond …» takes the
+pinned structure twice, with the «respond» sense the 2026-08-13 ruling rules out; «Defects in DNA
+mismatch repair …» −3, where the term C1155661 is now visible and chosen against a compositional pin
+— recommendation 2, for the maintainer. Selection baseline unchanged at 28, tracked on
+`2026-10-01-terms-jev-latest-1` (0b26c2b).
+
+## 7s. The sense ranker's arms — none beats S-guide2 (`2026-10-05`/`06`, closed)
+
+The trigger: «We analysed data from large-scale silencing screens.» has no correct candidate. The sense
+ranker keeps three verb senses of «screens» ('examine methodically', 'test or examine for the presence
+of disease', 'examine in order to test suitability') and eliminates every noun, C0220908 «Screening
+procedure» included — the §7f failure, still present. The parser then restores a noun by static
+frequency (the CRT display, the projection screen). Each arm ran live on
+`wordnet-umls-hpo-aligned-2026-10-05-merge` at 958525d and is scored by the SENSE RANKS line, against
+the reading ledger, floor 0.02:
+
+| sense ranker | words | right sense kept | right sense first | eliminated | readings | pins |
+|---|---|---|---|---|---|---|
+| S-guide2, `claude-sonnet-4-6` (the do-sense recording, replayed) | 216 | 214 | 191 | 2 | 679 | 62 |
+| each option labelled with its part of speech (one draw) | 216 | 212 | 193 | 4 | 723 | 62 |
+| `claude-sonnet-5-5`, thinking (three draws) | 216 | 214, 212, 214 | 179, 178, 181 | 2, 4, 2 | 442, 450, 511 | 61 |
+| `claude-opus-5-5`, thinking (two draws) | 198, 195 | 196, 194 | 177, 175 | 2, 1 | 551, 470 | 61 |
+
+- The part-of-speech labels left «screens» on the same three verbs and took «silencing» to its two
+  verbs as well: the model matches on meaning and overrides the label. No sense in the lexicon is a
+  genetic screen, and no gene-silencing concept is reachable from «silencing» (C0858952 is CHV's
+  'silence', a Mental or Behavioral Dysfunction).
+- The thinking models put the right sense first 10–16 words less often, lose the pin of «The use of
+  immune checkpoint blockade can be limited by toxicity.», and keep the «silencing screens» failure
+  (`sonnet-5-5` drops both noun senses of «silencing» in every draw).
+- `claude-opus-5-5` refused 5 and 7 of its sense calls with `stop_details.category: "bio"`; those
+  sentences fell back to seed order, so it ranked 18–21 fewer words. It cannot rank this page as asked.
+- A third arm — `claude-sonnet-4-6` writing its reasoning before its choice — was stopped before its
+  first draw finished. The reply schema puts `choice` before `rationale` because `serde_json` sorts
+  keys (no `preserve_order`), so today's rationale is written after the choice; the arm renamed the
+  field `analysis` to sort first.
+
+None is adopted; S-guide2 on `claude-sonnet-4-6` stays. What remains is not a ranking question: the
+lexicon has no genetic-screen or gene-silencing sense, and a wrong elimination is restored by
+frequency rather than by the ranker's order.
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×

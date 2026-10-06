@@ -1153,6 +1153,98 @@ pub(super) fn is_vp_adjunct_prep(cat: &Exp) -> bool {
         Some((_m, res, np)) if is_ctor(res, "bwd").is_some() && is_ctor(np, "cat_np").is_some())
 }
 
+/// The prepositions a `lexicon:Prep` value names, as (surface, constructor). An importer that finds a
+/// word governing a preposition types its argument PP from this list, so a preposition the ontology
+/// adds reaches every importer at once. `prep_any`, the wildcard, names none. A test checks the list
+/// against `data lexicon:Prep`: the WordNet importer once kept its own eleven, and `of` and `as`,
+/// added to the enum by hand, never reached it (eigenius#263).
+pub const GOVERNED_PREPOSITIONS: &[(&str, &str)] = &[
+    ("to", "prep_to"),
+    ("on", "prep_on"),
+    ("in", "prep_in"),
+    ("with", "prep_with"),
+    ("from", "prep_from"),
+    ("for", "prep_for"),
+    ("at", "prep_at"),
+    ("upon", "prep_upon"),
+    ("about", "prep_about"),
+    ("against", "prep_against"),
+    ("into", "prep_into"),
+    ("of", "prep_of"),
+    ("as", "prep_as"),
+    // Every other preposition a SPECIALIST frame names (D97 decision 3), most frequent first.
+    ("by", "prep_by"),
+    ("between", "prep_between"),
+    ("over", "prep_over"),
+    ("onto", "prep_onto"),
+    ("through", "prep_through"),
+    ("per", "prep_per"),
+    ("off", "prep_off"),
+    ("out of", "prep_out_of"),
+    ("after", "prep_after"),
+    ("due to", "prep_due_to"),
+    ("among", "prep_among"),
+    ("around", "prep_around"),
+    ("towards", "prep_towards"),
+    ("under", "prep_under"),
+    ("out", "prep_out"),
+    ("toward", "prep_toward"),
+    ("up", "prep_up"),
+    ("round", "prep_round"),
+    ("down", "prep_down"),
+    ("during", "prep_during"),
+    ("across", "prep_across"),
+    ("along", "prep_along"),
+    ("as to", "prep_as_to"),
+    ("without", "prep_without"),
+    ("before", "prep_before"),
+    ("following", "prep_following"),
+    ("according to", "prep_according_to"),
+    ("behind", "prep_behind"),
+    ("until", "prep_until"),
+    ("concerning", "prep_concerning"),
+    ("like", "prep_like"),
+    ("plus", "prep_plus"),
+    ("regarding", "prep_regarding"),
+    ("till", "prep_till"),
+    ("with regard to", "prep_with_regard_to"),
+    ("within", "prep_within"),
+    ("above", "prep_above"),
+    ("amongst", "prep_amongst"),
+    ("via", "prep_via"),
+    ("away from", "prep_away_from"),
+    ("below", "prep_below"),
+    ("beside", "prep_beside"),
+    ("by comparison with", "prep_by_comparison_with"),
+    ("from among", "prep_from_among"),
+    ("in behalf of", "prep_in_behalf_of"),
+    ("in favor of", "prep_in_favor_of"),
+    ("in relation to", "prep_in_relation_to"),
+    ("in terms of", "prep_in_terms_of"),
+    ("off of", "prep_off_of"),
+    ("on behalf of", "prep_on_behalf_of"),
+    ("past", "prep_past"),
+    ("unto", "prep_unto"),
+    ("up to", "prep_up_to"),
+];
+
+/// The `lexicon:Prep` constructor a governed preposition's surface names, if it names one.
+pub fn prep_constructor(surface: &str) -> Option<&'static str> {
+    GOVERNED_PREPOSITIONS
+        .iter()
+        .find(|(s, _)| *s == surface)
+        .map(|(_, ctor)| *ctor)
+}
+
+/// The preposition a constructor's name segment names — the constructor without `prep_`, as an
+/// importer writes it into an atom name (`deg_a00725772_rel_out_of`): `out_of` → `out of`.
+pub fn preposition_of_slug(slug: &str) -> Option<&'static str> {
+    GOVERNED_PREPOSITIONS
+        .iter()
+        .find(|(_, ctor)| ctor.strip_prefix("prep_") == Some(slug))
+        .map(|(surface, _)| *surface)
+}
+
 /// Whether `cat` **governs a named preposition** — `X/cat_pp_arg(prep_R)` for a CONCRETE `prep_R`.
 ///
 /// This is the lexical signature of a gloss-governed relational word: `concordant WITH`, `dependent
@@ -1234,6 +1326,32 @@ pub fn pretty_cat_dbg(c: &Exp) -> String {
 mod tests {
     use super::*;
     use crate::nbe::term::Patt;
+
+    /// `GOVERNED_PREPOSITIONS` names every specific `lexicon:Prep` constructor, and nothing else.
+    #[test]
+    fn the_governed_prepositions_are_the_prep_constructors() {
+        let ctx = crate::testing::bootstrap_context();
+        let decl = match crate::nbe::env_global::Env::of(ctx.head().clone())
+            .lookup(&Iri::parse("urn:eigenius:lexicon:Prep").unwrap())
+        {
+            crate::nbe::env_global::Global::Inductive(d) => d,
+            other => panic!("lexicon:Prep must be an inductive, got {other:?}"),
+        };
+        let declared: std::collections::BTreeSet<&str> = decl
+            .ctors
+            .iter()
+            .map(|c| c.name.as_str())
+            .filter(|n| *n != "prep_any")
+            .collect();
+        let listed: std::collections::BTreeSet<&str> =
+            GOVERNED_PREPOSITIONS.iter().map(|(_, c)| *c).collect();
+        assert_eq!(listed, declared);
+        assert_eq!(prep_constructor("of"), Some("prep_of"));
+        assert_eq!(prep_constructor("out of"), Some("prep_out_of"));
+        assert_eq!(prep_constructor("than"), None, "the comparative's");
+        assert_eq!(preposition_of_slug("out_of"), Some("out of"));
+        assert_eq!(prep_constructor("any"), None);
+    }
 
     /// A GOVERNED preposition names a marker; `prep_any` names nothing.
     ///

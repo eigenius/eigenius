@@ -38,6 +38,7 @@ use eigenius_kernel::nbe::eval::eval;
 use eigenius_kernel::nbe::readback::readback_val;
 use eigenius_kernel::nbe::term::Exp;
 use eigenius_wordnet::convert::{render_document, MassNouns};
+use eigenius_wordnet::governance::{self, Governance, Placements};
 use eigenius_wordnet::import::{read_sense_ranks, select_synsets, SeedSpec};
 use eigenius_wordnet::lemmatizer::MorphyLemmatizer;
 
@@ -49,10 +50,40 @@ const DICT: &str = concat!(
     "/../../references/WordNet-3.0/dict"
 );
 
+/// The governance as the importer builds it (eigenius#263, D97 slice 2): the whole dict,
+/// the provisioned SPECIALIST Lexicon and the judges' committed placements.
+fn governance() -> Governance {
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let placements = Placements::read(
+        &std::path::Path::new(root).join("experiments/lexicon-specialist/adjective-senses.tsv"),
+    )
+    .expect("the adjective sense judge's placements are committed");
+    let verb_placements = Placements::read(
+        &std::path::Path::new(root).join("experiments/lexicon-specialist/verb-senses.tsv"),
+    )
+    .expect("the verb sense judge's placements are committed");
+    governance::build(
+        std::path::Path::new(DICT),
+        &std::path::Path::new(root).join("references/specialist/LEXICON"),
+        &placements,
+        &verb_placements,
+    )
+    .expect("governed prepositions")
+    .0
+}
+
 /// Skip a dict-dependent test cleanly when WordNet isn't provisioned (fresh checkout / CI
 /// — `references/` is gitignored). Returns `true` (after logging) when the dict is absent,
 /// so the caller early-returns instead of panicking. Checks `data.noun` as the sentinel.
 fn dict_missing() -> bool {
+    let specialist = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../references/specialist/LEXICON"
+    );
+    if !std::path::Path::new(specialist).exists() {
+        eprintln!("SKIP: SPECIALIST not provisioned — run scripts/provision-specialist.sh");
+        return true;
+    }
     if std::path::Path::new(DICT).join("data.noun").exists() {
         return false;
     }
@@ -69,7 +100,7 @@ fn dict_missing() -> bool {
 fn stand_up(spec: &SeedSpec) -> (Arc<Layer>, std::time::Duration) {
     let chosen = select_synsets(std::path::Path::new(DICT), spec).expect("read WordNet dict");
     let ranks = read_sense_ranks(std::path::Path::new(DICT), &spec.pos).expect("read index ranks");
-    let (doc, rep) = render_document(&chosen, &ranks, &MassNouns::new());
+    let (doc, rep) = render_document(&chosen, &ranks, &MassNouns::new(), &governance());
     eprintln!(
         "stand_up: {} synsets → {} noun classes, {} instances, {} verb + {} adj axioms, {} entries",
         chosen.len(),
