@@ -11,6 +11,7 @@
 - **Every verb takes the eventuality argument, stative ones included** (2026-10-06, open question 3). Where a sense is known to be stative, a later step may refine the argument's class; the structure never depends on it.
 - **The class is a new `lexicon:Eventuality`** (2026-10-06, open question 1 → (b)), under `lexicon:Entity` and above WordNet's `event.n.01` and `state.n.02`. Declaring `schema_org:Action ≡ action.n.01` is a separate, later step.
 - **When the event condition and the frame are both faithful, the ledger rules by what the PP does** (2026-10-06, open question 8 (i)). The frame is best when the PP gives the population, model, method or classification within which the finding holds; the event condition is best when it gives a participant or circumstance of the event, such as an instrument. The test is the entailment that separates the two readings: would the paper assert the clause without the PP? If not, the frame. A per-preposition rule fails on the page: «with» frames in «remained true with PCR-based MSI classifications» and is an instrument in «screened cell lines with a CRISPR library».
+- **Framing prepositions** (2026-10-06, open question 8 (ii)): «in» and «with», in both positions, which are the two the page uses as frames. CGEL's other realisations of domain adjuncts are a planned augmentation, not left to attestation (slice 4): the other spatial-location prepositions and the dedicated domain PPs («with respect to», «as regards», «regarding», «from a … point of view», «as far as … is concerned»). The design keeps each addition to one `frame_*` axiom and its entries.
 
 **Recommendation.** Every verb gets one Davidsonian event argument, placed after its positional arguments. The subject, the object and any governed PP (`respond to`, `arise from`) stay positional in the verb's named relation. Adjunct PPs and adverbs become conjuncts on the event, and a PP that says where the claim holds can instead frame the whole clause. The event quantifier closes inside the verb's own lexical entry, as Champollion (2015) proposes and as ccg2lambda and lightblue implement.
 
@@ -305,7 +306,14 @@ A quantified PP object should scope over the event quantifier, as de Groote & Wi
 
 ### Frames: a PP can restrict the whole claim
 
-*Decided (2026-10-06).* On the WRN page, most PPs on state predicates give the population, model or method within which a finding holds: «in MSI models», «in cancers with deficiencies in homologous recombination», «with PCR-based MSI classifications». Maienborn reads locatives with statives and copular predicates as "frame adverbials" that restrict the proposition ([Maienborn 2011, pp. 819–822](https://ub01.uni-tuebingen.de/xmlui/bitstream/handle/10900/47121/pdf/Maienborn_2011_Event_semantics.pdf?sequence=1&isAllowed=y)). Neither encoding available before this decision says that:
+*Decided (2026-10-06).* On the WRN page, most PPs on state predicates give the population, model or method within which a finding holds: «in MSI models», «in cancers with deficiencies in homologous recombination», «with PCR-based MSI classifications». Maienborn reads locatives with statives and copular predicates as "frame adverbials" that restrict the proposition ([Maienborn 2011, pp. 819–822](https://ub01.uni-tuebingen.de/xmlui/bitstream/handle/10900/47121/pdf/Maienborn_2011_Event_semantics.pdf?sequence=1&isAllowed=y)). CGEL calls them domain adjuncts, which "restrict the domain to which the rest of the clause applies" (CGEL, pp. 765–766):
+
+- **Realisation.** Adverbs (*economically*), dedicated PPs (*from a … point of view*, *as far as … is concerned*, *as regards*, *regarding*, *with respect to*), and "adjuncts of spatial location and a narrow range of conditional constructions" that "simultaneously serve to restrict the domain".
+- **The test.** Omitting *in this country* from «In this country giving bribes to secure foreign contracts is permitted» "would result in a statement understood to apply universally". This is the drop test of open question 8 (i).
+- **Events too.** "The clause usually expresses a state, but occurrences are not excluded" (*From an economic perspective, we acted foolishly*).
+- **Position.** Domain adjuncts "prefer front position and also accept end position" (CGEL, p. 580).
+
+Neither encoding available before this decision says what such a PP says:
 
 - Subject anchoring makes WRN "in" MSI models.
 - An event condition locates a state that, on her analysis, has no location.
@@ -322,7 +330,7 @@ frame_in : Prop → Entity → Prop                 opaque; one per framing prep
 - **Scope.** Above the subject quantifier, negation and modals. «The four other RecQ DNA helicases were not preferentially essential in MSI cell lines.» gets `frame_in(¬essential(H), L)`, with `H` the four helicases and `L` the MSI cell lines.
 - **No modifier drop.** `frame_in` is kernel-uninterpreted, like the modal operators, so `frame_in(φ, x)` does not entail `φ`: «WRN is essential in MSI models» does not entail «WRN is essential». An event condition licenses the drop; the two readings differ in their entailments.
 - **Grounding.** The structured encodings put the frame's object in an argument: the WRN chain has `onco:SelectiveViabilityDependence("WRN", "MSI")` (`experiments/publications/wrn-helicase/chain/03-phase1-recompute-plans.esl:870`), and D63 §8.13 maps «WRN depletion causes apoptosis in MSI» to `CausesApoptosis(WRN, MSI)`. The encoding institution maps `frame_*` onto that argument, as it supplies the `prep_*` relations (D62).
-- **Vocabulary.** The `frame_*` axioms sit beside the `prep_*` axioms in `ontologies/ontology/ontology.esl`, a bootstrap ontology.
+- **Vocabulary.** The `frame_*` axioms sit beside the `prep_*` axioms in `ontologies/ontology/ontology.esl`, a bootstrap ontology. Slice 2 declares `frame_in` and `frame_with` (decided, open question 8 (ii)). Each later framing preposition adds one axiom and its entries; no rule and no existing entry changes, and the ledger rule of open question 8 (i) covers it unchanged.
 - **Complements are not frames.** Nothing gives «essential», «dispensable», «successful» or «true» an *in* or *with*. SPECIALIST does govern «essential for» and «concordant with», and D97 slice 3a reads a governed adjective preposition as the adjective's relational argument, which frames leave alone.
 
 On event verbs the forest offers both readings of a clause-final PP. The ledger rules by what the PP does (decided, open question 8 (i)), testing whether the paper would assert the clause without it:
@@ -372,10 +380,10 @@ Because the copula discards `K`, a VP adjunct on a copular VP would drop out of 
 | Component | Change | Size (measured 2026-10-06) |
 |---|---|---|
 | Kernel | none: impredicative `∃` and class subsumption exist | 0 |
-| Ontologies | `lexicon:Eventuality ⊑ lexicon:Entity`, and the importer's extra parent for `event.n.01` and `state.n.02`; one opaque `frame_*` axiom per framing preposition in `ontology.esl`. `lexicon-ontology.esl` and `ontology.esl` are bootstrap ontologies and the importer change re-imports WordNet, so the chain reseeds | 1 class, 2 parent edges, 1 axiom per framing preposition (open question 8) |
+| Ontologies | `lexicon:Eventuality ⊑ lexicon:Entity`, and the importer's extra parent for `event.n.01` and `state.n.02`; one opaque `frame_*` axiom per framing preposition in `ontology.esl`. `lexicon-ontology.esl` and `ontology.esl` are bootstrap ontologies and the importer change re-imports WordNet, so the chain reseeds | 1 class, 2 parent edges, 2 frame axioms (`frame_in`, `frame_with`) |
 | `denote_cat` | branch `⟦S[dcl,f]⟧` on `f = adj` | 1 match arm (`kernel/src/dcg/category.rs:41`) |
 | Verb entries | `FrameKind::arrow` gains an event slot. The emitted verb sem wraps the axiom in `λ…λK. ∃e:Ev. K(λa. v(…, a))(e)`. D62 §5 calls this "a converter-rule change + reseed". | 8 frame tags in one converter; 13,767 WordNet verb synsets plus the SPECIALIST verbs of D97, re-emitted |
-| Closed class | sem types of entries over non-adjectival `S`. Terms change for determiners (pointwise `K`), negation, modals, prepositions, the copula (it discards `K`) and the complementiser; `do`, passive `be` and `by_agent` change type only. New: two frame entries (`S\S`, `S/S`) per framing preposition | 316 of 465 entries; 137 SemTerms to audit (`ontologies/lexicon/closed-class.esl`) |
+| Closed class | sem types of entries over non-adjectival `S`. Terms change for determiners (pointwise `K`), negation, modals, prepositions, the copula (it discards `K`) and the complementiser; `do`, passive `be` and `by_agent` change type only. New: four frame entries, «in» and «with» in `S\S` and `S/S` | 316 of 465 entries; 137 SemTerms to audit (`ontologies/lexicon/closed-class.esl`) |
 | Engine rules | coordination folds pointwise over `K`; relativiser and root close with `λP.P`; VP adjuncts no longer reach copular VPs (open question 9) | 4 files, 7,010 lines, 58 connective sites (`kernel/src/dcg/rules/`) |
 | Verbaliser | `adjunct_of` matches the PP to the verb atom by the shared event variable instead of by the subject's printed string. Its adjective and copula branches lose their input; a frame rendering ("«in MSI models» says where the claim holds") replaces them | `kernel/src/dcg/verbalize.rs:1497–1569` |
 | Forest | every clause-final PP on a verbal clause gets a frame reading beside the event condition, and an embedded clause adds frame positions if open question 8 allows them; the ranker chooses among more readings | derived, not measured |
@@ -399,7 +407,7 @@ Because the copula discards `K`, a VP adjunct on a copular VP would drop out of 
 **Slice 1 (vocabulary, no grammar change).**
 
 - Declare `lexicon:Eventuality ⊑ lexicon:Entity` in the lexicon ontology, and have the WordNet importer give `wn:n00029378` and `wn:n00024720` it as an extra parent.
-- Declare the `frame_*` axioms for the prepositions open question 8 settles, beside the `prep_*` axioms in `ontology.esl`.
+- Declare `frame_in` and `frame_with` beside the `prep_*` axioms in `ontology.esl`.
 - Witnesses: `is_subclass_of(wn:n00029378, lexicon:Eventuality)`, `is_subclass_of(wn:n00024720, lexicon:Eventuality)` and `is_subclass_of(lexicon:Eventuality, lexicon:Entity)`.
 - Cost: one class, two parent edges, the frame axioms and a test. Both ontologies are in the bootstrap, so the slice reseeds; landing it with slice 2 shares that reseed.
 
@@ -408,7 +416,7 @@ Because the copula discards `K`, a VP adjunct on a copular VP would drop out of 
 - the `denote_cat` branch;
 - the converter's event slot and verb sem;
 - the 316 closed-class types and the VP-touching terms;
-- the frame entries;
+- the four frame entries;
 - the copula's sem, and keeping VP adjuncts off copular VPs (open question 9);
 - the coordination, relativiser and root-closure rules;
 - `adjunct_of` keyed on the event variable, and the frame rendering;
@@ -424,11 +432,20 @@ It also brings the 15 adjunct pins and 71 ledger rows to the maintainer as a re-
 
 **Slice 3 (persisted claims).** Drop and reseed the encoded artefacts. Every verb-bearing claim gets a new D47 term and witness key.
 
+**Slice 4 (CGEL's domain adjuncts, any time after slice 2).** A planned augmentation, decided with open question 8 (ii):
+
+- the other spatial-location prepositions. «within», «among», «on» and «at» have entries and `prep_*` axioms today; «across» and «under» have argument-marker entries only (D97 decision 3); «throughout» has none;
+- the dedicated domain PPs with a fixed form, «with respect to», «as regards» and «regarding», as multiword closed-class forms, as «at least» and «more than» are; «regarding» exists today only as an argument marker;
+- «from a … point of view» and «as far as … (is concerned)», which take a phrase inside the frame and need entries of their own.
+
+Each preposition adds one `frame_*` axiom, its entries and a frame reading on every clause-final PP it heads.
+
 **Later, each its own decision:**
 
 - thematic roles for knowledge-graph alignment, taking D62's fork (role axioms vs property-as-relation);
 - `schema_org:Action ≡ wn:n00037396`, when role alignment needs D62's root in the lattice;
 - a stativity source, to bind known-stative senses at `state.n.02`;
+- CGEL's other realisations of domain adjuncts, adverbs («Economically, …») and participials («economically speaking»). A productive -ly adverb seeds identity entries today (D62 Phase 3, `adverb_modifier_cats` in `kernel/src/dcg/category.rs`), so where one attaches, its restriction is lost;
 - Kimian states, if state anaphora or the stative adverb gap is needed;
 - sum events for measure adjuncts;
 - the generic reading of present-tense negation.
@@ -470,7 +487,7 @@ Either way the 14 rows grounded on "predicates … of the subject" need new evid
 **8. Frames.** The frame reading leaves three choices:
 
 - (i) Which reading the ledger rules best when the event condition and the frame are both faithful, as in «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.» *Decided 2026-10-06: by what the PP does,* with the drop test (see "Decided so far"). Rejected: a per-preposition rule, which «with» defeats; always the frame, which loses the drop where it holds («Project Achilles screened cell lines»); always the event condition, which removes the domain restriction from verbal clauses.
-- (ii) Which prepositions frame. Candidates: *in*, *with*, *for*, *among*, *across*.
+- (ii) Which prepositions frame. *Decided 2026-10-06: «in» and «with» now, CGEL's list as a planned augmentation (slice 4).* On the page, 15 of 62 sentences end in a PP run containing «in» or «with». By the drop test the frame is best in 8 (7 «in», 1 «with»), the event condition in 5, the governed reading in 1 («concordant with») and the noun-internal reading in 1. No page sentence needs a «for» frame: in «a promising drug target for MSI cancers» the frame and the noun-internal reading both restrict the claim. Rejected: frames for all 14 prepositions that have a finite VP-adjunct entry today, which would add frame readings to about 45 of the 62 sentences (hand count), mostly for «from», «to» and «for».
 - (iii) Whether frames attach inside embedded clauses. A «that»-complement gives the choice between framing «WRN was essential» and framing «we found» («We found that WRN was selectively essential in MSI models.»). Two copular pins put the PP inside a relative clause («genes that are selectively essential in cancer cells with MSI»), and only an embedded frame keeps it there.
 
 **9. Copular VPs and VP adjuncts.** The copula discards `K`, so a VP adjunct on a copular VP must not be derivable (see "Copular predicates keep no event; their PPs are frames"). The copular VP and the finite verbal VP share the category `S[dcl,fin]\NP`. Keeping VP adjuncts off the copular one takes a category distinction that the VP-adjunct entries see and that every other VP-taking entry, and the coordination rule, accept on both sides.

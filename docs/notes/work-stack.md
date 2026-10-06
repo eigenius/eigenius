@@ -26,8 +26,9 @@ any detour.
 > `frame_in(S(K), x)` for PPs that say where a claim holds; copular predicates eventless with their
 > PPs as frames (open question 2); every verb takes the argument (3); the class is a new
 > `lexicon:Eventuality` above `event.n.01` and `state.n.02` (1); when the event condition and the
-> frame are both faithful, the ledger rules by what the PP does, by the drop test (8 (i)).
-> **Next:** the rest of open question 8 (which prepositions frame, frames in embedded clauses), 9 (keeping VP adjuncts off
+> frame are both faithful, the ledger rules by what the PP does, by the drop test (8 (i)); «in» and
+> «with» frame now, CGEL's domain adjuncts follow as slice 4 (8 (ii)).
+> **Next:** open question 8 (iii) (frames in embedded clauses), 9 (keeping VP adjuncts off
 > copular VPs), then 4–7 (governed prepositions' free-adjunct parse, U1's purpose «for»,
 > coordination and quantified PP objects, generic negation); then slice 1 (`lexicon:Eventuality`
 > and the `frame_*` axioms).
