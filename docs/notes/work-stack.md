@@ -30,12 +30,15 @@ any detour.
 > «with» frame now, CGEL's domain adjuncts follow as slice 4 (8 (ii)); frames reach «that»-complements
 > as they are and relative clauses through a VP-level frame, on the smallest clause the paper would
 > not assert unrestricted (8 (iii)); an eventivity feature on `cat_s` keeps VP adjuncts off copular
-> VPs and states Katz's stative adverb gap for copular predicates (9).
-> **Next:** open questions 4–7 (governed prepositions' free-adjunct parse, U1's purpose «for»,
-> coordination and quantified PP objects, generic negation); then slice 1 (`lexicon:Eventuality`
-> and the `frame_*` axioms).
-> #264's strand 3 (whether attachment is derivable) waits on this design. #271 (the «a DNA» atom)
-> is independent.
+> VPs and states Katz's stative adverb gap for copular predicates (9); governed readings stay the
+> pins, the free adjunct of a governed preposition becomes `correct` with `departs` under events,
+> and a selection rule demotes free-adjunct and frame readings of a preposition the lexicon names on
+> the verb's sense (4).
+> **Next:** open questions 5–7 (U1's purpose «for», coordination and quantified PP objects, generic
+> negation); then slice 1 (`lexicon:Eventuality` and the `frame_*` axioms).
+> #264's strand 3 (whether attachment is derivable) is answered by question 4 for prepositions the
+> lexicon names on a sense; other attachments stay with the ranker. #271 (the «a DNA» atom) is
+> independent.
 >
 > **Exit gate:** the design note settled and the event slice merged, with pins and ledger
 > re-adjudicated on a reseed.
