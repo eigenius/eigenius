@@ -797,6 +797,41 @@ mismatch repair …» −3, where the term C1155661 is now visible and chosen ag
 — recommendation 2, for the maintainer. Selection baseline unchanged at 28, tracked on
 `2026-10-01-terms-jev-latest-1` (0b26c2b).
 
+## 7s. The sense ranker's arms — none beats S-guide2 (`2026-10-05`/`06`, closed)
+
+The trigger: «We analysed data from large-scale silencing screens.» has no correct candidate. The sense
+ranker keeps three verb senses of «screens» ('examine methodically', 'test or examine for the presence
+of disease', 'examine in order to test suitability') and eliminates every noun, C0220908 «Screening
+procedure» included — the §7f failure, still present. The parser then restores a noun by static
+frequency (the CRT display, the projection screen). Each arm ran live on
+`wordnet-umls-hpo-aligned-2026-10-05-merge` at 958525d and is scored by the SENSE RANKS line, against
+the reading ledger, floor 0.02:
+
+| sense ranker | words | right sense kept | right sense first | eliminated | readings | pins |
+|---|---|---|---|---|---|---|
+| S-guide2, `claude-sonnet-4-6` (the do-sense recording, replayed) | 216 | 214 | 191 | 2 | 679 | 62 |
+| each option labelled with its part of speech (one draw) | 216 | 212 | 193 | 4 | 723 | 62 |
+| `claude-sonnet-5-5`, thinking (three draws) | 216 | 214, 212, 214 | 179, 178, 181 | 2, 4, 2 | 442, 450, 511 | 61 |
+| `claude-opus-5-5`, thinking (two draws) | 198, 195 | 196, 194 | 177, 175 | 2, 1 | 551, 470 | 61 |
+
+- The part-of-speech labels left «screens» on the same three verbs and took «silencing» to its two
+  verbs as well: the model matches on meaning and overrides the label. No sense in the lexicon is a
+  genetic screen, and no gene-silencing concept is reachable from «silencing» (C0858952 is CHV's
+  'silence', a Mental or Behavioral Dysfunction).
+- The thinking models put the right sense first 10–16 words less often, lose the pin of «The use of
+  immune checkpoint blockade can be limited by toxicity.», and keep the «silencing screens» failure
+  (`sonnet-5-5` drops both noun senses of «silencing» in every draw).
+- `claude-opus-5-5` refused 5 and 7 of its sense calls with `stop_details.category: "bio"`; those
+  sentences fell back to seed order, so it ranked 18–21 fewer words. It cannot rank this page as asked.
+- A third arm — `claude-sonnet-4-6` writing its reasoning before its choice — was stopped before its
+  first draw finished. The reply schema puts `choice` before `rationale` because `serde_json` sorts
+  keys (no `preserve_order`), so today's rationale is written after the choice; the arm renamed the
+  field `analysis` to sort first.
+
+None is adopted; S-guide2 on `claude-sonnet-4-6` stays. What remains is not a ranking question: the
+lexicon has no genetic-screen or gene-silencing sense, and a wrong elimination is restored by
+frequency rather than by the ranker's order.
+
 ## 8. What this does not fix
 
 The negated sentence's forest is **308 readings cap-only vs 2 for the plain one** — a 154×

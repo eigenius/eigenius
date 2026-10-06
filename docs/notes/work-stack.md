@@ -97,8 +97,22 @@ any detour.
 > words. **Adopted by the owner; re-baselined** (`baseline.json`): live at `aeb67c3`, readings 738,
 > skeletons 210, 62 of 62, readings ceiling 700 → 775; record and replay agree. Strict mode's grammar
 > limit cost two sentences on the first attempt; a choice is now asked in parts of eight questions
-> (`aeb67c3`). **Next:** the draws on this snapshot — the live draw left 9 selections unadjudicated
-> (26 correct, 7 wrong) — then the selection baseline.
+> (`aeb67c3`). The draws on this snapshot are done: the 9 open selections adjudicated, three draws
+> scoring 31, 31, 31 of 42 (`2574984`).
+> **The owner's rulings of `2026-10-05`** (`638ae2d`, D69 structure-call note recommendation 2): a
+> preposition the lexicon places on a verb's sense is pinned as the verb's governed object (`result
+> from`, `arise from`, as `respond to`), its free-adjunct reading `wrong`; a multi-word span the lexicon
+> has as one concept is pinned as that term (C1155661 over «DNA mismatch repair»), its decomposition
+> `correct, departs`. The 2026-10-02 «analysed» ruling from main covers data from screens (`89ceffb`).
+> **Merged `origin/main` (`fd5460f`, UAB experiment 02) and re-baselined on the HPO chain** the owner
+> chose for the gate (`958525d`, `wordnet-umls-hpo-aligned-2026-10-05-merge`): readings 679,
+> skeletons 210, 62 of 62; selection 32 of 42 on three identical draws.
+> **The sense ranker's arms closed (`2026-10-06`, D69 note §7s):** part-of-speech labels on the options,
+> `claude-sonnet-5-5` and `claude-opus-5-5` with thinking — none beats S-guide2 (right sense first
+> 175–193 against 191; Opus refuses 5–7 calls as "bio"). The owner wrapped the ranker work here.
+> **Open:** the verb-adjunct encoding — D63 §(B)'s `And(V(s), prep(s, x))` puts every adjunct PP on
+> the subject (8 pins), the ground of the «from» ruling, and U1 («for cancer therapeutics») waits on
+> it; U2's re-pin to C1511689 (with a lexicon gate on «a DNA», a reseed); the combined #263+#264 PR.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change
