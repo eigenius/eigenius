@@ -10,6 +10,7 @@
 - **Copular predicates keep no event, and their PPs are frames** (2026-10-06, open question 2 → (c)). There is no Kimian state at the copula, and no reading anchors an adjunct on the subject.
 - **Every verb takes the eventuality argument, stative ones included** (2026-10-06, open question 3). Where a sense is known to be stative, a later step may refine the argument's class; the structure never depends on it.
 - **The class is a new `lexicon:Eventuality`** (2026-10-06, open question 1 → (b)), under `lexicon:Entity` and above WordNet's `event.n.01` and `state.n.02`. Declaring `schema_org:Action ≡ action.n.01` is a separate, later step.
+- **When the event condition and the frame are both faithful, the ledger rules by what the PP does** (2026-10-06, open question 8 (i)). The frame is best when the PP gives the population, model, method or classification within which the finding holds; the event condition is best when it gives a participant or circumstance of the event, such as an instrument. The test is the entailment that separates the two readings: would the paper assert the clause without the PP? If not, the frame. A per-preposition rule fails on the page: «with» frames in «remained true with PCR-based MSI classifications» and is an instrument in «screened cell lines with a CRISPR library».
 
 **Recommendation.** Every verb gets one Davidsonian event argument, placed after its positional arguments. The subject, the object and any governed PP (`respond to`, `arise from`) stay positional in the verb's named relation. Adjunct PPs and adverbs become conjuncts on the event, and a PP that says where the claim holds can instead frame the whole clause. The event quantifier closes inside the verb's own lexical entry, as Champollion (2015) proposes and as ccg2lambda and lightblue implement.
 
@@ -293,7 +294,7 @@ The attachment stays the maintainer's call (U1 in `docs/notes/d69-structure-call
 
 ### Locatives over coordinated events: «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.»
 
-Today's pin is `And(And(promote(apo, d), promote(cca, d)), prep_in(d, m))`, with the locative on the depletion. Champollion's generalised conjunction of event quantifiers shares `K` across the conjuncts and gives each its own event ([Champollion 2015, pp. 51–52](https://champollion.com/wp-content/uploads/2018/06/2015-interaction-paper.pdf)). The result is `And(∃e. And(promote(apo, d, e), prep_in(e, m)), ∃e′. And(promote(cca, d, e′), prep_in(e′, m)))`. The locative is printed twice. A PP attached inside the second conjunct of a VP coordination restricts only `e′`, a truth-conditional difference that the forest carries. As a frame, «in MSI models» wraps the coordination once: `frame_in(And(∃e. promote(apo, d, e), ∃e′. promote(cca, d, e′)), m)`. Open question 8 asks which of the two readings the ledger rules best.
+Today's pin is `And(And(promote(apo, d), promote(cca, d)), prep_in(d, m))`, with the locative on the depletion. Champollion's generalised conjunction of event quantifiers shares `K` across the conjuncts and gives each its own event ([Champollion 2015, pp. 51–52](https://champollion.com/wp-content/uploads/2018/06/2015-interaction-paper.pdf)). The result is `And(∃e. And(promote(apo, d, e), prep_in(e, m)), ∃e′. And(promote(cca, d, e′), prep_in(e′, m)))`. The locative is printed twice. A PP attached inside the second conjunct of a VP coordination restricts only `e′`, a truth-conditional difference that the forest carries. As a frame, «in MSI models» wraps the coordination once: `frame_in(And(∃e. promote(apo, d, e), ∃e′. promote(cca, d, e′)), m)`. The frame is the best reading by the rule decided for open question 8 (i): the page does not assert the effects outside MSI models.
 
 Two cases stay uncovered:
 
@@ -324,7 +325,13 @@ frame_in : Prop → Entity → Prop                 opaque; one per framing prep
 - **Vocabulary.** The `frame_*` axioms sit beside the `prep_*` axioms in `ontologies/ontology/ontology.esl`, a bootstrap ontology.
 - **Complements are not frames.** Nothing gives «essential», «dispensable», «successful» or «true» an *in* or *with*. SPECIALIST does govern «essential for» and «concordant with», and D97 slice 3a reads a governed adjective preposition as the adjective's relational argument, which frames leave alone.
 
-On event verbs the forest offers both readings of a clause-final PP. Open question 8 lists what the frame reading leaves to decide.
+On event verbs the forest offers both readings of a clause-final PP. The ledger rules by what the PP does (decided, open question 8 (i)), testing whether the paper would assert the clause without it:
+
+- «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.»: no, the page also says «WRN was dispensable in models of microsatellite-stable cancers.» The frame is best.
+- «These findings remained true with PCR-based MSI classifications.»: no. The frame is best.
+- «Project Achilles screened cell lines with a CRISPR library.», «We ascertained MSI status with sequencing.» and «These mutations occur in nucleotide repeat regions.»: yes. The event condition is best.
+
+Open question 8 lists what the frame reading still leaves to decide.
 
 ### Copular predicates keep no event; their PPs are frames
 
@@ -342,7 +349,7 @@ Because the copula discards `K`, a VP adjunct on a copular VP would drop out of 
 
 | Current adjunct pin (15) | Host | Under the proposal |
 |---|---|---|
-| «…screened cell lines with a CRISPR library.», «…analysed cell lines with an RNA interference library.», «We ascertained MSI status with sequencing.», «These mutations occur in nucleotide repeat regions.», «These findings remained true with PCR-based MSI classifications.», «The MSI relationship compared favourably to other strong biomarkers for vulnerabilities.» (the «to» PP), «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.» | verb (7). #270 counts eight because it adds «… dependency in MSI cell lines compared to MSS cell lines», but that PP precedes «compared» and modifies the noun «dependency». | PP moves from the subject to the event, with a frame reading beside it; re-adjudicate |
+| «…screened cell lines with a CRISPR library.», «…analysed cell lines with an RNA interference library.», «We ascertained MSI status with sequencing.», «These mutations occur in nucleotide repeat regions.», «These findings remained true with PCR-based MSI classifications.», «The MSI relationship compared favourably to other strong biomarkers for vulnerabilities.» (the «to» PP), «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.» | verb (7). #270 counts eight because it adds «… dependency in MSI cell lines compared to MSS cell lines», but that PP precedes «compared» and modifies the noun «dependency». | PP moves from the subject to the event, with a frame reading beside it. By the rule of open question 8 (i), the frame is best for «remained true with …» and «… in MSI models», the event condition for the three instruments and «occur in». Re-adjudicate |
 | «WRN was dispensable in models of microsatellite-stable cancers.», «These classifications were highly concordant with …», «The four other RecQ DNA helicases were not preferentially essential in MSI cell lines.», «MSI is most commonly observed in …», «We found that WRN was selectively essential in MSI models.», «PARP-1 inhibitors are successful in cancers with …», «These libraries define genes that were essential for proliferation and survival.» and «We analysed these data sets for genes that are selectively essential in cancer cells with MSI.» (PP on the relative clause's predicate) | copular/adjectival (8) | PP becomes a frame, or the adjective's relational argument where SPECIALIST governs the preposition («concordant with», «essential for»). The two relative clauses need frames inside embedded clauses (open question 8). Re-adjudicate |
 
 ## The type change is atomic and its cost is countable
@@ -462,7 +469,7 @@ Either way the 14 rows grounded on "predicates … of the subject" need new evid
 
 **8. Frames.** The frame reading leaves three choices:
 
-- (i) Which reading the ledger rules best when the event condition and the frame are both faithful, as in «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.» Proposed: the frame for PPs that state a domain of validity («in MSI models», «with PCR-based MSI classifications»), the event condition for instruments and for locations of an action («with a CRISPR library»).
+- (i) Which reading the ledger rules best when the event condition and the frame are both faithful, as in «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.» *Decided 2026-10-06: by what the PP does,* with the drop test (see "Decided so far"). Rejected: a per-preposition rule, which «with» defeats; always the frame, which loses the drop where it holds («Project Achilles screened cell lines»); always the event condition, which removes the domain restriction from verbal clauses.
 - (ii) Which prepositions frame. Candidates: *in*, *with*, *for*, *among*, *across*.
 - (iii) Whether frames attach inside embedded clauses. A «that»-complement gives the choice between framing «WRN was essential» and framing «we found» («We found that WRN was selectively essential in MSI models.»). Two copular pins put the PP inside a relative clause («genes that are selectively essential in cancer cells with MSI»), and only an embedded frame keeps it there.
 
