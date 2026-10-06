@@ -16,12 +16,12 @@ any detour.
 > subject; D63 §(B)'s `And(V(s), prep(s, x))` is replaced. A literature survey (Davidson; Parsons and
 > Kratzer; Champollion's quantificational event semantics; Winter & Zwarts and de Groote & Winter;
 > ccg2lambda and lightblue; Luo & Soloviev's dependent event types; Cooper's TTR; the 2025 Element)
-> produced `docs/notes/event-semantics-draft.md`. Its recommendation: Davidsonian positional arguments
+> produced `docs/notes/event-semantics.md`. Its recommendation: Davidsonian positional arguments
 > plus one event argument, the event quantifier closed inside each verb's entry, governed PPs
 > positional, adjunct PPs and adverbs as event conditions. No partial path exists: the type change
 > is one slice (316 of 465 closed-class entries, the converter, coordination, the verbaliser, a
 > reseed, at least 51 of 62 pins, 213 of 228 ledger rows, 74 of them re-adjudicated).
-> Decided by the owner on `2026-10-06`, recorded in the draft's "Decided so far": verbs as relations
+> Decided by the owner on `2026-10-06`, recorded in the note's "Decided" list: verbs as relations
 > with an event slot (not event-type families); frames, a clause-level reading
 > `frame_in(S(K), x)` for PPs that say where a claim holds; copular predicates eventless with their
 > PPs as frames (open question 2); every verb takes the argument (3); the class is a new
@@ -45,6 +45,57 @@ any detour.
 > #264's strand 3 (whether attachment is derivable) is answered by question 4 for prepositions the
 > lexicon names on a sense; other attachments stay with the ranker. #271 (the «a DNA» atom) is
 > independent.
+>
+> **Hand-off (`2026-10-06`): the implementation continues on another machine, on this branch.**
+> - **Design:** `docs/notes/event-semantics.md`. "The proposed entries" gives the terms; "Cost by
+>   component" the sizes and file locations; "Implementation path and cost" the slices. Slices 1 and
+>   2 go in one PR: slice 1 changes the bootstrap (`lexicon-ontology.esl`, `ontology.esl`) and
+>   slice 2 reseeds anyway.
+> - **Branch:** `event-semantics`. `origin/main` has one commit it lacks (`4962594`, `.gitignore`
+>   adds `/references.bak`); merge it before the PR.
+> - **Data:** `references/` (gitignored; WordNet 3.0, SPECIALIST, UMLS, HPO, lightblue, CGEL) and
+>   the tracked store `../db-snapshot/wordnet-umls-hpo-aligned-2026-10-05-merge` (3.7 GB). The USB
+>   copy holds both (`references.tar`, `snapshots/wordnet-umls-hpo-aligned-2026-10-05-merge.tar`,
+>   `SHA256SUMS`, `README.md`). `scripts/measure-parse-rate.sh` picks the newest `wordnet-umls-*`
+>   store unless given `--snapshot`, so pass it.
+> - **Baseline first, on that machine, before changing anything:** replay
+>   `ranks/2026-10-01-do-sense.json` and `selections/2026-10-05-hpo-merge-1.json` against that store,
+>   in release (`experiments/parsing/README.md`). Expected: 62/62 hits, grammar-gap 0, 210
+>   skeletons, 679 readings; reading-correct 32/42, structure 37, ledger-conflicts 0. Another number
+>   means the environment differs, not the code.
+> - **After the change** the old store no longer opens (ManifestDrift). Rebuild the chain as on
+>   2026-10-05 (`baseline.json`, `_provenance_note_2026-10-05-hpo-chain`), in its own Docker compose
+>   project so existing volumes stay untouched; `S` is the absolute path of `../db-snapshot`, `D` a
+>   date tag (the last build used `2026-10-05-merge`), `hp.json` HPO 2026-09-01 (`references/hpo/` in
+>   the USB copy):
+>
+>   ```bash
+>   export COMPOSE_PROJECT_NAME=eigenius-events EIGENIUS_KERNEL_TAG=events \
+>          EIGENIUS_KERNEL_PORT=18061 ENDPOINT=127.0.0.1:18061
+>   scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-$D
+>   scripts/build-alignment-snapshot.sh --base $S/wordnet-umls-$D --out $S/wordnet-umls-aligned-$D \
+>     --merges experiments/lexicon-align/merges.json
+>   cargo run --release -q -p eigenius-obograph --bin obograph-import -- --input references/hpo/hp.json \
+>     --output /tmp/hpo.eigon.json --root-anchor urn:eigenius:lexicon:Entity
+>   scripts/add-layer-to-snapshot.sh --base $S/wordnet-umls-aligned-$D --out $S/wordnet-umls-hpo-$D \
+>     /tmp/hpo.eigon.json
+>   scripts/build-hpo-alignment-snapshot.sh --base $S/wordnet-umls-hpo-$D \
+>     --out $S/wordnet-umls-hpo-aligned-$D
+>   docker compose down
+>   ```
+>
+>   The 2026-10-05 build: 38,391 alignment merges (with the polydipsia verdict), 20,533 HPO resources,
+>   864 HPO ≡ WordNet ≡ UMLS equivalences. Different numbers point at the inputs.
+> - **Re-adjudication:** 16 pins and 74 ledger rows (the note's Pins and Ledger rows). The decisions
+>   fix some verdicts in advance: 17 free adjuncts of governed prepositions become `correct` with
+>   `departs`; U1's 3 noun-attachment rows become `wrong`; the frame is best for the sentences listed
+>   under "Frames". The candidate lists change, so a new live draw is needed (`--features use-llm`,
+>   `ANTHROPIC_API_KEY`).
+> - **The note's counts** (70 + 1 rows with a PP on the subject or a relativised noun, 46 on a
+>   verb, 18 governed free adjuncts, 62 pins, 48 verb pins) classify each ledger row's `prep_*`
+>   conjuncts: the anchor is not bound by a `Σ`, and the host is the conjunct beside it, with or
+>   without a verb atom.
+> - **Can ride along:** #271 (the «a DNA» atom) needs a reseed as well and can share slice 2's.
 >
 > **Exit gate:** the design note settled and the event slice merged, with pins and ledger
 > re-adjudicated on a reseed.
