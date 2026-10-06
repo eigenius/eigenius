@@ -112,7 +112,8 @@ any detour.
 > 175–193 against 191; Opus refuses 5–7 calls as "bio"). The owner wrapped the ranker work here.
 > **Open:** the verb-adjunct encoding — D63 §(B)'s `And(V(s), prep(s, x))` puts every adjunct PP on
 > the subject (8 pins), the ground of the «from» ruling, and U1 («for cancer therapeutics») waits on
-> it; U2's re-pin to C1511689 (with a lexicon gate on «a DNA», a reseed); the combined #263+#264 PR.
+> it; the lexicon gate on «a DNA» (a reseed; U2 itself was re-pinned to C1511689 on `2026-10-06`); the
+> combined #263+#264 PR.
 > **#264:** the reading ranker reasons about senses and is asked to choose structures. Three strands:
 > the prompt and the rendering (name the structural contrast); the model, TypeSafe.ai models included,
 > behind a client trait; whether attachment is derivable at all (after the measurement). Each change
