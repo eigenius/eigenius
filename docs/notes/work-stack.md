@@ -18,13 +18,19 @@ any detour.
 > ccg2lambda and lightblue; Luo & Soloviev's dependent event types; Cooper's TTR; the 2025 Element)
 > produced `docs/notes/event-semantics-draft.md`. Its recommendation: Davidsonian positional arguments
 > plus one event argument, the event quantifier closed inside each verb's entry, governed PPs
-> positional, adjunct PPs and adverbs as event conditions, one event class at `wn:n00029378`
-> (`schema_org:Action ≡ wn:n00037396`), copular predicates eventless. No partial path exists: the
-> type change is one slice (316 of 465 closed-class entries, the converter, coordination, the
-> verbaliser, a reseed, at least 48 of 63 pins, 193 of 228 ledger rows, 43 of them re-adjudicated).
-> **Next:** the owner's answers to the draft's seven open questions (the event class, copular
-> predicates, stative verbs, governed prepositions' free-adjunct parse, U1's purpose «for»,
-> coordination and quantified PP objects, generic negation); then slice 1 (the class equivalence).
+> positional, adjunct PPs and adverbs as event conditions. No partial path exists: the type change
+> is one slice (316 of 465 closed-class entries, the converter, coordination, the verbaliser, a
+> reseed, at least 51 of 62 pins, 213 of 228 ledger rows, 71 of them re-adjudicated).
+> Decided by the owner on `2026-10-06`, recorded in the draft's "Decided so far": verbs as relations
+> with an event slot (not event-type families); frames, a clause-level reading
+> `frame_in(S(K), x)` for PPs that say where a claim holds; copular predicates eventless with their
+> PPs as frames (open question 2); every verb takes the argument (3); the class is a new
+> `lexicon:Eventuality` above `event.n.01` and `state.n.02` (1).
+> **Next:** open question 8 (the frame sub-decisions: which reading is best when both are
+> faithful, which prepositions frame, frames in embedded clauses), 9 (keeping VP adjuncts off
+> copular VPs), then 4–7 (governed prepositions' free-adjunct parse, U1's purpose «for»,
+> coordination and quantified PP objects, generic negation); then slice 1 (`lexicon:Eventuality`
+> and the `frame_*` axioms).
 > #264's strand 3 (whether attachment is derivable) waits on this design. #271 (the «a DNA» atom)
 > is independent.
 >

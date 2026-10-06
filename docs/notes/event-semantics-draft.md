@@ -6,8 +6,12 @@
 
 - **Events** (2026-10-06, #270 option B): verb adjuncts attach to an event, not to the subject.
 - **Verbs denote relations with an event slot** (2026-10-06): `screen : Entity → Entity → Ev → Prop`, not event-type families `screen : Entity → Entity → Set` with every `screen(o, s) ⊑ Ev`. The relation gives both views: the type of screenings is definable from it at any time (`Σe:Ev. screen(o, s, e)`), while a family gives no proposition saying of an event obtained elsewhere — a graph resource, a coreferent event in another sentence — that it is a screening of `o` by `s`. Families also leave `∃e : screen(o, s). ⊤` for an unmodified verb. Their kernel cost would be small (see "Kind 1 and kind 2 coercions" below), so the reason is the missing predicate, not the kernel.
+- **Frames** (2026-10-06): a PP that says where a claim holds («in MSI models», «with PCR-based MSI classifications») can attach to the whole clause, clause-final (`S\S`) or fronted (`S/S`), as an opaque relation `frame_in : Prop → Entity → Prop` with sem `λx.λS.λK. frame_in(S(K), x)`. This is Maienborn's frame adverbial. The frame passes the continuation into the clause, so adjuncts inside still reach their events, and wraps the closed clause the way a modal does. Grounding maps the frame's object onto the domain predicate's argument. See "Frames: a PP can restrict the whole claim".
+- **Copular predicates keep no event, and their PPs are frames** (2026-10-06, open question 2 → (c)). There is no Kimian state at the copula, and no reading anchors an adjunct on the subject.
+- **Every verb takes the eventuality argument, stative ones included** (2026-10-06, open question 3). Where a sense is known to be stative, a later step may refine the argument's class; the structure never depends on it.
+- **The class is a new `lexicon:Eventuality`** (2026-10-06, open question 1 → (b)), under `lexicon:Entity` and above WordNet's `event.n.01` and `state.n.02`. Declaring `schema_org:Action ≡ action.n.01` is a separate, later step.
 
-**Recommendation.** Every verb gets one Davidsonian event argument, placed after its positional arguments. The subject, the object and any governed PP (`respond to`, `arise from`) stay positional in the verb's named relation. Adjunct PPs and adverbs become conjuncts on the event. The event quantifier closes inside the verb's own lexical entry, as Champollion (2015) proposes and as ccg2lambda and lightblue implement.
+**Recommendation.** Every verb gets one Davidsonian event argument, placed after its positional arguments. The subject, the object and any governed PP (`respond to`, `arise from`) stay positional in the verb's named relation. Adjunct PPs and adverbs become conjuncts on the event, and a PP that says where the claim holds can instead frame the whole clause. The event quantifier closes inside the verb's own lexical entry, as Champollion (2015) proposes and as ccg2lambda and lightblue implement.
 
 **Why lexical closure.** Of the solutions surveyed, lexical closure is the only one that keeps the event quantifier lowest using function application alone. A chart CCG without hypothetical reasoning needs exactly that. It puts `∃e` under every generalised quantifier, under `→ False` and inside `Possible`. So «Some cancers do not respond to immune checkpoint blockade.» becomes `some Cancer (λx. ¬∃e. respond_to(icb, x, e))`, with the scope order it has today.
 
@@ -16,9 +20,9 @@
 - *Neo-Davidsonian thematic roles.* None of the five questions needs them. Leaving them out avoids D62's role-relation fork, the role-inventory problem, and three atoms per transitive verb instead of one.
 - *Dependent event types* (Luo & Soloviev). Their families rely on function-inserting parameterised coercions that `Layer::is_subclass_of` does not have. They also solve a scope problem that lexical closure never creates. One event class is enough, and verbs stay relations (decided above).
 
-**Where the event class sits.** The class must sit under `lexicon:Entity`. `urn:schema_org:Action`, the root D62 chose, does not: it is a subclass of a parentless `schema_org:Thing`.
+**Where the event class sits.** Under `lexicon:Entity`, as a new `lexicon:Eventuality` above WordNet's `event.n.01` and `state.n.02` (decided). `urn:schema_org:Action`, the root D62 chose, is not under `lexicon:Entity`: it is a subclass of a parentless `schema_org:Thing`.
 
-**Copular and adjectival predicates keep no event.** Their adjuncts stay anchored on the subject. That keeps the PP reading of 8 of the 15 current adjunct pins and of the 23 ledger rows whose PP hangs on an adjective.
+**Copular and adjectival predicates keep no event, and their PPs are frames.** No reading anchors an adjunct on the subject. The 8 copular or adjectival adjunct pins change meaning, and so do the 25 ledger rows whose PP hangs on an adjective or copula.
 
 **No partial rollout.** There is no path on which only adjuncts introduce an event. Every VP-taking closed-class entry shares the VP's type, so the change lands as one slice:
 
@@ -26,8 +30,8 @@
 - the verb converter;
 - the types of 316 of 465 closed-class entries;
 - the engine's coordination rules;
-- at least 48 of 63 pins;
-- 193 of 228 ledger rows.
+- at least 51 of 62 pins;
+- 213 of 228 ledger rows.
 
 The kernel does not change.
 
@@ -88,7 +92,7 @@ The decision follows the ERG precedent of positional arity plus an event argumen
 - `v{offset}_i : Entity → Entity → Prop`;
 - `v{offset}_p_{prep} : Entity → Entity → Entity → Prop`.
 
-The event slot is typed `lexicon:Entity`, like every stage-1 verb slot (`crates/eigenius-wordnet/src/convert.rs:223–241`). Its sort comes from the binder `∃e:Ev`; the next section explains why the slot is not typed `Ev`.
+The event slot is typed `lexicon:Entity`, like every stage-1 verb slot (`crates/eigenius-wordnet/src/convert.rs:223–241`). Its sort comes from the binder `∃e:Ev` and from the continuation, which ranges over `Ev` (next section).
 
 No role relation appears in a term, so D62's fork (role axioms vs a property-as-relation kernel feature, `docs/notes/d62-adverb-semantics-decision.md` §5) is not on the path.
 
@@ -132,20 +136,21 @@ Notes on the table:
 
 ### The proposed entries
 
-The continuation ranges over `lexicon:Entity` rather than `Ev`. That lets copular predicates anchor their adjuncts on the subject (see "Copular predicates keep their current encoding" below). It is also why the verb's event slot is typed `Entity`.
+The continuation ranges over `Ev`, the eventuality class. The copula passes it nothing (see "Copular predicates keep no event; their PPs are frames"), and a `K` applied to the subject would not type-check, since an `Entity` is not an `Ev`. The verb's event slot stays typed `Entity`, like every stage-1 slot, and takes an `Ev` by class subsumption.
 
 ```
-Ev                 the event class, Ev ⊑ lexicon:Entity (open question 1)
-Mod  := (Entity → Prop) → Entity → Prop
+Ev  := lexicon:Eventuality ⊑ lexicon:Entity        above wn:n00029378 event, wn:n00024720 state
+Mod := (Ev → Prop) → Ev → Prop
 ⟦S[dcl, f]⟧ := Mod → Prop   for f ≠ adj          was Prop
 ⟦S[dcl, adj]⟧ := Prop                             unchanged
 
 ⟦v_t⟧          = λo.λs.λK. ∃e:Ev. K(λa. v_t(o, s, a))(e)
 ⟦v_p_to⟧       = λy.λx.λK. ∃e:Ev. K(λa. v_p_to(y, x, a))(e)    governed PP: positional
 ⟦in⟧ VP adjunct = λx.λV.λs.λK. V(s)(λP. K(λa. And(P(a), prep_in(a, x))))
+⟦in⟧ frame     = λx.λS.λK. frame_in(S(K), x)                    S\S and S/S; frame_in : Prop → Entity → Prop
 ⟦not⟧          = λV.λs.λK. V(s)(K) → logic:False                the current neg_sem, K passed in
 ⟦can⟧          = λV.λs.λK. logic:Possible(V(s)(K))
-⟦be⟧ + adj     = λP.λs.λK. K(P)(s)                              anchor = subject; no event
+⟦be⟧ + adj     = λP.λs.λK. P(s)                                 no event: K has nothing to extend
 ⟦some⟧ subject = λA.λV.λK. exists_sem(A)(λx. V(x)(K))           quantifier core unchanged
 ⟦that⟧ comp    = λS. S(λP.P)                                    closure at the embedding
 root           = λS. S(λP.P)
@@ -167,12 +172,12 @@ In the printed term, each verb adds two binders and one argument: an extra `ΠG#
 
 ### Charlow's objection as a test
 
-The narrow scope of `∃e` holds only if no entry puts a quantifier, a negation or a modal inside `K`. The test: every closed-class entry that consumes a VP `V` must do one of two things.
+The narrow scope of `∃e` holds only if no entry puts a quantifier, a negation or a modal inside `K`. The test: every closed-class entry that consumes a VP `V` or a clause `S` must do one of two things.
 
 1. Pass `K` through unchanged.
 2. Extend it only as `λP. K(λa. And(P(a), φ(a)))`, where `φ` is an atomic relation.
 
-GQs, `→ False` and `Possible` may wrap `V(s)(K)` from outside. Like `reading_ledger_is_consistent`, the test needs no parse. It is the lexicon property Charlow says the narrow scope rests on, and it also guarantees the modifier-drop entailments that Qv→Qv typing alone does not ([Charlow, slide 23](https://schar.github.io/sem2/files/notes/02-19-18.pdf)).
+GQs, `→ False`, `Possible` and the frames may wrap `V(s)(K)` or `S(K)` from outside. Like `reading_ledger_is_consistent`, the test needs no parse. It is the lexicon property Charlow says the narrow scope rests on, and it also guarantees the modifier-drop entailments that Qv→Qv typing alone does not ([Charlow, slide 23](https://schar.github.io/sem2/files/notes/02-19-18.pdf)).
 
 ## One event class, because EigenTT subtypes nominally
 
@@ -222,18 +227,26 @@ D62 compared `schema:Action` against `schema:Event`, which covers scheduled happ
 1. **`urn:schema_org:Action` is not an Entity.** It is a subclass of `urn:schema_org:Thing`, which has no parent (`ontologies/schema-org/schema-org.eigon.json`). An Action-typed event therefore cannot fill `prep_in : Entity → Entity → Prop`.
 2. **Its definition presumes an agent.** It begins "An action performed by a direct agent". The corpus verbs `arise`, `result` and `occur` are not agentive.
 
-WordNet already has the right node. `event.n.01` (`wn:n00029378`, "something that happens at a given place and time") lies under `entity.n.01`, which the importer roots at `lexicon:Entity`. It is also the ancestor of the corpus's event nouns: `depletion` (n00356199) ⊑ `action` (n00037396) ⊑ `act` (n00030358) ⊑ `event` (n00029378) (`references/WordNet-3.0/dict/data.noun`).
+WordNet has the two nodes an eventuality class needs, both under `entity.n.01`, which the importer roots at `lexicon:Entity` (`references/WordNet-3.0/dict/data.noun`):
 
-The proposal:
+- `event.n.01` (`wn:n00029378`, "something that happens at a given place and time"), under `psychological_feature.n.01`. It is the ancestor of the corpus's event nouns: `depletion` (n00356199) ⊑ `action` (n00037396) ⊑ `act` (n00030358) ⊑ `event` (n00029378).
+- `state.n.02` (`wn:n00024720`, "the way something is with respect to its main attributes"), under `attribute.n.02`. It is the «state» in «a hypermutable state».
 
-- Bind verb events at `wn:n00029378`.
-- Declare `urn:schema_org:Action` equivalent to `wn:n00037396` through `core:EquivalentClasses`. D99 §11 admits equivalence for classes with equal required properties; Action only `recommends` its 12 properties.
+Since stative verbs take the argument too (next section), `event.n.01` alone would type the eventualities of «require» and «remain» as happenings.
 
-D62's root then keeps its advisory roles (agent, object, instrument, location, result, …) and its 14 subclasses inside the lattice. «WRN depletion» and the event of depleting WRN share one class space. The Element shows why disjoint domains fail: with eventualities and physical entities in disjoint domains, simple types cannot type event–object nouns such as *lunch* ([Chatzikyriakidis et al. 2025, p. 36](https://doi.org/10.1017/9781009285322)).
+**Decided (2026-10-06):**
+
+- Verb eventualities range over a new class `lexicon:Eventuality ⊑ lexicon:Entity`, declared in the lexicon ontology.
+- `wn:n00029378` and `wn:n00024720` become its subclasses. The importer emits the extra parent the way it roots `entity.n.01` at `lexicon:Entity` (`push_noun` in `crates/eigenius-wordnet/src/convert.rs`, which already writes several parents for a class).
+- Each verb's eventuality is a member of the shared class, not of a per-verb subclass.
+
+«WRN depletion» and the event of depleting WRN share one class space. Declaring `urn:schema_org:Action` equivalent to `wn:n00037396` through `core:EquivalentClasses` is a separate, later step, taken when role alignment needs D62's root, its advisory roles (agent, object, instrument, location, result, …) and its 14 subclasses inside the lattice. D99 §11 admits the equivalence for classes with equal required properties; Action only `recommends` its 12 properties.
+
+The Element shows why disjoint domains fail: with eventualities and physical entities in disjoint domains, simple types cannot type event–object nouns such as *lunch* ([Chatzikyriakidis et al. 2025, p. 36](https://doi.org/10.1017/9781009285322)).
 
 ### All verbs, stative ones included, take events
 
-WordNet's lexicographer file 42, `verb.stative`, holds 756 of 13,767 verb synsets. A per-sense stative split would separate senses that the ledger treats as twins:
+*Decided (2026-10-06).* WordNet's lexicographer file 42, `verb.stative`, holds 756 of 13,767 verb synsets. A per-sense stative split would separate senses that the ledger treats as twins:
 
 - «arise» v02624263 and v02625786 are in `verb.stative`;
 - «arise» v00339738 is in `verb.change`;
@@ -241,11 +254,13 @@ WordNet's lexicographer file 42, `verb.stative`, holds 756 of 13,767 verb synset
 
 Under that split the twins would differ in structure, so their skeletons would differ. That contradicts the premise of `kernel/src/dcg/skeleton.rs`: two readings that differ only in which sense fills a slot are the same structure.
 
+The file is not a stativity test either: it holds the two «arise» senses, which are changes, while «stay», a state, is in `verb.change`. Where a sense is known to be stative, a later step may bind its argument at `state.n.02` rather than at `Ev`. A wrong label then gives the wrong class, never the wrong structure, so pins and skeletons do not depend on it. A PP that states a stative claim's scope («These mutations occur in nucleotide repeat regions.») gets the frame reading beside the condition on the state.
+
 ## Adjuncts ride the continuation to every event they modify
 
 ### PP adjuncts and negation
 
-An intersective adjunct extends `K`, so its condition lands under the verb's `∃e`, whichever operator it attaches above. «X did not respond to ICB in MSI models» yields `¬∃e. And(respond_to(icb, x, e), prep_in(e, m))` whether `in MSI models` attaches below or above `not`. This is Schwarzschild's `not(rain heavily) ≡ (not rain) heavily` ([Schwarzschild 2014, pp. 3–4](http://web.mit.edu/schild/www/papers/public_html/champ.pdf)). The two attachments print one term, so they add no skeleton.
+An intersective adjunct extends `K`, so its condition lands under the verb's `∃e`, whichever operator it attaches above. «X did not respond to ICB in MSI models» yields `¬∃e. And(respond_to(icb, x, e), prep_in(e, m))` whether `in MSI models` attaches below or above `not`. This is Schwarzschild's `not(rain heavily) ≡ (not rain) heavily` ([Schwarzschild 2014, pp. 3–4](http://web.mit.edu/schild/www/papers/public_html/champ.pdf)). The two attachments print one term, so they add no skeleton. As a frame, the same PP scopes above the negation instead: `frame_in(¬∃e. respond_to(icb, x, e), m)`, "in MSI models, X did not respond to ICB".
 
 Downward-monotone contexts reverse modifier drop, as they should: «Nobody stabbed Caesar ⊨ Nobody stabbed Caesar with a sword» ([Beaver & Condoravdi 2007, p. 5](https://platform.openjournals.nl/PAC/article/download/22750/24310/56165)).
 
@@ -278,7 +293,7 @@ The attachment stays the maintainer's call (U1 in `docs/notes/d69-structure-call
 
 ### Locatives over coordinated events: «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.»
 
-Today's pin is `And(And(promote(apo, d), promote(cca, d)), prep_in(d, m))`, with the locative on the depletion. Champollion's generalised conjunction of event quantifiers shares `K` across the conjuncts and gives each its own event ([Champollion 2015, pp. 51–52](https://champollion.com/wp-content/uploads/2018/06/2015-interaction-paper.pdf)). The result is `And(∃e. And(promote(apo, d, e), prep_in(e, m)), ∃e′. And(promote(cca, d, e′), prep_in(e′, m)))`. The locative is printed twice. A PP attached inside the second conjunct of a VP coordination restricts only `e′`, a truth-conditional difference that the forest carries.
+Today's pin is `And(And(promote(apo, d), promote(cca, d)), prep_in(d, m))`, with the locative on the depletion. Champollion's generalised conjunction of event quantifiers shares `K` across the conjuncts and gives each its own event ([Champollion 2015, pp. 51–52](https://champollion.com/wp-content/uploads/2018/06/2015-interaction-paper.pdf)). The result is `And(∃e. And(promote(apo, d, e), prep_in(e, m)), ∃e′. And(promote(cca, d, e′), prep_in(e′, m)))`. The locative is printed twice. A PP attached inside the second conjunct of a VP coordination restricts only `e′`, a truth-conditional difference that the forest carries. As a frame, «in MSI models» wraps the coordination once: `frame_in(And(∃e. promote(apo, d, e), ∃e′. promote(cca, d, e′)), m)`. Open question 8 asks which of the two readings the ledger rules best.
 
 Two cases stay uncovered:
 
@@ -287,22 +302,48 @@ Two cases stay uncovered:
 
 A quantified PP object should scope over the event quantifier, as de Groote & Winter's *everyday* does: `∀x. day x → ∃e. kissed e j m ∧ time e x` ([de Groote & Winter 2015, §3](https://members.loria.fr/PdeGroote/papers/lenls14.pdf)). ccg2lambda's VP-modifying preposition template puts it inside instead ([ccg2lambda, l. 837–839](https://github.com/mynlp/ccg2lambda/blob/master/en/semantic_templates_en_event.yaml)).
 
-### Copular predicates keep their current encoding
+### Frames: a PP can restrict the whole claim
 
-Maienborn finds that statives and "all copular predicates" fail every event diagnostic. Locatives with them act as "frame adverbials" that restrict the proposition ([Maienborn 2011, pp. 819–822](https://ub01.uni-tuebingen.de/xmlui/bitstream/handle/10900/47121/pdf/Maienborn_2011_Event_semantics.pdf?sequence=1&isAllowed=y)). Katz keeps statives without a Davidsonian argument; "once existential closure has applied … state sentences and event sentences are of the same logical type" ([Katz 2000, §4.1](https://zaspil.leibniz-zas.de/article/download/44/43)).
+*Decided (2026-10-06).* On the WRN page, most PPs on state predicates give the population, model or method within which a finding holds: «in MSI models», «in cancers with deficiencies in homologous recombination», «with PCR-based MSI classifications». Maienborn reads locatives with statives and copular predicates as "frame adverbials" that restrict the proposition ([Maienborn 2011, pp. 819–822](https://ub01.uni-tuebingen.de/xmlui/bitstream/handle/10900/47121/pdf/Maienborn_2011_Event_semantics.pdf?sequence=1&isAllowed=y)). Neither encoding available before this decision says that:
 
-The design keeps the categorial split this needs. `denote_cat` erases the Fin feature today (`kernel/src/dcg/category.rs:41`). One branch makes `⟦S[dcl,adj]⟧ = Prop` while every other `S[dcl,_]` becomes `Mod → Prop`. The copula then passes the adjective's predicate to `K` with the subject as anchor. As a result:
+- Subject anchoring makes WRN "in" MSI models.
+- An event condition locates a state that, on her analysis, has no location.
+- For «We found that WRN was selectively essential in MSI models.» today's forest puts «in MSI models» on *we* or on *WRN*.
+
+A frame attaches to a whole clause, clause-final (`S\S`) or fronted (`S/S`, «In MSI models, …»):
+
+```
+frame_in : Prop → Entity → Prop                 opaque; one per framing preposition
+⟦in⟧ frame = λx.λS.λK. frame_in(S(K), x)
+```
+
+- **Shape.** A clause denotes `Mod → Prop`, and the frame is a function on it. It passes `K` into the clause, so adjuncts inside still reach their events, and wraps the result the way `Possible` does. It meets the lexicon test above.
+- **Scope.** Above the subject quantifier, negation and modals. «The four other RecQ DNA helicases were not preferentially essential in MSI cell lines.» gets `frame_in(¬essential(H), L)`, with `H` the four helicases and `L` the MSI cell lines.
+- **No modifier drop.** `frame_in` is kernel-uninterpreted, like the modal operators, so `frame_in(φ, x)` does not entail `φ`: «WRN is essential in MSI models» does not entail «WRN is essential». An event condition licenses the drop; the two readings differ in their entailments.
+- **Grounding.** The structured encodings put the frame's object in an argument: the WRN chain has `onco:SelectiveViabilityDependence("WRN", "MSI")` (`experiments/publications/wrn-helicase/chain/03-phase1-recompute-plans.esl:870`), and D63 §8.13 maps «WRN depletion causes apoptosis in MSI» to `CausesApoptosis(WRN, MSI)`. The encoding institution maps `frame_*` onto that argument, as it supplies the `prep_*` relations (D62).
+- **Vocabulary.** The `frame_*` axioms sit beside the `prep_*` axioms in `ontologies/ontology/ontology.esl`, a bootstrap ontology.
+- **Complements are not frames.** Nothing gives «essential», «dispensable», «successful» or «true» an *in* or *with*. SPECIALIST does govern «essential for» and «concordant with», and D97 slice 3a reads a governed adjective preposition as the adjective's relational argument, which frames leave alone.
+
+On event verbs the forest offers both readings of a clause-final PP. Open question 8 lists what the frame reading leaves to decide.
+
+### Copular predicates keep no event; their PPs are frames
+
+*Decided (2026-10-06), open question 2 → (c).* Maienborn finds that statives and "all copular predicates" fail every event diagnostic ([Maienborn 2011, pp. 819–822](https://ub01.uni-tuebingen.de/xmlui/bitstream/handle/10900/47121/pdf/Maienborn_2011_Event_semantics.pdf?sequence=1&isAllowed=y)). Katz keeps statives without a Davidsonian argument; "once existential closure has applied … state sentences and event sentences are of the same logical type" ([Katz 2000, §4.1](https://zaspil.leibniz-zas.de/article/download/44/43)).
+
+The design keeps the categorial split this needs. `denote_cat` erases the Fin feature today (`kernel/src/dcg/category.rs:41`). One branch makes `⟦S[dcl,adj]⟧ = Prop` while every other `S[dcl,_]` becomes `Mod → Prop`. The copula applies the adjective's predicate to the subject and passes `K` nothing: `λP.λs.λK. P(s)`. As a result:
 
 - the 28 closed-class entries whose categories mention only `S[adj]` keep their types;
-- the imported adjectives keep their `gt(deg_a…(x), std_a…)` terms;
-- a PP on a copular VP still reads `prep_in(subject, x)`, CGEL's "location of theme" (CGEL, pp. 680–682).
+- the imported adjectives keep their `gt(deg_a…(x), std_a…)` terms, and D97's relational readings keep theirs;
+- a PP on a copular clause reads as a frame, no longer as `prep_in(subject, x)`, CGEL's "location of theme" (CGEL, pp. 680–682).
 
-Verbal and copular VPs still share one type and coordinate («is essential and promotes …»).
+Verbal and copular VPs still share one type and coordinate («is essential and promotes …»). A VP adjunct on such a coordination conditions the verbal conjunct's event only.
+
+Because the copula discards `K`, a VP adjunct on a copular VP would drop out of the term: «WRN was dispensable in models of microsatellite-stable cancers.» would get a reading with no «in». The copula's VP is `S[dcl,fin]\NP`, the same category as a finite verb's (`is_copula` in `closed-class.esl`), and each preposition's six VP-adjunct entries accept it. The grammar has to stop deriving that attachment; open question 9 asks how.
 
 | Current adjunct pin (15) | Host | Under the proposal |
 |---|---|---|
-| «…screened cell lines with a CRISPR library.», «…analysed cell lines with an RNA interference library.», «We ascertained MSI status with sequencing.», «These mutations occur in nucleotide repeat regions.», «These findings remained true with PCR-based MSI classifications.», «The MSI relationship compared favourably to other strong biomarkers for vulnerabilities.» (the «to» PP), «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.» | verb (7). #270 counts eight because it adds «… dependency in MSI cell lines compared to MSS cell lines», but that PP precedes «compared» and modifies the noun «dependency». | PP moves from the subject to the event; re-adjudicate |
-| «WRN was dispensable in models of microsatellite-stable cancers.», «These classifications were highly concordant with …», «The four other RecQ DNA helicases were not preferentially essential in MSI cell lines.», «MSI is most commonly observed in …», «We found that WRN was selectively essential in MSI models.», «PARP-1 inhibitors are successful in cancers with …», «These libraries define genes that were essential for proliferation and survival.» and «We analysed these data sets for genes that are selectively essential in cancer cells with MSI.» (PP on the relative clause's predicate) | copular/adjectival (8) | unchanged |
+| «…screened cell lines with a CRISPR library.», «…analysed cell lines with an RNA interference library.», «We ascertained MSI status with sequencing.», «These mutations occur in nucleotide repeat regions.», «These findings remained true with PCR-based MSI classifications.», «The MSI relationship compared favourably to other strong biomarkers for vulnerabilities.» (the «to» PP), «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.» | verb (7). #270 counts eight because it adds «… dependency in MSI cell lines compared to MSS cell lines», but that PP precedes «compared» and modifies the noun «dependency». | PP moves from the subject to the event, with a frame reading beside it; re-adjudicate |
+| «WRN was dispensable in models of microsatellite-stable cancers.», «These classifications were highly concordant with …», «The four other RecQ DNA helicases were not preferentially essential in MSI cell lines.», «MSI is most commonly observed in …», «We found that WRN was selectively essential in MSI models.», «PARP-1 inhibitors are successful in cancers with …», «These libraries define genes that were essential for proliferation and survival.» and «We analysed these data sets for genes that are selectively essential in cancer cells with MSI.» (PP on the relative clause's predicate) | copular/adjectival (8) | PP becomes a frame, or the adjective's relational argument where SPECIALIST governs the preposition («concordant with», «essential for»). The two relative clauses need frames inside embedded clauses (open question 8). Re-adjudicate |
 
 ## The type change is atomic and its cost is countable
 
@@ -323,78 +364,85 @@ Verbal and copular VPs still share one type and coordinate («is essential and p
 
 | Component | Change | Size (measured 2026-10-06) |
 |---|---|---|
-| Kernel | none: impredicative `∃`, class subsumption and `core:EquivalentClasses` exist | 0 |
+| Kernel | none: impredicative `∃` and class subsumption exist | 0 |
+| Ontologies | `lexicon:Eventuality ⊑ lexicon:Entity`, and the importer's extra parent for `event.n.01` and `state.n.02`; one opaque `frame_*` axiom per framing preposition in `ontology.esl`. `lexicon-ontology.esl` and `ontology.esl` are bootstrap ontologies and the importer change re-imports WordNet, so the chain reseeds | 1 class, 2 parent edges, 1 axiom per framing preposition (open question 8) |
 | `denote_cat` | branch `⟦S[dcl,f]⟧` on `f = adj` | 1 match arm (`kernel/src/dcg/category.rs:41`) |
 | Verb entries | `FrameKind::arrow` gains an event slot. The emitted verb sem wraps the axiom in `λ…λK. ∃e:Ev. K(λa. v(…, a))(e)`. D62 §5 calls this "a converter-rule change + reseed". | 8 frame tags in one converter; 13,767 WordNet verb synsets plus the SPECIALIST verbs of D97, re-emitted |
-| Closed class | sem types of entries over non-adjectival `S`. Terms change for determiners (pointwise `K`), negation, modals, prepositions, the copula and the complementiser; `do`, passive `be` and `by_agent` change type only | 316 of 465 entries; 137 SemTerms to audit (`ontologies/lexicon/closed-class.esl`) |
-| Engine rules | coordination folds pointwise over `K`; relativiser and root close with `λP.P` | 4 files, 7,010 lines, 58 connective sites (`kernel/src/dcg/rules/`) |
-| Verbaliser | `adjunct_of` matches the PP to the verb atom by the shared event variable instead of by the subject's printed string; the adjective and copula branches stay | `kernel/src/dcg/verbalize.rs:1497–1569` |
-| Pins | each verb adds `ΠG#k:Prop. ΠG#k+1:§.`, one argument and one `→ G#k → G#k`; later binders renumber | ≥48 of 63 pins reprint (every pinned sentence whose ledger rows carry a verb atom); 7 change meaning; the 8 copular or adjectival adjunct pins keep their subject-anchored PP |
-| Ledger | rows are keyed on the printed term, so every verb row is re-keyed. The D64 re-pin precedent was "transformed mechanically and checked against the new forest". | 193 of 228 rows re-keyed. 150 carry their verdict mechanically: 145 have no subject-anchored PP, and 5 hang it on an adjective or copula. 43 hang a PP on a verb and need re-adjudication (10 `correct`, 33 `wrong`, 14 of them grounded on subject predication). The 20 verbless rows with a subject-anchored PP on an adjective or copula are unchanged. |
+| Closed class | sem types of entries over non-adjectival `S`. Terms change for determiners (pointwise `K`), negation, modals, prepositions, the copula (it discards `K`) and the complementiser; `do`, passive `be` and `by_agent` change type only. New: two frame entries (`S\S`, `S/S`) per framing preposition | 316 of 465 entries; 137 SemTerms to audit (`ontologies/lexicon/closed-class.esl`) |
+| Engine rules | coordination folds pointwise over `K`; relativiser and root close with `λP.P`; VP adjuncts no longer reach copular VPs (open question 9) | 4 files, 7,010 lines, 58 connective sites (`kernel/src/dcg/rules/`) |
+| Verbaliser | `adjunct_of` matches the PP to the verb atom by the shared event variable instead of by the subject's printed string. Its adjective and copula branches lose their input; a frame rendering ("«in MSI models» says where the claim holds") replaces them | `kernel/src/dcg/verbalize.rs:1497–1569` |
+| Forest | every clause-final PP on a verbal clause gets a frame reading beside the event condition, and an embedded clause adds frame positions if open question 8 allows them; the ranker chooses among more readings | derived, not measured |
+| Pins | each verb adds `ΠG#k:Prop. ΠG#k+1:§.`, one argument and one `→ G#k → G#k`; later binders renumber | ≥51 of 62 pins reprint: the 48 pinned sentences whose ledger rows carry a verb atom, and 3 verbless copular adjunct pins. The 15 adjunct pins change meaning (7 verbal, 8 copular or adjectival); at least 36 reprint mechanically |
+| Ledger | rows are keyed on the printed term, so every verb row is re-keyed. The D64 re-pin precedent was "transformed mechanically and checked against the new forest". | 213 of 228 rows re-keyed. 142 verb rows with no PP on the subject carry their verdict mechanically. 71 hang a PP on the subject and need re-adjudication: 46 on a verb (11 `correct`, 35 `wrong`, 14 of the `wrong` grounded on subject predication) and 25 on an adjective or copula (13 `correct`, 12 `wrong`; 20 of them in verbless rows, 1 inside a relative clause). The 15 verbless rows without such a PP are unchanged. |
 | Canonical hashing | D47 stores binder names as strings, and readback names binders `G#<level>` (`kernel/src/nbe/readback.rs:392`), so α-variants already hash alike. Conjunct order is attachment order, first-attached innermost; the identity closure leaves no `True`. | every `enc:EncodedClaim` with a verb gets a new proposition and witness key; regenerate by drop-and-reseed |
 | Term size | positional: +2 binders, +1 argument per verb. Neo-Davidsonian roles would add two role atoms per transitive verb on top; PMB gold has 7,516 role clauses beside 7,545 concept clauses ([van Noord et al. 2018, Table 1](https://aclanthology.org/L18-1267.pdf)) | derived, not measured |
 
 ## Recommendation
 
 1. **Arguments: positional.** Adopt Davidsonian positional arguments plus one event argument, typed `lexicon:Entity` and bound by an impredicative `∃e:Ev` inside each verb's lexical entry. Governed PPs stay positional in `v{offset}_p_{prep}`. Do not adopt thematic-role predicates now.
-2. **VP type.** Make the VP denotation take a predicate-transforming continuation, `Mod := (Entity → Prop) → Entity → Prop`, closed by the identity at the parse root and at every embedding boundary.
-3. **Adjuncts.** Intersective adjuncts extend `Mod` with an opaque `prep_*(a, x)` conjunct on the anchor. Negation, modals and GQs pass `Mod` through. A test enforces this shape.
-4. **Event class.** Use one event class, `wn:n00029378` `event.n.01`, with `urn:schema_org:Action` declared equivalent to `wn:n00037396` so D62's root enters the lattice under `lexicon:Entity`.
-5. **Copular predicates** keep no event and keep their subject-anchored adjuncts.
-6. **Deferred:** dependent event types, per-verb event classes, sum events and Kimian states. Each waits for a task that needs it.
+2. **VP type.** Make the VP denotation take a predicate-transforming continuation over eventualities, `Mod := (Ev → Prop) → Ev → Prop`, closed by the identity at the parse root and at every embedding boundary.
+3. **Adjuncts.** Intersective adjuncts extend `Mod` with an opaque `prep_*(a, x)` conjunct on the event. Negation, modals, GQs and frames pass `Mod` through. A test enforces this shape.
+4. **Frames** (decided). A PP that says where a claim holds can attach to the clause as `frame_*(φ, x)`, above the subject quantifier, negation and modals.
+5. **Event class** (decided). `lexicon:Eventuality ⊑ lexicon:Entity`, above `wn:n00029378` `event.n.01` and `wn:n00024720` `state.n.02`. Every verb takes the argument, stative ones included.
+6. **Copular predicates** (decided) keep no event; their PPs are frames.
+7. **Deferred:** dependent event types, per-verb event classes, sum events, Kimian states and `schema_org:Action ≡ wn:n00037396`. Each waits for a task that needs it.
 
 ## Implementation path and cost
 
 **Slice 1 (vocabulary, no grammar change).**
 
-- Declare the `core:EquivalentClasses` instance for `urn:schema_org:Action` and `wn:n00037396`, with a SEMAPV justification per D99 §11.
-- Fix the event class.
-- Witnesses: `is_subclass_of(urn:schema_org:Action, lexicon:Entity)` and `is_subclass_of(wn:n00029378, lexicon:Entity)`.
-- Cost: one resource plus a test.
+- Declare `lexicon:Eventuality ⊑ lexicon:Entity` in the lexicon ontology, and have the WordNet importer give `wn:n00029378` and `wn:n00024720` it as an extra parent.
+- Declare the `frame_*` axioms for the prepositions open question 8 settles, beside the `prep_*` axioms in `ontology.esl`.
+- Witnesses: `is_subclass_of(wn:n00029378, lexicon:Eventuality)`, `is_subclass_of(wn:n00024720, lexicon:Eventuality)` and `is_subclass_of(lexicon:Eventuality, lexicon:Entity)`.
+- Cost: one class, two parent edges, the frame axioms and a test. Both ontologies are in the bootstrap, so the slice reseeds; landing it with slice 2 shares that reseed.
 
 **Slice 2 (the type change, one PR, since no subset type-checks).**
 
 - the `denote_cat` branch;
 - the converter's event slot and verb sem;
 - the 316 closed-class types and the VP-touching terms;
+- the frame entries;
+- the copula's sem, and keeping VP adjuncts off copular VPs (open question 9);
 - the coordination, relativiser and root-closure rules;
-- `adjunct_of` keyed on the event variable;
+- `adjunct_of` keyed on the event variable, and the frame rendering;
 - the Charlow-invariant lexicon test;
 - a reseed (`scripts/reseed-lexicon-db.sh`).
 
 The same PR transforms the pins and ledger mechanically:
 
-- at least 41 verb pins without a verbal adjunct;
-- 150 ledger rows.
+- at least 36 verb pins without an adjunct PP;
+- 142 ledger rows.
 
-It also brings the 7 verbal-adjunct pins and 43 ledger rows to the maintainer as a re-adjudication batch, because the parse gates fail on stale pins otherwise.
+It also brings the 15 adjunct pins and 71 ledger rows to the maintainer as a re-adjudication batch, because the parse gates fail on stale pins otherwise.
 
 **Slice 3 (persisted claims).** Drop and reseed the encoded artefacts. Every verb-bearing claim gets a new D47 term and witness key.
 
 **Later, each its own decision:**
 
 - thematic roles for knowledge-graph alignment, taking D62's fork (role axioms vs property-as-relation);
+- `schema_org:Action ≡ wn:n00037396`, when role alignment needs D62's root in the lattice;
+- a stativity source, to bind known-stative senses at `state.n.02`;
 - Kimian states, if state anaphora or the stative adverb gap is needed;
 - sum events for measure adjuncts;
 - the generic reading of present-tense negation.
 
 ## Open questions for the maintainer
 
-**1. The event class.** Options:
+**1. The event class.** *Decided 2026-10-06: (b).* The options were:
 
-- (a) bind at `wn:n00029378` and declare `schema_org:Action ≡ wn:n00037396` (recommended);
-- (b) mint a `lexicon:Eventuality` above both;
+- (a) bind at `wn:n00029378` and declare `schema_org:Action ≡ wn:n00037396`. With stative verbs taking the argument, this types their eventualities as happenings.
+- (b) mint a `lexicon:Eventuality` above `wn:n00029378` and `wn:n00024720`. **Chosen.** The Action equivalence becomes a later step.
 - (c) bind at `urn:schema_org:Action` as D62 named it. This still requires placing Action under `lexicon:Entity`, and it types the events of `arise`, `result` and `occur` as agentive.
 
 `urn:schema_org:Event` is not a candidate: it is "an event happening at a certain time and location, such as a concert, lecture, or festival", its 20 subclasses are of that kind (`Festival`, `SportsEvent`, `ScreeningEvent`), and like Action it sits under the parentless `schema_org:Thing`, not `lexicon:Entity` (D62 §5: "scheduled happenings"). If a task imports schema.org-typed records, `schema_org:Event ⊑ wn:n00029378` is the sound link; #270 needs none.
 
-**2. Copular predicates.** Options:
+**2. Copular predicates.** *Decided 2026-10-06: (c), with the frame reading available on every clause, verbal or copular.* The options were:
 
-- (a) keep them eventless with subject-anchored adjuncts (recommended);
-- (b) introduce a Kimian state at the copula, which makes eventualities uniform and lets typing enforce the stative adverb gap, at the cost of a state binder in every copular clause;
-- (c) read their PPs as proposition-level frame restrictors, #270's option A applied to statives only.
+- (a) keep them eventless with subject-anchored adjuncts. This makes WRN "in" MSI models.
+- (b) introduce a Kimian state at the copula, which makes eventualities uniform and lets typing enforce the stative adverb gap, at the cost of a state binder in every copular clause. A PP would then condition a state that Maienborn says has no location.
+- (c) read their PPs as proposition-level frame restrictors. **Chosen.**
 
-**3. Stative verbs.** Should all verb synsets take events, including the 756 in `verb.stative`, as recommended because of the «arise» twins? Or should the importer start keeping `lex_filenum`, which `Synset` drops today (`crates/eigenius-wordnet/src/wndb.rs:84–126`), and split by class?
+**3. Stative verbs.** *Decided 2026-10-06: all verb synsets take the argument,* including the 756 in `verb.stative`, because of the «arise» twins. The importer does not start splitting by `lex_filenum`, which `Synset` drops today (`crates/eigenius-wordnet/src/wndb.rs:84–126`). A stativity source, if one is adopted later, refines the argument's class only.
 
 **4. Governed prepositions.** Options:
 
@@ -411,6 +459,14 @@ Either way the 14 rows grounded on "predicates … of the subject" need new evid
 - Should quantified PP objects scope over the event quantifier (de Groote & Winter, Champollion) rather than under it (ccg2lambda)?
 
 **7. Negation in present-tense scientific claims.** «Some cancers do not respond …» comes out as `¬∃e`, meaning no responding event occurs. A generic or dispositional reading, with Gen binding `e` as in Kratzer and Diesing via Maienborn, is not covered by any source read.
+
+**8. Frames.** The frame reading leaves three choices:
+
+- (i) Which reading the ledger rules best when the event condition and the frame are both faithful, as in «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.» Proposed: the frame for PPs that state a domain of validity («in MSI models», «with PCR-based MSI classifications»), the event condition for instruments and for locations of an action («with a CRISPR library»).
+- (ii) Which prepositions frame. Candidates: *in*, *with*, *for*, *among*, *across*.
+- (iii) Whether frames attach inside embedded clauses. A «that»-complement gives the choice between framing «WRN was essential» and framing «we found» («We found that WRN was selectively essential in MSI models.»). Two copular pins put the PP inside a relative clause («genes that are selectively essential in cancer cells with MSI»), and only an embedded frame keeps it there.
+
+**9. Copular VPs and VP adjuncts.** The copula discards `K`, so a VP adjunct on a copular VP must not be derivable (see "Copular predicates keep no event; their PPs are frames"). The copular VP and the finite verbal VP share the category `S[dcl,fin]\NP`. Keeping VP adjuncts off the copular one takes a category distinction that the VP-adjunct entries see and that every other VP-taking entry, and the coordination rule, accept on both sides.
 
 ## Sources
 
