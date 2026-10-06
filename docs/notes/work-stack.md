@@ -9,8 +9,30 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **entry 3 (`2026-09-30`). #263 and #264 — governed prepositions and the reading ranker, on
-> `prepositions-and-ranker`. ACTIVE.**
+> **entry 4 (`2026-10-06`). #270 — event semantics for verbs and their modifiers, on `event-semantics`.
+> ACTIVE.**
+>
+> The owner decided option B on #270 (`2026-10-06`): verb adjuncts attach to an event, not to the
+> subject; D63 §(B)'s `And(V(s), prep(s, x))` is replaced. A literature survey (Davidson; Parsons and
+> Kratzer; Champollion's quantificational event semantics; Winter & Zwarts and de Groote & Winter;
+> ccg2lambda and lightblue; Luo & Soloviev's dependent event types; Cooper's TTR; the 2025 Element)
+> produced `docs/notes/event-semantics-draft.md`. Its recommendation: Davidsonian positional arguments
+> plus one event argument, the event quantifier closed inside each verb's entry, governed PPs
+> positional, adjunct PPs and adverbs as event conditions, one event class at `wn:n00029378`
+> (`schema_org:Action ≡ wn:n00037396`), copular predicates eventless. No partial path exists: the
+> type change is one slice (316 of 465 closed-class entries, the converter, coordination, the
+> verbaliser, a reseed, at least 48 of 63 pins, 193 of 228 ledger rows, 43 of them re-adjudicated).
+> **Next:** the owner's answers to the draft's seven open questions (the event class, copular
+> predicates, stative verbs, governed prepositions' free-adjunct parse, U1's purpose «for»,
+> coordination and quantified PP objects, generic negation); then slice 1 (the class equivalence).
+> #264's strand 3 (whether attachment is derivable) waits on this design. #271 (the «a DNA» atom)
+> is independent.
+>
+> **Exit gate:** the design note settled and the event slice merged, with pins and ledger
+> re-adjudicated on a reseed.
+
+> **entry 3 (`2026-09-30`). #263 and #264 — governed prepositions and the reading ranker. DONE, merged
+> as #272 (`f331dcb`, `2026-10-06`); #264 stays open for strand 3, now under entry 4.**
 >
 > **#263:** the WordNet importer decides an adjective's governed preposition against its own list of
 > eleven, which never gained `lexicon:Prep`'s `of` and `as`; it keeps one preposition per lemma, and
@@ -123,8 +145,8 @@ any detour.
 > **Exit gate:** #263 landed with its reseed and re-adjudicated pins; #264's first two strands measured
 > on a fixed snapshot and the third decided.
 
-> **entry 3 (`2026-10-02`). UAB experiment 02 — typing a PMI registry case, on
-> `uab-experiment-02`. ACTIVE.**
+> **entry 3 (`2026-10-02`). UAB experiment 02 — typing a PMI registry case. DONE, merged as #269
+> (`a2a1076`).**
 >
 > **Done on this branch:** HPO 2026-09-01 imported and aligned with UMLS (`4b07e11`); the design,
 > `docs/design/d99-uab-registry-case-typing.md` (`6b3c307`), all ten decisions decided
