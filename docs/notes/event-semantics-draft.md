@@ -1,8 +1,8 @@
 # Close verb events inside lexical entries
 
-*Design-note draft for `docs/notes/`. It answers eigenius#270 after the maintainer chose option B, event semantics, on 2026-10-06. It proposes changes; it changes no code.*
+*Design note for `docs/notes/`. It answers eigenius#270 after the maintainer chose option B, event semantics, on 2026-10-06. The maintainer decided all ten of its questions the same day; what stays open is listed under "Later, each its own decision". It changes no code.*
 
-**Decided so far (the maintainer):**
+**Decided (the maintainer, 2026-10-06):**
 
 - **Events** (2026-10-06, #270 option B): verb adjuncts attach to an event, not to the subject.
 - **Verbs denote relations with an event slot** (2026-10-06): `screen : Entity → Entity → Ev → Prop`, not event-type families `screen : Entity → Entity → Set` with every `screen(o, s) ⊑ Ev`. The relation gives both views: the type of screenings is definable from it at any time (`Σe:Ev. screen(o, s, e)`), while a family gives no proposition saying of an event obtained elsewhere — a graph resource, a coreferent event in another sentence — that it is a screening of `o` by `s`. Families also leave `∃e : screen(o, s). ⊤` for an unmodified verb. Their kernel cost would be small (see "Kind 1 and kind 2 coercions" below), so the reason is the missing predicate, not the kernel.
@@ -16,6 +16,7 @@
 - **Governed prepositions** (2026-10-06, open question 4). The governed reading stays the pin, as the 2026-09-30 and 2026-10-05 rulings made it. Under events the free-adjunct reading of a governed preposition no longer contradicts the sentence, so slice 2's re-adjudication rules it `correct` with `departs`. Selection demotes, before the ranker sees the candidates, any reading that hangs a preposition as a free adjunct or a frame on a verb whose sense the lexicon names it on (`v{offset}_p_{prep}`); WordNet's any-preposition frame names no preposition and stays with the ranker. This answers #264's strand 3 for those prepositions.
 - **Purpose «for»** (2026-10-06, open question 5). U1's «for cancer therapeutics» attaches to «exploit», as the purpose of the exploiting: `Possible(∃e. exploit(SL, S, e) ∧ prep_for(e, T))`. U1 is re-pinned in slice 2, since today's encoding would pin the purpose of the scientists. Purpose «for» stays the one opaque `prep_for`; under events its eventuality anchor tells it from a noun-level «for».
 - **Quantified PP objects scope over the event quantifier** (2026-10-06, open question 6 (ii)): «in every model» gives `∀m. model(m) → ∃e. … ∧ in(e, m)`, as in de Groote & Winter and Champollion. The lexicon test already requires it: an entry may extend `K` only with an atomic relation, so the quantifier wraps `V(s)(K)` from outside.
+- **Frame or noun: the noun-internal reading wins a tie** (2026-10-06, open question 10). Where a frame and a noun-internal reading both restrict the claim, the drop test cannot separate them; the noun-internal reading is best. «PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination.» gets one frame whose object is HR-deficient cancers, not a «with» frame stacked under an «in» frame.
 - **Negation stays `¬∃e` under the subject quantifier** (2026-10-06, open question 7). «Some cancers do not respond to immune checkpoint blockade.» means: there exists `c`, an instance of Cancer, for which «responds to» is false, `∃c:Cancer. (∃e:Ev. respond_to(icb, c, e)) → False`. For an individual, not responding is the absence of a responding event of it. Generic and dispositional readings arise only for kind-level subjects and are deferred.
 - **Coordination stays distributive** (2026-10-06, open question 6 (i)): one event per conjunct, for coordinated subjects and objects alike, until a task needs sum events. «in MSI models» on «promoted apoptosis and cell cycle arrest» is covered: as an event condition the shared continuation puts it on both events, and as a frame it wraps the coordination once from outside.
 - **An eventivity feature on `S` keeps VP adjuncts off copular VPs** (2026-10-06, open question 9). `cat_s(mood, fin, evt)` gains `lexicon:Eventivity` (`eventive | eventless`), erased by ⟦·⟧ like Fin, Num, Prep and Mode. Verbs build eventive VPs and the copula eventless ones; VP adjuncts select eventive VPs; entries that pass a VP through bind the feature, entries that close a clause accept either, and a coordination is eventive only if every conjunct is. The grammar thereby states Katz's stative adverb gap for copular predicates.
@@ -350,6 +351,7 @@ frame_in : Prop → Entity → Prop                 opaque; one per framing prep
 - **Embedded clauses** (decided, open question 8 (iii)). A «that»-complement is a full clause (`S[dcl]`), so the clause-level frames attach to it as they are: «We found that WRN was selectively essential in MSI models.» gets `∃e. find(frame_in(essential(WRN), m), we, e)`. A relative clause's body is a VP missing its subject (`S[dcl]\NP`), which a clause-level frame cannot reach, so «in» and «with» also get a VP-level frame on finite VPs, `λx.λV.λs.λK. frame_in(V(s)(K), x)`. «… genes that are selectively essential in cancer cells with MSI.» then gets `ΣG:Gene. frame_in(essential(G), c)`; every other attachment of that PP («genes», «data sets», «analysed», a main-clause frame) misplaces it.
 - **The VP-level frame elsewhere.** It also attaches to main-clause VPs. With a name, kind or definite subject it prints the same term as the clause-level frame, so it adds no skeleton; with a quantified subject it adds a frame under the quantifier. No clause-final «in» or «with» PP on the page has a quantified subject. It wraps a copular VP from outside instead of extending `K`, so nothing is lost when the copula ignores `K`.
 - **Which clause.** Where a PP could frame more than one clause, the frame restricts the smallest clause whose unrestricted content the paper would not assert, and all of that clause, CGEL's "the domain to which the rest of the clause applies". «WRN was selectively essential» is not asserted unrestricted, so the «found» sentence's frame goes on the complement; a main-clause frame sits above a quantified subject.
+- **Frame or noun** (decided, open question 10). Where a PP can restrict either a noun before it or the whole claim, both readings fail the drop test, and the noun-internal reading is best. In a run of PPs ending a clause, a later «with» or «in» therefore modifies the noun before it, and the clause gets one frame whose object carries the whole restriction: `frame_in(successful(P), c)` with `c` the HR-deficient cancers, not `frame_in(frame_with(successful(P), deficiencies), cancers)`. The same holds for «… in cancer cells with MSI» and «We queried dependencies in cancers with MSI.»
 
 On event verbs the forest offers both readings of a clause-final PP. The ledger rules by what the PP does (decided, open question 8 (i)), testing whether the paper would assert the clause without it:
 
@@ -357,7 +359,7 @@ On event verbs the forest offers both readings of a clause-final PP. The ledger 
 - «These findings remained true with PCR-based MSI classifications.»: no. The frame is best.
 - «Project Achilles screened cell lines with a CRISPR library.», «We ascertained MSI status with sequencing.» and «These mutations occur in nucleotide repeat regions.»: yes. The event condition is best.
 
-Open question 8 lists what the frame reading still leaves to decide.
+Open questions 8 and 10 record the rest of the frame decisions.
 
 ### Copular predicates keep no event; their PPs are frames
 
@@ -482,7 +484,7 @@ Each preposition adds one `frame_*` axiom, its entries and a frame reading on ev
 - sum events for measure adjuncts;
 - generic and dispositional readings of kind-level subjects, which need tense in the semantics, a Gen closure that lexical closure leaves room for, and a survey of the genericity literature.
 
-## Open questions for the maintainer
+## The questions put to the maintainer, all decided 2026-10-06
 
 **1. The event class.** *Decided 2026-10-06: (b).* The options were:
 
@@ -528,6 +530,14 @@ What selection does with these readings:
 - (c) present-tense verbs as eventless dispositional relations. Rejected: it undoes question 3 and needs tense too.
 
 Generic and dispositional readings arise for kind-level subjects («Defects in DNA mismatch repair promote a hypermutable state» gives `∃e. promote(…, e)`, which the generic claim entails but does not equal) and are deferred to their own design.
+
+**10. Frame or noun-internal reading.** *Decided 2026-10-06: (a).* Raised with 8 (ii): when a PP can restrict either a noun before it or the whole claim, the drop test of 8 (i) cannot choose, because both readings fail it. The options were:
+
+- (a) prefer the noun-internal reading; a frame is best only when the PP restricts the claim and no noun before it. **Chosen.** On the page it picks the faithful reading: the cancers have the HR deficiencies, the cells have MSI. The frame's object then carries the whole restriction for grounding.
+- (b) prefer the frame. Rejected: frames stack, «with deficiencies» becomes a condition on the whole claim, and the encoding institution has to recombine the stack into one argument.
+- (c) no rule, the ledger ruling each sentence. Rejected: the page's cases all resolve the same way.
+
+The ties on the page: «PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination.», «… genes that are selectively essential in cancer cells with MSI.», «We queried dependencies in cancers with MSI.», and «identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines» if «compared to …» attaches to the clause; where it stays in the noun phrase, as pinned, «in MSI cell lines» ends no clause and cannot frame.
 
 **8. Frames.** The frame reading leaves three choices:
 

@@ -38,9 +38,10 @@ any detour.
 > lexicon test requires (6 (ii)); coordination stays distributive until a task needs sum events
 > (6 (i)); negation stays `¬∃e` under the subject quantifier, «Some cancers do not respond …» being
 > an instance of Cancer for which «responds to» is false, with generic readings of kind-level
-> subjects deferred (7).
-> **Next:** the tie-break between a frame and a noun-internal reading that both restrict the claim;
-> then slice 1 (`lexicon:Eventuality` and the `frame_*` axioms).
+> subjects deferred (7); where a frame and a noun-internal reading both restrict the claim, the
+> noun-internal reading is best (10). The design note's ten questions are all decided.
+> **Next:** slice 1 (`lexicon:Eventuality` and the `frame_*` axioms), which can land with slice 2 to
+> share its reseed.
 > #264's strand 3 (whether attachment is derivable) is answered by question 4 for prepositions the
 > lexicon names on a sense; other attachments stay with the ranker. #271 (the «a DNA» atom) is
 > independent.
