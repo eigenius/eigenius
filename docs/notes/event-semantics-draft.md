@@ -13,6 +13,7 @@
 - **When the event condition and the frame are both faithful, the ledger rules by what the PP does** (2026-10-06, open question 8 (i)). The frame is best when the PP gives the population, model, method or classification within which the finding holds; the event condition is best when it gives a participant or circumstance of the event, such as an instrument. The test is the entailment that separates the two readings: would the paper assert the clause without the PP? If not, the frame. A per-preposition rule fails on the page: «with» frames in «remained true with PCR-based MSI classifications» and is an instrument in «screened cell lines with a CRISPR library».
 - **Framing prepositions** (2026-10-06, open question 8 (ii)): «in» and «with», in both positions, which are the two the page uses as frames. CGEL's other realisations of domain adjuncts are a planned augmentation, not left to attestation (slice 4): the other spatial-location prepositions and the dedicated domain PPs («with respect to», «as regards», «regarding», «from a … point of view», «as far as … is concerned»). The design keeps each addition to one `frame_*` axiom and its entries.
 - **Frames inside embedded clauses** (2026-10-06, open question 8 (iii)): main clauses and «that»-complements take the clause-level frames as they are. Relative clauses take a VP-level frame, `λx.λV.λs.λK. frame_in(V(s)(K), x)`, for «in» and «with» on finite VPs. Where a PP could frame more than one clause, the frame restricts the smallest clause whose unrestricted content the paper would not assert, and all of that clause, so a main-clause frame sits above a quantified subject.
+- **An eventivity feature on `S` keeps VP adjuncts off copular VPs** (2026-10-06, open question 9). `cat_s(mood, fin, evt)` gains `lexicon:Eventivity` (`eventive | eventless`), erased by ⟦·⟧ like Fin, Num, Prep and Mode. Verbs build eventive VPs and the copula eventless ones; VP adjuncts select eventive VPs; entries that pass a VP through bind the feature, entries that close a clause accept either, and a coordination is eventive only if every conjunct is. The grammar thereby states Katz's stative adverb gap for copular predicates.
 
 **Recommendation.** Every verb gets one Davidsonian event argument, placed after its positional arguments. The subject, the object and any governed PP (`respond to`, `arise from`) stay positional in the verb's named relation. Adjunct PPs and adverbs become conjuncts on the event, and a PP that says where the claim holds can instead frame the whole clause. The event quantifier closes inside the verb's own lexical entry, as Champollion (2015) proposes and as ccg2lambda and lightblue implement.
 
@@ -358,7 +359,17 @@ The design keeps the categorial split this needs. `denote_cat` erases the Fin fe
 
 Verbal and copular VPs still share one type and coordinate («is essential and promotes …»). A VP adjunct on such a coordination conditions the verbal conjunct's event only.
 
-Because the copula discards `K`, a VP adjunct on a copular VP would drop out of the term: «WRN was dispensable in models of microsatellite-stable cancers.» would get a reading with no «in». The copula's VP is `S[dcl,fin]\NP`, the same category as a finite verb's (`is_copula` in `closed-class.esl`), and each preposition's six VP-adjunct entries accept it. The grammar has to stop deriving that attachment; open question 9 asks how. The VP-level frame is not affected: it wraps the copular VP instead of extending `K`.
+Because the copula discards `K`, a VP adjunct on a copular VP would drop out of the term: «WRN was dispensable in models of microsatellite-stable cancers.» would get a reading with no «in». The copula's VP is `S[dcl,fin]\NP`, the same category as a finite verb's (`is_copula` in `closed-class.esl`), and each preposition's six VP-adjunct entries accept it. The grammar has to stop deriving that attachment. The VP-level frame is not affected: it wraps the copular VP instead of extending `K`.
+
+*Decided (2026-10-06), open question 9:* an eventivity feature on `S`, `cat_s(mood, fin, evt)` with `evt : lexicon:Eventivity = eventive | eventless`, erased by ⟦·⟧ like the other syntactic features.
+
+- Verbs build `S[dcl,f,eventive]\NP`; the copula builds `S[dcl,fin,eventless]\NP`.
+- The VP-adjunct entries select an eventive VP.
+- Entries that pass a VP through bind the feature as a variable, as `cat_fin_forall` binds Fin: modals, negation, «do», «to», the adverb modifiers and the VP-level frame. An adjunct above a modal over a copular VP is then refused too.
+- Entries that close a clause accept either: the complementiser, the relativiser, the root and the clause-level frames.
+- A coordination is eventive only if every conjunct is. «is essential and promotes …» still parses, and a VP adjunct attaches inside the verbal conjunct, which prints the term an attachment to the coordination would. The page has no VP coordination.
+
+This states Katz's stative adverb gap in the grammar for copular predicates: an event modifier selects a VP that has an event. Stative verbs take an eventuality (question 3), so their VPs are eventive and the gap for them («resembled her mother slowly») is not stated. A stativity source could state it later on the argument's class (`state.n.02`), leaving structure alone.
 
 | Current adjunct pin (15) | Host | Under the proposal |
 |---|---|---|
@@ -389,7 +400,8 @@ Because the copula discards `K`, a VP adjunct on a copular VP would drop out of 
 | `denote_cat` | branch `⟦S[dcl,f]⟧` on `f = adj` | 1 match arm (`kernel/src/dcg/category.rs:41`) |
 | Verb entries | `FrameKind::arrow` gains an event slot. The emitted verb sem wraps the axiom in `λ…λK. ∃e:Ev. K(λa. v(…, a))(e)`. D62 §5 calls this "a converter-rule change + reseed". | 8 frame tags in one converter; 13,767 WordNet verb synsets plus the SPECIALIST verbs of D97, re-emitted |
 | Closed class | sem types of entries over non-adjectival `S`. Terms change for determiners (pointwise `K`), negation, modals, prepositions, the copula (it discards `K`) and the complementiser; `do`, passive `be` and `by_agent` change type only. New: six frame entries, «in» and «with» in `S\S`, in `S/S` and on finite VPs | 316 of 465 entries; 137 SemTerms to audit (`ontologies/lexicon/closed-class.esl`) |
-| Engine rules | coordination folds pointwise over `K`; relativiser and root close with `λP.P`; VP adjuncts no longer reach copular VPs (open question 9) | 4 files, 7,010 lines, 58 connective sites (`kernel/src/dcg/rules/`) |
+| Engine rules | coordination folds pointwise over `K` and takes the meet of the eventivity feature; relativiser and root close with `λP.P` | 4 files, 7,010 lines, 58 connective sites (`kernel/src/dcg/rules/`) |
+| Eventivity feature | `cat_s` gains `lexicon:Eventivity` (open question 9): the copula's VPs are eventless, verbs' eventive, VP adjuncts select eventive, VP-passing entries bind it | 676 `cat_s` occurrences in 344 closed-class entries; 19 importer emission sites; 12 Rust files that build or match `cat_s` |
 | Verbaliser | `adjunct_of` matches the PP to the verb atom by the shared event variable instead of by the subject's printed string. Its adjective and copula branches lose their input; a frame rendering ("«in MSI models» says where the claim holds") replaces them | `kernel/src/dcg/verbalize.rs:1497–1569` |
 | Forest | every clause-final «in» or «with» PP gets a frame reading beside its other attachments; a PP that ends a «that»-complement and its main clause gets one frame reading per clause; the VP-level frame adds a reading only under a quantified subject. The ranker chooses among more readings | 15 of 62 page sentences end in an «in» or «with» PP; growth derived, not measured |
 | Pins | each verb adds `ΠG#k:Prop. ΠG#k+1:§.`, one argument and one `→ G#k → G#k`; later binders renumber | ≥51 of 62 pins reprint: the 48 pinned sentences whose ledger rows carry a verb atom, and 3 verbless copular adjunct pins. The 15 adjunct pins change meaning (7 verbal, 8 copular or adjectival); at least 36 reprint mechanically |
@@ -422,7 +434,7 @@ Because the copula discards `K`, a VP adjunct on a copular VP would drop out of 
 - the converter's event slot and verb sem;
 - the 316 closed-class types and the VP-touching terms;
 - the six frame entries;
-- the copula's sem, and keeping VP adjuncts off copular VPs (open question 9);
+- the copula's sem, and the eventivity feature on `cat_s` that keeps VP adjuncts off copular VPs (open question 9);
 - the coordination, relativiser and root-closure rules;
 - `adjunct_of` keyed on the event variable, and the frame rendering;
 - the Charlow-invariant lexicon test;
@@ -451,7 +463,8 @@ Each preposition adds one `frame_*` axiom, its entries and a frame reading on ev
 - `schema_org:Action ≡ wn:n00037396`, when role alignment needs D62's root in the lattice;
 - a stativity source, to bind known-stative senses at `state.n.02`;
 - CGEL's other realisations of domain adjuncts, adverbs («Economically, …») and participials («economically speaking»). A productive -ly adverb seeds identity entries today (D62 Phase 3, `adverb_modifier_cats` in `kernel/src/dcg/category.rs`), so where one attaches, its restriction is lost;
-- Kimian states, if state anaphora or the stative adverb gap is needed;
+- Kimian states, if state anaphora is needed. The eventivity feature already states the stative adverb gap for copular predicates;
+- the stative adverb gap for stative verbs, on the argument's class once a stativity source exists;
 - sum events for measure adjuncts;
 - the generic reading of present-tense negation.
 
@@ -495,7 +508,12 @@ Either way the 14 rows grounded on "predicates … of the subject" need new evid
 - (ii) Which prepositions frame. *Decided 2026-10-06: «in» and «with» now, CGEL's list as a planned augmentation (slice 4).* On the page, 15 of 62 sentences end in a PP run containing «in» or «with». By the drop test the frame is best in 8 (7 «in», 1 «with»), the event condition in 5, the governed reading in 1 («concordant with») and the noun-internal reading in 1. No page sentence needs a «for» frame: in «a promising drug target for MSI cancers» the frame and the noun-internal reading both restrict the claim. Rejected: frames for all 14 prepositions that have a finite VP-adjunct entry today, which would add frame readings to about 45 of the 62 sentences (hand count), mostly for «from», «to» and «for».
 - (iii) Whether frames attach inside embedded clauses. *Decided 2026-10-06: main clauses, «that»-complements and, through a VP-level frame, relative clauses; the frame restricts the smallest clause whose unrestricted content the paper would not assert, and all of it* (see "Frames"). Rejected: main and complement clauses only, which leaves «… genes that are selectively essential in cancer cells with MSI» without a faithful reading; main clauses only, which also loses the «found» sentence's best reading and needs a marking to keep frames out of complements.
 
-**9. Copular VPs and VP adjuncts.** The copula discards `K`, so a VP adjunct on a copular VP must not be derivable (see "Copular predicates keep no event; their PPs are frames"). The copular VP and the finite verbal VP share the category `S[dcl,fin]\NP`. Keeping VP adjuncts off the copular one takes a category distinction that the VP-adjunct entries see and that every other VP-taking entry, and the coordination rule, accept on both sides. The VP-level frames of open question 8 (iii) must keep accepting copular VPs.
+**9. Copular VPs and VP adjuncts.** The copula discards `K`, so a VP adjunct on a copular VP must not be derivable (see "Copular predicates keep no event; their PPs are frames"). The copular VP and the finite verbal VP share the category `S[dcl,fin]\NP`. *Decided 2026-10-06: (a), an eventivity feature on `S`.* The options were:
+
+- (a) a third feature on `cat_s`, eventive or eventless, which VP adjuncts select. **Chosen.** It follows the grammar's separate syntactic features (Fin, Num, Prep, Mode) and keeps the feature meet a lattice.
+- (b) a copular Fin value `cop`. Accepting it wherever a finite clause or VP is selected needs a pair `cop ⊑ fin` in the meet, which lets the VP adjuncts' `fin` accept it too; refusing it there needs a further value only verbs meet, and the meet stops being a lattice.
+- (c) a filter that refuses a VP adjunct whose condition is missing from the result: a guard, since the categories would still license the attachment.
+- (d) a separate type for eventless VPs, which needs (a)'s distinction for `denote_cat` to branch on and then both types on every VP-taking entry.
 
 ## Sources
 
