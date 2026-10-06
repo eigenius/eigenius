@@ -398,6 +398,7 @@ jev's abstentions on «Each event alone does not lead to cell death.» (jev3) an
    - Add a `notes` line to the structure choice: brackets mark only what the analyses group differently; `⟨…⟩` marks one term.
    - Do 2 at the same time: once one-term options are visible, models will pick them on U3/U3c, where the pins are compositional.
 2. **One policy for lexicalised vs compositional in pins and ledger (P2).** 18 decisions re-scored (U2 6, U3 6, U5 6).
+   - **DECIDED `2026-10-05` (the maintainer):** the pin takes the one-term concept, and its decomposition is `correct, departs` in the ledger. Applied to U3 and U3c (C1155661 over «DNA mismatch repair»); row 59's ground and both pin notes corrected. U3 was re-pinned at the same time to the governed «from» of `result from` (D97 slice 2), with the three `arise from` units on the page; their free-adjunct readings are `wrong`, as for «respond to». U2's re-pin is still open.
    - Either a concept and its decomposition count as one structure (the pin file admits alternates, or the structure diagnostic accepts a ledger `departs`-correct structure), or pins name one form and the ledger stops accepting the other.
    - Correct row 59 and the pin notes of U3 and U3c: C1155661 over «DNA mismatch repair» drops nothing.
    - Re-pin U2 to option 4's skeleton (DNA ⊗ repair ⊗ pathway under the existential) or to the BEST row's C1511689. In the lexicon, gate the surface form «a DNA» of C0000702 «DNA, A-Form» (written «A-DNA») so an article cannot seed as part of a term.
