@@ -1230,7 +1230,7 @@ pub(crate) fn is_pp_refined(ty: &Exp) -> bool {
                 mentions_prep(b)
             }
             Exp::InductiveCtor(_, _, args) => args.iter().any(mentions_prep),
-            Exp::Id(a, b, c) | Exp::DecEq(a, b, c) => {
+            Exp::Id(a, b, c) | Exp::Apart(a, b, c) => {
                 mentions_prep(a) || mentions_prep(b) || mentions_prep(c)
             }
             _ => false,

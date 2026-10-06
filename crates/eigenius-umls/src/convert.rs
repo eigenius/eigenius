@@ -41,6 +41,21 @@ use crate::rrf::Subset;
 /// The stable lexicon identity for this importer's output (D65 §3).
 pub const UMLS_LEXICON: &str = "lexicon:umls";
 
+/// The suffix of a concept's plain entry for a surface: `e_<CUI>_<i>`.
+const COUNT_SUFFIX: &str = "";
+/// The additive mass-noun entry (`cat_n(C, mass)`) of a mass-denoting concept.
+pub const MASS_SUFFIX: &str = "_mass";
+/// The additive named-condition entry (`cat_n(C, name)`, D70) of a disease or neoplasm.
+pub const NAME_SUFFIX: &str = "_name";
+
+/// Every suffix this importer mints a lexical entry under: a concept's entries for its `i`-th
+/// surface are `umlscui:e_<CUI>_<i><suffix>` for each of these that applies. A consumer that
+/// enumerates a concept's entries — an alignment emitter redefining them — iterates THIS, so a
+/// suffix added here reaches it. Both alignment emitters once kept their own copy, `["", "_mass"]`,
+/// and D70's `_name` entries went unaligned: every named condition kept a reading of the UMLS
+/// concept beside the aligned one.
+pub const ENTRY_SUFFIXES: &[&str] = &[COUNT_SUFFIX, MASS_SUFFIX, NAME_SUFFIX];
+
 /// **Junk-atom drop set** (D63 cross-lexicon alignment): `CUI → { original-case forms to skip }`.
 ///
 /// Produced by `lexicon-align drops` — atoms whose only contribution is a case-mangled collision
@@ -502,17 +517,17 @@ fn push_entries(
             rep.inflected_skipped += 1;
             continue;
         }
-        emit_entry(buf, cui, i, "", form, &cat, &sem_type);
+        emit_entry(buf, cui, i, COUNT_SUFFIX, form, &cat, &sem_type);
         rep.entries += 1;
         if bare.mass && named_tui.is_none() {
-            emit_entry(buf, cui, i, "_mass", form, &mass_cat, "Set");
+            emit_entry(buf, cui, i, MASS_SUFFIX, form, &mass_cat, "Set");
             rep.entries += 1;
             rep.mass_entries += 1;
         }
         // D70 — the bare-standing entry for a named condition. A named individual (`cat_np`) already
         // stands bare, so this fires only on the class path, exactly as the mass shim does.
         if bare.name && named_tui.is_none() {
-            emit_entry(buf, cui, i, "_name", form, &name_cat, "Set");
+            emit_entry(buf, cui, i, NAME_SUFFIX, form, &name_cat, "Set");
             rep.entries += 1;
             rep.name_entries += 1;
         }

@@ -1126,49 +1126,85 @@ pub fn check_infer(ctx: &mut CheckCtx, exp: &Exp) -> Result<Val, CheckError> {
             ))
         }
 
-        // DecEq(A, x, y): check A is a type, x and y inhabit A,
-        // return Id(A_val, x_val, y_val)
-        Exp::DecEq(a, x, y) => {
+        // Apart(A, x, y) : Id(A, x, y) -> logic:False (D99 §10). A is a type, x and y inhabit
+        // it, and — the side condition the rule's soundness rests on — they evaluate to DISTINCT
+        // canonical literals. Anything else (equal literals, floats, resources, neutrals) is
+        // refused, so no proof of a negation is admitted that the literals do not force.
+        Exp::Apart(a, x, y) => {
             check_type(ctx, a)?;
             let a_val = ctx.eval(a, &ctx.rho)?;
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)?;
             let x_val = ctx.eval(x, &ctx.rho)?;
             let y_val = ctx.eval(y, &ctx.rho)?;
-            Ok(Val::Id(Box::new(a_val), Box::new(x_val), Box::new(y_val)))
+            if !crate::nbe::eval::literals_apart(&x_val, &y_val) {
+                return Err(CheckError::IllFormed(format!(
+                    "apart: {:?} and {:?} are not distinct canonical literals (string, integer, \
+                     boolean, rational or unit), so Id between them is not refuted",
+                    readback_val(ctx.rho.len(), &x_val),
+                    readback_val(ctx.rho.len(), &y_val)
+                )));
+            }
+            let negation = Exp::Arrow(
+                Box::new(Exp::Id(a.clone(), x.clone(), y.clone())),
+                Box::new(Exp::Const(
+                    crate::ontology::well_known::iri(crate::ontology::well_known::LOGIC_FALSE),
+                    Vec::new(),
+                )),
+            );
+            Ok(ctx.eval(&negation, &ctx.rho)?)
         }
 
         // IdJ([A, C, d, x, y, p]): Martin-Löf J eliminator.
         // Per D18 §6.4, require an explicit motive C and return C(x, y, p).
         // Lean handles this via recursor reduction; we use a direct J-rule
         // since EigenTT doesn't have a recursor framework.
+        //
+        //   C : (x y : A) -> Id(A, x, y) -> Sort l     d : (z : A) -> C(z, z, refl z)
+        //   ─────────────────────────────────────────────────────────────────────────
+        //                 J(A, C, d, x, y, p) : C(x, y, p)      for p : Id(A, x, y)
+        //
+        // The motive is explicit, so nothing here needs higher-order unification. This rule used
+        // to ignore C and type J as d's codomain at x — `C(x, x, refl x)` — which `d(x)` already
+        // inhabits, so J proved nothing about y; congruence was not expressible (D99 §10).
         Exp::IdJ(args) => {
-            let [ref a, ref _c, ref d, ref x, ref y, ref p] = **args;
-            // A must be a type
+            let [ref a, ref c, ref d, ref x, ref y, ref p] = **args;
             check_type(ctx, a)?;
             let a_val = ctx.eval(a, &ctx.rho)?;
-            // x, y : A
             check(ctx, x, &a_val)?;
             check(ctx, y, &a_val)?;
             let x_val = ctx.eval(x, &ctx.rho)?;
             let y_val = ctx.eval(y, &ctx.rho)?;
-            // p : Id(A, x, y)
             let id_type = Val::Id(
                 Box::new(a_val.clone()),
-                Box::new(x_val.clone()),
+                Box::new(x_val),
                 Box::new(y_val),
             );
             check(ctx, p, &id_type)?;
-            // d : (a : A) → C(a, a, refl(a)) — the base case
-            // For now, just infer d's type; the full motive check
-            // requires higher-order unification which is Phase 10b.
-            let d_type = check_infer(ctx, d)?;
-            // J reduces to d(x) when p = refl(x), so the result type
-            // is the return type of d applied to x.
-            match d_type {
-                Val::Pi(_, g) => ctx.apply(&g, x_val).map_err(CheckError::from),
-                _ => Ok(Val::sort(1)), // conservative fallback
-            }
+            check_j_motive(ctx, c, &a_val)?;
+            // The method, against `(z : A) -> C(z, z, refl z)`. `z` is a name no ESL source can
+            // write, so it cannot capture a free variable of `C`.
+            let z = "__j_z".to_string();
+            let at_refl = Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::App(Box::new(c.clone()), Box::new(Exp::Var(z.clone())))),
+                    Box::new(Exp::Var(z.clone())),
+                )),
+                Box::new(Exp::Refl(Box::new(Exp::Var(z.clone())))),
+            );
+            let method_type = ctx.eval(
+                &Exp::Pi(Patt::Var(z), Box::new(a.clone()), Box::new(at_refl)),
+                &ctx.rho,
+            )?;
+            check(ctx, d, &method_type)?;
+            let result = Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::App(Box::new(c.clone()), Box::new(x.clone()))),
+                    Box::new(y.clone()),
+                )),
+                Box::new(p.clone()),
+            );
+            Ok(ctx.eval(&result, &ctx.rho)?)
         }
 
         // Map(f, coll): infer f : A → B, coll : List A, return List B.
@@ -1464,6 +1500,68 @@ fn find_sigma_field(ctx: &mut CheckCtx, typ: &Val, field_name: &str) -> Option<V
 ///
 /// Forgetting a refinement is safe here for the same reason it is safe in
 /// subtyping — the constraints do not change what fields the carrier has.
+/// `J`'s motive: `C : (x : A) -> (y : A) -> Id(A, x, y) -> Sort l`, for some `l` (D99 §10).
+///
+/// A lambda motive — the common case, and what ESL's `fun (x : A, y : A, q : …) => …` lowers
+/// to — cannot be inferred, since `Exp::Lam` carries no domain. So it is checked by entering its
+/// three binders at the types they must have and requiring the body to be a type. Any other
+/// motive must infer to that Π-chain.
+fn check_j_motive(ctx: &mut CheckCtx, c: &Exp, a_val: &Val) -> Result<(), CheckError> {
+    let not_a_motive = |why: String| {
+        CheckError::IllFormed(format!(
+            "J: the motive must be (x y : A) -> Id(A, x, y) -> Sort — {why}"
+        ))
+    };
+    if let Exp::Lam(px, b1) = c {
+        if let Exp::Lam(py, b2) = b1.as_ref() {
+            if let Exp::Lam(pq, body) = b2.as_ref() {
+                let vx = gen_val(&ctx.rho);
+                let c1 = ctx.extend(px, a_val, &vx)?;
+                let vy = gen_val(&c1.rho);
+                let c2 = c1.extend(py, a_val, &vy)?;
+                let id = Val::Id(Box::new(a_val.clone()), Box::new(vx), Box::new(vy));
+                let vq = gen_val(&c2.rho);
+                let mut c3 = c2.extend(pq, &id, &vq)?;
+                return match check_infer(&mut c3, body)? {
+                    Val::Sort(_) => Ok(()),
+                    other => Err(not_a_motive(format!(
+                        "its body is not a type: {:?}",
+                        readback_val(c3.rho.len(), &other)
+                    ))),
+                };
+            }
+        }
+    }
+    let mut ty = check_infer(ctx, c)?;
+    let mut rho = ctx.rho.clone();
+    let mut bound: Vec<Val> = Vec::new();
+    for slot in 0..3 {
+        let (dom, clos) = ext_pi(&ty)?;
+        let expected = if slot < 2 {
+            a_val.clone()
+        } else {
+            Val::Id(
+                Box::new(a_val.clone()),
+                Box::new(bound[0].clone()),
+                Box::new(bound[1].clone()),
+            )
+        };
+        eq_nf(rho.len(), &dom, &expected)
+            .map_err(|_| not_a_motive(format!("binder {slot} has the wrong domain")))?;
+        let v = gen_val(&rho);
+        rho = rho.extend(Patt::Var(format!("__j_m{slot}")), v.clone());
+        ty = ctx.apply(&clos, v.clone())?;
+        bound.push(v);
+    }
+    match ty {
+        Val::Sort(_) => Ok(()),
+        other => Err(not_a_motive(format!(
+            "it returns {:?}",
+            readback_val(rho.len(), &other)
+        ))),
+    }
+}
+
 fn find_record_field(ctx: &mut CheckCtx, typ: &Val, field: &Iri) -> Option<Val> {
     match typ {
         Val::Record(fields, rho) => {
@@ -1528,6 +1626,7 @@ mod tests {
     use crate::nbe::eval::EvalCtx;
     use crate::nbe::term::PrimitiveType;
     use crate::nbe::term::{InductiveCtorDecl, InductiveDecl};
+    use crate::nbe::val::Neut;
     use crate::ontology::iri::Iri;
 
     #[test]
@@ -2297,56 +2396,78 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn deceq_equal_reduces_to_refl() -> Result<(), Box<dyn std::error::Error>> {
-        use crate::nbe::eval::eval;
-        // DecEq(1, (), ()) → refl(())
-        let deceq = Exp::DecEq(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
-        let result = eval(&deceq, &Rho::Nil)?;
-        assert!(matches!(result, Val::Refl(_)));
-        Ok(())
+    fn apart(a: Exp, x: Exp, y: Exp) -> Exp {
+        Exp::Apart(Box::new(a), Box::new(x), Box::new(y))
     }
 
+    /// D99 §10 — two distinct integers are apart: the rule types as `Id(A, x, y) -> logic:False`.
     #[test]
-    fn deceq_unequal_produces_neutral() -> Result<(), Box<dyn std::error::Error>> {
-        use crate::nbe::eval::eval;
-        // DecEq(Set, 1, Set) — One ≠ Set, produces neutral
-        let deceq = Exp::DecEq(
-            Box::new(Exp::sort(1)),
-            Box::new(Exp::One),
-            Box::new(Exp::sort(1)),
+    fn apart_of_distinct_integers_is_a_negation_of_their_identity() {
+        let int = Exp::EigonPrimitive(PrimitiveType::Integer);
+        let t = check_infer(&mut ctx(), &apart(int, Exp::LitInt(130), Exp::LitInt(131)))
+            .expect("130 and 131 are apart");
+        let Val::Pi(dom, _) = &t else {
+            panic!("expected a function type, got {t:?}");
+        };
+        assert!(
+            matches!(dom.as_ref(), Val::Id(_, x, y)
+                if matches!(x.as_ref(), Val::LitInt(130)) && matches!(y.as_ref(), Val::LitInt(131))),
+            "domain is Id(Integer, 130, 131), got {dom:?}"
         );
-        let result = eval(&deceq, &Rho::Nil)?;
-        assert!(matches!(result, Val::Nt(_)));
-        Ok(())
     }
 
+    /// Equal literals are never apart — the rule would otherwise refute `refl`.
     #[test]
-    fn deceq_iri_equal() -> Result<(), Box<dyn std::error::Error>> {
-        use crate::nbe::eval::eval;
-        let iri = Iri::parse("urn:eigenius:core:string").unwrap();
-        let deceq = Exp::DecEq(
-            Box::new(Exp::sort(1)),
-            Box::new(Exp::EigonClass(iri.clone())),
-            Box::new(Exp::EigonClass(iri)),
-        );
-        let result = eval(&deceq, &Rho::Nil)?;
-        assert!(matches!(result, Val::Refl(_)));
-        Ok(())
+    fn apart_of_equal_literals_is_refused() {
+        let s = Exp::EigonPrimitive(PrimitiveType::String);
+        let lit = || Exp::LitString("C".to_string());
+        assert!(check_infer(&mut ctx(), &apart(s, lit(), lit())).is_err());
     }
 
+    /// `NaN != NaN` and `0.0 == -0.0`: `!=` on floats is not apartness, so floats are refused
+    /// outright rather than compared.
     #[test]
-    fn deceq_iri_unequal() -> Result<(), Box<dyn std::error::Error>> {
-        use crate::nbe::eval::eval;
-        let iri1 = Iri::parse("urn:eigenius:core:string").unwrap();
-        let iri2 = Iri::parse("urn:eigenius:core:integer").unwrap();
-        let deceq = Exp::DecEq(
-            Box::new(Exp::sort(1)),
-            Box::new(Exp::EigonClass(iri1)),
-            Box::new(Exp::EigonClass(iri2)),
+    fn apart_of_floats_is_refused() {
+        let f = Exp::EigonPrimitive(PrimitiveType::Float);
+        let e = apart(f, Exp::LitFloat(1.0), Exp::LitFloat(2.0));
+        assert!(check_infer(&mut ctx(), &e).is_err());
+    }
+
+    /// Two class IRIs are not literals: distinct names may denote one thing.
+    #[test]
+    fn apart_of_two_names_is_refused() {
+        let a = Exp::EigonClass(Iri::parse("urn:eigenius:core:string").unwrap());
+        let b = Exp::EigonClass(Iri::parse("urn:eigenius:core:integer").unwrap());
+        assert!(check_infer(&mut ctx(), &apart(Exp::sort(1), a, b)).is_err());
+    }
+
+    /// A variable is not yet a value: `x` might be 131.
+    #[test]
+    fn apart_of_a_variable_is_refused() {
+        let int = Val::EigonPrimitive(PrimitiveType::Integer);
+        let gamma: Gamma = vec![("x".to_string(), int)];
+        let rho = Rho::Nil.extend(
+            Patt::Var("x".to_string()),
+            Val::Nt(Neut::Gen(0, "x".to_string())),
         );
-        let result = eval(&deceq, &Rho::Nil)?;
-        assert!(matches!(result, Val::Nt(_)));
+        let mut c = CheckCtx::new(rho, gamma);
+        let e = apart(
+            Exp::EigonPrimitive(PrimitiveType::Integer),
+            Exp::Var("x".to_string()),
+            Exp::LitInt(131),
+        );
+        assert!(check_infer(&mut c, &e).is_err());
+    }
+
+    /// The proof has no reduction rule; it evaluates to its neutral and reads back to itself.
+    #[test]
+    fn apart_evaluates_to_its_neutral() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::nbe::eval::eval;
+        let int = Exp::EigonPrimitive(PrimitiveType::Integer);
+        let e = apart(int, Exp::LitInt(130), Exp::LitInt(131));
+        let v = eval(&e, &Rho::Nil)?;
+        assert!(matches!(v, Val::Nt(Neut::Apart(..))));
+        assert_eq!(readback_val(0, &v), e);
         Ok(())
     }
 
@@ -2371,14 +2492,6 @@ mod tests {
         let mut c = CheckCtx::new(rho, gamma);
         let refl_x = Exp::Refl(Box::new(Exp::Var("x".to_string())));
         let t = check_infer(&mut c, &refl_x).unwrap();
-        assert!(matches!(t, Val::Id(_, _, _)));
-    }
-
-    #[test]
-    fn infer_deceq() {
-        // DecEq(One, (), ()) should infer Id(One, (), ())
-        let deceq = Exp::DecEq(Box::new(Exp::One), Box::new(Exp::Unit), Box::new(Exp::Unit));
-        let t = check_infer(&mut ctx(), &deceq).unwrap();
         assert!(matches!(t, Val::Id(_, _, _)));
     }
 

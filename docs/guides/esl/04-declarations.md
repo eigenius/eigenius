@@ -137,7 +137,7 @@ Source: [`compile_resource`](../../../kernel/src/esl/compile.rs).
 
 ```esl
 axiom ex:propext :
-    forall (P : Prop, Q : Prop) => (P <-> Q) -> Id(Prop, P, Q)
+    forall (P : Prop, Q : Prop) => (P <-> Q) -> eigentt:Eq(Prop, P, Q)
 ```
 
 The `axiom` keyword takes a name, a colon, and a type expression. The statement is **postulated** — the kernel admits an inhabitant of the type without requiring a proof term, treating the axiom's name as an opaque constant equal only to itself by symbol identity. Conversion never `delta`-reduces it. The chain validator type-checks the *statement* against the universe ladder at commit and rejects malformed propositions; the inhabitant is granted by fiat.
@@ -151,7 +151,8 @@ The body to the right of the `:` is a type expression with the following forms (
 - `forall (x : T, y : U) => body` — value-typed Π binders (alias for `pi`).
 - `A -> B` — non-dependent arrow.
 - `Prop` / `Set` / `Type N` — sort literals.
-- `Id(A, x, y)` — equality at type `A`.
+- `eigentt:Eq(A, x, y)` — equality at type `A` (D99 §10). Not `Id(A, x, y)`: the bare name `Id` resolves to the quoted-term constructor `Id` of `eigentt:Term`, a term value rather than the type.
+- `eigentt:refl(x)`, `eigentt:J(A, C, d, x, y, p)`, `eigentt:apart(A, x, y)` and `eigentt:field(e, p)` — reflexivity, the identity eliminator (motive `C : (x y : A) -> eigentt:Eq(A, x, y) -> Sort`, method `d : (z : A) -> C(z, z, refl(z))`), literal apartness (`eigentt:Eq(A, x, y) -> logic:False` for distinct literals), and a resource's field. Arguments past a form's arity are applied to it: `eigentt:apart(A, x, y, p)`.
 - Constructor references, applied or nullary: `ex:Eq(A, x, y)`, `ex:zero`.
 
 The body need not be in `Prop` — `Set`-level axioms (e.g., postulating the existence of a particular structure) are admitted by the same mechanism — but the audit invariant (§ "What's rejected" below) means almost every chain-author axiom is a Prop.
@@ -162,7 +163,7 @@ Records the human-readable justification — why this axiom is being admitted, w
 
 ```esl
 axiom ex:proof_irrelevance :
-    forall (P : Prop, p : P, q : P) => Id(P, p, q)
+    forall (P : Prop, p : P, q : P) => eigentt:Eq(P, p, q)
 note: "Folklore; built into the kernel's Prop universe per D46 §5."
 ```
 

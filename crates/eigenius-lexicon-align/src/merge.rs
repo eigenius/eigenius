@@ -69,6 +69,51 @@ pub struct MergeStats {
 ///
 /// `candidates` supplies the surfaces: every surface that ever produced the pair `(cui, offset)`
 /// inherits that pair's verdict (rule 1).
+/// A maintainer's verdict on a `(cui, synset)` pair, recorded in
+/// `experiments/lexicon-align/maintainer-verdicts.jsonl`. It REPLACES the adjudicator's verdicts on
+/// that pair, whatever their confidence: the adjudication stays the recorded LLM output
+/// (`alignment.jsonl`, never edited), and a correction to it is a separate, attributed record. Read
+/// by both resolve steps ([`resolve`] through [`apply_maintainer_verdicts`], and the drop set), so a
+/// pair a maintainer declares the same is never dropped as junk either.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct MaintainerVerdict {
+    pub cui: String,
+    pub offset: String,
+    pub surface: String,
+    pub same: bool,
+    /// Why — the evidence the maintainer judged on.
+    pub reason: String,
+    /// Who decided.
+    pub by: String,
+    /// When, ISO-8601 date.
+    pub date: String,
+}
+
+/// The adjudicator's verdicts with every pair a maintainer judged replaced by the maintainer's
+/// verdict (confidence 1.0).
+pub fn apply_maintainer_verdicts(
+    verdicts: Vec<Verdict>,
+    maintainer: &[MaintainerVerdict],
+) -> Vec<Verdict> {
+    let judged: std::collections::BTreeSet<(&str, &str)> = maintainer
+        .iter()
+        .map(|m| (m.cui.as_str(), m.offset.as_str()))
+        .collect();
+    let mut out: Vec<Verdict> = verdicts
+        .into_iter()
+        .filter(|v| !judged.contains(&(v.cui.as_str(), v.offset.as_str())))
+        .collect();
+    out.extend(maintainer.iter().map(|m| Verdict {
+        cui: m.cui.clone(),
+        offset: m.offset.clone(),
+        surface: m.surface.clone(),
+        same: m.same,
+        confidence: 1.0,
+        reason: format!("maintainer ({}, {}): {}", m.by, m.date, m.reason),
+    }));
+    out
+}
+
 pub fn resolve(candidates: &[Candidate], verdicts: &[Verdict]) -> (Vec<Merge>, MergeStats) {
     // Rule 1: index the verdict by the CONCEPT PAIR, not by the surface that surfaced it.
     let mut by_pair: BTreeMap<(&str, &str), &Verdict> = BTreeMap::new();
@@ -176,6 +221,30 @@ mod tests {
     }
 
     /// Rule 2: below the threshold nothing merges, however emphatic the `same`.
+    /// A maintainer's verdict replaces the adjudicator's on its pair — here a confident `same=false`
+    /// (polydipsia, `C0085602` vs `n14040966`) — and licenses every surface of the concept.
+    #[test]
+    fn a_maintainer_verdict_replaces_the_adjudicators() {
+        let cands = [
+            cand("polydipsia", "C0085602", "14040966"),
+            cand("polydipsias", "C0085602", "14040966"),
+        ];
+        let llm = vec![verdict("C0085602", "14040966", "polydipsia", false, 0.75)];
+        let maintainer = [MaintainerVerdict {
+            cui: "C0085602".into(),
+            offset: "14040966".into(),
+            surface: "polydipsia".into(),
+            same: true,
+            reason: "HPO defines it as both".into(),
+            by: "m".into(),
+            date: "2026-10-02".into(),
+        }];
+        assert!(resolve(&cands, &llm).0.is_empty());
+        let (merges, _) = resolve(&cands, &apply_maintainer_verdicts(llm, &maintainer));
+        let surfaces: Vec<&str> = merges.iter().map(|m| m.surface.as_str()).collect();
+        assert_eq!(surfaces, ["polydipsia", "polydipsias"]);
+    }
+
     #[test]
     fn a_verdict_below_the_confidence_threshold_does_not_merge() {
         let cands = [cand("attachment", "C0870313", "13792970")];

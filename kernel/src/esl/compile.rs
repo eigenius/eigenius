@@ -525,6 +525,73 @@ pub fn collect_macros_from_layer(layer: &crate::layer::Layer) -> BTreeMap<String
     out
 }
 
+/// D99 §10 — the identity type and the proof-level forms a disequality proof is written with.
+///
+/// Surface spellings, like `eigentt:fst`, of term NODES rather than of axioms: an axiom is opaque,
+/// and these must compute (`J` on `refl`, a field of a named resource) or be checked (`apart`).
+/// None is a constructor of `eigentt:Term`, so none collides with the qualified constructor lookup
+/// — which is why the identity type is `eigentt:Eq`: `eigentt:Id` already names the quoted-term
+/// constructor `Id`.
+///
+/// | ESL | term |
+/// |---|---|
+/// | `eigentt:Eq(T, x, y)` | `Id(T, x, y)` |
+/// | `eigentt:refl(x)` | `Refl(x)` |
+/// | `eigentt:J(A, C, d, x, y, p)` | `IdJ` — `C : (x y : A) -> Id(A, x, y) -> Type`, `d : (x : A) -> C(x, x, refl(x))` |
+/// | `eigentt:apart(T, x, y)` | `Apart(T, x, y) : Id(T, x, y) -> logic:False`, for distinct literals |
+/// | `eigentt:field(e, p)` | `PropAccess(e, p)` — `p` names a property |
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IdentityForm {
+    Eq,
+    Refl,
+    J,
+    Apart,
+    Field,
+}
+
+impl IdentityForm {
+    fn of_iri(iri: &str) -> Option<Self> {
+        Some(match iri {
+            "urn:eigenius:eigentt:Eq" => Self::Eq,
+            "urn:eigenius:eigentt:refl" => Self::Refl,
+            "urn:eigenius:eigentt:J" => Self::J,
+            "urn:eigenius:eigentt:apart" => Self::Apart,
+            "urn:eigenius:eigentt:field" => Self::Field,
+            _ => return None,
+        })
+    }
+
+    fn arity(self) -> usize {
+        match self {
+            Self::Refl => 1,
+            Self::Field => 2,
+            Self::Eq | Self::Apart => 3,
+            Self::J => 6,
+        }
+    }
+
+    /// The `eigentt:Term` constructor the form encodes as.
+    fn ctor(self) -> &'static str {
+        match self {
+            Self::Eq => "Id",
+            Self::Refl => "Refl",
+            Self::J => "IdJ",
+            Self::Apart => "Apart",
+            Self::Field => "PropAccess",
+        }
+    }
+
+    fn spelling(self) -> &'static str {
+        match self {
+            Self::Eq => "eigentt:Eq",
+            Self::Refl => "eigentt:refl",
+            Self::J => "eigentt:J",
+            Self::Apart => "eigentt:apart",
+            Self::Field => "eigentt:field",
+        }
+    }
+}
+
 struct Compiler {
     namespaces: BTreeMap<String, String>,
     /// Level variables bound by `universe` declarations in this file (eigenius#188).
@@ -1946,6 +2013,10 @@ impl Compiler {
                     Exp::Snd(Box::new(inner))
                 })
             }
+            ast::Term::Ref { name, args, pos } if self.identity_form(name).is_some() => {
+                let form = self.identity_form(name).expect("guarded");
+                self.lower_identity_form(form, args, pos, scope)
+            }
             ast::Term::Ref { name, args, .. } => {
                 let is_bound = name.namespace.is_none() && scope.contains(name.name.as_str());
                 if is_bound {
@@ -2154,6 +2225,143 @@ impl Compiler {
     /// Cases that can contain nested `Lambda`s (Arrow, Pi, BinderArrow,
     /// Ref with args) recurse here so the annotation survives at any
     /// depth. Leaves with no Lambda exposure (Sort, literals) delegate
+    /// The identity form `name` spells, if any (D99 §10). Resolution failure is "not one": the
+    /// general `Ref` arm reports an unknown namespace with its own diagnostic.
+    fn identity_form(&self, name: &ast::QualifiedName) -> Option<IdentityForm> {
+        self.resolve(name)
+            .ok()
+            .and_then(|iri| IdentityForm::of_iri(&iri))
+    }
+
+    fn check_identity_arity(
+        &self,
+        form: IdentityForm,
+        args: &[ast::Term],
+        pos: &crate::esl::error::Position,
+    ) -> Result<(), EslError> {
+        if args.len() >= form.arity() {
+            Ok(())
+        } else {
+            Err(EslError::compiler(
+                Some(pos.clone()),
+                format!(
+                    "`{}` takes {} argument(s), got {}",
+                    form.spelling(),
+                    form.arity(),
+                    args.len()
+                ),
+            ))
+        }
+    }
+
+    /// `eigentt:field`'s second argument: a property NAME, not a term.
+    fn field_property(
+        &self,
+        arg: &ast::Term,
+        pos: &crate::esl::error::Position,
+    ) -> Result<Iri, EslError> {
+        let not_a_name = || {
+            EslError::compiler(
+                Some(pos.clone()),
+                "`eigentt:field`'s second argument must name a property, e.g. `variant:start`"
+                    .to_string(),
+            )
+        };
+        match arg {
+            ast::Term::Ref { name, args, .. } if args.is_empty() => {
+                Iri::parse(&self.resolve(name)?).map_err(|_| not_a_name())
+            }
+            _ => Err(not_a_name()),
+        }
+    }
+
+    /// Lower an identity form to an `Exp` (the axiom / `def` path). Arguments past the form's
+    /// arity are APPLIED to it, as ESL's `f(a, b)` is curried application: `eigentt:apart(T, x,
+    /// y, p)` is `Apart(T, x, y)` applied to `p`, there being no `f(a)(b)` in ESL.
+    fn lower_identity_form(
+        &self,
+        form: IdentityForm,
+        args: &[ast::Term],
+        pos: &crate::esl::error::Position,
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<Exp, EslError> {
+        self.check_identity_arity(form, args, pos)?;
+        let (own, applied) = args.split_at(form.arity());
+        let mut acc = self.lower_identity_head(form, own, pos, scope)?;
+        for a in applied {
+            acc = Exp::App(
+                Box::new(acc),
+                Box::new(self.lower_type_expr_to_exp(a, scope)?),
+            );
+        }
+        Ok(acc)
+    }
+
+    fn lower_identity_head(
+        &self,
+        form: IdentityForm,
+        args: &[ast::Term],
+        pos: &crate::esl::error::Position,
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<Exp, EslError> {
+        if form == IdentityForm::Field {
+            let subject = self.lower_type_expr_to_exp(&args[0], scope)?;
+            return Ok(Exp::PropAccess(
+                Box::new(subject),
+                self.field_property(&args[1], pos)?,
+            ));
+        }
+        let mut xs = args
+            .iter()
+            .map(|a| self.lower_type_expr_to_exp(a, scope).map(Box::new))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter();
+        let mut next = || xs.next().expect("arity checked");
+        Ok(match form {
+            IdentityForm::Eq => Exp::Id(next(), next(), next()),
+            IdentityForm::Refl => Exp::Refl(next()),
+            IdentityForm::Apart => Exp::Apart(next(), next(), next()),
+            IdentityForm::J => Exp::IdJ(Box::new([
+                *next(),
+                *next(),
+                *next(),
+                *next(),
+                *next(),
+                *next(),
+            ])),
+            IdentityForm::Field => unreachable!("handled above"),
+        })
+    }
+
+    /// Encode an identity form as an `eigentt:Term` value (the `type_expr(...)` path), recursing
+    /// through [`Self::encode_type_expr_to_value`] so a lambda argument (`J`'s motive and method)
+    /// keeps its binder annotation.
+    fn encode_identity_form(
+        &self,
+        form: IdentityForm,
+        args: &[ast::Term],
+        pos: &crate::esl::error::Position,
+        scope: &std::collections::HashSet<&str>,
+    ) -> Result<Value, EslError> {
+        self.check_identity_arity(form, args, pos)?;
+        let (own, applied) = args.split_at(form.arity());
+        let encoded = if form == IdentityForm::Field {
+            vec![
+                self.encode_type_expr_to_value(&own[0], scope)?,
+                Value::String(self.field_property(&own[1], pos)?.as_str().to_string()),
+            ]
+        } else {
+            own.iter()
+                .map(|a| self.encode_type_expr_to_value(a, scope))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let mut acc = self.term(form.ctor(), encoded)?;
+        for a in applied {
+            acc = self.term("App", vec![acc, self.encode_type_expr_to_value(a, scope)?])?;
+        }
+        Ok(acc)
+    }
+
     /// One `eigentt:Term` value, built through the single layout authority.
     fn term(&self, ctor: &str, args: Vec<Value>) -> Result<Value, EslError> {
         self.inductive_value(
@@ -2339,6 +2547,10 @@ impl Compiler {
                 };
                 let inner = self.encode_type_expr_to_value(&args[0], scope)?;
                 Ok(self.term(ctor, vec![inner])?)
+            }
+            ast::Term::Ref { name, args, pos } if self.identity_form(name).is_some() => {
+                let form = self.identity_form(name).expect("guarded");
+                self.encode_identity_form(form, args, pos, scope)
             }
             ast::Term::Ref { name, args, .. } => {
                 // Mirror `lower_type_expr_to_exp`'s Ref resolution: bound

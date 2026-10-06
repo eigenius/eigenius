@@ -333,10 +333,22 @@ fn go_subset_loads_into_kernel_layer() {
         .layer
         .resolve(&nucleus_iri)
         .expect("nucleus Class resolves from kernel layer");
-    match resolved.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
+    // The label is prose in `rdfs:label`; the short name is the identifier from the IRI.
+    match resolved.get(&Iri::parse("urn:rdfs:label").unwrap()) {
         Some(Value::String(s)) => assert_eq!(s, "nucleus"),
-        other => panic!("expected short_name 'nucleus', got {other:?}"),
+        other => panic!("expected rdfs:label 'nucleus', got {other:?}"),
     }
+    match resolved.get(&Iri::parse(wk::SHORT_NAME).unwrap()) {
+        Some(Value::String(s)) => assert_eq!(s, "GO_0005634"),
+        other => panic!("expected short_name 'GO_0005634', got {other:?}"),
+    }
+    // OBO `is_a` is subclassing: nucleus is a kind of intracellular membrane-bounded organelle,
+    // and the kernel's subsumption check sees it.
+    let organelle = Iri::parse("urn:obo:GO:0043231").unwrap();
+    assert!(
+        persistent.layer.is_subclass_of(&nucleus_iri, &organelle),
+        "GO:0005634 is a subclass of GO:0043231 through core:subclass_of"
+    );
 }
 
 /// End-to-end D43 similarity query against the loaded GO corpus.

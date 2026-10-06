@@ -45,6 +45,8 @@
 #                  is `eigenius_eigenius_db` for a checkout named `eigenius`)
 #   COMPOSE_PROJECT_NAME, EIGENIUS_KERNEL_TAG   seed in isolation from other checkouts: their own
 #                  volume and container, and their own kernel image tag (docker-compose.yml)
+#   EIGENIUS_KERNEL_PORT   the host port (docker-compose.yml; default 50051) — set it, and ENDPOINT to
+#                  match, when another checkout's kernel already holds 50051
 #   SNAPSHOT_ROOT  parent dir for snapshots (default: ../db-snapshot relative to repo root)
 #   CARGO_PROFILE_IMG  kernel image build profile (default: ci — functionally identical, faster than release)
 #   CARGO_FEATURES     cargo features for the kernel image (default: none). Set to `use-llm` to

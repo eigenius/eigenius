@@ -30,7 +30,10 @@
 pub mod adjudicate;
 pub mod drops;
 pub mod emit;
+pub mod hpo;
 pub mod merge;
+#[cfg(feature = "chain")]
+pub mod read;
 pub mod senses;
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -44,7 +44,10 @@ services:
         # works either way.
         CARGO_FEATURES: ${CARGO_FEATURES-use-llm}
     ports:
-      - "50051:50051"
+      # `EIGENIUS_KERNEL_PORT` moves the HOST side, so a checkout building in isolation
+      # (`COMPOSE_PROJECT_NAME`, `EIGENIUS_KERNEL_TAG`) can run beside another checkout's kernel;
+      # point the scripts' `ENDPOINT` at the same port.
+      - "${EIGENIUS_KERNEL_PORT:-50051}:50051"
     environment:
       - EIGENIUS_ORCHESTRATOR_ENDPOINT=http://orchestrator:8080
       - RUST_LOG=${RUST_LOG:-info}

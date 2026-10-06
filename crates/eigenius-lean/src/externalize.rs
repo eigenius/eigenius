@@ -651,7 +651,7 @@ fn go<'x, 't: 'x, 'p: 't>(
         Exp::Map(_, _) => outside("Map", "computation, not proposition"),
         Exp::Reduce(_, _, _) => outside("Reduce", "computation, not proposition"),
         Exp::NativeDecide(_, _) => outside("NativeDecide", "computation, not proposition"),
-        Exp::DecEq(_, _, _) => outside("DecEq", "computation, not proposition"),
+        Exp::Apart(_, _, _) => outside("Apart", "a proof term (of a negation), not a proposition"),
 
         Exp::Template(_, _) => outside("Template", "resource-level"),
         Exp::PropAccess(_, _) => outside(

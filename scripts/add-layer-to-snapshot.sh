@@ -34,6 +34,8 @@
 #              which is `eigenius_eigenius_db` for a checkout named `eigenius`)
 #   COMPOSE_PROJECT_NAME, EIGENIUS_KERNEL_TAG   stage in isolation from other checkouts: their
 #              own volume and container, and their own kernel image tag (docker-compose.yml)
+#   EIGENIUS_KERNEL_PORT   the host port (docker-compose.yml; default 50051) — set it, and ENDPOINT to
+#              match, when another checkout's kernel already holds 50051
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

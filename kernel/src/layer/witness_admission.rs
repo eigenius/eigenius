@@ -95,9 +95,11 @@ use std::sync::Arc;
 /// reasoning-aware — it builds the witnesses `justification:Grounds` consumes.
 const CONCLUSION_CLASS: &str = "urn:eigenius:justification:Conclusion";
 const CONCLUSION_GROUNDS_JUDGEMENT: &str = "urn:eigenius:justification:grounds_judgement";
-/// The conclusion's optional PROOF judgement — `holds(logic, t, P)`. This, and
-/// not the certificate judgement, is what establishes `Verified`.
-const CONCLUSION_PROOF_JUDGEMENT: &str = "urn:eigenius:justification:proof_judgement";
+/// A PROOF judgement — `holds(logic, t, P)`. This, and not the grounds judgement, is what
+/// establishes `Verified`. Carried by any proposition-bearing resource, not only a conclusion
+/// (D89 §2): whether a resource attests `Verified` is read off the property it carries, never off
+/// its class.
+const PROOF_JUDGEMENT: &str = "urn:eigenius:justification:proof_judgement";
 
 /// Does `layer` itself admit `key`?
 ///
@@ -109,8 +111,9 @@ const CONCLUSION_PROOF_JUDGEMENT: &str = "urn:eigenius:justification:proof_judge
 ///
 /// Two routes, mirroring the two ways a witness arises (D49 §6):
 ///
-/// - **self-attesting** — the key's IRI *is* the resource. A committed `justification:Conclusion`
-///   whose judgement carries a proof is `Verified` on its own IRI. Reached by
+/// - **self-attesting** — the key's IRI *is* the resource. A committed resource carrying a
+///   `justification:proof_judgement` is `Verified` on its own IRI — a conclusion, or a declaration
+///   whose author supplied a checked proof (D89 §2). Reached by
 ///   [`Layer::get_resource`], which is layer-local. A `institution:EmittedDerivation`
 ///   used to be `Derived` on its own IRI (D52); it now attests nothing, because a program's
 ///   output is not a ground — see `trace_category`.
@@ -130,11 +133,8 @@ pub fn layer_admits_witness(layer: &Layer, key: &WitnessKey) -> bool {
     // 1. Self-attesting. `get_resource` is layer-local (it gates on `defined_iris`), which is the
     //    "defined in THIS layer" condition the candidate scan used to enforce explicitly.
     if let Some(resource) = layer.get_resource(&key.iri) {
-        let is_a = resource.is_a();
         let emitted = match key.category {
-            WitnessCategory::Verified if is_a.iter().any(|c| c.as_str() == CONCLUSION_CLASS) => {
-                emit_from_conclusion(layer, &resource)
-            }
+            WitnessCategory::Verified => emit_from_proof_judgement(layer, &resource),
             _ => None,
         };
         if emitted.as_ref() == Some(key) {
@@ -181,7 +181,43 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
             return None;
         }
     };
-    match hash_proposition_exp(&decoded, &CodecNames::from_layer(layer)) {
+    hash_normal_proposition(layer, owner, &decoded)
+}
+
+/// Hash a decoded proposition in its NORMAL form — evaluated in the layer's environment and read
+/// back, which is exactly what the check side hashes (`check_hooks.rs` reads back the cited
+/// proposition's value).
+///
+/// The emit side used to hash the decoded term as it stood, on the invariant that a decoded term
+/// is already normal (D66 D8/D9). D99 §10 broke that invariant on purpose: the codec now carries
+/// forms that reduce — a field of a named resource, `J` on `refl` — so a definition unfolded over
+/// a named location (`variant:At(q, syn:Leu44)`) decodes to `field(Leu44, start)`, which evaluation
+/// reduces to `44`. Hashing the unreduced term keyed a different proposition from the one any
+/// citation names. Normalizing here is the check side's procedure, so the two ends agree by
+/// construction rather than by a restriction on what the codec may carry.
+///
+/// `None` on an evaluation or encoding failure, logged with the owner's IRI — the same "no witness"
+/// outcome as an undecodable proposition, and distinguishable from an absent one.
+fn hash_normal_proposition(
+    layer: &Layer,
+    owner: &Iri,
+    prop: &crate::nbe::term::Exp,
+) -> Option<[u8; 32]> {
+    let env = crate::nbe::env_global::Env::of(Arc::new(layer.clone()));
+    let normal = match crate::nbe::eval::eval_env(prop, &crate::nbe::env::Rho::Nil, &env) {
+        Ok(v) => crate::nbe::readback::readback_val(0, &v),
+        Err(e) => {
+            tracing::warn!(
+                { field::OPERATION } = operation::WITNESS_DECODE,
+                { field::ERROR_KIND } = "proposition_eval_failed",
+                { field::ERROR_MESSAGE } = %format!("{e:?}"),
+                resource_iri = %owner,
+                "decoded proposition did not evaluate; no witness can be admitted for it"
+            );
+            return None;
+        }
+    };
+    match hash_proposition_exp(&normal, &CodecNames::from_layer(layer)) {
         Ok(h) => Some(h),
         Err(e) => {
             tracing::warn!(
@@ -189,7 +225,7 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
                 { field::ERROR_KIND } = "proposition_encode_failed",
                 { field::ERROR_MESSAGE } = %format!("{e:?}"),
                 resource_iri = %owner,
-                "decoded proposition did not re-encode; no witness can be admitted for it"
+                "normalized proposition did not re-encode; no witness can be admitted for it"
             );
             None
         }
@@ -198,18 +234,21 @@ fn hash_stored_proposition(layer: &Layer, owner: &Iri, encoded: &Value) -> Optio
 
 /// Could `resource` ever admit a `ChainWitness`?
 ///
-/// True for the seven classes [`layer_admits_witness`] can emit from: the five Trace classes, a
-/// `institution:EmittedDerivation`, and a `justification:Conclusion`. Stamped over a
+/// True for the six classes [`layer_admits_witness`] can emit from — the five Trace classes and an
+/// `institution:EmittedDerivation` — and for any resource carrying a
+/// `justification:proof_judgement`, whatever its class (D89 §2). Stamped over a
 /// layer's resources at write time into [`LayerHandle::has_witness_candidates`], so a chain walk can
 /// skip a layer that holds none without probing it — the job the materialised index used to do by
 /// caching an empty map.
 pub fn is_witness_candidate(resource: &Resource) -> bool {
-    resource.is_a().iter().any(|c| {
-        let c = c.as_str();
-        trace_category(c).is_some()
-            || c == wk::INSTITUTION_EMITTED_DERIVATION
-            || c == CONCLUSION_CLASS
-    })
+    let attests_a_proof = Iri::parse(PROOF_JUDGEMENT)
+        .ok()
+        .is_some_and(|i| resource.get(&i).is_some());
+    attests_a_proof
+        || resource.is_a().iter().any(|c| {
+            let c = c.as_str();
+            trace_category(c).is_some() || c == wk::INSTITUTION_EMITTED_DERIVATION
+        })
 }
 
 /// The witness category a Trace class attests, or `None` if the class is not a Trace.
@@ -237,7 +276,7 @@ pub fn is_witness_candidate(resource: &Resource) -> bool {
 /// for it exactly as it does for the other three — nothing about the Verified category needs
 /// special handling here.
 ///
-/// The consequence of the omission was a witness with no artifact: `emit_from_conclusion`
+/// The consequence of the omission was a witness with no artifact: `emit_from_proof_judgement`
 /// synthesised a Verified key straight from the sentence, so every Verified witness on every chain
 /// was traceless, breaking D39 §5's invariant that the trace and the witness are two projections of
 /// one validator event.
@@ -320,10 +359,16 @@ where
     false
 }
 
-/// D54: admit a `justification:Conclusion` as a `Verified` witness — but ONLY
-/// on the strength of a proof term.
+/// D54: admit a resource as a `Verified` witness — but ONLY on the strength of a proof term.
 ///
-/// The conclusion carries up to two judgements, and they say different things:
+/// Any proposition-bearing resource may carry the proof (D89 §2): a `justification:Declaration`
+/// whose author supplied one — a manually authored claim with a checked proof, `Verified` beside its
+/// `Declared` provenance — or a `justification:Conclusion` that holds a proof besides its grounds.
+/// It was keyed on the Conclusion class, which left the declaration case, the one D89 names,
+/// unrepresentable: a Conclusion requires grounds, and a proved proposition has no grounds but
+/// itself.
+///
+/// A conclusion carries up to two judgements, and they say different things:
 ///
 /// - `justification:grounds_judgement` is `holds(kernel, c, Certificate(j, P))` — *a
 ///   checker verified the certificate c*. It does **not** say `P`. A
@@ -345,9 +390,9 @@ where
 /// `P` directly; `hash_proposition_exp` hashes the decoded `Exp`, so both sides
 /// hash the same term — see
 /// `a_projected_proposition_hashes_as_the_same_proposition_stored_flat`.
-fn emit_from_conclusion(layer: &Layer, sentence: &Resource) -> Option<WitnessKey> {
+fn emit_from_proof_judgement(layer: &Layer, sentence: &Resource) -> Option<WitnessKey> {
     let sentence_iri = sentence.id().cloned()?;
-    let proof_iri = Iri::parse(CONCLUSION_PROOF_JUDGEMENT).ok()?;
+    let proof_iri = Iri::parse(PROOF_JUDGEMENT).ok()?;
     let stored = sentence.get(&proof_iri)?;
     let proof = crate::program::eigentt_type_mirror::decode_judgement(stored, layer).ok()?;
 
@@ -365,7 +410,7 @@ fn emit_from_conclusion(layer: &Layer, sentence: &Resource) -> Option<WitnessKey
         return None;
     }
 
-    let prop_hash = hash_proposition_exp(&proof.typ, &CodecNames::from_layer(layer)).ok()?;
+    let prop_hash = hash_normal_proposition(layer, &sentence_iri, &proof.typ)?;
     Some(WitnessKey {
         category: WitnessCategory::Verified,
         iri: sentence_iri,
@@ -398,7 +443,7 @@ fn emit_from_trace(
     // the judgement, whose inputs the trace also pins (`prov:permitted_axioms`,
     // `prov:checker_identity`), so the verdict is recomputable rather than postulated.
     //
-    // The refuse-a-certificate check is [`emit_from_conclusion`]'s, for the same reason: a
+    // The refuse-a-certificate check is [`emit_from_proof_judgement`]'s, for the same reason: a
     // judgement whose type is a `Certificate(...)` says a checker verified the CERTIFICATE, which
     // establishes nothing about the proposition, and minting `Verified` from one launders a
     // conclusion resting on nothing but `Declared(...)` into a proof one citation downstream.
@@ -450,7 +495,7 @@ fn judgement_proposition_hash(layer: &Layer, trace: &Resource, stored: &Value) -
         );
         return None;
     }
-    hash_proposition_exp(&j.typ, &CodecNames::from_layer(layer)).ok()
+    hash_normal_proposition(layer, &trace_iri, &j.typ)
 }
 
 /// The proposition a trace's target canonically asserts, hashed.
@@ -460,7 +505,7 @@ fn judgement_proposition_hash(layer: &Layer, trace: &Resource, stored: &Value) -
 /// 1. `eigentt:proposition` — the general slot.
 /// 2. `eigentt:proposition` — where a `justification:Conclusion` keeps the same thing under a different
 ///    name. **Required for correctness, not convenience** (eigenius#200): the self-attesting path
-///    [`emit_from_conclusion`] reads slot 2, so without this arm a `VerificationTrace`
+///    [`emit_from_proof_judgement`] reads slot 2, so without this arm a `VerificationTrace`
 ///    targeting a sentence would fall through to slot 3 and key the witness against
 ///    `Asserts(sentence_iri)` — a DIFFERENT hash from the one the sentence itself emits, and the
 ///    one no certificate cites.
@@ -485,7 +530,7 @@ fn target_proposition_hash(layer: &Layer, target_iri: &Iri, target: &Resource) -
             if let Ok(j) = crate::program::eigentt_type_mirror::decode_judgement(stored, layer) {
                 if let Some(prop) = crate::program::eigentt_type_mirror::certificate_indices(&j.typ)
                 {
-                    return hash_proposition_exp(prop, &CodecNames::from_layer(layer)).ok();
+                    return hash_normal_proposition(layer, target_iri, prop);
                 }
             }
         }
@@ -619,12 +664,12 @@ fn proposition_dependencies(admitting: &Layer, key: &WitnessKey) -> BTreeSet<Iri
     out.insert(key.iri.clone());
 
     if let Some(target) = admitting.resolve(&key.iri) {
-        // Every slot `target_proposition_hash` and `emit_from_conclusion` read.
+        // Every slot `target_proposition_hash` and `emit_from_proof_judgement` read.
         // `proof_judgement` is the one that establishes `Verified` from a conclusion.
         for slot in [
             wk::PROPOSITION,
             CONCLUSION_GROUNDS_JUDGEMENT,
-            CONCLUSION_PROOF_JUDGEMENT,
+            PROOF_JUDGEMENT,
         ] {
             if let Some(encoded) = Iri::parse(slot).ok().and_then(|i| target.get(&i)) {
                 crate::layer::term_mentions::json_mentions_of_value(encoded, admitting, &mut out);
@@ -847,7 +892,7 @@ mod tests {
             crate::testing::codec_names(),
         )
         .unwrap();
-        r.set(iri(CONCLUSION_PROOF_JUDGEMENT), proof);
+        r.set(iri(PROOF_JUDGEMENT), proof);
         r
     }
 

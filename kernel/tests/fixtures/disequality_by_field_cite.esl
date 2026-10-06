@@ -1,0 +1,30 @@
+// D99 §10 — the disequality grounds a later claim as Verified, one layer up.
+
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace logic         = "urn:eigenius:logic";
+namespace justification = "urn:eigenius:justification";
+namespace core          = "urn:eigenius:core";
+namespace fx            = "urn:eigenius:test:apart";
+
+resource fx:cites_by_start : justification:Conclusion {
+    core:description = "Grounds(c.130C>T ≠ c.131T>C), verified by fx:by_start.";
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(verified(
+                   "urn:eigenius:test:apart:by_start",
+                   eigentt:Eq(fx:Allele, fx:c130, fx:c131) -> logic:False,
+                   ())),
+               type_expr(justification:Grounds(eigentt:Eq(fx:Allele, fx:c130, fx:c131) -> logic:False)) );
+}
+
+// REFUSED — `fx:c131_twin` carries no proof, so no Verified witness exists to cite.
+resource fx:cites_unproved : justification:Conclusion {
+    core:description = "Grounds(c.131T>C ≠ its twin), citing a resource that proves nothing.";
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(verified(
+                   "urn:eigenius:test:apart:c131_twin",
+                   eigentt:Eq(fx:Allele, fx:c131, fx:c131_twin) -> logic:False,
+                   ())),
+               type_expr(justification:Grounds(eigentt:Eq(fx:Allele, fx:c131, fx:c131_twin) -> logic:False)) );
+}

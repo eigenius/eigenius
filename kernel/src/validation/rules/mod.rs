@@ -24,6 +24,7 @@ mod closed_inductive;
 pub(super) mod conditional;
 pub(super) mod domain;
 pub(super) mod eigentt_value;
+mod equivalent_classes;
 pub(super) mod format;
 pub(super) mod inductive;
 pub(super) mod inductive_decl;

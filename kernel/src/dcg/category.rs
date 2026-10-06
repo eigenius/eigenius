@@ -1048,7 +1048,7 @@ fn exp_any(e: &Exp, pred: &dyn Fn(&Exp) -> bool) -> bool {
             exp_any(b, pred)
         }
         Exp::InductiveCtor(_, _, args) => args.iter().any(|x| exp_any(x, pred)),
-        Exp::Id(a, b, c) | Exp::DecEq(a, b, c) => {
+        Exp::Id(a, b, c) | Exp::Apart(a, b, c) => {
             exp_any(a, pred) || exp_any(b, pred) || exp_any(c, pred)
         }
         _ => false,

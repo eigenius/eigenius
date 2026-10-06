@@ -64,19 +64,20 @@
 //!   covers OBO's "naked" nodes (subset declarations, synonym types)
 //!   that are referenced but never typed by the ontology itself.
 //!
-//! `lbl` populates `core:short_name`; `meta.definition.val`
-//! populates `core:description`; `meta.deprecated == true` adds
-//! `core:deprecated: true`. Edges with `pred == "is_a"` extend the
-//! subject's `is_a` array; edges with any other predicate set the
-//! IRI-keyed property on the subject (as a resource_array — the
-//! converter accumulates multiple obj values under the same
-//! `(sub, pred)` pair).
+//! `lbl` populates `rdfs:label` (declared by the OBO meta-ontology); `core:short_name` is an
+//! identifier from the IRI (`HP_0001250`) — it has pattern `\S+`, and a label is prose.
+//! `meta.definition.val` populates `core:description`, and a term without one is described by its
+//! label and CURIE (`Seizure (HP:0001250).`), since classes and properties require a description.
+//! `meta.deprecated == true` adds `core:deprecated: true`. Edges with `pred == "is_a"` (OWL
+//! `subClassOf`) extend the subject's `core:subclass_of`; edges with any other predicate set the
+//! IRI-keyed property on the subject (as a resource_array — the converter accumulates multiple
+//! obj values under the same `(sub, pred)` pair).
 //!
 //! **Synthetic-IRI fan-out.** OBO uses bare-string predicates in two
 //! places — edges (`is_a`, `inverseOf`, `subPropertyOf`, `type`) and
 //! synonym scopes (`hasExactSynonym`, `hasRelatedSynonym`, etc.).
-//! `is_a` / `type` / `subPropertyOf` fold into the kernel's
-//! `core:is_a`. Everything else maps into the `urn:obo:*` IRI
+//! `is_a` maps to `core:subclass_of`, `type` to `core:is_a`, and `subPropertyOf` to
+//! `urn:obo:subPropertyOf` ([`resolve_predicate_iri`] says why). Everything else maps into the `urn:obo:*` IRI
 //! namespace via [`synonym_scope_to_iri`] and
 //! [`resolve_predicate_iri`]. After the node + edge pass,
 //! [`ensure_synthetic_property_declarations`] walks the accumulated
@@ -127,7 +128,11 @@ use crate::obo::{Edge, GraphDocument, Node};
 // the kernel stays scoped to the public Resource/IRI/Value types.
 
 const IS_A: &str = "urn:eigenius:core:is_a";
+const SUBCLASS_OF: &str = "urn:eigenius:core:subclass_of";
 const SHORT_NAME: &str = "urn:eigenius:core:short_name";
+/// A node's human-readable label (OBO `lbl`), declared by the OBO meta-ontology. Prose — it may
+/// contain spaces, which `core:short_name` (an identifier, pattern `\S+`) may not.
+const RDFS_LABEL: &str = "urn:rdfs:label";
 const DESCRIPTION: &str = "urn:eigenius:core:description";
 const DATA_TYPE: &str = "urn:eigenius:core:data_type";
 const DEPRECATED: &str = "urn:eigenius:core:deprecated";
@@ -137,7 +142,9 @@ const CLASS: &str = "urn:eigenius:core:Class";
 const PROPERTY: &str = "urn:eigenius:core:Property";
 const RESOURCE: &str = "urn:eigenius:core:Resource";
 const STRING_DATA_TYPE: &str = "urn:eigenius:core:string";
-const RESOURCE_DATA_TYPE: &str = "urn:eigenius:core:resource";
+/// Every edge-derived slot is written as an array ([`apply_edge`] accumulates objects per
+/// `(sub, pred)`), so object properties are declared multi-valued.
+const RESOURCE_ARRAY_DATA_TYPE: &str = "urn:eigenius:core:resource_array";
 
 const DECLARED_BY: &str = "urn:eigenius:prov:was_attributed_to";
 
@@ -228,6 +235,9 @@ const SYN_RELATED: &str = "urn:obo:has_related_synonym";
 const SYN_BROAD: &str = "urn:obo:has_broad_synonym";
 const SYN_NARROW: &str = "urn:obo:has_narrow_synonym";
 const OBO_INVERSE_OF: &str = "urn:obo:inverseOf";
+/// OBO's bare-string `subPropertyOf`. The kernel has no property hierarchy, so the edge is kept
+/// under its own slot (declared by the OBO meta-ontology) rather than read as class membership.
+const OBO_SUB_PROPERTY_OF: &str = "urn:obo:subPropertyOf";
 
 /// IRIs declared by the shared `ontologies/obo/obo-meta-ontology.json`
 /// layer loaded by the kernel at bootstrap. The post-pass skips
@@ -243,6 +253,8 @@ const META_DECLARED_IRIS: &[&str] = &[
     SYN_BROAD,
     SYN_NARROW,
     OBO_INVERSE_OF,
+    OBO_SUB_PROPERTY_OF,
+    RDFS_LABEL,
 ];
 
 /// Map one OBO synonym `pred` slot to the Eigon-side synthetic IRI
@@ -269,7 +281,7 @@ fn synonym_scope_to_iri(pred: &str) -> Option<&'static str> {
 fn synthetic_predicate_data_type(iri: &str) -> &'static str {
     match iri {
         SYN_EXACT | SYN_RELATED | SYN_BROAD | SYN_NARROW => STRING_DATA_TYPE,
-        _ => RESOURCE_DATA_TYPE,
+        _ => RESOURCE_ARRAY_DATA_TYPE,
     }
 }
 
@@ -278,17 +290,20 @@ fn synthetic_predicate_data_type(iri: &str) -> &'static str {
 /// `is_a`, `subPropertyOf`, `inverseOf`, `type`. The first three are
 /// RBox-shaped (class / property hierarchy); the last is RDF type.
 ///
-/// `is_a` and `type` both fold into [`IS_A`] on the Eigon side
-/// (Eigon doesn't distinguish class-membership from class-subclass at
-/// this layer). `subPropertyOf` likewise folds into [`IS_A`] because
-/// Eigon Properties *are* Resources and inherit their hierarchy via
-/// the same `is_a` slot. `inverseOf` and any other bare-string
-/// predicate get a synthetic `urn:obo:<pred>` IRI so the triple
-/// survives the import without colliding with the kernel's reserved
-/// `urn:eigenius:*` namespace.
+/// `is_a` is OWL `subClassOf` and maps to [`SUBCLASS_OF`] — the relation the kernel walks for
+/// subsumption (`Layer::is_subclass_of`). `type` is class membership and maps to [`IS_A`]. The two
+/// are not interchangeable: folding `is_a` into [`IS_A`] made every term an *instance* of its parent
+/// (`Seizure` a member of `Abnormal nervous system physiology`), invisible to every subclass check.
+/// `subPropertyOf` keeps its own slot, [`OBO_SUB_PROPERTY_OF`] — the kernel has no property
+/// hierarchy, and reading it as membership would assert one. `inverseOf` and any other bare-string
+/// predicate get a synthetic `urn:obo:<pred>` IRI so the triple survives the import without
+/// colliding with the kernel's reserved `urn:eigenius:*` namespace.
 fn resolve_predicate_iri(pred: &str) -> Result<Iri, ()> {
-    if pred == OBO_IS_A_PREDICATE || pred == "type" || pred == "subPropertyOf" {
-        return Ok(Iri::parse(IS_A).expect("well-known IRI"));
+    match pred {
+        OBO_IS_A_PREDICATE => return Ok(Iri::parse(SUBCLASS_OF).expect("well-known IRI")),
+        "type" => return Ok(Iri::parse(IS_A).expect("well-known IRI")),
+        "subPropertyOf" => return Ok(Iri::parse(OBO_SUB_PROPERTY_OF).expect("well-known IRI")),
+        _ => {}
     }
     // HTTP IRIs in predicates flow through the same rewriter as
     // node IDs so cross-references stay coherent: an edge whose
@@ -341,6 +356,13 @@ pub struct ConvertOptions {
     /// dump whose graph-IRI doesn't unambiguously identify the
     /// curating authority (e.g., a community subset of GO).
     pub declared_by: Option<String>,
+    /// A class every root of the imported hierarchy is placed under — each live class with no
+    /// superclass in the document gets `core:subclass_of: [root_anchor]`. An ontology imported for
+    /// the lexicon must sit in its `Entity` lattice (`urn:eigenius:lexicon:Entity`) for its classes
+    /// to type where an entity is expected; HPO's one root is `HP:0000001`. Deprecated classes are
+    /// left unanchored: they are kept for their identifiers, not as types. `None` leaves the roots
+    /// parentless. The anchor must resolve below the layer the import loads into.
+    pub root_anchor: Option<String>,
 }
 
 /// Convert a full [`GraphDocument`] into a flat list of Eigon
@@ -409,18 +431,52 @@ fn emit_declarers(by_iri: &mut BTreeMap<String, Resource>, declarers: &BTreeSet<
         // integrations. A raw graph tail like `go.owl` would be the tree's first dotted
         // one. The readable form stays in `description`.
         let tail = value.rsplit('/').next().unwrap_or(value);
-        let mut short: String = tail
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect();
-        if !short.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
-            short.insert(0, '_');
-        }
         r.set(
             Iri::parse(SHORT_NAME).expect("well-known IRI"),
-            Value::String(short),
+            Value::String(identifier(tail)),
         );
         by_iri.insert(value.clone(), r);
+    }
+}
+
+/// An identifier for `core:short_name`, which is one (pattern `\S+`; every short name in the
+/// ontologies is `[A-Za-z_][A-Za-z0-9_]*`, and the property exists for external integrations):
+/// non-alphanumerics become `_`, and a leading non-letter gets one — `HP:0001250` → `HP_0001250`,
+/// `go.owl` → `go_owl`. The readable form lives in `rdfs:label` and `core:description`.
+fn identifier(s: &str) -> String {
+    let mut out: String = s
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    if !out.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+        out.insert(0, '_');
+    }
+    out
+}
+
+/// The CURIE a rewritten IRI stands for — `urn:obo:HP:0001250` → `HP:0001250`, `urn:rdfs:label` →
+/// `rdfs:label` — the form a description names a term by. An IRI the converter does not rewrite
+/// (`http://example.org/Cell`) is named by its last segment (`Cell`).
+fn curie(urn: &str) -> &str {
+    if let Some(c) = urn
+        .strip_prefix(SYNTHETIC_PREFIX)
+        .or_else(|| urn.strip_prefix("urn:"))
+    {
+        return c;
+    }
+    urn.rsplit(['/', '#'])
+        .next()
+        .filter(|t| !t.is_empty())
+        .unwrap_or(urn)
+}
+
+/// The description of a term the source does not define: its label and CURIE, the way the UMLS
+/// importer describes an undefined concept by its preferred name and CUI. `core:Class` and
+/// `core:Property` require one.
+fn undefined_description(label: Option<&str>, urn: &str) -> String {
+    match label {
+        Some(l) => format!("{l} ({}).", curie(urn)),
+        None => format!("{}.", curie(urn)),
     }
 }
 
@@ -456,6 +512,15 @@ pub fn convert_document_with(doc: &GraphDocument, opts: &ConvertOptions) -> Conv
                     continue;
                 }
             };
+            if META_DECLARED_IRIS.contains(&urn_str.as_str()) {
+                // Declared by the bootstrap OBO meta-ontology (`hp.json` declares `rdfs:label`
+                // itself). The document's copy would redefine a bootstrap resource in this layer.
+                *report
+                    .counts_by_type
+                    .entry("<meta-declared, skipped>".to_string())
+                    .or_insert(0) += 1;
+                continue;
+            }
             let resource = node_to_resource(node, iri, source_irl.as_deref(), &declared_by_value);
             let type_key = node.node_type.as_deref().unwrap_or("<untyped>").to_string();
             *report.counts_by_type.entry(type_key).or_insert(0) += 1;
@@ -467,6 +532,13 @@ pub fn convert_document_with(doc: &GraphDocument, opts: &ConvertOptions) -> Conv
         }
     }
 
+    if let Some(anchor) = opts.root_anchor.as_deref() {
+        let anchored = anchor_roots(&mut by_iri, anchor);
+        *report
+            .counts_by_type
+            .entry("<anchored root>".to_string())
+            .or_insert(0) += anchored;
+    }
     emit_declarers(&mut by_iri, &declarers);
     let synthetic_count = ensure_synthetic_property_declarations(&mut by_iri);
     if synthetic_count > 0 {
@@ -480,6 +552,28 @@ pub fn convert_document_with(doc: &GraphDocument, opts: &ConvertOptions) -> Conv
     report
 }
 
+/// Put every live root class under `anchor` ([`ConvertOptions::root_anchor`]): a resource typed
+/// `core:Class`, with no `core:subclass_of` and no `core:deprecated: true`. Returns how many.
+fn anchor_roots(by_iri: &mut BTreeMap<String, Resource>, anchor: &str) -> usize {
+    let is_a = Iri::parse(IS_A).expect("well-known IRI");
+    let subclass_of = Iri::parse(SUBCLASS_OF).expect("well-known IRI");
+    let deprecated = Iri::parse(DEPRECATED).expect("well-known IRI");
+    let mut anchored = 0;
+    for r in by_iri.values_mut() {
+        let is_class = matches!(r.get(&is_a), Some(Value::Array(a))
+            if a.iter().any(|v| matches!(v, Value::String(s) if s == CLASS)));
+        let is_deprecated = matches!(r.get(&deprecated), Some(Value::Boolean(true)));
+        if is_class && !is_deprecated && r.get(&subclass_of).is_none() {
+            r.set(
+                subclass_of.clone(),
+                Value::Array(vec![Value::String(anchor.to_string())]),
+            );
+            anchored += 1;
+        }
+    }
+    anchored
+}
+
 /// Walk the accumulated Resources, find every `urn:obo:*` slot
 /// referenced anywhere, and synthesise a Property declaration for
 /// each one that doesn't already have one. Returns the number of
@@ -487,12 +581,11 @@ pub fn convert_document_with(doc: &GraphDocument, opts: &ConvertOptions) -> Conv
 ///
 /// The synthesised Property carries:
 ///
-/// - `is_a: [core:Property, urn:eigenius:reflection:DeclaredResource]`
-///   — Property + Declared, since the converter itself is the
-///   "declarer" for synthesised IRIs.
+/// - `is_a: [core:Property]`.
 /// - `data_type` per [`synthetic_predicate_data_type`] —
-///   `core:string` for synonym scopes, `core:resource` for
-///   everything else.
+///   `core:string` for synonym scopes, `core:resource_array` for
+///   everything else (edge objects accumulate).
+/// - a `description` naming the predicate — `core:Property` requires one.
 /// - `short_name` derived from the trailing IRI fragment after
 ///   `urn:obo:` so kernel-side short-name resolution surfaces the
 ///   declaration without forcing every caller to know the full IRI.
@@ -558,6 +651,16 @@ fn ensure_synthetic_property_declarations(by_iri: &mut BTreeMap<String, Resource
                 Value::String(short.to_string()),
             );
         }
+        // `core:Property` requires a description, and the source gave none: it used the
+        // predicate without declaring it.
+        r.set(
+            Iri::parse(DESCRIPTION).expect("well-known IRI"),
+            Value::String(format!(
+                "OBO predicate `{}`, used by the source ontology without a declaration; declared by \
+                 the obograph importer so the slot resolves.",
+                curie(&iri_str)
+            )),
+        );
         by_iri.insert(iri_str, r);
         emitted += 1;
     }
@@ -573,6 +676,7 @@ fn node_to_resource(
     source_irl: Option<&str>,
     declared_by: &str,
 ) -> Resource {
+    let urn = iri.as_str().to_string();
     let mut r = Resource::new(iri);
 
     // is_a — driven by node type. PROPERTY nodes get a `data_type` companion slot;
@@ -589,7 +693,7 @@ fn node_to_resource(
             Some("CLASS") => (Some(CLASS), None),
             Some("PROPERTY") => {
                 let dt = match node.property_type.as_deref() {
-                    Some("OBJECT") => RESOURCE_DATA_TYPE,
+                    Some("OBJECT") => RESOURCE_ARRAY_DATA_TYPE,
                     // ANNOTATION and DATA both carry string-typed values
                     // in OBO-JSON; the kernel's per-type checks downstream
                     // can specialise further when needed.
@@ -632,26 +736,33 @@ fn node_to_resource(
         declarer_ref(declared_by),
     );
 
-    if let Some(lbl) = node.lbl.as_deref() {
-        if !lbl.is_empty() {
-            r.set(
-                Iri::parse(SHORT_NAME).expect("well-known IRI"),
-                Value::String(lbl.to_string()),
-            );
-        }
+    // The label is prose (`rdfs:label`); the short name is an identifier, from the IRI.
+    let label = node.lbl.as_deref().filter(|l| !l.is_empty());
+    if let Some(lbl) = label {
+        r.set(
+            Iri::parse(RDFS_LABEL).expect("well-known IRI"),
+            Value::String(lbl.to_string()),
+        );
     }
+    r.set(
+        Iri::parse(SHORT_NAME).expect("well-known IRI"),
+        Value::String(identifier(curie(&urn))),
+    );
+    let definition = node
+        .meta
+        .as_ref()
+        .and_then(|m| m.definition.as_ref())
+        .and_then(|d| d.val.as_deref())
+        .filter(|v| !v.is_empty());
+    r.set(
+        Iri::parse(DESCRIPTION).expect("well-known IRI"),
+        Value::String(match definition {
+            Some(def) => def.to_string(),
+            None => undefined_description(label, &urn),
+        }),
+    );
 
     if let Some(meta) = node.meta.as_ref() {
-        if let Some(def) = meta.definition.as_ref() {
-            if let Some(val) = def.val.as_deref() {
-                if !val.is_empty() {
-                    r.set(
-                        Iri::parse(DESCRIPTION).expect("well-known IRI"),
-                        Value::String(val.to_string()),
-                    );
-                }
-            }
-        }
         if meta.deprecated {
             r.set(
                 Iri::parse(DEPRECATED).expect("well-known IRI"),
@@ -692,10 +803,10 @@ fn node_to_resource(
 
 /// Fold one edge into the accumulating `by_iri` map. Two cases:
 ///
-/// - `pred == "is_a"`: extend the subject's `is_a` array. If the
+/// - `pred == "is_a"`: extend the subject's `core:subclass_of`. If the
 ///   subject doesn't exist yet (an edge with a sub-IRI not in the
-///   `nodes` list), a minimal typeless Resource is materialised so
-///   the edge has a place to land.
+///   `nodes` list), a minimal class is materialised so the edge has a
+///   place to land (a `core:Resource` for any other predicate).
 /// - any other predicate: the predicate is interpreted as a full
 ///   IRI of a Property node. The subject's property at that IRI
 ///   gets the object IRI appended as an IRI string.
@@ -731,26 +842,47 @@ fn apply_edge(
         }
     };
 
-    let subject_entry = by_iri.entry(urn_sub).or_insert_with(|| {
-        // Edge subject not declared as its own node — materialise a
-        // typeless DeclaredResource so the edge has a place to land
-        // and downstream auditors can still trace it back to the
-        // source graph. The `is_a: [DeclaredResource]` seeding here
-        // is consistent with [`node_to_resource`]: every Resource
-        // the converter emits is structurally a declared one, even
-        // the ones inferred from edges alone.
+    let prop_iri = match resolve_predicate_iri(&edge.pred) {
+        Ok(i) => i,
+        Err(()) => {
+            report.errors.push(ConvertError::InvalidIri {
+                context: "edge.pred".to_string(),
+                iri: edge.pred.clone(),
+            });
+            return;
+        }
+    };
+
+    if META_DECLARED_IRIS.contains(&urn_sub.as_str()) {
+        // The subject is declared by the bootstrap OBO meta-ontology; a slot set on it here would
+        // redefine that resource in this layer.
+        return;
+    }
+
+    let subject_is_class = prop_iri.as_str() == SUBCLASS_OF;
+    let subject_entry = by_iri.entry(urn_sub.clone()).or_insert_with(|| {
+        // Edge subject not declared as its own node — materialise one so the edge has a place to
+        // land and downstream auditors can still trace it back to the source graph. The subject of
+        // a `subClassOf` edge is a class (`core:subclass_of` has domain `core:Class`); anything
+        // else gets the catch-all `core:Resource`. Both classes require a description, which the
+        // source gave none of.
         let mut r = Resource::new(sub_iri);
         r.set(
             Iri::parse(IS_A).expect("well-known IRI"),
-            // `core:Resource`, the catch-all, where `reflection:DeclaredResource` stood as
-            // this resource's ONLY class. Dropping the retired tag without naming a real one
-            // would leave an empty `is_a` and fail Rule 1.
             Value::Array(vec![Value::String(
-                Iri::parse(RESOURCE)
+                Iri::parse(if subject_is_class { CLASS } else { RESOURCE })
                     .expect("well-known IRI")
                     .as_str()
                     .to_string(),
             )]),
+        );
+        r.set(
+            Iri::parse(SHORT_NAME).expect("well-known IRI"),
+            Value::String(identifier(curie(&urn_sub))),
+        );
+        r.set(
+            Iri::parse(DESCRIPTION).expect("well-known IRI"),
+            Value::String(undefined_description(None, &urn_sub)),
         );
         if let Some(src) = sub_source_irl {
             r.set(
@@ -764,17 +896,6 @@ fn apply_edge(
         );
         r
     });
-
-    let prop_iri = match resolve_predicate_iri(&edge.pred) {
-        Ok(i) => i,
-        Err(()) => {
-            report.errors.push(ConvertError::InvalidIri {
-                context: "edge.pred".to_string(),
-                iri: edge.pred.clone(),
-            });
-            return;
-        }
-    };
 
     // Accumulate: every property is a resource_array. Newly-set
     // properties start as a one-element array; existing arrays gain
@@ -857,13 +978,10 @@ mod tests {
     }
 
     #[test]
-    fn class_node_maps_to_is_a_class_with_short_name_and_description() {
+    fn class_node_maps_to_a_class_with_label_identifier_and_description() {
         let report = convert_document(&sample_doc());
         let cell = find(&report, "http://example.org/Cell");
-        // `is_a` now carries the node typing AND the
-        // DeclaredResource tag — every imported Resource is
-        // structurally a declared one. The typing target comes
-        // first; DeclaredResource appended last.
+        // `is_a` carries the node typing only — a superclass goes to `subclass_of`.
         let is_a = cell
             .get(&Iri::parse(IS_A).unwrap())
             .expect("is_a present")
@@ -879,8 +997,13 @@ mod tests {
             other => panic!("expected Array, got {other:?}"),
         };
         assert_eq!(iris, vec![CLASS.to_string()]);
-        match cell.get(&Iri::parse(SHORT_NAME).unwrap()) {
+        // The label is prose in `rdfs:label`; the short name is an identifier from the IRI.
+        match cell.get(&Iri::parse(RDFS_LABEL).unwrap()) {
             Some(Value::String(s)) => assert_eq!(s, "cell"),
+            other => panic!("expected rdfs:label string, got {other:?}"),
+        }
+        match cell.get(&Iri::parse(SHORT_NAME).unwrap()) {
+            Some(Value::String(s)) => assert_eq!(s, "Cell"),
             other => panic!("expected short_name string, got {other:?}"),
         }
         match cell.get(&Iri::parse(DESCRIPTION).unwrap()) {
@@ -895,11 +1018,12 @@ mod tests {
     }
 
     #[test]
-    fn property_node_object_type_gets_resource_data_type() {
+    fn property_node_object_type_gets_resource_array_data_type() {
+        // Edge objects accumulate per `(sub, pred)`, so an object property is multi-valued.
         let report = convert_document(&sample_doc());
         let part_of = find(&report, "http://example.org/part_of");
         match part_of.get(&Iri::parse(DATA_TYPE).unwrap()) {
-            Some(Value::String(i)) => assert_eq!(i.as_str(), RESOURCE_DATA_TYPE),
+            Some(Value::String(i)) => assert_eq!(i.as_str(), RESOURCE_ARRAY_DATA_TYPE),
             other => panic!("expected data_type as an IRI string, got {other:?}"),
         }
     }
@@ -920,12 +1044,17 @@ mod tests {
     /// merge. Mitochondrion ends up
     /// `is_a: [core:Class, DeclaredResource, Organelle]`.
     #[test]
-    fn is_a_edge_extends_existing_is_a_array() {
+    fn is_a_edge_is_subclass_of_not_membership() {
         let report = convert_document(&sample_doc());
         let mito = find(&report, "http://example.org/Mitochondrion");
+        // Membership is the node typing alone.
+        match mito.get(&Iri::parse(IS_A).unwrap()) {
+            Some(Value::Array(arr)) => assert_eq!(arr, &vec![Value::String(CLASS.to_string())]),
+            other => panic!("expected is_a [core:Class], got {other:?}"),
+        }
         let is_a = mito
-            .get(&Iri::parse(IS_A).unwrap())
-            .expect("is_a present")
+            .get(&Iri::parse(SUBCLASS_OF).unwrap())
+            .expect("subclass_of present")
             .clone();
         let array = match is_a {
             Value::Array(arr) => arr,
@@ -938,15 +1067,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // Node typing seeded `[CLASS, DeclaredResource]`; the
-        // `is_a` edge appends the Organelle URN.
-        assert_eq!(
-            iris,
-            vec![
-                CLASS.to_string(),
-                "http://example.org/Organelle".to_string(),
-            ]
-        );
+        // OBO `is_a` is OWL `subClassOf`: Mitochondrion is a KIND of Organelle, not a member of it.
+        assert_eq!(iris, vec!["http://example.org/Organelle".to_string()]);
     }
 
     /// Object-property edges (`part_of`) populate the subject's
@@ -980,11 +1102,9 @@ mod tests {
 
     /// Bare-string OBO predicates (`type`, `subPropertyOf`,
     /// `inverseOf`, beyond `is_a`) used to soft-error and drop the
-    /// edge. They now fold into `is_a` (for the hierarchy shorthand)
-    /// or synthesise a `urn:obo:<pred>` IRI (for `inverseOf` and any
-    /// other bare-string predicate the converter doesn't have a
-    /// well-known mapping for). Three edges, three distinct
-    /// destinations, no soft errors.
+    /// edge. `type` maps to `core:is_a` (membership); `subPropertyOf`
+    /// and `inverseOf` keep their own `urn:obo:<pred>` slots. Three
+    /// edges, three distinct destinations, no soft errors.
     #[test]
     fn bare_string_predicates_route_to_well_known_or_synthetic_iris() {
         let doc: GraphDocument = serde_json::from_str(
@@ -1011,21 +1131,22 @@ mod tests {
         );
 
         let p1 = find(&report, "http://example.org/p1");
-        // subPropertyOf folds into is_a → p1.is_a contains both
-        // [core:Property] (from node typing) and p2 (from the edge).
-        let is_a = p1.get(&Iri::parse(IS_A).unwrap()).unwrap();
-        let is_a_iris: Vec<String> = match is_a {
-            Value::Array(arr) => arr
-                .iter()
-                .filter_map(|v| match v {
-                    Value::String(i) => Some(i.as_str().to_string()),
-                    _ => None,
-                })
-                .collect(),
-            _ => panic!("expected is_a Array"),
-        };
-        assert!(is_a_iris.iter().any(|i| i == "http://example.org/p2"));
-        assert!(is_a_iris.iter().any(|i| i == PROPERTY));
+        // subPropertyOf keeps its own slot; p1 is a Property, not a member of p2.
+        match p1.get(&Iri::parse(IS_A).unwrap()) {
+            Some(Value::Array(arr)) => {
+                assert_eq!(arr, &vec![Value::String(PROPERTY.to_string())])
+            }
+            other => panic!("expected is_a [core:Property], got {other:?}"),
+        }
+        match p1.get(&Iri::parse(OBO_SUB_PROPERTY_OF).unwrap()) {
+            Some(Value::Array(arr)) => {
+                assert_eq!(
+                    arr,
+                    &vec![Value::String("http://example.org/p2".to_string())]
+                )
+            }
+            other => panic!("expected subPropertyOf [p2], got {other:?}"),
+        }
 
         // inverseOf lands on `urn:obo:inverseOf`.
         let inverse_iri = Iri::parse("urn:obo:inverseOf").unwrap();
@@ -1042,7 +1163,7 @@ mod tests {
             _ => panic!("expected Array"),
         }
 
-        // type also folds into is_a (rdf:type ≈ class membership).
+        // type is class membership: it extends is_a.
         let i1 = find(&report, "http://example.org/i1");
         let i1_is_a = i1.get(&Iri::parse(IS_A).unwrap()).unwrap();
         let i1_iris: Vec<String> = match i1_is_a {
@@ -1207,7 +1328,7 @@ mod tests {
         );
         let decl = find(&report, "urn:obo:hasAlternativeNamespace");
         match decl.get(&Iri::parse(DATA_TYPE).unwrap()) {
-            Some(Value::String(i)) => assert_eq!(i.as_str(), RESOURCE_DATA_TYPE),
+            Some(Value::String(i)) => assert_eq!(i.as_str(), RESOURCE_ARRAY_DATA_TYPE),
             other => panic!("expected data_type as an IRI string, got {other:?}"),
         }
         match decl.get(&Iri::parse(SHORT_NAME).unwrap()) {
@@ -1306,9 +1427,9 @@ mod tests {
             other => panic!("expected source_irl String, got {other:?}"),
         }
 
-        // is_a contains the URN form of the parent (not the HTTP
+        // subclass_of contains the URN form of the parent (not the HTTP
         // form) — cross-references rewrite consistently.
-        let is_a = nucleus.get(&Iri::parse(IS_A).unwrap()).unwrap();
+        let is_a = nucleus.get(&Iri::parse(SUBCLASS_OF).unwrap()).unwrap();
         let iris: Vec<String> = match is_a {
             Value::Array(arr) => arr
                 .iter()
@@ -1347,6 +1468,7 @@ mod tests {
         .unwrap();
         let opts = ConvertOptions {
             declared_by: Some("urn:eigenius:agents:go-curators".to_string()),
+            ..Default::default()
         };
         let report = convert_document_with(&doc, &opts);
         let nucleus = find(&report, "urn:obo:GO:0005634");
@@ -1434,5 +1556,48 @@ mod tests {
             Some(Value::String(s)) => assert_eq!(s, "user override"),
             other => panic!("expected explicit description, got {other:?}"),
         }
+    }
+
+    /// `root_anchor` puts every live root class under the anchor, and nothing else: a class with a
+    /// superclass keeps it alone, and a deprecated root stays parentless.
+    #[test]
+    fn root_anchor_places_live_roots_under_the_anchor() {
+        let doc: GraphDocument = serde_json::from_str(
+            r#"{"graphs":[{
+                "nodes": [
+                    {"id": "http://purl.obolibrary.org/obo/HP_0000001", "type": "CLASS", "lbl": "All"},
+                    {"id": "http://purl.obolibrary.org/obo/HP_0000118", "type": "CLASS", "lbl": "Phenotypic abnormality"},
+                    {"id": "http://purl.obolibrary.org/obo/HP_0000003", "type": "CLASS", "lbl": "obsolete term",
+                     "meta": {"deprecated": true}}
+                ],
+                "edges": [
+                    {"sub": "http://purl.obolibrary.org/obo/HP_0000118", "pred": "is_a",
+                     "obj": "http://purl.obolibrary.org/obo/HP_0000001"}
+                ]
+            }]}"#,
+        )
+        .unwrap();
+        let opts = ConvertOptions {
+            root_anchor: Some("urn:eigenius:lexicon:Entity".to_string()),
+            ..Default::default()
+        };
+        let report = convert_document_with(&doc, &opts);
+        let subclass_of = |id: &str| {
+            find(&report, id)
+                .get(&Iri::parse(SUBCLASS_OF).unwrap())
+                .cloned()
+        };
+        let one = |s: &str| Some(Value::Array(vec![Value::String(s.to_string())]));
+        assert_eq!(
+            subclass_of("urn:obo:HP:0000001"),
+            one("urn:eigenius:lexicon:Entity")
+        );
+        assert_eq!(subclass_of("urn:obo:HP:0000118"), one("urn:obo:HP:0000001"));
+        assert_eq!(
+            subclass_of("urn:obo:HP:0000003"),
+            None,
+            "a deprecated root stays parentless"
+        );
+        assert_eq!(report.counts_by_type.get("<anchored root>"), Some(&1));
     }
 }

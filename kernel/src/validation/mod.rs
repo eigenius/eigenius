@@ -58,6 +58,9 @@ pub struct ValidationError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationRule {
     MissingRequired,
+    /// Rule 26 — a `core:EquivalentClasses` lists fewer than two classes, or classes that
+    /// require different properties (D99 §11). `rules::equivalent_classes.rs`.
+    EquivalenceUnsound,
     /// Rule 25 — a class named an inductive in `subclass_of` from outside that inductive's
     /// own layer, or without corresponding to one of its `core:ctors` (D85 §6.1).
     InductiveNotClosed,
@@ -574,6 +577,9 @@ impl Validator {
         // constructor the inductive declares. Derived classes satisfy both by construction;
         // this answers one written by hand.
         errors.extend(self.check_inductive_closure(resource, &res_id));
+
+        // Rule 26 (D99 §11): an equivalence lists two or more classes with the same obligations.
+        errors.extend(self.check_equivalent_classes(resource, &res_id));
 
         // Rule 23: Embedded-resource recursion. A `Value::Embedded`
         // whose resource declares an `is_a` is a nested *typed instance*
