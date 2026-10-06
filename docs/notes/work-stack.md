@@ -34,9 +34,11 @@ any detour.
 > pins, the free adjunct of a governed preposition becomes `correct` with `departs` under events,
 > and a selection rule demotes free-adjunct and frame readings of a preposition the lexicon names on
 > the verb's sense (4); U1's «for» attaches to «exploit», re-pinned in slice 2, and purpose «for»
-> stays one opaque `prep_for` (5).
-> **Next:** open questions 6–7 (coordination and quantified PP objects, generic negation); then
-> slice 1 (`lexicon:Eventuality` and the `frame_*` axioms).
+> stays one opaque `prep_for` (5); quantified PP objects scope over the event quantifier, as the
+> lexicon test requires (6 (ii)).
+> **Next:** open question 6 (i) (coordination: distributive only until sum events), 7 (generic
+> negation), and the tie-break between a frame and a noun-internal reading that both restrict the
+> claim; then slice 1 (`lexicon:Eventuality` and the `frame_*` axioms).
 > #264's strand 3 (whether attachment is derivable) is answered by question 4 for prepositions the
 > lexicon names on a sense; other attachments stay with the ranker. #271 (the «a DNA» atom) is
 > independent.
