@@ -2,6 +2,11 @@
 
 *Design-note draft for `docs/notes/`. It answers eigenius#270 after the maintainer chose option B, event semantics, on 2026-10-06. It proposes changes; it changes no code.*
 
+**Decided so far (the maintainer):**
+
+- **Events** (2026-10-06, #270 option B): verb adjuncts attach to an event, not to the subject.
+- **Verbs denote relations with an event slot** (2026-10-06): `screen : Entity → Entity → Ev → Prop`, not event-type families `screen : Entity → Entity → Set` with every `screen(o, s) ⊑ Ev`. The relation gives both views: the type of screenings is definable from it at any time (`Σe:Ev. screen(o, s, e)`), while a family gives no proposition saying of an event obtained elsewhere — a graph resource, a coreferent event in another sentence — that it is a screening of `o` by `s`. Families also leave `∃e : screen(o, s). ⊤` for an unmodified verb. Their kernel cost would be small (see "Kind 1 and kind 2 coercions" below), so the reason is the missing predicate, not the kernel.
+
 **Recommendation.** Every verb gets one Davidsonian event argument, placed after its positional arguments. The subject, the object and any governed PP (`respond to`, `arise from`) stay positional in the verb's named relation. Adjunct PPs and adverbs become conjuncts on the event. The event quantifier closes inside the verb's own lexical entry, as Champollion (2015) proposes and as ccg2lambda and lightblue implement.
 
 **Why lexical closure.** Of the solutions surveyed, lexical closure is the only one that keeps the event quantifier lowest using function application alone. A chart CCG without hypothetical reasoning needs exactly that. It puts `∃e` under every generalised quantifier, under `→ False` and inside `Possible`. So «Some cancers do not respond to immune checkpoint blockade.» becomes `some Cancer (λx. ¬∃e. respond_to(icb, x, e))`, with the scope order it has today.
@@ -9,7 +14,7 @@
 **What is not needed.**
 
 - *Neo-Davidsonian thematic roles.* None of the five questions needs them. Leaving them out avoids D62's role-relation fork, the role-inventory problem, and three atoms per transitive verb instead of one.
-- *Dependent event types* (Luo & Soloviev). They need parameterised coercions that `Layer::is_subclass_of` does not have. They also solve a scope problem that lexical closure never creates. One event class is enough.
+- *Dependent event types* (Luo & Soloviev). Their families rely on function-inserting parameterised coercions that `Layer::is_subclass_of` does not have. They also solve a scope problem that lexical closure never creates. One event class is enough, and verbs stay relations (decided above).
 
 **Where the event class sits.** The class must sit under `lexicon:Entity`. `urn:schema_org:Action`, the root D62 chose, does not: it is a subclass of a parentless `schema_org:Thing`.
 
@@ -198,6 +203,15 @@ GQs, `→ False` and `Possible` may wrap `V(s)(K)` from outside. Like `reading_l
 - Inductive families compare parameters and indices invariantly (`conv.rs:459–496`).
 
 So `EvtA(a) ≤ Event` cannot be stated, and dependent event types would be a kernel extension. Lexical closure makes them unnecessary.
+
+### Kind 1 and kind 2 coercions
+
+A family of conversions for every parameter value — `Π(o s : Entity). screen(o, s) → Entity`, or the first projection of `Σe:Entity. screen_rel(o, s, e)` — is an ordinary dependent function and can be stated today. What dependent types cannot add is the subtyping judgement that lets the checker accept a `screen(o, s)` member where an `Entity` is expected. `check_by_inference` (`kernel/src/nbe/check/mod.rs:875`) is the one place that judgement is made; it already accepts a subclass member for its superclass ("the inclusion-coercion fragment of coercive subtyping") and relates sized inductive parameters, and it returns `Result<(), CheckError>`: it accepts or rejects, it never rewrites a term.
+
+- **Kind 1, inclusion coercions for families.** "Every member of `screen(o, s)` is a member of `Ev`", with the identity as the conversion. One more case at that check site, a declaration form and its validation rule; terms, `eq_nf`, hashing, pins and ledger untouched. It enters the trusted kernel and is sound only for families that are subsets of their class. Well below D46's 3–6 weeks.
+- **Kind 2, Luo's coercive subtyping with inserted functions** (projections, buy/sell role permutations). The checker would have to elaborate — a change to the interface of the ~8,900-line checking module — or a separate elaboration pass would duplicate its inference; coherence (every path between two types gives one function) must be restricted to be decidable, and stored terms carry the inserted functions. At least D46's scale.
+
+#270 needs neither: one class `Ev` uses the named-class rule the kernel has. Kind 1 is the cheap path to verbs as event-type families, which the relation form keeps available but was not chosen (see "Decided so far").
 
 **Per-verb event classes are possible but not needed now.** TTR-style classes (`Hugging ⊑ Touching`) could be declared, since a resource may already inhabit several classes (`check/mod.rs:832–846`). They would put WordNet verb hypernymy into the subclass lattice. The Σ-refinement Eigenius already uses for nouns expresses a verb-specific event type when a task needs one: `Σe:Ev. v_t(o, s, e)`, after [Luo 2012, p. 495](https://www.cs.rhul.ac.uk/home/zhaohui/LP13.pdf).
 
