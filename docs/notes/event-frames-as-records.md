@@ -294,6 +294,14 @@ artifacts in their own right, a coordination that exits and re-enters the repres
 in the representation; if they are only an encoding of the adjunct attachment, it is a notational
 wrinkle.
 
+## A third option exists
+
+`docs/notes/event-free-modification.md` (`2026-10-07`) works out Luo & Shi's event-free treatment:
+adverbials as predicate modifiers, `ADV = (Entity → Prop) → (Entity → Prop)`, with the drop
+entailments derived from the defining equation rather than from typing. It needs no event class, no
+record extension, no width subtyping and no kernel change, and leaves `⟦S⟧` at `Prop` so the 316
+closed-class entries do not move. The comparison above is therefore two of three, not two of two.
+
 ## Not examined
 
 - Cooper's §2.2 sub-event strings. Both designs treat an event as atomic. Nothing in the WRN corpus
