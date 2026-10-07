@@ -92,9 +92,9 @@ any detour.
 >   under "Frames". The candidate lists change, so a new live draw is needed (`--features use-llm`,
 >   `ANTHROPIC_API_KEY`).
 > - **The note's counts** (70 + 1 rows with a PP on the subject or a relativised noun, 46 on a
->   verb, 18 governed free adjuncts, 62 pins, 48 verb pins) classify each ledger row's `prep_*`
->   conjuncts: the anchor is not bound by a `Σ`, and the host is the conjunct beside it, with or
->   without a verb atom.
+>   verb, 18 governed free adjuncts, 62 pins, 48 verb pins, 139 mechanical and 74 re-adjudicated
+>   rows, 676 `cat_s` occurrences) are re-derived by `python3
+>   experiments/parsing/event-semantics-counts.py`; run it again after slice 2's re-adjudication.
 > - **Can ride along:** #271 (the «a DNA» atom) needs a reseed as well and can share slice 2's.
 >
 > **Exit gate:** the design note settled and the event slice merged, with pins and ledger
