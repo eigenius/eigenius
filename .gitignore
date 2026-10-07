@@ -16,6 +16,7 @@ node_modules/
 
 # Reference material
 /references
+/references.bak
 
 # Deno
 orchestration/node_modules/
