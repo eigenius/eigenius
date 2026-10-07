@@ -196,9 +196,13 @@ event to quantify over.
 
 ## What this does not settle, and what is unverified
 
-- **Non-intersective modifiers.** `ADV = (e → t) → (e → t)` admits them, which is its usual
-  advantage over Davidson. Whether any WRN-page adjunct is non-intersective has not been checked, and
-  if one is, the `And(V(s), …)` form in the entry is wrong for it.
+- **Non-intersective modifiers — checked `2026-10-07`, none in the corpus.** `ADV = (e → t) → (e → t)`
+  admits them, which is its usual advantage over Davidson, but the `And(V(s), …)` form in the entry
+  is only right for intersective ones. All twelve `expected-readings.tsv` pins carrying a `prep_*`
+  conjunct are intersective: instruments («with a CRISPR library», «with an RNA interference
+  library»), locatives («in models of microsatellite-stable cancers», «in nucleotide repeat
+  regions»), sources («from Lynch syndrome», «from deficient DNA mismatch repair»). A
+  non-intersective adjunct would need an entry without the conjunct, and the type admits it.
 - **Adverbs.** `event-semantics.md` §"Adverbs" is not worked here.
 - **§3 of the paper.** Event talk, perception words and nominalisation — the paper's argument that
   the *other* benefits of events are obtainable otherwise — were not read. They do not bear on #270
