@@ -2,6 +2,39 @@
 
 *Design note for `docs/notes/`. It answers eigenius#270 after the maintainer chose option B, event semantics, on 2026-10-06. The maintainer decided all ten of its questions the same day; what stays open is listed under "Later, each its own decision". It changes no code.*
 
+> ## Superseded for #270 on `2026-10-07`
+>
+> **#270 is now to be answered without events**, by predicate modifiers — see
+> [`event-free-modification.md`](event-free-modification.md). This note stands as the research record
+> for the event-argument design and for the ten questions decided on 2026-10-06; its recommendation
+> no longer holds.
+>
+> **What changed.** #270 recommended option A, attaching the adjunct to the predication. Option B was
+> chosen over it, and the ground given here is that predicate modifiers do not deliver the
+> modifier-drop entailments — "the modifier-drop entailments that `Qv→Qv` typing alone does not"
+> (§"Charlow's objection as a test"). That is correct about typing alone. Luo & Shi 2026, "Variable
+> polyadicity without events" — cited in this note's sources, and once in §"What the type-theoretic
+> literature offers" for an unrelated remark — do not rely on typing: the conjunction sits in the
+> defining equation, so `TV(n+1, advₙ₊₁, x, y) ⊃ TV(n, advₙ, x, y)` is a theorem, machine-checked in
+> Coq. The stated ground for B over A is therefore answered.
+>
+> **What the alternative costs**, against this note's own figures: no kernel change, no event class,
+> `⟦S⟧` stays `Prop`, and **none** of the 316 of 465 closed-class entry types move. It changes the
+> preposition axioms' type, the adjunct entry, `adjunct_of`, the 8 adjunct pins and their ledger rows.
+>
+> **Which decisions of 2026-10-06 survive.** The frames decision stands unchanged —
+> `frame_in : Prop → Entity → Prop`, its realisations, its embedded-clause rule and the drop test of
+> open question 8. So do the governed-preposition ruling (open question 4), purpose «for» (5),
+> quantified PP objects scoping from outside (6 ii), distributive coordination (6 i), negation as
+> `¬` under the subject quantifier (7), and the frame-or-noun tie-break (10).
+>
+> **Which lapse.** Open questions 1, 2, 3 and 9 — the `lexicon:Eventuality` class, its position in
+> the lattice, stative verbs taking the argument, and the eventivity feature on `S` — do not arise
+> without an event argument. Whether the eventivity feature is still wanted to state Katz's stative
+> adverb gap is open.
+>
+> Everything below is unchanged from 2026-10-06.
+
 **Decided (the maintainer, 2026-10-06):**
 
 - **Events** (2026-10-06, #270 option B): verb adjuncts attach to an event, not to the subject.
@@ -425,6 +458,9 @@ This states Katz's stative adverb gap in the grammar for copular predicates: an 
 | Term size | positional: +2 binders, +1 argument per verb. Neo-Davidsonian roles would add two role atoms per transitive verb on top; PMB gold has 7,516 role clauses beside 7,545 concept clauses ([van Noord et al. 2018, Table 1](https://aclanthology.org/L18-1267.pdf)) | derived, not measured |
 
 ## Recommendation
+
+*Superseded `2026-10-07` — see the banner at the top of this note and
+[`event-free-modification.md`](event-free-modification.md). Kept as written.*
 
 1. **Arguments: positional.** Adopt Davidsonian positional arguments plus one event argument, typed `lexicon:Entity` and bound by an impredicative `∃e:Ev` inside each verb's lexical entry. Governed PPs stay positional in `v{offset}_p_{prep}`. Do not adopt thematic-role predicates now.
 2. **VP type.** Make the VP denotation take a predicate-transforming continuation over eventualities, `Mod := (Ev → Prop) → Ev → Prop`, closed by the identity at the parse root and at every embedding boundary.

@@ -6,6 +6,9 @@ modification as an answer to eigenius#270, and sets it against the event-argumen
 ([`event-frames-as-records.md`](event-frames-as-records.md)). Written `2026-10-07`. It changes no
 code.*
 
+**Recommended `2026-10-07`** as the answer to #270, in place of the event-argument design decided on
+2026-10-06. `event-semantics.md` carries a banner pointing here.
+
 Source: Zhaohui Luo & Yunbao Shi, "Variable polyadicity without events: a type-theoretic analysis of
 event semantics", *Mathematical Structures in Computer Science* 36 (2026), e11,
 doi:10.1017/S0960129526100504. Read §§1–2.3 of 23 pages.
@@ -165,7 +168,7 @@ re-adjudication, reached without events.
 | | |
 |---|---|
 | kernel | none |
-| ontology | the preposition axioms' type — 8+ axioms in `ontology.esl`. Bootstrap edit, so it rides a reseed |
+| ontology | the preposition axioms' type — 8+ axioms in `ontology.esl`. Bootstrap edit, so it rides a reseed. **The shape is already shipped**: `ontology:has_proportion : lexicon:Entity -> (lexicon:Entity -> Prop) -> units:Quantity(u"1") -> Prop` is the same higher-order form, and `median_over` takes a function argument, so such axioms already round-trip the D47 codec and validate |
 | grammar | the VP-adjunct entry; `is_vp_adjunct_prep`'s category is unchanged |
 | verbaliser | `adjunct_of` |
 | closed-class entries | **none** — `⟦S⟧` stays `Prop` |
@@ -204,15 +207,50 @@ event to quantify over.
   regions»), sources («from Lynch syndrome», «from deficient DNA mismatch repair»). A
   non-intersective adjunct would need an entry without the conjunct, and the type admits it.
 - **Adverbs.** `event-semantics.md` §"Adverbs" is not worked here.
-- **§3 of the paper.** Event talk, perception words and nominalisation — the paper's argument that
-  the *other* benefits of events are obtainable otherwise — were not read. They do not bear on #270
-  but bear on whether events are wanted elsewhere.
+- **§3 of the paper — read `2026-10-07`.** It is weaker than §2 and does not change the
+  recommendation. §3.1 replaces event ordering with a **time argument** on every verb
+  (`∃t,t'. sing(j,M,t) & salute(j,flag,t') & t < t'`), which for Eigenius is the same per-verb slot
+  that events would be. §3.2 handles perception verbs with a local reification `E : t → e`, and is
+  explicit that it is local: "introducing the mapping `E` is only for the interpretation of such
+  sentences involving perceptual verbs, not in general." §3.3 **leaves nominalisation open** — "it is
+  arguable whether event semantics is essential", pointing at Chierchia 1984/1985 and conceding that
+  DRT's discourse referents may be "event-like structures", then "we shall not discuss these
+  approaches in detail."
+  Nominalisation is the one §3 defers and the one the corpus actually uses — «Depletion of WRN»,
+  «Somatic MMR inactivation», «The co-occurrence of these two events» — and the corpus already
+  handles it as nominals with `prep_of`, with no event and no `E`. Perception verbs and cross-clause
+  time ordering do not occur on the gate page.
 - **The arity of `prep_*` in the chain.** Changing a shipped axiom's type is a versioned-ADT change;
   the migration for existing encoded terms has not been sized.
 - **Whether `V` is the right predicate to modify.** The paper modifies `BUTTER(x)` — subject
   absorbed, object outstanding. Eigenius's `V : Entity -> Prop` is object-absorbed, subject
   outstanding. The two coincide for a transitive verb with both arguments, but the correspondence was
   derived here, not taken from the paper.
+
+## Event anaphora, checked `2026-10-07`
+
+Raised as the strongest candidate for needing events beyond adjunct attachment. It does not, as this
+corpus exercises it.
+
+- **Anaphora is not resolved at all.** Every demonstrative on the gate page is pinned as a λ-bound
+  open parameter — «This success highlights the potential of this approach» is
+  `λ($demref$0 : §). λ($demref$1 : §). §(the(ΣG#0:§. prep_of(G#0, $demref$0)).1, $demref$1)`.
+  Resolution is a later step, so there is no eventuality to bind to either way.
+- **The three demonstratives all have nominal antecedents**: «an impairment … This impairment», «a
+  hypermutable state … This state», «are successful … This success». The last is the sharpest: its
+  antecedent is a *copular* predication, which `event-semantics.md` decided carries no event, so
+  adopting events would not give it a referent.
+- **Event-denoting subjects are nominals.** «Depletion of WRN induced double-stranded DNA breaks» is
+  `§(kind_of(§), kind_of(ΣG#0:§. prep_of(G#0, kind_of(§))))`. The corpus reifies events as nouns with
+  their arguments as PPs, which the nominal machinery already handles.
+- **What would need events**, and does not occur on the page: a bare demonstrative over a verbal
+  antecedent («WRN was depleted. This caused apoptosis»), temporal predication of an event («It
+  occurred within 48 hours»), and event individuation («They analysed the data twice. The second
+  analysis…»).
+- **Event counting does occur in the methods**, which the gate does not parse: «All experiments were
+  performed three times», «immunofluorescence experiments were performed twice» — 17 occurrences of
+  «twice» and 10 of «three times» in the full text. Nominalisation cannot encode "performed twice".
+  **If methods sections come into scope, this is the construction that reopens the question.**
 
 ## Sources
 
