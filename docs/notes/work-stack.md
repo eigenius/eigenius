@@ -106,21 +106,22 @@ any detour.
 >   copy holds both (`references.tar`, `snapshots/wordnet-umls-hpo-aligned-2026-10-05-merge.tar`,
 >   `SHA256SUMS`, `README.md`). `scripts/measure-parse-rate.sh` picks the newest `wordnet-umls-*`
 >   store unless given `--snapshot`, so pass it.
-> - **The pre-change baseline replay is NOT runnable here, and an A/B across this change is not
->   possible at all** (established `2026-10-07`). The bullet this replaces said to replay
->   `ranks/2026-10-01-do-sense.json` and `selections/2026-10-05-hpo-merge-1.json` against
->   `wordnet-umls-hpo-aligned-2026-10-05-merge` for 62/62 hits, grammar-gap 0, 210 skeletons, 679
->   readings; reading-correct 32/42, structure 37, ledger-conflicts 0. Two reasons it cannot be done:
->   - That store's `PROVENANCE` says it was built from git **`89ceffb`, a commit this clone does not
->     have** — it came from the other machine with the archives. Its build timestamp
->     (2026-10-05T20:20) is **before `f331dcb`** (2026-10-06 10:25, #263/#264), which moved the
->     bootstrap manifest, so the store is almost certainly already `ManifestDrift` at every commit on
->     this branch. (Grepping the store for either candidate `closed-class` hash finds neither;
->     RocksDB compresses, so that is not evidence either way.)
->   - **An A/B across a bootstrap edit is impossible by construction.** The pre- and post-change
->     bootstraps hash differently, so no single store opens under both. The comparison is therefore
->     the new store's numbers against the committed `baseline.json` / `selection-baseline.json`
->     expected blocks, which is what `eval-parse-rate.sh` gates on.
+> - **The pre-change baseline DOES replay here, and it reproduces exactly** (established
+>   `2026-10-07`; an earlier bullet here claimed the opposite and was wrong). At `f331dcb`,
+>   replaying `ranks/2026-10-01-do-sense.json` against `wordnet-umls-hpo-aligned-2026-10-05-merge`
+>   gives **62 hits, 0 misses, 679 readings, 210 skeletons** — the committed figures. The claim it
+>   replaces was that a bootstrap edit after the store's build made it unresumable; that edit was
+>   `a2a1076`'s, which the branch had already merged at `fd5460f` **before** the baseline ran at
+>   `89ceffb`, and none of the four commits between `89ceffb` and the squash touched `ontologies/`
+>   or `kernel/src/`. Settled by reading the store's own manifest: opening it reports
+>   `ManifestDrift` differing in exactly the two layers the `adv_*` slice edits
+>   (`ontology`, `closed-class`) and matching `f331dcb`'s `EXPECTED` on all 21.
+>   A worktree needs `references/` linked in — `.gitignore` excludes it and only `.gitkeep` is
+>   tracked, so the page is absent and a run measures nothing.
+> - **An A/B across this change IS possible, by reseeding the pre-change commit** (done
+>   `2026-10-07`). `f331dcb` + a store reseeded here from identical provenance also gives
+>   **679/210 with identical per-unit skeleton sets**, so the store is not a variable and the slice's
+>   deltas are attributable. `wordnet-umls-hpo-aligned-2026-10-07-pre` is that reference; keep it.
 > - **What CAN be matched is the store's provenance, and it was** (`2026-10-07`). The 2026-10-05
 >   store's `PROVENANCE` names every input; all of them are present here and the three recorded
 >   sha256 prefixes match exactly — SPECIALIST `LEXICON` 259d0283ebe7b027, `adjective-senses.tsv`

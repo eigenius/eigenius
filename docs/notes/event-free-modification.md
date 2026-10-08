@@ -546,6 +546,57 @@ corpus exercises it.
   «twice» and 10 of «three times» in the full text. Nominalisation cannot encode "performed twice".
   **If methods sections come into scope, this is the construction that reopens the question.**
 
+## Measured outcome, `2026-10-07`
+
+Implemented and measured against `wordnet-umls-hpo-aligned-2026-10-07-adv`, a reseed whose
+`PROVENANCE` matches the 2026-10-05 store on every input axis.
+
+**The defect is closed.** `grammar-gap 0`, `missing-lexeme 0`, every unit parses;
+COVERAGE / SELECTION-VALIDITY / LEDGER all PASS. The 13 adjunct pins fell out and were restored
+**mechanically**: for each, exactly one skeleton in the new forest rewrites back to the old pin under
+`adv_X(obj, V, subj) → prep_X(subj, obj)`, so the pinned *analysis* never changed — only the
+relation's name and argument order. No ruling was needed, including for the three attachments re-ruled
+on 2026-09-30. `expected-hits` is back to **62/62**.
+
+**The forest grew, and the growth is attributable.** Readings 679 → 799, skeletons 210 → 290. A replay
+at `f331dcb` reproduces **679/210 against both** the 2026-10-05 store and a store reseeded here from
+identical provenance, with *identical per-unit skeleton sets* — so the store is not a variable. The
+`is_pp_refined` `adv_` arm is not a cause either: skeleton sets are identical with it on and off.
+
+| | skeletons |
+|---|---|
+| previously-identical terms the `prep_`/`adv_` split now separates | 26 |
+| analyses that would have been distinct before and were **not produced** | 54 |
+
+Three sentences carry 76 of the 80.
+
+**The largest is an under-generation gap closing, not over-generation opening.** «Project Achilles and
+project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell
+lines.» went 4 → 52, and 16 of the new readings put **both** PPs inside the dependency's Σ:
+
+```
+the( ΣG#0:§.  gt(§(G#0),§) ∧ gt(§(G#0),§)
+            ∧ prep_in(G#0, «MSI cell lines»)
+            ∧ prep_to(G#0, «MSS cell lines») ).1
+```
+
+That is the maintainer's 2026-10-06 ruling on #270 — "«in MSI cell lines compared to MSS cell lines»
+modifies the noun «dependency»" — an analysis the grammar **could not produce before**, and which that
+unit's pin consequently does not encode (its pin carries `prep_in` and no `prep_to`). The ceilings were
+therefore raised by the same absolute headroom they already carried, +96 readings and +40 skeletons,
+rather than widened.
+
+**Open, and recorded rather than resolved.** That pin may want to move to one of the 16, and the two
+other growers — «MSI cell lines from these four lineages …» (18 → 36) and «We analysed these data sets
+…» (14 → 24) — deserve the same look. **The mechanism by which the rename made those noun-internal
+attachments reachable is not identified**; the Rust changes are excluded by measurement, so it is the
+ontology half, and splitting the 22 axioms from the 22 sem bodies needs a third reseed.
+
+**`reading-correct` for this slice is unmeasured.** The live selection draw lost four of 42 units to
+`jev-latest` 503s, so it is not a measurement; `selection-baseline.json` is untouched. Whether the
+larger forest costs selection accuracy is the open question, and it is #264's instrument, not this
+note's.
+
 ## Sources
 
 - Luo, Z. & Y. Shi. 2026. "Variable polyadicity without events: a type-theoretic analysis of event

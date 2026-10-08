@@ -1,18 +1,18 @@
 {
   "_comment": "The reference measurement the parse-rate gate is judged against. Run logs are NOT committed (experiments/*/results/ is gitignored); this is the distilled result + provenance. Update it DELIBERATELY, never to make a red run go green.",
   "provenance": {
-    "commit": "89ceffb (branch prepositions-and-ranker after merging origin/main a2a1076, UAB experiment 02)",
-    "date": "2026-10-05",
+    "commit": "6e5ee87 (branch event-semantics, the #270 adv_* slice)",
+    "date": "2026-10-07",
     "profile": "release",
     "features": [
       "use-llm"
     ],
     "reranker": "DecisionSenseRanker over AnthropicDecider, claude-sonnet-4-6, strict tool, choices of at most eight questions per request; the S-guide2 question (sense_ranker.rs sense_question), floor 0.02",
     "page": "references/publications/WRN-Helicase-Nature-OCR/first-page-cnl-v3.txt",
-    "snapshot": "wordnet-umls-hpo-aligned-2026-10-05-merge",
-    "ranks": "experiments/parsing/ranks/2026-10-01-do-sense.json, REPLAYED (62 hits, 0 misses)",
-    "selections": "experiments/parsing/selections/2026-10-05-hpo-merge-1.json",
-    "replay": "62 hits, 0 misses; selection replay 42 hits, 0 misses — the live selection draw and its replay agree on every figure"
+    "snapshot": "wordnet-umls-hpo-aligned-2026-10-07-adv",
+    "ranks": "experiments/parsing/ranks/2026-10-07-adv.json, RECORDED live then REPLAYED (62 hits, 0 misses)",
+    "selections": "NONE — the live draw died on four jev-latest 503s; selection-baseline.json is deliberately NOT re-derived here (see the note)",
+    "replay": "62 hits, 0 misses; forest figures reproduce exactly on replay"
   },
   "_provenance_note_2026-10-01-sense-ranker": "RE-BASELINE (the owner adopted S-guide2, 2026-10-01). Three changes since 93f3a64: D97 slice 2 (verbs), measured on wordnet-umls-aligned-2026-10-01-verbs at 656 readings / 220 skeletons / 62 of 62 with the old ranking prompt; the sense ranker moved onto the decision interface, one question per word, with the question chosen on an offline screen (S-guide2: a grammatical word has one reading here); and do-support as one sense key (c5d6d28), after S-guide2 kept «does»'s question entry and lost «Each event alone does not lead to cell death.». Deterministic replays of offline answers on this snapshot, same code: old prompt 646 / 229 / 62, S-guide2 714 / 205 / 62. 18 of the 24 fewer skeletons are «MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.» (36 -> 18), where S-guide2 seeds the comparative marker wn:great.a.01 over UMLS's 'Greater' qualifier C1704243; the extra readings are runners-up on content words, which an Anthropic answer cannot weigh (no probabilities, so the floor keeps every runner-up). THIS RECORDING (live, aeb67c3): 738 readings, 210 skeletons, 62 of 62, encoded 0 (the two units encoded under the old prompt, «MSI contributes to several cancers.» and «MSI occurs in colon, gastric, endometrial and ovarian cancers.», keep a second sense of «MSI»). The first live attempt lost two sentences to the strict grammar's size limit (804 / 236, discarded); aeb67c3 asks a choice in parts of eight questions. The live selection draw (jev-latest) scored 26 correct, 7 wrong, 9 unadjudicated; the selection baseline is re-derived separately, after adjudication.",
   "_provenance_note_2026-08-17-faithful-remeasure": "RE-MEASURED on a FAITHFUL run (2026-08-17, D69 slice 3). The tracked ranks draw (2026-08-13-d69-corrected) had been replaying 61/62 against the d70b snapshot ever since the D70 reseed — D70 changed candidate sense lists, so one rank key stopped matching — which means the 2026-08-15 d70b figures in this file were recorded with ONE SENTENCE UNRANKED, falling back to seed order. The protocol calls that 'a different experiment, not a reproduction'. Re-recorded live on d70b as ranks/2026-08-17-d70b.json; the live run and its replay now agree exactly (62 hits/0 misses, selection replay 40/0). NUMBERS MOVE, all improvements: total-readings 637 -> 613, total-skeletons 175 -> 170. UNCHANGED and confirmed on the faithful run: grammar-gap 0, encoded 2, expected-hits 62/62 with an empty miss-set — so D70's conclusions stand, they were simply measured imprecisely.",
@@ -40,45 +40,45 @@
     "ambiguous": 42,
     "open": 20,
     "encoded": 0,
-    "total_readings_ceiling": 775,
-    "total_readings": 679,
-    "skeletons_ceiling": 250,
-    "skeletons": 210,
+    "total_readings_ceiling": 895,
+    "total_readings": 799,
+    "skeletons_ceiling": 330,
+    "skeletons": 290,
     "expected_reading_hits": 62,
     "expected_reading_curated": 62,
     "expected_reading_misses": [],
     "_expected_reading_misses_note": "The units that MISS their pin at this baseline, by name. Gated as a SET by eval-parse-rate.sh: a newly-missing unit is a regression even when expected_reading_hits holds or rises. Added 2026-08-14 after the scalar hid a swap — hits went 60 -> 61 while three units changed state, and the provenance recorded the wrong one as the survivor. Keep this list in step with expected_reading_hits (hits + len(misses) == curated).",
     "skeleton_histogram": {
-      "_comment": "STALE as of 2026-08-14 — describes the PRE-sense-cap forest (144 skeletons). Not re-derived under the sense-counted cap (the harness prints a reading-count histogram, not a per-unit skeleton one); total-skeletons is tracked as a scalar and is 177. Kept for the migration record. units bucketed by SKELETON count over the D64 demonstrative-hole forest with TYPED open skeletons (OpenParse::skeleton -- hole restrictor types printed; 144 skeletons, 62 units; +5 vs the untyped instrument = previously-merged open readings differing only in hole type). COVERAGE IS COMPLETE: 84 ledger rows (carried via the iota/typed detransforms) + the 60 pinned correct skeletons cover all 144 -- the migration's provisional '74-row wave' was an artifact of the untyped instrument and is discharged.",
+      "_comment": "RE-DERIVED 2026-10-07 for the #270 adv_* slice, from EIGENIUS_DUMP_SKELETONS=1 on the replay of ranks/2026-10-07-adv.json. The previous histogram had been STALE since 2026-08-14 (it described the pre-sense-cap forest, 144 skeletons) and its buckets summed to 144 against a tracked 210 — do not compare per-unit figures across that gap. units bucketed by SKELETON count; `skeletons` is the sum over that bucket's units, so the buckets partition total-skeletons exactly.",
       "buckets": {
         "1": {
-          "units": 32,
-          "skeletons": 32
+          "units": 13,
+          "skeletons": 13
         },
         "2-3": {
-          "units": 19,
-          "skeletons": 38
+          "units": 29,
+          "skeletons": 60
         },
         "4-6": {
-          "units": 8,
-          "skeletons": 38
+          "units": 11,
+          "skeletons": 53
         },
         "7-10": {
-          "units": 1,
-          "skeletons": 10
+          "units": 6,
+          "skeletons": 52
         },
-        "11-20": {
-          "units": 2,
-          "skeletons": 26
+        "21-60": {
+          "units": 3,
+          "skeletons": 112
         }
       },
       "top_units": {
-        "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.": 14,
-        "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.": 12,
+        "Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines.": 52,
+        "MSI cell lines from these four lineages showed greater dependence on WRN than their MSS counterparts.": 36,
+        "We analysed these data sets for genes that are selectively essential in cancer cells with MSI.": 24,
         "PARP-1 inhibitors are successful in cancers with deficiencies in homologous recombination.": 10,
-        "These findings show that WRN is a synthetic-lethal vulnerability for MSI cancers.": 6,
-        "These findings show that WRN is a promising drug target for MSI cancers.": 6,
-        "Some cancers do not respond to immune checkpoint blockade.": 6
+        "Depletion of WRN induced double-stranded DNA breaks.": 10,
+        "Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.": 8
       }
     },
     "_expected_reading_note_2026_07_29": "SUPERSEDED IN PART 2026-08-14 — see _provenance_note_2026-08-14-sense-cap. Its 'DO NOT repin either' applied to «Depletion of WRN induced double-stranded DNA breaks» on the premise that the bare WRN form was unavailable in the forest; the sense-counted cap made it available, and the unit was repinned (to the PROTEIN under kind_of, not the bare gene). hits are now 61/62. CORRECTION 2026-08-14 (same day, before the lexicon change): this note first asserted the single remaining miss was the documented draw-variance unit «Synthetic lethality is an interaction between two genetic events.» — that was an ASSUMPTION from the aggregate, never checked against the miss list, and it is WRONG. The run log shows exactly one FAITHFULNESS MISS and it is «These observations suggest that WRN dependency is not simply a result of MMR deficiency.», whose pin wants WRN as a bare individual inside the compound (`compound(G#0, §)`). So the 60 -> 61 move was not one unit recovering: the Depletion unit AND the draw-variance unit both began hitting under the sense-counted cap while the MMR unit began MISSING. The cap adoption cost that pin, which the aggregate hid. Under investigation; recorded here so the number is not read as clean. ORIGINAL NOTE: hits 60 of 62 CURATED, and the 2-unit shortfall is EXPECTED and explained — see the header of expected-readings.tsv. Both are sense-selection misses with the STRUCTURE intact, not lost readings. «Synthetic lethality is an interaction between two genetic events.» is this lexicon's documented draw-variance unit (missed in draws 1 and 3, HIT in draw 2); its closest rival has the SAME `between` attachment and differs only in taking `two genetic events` as a quantified GQ instead of a bare kind. «Depletion of WRN induced double-stranded DNA breaks.» differs from its pin by ONE TOKEN — `prep_of(G#0, §)` against `prep_of(G#0, kind_of(§))` — i.e. WRN realising as the class `WRN protein, human` instead of the HGNC-symboled named individual `WRN gene`. That is Axis B, not grammar; and the gene reading is NOT AVAILABLE for this unit at all (no produced skeleton carries the bare form), which matches the page-wide finding of 5 units missing it. DO NOT repin either: repinning would bake the wrong analysis in. `expected_reading_curated` rises 61 -> 62 because the page is now fully pinned (65e62a6).",
@@ -575,6 +575,14 @@
       "commit": "4400aef",
       "encoded": 10,
       "note": "RE-BASELINE. Two SEEDING fixes (parse/seed.rs, NO reseed -- snapshot unchanged), diagnosed from the reranked 2-3 bucket. (A) EVENT [33ff4a2] cap-then-dedup: the cross-lexicon concept dedup used to run BEFORE the sense cap, so a merged reranker top-2 (event-happening's WordNet sense + its UMLS twin) dropped the twin and let the cap BACKFILL a lower-ranked wrong sense (event-*circumstance*). Moving dedup AFTER the cap keeps the reranker's top-`cap` raw positions, which collapse to 1 -> 'Each event alone does not lead to cell death' encodes. (B) GENE [4400aef] elimination-through-widen: the sense-cap elimination cut applied only at BASE cap, so when a sentence WIDENED (base cap fails -- 'Germline mutations ... cause Lynch syndrome' needs cap 4 for `cause`/`mutations`' deep RANKED sense), the widen un-eliminated ALL of the reranker's rejects, re-seeding junk onto every word (`gene` got C5849123 = 'Gross Extranodal Extension' via a spurious 'gENE' NCI synonym). Making the cut hold at EVERY cap rung keeps eliminations through widen; the wrong-elimination safety is instead provided by parse_widening PASS 2 (a ranks=None widen), reached only when a NEEDED sense was wrongly eliminated -- so grammar-gap stays 0. CORRECTION: `gene` was NOT a merge gap (the real gene C0017337<->n05436752 was already merged); the earlier 'dedup gene' framing was wrong -- the junk is a different concept the reranker already eliminates, and merges.json was not the lever. VALIDATED by a deterministic REPLAY of the 2235 rankings (isolates the code from the reranker): encoded 8->10, total_readings 1991->1282 (-36%), grammar-gap 0; then CONFIRMED live at 4400aef: encoded 10, ambiguous 51, open 1, grammar-gap 0, total_readings 1286 (== replay, so the -35% multiplicity drop is structural, not drift), runtime 239s. The 2 newly-encoded are exactly 'Each event ...' and 'Germline mutations ...'. The bigger result is total_readings: the gene fix is BROAD (every widening sentence stops flooding), 101+ bin 4->1. Floor set at 9; total_readings ceiling 1500 (see gates)."
+    },
+    {
+      "date": "2026-10-07",
+      "commit": "6e5ee87",
+      "encoded": 0,
+      "skeletons": 290,
+      "readings": 799,
+      "note": "#270 answered without events: adv_* takes the VP-adjunct role, prep_* keeps the noun-internal one. Readings 679→799, skeletons 210→290; ceilings raised by the same absolute headroom they had (+96, +40)."
     }
   ],
   "_provenance_note_2026-07-26-normal-forms": "Re-baselined 2026-07-26 for a session of categorial-syntactic normal forms plus a lemma-keyed lexicon. skeletons 412 -> 281 (-32%), readings 2299 -> 1216 (-47%), encoded 9 -> 10, grammar-gap 0 throughout. Snapshot wordnet-umls-aligned-2026-07-26-lemmakeyed; drift-free REPLAY of experiments/parsing/ranks/2026-07-26-lemmakeyed.json (now TRACKED — see that directory's README for why a recording must not live in gitignored results/). PARSER: close apposition distributes the classifier over every group member and is a normal form (`Combinator::Apposed` — no second classifier, no later extension); a designator may not be a DERIVED individual (`Combinator::DerivedIndividual` — neither a definite designation nor a kind realization), propagated through coordination; classifier/designator CARDINALITY agreement (`Guard::NotPlural` — a plural classifier takes a group, never one name); PP-ADJACENCY, i.e. a PP-postmodified noun is neither an apposition classifier nor a pre-nominal compound modifier (`Guard::NotPpRefined`, the single largest win: the germline unit's 24-skeleton compound pile); a comma list folds only when COMPLETE (`RightContext::list_is_final`, new cell right-context threaded to both chart drivers and packing-safe because it is a property of the SPAN); verb-side number (a `-s` surface cannot take a plural subject); vocabulary-scoped apposition felicity (WordNet<->UMLS has no edges BY DESIGN, so an absent one is not a clash). LEXICON: the UMLS importer prunes inflected duplicate forms (52 505 of 6.17M) so the lexicon is lemma-keyed as `seed`'s number rule assumes, and the alignment consumes merges-lemma-keyed.json (38 389 -> 30 776). EXPECTED HITS ARE 44 OF 45, NOT 45/45 — the faithfulness gate is stochastic: four live draws scored 44, 44, 43, 44 and which pin misses varies; every failing pin's structure stayed reachable in some draw. See expected-readings.tsv's header. Ceilings tightened 2800->1900 and 650->400, sized for the measured draw variance (readings +/-25% across recordings, skeletons +/-2.6%). Germline unit 112 -> 9 with a correct reading that did not exist at session start, now pinned.",
@@ -601,5 +609,6 @@
   "_provenance_note_2026-09-30-attachments": "Three pins moved to the verb-adjunct encoding on the maintainer's rulings of 2026-09-30 (eigenius#264): «Project Achilles screened cell lines with a CRISPR library.» and «Project DRIVE analysed cell lines with an RNA interference library.» (the library is the instrument), and «Depletion of WRN promoted apoptosis and cell cycle arrest in MSI models.» (the locative scopes over both effects). Replayed at cf0e84f on the same snapshot and rankings: expected-hits 62/62, no misses, readings 668, skeletons 215 — every gated figure unchanged.",
   "_provenance_note_2026-10-02-uab-d99": "UAB EXPERIMENT 02 RESEED (2026-10-02, branch uab-experiment-02). Reseeded from e39d231 (uab-d99-2026-10-02: the OBO meta-ontology of 4b07e11, the eigentt:Term proof constructors and core:EquivalentClasses of 7878e8d) and aligned with the corrected emitters; the measured chain is uab-d99-r2-hpo-aligned-2026-10-02 (WordNet↔UMLS, HPO, HPO↔UMLS + HPO≡WordNet≡UMLS equivalences, the polydipsia maintainer override and bare-standing HPO names of 52d0af9). Measured at 52d0af9, clean tree. Readings 652 -> 612, every other figure equal (grammar-gap 0, encoded 1, expected hits 62/62, skeletons 212). The drop appeared on the first d99 alignment (uab-d99-hpo-aligned-2026-10-02, 612) and is attributed to cecbe94: both alignment emitters had left D70's `_name` entries on the UMLS concept (8,107 entries), so a named condition carried a UMLS reading beside its aligned one; the equivalence layer and the r2 changes do not move it. The slice-8 rankings replay with 0 misses; the selection draw is new (the forest changed), and the ledger records the owner's 2026-10-02 verdict on its one novel reading.",
   "_provenance_note_2026-10-05-merge-main": "MERGED origin/main a2a1076 (UAB experiment 02, #269) on 2026-10-05. Both branches changed bootstrap ontologies (main: core, obo, clinvar, variant; this branch: lexicon, closed-class), and no snapshot has been seeded from the merged bootstrap: the merged code refuses wordnet-umls-aligned-2026-10-01-do-sense with ManifestDrift. `provenance` and `expected` therefore describe this branch before the merge (2574984) until a reseed with the merged importers is measured. Main's measurement, on uab-d99-r2-hpo-aligned-2026-10-02, is in _provenance_note_2026-10-02-uab-d99. The merge took the maintainer's ruling of 2026-10-02 that «analysed» v00644583 is a faithful reading of analysing a data set, which re-rules rows on «We analysed two independent cancer dependency data sets.». MEASURED the same day: see _provenance_note_2026-10-05-hpo-chain.",
-  "_provenance_note_2026-10-05-hpo-chain": "RE-BASELINED on the HPO chain, which the maintainer chose for the gate (2026-10-05). Built from 89ceffb in main's order, isolated in its own compose project: reseed --umls-all (wordnet-umls-2026-10-05-merge); the WordNet<->UMLS alignment, 38,391 merges with the polydipsia maintainer verdict (wordnet-umls-aligned-2026-10-05-merge); HPO 2026-09-01 by obograph-import --root-anchor urn:eigenius:lexicon:Entity, 20,533 resources (wordnet-umls-hpo-2026-10-05-merge); the HPO<->UMLS layer, 61,092 entries redefined onto 18,418 HP classes and 20,131 bare-standing `_name` entries, and 864 HPO ≡ WordNet ≡ UMLS equivalences (wordnet-umls-hpo-aligned-2026-10-05-merge) — main's chain had 81,223 entries and 864 equivalences. The do-sense rankings replay with 62 hits, 0 misses. Readings 738 -> 679; every other gated figure equal (grammar-gap 0, encoded 0, expected hits 62/62, skeletons 210). Main recorded a drop of the same kind (652 -> 612) when cecbe94 aligned D70's `_name` entries, which this merge brings in; this drop is not attributed further. The readings ceiling stays 775."
+  "_provenance_note_2026-10-05-hpo-chain": "RE-BASELINED on the HPO chain, which the maintainer chose for the gate (2026-10-05). Built from 89ceffb in main's order, isolated in its own compose project: reseed --umls-all (wordnet-umls-2026-10-05-merge); the WordNet<->UMLS alignment, 38,391 merges with the polydipsia maintainer verdict (wordnet-umls-aligned-2026-10-05-merge); HPO 2026-09-01 by obograph-import --root-anchor urn:eigenius:lexicon:Entity, 20,533 resources (wordnet-umls-hpo-2026-10-05-merge); the HPO<->UMLS layer, 61,092 entries redefined onto 18,418 HP classes and 20,131 bare-standing `_name` entries, and 864 HPO ≡ WordNet ≡ UMLS equivalences (wordnet-umls-hpo-aligned-2026-10-05-merge) — main's chain had 81,223 entries and 864 equivalences. The do-sense rankings replay with 62 hits, 0 misses. Readings 738 -> 679; every other gated figure equal (grammar-gap 0, encoded 0, expected hits 62/62, skeletons 210). Main recorded a drop of the same kind (652 -> 612) when cecbe94 aligned D70's `_name` entries, which this merge brings in; this drop is not attributed further. The readings ceiling stays 775.",
+  "_provenance_note_2026-10-07-adv-adjuncts": "RE-BASELINED for eigenius#270, answered with predicate modifiers rather than events (Luo & Shi 2026; docs/notes/event-free-modification.md). `adv_*` takes the VP-adjunct role and `prep_*` keeps the noun-internal one, so no committed term is retyped. 22 axioms added, 0 changed. WHAT MOVED AND WHY, each figure measured: expected-hits fell 62→49 and was restored by 13 MECHANICAL re-pins — for each, exactly one new skeleton rewrites back to the old pin under adv_X(obj,V,subj)→prep_X(subj,obj), so the pinned ANALYSIS is unchanged (6e5ee87). Readings 679→799 and skeletons 210→290, attributable to this change and to nothing else: a replay at f331dcb reproduces 679/210 against BOTH the 2026-10-05 store and a store reseeded here from identical provenance, with identical per-unit skeleton sets, so the store is not a variable. The `is_pp_refined` adv_ arm is not a cause either — skeleton sets are identical with it on and off. DECOMPOSITION of the +80: 26 are previously-identical terms the prep_/adv_ split now separates (verified by rewriting each new skeleton to the old form and counting distinct); the other 54 are analyses that would have been distinct before and were simply NOT PRODUCED. Three sentences carry 76 of the 80. On the largest, «Project Achilles and project DRIVE identified WRN as the top preferential dependency in MSI cell lines compared to MSS cell lines.» (4→52), 16 of the new readings put BOTH PPs inside the dependency's Σ — `prep_in(G#0, MSI) ∧ prep_to(G#0, MSS)` — which is the maintainer's 2026-10-06 ruling on #270 («in MSI cell lines compared to MSS cell lines» modifies the noun «dependency»), an analysis the grammar could NOT produce before and which that unit's pin therefore does not encode. So the ceiling breach is an UNDER-generation gap closing, not over-generation opening; the ceilings are raised by the same absolute headroom they carried (+96 readings, +40 skeletons) rather than widened. STILL OPEN, deliberately: that pin may want to move to one of the 16, and the two other growers deserve the same look; the mechanism by which the rename made those noun-internal attachments reachable is not identified. SELECTION IS NOT RE-DERIVED HERE: the live draw lost four of 42 units to jev-latest 503s, so it is not a measurement; selection-baseline.json is untouched and `reading-correct` for this slice is unmeasured."
 }
