@@ -9,48 +9,73 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **entry 4 (`2026-10-06`). #270 — event semantics for verbs and their modifiers, on `event-semantics`.
-> ACTIVE.**
+> **entry 4 (`2026-10-07`). #270 — adjunct attachment for verbs and their modifiers, on
+> `event-semantics`. ACTIVE.**
 >
-> The owner decided option B on #270 (`2026-10-06`): verb adjuncts attach to an event, not to the
-> subject; D63 §(B)'s `And(V(s), prep(s, x))` is replaced. A literature survey (Davidson; Parsons and
-> Kratzer; Champollion's quantificational event semantics; Winter & Zwarts and de Groote & Winter;
-> ccg2lambda and lightblue; Luo & Soloviev's dependent event types; Cooper's TTR; the 2025 Element)
-> produced `docs/notes/event-semantics.md`. Its recommendation: Davidsonian positional arguments
-> plus one event argument, the event quantifier closed inside each verb's entry, governed PPs
-> positional, adjunct PPs and adverbs as event conditions. No partial path exists: the type change
-> is one slice (316 of 465 closed-class entries, the converter, coordination, the verbaliser, a
-> reseed, at least 51 of 62 pins, 213 of 228 ledger rows, 74 of them re-adjudicated).
-> Decided by the owner on `2026-10-06`, recorded in the note's "Decided" list: verbs as relations
-> with an event slot (not event-type families); frames, a clause-level reading
-> `frame_in(S(K), x)` for PPs that say where a claim holds; copular predicates eventless with their
-> PPs as frames (open question 2); every verb takes the argument (3); the class is a new
-> `lexicon:Eventuality` above `event.n.01` and `state.n.02` (1); when the event condition and the
-> frame are both faithful, the ledger rules by what the PP does, by the drop test (8 (i)); «in» and
-> «with» frame now, CGEL's domain adjuncts follow as slice 4 (8 (ii)); frames reach «that»-complements
-> as they are and relative clauses through a VP-level frame, on the smallest clause the paper would
-> not assert unrestricted (8 (iii)); an eventivity feature on `cat_s` keeps VP adjuncts off copular
-> VPs and states Katz's stative adverb gap for copular predicates (9); governed readings stay the
-> pins, the free adjunct of a governed preposition becomes `correct` with `departs` under events,
-> and a selection rule demotes free-adjunct and frame readings of a preposition the lexicon names on
-> the verb's sense (4); U1's «for» attaches to «exploit», re-pinned in slice 2, and purpose «for»
-> stays one opaque `prep_for` (5); quantified PP objects scope over the event quantifier, as the
-> lexicon test requires (6 (ii)); coordination stays distributive until a task needs sum events
-> (6 (i)); negation stays `¬∃e` under the subject quantifier, «Some cancers do not respond …» being
-> an instance of Cancer for which «responds to» is false, with generic readings of kind-level
-> subjects deferred (7); where a frame and a noun-internal reading both restrict the claim, the
-> noun-internal reading is best (10). The design note's ten questions are all decided.
-> **Next:** slice 1 (`lexicon:Eventuality` and the `frame_*` axioms), which can land with slice 2 to
-> share its reseed.
+> **The owner adopted option D on `2026-10-07`: predicate modifiers, no events.** Verb adjuncts are
+> encoded as modifiers of the predicate, following Luo & Shi 2026, *Variable polyadicity without
+> events* (MSCS 36, e11). `docs/notes/event-free-modification.md` is the adopted design.
+> `docs/notes/event-semantics.md` is the research record for the event-argument design decided on
+> `2026-10-06` and carries a supersession banner; **the event slice is not to be built.**
+>
+> **Why B was dropped.** B was chosen over A because predicate modifiers were held not to deliver
+> the modifier-drop entailments. That is true of typing alone. Luo & Shi put the conjunction in the
+> defining equation, so `TV(n+1, advₙ₊₁, x, y) ⊃ TV(n, advₙ, x, y)` is a theorem, machine-checked in
+> Coq. The stated ground for B over A is answered.
+>
+> **The change.** `prep_*` already serves two roles and only one is broken, so the change is
+> **additive** — nothing committed is retyped or migrated:
+>
+> ```
+>   unchanged  prep_in : Entity -> Entity -> Prop            noun-internal, 54 uses, correct
+>      added   adv_in  : Entity -> (Entity -> Prop)
+>                     -> Entity -> Prop                      VP adjunct, 14 uses, the defect
+>
+>   ⟦in⟧ VP adjunct   was: λx.λV.λs. And(V(s), prep_in(s, x))
+>                     now: λx.λV.λs. And(V(s), adv_in(x, V, s))
+> ```
+>
+> **Both families are in scope (`2026-10-07`).** The measured-value family (`prep_*_value`,
+> `prep_*_offset`, `every_period`) carries the same defect — `ontology.esl`'s own comment says "the
+> predication **or entity** s", while the type says `lexicon:Entity`. Measured by parsing the corpus
+> over the bootstrap chain: `every_period(the(Medium), ‹s›, 259200)` for «The medium was changed every
+> 3 days» says the medium recurs. It splits 27 VP-adjunct against 3 noun-internal, the inverse of the
+> entity-object family's 14 against 54, because these are methods sentences.
+>
+> **Naming (`2026-10-07`): `adv_*`**, after Luo & Shi's `ADV` type. One prefix covers PP adjuncts and
+> manner adverbs, which are the same type; `prep_*` then means exactly "a relation between two
+> entities".
+>
+> **Cost.** No kernel change, no event class, `⟦S⟧` stays `Prop`, and **none** of the 316 of 465
+> closed-class entry types move. 13 axioms added and 0 changed (5 entity-object, 8 measured-value);
+> no migration of encoded terms; 14 pins and their ledger rows; 27 quantity-corpus rows' relation
+> names plus the `prep_*_value` assertions in `kernel/tests/quantities_in_the_parser.rs`; the
+> VP-adjunct entry; `adjunct_of`, whose `_value` exclusion and subject test both go away because the
+> role moves into the type. 57 noun-internal uses untouched. A bootstrap edit, so it rides a reseed.
+>
+> **Of 2026-10-06's ten decisions, these survive**: frames, `frame_in(S(K), x)`, their realisations,
+> the embedded-clause rule and the drop test (8); governed prepositions stay positional and the
+> selection rule stands, with the free adjunct becoming well-formed rather than contradictory (4);
+> U1's «for» attaches to «exploit» and is re-pinned, purpose «for» staying opaque (5); quantified PP
+> objects scope from outside (6 ii); coordination stays distributive (6 i); negation under the
+> subject quantifier (7); the frame-or-noun tie-break (10).
+> **These lapse**: 1, 2, 3 and 9 — `lexicon:Eventuality`, its lattice position, stative verbs taking
+> the argument, and the eventivity feature on `cat_s`. None arises without an event argument.
+> Whether the eventivity feature is still wanted for Katz's stative adverb gap is undecided and
+> nothing in this design needs it.
+>
+> **Next:** the `adv_*` axioms in `ontology.esl`, the VP-adjunct entry, `adjunct_of`, then the
+> re-pins — one slice, one reseed.
 > #264's strand 3 (whether attachment is derivable) is answered by question 4 for prepositions the
 > lexicon names on a sense; other attachments stay with the ranker. #271 (the «a DNA» atom) is
 > independent.
 >
 > **Hand-off (`2026-10-06`): the implementation continues on another machine, on this branch.**
-> - **Design:** `docs/notes/event-semantics.md`. "The proposed entries" gives the terms; "Cost by
->   component" the sizes and file locations; "Implementation path and cost" the slices. Slices 1 and
->   2 go in one PR: slice 1 changes the bootstrap (`lexicon-ontology.esl`, `ontology.esl`) and
->   slice 2 reseeds anyway.
+> - **Design:** `docs/notes/event-free-modification.md`. "The proposed encoding" gives the axioms and
+>   the entry, "§The measured-value family has the same defect" the eight further axioms and the
+>   measured terms, "The cases" the eight worked constructions, "Cost" the sizes.
+>   `docs/notes/event-semantics.md` is the research record only; `docs/notes/event-frames-as-records.md`
+>   compares Cooper's TTR route, also not taken.
 > - **Branch:** `event-semantics`. `origin/main` has one commit it lacks (`4962594`, `.gitignore`
 >   adds `/references.bak`); merge it before the PR.
 > - **Data:** `references/` (gitignored; WordNet 3.0, SPECIALIST, UMLS, HPO, lightblue, CGEL) and
@@ -70,7 +95,7 @@ any detour.
 >   the USB copy):
 >
 >   ```bash
->   export COMPOSE_PROJECT_NAME=eigenius-events EIGENIUS_KERNEL_TAG=events \
+>   export COMPOSE_PROJECT_NAME=eigenius-adjuncts EIGENIUS_KERNEL_TAG=adjuncts \
 >          EIGENIUS_KERNEL_PORT=18061 ENDPOINT=127.0.0.1:18061
 >   scripts/reseed-lexicon-db.sh --umls-all --snapshot-dir wordnet-umls-$D
 >   scripts/build-alignment-snapshot.sh --base $S/wordnet-umls-$D --out $S/wordnet-umls-aligned-$D \
@@ -86,19 +111,21 @@ any detour.
 >
 >   The 2026-10-05 build: 38,391 alignment merges (with the polydipsia verdict), 20,533 HPO resources,
 >   864 HPO ≡ WordNet ≡ UMLS equivalences. Different numbers point at the inputs.
-> - **Re-adjudication:** 16 pins and 74 ledger rows (the note's Pins and Ledger rows). The decisions
->   fix some verdicts in advance: 17 free adjuncts of governed prepositions become `correct` with
->   `departs`; U1's 3 noun-attachment rows become `wrong`; the frame is best for the sentences listed
->   under "Frames". The candidate lists change, so a new live draw is needed (`--features use-llm`,
->   `ANTHROPIC_API_KEY`).
+> - **Re-adjudication:** 14 pins (the VP-adjunct `prep_*` occurrences — `prep_in` 6, `prep_from` 4,
+>   `prep_with` 3, `prep_to` 1) and their ledger rows, far fewer than the event design's 16 and 74,
+>   since `⟦S⟧` does not move. Verdicts fixed in advance: free adjuncts of governed prepositions
+>   become `correct` with `departs` (the adjunct reading is well-formed rather than contradictory);
+>   U1's noun-attachment rows become `wrong`; the frame is best for the sentences listed under
+>   "Frames" in `event-semantics.md`, whose frames decision survives. The candidate lists change, so
+>   a new live draw is needed (`--features use-llm`, `ANTHROPIC_API_KEY`).
 > - **The note's counts** (70 + 1 rows with a PP on the subject or a relativised noun, 46 on a
 >   verb, 18 governed free adjuncts, 62 pins, 48 verb pins, 139 mechanical and 74 re-adjudicated
 >   rows, 676 `cat_s` occurrences) are re-derived by `python3
 >   experiments/parsing/event-semantics-counts.py`; run it again after slice 2's re-adjudication.
 > - **Can ride along:** #271 (the «a DNA» atom) needs a reseed as well and can share slice 2's.
 >
-> **Exit gate:** the design note settled and the event slice merged, with pins and ledger
-> re-adjudicated on a reseed.
+> **Exit gate:** the `adv_*` slice merged, with the 14 pins, their ledger rows and the 27
+> quantity-corpus rows re-adjudicated on a reseed.
 
 > **entry 3 (`2026-09-30`). #263 and #264 — governed prepositions and the reading ranker. DONE, merged
 > as #272 (`f331dcb`, `2026-10-06`); #264 stays open for strand 3, now under entry 4.**

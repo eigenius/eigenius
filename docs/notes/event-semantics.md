@@ -4,10 +4,10 @@
 
 > ## Superseded for #270 on `2026-10-07`
 >
-> **#270 is now to be answered without events**, by predicate modifiers — see
-> [`event-free-modification.md`](event-free-modification.md). This note stands as the research record
-> for the event-argument design and for the ten questions decided on 2026-10-06; its recommendation
-> no longer holds.
+> **The maintainer decided on 2026-10-07 to answer #270 without events**, by predicate modifiers —
+> see [`event-free-modification.md`](event-free-modification.md), which is the adopted design. This
+> note stands as the research record for the event-argument design and for the ten questions decided
+> on 2026-10-06; its recommendation no longer holds, and the event slice is not to be built.
 >
 > **What changed.** #270 recommended option A, attaching the adjunct to the predication. Option B was
 > chosen over it, and the ground given here is that predicate modifiers do not deliver the
@@ -18,12 +18,15 @@
 > defining equation, so `TV(n+1, advₙ₊₁, x, y) ⊃ TV(n, advₙ, x, y)` is a theorem, machine-checked in
 > Coq. The stated ground for B over A is therefore answered.
 >
-> **What the alternative costs**, against this note's own figures: no kernel change, no event class,
-> `⟦S⟧` stays `Prop`, and **none** of the 316 of 465 closed-class entry types move. It adds **five
-> preposition axioms and changes none**: `ontology:prep_*` serves 54 correct noun-internal uses
-> («deficiencies in homologous recombination») against 14 broken VP-adjunct ones, so a second family
-> `vprep_*` takes the adjunct role and no committed term needs migrating. It changes the adjunct
-> entry, `adjunct_of`, those 14 pins and their ledger rows.
+> **What the adopted design costs**, against this note's own figures: no kernel change, no event
+> class, `⟦S⟧` stays `Prop`, and **none** of the 316 of 465 closed-class entry types move. It adds
+> **13 preposition axioms and changes none**, because the existing relations each serve two roles and
+> only one is broken. `ontology:prep_*` serves 54 correct noun-internal uses («deficiencies in
+> homologous recombination») against 14 broken VP-adjunct ones; the measured-value family
+> (`prep_*_value`, `prep_*_offset`, `every_period`) serves 3 correct noun-internal uses against 27
+> broken ones. A second family, named **`adv_*`** after Luo & Shi's `ADV` type, takes the adjunct
+> role in both, so no committed term needs migrating. It changes the adjunct entry, `adjunct_of`,
+> those 14 pins and their ledger rows, and the 27 quantity-corpus rows.
 >
 > **Which decisions of 2026-10-06 survive.** The frames decision stands unchanged —
 > `frame_in : Prop → Entity → Prop`, its realisations, its embedded-clause rule and the drop test of
