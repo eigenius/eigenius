@@ -20,13 +20,14 @@
 >
 > **What the adopted design costs**, against this note's own figures: no kernel change, no event
 > class, `⟦S⟧` stays `Prop`, and **none** of the 316 of 465 closed-class entry types move. It adds
-> **13 preposition axioms and changes none**, because the existing relations each serve two roles and
-> only one is broken. `ontology:prep_*` serves 54 correct noun-internal uses («deficiencies in
+> **22 preposition axioms and changes none** — one per VP-adjunct entry — because the existing
+> relations each serve two roles and only one is broken. `ontology:prep_*` serves 54 correct noun-internal uses («deficiencies in
 > homologous recombination») against 14 broken VP-adjunct ones; the measured-value family
 > (`prep_*_value`, `prep_*_offset`, `every_period`) serves 3 correct noun-internal uses against 27
 > broken ones. A second family, named **`adv_*`** after Luo & Shi's `ADV` type, takes the adjunct
-> role in both, so no committed term needs migrating. It changes the adjunct entry, `adjunct_of`,
-> those 14 pins and their ledger rows, and the 27 quantity-corpus rows.
+> role in both, so no committed term needs migrating. It changes the 22 VP-adjunct sem-term bodies
+> (no category and no `sem_type`: they were already typed `ADV` with the object), `adjunct_of`,
+> those 14 pins and their ledger rows, and the quantity-corpus rows.
 >
 > **Which decisions of 2026-10-06 survive.** The frames decision stands unchanged —
 > `frame_in : Prop → Entity → Prop`, its realisations, its embedded-clause rule and the drop test of

@@ -5,55 +5,55 @@
 # values: the quantities every reading renders, in base units as verbalize prints them
 #   (`;`-separated); for a gap, the construction that is missing and where it is decided.
 # Checked by kernel/tests/quantity_corpus.rs over the bootstrap chain and content-words.esl.
-The flask was incubated at 37 °C for 1 h.	prep_at_value prep_for_value	6203/20 K;3600 s	methods: incubated at 37 °C for 1 h
-The plates were spun at 931g for 2 h at 30 °C.	prep_at_value prep_for_value	7200 s;6063/20 K	methods: spun at 931g for 2 h at 30 °C (931g: gram or standard gravity)
-The cells were centrifuged at 1,000g for 5 min.	prep_at_value prep_for_value	300 s	methods: centrifuged at 1,000 r.p.m. for 5 min
-The samples were stored at −80 °C.	prep_at_value	3863/20 K	D95: stored at −80 °C
-The slides were denatured at 85 °C for 3 min.	prep_at_value prep_for_value	7163/20 K;180 s	methods: denatured at 85 °C for 3 min
-The cells were propagated for 2 weeks.	prep_for_value	1209600 s	methods: propagated for 2 weeks
-The cells were incubated for 45 min.	prep_for_value	2700 s	methods: incubating at room temperature for 45 min
-The cells were harvested after 72 h.	prep_after_value	259200 s	methods: after 24 h of puromycin selection
-The colonies were counted after 9 days.	prep_after_value	777600 s	methods: nine days after doxycycline treatment
-The cells were resuspended in 50 μl.	prep_in_value	1/20000000 m^3	methods: in 0.2 ml of medium
+The flask was incubated at 37 °C for 1 h.	adv_at_value adv_for_value	6203/20 K;3600 s	methods: incubated at 37 °C for 1 h
+The plates were spun at 931g for 2 h at 30 °C.	adv_at_value adv_for_value	7200 s;6063/20 K	methods: spun at 931g for 2 h at 30 °C (931g: gram or standard gravity)
+The cells were centrifuged at 1,000g for 5 min.	adv_at_value adv_for_value	300 s	methods: centrifuged at 1,000 r.p.m. for 5 min
+The samples were stored at −80 °C.	adv_at_value	3863/20 K	D95: stored at −80 °C
+The slides were denatured at 85 °C for 3 min.	adv_at_value adv_for_value	7163/20 K;180 s	methods: denatured at 85 °C for 3 min
+The cells were propagated for 2 weeks.	adv_for_value	1209600 s	methods: propagated for 2 weeks
+The cells were incubated for 45 min.	adv_for_value	2700 s	methods: incubating at room temperature for 45 min
+The cells were harvested after 72 h.	adv_after_value	259200 s	methods: after 24 h of puromycin selection
+The colonies were counted after 9 days.	adv_after_value	777600 s	methods: nine days after doxycycline treatment
+The cells were resuspended in 50 μl.	adv_in_value	1/20000000 m^3	methods: in 0.2 ml of medium
 The mice received a dose of 5 mg/kg.	prep_of_value	1/200000	D95: a dose of 5 mg/kg
 The tumours reached a volume of 2,000 mm³.	prep_of_value	1/500000 m^3	methods: maximal tumour volumes of 2,000 mm³
-The cells were treated with 10 μM etoposide.	prep_with has_quantity	1/100 m^-3·mol	methods: treated with 10 μM etoposide
-The cells were treated with 10 μM etoposide and with 1 mM hydroxyurea.	prep_with has_quantity	1/100 m^-3·mol;1 m^-3·mol	methods: with 10 μM etoposide and 1 mM hydroxyurea, the preposition repeated
+The cells were treated with 10 μM etoposide.	adv_with has_quantity	1/100 m^-3·mol	methods: treated with 10 μM etoposide
+The cells were treated with 10 μM etoposide and with 1 mM hydroxyurea.	adv_with has_quantity	1/100 m^-3·mol;1 m^-3·mol	methods: with 10 μM etoposide and 1 mM hydroxyurea, the preposition repeated
 The cells were treated with 10 μM etoposide and 1 mM hydroxyurea.	gap	a coordinated NP as an adjunct preposition's object: no parse without quantities either (`treated with the dose and the diet`); over the full lexicon `treat` governs `with` and it parses; not D95	methods: with 10 μM etoposide and 1 mM hydroxyurea
-The medium was supplemented with 10% FBS.	prep_with has_quantity	1/10	methods: medium supplemented with 10% fetal bovine serum
-The cells were fixed with 3% formalin for 30 min.	prep_with has_quantity prep_for_value	3/100;1800 s	methods: fixed with 10% formalin for 30 min
+The medium was supplemented with 10% FBS.	adv_with has_quantity	1/10	methods: medium supplemented with 10% fetal bovine serum
+The cells were fixed with 3% formalin for 30 min.	adv_with has_quantity adv_for_value	3/100;1800 s	methods: fixed with 10% formalin for 30 min
 The medium contained 2 μg ml⁻¹ puromycin.	has_quantity	1/500 m^-3·kg	methods: medium containing 2 μg ml⁻¹ puromycin
 The diet contained 625 mg kg⁻¹ doxycycline.	has_quantity	1/1600	methods: diet containing 625 mg kg⁻¹ doxycycline hyclate
-The cells were electroporated with 50 ng plasmid.	prep_with has_quantity	1/20000000000 kg	methods: electroporated with … 50 ng pmaxOrange_GG
+The cells were electroporated with 50 ng plasmid.	adv_with has_quantity	1/20000000000 kg	methods: electroporated with … 50 ng pmaxOrange_GG
 The temperature was 37 °C.	has_quantity	6203/20 K	D95: the temperature was 37 °C
 The concentration was 10 μM.	has_quantity	1/100 m^-3·mol	CNL: a predicated concentration
-The medium was replaced after 24 h.	prep_after_value	86400 s	methods: After 24 h, the medium was replaced
-After 24 h, the medium was replaced.	prep_after_value	86400 s	methods: After 24 h, the medium was replaced
-The RNA was purified 72 h after transduction.	prep_after_offset	259200 s after	methods: RNA was purified 72 h after transduction
-The cells were treated with 10 μg ml⁻¹ of colcemid.	prep_with has_quantity	1/100 m^-3·kg	methods: treated with 10 ml of colcemid (OCR lost μg)
-The medium was changed every 3 days.	every_period	every 259200 s	methods: changed every 3 days
-The lysates were fractionated in 4–12% gels.	prep_in has_quantity	from 1/25 to 3/25	methods: fractionated in 4–12% Bis-Tris gels
+The medium was replaced after 24 h.	adv_after_value	86400 s	methods: After 24 h, the medium was replaced
+After 24 h, the medium was replaced.	adv_after_value	86400 s	methods: After 24 h, the medium was replaced
+The RNA was purified 72 h after transduction.	adv_after_offset	259200 s after	methods: RNA was purified 72 h after transduction
+The cells were treated with 10 μg ml⁻¹ of colcemid.	adv_with has_quantity	1/100 m^-3·kg	methods: treated with 10 ml of colcemid (OCR lost μg)
+The medium was changed every 3 days.	adv_every_period	every 259200 s	methods: changed every 3 days
+The lysates were fractionated in 4–12% gels.	adv_in has_quantity	from 1/25 to 3/25	methods: fractionated in 4–12% Bis-Tris gels
 The cells reached 80–90% confluence.	has_quantity	from 4/5 to 9/10	methods: when the cells reached 80–90% confluence
 The tumours reached a volume of approximately 100 mm³.	prep_of_value	about 1/10000000 m^3	methods: when primary tumours reached around 100 mm3
 The infection efficiency was >90%.	has_quantity	more than 9/10	methods: predetermined to achieve >90% infection efficiency
-The medium was changed every 2–3 days.	every_period	from 172800 s to 259200 s	methods: media was refreshed every 2–3 days
+The medium was changed every 2–3 days.	adv_every_period	from 172800 s to 259200 s	methods: media was refreshed every 2–3 days
 Three sgRNAs were validated.	has_count	3 	results: we validated three sgRNAs targeting WRN
 The cells lost more than one MMR gene.	has_count	more than 1	figure legend: loss of more than one MMR gene
 The cells showed 4–7 foci.	has_count	from 4 to 7	figure: 4-7 foci
 Half of the cell pellet was saved.	has_proportion	1/2 of	methods: Half of the cell pellet was saved for immunoblot analysis
-The cells were harvested after seven days.	prep_after_value	604800 s	methods (manuscript): Seven days post-transduction, cells were harvested
-The cells were evaluated with an eight-day viability assay.	prep_with has_quantity	691200 s	results: with an eight-day viability assay (manuscript: an 8-day viability assay)
+The cells were harvested after seven days.	adv_after_value	604800 s	methods (manuscript): Seven days post-transduction, cells were harvested
+The cells were evaluated with an eight-day viability assay.	adv_with has_quantity	691200 s	results: with an eight-day viability assay (manuscript: an 8-day viability assay)
 None of the four other RecQ helicases were essential.	has_proportion the_count	0 of the 4	results: none of the four other RecQ DNA helicases were preferentially essential in MSI cell lines
-Knockout was evaluated in five MSS and five MSI cell lines.	prep_in has_count	5 	results: evaluated WRN knockout in five MSS and five MSI cell lines
-MSI occurs in 15% of colon, 22% of gastric, 20–30% of endometrial and 12% of ovarian cancers.	prep_in has_proportion	3/20 of;11/50 of;3/25 of	introduction (manuscript): predominantly 15% of colon, 22% of gastric, 20–30% of endometrial, and 12% of ovarian cancers
-The cells were fixed 2 days later.	prep_after_value	172800 s	methods: Cells were fixed and stained 2 days later
-The levels recovered by three weeks.	prep_by_value	1814400 s	results: WRN levels recovered by three weeks
-The cells were treated 6 h before collection.	prep_before_offset	21600 s before	methods: treated with 10 uM etoposide and 1 mM hydroxyurea, respectively, 6 h before collection
-The cells were split 4 days post transduction.	prep_after_offset	345600 s after	methods (manuscript): Cells were split 4 days post transduction
-Nine days after doxycycline treatment, cell viability was assayed.	prep_after_offset	777600 s after	methods: Nine days after doxycycline treatment, cell viability was assayed
-The cells were treated with 0.2 μg/ml of doxycycline.	prep_with has_quantity	1/5000 m^-3·kg	methods (manuscript): All in vitro experiments used 0.2 µg/mL of doxycycline
-After 24 h of puromycin selection, the cells were harvested.	prep_after has_quantity	86400 s	methods: After 24 h of puromycin selection, lentivirally infected cells were …
+Knockout was evaluated in five MSS and five MSI cell lines.	adv_in has_count	5 	results: evaluated WRN knockout in five MSS and five MSI cell lines
+MSI occurs in 15% of colon, 22% of gastric, 20–30% of endometrial and 12% of ovarian cancers.	adv_in has_proportion	3/20 of;11/50 of;3/25 of	introduction (manuscript): predominantly 15% of colon, 22% of gastric, 20–30% of endometrial, and 12% of ovarian cancers
+The cells were fixed 2 days later.	adv_after_value	172800 s	methods: Cells were fixed and stained 2 days later
+The levels recovered by three weeks.	adv_by_value	1814400 s	results: WRN levels recovered by three weeks
+The cells were treated 6 h before collection.	adv_before_offset	21600 s before	methods: treated with 10 uM etoposide and 1 mM hydroxyurea, respectively, 6 h before collection
+The cells were split 4 days post transduction.	adv_after_offset	345600 s after	methods (manuscript): Cells were split 4 days post transduction
+Nine days after doxycycline treatment, cell viability was assayed.	adv_after_offset	777600 s after	methods: Nine days after doxycycline treatment, cell viability was assayed
+The cells were treated with 0.2 μg/ml of doxycycline.	adv_with has_quantity	1/5000 m^-3·kg	methods (manuscript): All in vitro experiments used 0.2 µg/mL of doxycycline
+After 24 h of puromycin selection, the cells were harvested.	adv_after has_quantity	86400 s	methods: After 24 h of puromycin selection, lentivirally infected cells were …
 At least 1,000 cells per sample were scored.	has_count prep_per	at least 1000;per SampleOne	methods: signal intensities in the nucleus of at least 1,000 cells per sample were scored
-Four and seven days after transduction, the cells were labeled.	prep_after_offset	345600 s after;604800 s after	methods (manuscript): Four and seven days after the lentiviral transduction, cells were labeled with EdU
+Four and seven days after transduction, the cells were labeled.	adv_after_offset	345600 s after;604800 s after	methods (manuscript): Four and seven days after the lentiviral transduction, cells were labeled with EdU
 The cell lines contained a median 0.56-fold fewer deletion mutations in microsatellite regions compared to typical lineages.	fold_lower median_over	a median 14/25-fold fewer	results: these MSI cell lines were distinct and contained a median 0.56-fold fewer deletion mutations in microsatellite regions compared to typical lineages
 The cell lines contained 2-fold more deletion mutations than typical lineages.	fold_higher	2-fold more	CNL: the factor comparative's other direction, without a statistic

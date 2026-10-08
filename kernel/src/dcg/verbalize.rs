@@ -721,29 +721,39 @@ pub fn verbalize(sem: &Exp, vb: &Vb) -> String {
             // The distributive `per` (D95 slice 8d): `prep_per(Y, x, y)` reads `per Y`; `x` and `y` are
             // the variables the count and the universal bind.
             ("prep_per", 3) => return format!("per {}", bare_np(args[0], vb)),
-            // A period (D95 slice 8b): `every_period(x, u, q)` reads `x every 259200 s`.
-            ("every_period", 3) => {
-                let subj = verbalize(args[0], vb);
-                let q = quantity_text(args[2], args[1]);
+            // A period (D95 slice 8b): `every_period(x, u, q)` reads `x every 259200 s`; the
+            // adverbial `adv_every_period(u, q, V, s)` (#270) reads the same, its subject last and
+            // the predicate it modifies rendered by the clause.
+            ("every_period", 3) | ("adv_every_period", 4) => {
+                let (subj, unit, q) = if local == "every_period" {
+                    (args[0], args[1], args[2])
+                } else {
+                    (args[3], args[0], args[1])
+                };
+                let subj = verbalize(subj, vb);
+                let q = quantity_text(q, unit);
                 return if subj.is_empty() {
                     format!("every {q}")
                 } else {
                     format!("{subj} every {q}")
                 };
             }
-            // An offset (D95 slice 8a): `prep_after_offset(x, y, u, q)` reads `x 259200 s after y`.
-            ("prep_after_offset" | "prep_before_offset", 4) => {
-                let subj = verbalize(args[0], vb);
-                let p = if local == "prep_after_offset" {
+            // An offset (D95 slice 8a): `prep_after_offset(x, y, u, q)` reads `x 259200 s after y`;
+            // the adverbial `adv_after_offset(y, u, q, V, s)` (#270) reads the same, its subject last.
+            ("prep_after_offset" | "prep_before_offset", 4)
+            | ("adv_after_offset" | "adv_before_offset", 5) => {
+                let (subj, y, unit, q) = if local.starts_with("prep_") {
+                    (args[0], args[1], args[2], args[3])
+                } else {
+                    (args[4], args[0], args[1], args[2])
+                };
+                let subj = verbalize(subj, vb);
+                let p = if local.ends_with("after_offset") {
                     "after"
                 } else {
                     "before"
                 };
-                let tail = format!(
-                    "{} {p} {}",
-                    quantity_text(args[3], args[2]),
-                    verbalize(args[1], vb)
-                );
+                let tail = format!("{} {p} {}", quantity_text(q, unit), verbalize(y, vb));
                 return if subj.is_empty() {
                     tail
                 } else {
@@ -840,10 +850,27 @@ fn verb_pp(left: &Exp, right: &Exp, vb: &Vb) -> Option<String> {
     ))
 }
 
-/// A PP relation's preposition, subject and rendered object: `prep_X(subj, obj)`, or a quantity
-/// relation `prep_X_value(subj, unit, quantity)` (D95), whose object is the quantity with its unit.
-/// `None` for anything else.
+/// A PP relation's preposition, subject and rendered object. Three shapes:
+///   * `prep_X(subj, obj)` — the relation between two entities, the noun-internal modifier;
+///   * `prep_X_value(subj, unit, quantity)` (D95), whose object is the quantity with its unit;
+///   * `adv_X(obj, pred, subj)` (#270) — the adverbial modifier, whose object comes FIRST and whose
+///     subject comes LAST, the predicate between them being rendered by the clause itself.
+///
+/// All three normalise to the same triple, so every caller reads an adverbial the way it read a
+/// preposition. `None` for anything else.
 fn prep_parts<'e>(local: &'e str, args: &[&'e Exp], vb: &Vb) -> Option<(&'e str, &'e Exp, String)> {
+    if let Some(p) = local.strip_prefix("adv_") {
+        return match (p.strip_suffix("_value"), args) {
+            // `adv_X_value(unit, quantity, pred, subj)` — the measured object, with its unit.
+            (Some(p), [unit, quantity, _pred, subj]) => {
+                Some((p, subj, quantity_text(quantity, unit)))
+            }
+            (None, [obj, _pred, subj]) => Some((p, subj, verbalize(obj, vb))),
+            // The offsets and the period have their own arms in `verbalize`, as their `prep_`
+            // counterparts do; `adv_every_period` would otherwise read as a preposition.
+            _ => None,
+        };
+    }
     let p = local.strip_prefix("prep_")?;
     match (p.strip_suffix("_value"), args) {
         (Some(p), [subj, unit, quantity]) => Some((p, subj, quantity_text(quantity, unit))),
@@ -1494,10 +1521,10 @@ fn with_binder<'e>(
     }
 }
 
-/// A conjunction's links. A PP conjoined with a clause whose subject is its first argument — the
-/// verb-adjunct encoding, `And(V(…, s), prep_P(s, o))` («We ascertained MSI status with
-/// sequencing.») — is about that clause's verb, predicated adjective or copula, not the subject.
-/// Every other conjunct is walked as itself.
+/// A conjunction's links. An adverbial conjoined with a clause — the verb-adjunct encoding,
+/// `And(V(…, s), adv_P(o, V, s))` («We ascertained MSI status with sequencing.») — is about that
+/// clause's verb, predicated adjective or copula, not the subject. Every other conjunct is walked as
+/// itself.
 fn conjunction_links<'e>(e: &'e Exp, vb: &Vb, env: &mut Vec<Binding<'e>>, out: &mut Vec<Link>) {
     let mut conj = Vec::new();
     flatten_and_exp(e, &mut conj);
@@ -1519,9 +1546,15 @@ fn conjunction_links<'e>(e: &'e Exp, vb: &Vb, env: &mut Vec<Binding<'e>>, out: &
     }
 }
 
-/// The function a conjoined PP `prep_P(s, o)` has, its object, and the words it modifies, when a
-/// sibling conjunct has `s` as its subject: an adverbial of each such verb; else of a predicated
-/// adjective; else a second predicate beside a copula. `None` for any other conjunct.
+/// The function a conjoined adverbial `adv_P(o, V, s)` has, its object, and the words it modifies:
+/// an adverbial of each sibling verb predicated of `s`; else of a predicated adjective; else a second
+/// predicate beside a copula. `None` for any other conjunct.
+///
+/// Keyed on `adv_` since #270 (2026-10-07). It used to key on `prep_` and ask whether the relation's
+/// first argument was a sibling verb's subject — reconstructing a role the term did not carry,
+/// because one relation served both the adverbial and the noun-internal job. The role is in the name
+/// now, so the test is gone: a `prep_P(s, o)` relates two entities and reads as one
+/// ([`link_of`]'s postmodifier arm), whatever `s` happens to be.
 fn adjunct_of<'e>(
     pp: &'e Exp,
     conj: &[&'e Exp],
@@ -1529,14 +1562,11 @@ fn adjunct_of<'e>(
     env: &[Binding<'e>],
 ) -> Option<(Function, &'e Exp, Vec<String>)> {
     let (h, a) = app_spine(pp);
-    let p = axiom_local(h)?.strip_prefix("prep_")?;
-    let [subject, obj] = a.as_slice() else {
+    let p = axiom_local(h)?.strip_prefix("adv_")?;
+    let [obj, _pred, subject_exp] = a.as_slice() else {
         return None;
     };
-    if p.ends_with("_value") {
-        return None;
-    }
-    let subject = pretty_term(subject);
+    let subject = pretty_term(subject_exp);
     let about = |e: &Exp| pretty_term(e) == subject;
     let (mut verbs, mut adjectives, mut copula) = (Vec::new(), Vec::new(), false);
     for &c in conj.iter().filter(|&&c| !std::ptr::eq(c, pp)) {
@@ -1561,11 +1591,10 @@ fn adjunct_of<'e>(
     } else if !adjectives.is_empty() {
         Some((Function::PredicateAdverbial(p), obj, adjectives))
     } else if copula {
-        let (_, a) = app_spine(pp);
         Some((
             Function::SecondPredicate(p),
             obj,
-            vec![head_word(a[0], vb, env)],
+            vec![head_word(subject_exp, vb, env)],
         ))
     } else {
         None
@@ -1932,6 +1961,36 @@ mod register_tests {
             ),
             "hela at 6203/20 K"
         );
+        // The adverbial siblings (#270): `adv_X_value(u, q, V, s)` and
+        // `adv_every_period(u, q, V, s)` carry the subject LAST and the predicate before it, and
+        // read as their `prep_` counterparts do.
+        let adv4 = |axiom: &str, s: Exp| {
+            let pred = Exp::Lam(
+                Patt::Var("z".into()),
+                Box::new(app1("urn:eigenius:ontology:kind_of", Exp::Var("z".into()))),
+            );
+            Exp::App(
+                Box::new(Exp::App(
+                    Box::new(app2(axiom, kelvin.clone(), q.clone())),
+                    Box::new(pred),
+                )),
+                Box::new(s),
+            )
+        };
+        assert_eq!(
+            verbalize(
+                &adv4("urn:eigenius:ontology:adv_at_value", hela()),
+                &surface
+            ),
+            "hela at 6203/20 K"
+        );
+        assert_eq!(
+            verbalize(
+                &adv4("urn:eigenius:ontology:adv_every_period", hela()),
+                &surface
+            ),
+            "hela every 6203/20 K"
+        );
         let medium = sig(
             cls("urn:eigenius:lexicon:Medium"),
             app3("urn:eigenius:ontology:has_quantity", Exp::Var("x0".into())),
@@ -2166,7 +2225,23 @@ mod register_tests {
                 cls("urn:eigenius:wn:n00649000"),
             )
         };
-        let with = |s: Exp| app2("urn:eigenius:ontology:prep_with", s, sequencing());
+        // `adv_with(obj, V, s)` — the adverbial (#270). `V` is the predicate it modifies.
+        let pred = || {
+            Exp::Lam(
+                Patt::Var("z".into()),
+                Box::new(app2(
+                    "urn:eigenius:ontology:v00920000_t",
+                    status(),
+                    Exp::Var("z".into()),
+                )),
+            )
+        };
+        let with = |s: Exp| {
+            Exp::App(
+                Box::new(app2("urn:eigenius:ontology:adv_with", sequencing(), pred())),
+                Box::new(s),
+            )
+        };
         let adjunct = and(
             app2("urn:eigenius:ontology:v00920000_t", status(), we()),
             with(we()),
@@ -2192,16 +2267,27 @@ mod register_tests {
             verbalize(&adjunct, &Vb::surface(&names, &l)),
             "we ascertained status and we with sequencing"
         );
-        // A PP whose first argument is not the verb's subject is no adjunct.
-        let not_adjunct = and(
-            app2("urn:eigenius:ontology:v00920000_t", status(), we()),
-            with(status()),
-        );
-        assert!(structure_links(&not_adjunct, &vb).contains(&link(
-            Function::Postmodifier("with".into()),
-            "sequencing",
-            "status"
-        )));
+        // A `prep_with` is the relation between two entities and reads as a postmodifier of its
+        // first argument — whatever that argument is. Before #270 the role was guessed from whether
+        // it matched a sibling verb's subject, so the same term read as an adverbial here and as a
+        // postmodifier there; the role is in the name now, so both arguments read alike.
+        let prep_with = |s: Exp| app2("urn:eigenius:ontology:prep_with", s, sequencing());
+        for (host, s) in [("status", status()), ("we", we())] {
+            let not_adjunct = and(
+                app2("urn:eigenius:ontology:v00920000_t", status(), we()),
+                prep_with(s),
+            );
+            let links = structure_links(&not_adjunct, &vb);
+            assert!(
+                links.contains(&link(
+                    Function::Postmodifier("with".into()),
+                    "sequencing",
+                    host
+                )),
+                "{host}: {links:?}"
+            );
+            assert!(!links.iter().any(|l| l.function == adverbial.function));
+        }
         // Beside a predicated adjective, the predicate's adverbial.
         let essential = app2(
             "urn:eigenius:ontology:gt",

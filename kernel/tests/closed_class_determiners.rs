@@ -1281,13 +1281,14 @@ fn pied_piping_counts_the_prepositions_cost() {
 fn pied_piping_relative_threads_the_antecedent_into_the_fronted_preposition() {
     // D62 §2 #2B: pied-piping `[noun] [prep] which [subject VP]` — the antecedent is the FRONTED
     // preposition's object, threaded into the clause as a VP-adjunct: "the gene in which HeLa affects
-    // BRCA1" ⇒ Σg:Gene. And(affects(brca1,hela), prep_in(hela, g)). Reuses the VP-adjunct prep sem.
+    // BRCA1" ⇒ Σg:Gene. And(affects(brca1,hela), adv_in(g, affects(brca1), hela)). Reuses the
+    // VP-adjunct sem, so the antecedent lands in the adverbial's OBJECT slot (#270).
     let (layer, index) = index_over_bootstrap();
     for (s, prep) in [
-        ("the gene in which HeLa affects BRCA1 is large", "prep_in"),
+        ("the gene in which HeLa affects BRCA1 is large", "adv_in"),
         (
             "the gene within which HeLa affects BRCA1 is large",
-            "prep_within",
+            "adv_within",
         ),
     ] {
         let forest = index.parse(s, &Identity);
@@ -1517,14 +1518,14 @@ fn vp_adjunct_pp_attaches_inside_a_base_vp() {
     assert!(
         modal
             .iter()
-            .any(|s| s.contains("Possible(And(") && s.contains("prep_to")),
+            .any(|s| s.contains("Possible(And(") && s.contains("adv_to")),
         "the `to`-PP attaches inside the modal's base VP (under Possible); got: {modal:?}"
     );
     // Do-support negation: the PP scopes UNDER the negation (`(affect ∧ to) → False`).
     let neg = sem_of("HeLa does not affect BRCA1 to HeLa");
     assert!(
         neg.iter()
-            .any(|s| s.contains("prep_to") && s.contains("False") && s.contains("And(")),
+            .any(|s| s.contains("adv_to") && s.contains("False") && s.contains("And(")),
         "the `to`-PP attaches inside the negated base VP; got: {neg:?}"
     );
 }
@@ -4417,19 +4418,22 @@ fn compound_noun_refines_the_head() {
 
 #[test]
 fn pp_adjunct_adds_an_opaque_conjunct() {
-    // "HeLa affects BRCA1 in HeLa" → And(affects(brca1, hela), prep_in(hela, hela)) : Prop.
-    // The PP modifies the VP, conjoining the opaque locative.
+    // "HeLa affects BRCA1 in HeLa" →
+    //     And(affects(brca1, hela), adv_in(hela, affects(brca1), hela)) : Prop.
+    // The PP modifies the VP, conjoining the opaque locative. Since #270 the modifier takes the
+    // PREDICATE as its second argument and the subject as its third, so both `hela` slots here are
+    // the sentence's two `HeLa`s — the PP's object and the subject.
     let (layer, index) = index_over_bootstrap();
     let forest = index.parse("HeLa affects BRCA1 in HeLa", &Identity);
     assert!(!forest.is_empty(), "the PP-adjunct sentence must parse");
     let has_prep = forest.iter().any(|p| {
         matches!(p.sem().as_const_spine(), Some((iri, _, args))
             if iri.local_name() == "And" && args.len() == 2
-                && head_is_axiom(args[1], "urn:eigenius:ontology:prep_in"))
+                && head_is_axiom(args[1], "urn:eigenius:ontology:adv_in"))
     });
     assert!(
         has_prep,
-        "a parse is And(VP-predication, prep_in(s, x)); got {:?}",
+        "a parse is And(VP-predication, adv_in(x, V, s)); got {:?}",
         forest[0].sem()
     );
     let mut ctx = CheckCtx::with_layer(Rho::Nil, vec![], Arc::clone(&layer));

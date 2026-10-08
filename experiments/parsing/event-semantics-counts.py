@@ -15,11 +15,18 @@
 
 """Re-derive the counts in `docs/notes/event-semantics.md` (eigenius#270).
 
-Under event semantics a PP that today's verb-adjunct encoding hangs on the subject,
-`And(V(…, s), prep_P(s, o))`, moves to the verb's event or becomes a frame, so every ledger row and
-pin that carries one changes meaning. This script finds them in the printed terms.
+A PP that the pre-#270 verb-adjunct encoding hangs on the subject, `And(V(…, s), prep_P(s, o))`,
+changes meaning under either answer to #270 — the event design this note costs, and the predicate
+modifiers adopted on `2026-10-07` (`docs/notes/event-free-modification.md`). This script finds them
+in the printed terms, and reads both encodings:
 
-A `prep_P(anchor, object)` application is classified by its anchor and its host:
+- **Since `2026-10-07`** an adjunct is `adv_P(object, V, subject)` and SAYS SO IN ITS NAME, so it is
+  clause-level by definition and needs no anchor test. Its anchor is its LAST argument.
+- **Artifacts recorded before that change** carry `prep_P(anchor, object)`, one relation serving both
+  the adjunct and the noun-postmodifier role, so they are classified by their anchor as below. The
+  ledger and the pins still hold these until they are regenerated on a reseed.
+
+A pre-#270 `prep_P(anchor, object)` application is classified by its anchor and its host:
 
 - NOUN-INTERNAL when the anchor is a bare `G#k` whose nearest binder is a Σ (a noun postmodifier,
   or a relative clause on the Σ variable). These are skipped: events leave them alone.
@@ -27,9 +34,11 @@ A `prep_P(anchor, object)` application is classified by its anchor and its host:
   argument it is: a VERB host when that conjunct contains a verb atom `v<offset>_<frame>(`, an
   ADJECTIVE OR COPULA host otherwise.
 
-One row the classifier cannot see: «These libraries define genes that were essential for
+One row the ANCHOR classifier cannot see: «These libraries define genes that were essential for
 proliferation and survival.» hangs «for» on the copular VP inside a relative clause, so its anchor is
-Σ-bound like a noun postmodifier. The note counts it by hand («1 inside a relative clause»). The
+Σ-bound like a noun postmodifier. The note counts it by hand («1 inside a relative clause»). This
+blind spot is a property of the pre-#270 encoding, not of the script: an `adv_for` is classified by
+its name whatever its anchor, so regenerated artifacts do not need the hand count. The
 candidates are listed below; «These lines possess events that are predictive of …» is not counted,
 because «of» attaches at the `S[adj]` level (the closed class's adjective-complement «of»), which
 the term does not show.
@@ -55,6 +64,8 @@ CLOSED_CLASS = os.path.join(ROOT, "ontologies/lexicon/closed-class.esl")
 
 VERB_ATOM = re.compile(r"\bv(\d{8})_(\w+?)\(")
 PREP = re.compile(r"\bprep_(\w+)\(")
+# The adverbial family (#270, 2026-10-07): `adv_P(object, V, subject)`, clause-level by name.
+ADJUNCT = re.compile(r"\badv_(\w+)\(")
 PP_ARGUMENT_RELATION = re.compile(r"\bv\d{8}_p(_[a-z]+)?\(")
 SUBJECT_GROUND = re.compile(r"of the subject|subject predication")
 
@@ -130,7 +141,14 @@ def sigma_body(sem, pos, var):
 
 
 def clause_level_pps(sem):
-    """Each clause-level `prep_P(anchor, …)` in `sem`: (preposition, anchor, host conjunct or None)."""
+    """Each clause-level adjunct in `sem`: (preposition, anchor, host conjunct or None).
+
+    An `adv_P(object, V, subject)` is clause-level by name, its anchor the LAST argument. A
+    `prep_P(anchor, object)` is pre-#270 and is classified by its anchor.
+    """
+    for m in ADJUNCT.finditer(sem):
+        texts, _, _ = args_at(sem, m.end() - 1)
+        yield m.group(1), (texts[-1] if texts else ""), host_of(sem, m.start())
     for m in PREP.finditer(sem):
         texts, _, _ = args_at(sem, m.end() - 1)
         anchor = texts[0] if texts else ""

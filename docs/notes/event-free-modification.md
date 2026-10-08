@@ -12,8 +12,17 @@ modification as an answer to eigenius#270, and sets it against the event-argumen
 >
 > - **Scope: both preposition families.** The measured-value family (`prep_*_value`, `prep_*_offset`,
 >   `every_period`) carries the same defect, which its own comment in `ontology.esl` records — "a VP
->   adjunct and a noun modifier share the relation". 13 axioms are added and none changed. See
+>   adjunct and a noun modifier share the relation". **22 axioms are added and none changed.** See
 >   §"The measured-value family has the same defect".
+>
+> **The counting rule is per entry, not per pin** (corrected while implementing, `2026-10-07`). An
+> `adv_X` is needed wherever a VP-adjunct *entry* exists — `lexicon:prep_X_sem` — because every one
+> of them predicates the PP of the subject. Counting the pins instead gave 5 and 8; counting the
+> entries gives **13 and 9**. The eight entity-object prepositions the pins do not attest
+> (`on between within without among beyond after before`) each have a VP-adjunct entry and so each
+> carried the defect; `prep_with_value` likewise. The seven prepositions with only a noun-modifier
+> entry (`lexicon:nmod_X_sem`: about, against, at, by, into, of, upon) need none, and neither does
+> `prep_of_value`, whose three uses are noun-internal.
 > - **Naming: `adv_*`.** It names Luo & Shi's `ADV` type, and one prefix covers PP adjuncts and
 >   manner adverbs, which §"Adverbs" shows are the same type. `prep_*` then means exactly "a relation
 >   between two entities".
@@ -64,8 +73,10 @@ the first, not merely entailed by it.
 defining equation, because the `n+1` case contains the `n` case as a conjunct. The paper is explicit:
 "just like event semantics, we have obtained the expected inference relationships between such
 sentences concerning their adverbial modifiers **without resorting to meaning postulates (or
-events)**." Commutativity of modifiers follows from `&`. Both are machine-checked — "implemented in
-the Coq proof development system … including the above inference relationship (23) as a theorem".
+events)**." Commutativity of modifiers follows from `&`, **in the paper's flat form** — see
+§"Stacked adjuncts nest, and do not commute" for what a categorial grammar can and cannot reproduce
+of that. Both are machine-checked — "implemented in the Coq proof development system … including the
+above inference relationship (23) as a theorem".
 
 **The modifier never touches the subject.** `advₙ₊₁(BUTTER(x), y)` applies the modifier to
 `BUTTER(x)` — the verb with the subject already absorbed — and then to the object.
@@ -133,13 +144,21 @@ which relates two entities. The two families separate what the one name conflate
 **`⟦S⟧` stays `Prop`.** The adjunct consumes an `Entity -> Prop` and returns an `Entity -> Prop`, so
 the VP type is unchanged, and so is every entry that consumes a VP or a clause.
 
-**Five axioms here, and none retyped.** Only the prepositions used as VP adjuncts need an `adv_*`:
-the four attested in the pins — `adv_in`, `adv_from`, `adv_with`, `adv_to` — plus `adv_for` for
-«for cancer therapeutics», which `event-semantics.md`'s open question 5 re-pins to the exploiting and
-which today's encoding pins to the scientists. `event-semantics.md`'s decision on framing prepositions
-(open question 8 ii) names «in» and «with» as the two the page frames, and CGEL's other
-domain-adjunct realisations as a planned augmentation; the same staging applies here — one `adv_*`
-axiom per preposition as it is attested or planned. The measured-value family adds eight more, below.
+**Thirteen axioms here, and none retyped.** One `adv_X` per preposition that **has a VP-adjunct
+entry** — `lexicon:prep_X_sem` in `closed-class.esl` — since each of those entries predicates the PP
+of the subject:
+
+```
+in  for  with  to  on  from  between  within  without  among  beyond  after  before
+```
+
+Four are attested in the pins (`in`, `from`, `with`, `to`) and a fifth, `for`, is planned for
+«for cancer therapeutics», which `event-semantics.md`'s open question 5 re-pins to the exploiting. The
+other eight are not attested on the gate page but each has an entry today, so each would otherwise
+keep the defect — an earlier draft of this note counted pins and said five, which would have fixed
+the measured instances and left the grammar broken. The seven prepositions with only a
+noun-modifier entry (`lexicon:nmod_X_sem`: about, against, at, by, into, of, upon) need none, and
+neither does `prep_per`, which is noun-internal. The measured-value family adds nine more, below.
 
 ### The Π over ℕ is not needed here
 
@@ -197,7 +216,7 @@ Counts from `experiments/parsing/quantities/corpus.tsv`: `prep_for_value` 7, `pr
 27 adjunct against 3 noun-internal, where that family is 14 against 54 — because these are methods
 sentences, where almost every measured PP modifies the procedure.
 
-**Eight `adv_*` axioms**, the measured value ahead of the predicate as the PP's object is:
+The measured value goes ahead of the predicate, as the PP's object does:
 
 ```
 unchanged:  prep_at_value : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
@@ -207,17 +226,67 @@ unchanged:  prep_at_value : lexicon:Entity -> forall (u : core:unit) => units:Qu
                             -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
 ```
 
-`adv_at_value`, `adv_for_value`, `adv_after_value`, `adv_in_value`, `adv_by_value`,
-`adv_after_offset`, `adv_before_offset`, `adv_every_period`. `prep_of_value` gets no sibling — its
-three uses are noun-internal. `prep_with_value` gets none either: declared, but not attested as an
-adjunct in the corpus; the staging rule is the same as for the entity-object family, one `adv_*` per
-relation as it is attested or planned.
+**Nine `adv_*` axioms**, by the same per-entry rule: `adv_at_value`, `adv_for_value`,
+`adv_in_value`, `adv_with_value`, `adv_after_value`, `adv_by_value`, `adv_after_offset`,
+`adv_before_offset`, `adv_every_period` — one for each `lexicon:prep_X_value_sem`.
+`prep_with_value` is among them although the corpus does not attest it as an adjunct, because its
+entry exists. `prep_of_value` gets no sibling: it has only `nmod_of_value_sem`.
+
+The argument order is `prep_X`'s with the host dropped from the front and `V, s` appended —
+`prep_at_value(x, u, q)` → `adv_at_value(u, q, V, s)`, `prep_after_offset(x, y, u, q)` →
+`adv_after_offset(y, u, q, V, s)`.
 
 **This is also where the verbaliser's gap is.** `adjunct_of` recovers the adverbial role by testing
 whether a `prep_*`'s first argument is the subject of a verb in the same conjunction
 (`verbalize.rs:1525`) — reconstructing what the term lost — and returns `None` for every `_value`
 relation, so the measured-value family gets no adverbial rendering at all. Under `adv_*` the role is
 in the type, so the test goes away and the family is rendered like any other adjunct.
+
+### Stacked adjuncts nest, and do not commute
+
+Found while implementing, `2026-10-07`. The paper applies **every** modifier to `BUTTER(x)`, the bare
+verb, so its conjunctive form is flat:
+
+```
+   paper:  V(s) & adv₁(V, s) & adv₂(V, s) & … & advₙ(V, s)
+```
+
+A categorial adjunct receives the VP it attaches to, never the verb inside it. The first adjunct's
+`V` is the bare verb; the second's is the VP the first produced:
+
+```
+  VP₁ = λs. And(V(s),   adv_at(x, V, s))      V = the bare verb
+  VP₂ = λs. And(VP₁(s), adv_for(y, VP₁, s))    V = the modified predicate
+```
+
+No other derivation reaches the flat form: application and composition both nest, and the surface
+order fixes which adjunct is outer, so there is nothing to choose. **Three consequences.**
+
+**Modifier drop still holds**, for the outermost modifier — which is the one Luo & Shi's theorem is
+about. `VP₁(s)` is a conjunct of `VP₂(s)`, so dropping `for y` leaves exactly the `at x` reading. This
+is the property #270 chose the event design over option A for, and it survives.
+
+**Commutativity does not hold.** «at 37 °C for 1 h» and «for 1 h at 37 °C» differ in the nested `V`,
+not merely in `And` order. Under the pre-#270 encoding the conjunct *contents* were
+order-independent (`And(And(V(s), prep_at(s,x)), prep_for(s,y))`), so this is a change. It is also
+arguably the more faithful reading — the 1 h is the duration of the at-37-°C incubating — but it is
+not the paper's, and the note said it was.
+
+**The term doubles per stacked adjunct**, because `VP₁` occurs twice in `VP₂` (applied to `s`, and as
+the modifier's argument). Measured by parsing with no database:
+
+| sentence | stacked adjuncts | term |
+|---|---|---|
+| «The flask was incubated at 37 °C for 1 h.» | 2 | 469 chars |
+| «The plates were spun at 931g for 2 h at 30 °C.» | 3 | 989 chars |
+
+**The gate page has no stacked adjuncts.** Of its 63 pinned sentences, 49 carry no clause-level
+adjunct, 12 carry one, and the single sentence with two — «These classifications were highly
+concordant with PCR-based MSI phenotyping **and** with predicted MMR deficiency» — is a
+*coordination*, which distributes into two conjuncts, each over the bare predicate. Nothing nests.
+The growth is exercised only by the methods-section rows of
+`experiments/parsing/quantities/corpus.tsv`, which the gate does not parse. The three-adjunct row
+yields two readings that print to the **same** term, so the attachment ambiguity adds no skeleton.
 
 ## The cases
 
@@ -346,9 +415,9 @@ argument, so such an adverb is writable at the type without a conjunct. None occ
 | | |
 |---|---|
 | kernel | none |
-| ontology | **13 axioms added**, 0 changed, in `ontology.esl`. Entity-object (5): `adv_in`, `adv_from`, `adv_with`, `adv_to` for the four attested as adjuncts, plus `adv_for` for U1's planned re-pin (open question 5). Measured-value (8): `adv_at_value`, `adv_for_value`, `adv_after_value`, `adv_in_value`, `adv_by_value`, `adv_after_offset`, `adv_before_offset`, `adv_every_period`. Bootstrap edit, so it rides a reseed. **The shape is already shipped**: `ontology:has_proportion : lexicon:Entity -> (lexicon:Entity -> Prop) -> units:Quantity(u"1") -> Prop` is the same higher-order form, and `median_over` takes a function argument, so such axioms already round-trip the D47 codec and validate |
+| ontology | **22 axioms added**, 0 changed, in `ontology.esl` — one per VP-adjunct entry. Entity-object (13): `adv_in`, `adv_for`, `adv_with`, `adv_to`, `adv_on`, `adv_from`, `adv_between`, `adv_within`, `adv_without`, `adv_among`, `adv_beyond`, `adv_after`, `adv_before`. Measured-value (9): `adv_at_value`, `adv_for_value`, `adv_in_value`, `adv_with_value`, `adv_after_value`, `adv_by_value`, `adv_after_offset`, `adv_before_offset`, `adv_every_period`. Bootstrap edit, so it rides a reseed. **The shape is already shipped**: `ontology:has_proportion : lexicon:Entity -> (lexicon:Entity -> Prop) -> units:Quantity(u"1") -> Prop` is the same higher-order form, and `median_over` takes a function argument, so such axioms already round-trip the D47 codec and validate |
 | migration of encoded terms | **none** — `prep_*` keeps its type, so every committed term that mentions one stays well-typed |
-| grammar | the VP-adjunct entry; `is_vp_adjunct_prep`'s category is unchanged |
+| grammar | the 22 VP-adjunct sem-term bodies in `closed-class.esl`. **No category and no `sem_type` changes**: the entries were already typed `lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)`, which is `ADV` with the object — only which relation the body names, and in which argument order. `is_vp_adjunct_prep` is unchanged |
 | closed-class entries | **none** — `⟦S⟧` stays `Prop` |
 | event class | none |
 | pins | **14**, the VP-adjunct `prep_*` occurrences. #270 lists 8 for option A; the pin count is 14 because `prep_from` (4) and a `prep_to` are adjuncts too |
@@ -356,6 +425,7 @@ argument, so such an adverb is writable at the type without a conjunct. None occ
 | quantity corpus | **27 rows' relation names** in `experiments/parsing/quantities/corpus.tsv`, plus the `prep_*_value` assertions in `kernel/tests/quantities_in_the_parser.rs`. `kernel/tests/quantity_corpus.rs` parses without a database, so these are checkable before the reseed |
 | verbaliser | `adjunct_of`, and its `_value` exclusion goes away — the role is in the type, so the subject test is no longer needed |
 | noun-internal uses | **57 untouched** — 54 entity-object plus `prep_of_value`'s 3 |
+| term size | **doubles per stacked adjunct** (§"Stacked adjuncts nest, and do not commute"): 469 chars for two, 989 for three. Zero exposure on the gate page, which has no stacked adjuncts; the methods rows of the quantity corpus are the exposure |
 
 Against `event-semantics.md`'s costed path: one `denote_cat` branch, the verb converter, **316 of
 465 closed-class entry types**, the coordination rules, 51 of 62 pins, 213 of 228 ledger rows.

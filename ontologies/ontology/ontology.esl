@@ -97,6 +97,40 @@ axiom ontology:prep_beyond  : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_after   : lexicon:Entity -> lexicon:Entity -> Prop
 axiom ontology:prep_before  : lexicon:Entity -> lexicon:Entity -> Prop
 
+// ── Adverbial (VP-adjunct) prepositions: `adv_*` (eigenius#270, 2026-10-07) ────
+// `adv_X(y, V, s)`: the predication `V` of `s`, modified by *X y*. Luo & Shi's `ADV`
+// type — `(e -> t) -> (e -> t)` — instantiated at the PP's object (Luo & Shi 2026,
+// "Variable polyadicity without events", MSCS 36, e11), so the modifier applies to the
+// PREDICATE and not to the subject. `prep_X` above keeps its meaning, a relation between
+// two ENTITIES, for noun-internal modification ("deficiencies in homologous
+// recombination"); the two roles were conflated under one name, which is #270.
+//
+//   «These mutations occur in nucleotide repeat regions.»
+//       was  And(occur(m), prep_in(m, regions))        — the MUTATIONS are in the regions
+//       now  And(occur(m), adv_in(regions, occur, m))  — the OCCURRING is
+//
+// Opaque, as `prep_*` is: the grammar guarantees a felicitous typed tree exposing the
+// parts, and the institution supplies the relation (D62). Modifier drop is Luo & Shi's
+// theorem, not a typing consequence: the conjunction is in the entry
+// (`λy.λV.λs. And(V(s), adv_X(y, V, s))`), so dropping the adjunct leaves `V(s)`.
+//
+// One `adv_X` per preposition that has a VP-ADJUNCT entry (`lexicon:prep_X_sem`), which
+// is the 13 below. The seven with only a noun-modifier entry (`lexicon:nmod_X_sem`:
+// about, against, at, by, into, of, upon) need none, and `prep_per` is noun-internal.
+axiom ontology:adv_in      : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_for     : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_with    : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_to      : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_on      : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_from    : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_between : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_within  : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_without : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_among   : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_beyond  : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_after   : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_before  : lexicon:Entity -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+
 // ── Prepositions over a measured value (D95 slice 5) ──────────────────────────
 // `prep_X_value(s, u, q)`: the predication or entity s stands in the prepositional relation to the
 // measured value q, in base unit u — "incubated at 37 °C" → … ∧ prep_at_value(s, K, 310.15 K). The
@@ -121,6 +155,40 @@ axiom ontology:prep_before_offset : lexicon:Entity -> lexicon:Entity -> forall (
 // cells per sample` (D95 slice 8d). Polymorphic in y's type, so a refined noun (`per time point`)
 // types; opaque, as `prep_in` is.
 axiom ontology:prep_per         : forall (Y : Set) => lexicon:Entity -> Y -> Prop
+
+// The `adv_*` siblings of the measured-value prepositions (eigenius#270, 2026-10-07). The
+// same split: `prep_X_value` relates an ENTITY to a measured value, which the noun-internal
+// use needs ("a dose of 5 mg/kg", "a volume of 2,000 mm³" — the three `prep_of_value` uses);
+// `adv_X_value` modifies a PREDICATION, which the VP-adjunct use needs. The comment on
+// `prep_X_value` above — "the predication OR entity s" — recorded a conflation the type could
+// not express, since the slot is `lexicon:Entity` and a VP adjunct puts the subject in it:
+//
+//   «The medium was changed every 3 days.»
+//       was  every_period(the(Medium), s, 259200)          — the MEDIUM recurs
+//       now  adv_every_period(s, 259200, change, the(Medium)) — the CHANGING does
+//
+// The measured value precedes the predicate, as the PP's object does in `adv_in`. 27 of the
+// 30 uses in `experiments/parsing/quantities/corpus.tsv` are VP adjuncts — these are methods
+// sentences, where almost every measured PP modifies the procedure.
+//
+// One `adv_X` per relation that has a VP-ADJUNCT entry (`lexicon:prep_X_value_sem`), which is
+// the nine below — the same rule as the entity-object family. `prep_of_value` gets no sibling:
+// it has only `nmod_of_value_sem`, and its three uses ("a dose of 5 mg/kg") are noun-internal.
+// The argument order is `prep_X`'s with the host dropped from the front and `V, s` appended:
+// `prep_at_value(x, u, q)` → `adv_at_value(u, q, V, s)`, `prep_after_offset(x, y, u, q)` →
+// `adv_after_offset(y, u, q, V, s)`.
+axiom ontology:adv_at_value    : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_for_value   : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_in_value    : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_after_value : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_by_value    : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_with_value  : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+// `adv_after_offset(y, u, q, V, s)`: the predication V of s, after y by the interval q —
+// "RNA was purified 72 h after transduction".
+axiom ontology:adv_after_offset  : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+axiom ontology:adv_before_offset : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+// `adv_every_period(u, q, V, s)`: the predication V of s recurs with period q.
+axiom ontology:adv_every_period  : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
 // `every_period(x, u, q)`: x recurs with the period q — `changed every 3 days` (D95, "`every N unit`";
 // slice 8b). Opaque, as the PP adjuncts are: no event variable, and the periodicity is the
 // institution's to interpret.

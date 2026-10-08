@@ -46,12 +46,23 @@ any detour.
 > manner adverbs, which are the same type; `prep_*` then means exactly "a relation between two
 > entities".
 >
-> **Cost.** No kernel change, no event class, `⟦S⟧` stays `Prop`, and **none** of the 316 of 465
-> closed-class entry types move. 13 axioms added and 0 changed (5 entity-object, 8 measured-value);
-> no migration of encoded terms; 14 pins and their ledger rows; 27 quantity-corpus rows' relation
-> names plus the `prep_*_value` assertions in `kernel/tests/quantities_in_the_parser.rs`; the
-> VP-adjunct entry; `adjunct_of`, whose `_value` exclusion and subject test both go away because the
-> role moves into the type. 57 noun-internal uses untouched. A bootstrap edit, so it rides a reseed.
+> **Cost, as built.** No kernel change, no event class, `⟦S⟧` stays `Prop`, and **none** of the 316 of
+> 465 closed-class entry types move. **22 axioms added and 0 changed** — 13 entity-object, 9
+> measured-value. No migration of encoded terms. 57 noun-internal uses untouched. A bootstrap edit,
+> so it rides a reseed.
+>
+> **The counting rule is per ENTRY, not per pin** (corrected while implementing, `2026-10-07`). An
+> `adv_X` is needed wherever a VP-adjunct entry (`lexicon:prep_X_sem`) exists, because every one of
+> them predicates the PP of the subject. Counting pins gave 5 and 8; counting entries gives 13 and 9.
+> The eight entity-object prepositions the pins do not attest — `on between within without among
+> beyond after before` — each have an entry, so counting pins would have fixed the measured
+> instances and left the grammar broken. `prep_with_value` likewise. The seven with only a
+> noun-modifier entry (`nmod_X_sem`: about, against, at, by, into, of, upon) need none, nor does
+> `prep_of_value`.
+>
+> **No category and no `sem_type` moved.** The 22 VP-adjunct sem terms were already typed
+> `lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop)`, which is `ADV` with the
+> object; only which relation each body names, and in which argument order.
 >
 > **Of 2026-10-06's ten decisions, these survive**: frames, `frame_in(S(K), x)`, their realisations,
 > the embedded-clause rule and the drop test (8); governed prepositions stay positional and the
@@ -64,8 +75,20 @@ any detour.
 > Whether the eventivity feature is still wanted for Katz's stative adverb gap is undecided and
 > nothing in this design needs it.
 >
-> **Next:** the `adv_*` axioms in `ontology.esl`, the VP-adjunct entry, `adjunct_of`, then the
-> re-pins — one slice, one reseed.
+> **Done (`2026-10-07`, uncommitted/committed on this branch):** the 22 `adv_*` axioms in
+> `ontology.esl`; the 22 VP-adjunct sem-term bodies in `closed-class.esl`; `prep_parts`,
+> `adjunct_of` and the adverbial period/offset arms in `verbalize.rs`; the 30 relation names in
+> `experiments/parsing/quantities/corpus.tsv`; `event-semantics-counts.py` reading both encodings
+> (it reproduces this note's figures unchanged — 70 clause-level PP rows, 46 on a verb, 139
+> mechanical, 18 governed free adjuncts); `EXPECTED` in `bootstrap_manifest_pinned.rs` re-pinned,
+> with exactly two layers moved (`ontology`, `closed-class`) and a changelog entry.
+> `kernel/tests/quantity_corpus.rs` parses the corpus with NO database, so all 30 rows are verified
+> before the reseed.
+>
+> **Next: the reseed and the re-pins.** The 14 pins in `expected-readings.tsv` and their ledger rows
+> still hold `prep_*` terms, and the bootstrap edit makes every persisted store unresumable
+> (`BootstrapError::ManifestDrift`), so they need a reseed to re-measure. Replay the baseline FIRST
+> on an unmodified tree (a `git worktree`, not a stash — see the baseline bullet below).
 > #264's strand 3 (whether attachment is derivable) is answered by question 4 for prepositions the
 > lexicon names on a sense; other attachments stay with the ranker. #271 (the «a DNA» atom) is
 > independent.
