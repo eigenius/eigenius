@@ -202,7 +202,7 @@ fn a_value_consumer_takes_the_value_reading() {
     let r = readings(&parser, "HeLa incubated at 37 °C");
     assert_eq!(r.len(), 1, "{r:#?}");
     assert!(
-        r[0].contains("ontology:prep_at_value")
+        r[0].contains("ontology:adv_at_value")
             && r[0].contains("numer: 6203")
             && r[0].contains("denom: 20"),
         "{r:#?}"
@@ -218,27 +218,27 @@ fn each_preposition_takes_a_measured_value() {
     for (text, relation, magnitude) in [
         (
             "HeLa incubated for 2 h",
-            "prep_for_value",
+            "adv_for_value",
             "numer: 7200, denom: 1",
         ),
         (
             "HeLa incubated after 72 h",
-            "prep_after_value",
+            "adv_after_value",
             "numer: 259200, denom: 1",
         ),
         (
             "HeLa incubated in 50 μl",
-            "prep_in_value",
+            "adv_in_value",
             "numer: 1, denom: 20000000",
         ),
         (
             "HeLa incubated with 10%",
-            "prep_with_value",
+            "adv_with_value",
             "numer: 1, denom: 10",
         ),
         (
             "HeLa incubated at 37 °C for 2 h",
-            "prep_for_value",
+            "adv_for_value",
             "numer: 7200, denom: 1",
         ),
     ] {
@@ -251,14 +251,15 @@ fn each_preposition_takes_a_measured_value() {
     }
 }
 
-/// `after` is a closed-class preposition over an NP as well as over a measured value.
+/// `after` is a closed-class preposition over an NP as well as over a measured value. As a VP
+/// ADJUNCT it is `adv_after` since #270 — `prep_after` stays the noun-modifier relation.
 #[test]
 fn after_takes_an_np() {
     let parser = Parser::build(layer());
     let r = readings(&parser, "HeLa incubated after the dose");
     assert_eq!(r.len(), 1, "{r:#?}");
     assert!(
-        r[0].contains("ontology:prep_after\"") && r[0].contains("lexicon:Dose"),
+        r[0].contains("ontology:adv_after\"") && r[0].contains("lexicon:Dose"),
         "{r:#?}"
     );
 }
@@ -467,70 +468,70 @@ fn a_bound_constrains_the_value_a_consumer_takes() {
     for (text, relation, constraint, value_first_expected, magnitude) in [
         (
             "HeLa incubated at less than 37 °C",
-            "prep_at_value",
+            "adv_at_value",
             "lt",
             true,
             "numer: 6203, denom: 20",
         ),
         (
             "HeLa incubated for more than 2 h",
-            "prep_for_value",
+            "adv_for_value",
             "lt",
             false,
             "numer: 7200, denom: 1",
         ),
         (
             "HeLa incubated for at least 2 h",
-            "prep_for_value",
+            "adv_for_value",
             "le",
             false,
             "numer: 7200, denom: 1",
         ),
         (
             "HeLa incubated for at most 2 h",
-            "prep_for_value",
+            "adv_for_value",
             "le",
             true,
             "numer: 7200, denom: 1",
         ),
         (
             "HeLa incubated for up to 2 h",
-            "prep_for_value",
+            "adv_for_value",
             "le",
             true,
             "numer: 7200, denom: 1",
         ),
         (
             "HeLa incubated at approximately 37 °C",
-            "prep_at_value",
+            "adv_at_value",
             "approx",
             true,
             "numer: 6203, denom: 20",
         ),
         (
             "HeLa incubated for about 2 h",
-            "prep_for_value",
+            "adv_for_value",
             "approx",
             true,
             "numer: 7200, denom: 1",
         ),
         (
             "HeLa incubated for around 2 h",
-            "prep_for_value",
+            "adv_for_value",
             "approx",
             true,
             "numer: 7200, denom: 1",
         ),
         (
             "HeLa incubated for roughly 2 h",
-            "prep_for_value",
+            "adv_for_value",
             "approx",
             true,
             "numer: 7200, denom: 1",
         ),
         (
             "HeLa incubated with more than 10%",
-            "prep_with_value",
+            "adv_with_value",
             "lt",
             false,
             "numer: 1, denom: 10",
@@ -613,7 +614,7 @@ fn a_bound_takes_a_bound() {
     assert!(
         debug.contains("units:approx")
             && debug.contains("units:lt")
-            && debug.contains("prep_for_value"),
+            && debug.contains("adv_for_value"),
         "{}",
         pretty_term(parsed[0].sem())
     );
@@ -734,11 +735,11 @@ fn a_symbol_is_a_bound() {
             "lt",
             false,
         ),
-        ("HeLa incubated at < 37 °C", "prep_at_value", "lt", true),
-        ("HeLa incubated at ≤ 37 °C", "prep_at_value", "le", true),
-        ("HeLa incubated at ≥ 37 °C", "prep_at_value", "le", false),
-        ("HeLa incubated for ~ 2 h", "prep_for_value", "approx", true),
-        ("HeLa incubated for ≈ 2 h", "prep_for_value", "approx", true),
+        ("HeLa incubated at < 37 °C", "adv_at_value", "lt", true),
+        ("HeLa incubated at ≤ 37 °C", "adv_at_value", "le", true),
+        ("HeLa incubated at ≥ 37 °C", "adv_at_value", "le", false),
+        ("HeLa incubated for ~ 2 h", "adv_for_value", "approx", true),
+        ("HeLa incubated for ≈ 2 h", "adv_for_value", "approx", true),
     ] {
         let parsed = parser.parse(text, &Identity);
         assert_eq!(parsed.len(), 1, "{text}: {} readings", parsed.len());
@@ -831,13 +832,13 @@ fn a_range_is_a_constraint() {
     for (text, relation, low, high) in [
         (
             "HeLa incubated for 2–3 h",
-            "prep_for_value",
+            "adv_for_value",
             "numer: 7200, denom: 1",
             "numer: 10800, denom: 1",
         ),
         (
             "HeLa incubated for 2-3 h",
-            "prep_for_value",
+            "adv_for_value",
             "numer: 7200, denom: 1",
             "numer: 10800, denom: 1",
         ),
@@ -888,19 +889,19 @@ fn a_bound_can_follow_the_value() {
     for (text, relation, value_first_expected, magnitude) in [
         (
             "HeLa incubated at 37 °C or higher",
-            "prep_at_value",
+            "adv_at_value",
             false,
             "numer: 6203, denom: 20",
         ),
         (
             "HeLa incubated with 10% or more",
-            "prep_with_value",
+            "adv_with_value",
             false,
             "numer: 1, denom: 10",
         ),
         (
             "HeLa incubated for 2 h or less",
-            "prep_for_value",
+            "adv_for_value",
             true,
             "numer: 7200, denom: 1",
         ),
@@ -1206,7 +1207,7 @@ fn a_number_word_is_a_numeral() {
     for (text, relation, value) in [
         (
             "HeLa incubated for nine days",
-            "prep_for_value",
+            "adv_for_value",
             "numer: 777600, denom: 1",
         ),
         ("Nine cells incubated", "has_count", "numer: 9, denom: 1"),
@@ -1373,32 +1374,32 @@ fn an_offset_is_a_measure_phrase_before_a_preposition() {
     for (text, relation, value) in [
         (
             "HeLa incubated 72 h after transduction",
-            "prep_after_offset",
+            "adv_after_offset",
             "numer: 259200, denom: 1",
         ),
         (
             "HeLa incubated 6 h before transduction",
-            "prep_before_offset",
+            "adv_before_offset",
             "numer: 21600, denom: 1",
         ),
         (
             "HeLa incubated 4 days post transduction",
-            "prep_after_offset",
+            "adv_after_offset",
             "numer: 345600, denom: 1",
         ),
         (
             "HeLa incubated about 72 h after transduction",
-            "prep_after_offset",
+            "adv_after_offset",
             "numer: 259200, denom: 1",
         ),
         (
             "HeLa incubated 2 days later",
-            "prep_after_value",
+            "adv_after_value",
             "numer: 172800, denom: 1",
         ),
         (
             "HeLa incubated by three weeks",
-            "prep_by_value",
+            "adv_by_value",
             "numer: 1814400, denom: 1",
         ),
     ] {
@@ -1448,7 +1449,8 @@ fn a_fronted_adjunct_modifies_the_subject() {
     assert!(readings(&parser, "HeLa received after 72 h two cells").is_empty());
 }
 
-/// Slice 8b, decision 5: `every N unit` is the period of a repeated procedure, `every_period(x, u,
+/// Slice 8b, decision 5: `every N unit` is the period of a repeated procedure. Since #270 the
+/// adverbial is `adv_every_period(u, q, V, s)` — the subject LAST (was `every_period(x, u,
 /// q)`; a range is a constraint on it.
 #[test]
 fn every_n_unit_is_a_period() {
@@ -1456,13 +1458,13 @@ fn every_n_unit_is_a_period() {
     let r = readings(&parser, "HeLa incubated every 3 days");
     assert_eq!(r.len(), 1, "{r:#?}");
     assert!(
-        r[0].contains("ontology:every_period\"") && r[0].contains("numer: 259200, denom: 1"),
+        r[0].contains("ontology:adv_every_period\"") && r[0].contains("numer: 259200, denom: 1"),
         "{r:#?}"
     );
     let r = readings(&parser, "HeLa incubated every 2–3 days");
     assert_eq!(r.len(), 1, "{r:#?}");
     assert!(
-        r[0].contains("ontology:every_period\"")
+        r[0].contains("ontology:adv_every_period\"")
             && r[0].matches("urn:eigenius:units:le\"").count() == 2,
         "{r:#?}"
     );
