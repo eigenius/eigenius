@@ -106,11 +106,28 @@ any detour.
 >   copy holds both (`references.tar`, `snapshots/wordnet-umls-hpo-aligned-2026-10-05-merge.tar`,
 >   `SHA256SUMS`, `README.md`). `scripts/measure-parse-rate.sh` picks the newest `wordnet-umls-*`
 >   store unless given `--snapshot`, so pass it.
-> - **Baseline first, on that machine, before changing anything:** replay
->   `ranks/2026-10-01-do-sense.json` and `selections/2026-10-05-hpo-merge-1.json` against that store,
->   in release (`experiments/parsing/README.md`). Expected: 62/62 hits, grammar-gap 0, 210
->   skeletons, 679 readings; reading-correct 32/42, structure 37, ledger-conflicts 0. Another number
->   means the environment differs, not the code.
+> - **The pre-change baseline replay is NOT runnable here, and an A/B across this change is not
+>   possible at all** (established `2026-10-07`). The bullet this replaces said to replay
+>   `ranks/2026-10-01-do-sense.json` and `selections/2026-10-05-hpo-merge-1.json` against
+>   `wordnet-umls-hpo-aligned-2026-10-05-merge` for 62/62 hits, grammar-gap 0, 210 skeletons, 679
+>   readings; reading-correct 32/42, structure 37, ledger-conflicts 0. Two reasons it cannot be done:
+>   - That store's `PROVENANCE` says it was built from git **`89ceffb`, a commit this clone does not
+>     have** — it came from the other machine with the archives. Its build timestamp
+>     (2026-10-05T20:20) is **before `f331dcb`** (2026-10-06 10:25, #263/#264), which moved the
+>     bootstrap manifest, so the store is almost certainly already `ManifestDrift` at every commit on
+>     this branch. (Grepping the store for either candidate `closed-class` hash finds neither;
+>     RocksDB compresses, so that is not evidence either way.)
+>   - **An A/B across a bootstrap edit is impossible by construction.** The pre- and post-change
+>     bootstraps hash differently, so no single store opens under both. The comparison is therefore
+>     the new store's numbers against the committed `baseline.json` / `selection-baseline.json`
+>     expected blocks, which is what `eval-parse-rate.sh` gates on.
+> - **What CAN be matched is the store's provenance, and it was** (`2026-10-07`). The 2026-10-05
+>   store's `PROVENANCE` names every input; all of them are present here and the three recorded
+>   sha256 prefixes match exactly — SPECIALIST `LEXICON` 259d0283ebe7b027, `adjective-senses.tsv`
+>   df949282d08d07fa, `verb-senses.tsv` 4822632205e93442 — with `umls_scope: all` (hence
+>   `--umls-all`), `umls_release: 2026AA`, `chv_redundant: 1`, `drops.json`, `atom-overrides.json`,
+>   `uncountable-nouns.txt`, `merges.json` and `claim-kind-alignment.esl`. A reseed that misses one
+>   of these shifts the numbers silently.
 > - **After the change** the old store no longer opens (ManifestDrift). Rebuild the chain as on
 >   2026-10-05 (`baseline.json`, `_provenance_note_2026-10-05-hpo-chain`), in its own Docker compose
 >   project so existing volumes stay untouched; `S` is the absolute path of `../db-snapshot`, `D` a

@@ -1217,7 +1217,17 @@ pub(crate) fn is_pp_refined(ty: &Exp) -> bool {
     };
     fn mentions_prep(e: &Exp) -> bool {
         match e {
-            Exp::EigonAxiom(iri) => iri.as_str().starts_with("urn:eigenius:ontology:prep_"),
+            // BOTH families (#270, 2026-10-07). The guard's argument is about the SURFACE —
+            // something postmodifying cannot sit between the head and a designator — and both a
+            // noun postmodifier (`prep_in`, "mutations in the MMR") and a relative clause carrying a
+            // VP adjunct (`adv_for`, "genes that were essential for proliferation") are that. Before
+            // the split one relation served both roles, so matching `prep_` alone caught both;
+            // matching `prep_` alone NOW silently stops refusing the relative-clause bracketings.
+            Exp::EigonAxiom(iri) => {
+                let s = iri.as_str();
+                s.starts_with("urn:eigenius:ontology:prep_")
+                    || s.starts_with("urn:eigenius:ontology:adv_")
+            }
             // A nested refined noun is a different noun's restrictor — do not descend.
             Exp::Sig(..) => false,
             Exp::App(a, b)
@@ -1831,6 +1841,45 @@ mod tests {
         assert!(
             appose_group(&refined(unreduced), &group, &group_sem, &layer).is_none(),
             "the un-reduced PP restrictor is refused too"
+        );
+        // A relative clause carrying a VP ADJUNCT is refused on the same surface argument —
+        // "*the gene that is essential for proliferation MSH2". Before #270 one relation served the
+        // adjunct and the postmodifier, so `prep_` caught this; `adv_for(obj, V, x)` is the adjunct
+        // now, and matching `prep_` alone would silently admit the bracketing.
+        let adv3 = |iri: &str, obj: Exp| {
+            Exp::App(
+                Box::new(Exp::App(
+                    Box::new(Exp::App(
+                        Box::new(Exp::EigonAxiom(Iri::parse(iri).unwrap())),
+                        Box::new(obj),
+                    )),
+                    Box::new(Exp::Lam(
+                        Patt::Var("V".into()),
+                        Box::new(Exp::Var("V".into())),
+                    )),
+                )),
+                // The Σ variable is the adverbial's SUBJECT, its LAST argument — where `app2` puts
+                // it first, which is the postmodifier shape.
+                Box::new(x()),
+            )
+        };
+        let adv_restr = adv3(
+            "urn:eigenius:ontology:adv_for",
+            cls("urn:eigenius:lexicon:Mmr"),
+        );
+        // `is_pp_refined` takes the TYPE INDEX, the Σ itself — `refined` wraps that in a `cat_n`.
+        assert!(
+            is_pp_refined(&Exp::Sig(
+                Patt::Var(crate::dcg::rules::combinators::COMPOUND_X.into()),
+                Box::new(gene.clone()),
+                Box::new(adv_restr.clone()),
+            )),
+            "a restrictor carrying a VP adjunct is postmodified"
+        );
+        let adjunct_head = refined(adv_restr);
+        assert!(
+            appose_group(&adjunct_head, &group, &group_sem, &layer).is_none(),
+            "a classifier whose restrictor carries a VP adjunct is refused"
         );
         // An already-designated classifier ("genes MSH2") takes no second designator list.
         let named_head = refined(app2(

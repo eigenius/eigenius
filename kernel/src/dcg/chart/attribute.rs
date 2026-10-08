@@ -364,6 +364,11 @@ fn axiom_class(head: &Exp) -> &'static str {
                 "essive"
             } else if s.starts_with("urn:eigenius:ontology:prep_") {
                 "pp"
+            } else if s.starts_with("urn:eigenius:ontology:adv_") {
+                // A VP adjunct inside a restrictor is a relative clause's, not a postmodifier of the
+                // head (#270, 2026-10-07) — so it gets its own label rather than joining "pp", which
+                // would restate the conflation `adv_*` was introduced to end.
+                "adverbial"
             } else if s == "urn:eigenius:measurements:gt" || s == "urn:eigenius:measurements:lt" {
                 "adjective"
             } else {
@@ -630,6 +635,12 @@ mod tests {
             "adjective"
         );
         assert_eq!(axiom_class(&ax("urn:eigenius:ontology:prep_in")), "pp");
+        // A VP adjunct in a restrictor is a relative clause's, not a postmodifier of the head
+        // (#270) — its own label, not "pp" and not the "other" it fell to before.
+        assert_eq!(
+            axiom_class(&ax("urn:eigenius:ontology:adv_in")),
+            "adverbial"
+        );
         assert_eq!(axiom_class(&var()), "other");
     }
 

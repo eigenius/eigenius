@@ -410,6 +410,40 @@ intensional, de Groote & Winter call modal adverbs "orthogonal to the main tenet
 semantics", and the ERG gives scopal adverbs a handle argument. `ADV` takes the predicate as an
 argument, so such an adverb is writable at the type without a conjunct. None occurs in the corpus.
 
+### A rename reaches every site that matched the old name
+
+The entries' categories and `sem_type`s did not move, and no combinator needed an edit — the parser
+composes sem terms without inspecting relation names. That made it look as though no parser change
+was involved. It was not so. **Two Rust sites match on the `prep_` prefix in a context that covered
+the adjunct role, and both went stale the moment the adjunct moved to `adv_`.** The first commit
+shipped without them; they were found by asking the question directly.
+
+**`is_pp_refined` (`constructions.rs`) — a behavioural defect.** It gates `Guard::NotPpRefined`,
+which kills classifier capture: a designator sits immediately after the nominal head, so something
+postmodifying cannot intervene — «the gene MSH2 in humans», never «*the gene in humans MSH2». Its
+`mentions_prep` walks a Σ restrictor for an `ontology:prep_` axiom. A restrictor holding a relative
+clause with a VP adjunct — «genes that were essential **for** proliferation», which
+`event-semantics-counts.py` names as the Σ-anchored adjunct and which is a ledger row — used to match
+and be refused. With `adv_for` it stopped matching. Verified behaviourally, not just on the
+predicate: with the `adv_` arm removed, `appose_group` **accepts** the bracketing it exists to
+refuse. Both families now match, which is what the guard's surface argument wanted all along.
+
+**`axiom_class` (`chart/attribute.rs`) — a diagnostic.** `compound_shape_label` splits
+`Combinator::Compound` by restrictor shape, and an `adv_*` fell through to `"other"`, which the label
+drops. It now has its own label, `"adverbial"`, rather than joining `"pp"`: inside a restrictor a VP
+adjunct belongs to a relative clause, not to a postmodifier of the head, and lumping the two would
+restate the conflation `adv_*` was introduced to end.
+
+**Everything else that names `prep_` is correctly untouched**, and the division is the same one the
+two families draw. The test sites all build noun postmodifiers — `prep_in(x, Mmr)` in
+`constructions.rs`, `prep_of` in `attribute.rs`, the `prep_to`/`prep_of` restrictor keys in
+`combinators.rs`. `category.rs` and `eigenius-wordnet/src/convert.rs` use `lexicon:Prep` **feature
+constructors**, a different namespace from the ontology relations: `prep_to` there is a `Cat` feature
+value for governed-preposition marking, not a relation a term applies.
+
+The full workspace suite passed over both defects, so nothing covered them. Both now have a
+regression test, and the `is_pp_refined` one was checked to fail without the fix.
+
 ## Cost
 
 | | |
@@ -425,6 +459,7 @@ argument, so such an adverb is writable at the type without a conjunct. None occ
 | quantity corpus | **27 rows' relation names** in `experiments/parsing/quantities/corpus.tsv`, plus the `prep_*_value` assertions in `kernel/tests/quantities_in_the_parser.rs`. `kernel/tests/quantity_corpus.rs` parses without a database, so these are checkable before the reseed |
 | verbaliser | `adjunct_of`, and its `_value` exclusion goes away — the role is in the type, so the subject test is no longer needed |
 | noun-internal uses | **57 untouched** — 54 entity-object plus `prep_of_value`'s 3 |
+| parser | **two sites, found `2026-10-07` after the first commit.** No category or combinator *edit* was needed, but two Rust sites match on the `prep_` NAME where the old name meant both roles, so both went stale: `is_pp_refined` (`constructions.rs`), which gates `Guard::NotPpRefined`, and `axiom_class` (`chart/attribute.rs`). See §"A rename reaches every site that matched the old name" |
 | term size | **doubles per stacked adjunct** (§"Stacked adjuncts nest, and do not commute"): 469 chars for two, 989 for three. Zero exposure on the gate page, which has no stacked adjuncts; the methods rows of the quantity corpus are the exposure |
 
 Against `event-semantics.md`'s costed path: one `denote_cat` branch, the verb converter, **316 of
