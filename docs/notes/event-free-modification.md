@@ -63,7 +63,7 @@ compared:
 |---|---|
 | today | `And(screen(cl,pa), prep_with(pa, lib))` — *Project Achilles* is with the library |
 | events (decided) | `∃e:Ev. And(screen(cl,pa,e), prep_with(e, lib))` |
-| predicate modifier | `And(screen(cl,pa), prep_with(lib, screen(pa), cl))` |
+| predicate modifier | `And(screen(cl,pa), vprep_with(lib, screen(pa), cl))` |
 
 **The ontology already says this is the intent.** `ontologies/ontology/ontology.esl:66–67` documents
 the preposition axioms as "`prep_*(s, y)`: **the predication s** stands in the prepositional relation
@@ -72,24 +72,58 @@ subject. #270 is the gap between that comment and both the type and the term.
 
 ## The proposed encoding
 
-One axiom type changes and one entry changes.
+**Two preposition families, because `prep_*` already does two jobs.** A first draft of this note
+changed `prep_*`'s type in place and claimed "one axiom type changes". That is wrong, and the pins
+show why: `ontology:prep_in` serves both a noun-internal modifier and a VP adjunct, and only the
+second is broken.
+
+| role | example | pin shape | count | state |
+|---|---|---|---|---|
+| noun-internal | «deficiencies in homologous recombination» | `prep_in(G#1, kind_of(§))` — a Σ-bound entity | 54 | **correct** |
+| VP adjunct | «These mutations occur in nucleotide repeat regions» | `prep_in($demref$1, …)` — the subject | 14 | #270's defect |
+
+Noun-internal uses span eight prepositions — `prep_of` 19, `prep_in` 13, `prep_for` 10, `prep_from` 4,
+`prep_with` 3, `prep_between` 3, `prep_to` 1, `prep_on` 1. VP-adjunct uses span four — `prep_in` 6,
+`prep_from` 4, `prep_with` 3, `prep_to` 1.
+
+Retyping `prep_*` in place would break all 54 noun-internal uses, which are not broken and have
+nothing to do with #270, and would require migrating every already-encoded term that mentions one.
+**So the change is additive**: `prep_*` keeps its type and its meaning for noun-internal
+modification, and a second family handles VP adjuncts.
 
 ```
-                  was:  axiom ontology:prep_in : lexicon:Entity -> lexicon:Entity -> Prop
-                  now:  axiom ontology:prep_in : lexicon:Entity
-                                               -> (lexicon:Entity -> Prop)
-                                               -> lexicon:Entity -> Prop
+  unchanged:  axiom ontology:prep_in  : lexicon:Entity -> lexicon:Entity -> Prop
+                                        — relates two entities; noun-internal
+
+      added:  axiom ontology:vprep_in : lexicon:Entity
+                                     -> (lexicon:Entity -> Prop)
+                                     -> lexicon:Entity -> Prop
+                                        — modifies a predication; VP adjunct
 
 ⟦in⟧ VP adjunct   was:  λx.λV.λs. And(V(s), prep_in(s, x))
-                  now:  λx.λV.λs. And(V(s), prep_in(x, V, s))
+                  now:  λx.λV.λs. And(V(s), vprep_in(x, V, s))
+⟦in⟧ noun-internal      unchanged
 ```
 
 `V : lexicon:Entity -> Prop` is the VP with its object absorbed, awaiting the subject — the type it
-already has. `prep_in(x, V)` is Luo & Shi's `ADV`, instantiated at the PP's object; applying it to
+already has. `vprep_in(x, V)` is Luo & Shi's `ADV`, instantiated at the PP's object; applying it to
 `s` says the property `V`, modified by *in x*, holds of `s`.
+
+This also states a distinction the ontology comment was reaching for and could not make with one
+relation. `ontology.esl:66–67` documents the axioms as "`prep_*(s, y)`: **the predication s** stands
+in the prepositional relation to y" — true of the VP-adjunct role and false of the noun-internal one,
+which relates two entities. The two families separate what the one name conflated.
 
 **`⟦S⟧` stays `Prop`.** The adjunct consumes an `Entity -> Prop` and returns an `Entity -> Prop`, so
 the VP type is unchanged, and so is every entry that consumes a VP or a clause.
+
+**Five axioms, not eight, and none retyped.** Only the prepositions used as VP adjuncts need a
+`vprep_*`: the four attested in the pins — `vprep_in`, `vprep_from`, `vprep_with`, `vprep_to` — plus
+`vprep_for` for «for cancer therapeutics», which `event-semantics.md`'s open question 5 re-pins to the
+exploiting and which today's encoding pins to the scientists. `event-semantics.md`'s decision on framing
+prepositions (open question 8 ii) names «in» and «with» as the two the page frames, and CGEL's other
+domain-adjunct realisations as a planned augmentation; the same staging applies here — one
+`vprep_*` axiom per preposition as it is attested or planned.
 
 ### The Π over ℕ is not needed here
 
@@ -108,8 +142,8 @@ fixtures — so the Π route would need one declared. The CCG route needs neithe
 
 ### 1. «Project Achilles screened cell lines with a CRISPR library.»
 
-`And(screen(cl, pa), prep_with(lib, screen(pa), cl))`. The library modifies the screening. #270's
-defect is inexpressible: `prep_with`'s first argument is the PP's object and its second is a
+`And(screen(cl, pa), vprep_with(lib, screen(pa), cl))`. The library modifies the screening. #270's
+defect is inexpressible: `vprep_with`'s first argument is the PP's object and its second is a
 predicate, so there is no slot a subject could occupy.
 
 ### 2. «Some cancers do not respond to immune checkpoint blockade.»
@@ -123,14 +157,14 @@ so there is nothing to scope.
 
 ### 3. Quantified PP objects — «in every model»
 
-`∀m. model(m) → And(V(s), prep_in(m, V, s))`. The quantifier wraps the adjunct's output from
+`∀m. model(m) → And(V(s), vprep_in(m, V, s))`. The quantifier wraps the adjunct's output from
 outside, which is how the GQ entries already work. `event-semantics.md`'s open question 6(ii)
 required the quantifier to scope over the event quantifier; with no event quantifier the requirement
 is vacuous.
 
 ### 4. Coordination — «promoted apoptosis and cell cycle arrest in MSI models»
 
-`And(And(promote(apo,d), prep_in(msi, promote(apo), d)), And(promote(cca,d), prep_in(msi,
+`And(And(promote(apo,d), vprep_in(msi, promote(apo), d)), And(promote(cca,d), vprep_in(msi,
 promote(cca), d)))`. Coordination is `And` at `Prop`, which the object language has. No per-event
 distribution question arises, and no type-level join is needed — the gap
 `event-frames-as-records.md` found in the record route.
@@ -144,7 +178,7 @@ untouched. This route changes participant/circumstance PPs only, exactly as the 
 ### 6. Purpose «for» — U1
 
 «Scientists can exploit synthetic lethality for cancer therapeutics» gives
-`Possible(And(exploit(sl,s), prep_for(ct, exploit(sl), s)))`. The purpose attaches to the exploiting,
+`Possible(And(exploit(sl,s), vprep_for(ct, exploit(sl), s)))`. The purpose attaches to the exploiting,
 which is the re-pin open question 5 calls for. `⟦can⟧` is VP-level and unchanged.
 
 ### 7. Copular predicates
@@ -159,7 +193,7 @@ question this note does not answer.
 ### 8. Governed PPs
 
 Unchanged. `respond to` stays `respond_to(y, x)` positional, as the 2026-10-05 ruling has it. The
-free-adjunct competitor becomes `And(respond(x), prep_to(y, respond, x))`, which is well-formed
+free-adjunct competitor becomes `And(respond(x), vprep_to(y, respond, x))`, which is well-formed
 rather than contradictory — the same change `event-semantics.md` records for slice 2's
 re-adjudication, reached without events.
 
@@ -168,16 +202,23 @@ re-adjudication, reached without events.
 | | |
 |---|---|
 | kernel | none |
-| ontology | the preposition axioms' type — 8+ axioms in `ontology.esl`. Bootstrap edit, so it rides a reseed. **The shape is already shipped**: `ontology:has_proportion : lexicon:Entity -> (lexicon:Entity -> Prop) -> units:Quantity(u"1") -> Prop` is the same higher-order form, and `median_over` takes a function argument, so such axioms already round-trip the D47 codec and validate |
+| ontology | **5 axioms added**, 0 changed: `vprep_in`, `vprep_from`, `vprep_with`, `vprep_to` for the four attested as adjuncts, plus `vprep_for` for U1's planned re-pin (open question 5). In `ontology.esl`. Bootstrap edit, so it rides a reseed. **The shape is already shipped**: `ontology:has_proportion : lexicon:Entity -> (lexicon:Entity -> Prop) -> units:Quantity(u"1") -> Prop` is the same higher-order form, and `median_over` takes a function argument, so such axioms already round-trip the D47 codec and validate |
+| migration of encoded terms | **none** — `prep_*` keeps its type, so every committed term that mentions one stays well-typed |
 | grammar | the VP-adjunct entry; `is_vp_adjunct_prep`'s category is unchanged |
 | verbaliser | `adjunct_of` |
 | closed-class entries | **none** — `⟦S⟧` stays `Prop` |
 | event class | none |
-| pins | the 8 carrying an adjunct conjunct, per #270's own list for option A |
-| ledger | their rows |
+| pins | **14**, the VP-adjunct `prep_*` occurrences. #270 lists 8 for option A; the pin count is 14 because `prep_from` (4) and a `prep_to` are adjuncts too |
+| ledger | the rows for those 14 |
+| noun-internal uses | **54 untouched** |
 
 Against `event-semantics.md`'s costed path: one `denote_cat` branch, the verb converter, **316 of
 465 closed-class entry types**, the coordination rules, 51 of 62 pins, 213 of 228 ledger rows.
+
+The additive shape removes a risk the first draft of this note carried. Retyping `prep_*` in place
+would have been a versioned-ADT change needing a migration for every already-encoded term that
+mentions a preposition; adding `vprep_*` needs none, because nothing committed changes meaning. That
+risk was an artifact of overloading one relation for two jobs, not a cost of the design.
 
 ## How this relates to #270's option A
 
@@ -185,7 +226,7 @@ Against `event-semantics.md`'s costed path: one `denote_cat` branch, the verb co
 relations taking a proposition (`Prop → Entity → Prop`)", and recommends it. The maintainer chose B.
 
 This route is option A's family with a **predicate** type rather than a proposition type:
-`prep(x, V, s)` instead of `prep(V(s), x)`. The difference is that A's modifier receives a closed
+`vprep(x, V, s)` instead of `prep(V(s), x)`. The difference is that A's modifier receives a closed
 proposition while this one receives the predicate and its argument separately, which is what Luo &
 Shi's `adv(BUTTER(x), y)` form requires.
 
@@ -220,8 +261,8 @@ event to quantify over.
   «Somatic MMR inactivation», «The co-occurrence of these two events» — and the corpus already
   handles it as nominals with `prep_of`, with no event and no `E`. Perception verbs and cross-clause
   time ordering do not occur on the gate page.
-- **The arity of `prep_*` in the chain.** Changing a shipped axiom's type is a versioned-ADT change;
-  the migration for existing encoded terms has not been sized.
+- **Naming.** `vprep_*` is a placeholder. The two families need names that say which relates entities
+  and which modifies a predication; this note does not settle them.
 - **Whether `V` is the right predicate to modify.** The paper modifies `BUTTER(x)` — subject
   absorbed, object outstanding. Eigenius's `V : Entity -> Prop` is object-absorbed, subject
   outstanding. The two coincide for a transitive verb with both arguments, but the correspondence was
