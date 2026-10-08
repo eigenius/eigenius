@@ -36,6 +36,21 @@
 > without an event argument. Whether the eventivity feature is still wanted to state Katz's stative
 > adverb gap is open.
 >
+> **§"Adverbs", worked under the replacement on `2026-10-07`** — see
+> [`event-free-modification.md`](event-free-modification.md) §"Adverbs". That section's routing claim
+> stands: D62's identity holds, and manner adverbs get the same shape as a PP adjunct. What it adds
+> is that `adverb_modifier_cats`' two categories **already denote** `(Entity → Prop) → Entity → Prop`,
+> so under predicate modifiers an adverb needs no category or type change at all, where under events
+> the same denotation moves with `⟦S⟧`.
+>
+> It also records two things §"Adverbs" below does not. The 63 pinned sentences carry **11 adverb
+> occurrences and every one is erased** in its skeleton, so no pin distinguishes the designs here.
+> And of those 11, **three are frequency adverbs** («More commonly», «most commonly observed»,
+> «typically arises») against one manner adverb — a kind §"Adverbs" does not treat. They quantify over
+> occasions, and under open question 1's lexical closure the event `∃` is already closed inside the
+> verb's entry, so one cannot bind it; the event design would need the outside-`V` quantifier this
+> note names for `for`-adverbials. Neither design works them, and no pin depends on it.
+>
 > Everything below is unchanged from 2026-10-06.
 
 **Decided (the maintainer, 2026-10-06):**
