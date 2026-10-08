@@ -3,8 +3,24 @@
 *Design note for `docs/notes/`. It works out Luo & Shi's event-free treatment of adverbial
 modification as an answer to eigenius#270, and sets it against the event-argument design decided on
 `2026-10-06` ([`event-semantics.md`](event-semantics.md)) and the frames-as-records route
-([`event-frames-as-records.md`](event-frames-as-records.md)). Written `2026-10-07`. It changes no
-code.*
+([`event-frames-as-records.md`](event-frames-as-records.md)). Written `2026-10-07`.*
+
+> ## Adopted `2026-10-07`
+>
+> **The maintainer adopts this design — option D, predicate modifiers, no events — in place of the
+> event-argument design chosen on 2026-10-06.** Two further decisions were taken with it:
+>
+> - **Scope: both preposition families.** The measured-value family (`prep_*_value`, `prep_*_offset`,
+>   `every_period`) carries the same defect, which its own comment in `ontology.esl` records — "a VP
+>   adjunct and a noun modifier share the relation". 13 axioms are added and none changed. See
+>   §"The measured-value family has the same defect".
+> - **Naming: `adv_*`.** It names Luo & Shi's `ADV` type, and one prefix covers PP adjuncts and
+>   manner adverbs, which §"Adverbs" shows are the same type. `prep_*` then means exactly "a relation
+>   between two entities".
+>
+> Open questions 1, 2, 3 and 9 of `event-semantics.md` lapse with the event argument. Whether the
+> eventivity feature is still wanted for Katz's stative adverb gap is not decided here; nothing in
+> this design needs it.
 
 **Recommended `2026-10-07`** as the answer to #270, in place of the event-argument design decided on
 2026-10-06. `event-semantics.md` carries a banner pointing here.
@@ -63,7 +79,7 @@ compared:
 |---|---|
 | today | `And(screen(cl,pa), prep_with(pa, lib))` — *Project Achilles* is with the library |
 | events (decided) | `∃e:Ev. And(screen(cl,pa,e), prep_with(e, lib))` |
-| predicate modifier | `And(screen(cl,pa), vprep_with(lib, screen(pa), cl))` |
+| predicate modifier | `And(screen(cl,pa), adv_with(lib, screen(pa), cl))` |
 
 **The ontology already says this is the intent.** `ontologies/ontology/ontology.esl:66–67` documents
 the preposition axioms as "`prep_*(s, y)`: **the predication s** stands in the prepositional relation
@@ -95,18 +111,18 @@ modification, and a second family handles VP adjuncts.
   unchanged:  axiom ontology:prep_in  : lexicon:Entity -> lexicon:Entity -> Prop
                                         — relates two entities; noun-internal
 
-      added:  axiom ontology:vprep_in : lexicon:Entity
+      added:  axiom ontology:adv_in : lexicon:Entity
                                      -> (lexicon:Entity -> Prop)
                                      -> lexicon:Entity -> Prop
                                         — modifies a predication; VP adjunct
 
 ⟦in⟧ VP adjunct   was:  λx.λV.λs. And(V(s), prep_in(s, x))
-                  now:  λx.λV.λs. And(V(s), vprep_in(x, V, s))
+                  now:  λx.λV.λs. And(V(s), adv_in(x, V, s))
 ⟦in⟧ noun-internal      unchanged
 ```
 
 `V : lexicon:Entity -> Prop` is the VP with its object absorbed, awaiting the subject — the type it
-already has. `vprep_in(x, V)` is Luo & Shi's `ADV`, instantiated at the PP's object; applying it to
+already has. `adv_in(x, V)` is Luo & Shi's `ADV`, instantiated at the PP's object; applying it to
 `s` says the property `V`, modified by *in x*, holds of `s`.
 
 This also states a distinction the ontology comment was reaching for and could not make with one
@@ -117,13 +133,13 @@ which relates two entities. The two families separate what the one name conflate
 **`⟦S⟧` stays `Prop`.** The adjunct consumes an `Entity -> Prop` and returns an `Entity -> Prop`, so
 the VP type is unchanged, and so is every entry that consumes a VP or a clause.
 
-**Five axioms, not eight, and none retyped.** Only the prepositions used as VP adjuncts need a
-`vprep_*`: the four attested in the pins — `vprep_in`, `vprep_from`, `vprep_with`, `vprep_to` — plus
-`vprep_for` for «for cancer therapeutics», which `event-semantics.md`'s open question 5 re-pins to the
-exploiting and which today's encoding pins to the scientists. `event-semantics.md`'s decision on framing
-prepositions (open question 8 ii) names «in» and «with» as the two the page frames, and CGEL's other
-domain-adjunct realisations as a planned augmentation; the same staging applies here — one
-`vprep_*` axiom per preposition as it is attested or planned.
+**Five axioms here, and none retyped.** Only the prepositions used as VP adjuncts need an `adv_*`:
+the four attested in the pins — `adv_in`, `adv_from`, `adv_with`, `adv_to` — plus `adv_for` for
+«for cancer therapeutics», which `event-semantics.md`'s open question 5 re-pins to the exploiting and
+which today's encoding pins to the scientists. `event-semantics.md`'s decision on framing prepositions
+(open question 8 ii) names «in» and «with» as the two the page frames, and CGEL's other
+domain-adjunct realisations as a planned augmentation; the same staging applies here — one `adv_*`
+axiom per preposition as it is attested or planned. The measured-value family adds eight more, below.
 
 ### The Π over ℕ is not needed here
 
@@ -138,12 +154,77 @@ recursion on it. **Large elimination is available**: the singleton-elim gate in
 gated. But `core:Nat` is **not declared in any bootstrap ontology** — it occurs only in test
 fixtures — so the Π route would need one declared. The CCG route needs neither.
 
+### The measured-value family has the same defect
+
+Decided `2026-10-07`: it is in scope, and the same split applies to it.
+
+`ontology.esl` declares a second preposition family over measured values — `prep_*_value`,
+`prep_*_offset`, `every_period` — whose comment records the conflation outright: "`prep_X_value(s, u,
+q)`: **the predication or entity** s stands in the prepositional relation to the measured value q",
+and "a VP adjunct and a noun modifier share the relation, as `in_prep` and `in_nmod` share
+`prep_in`". The type says `lexicon:Entity`, so the predication reading is not expressible and the
+subject lands in the slot.
+
+**Measured, not inferred.** `kernel/tests/quantity_corpus.rs` parses the corpus over the bootstrap
+chain and the content words, with no database. The terms it produces:
+
+```
+«The flask was incubated at 37 °C for 1 h.»
+  And(And(ΠG#0:Prop. ΠG#1:Entity. incubate(the(Flask), G#1) → G#0 → G#0,
+          prep_at_value(the(Flask), ‹K›, 6203/20)),
+      prep_for_value(the(Flask), ‹s›, 3600))
+
+«The medium was changed every 3 days.»       every_period(the(Medium), ‹s›, 259200)
+«The cells were harvested after 72 h.»        prep_after_value(the(Cell), ‹s›, 259200)
+«The RNA was purified 72 h after transduction.»
+                                              prep_after_offset(the(Rna), kind_of(Transduction), ‹s›, 259200)
+
+«The mice received a dose of 5 mg/kg.»       ΠG#1:ΣG#1:Dose. prep_of_value(G#1, ‹›, 1/200000). …
+```
+
+The first four put **the subject** in slot 1: the medium recurs every 3 days, the cells are after
+72 h, the RNA is 72 h after the transduction. The fifth is Σ-bound under `Dose` — noun-internal and
+correct, exactly as the entity-object family's 54 are.
+
+| role | count | state |
+|---|---|---|
+| VP adjunct | 27 | the defect |
+| noun-internal (`prep_of_value`) | 3 | **correct** |
+
+Counts from `experiments/parsing/quantities/corpus.tsv`: `prep_for_value` 7, `prep_after_value` 6,
+`prep_at_value` 5, `prep_after_offset` 4, `prep_of_value` 3, `every_period` 2, `prep_in_value` 1,
+`prep_by_value` 1, `prep_before_offset` 1. The ratio is the inverse of the entity-object family's —
+27 adjunct against 3 noun-internal, where that family is 14 against 54 — because these are methods
+sentences, where almost every measured PP modifies the procedure.
+
+**Eight `adv_*` axioms**, the measured value ahead of the predicate as the PP's object is:
+
+```
+unchanged:  prep_at_value : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u) -> Prop
+    added:  adv_at_value  : forall (u : core:unit) => units:Quantity(u)
+                         -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+    added:  adv_after_offset : lexicon:Entity -> forall (u : core:unit) => units:Quantity(u)
+                            -> (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+```
+
+`adv_at_value`, `adv_for_value`, `adv_after_value`, `adv_in_value`, `adv_by_value`,
+`adv_after_offset`, `adv_before_offset`, `adv_every_period`. `prep_of_value` gets no sibling — its
+three uses are noun-internal. `prep_with_value` gets none either: declared, but not attested as an
+adjunct in the corpus; the staging rule is the same as for the entity-object family, one `adv_*` per
+relation as it is attested or planned.
+
+**This is also where the verbaliser's gap is.** `adjunct_of` recovers the adverbial role by testing
+whether a `prep_*`'s first argument is the subject of a verb in the same conjunction
+(`verbalize.rs:1525`) — reconstructing what the term lost — and returns `None` for every `_value`
+relation, so the measured-value family gets no adverbial rendering at all. Under `adv_*` the role is
+in the type, so the test goes away and the family is rendered like any other adjunct.
+
 ## The cases
 
 ### 1. «Project Achilles screened cell lines with a CRISPR library.»
 
-`And(screen(cl, pa), vprep_with(lib, screen(pa), cl))`. The library modifies the screening. #270's
-defect is inexpressible: `vprep_with`'s first argument is the PP's object and its second is a
+`And(screen(cl, pa), adv_with(lib, screen(pa), cl))`. The library modifies the screening. #270's
+defect is inexpressible: `adv_with`'s first argument is the PP's object and its second is a
 predicate, so there is no slot a subject could occupy.
 
 ### 2. «Some cancers do not respond to immune checkpoint blockade.»
@@ -157,14 +238,14 @@ so there is nothing to scope.
 
 ### 3. Quantified PP objects — «in every model»
 
-`∀m. model(m) → And(V(s), vprep_in(m, V, s))`. The quantifier wraps the adjunct's output from
+`∀m. model(m) → And(V(s), adv_in(m, V, s))`. The quantifier wraps the adjunct's output from
 outside, which is how the GQ entries already work. `event-semantics.md`'s open question 6(ii)
 required the quantifier to scope over the event quantifier; with no event quantifier the requirement
 is vacuous.
 
 ### 4. Coordination — «promoted apoptosis and cell cycle arrest in MSI models»
 
-`And(And(promote(apo,d), vprep_in(msi, promote(apo), d)), And(promote(cca,d), vprep_in(msi,
+`And(And(promote(apo,d), adv_in(msi, promote(apo), d)), And(promote(cca,d), adv_in(msi,
 promote(cca), d)))`. Coordination is `And` at `Prop`, which the object language has. No per-event
 distribution question arises, and no type-level join is needed — the gap
 `event-frames-as-records.md` found in the record route.
@@ -178,7 +259,7 @@ untouched. This route changes participant/circumstance PPs only, exactly as the 
 ### 6. Purpose «for» — U1
 
 «Scientists can exploit synthetic lethality for cancer therapeutics» gives
-`Possible(And(exploit(sl,s), vprep_for(ct, exploit(sl), s)))`. The purpose attaches to the exploiting,
+`Possible(And(exploit(sl,s), adv_for(ct, exploit(sl), s)))`. The purpose attaches to the exploiting,
 which is the re-pin open question 5 calls for. `⟦can⟧` is VP-level and unchanged.
 
 ### 7. Copular predicates
@@ -193,7 +274,7 @@ question this note does not answer.
 ### 8. Governed PPs
 
 Unchanged. `respond to` stays `respond_to(y, x)` positional, as the 2026-10-05 ruling has it. The
-free-adjunct competitor becomes `And(respond(x), vprep_to(y, respond, x))`, which is well-formed
+free-adjunct competitor becomes `And(respond(x), adv_to(y, respond, x))`, which is well-formed
 rather than contradictory — the same change `event-semantics.md` records for slice 2's
 re-adjudication, reached without events.
 
@@ -234,8 +315,8 @@ subject. A manner entry and a PP adjunct are then the same shape, differing only
 modifier has an object absorbed:
 
 ```
-⟦favourably⟧   λV.λs. And(V(s), vadv_favourably(V, s))
-⟦to x⟧         λx.λV.λs. And(V(s), vprep_to(x, V, s))
+⟦favourably⟧   λV.λs. And(V(s), adv_favourably(V, s))
+⟦to x⟧         λx.λV.λs. And(V(s), adv_to(x, V, s))
 ```
 
 Four are adjective modifiers (`selectively essential` ×2, `highly concordant`, `preferentially
@@ -265,22 +346,23 @@ argument, so such an adverb is writable at the type without a conjunct. None occ
 | | |
 |---|---|
 | kernel | none |
-| ontology | **5 axioms added**, 0 changed: `vprep_in`, `vprep_from`, `vprep_with`, `vprep_to` for the four attested as adjuncts, plus `vprep_for` for U1's planned re-pin (open question 5). In `ontology.esl`. Bootstrap edit, so it rides a reseed. **The shape is already shipped**: `ontology:has_proportion : lexicon:Entity -> (lexicon:Entity -> Prop) -> units:Quantity(u"1") -> Prop` is the same higher-order form, and `median_over` takes a function argument, so such axioms already round-trip the D47 codec and validate |
+| ontology | **13 axioms added**, 0 changed, in `ontology.esl`. Entity-object (5): `adv_in`, `adv_from`, `adv_with`, `adv_to` for the four attested as adjuncts, plus `adv_for` for U1's planned re-pin (open question 5). Measured-value (8): `adv_at_value`, `adv_for_value`, `adv_after_value`, `adv_in_value`, `adv_by_value`, `adv_after_offset`, `adv_before_offset`, `adv_every_period`. Bootstrap edit, so it rides a reseed. **The shape is already shipped**: `ontology:has_proportion : lexicon:Entity -> (lexicon:Entity -> Prop) -> units:Quantity(u"1") -> Prop` is the same higher-order form, and `median_over` takes a function argument, so such axioms already round-trip the D47 codec and validate |
 | migration of encoded terms | **none** — `prep_*` keeps its type, so every committed term that mentions one stays well-typed |
 | grammar | the VP-adjunct entry; `is_vp_adjunct_prep`'s category is unchanged |
-| verbaliser | `adjunct_of` |
 | closed-class entries | **none** — `⟦S⟧` stays `Prop` |
 | event class | none |
 | pins | **14**, the VP-adjunct `prep_*` occurrences. #270 lists 8 for option A; the pin count is 14 because `prep_from` (4) and a `prep_to` are adjuncts too |
 | ledger | the rows for those 14 |
-| noun-internal uses | **54 untouched** |
+| quantity corpus | **27 rows' relation names** in `experiments/parsing/quantities/corpus.tsv`, plus the `prep_*_value` assertions in `kernel/tests/quantities_in_the_parser.rs`. `kernel/tests/quantity_corpus.rs` parses without a database, so these are checkable before the reseed |
+| verbaliser | `adjunct_of`, and its `_value` exclusion goes away — the role is in the type, so the subject test is no longer needed |
+| noun-internal uses | **57 untouched** — 54 entity-object plus `prep_of_value`'s 3 |
 
 Against `event-semantics.md`'s costed path: one `denote_cat` branch, the verb converter, **316 of
 465 closed-class entry types**, the coordination rules, 51 of 62 pins, 213 of 228 ledger rows.
 
 The additive shape removes a risk the first draft of this note carried. Retyping `prep_*` in place
 would have been a versioned-ADT change needing a migration for every already-encoded term that
-mentions a preposition; adding `vprep_*` needs none, because nothing committed changes meaning. That
+mentions a preposition; adding `adv_*` needs none, because nothing committed changes meaning. That
 risk was an artifact of overloading one relation for two jobs, not a cost of the design.
 
 ## How this relates to #270's option A
@@ -325,8 +407,10 @@ event to quantify over.
   «Somatic MMR inactivation», «The co-occurrence of these two events» — and the corpus already
   handles it as nominals with `prep_of`, with no event and no `E`. Perception verbs and cross-clause
   time ordering do not occur on the gate page.
-- **Naming.** `vprep_*` is a placeholder. The two families need names that say which relates entities
-  and which modifies a predication; this note does not settle them.
+- **Naming — settled `2026-10-07`: `adv_*`.** It names Luo & Shi's `ADV` type, and one prefix covers
+  PP adjuncts and manner adverbs, which §"Adverbs" shows are the same type. `prep_*` keeps its
+  meaning: a relation between two entities. `adv_every_period` keeps the recognisable stem of a
+  relation that never had the `prep_` prefix.
 - **Whether `V` is the right predicate to modify.** The paper modifies `BUTTER(x)` — subject
   absorbed, object outstanding. Eigenius's `V : Entity -> Prop` is object-absorbed, subject
   outstanding. The two coincide for a transitive verb with both arguments, but the correspondence was
