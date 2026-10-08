@@ -197,6 +197,69 @@ free-adjunct competitor becomes `And(respond(x), vprep_to(y, respond, x))`, whic
 rather than contradictory — the same change `event-semantics.md` records for slice 2's
 re-adjudication, reached without events.
 
+## Adverbs
+
+The adverb categories **already denote `ADV`**: no category, type or pin changes under this
+encoding. `event-semantics.md` §"Adverbs" worked the same ground under events.
+
+**The category is already the right type.** `adverb_modifier_cats` (`kernel/src/dcg/category.rs`)
+builds two categories, a forward pre-modifier and a backward VP modifier, both over
+`VP = cat_s(dcl, fin) \ cat_np(Entity, num)`. `denote_cat` gives `⟦A\ₘB⟧ = ⟦B⟧→⟦A⟧`, `⟦cat_s(dcl,_)⟧ = Prop`
+and `⟦cat_np(T,_)⟧ = T`, so
+
+```
+⟦VP⟧      = lexicon:Entity -> Prop
+⟦VP \ VP⟧ = (lexicon:Entity -> Prop) -> lexicon:Entity -> Prop
+```
+
+which is Luo & Shi's `ADV` exactly. The seeded sem is `λx. x` — `ADV`'s identity at that type. Routing
+an adverb to a contentful entry is a change of sem at an **unchanged category and an unchanged
+type**. Under events the same category's denotation moves with `⟦S⟧`, which is what makes 316 of 465
+closed-class entry types part of that design's cost.
+
+**No pin changes.** The 63 pinned sentences carry 11 adverb occurrences — nine productive `-ly` forms
+(`selectively` ×2, `commonly` ×2, `typically`, `simply`, `preferentially`, `highly`, `favourably`) and
+two lexicalized discourse adverbs (`also`, `thus`). Every one is erased in its pinned skeleton; no
+adverb contributes a conjunct today. So nothing pinned distinguishes the two designs on adverbs, and
+nothing pinned changes under this one.
+
+**D62's routing stands**, as it does under events: inert adverbs are the identity, and measurement
+adverbs go to justification logic (`d62-adverb-semantics-decision.md` §4). What this encoding adds is
+that D62's identity *is already* `ADV`'s identity, so Phase 3's transparent treatment is the `n = 0`
+case of the same scheme rather than a placeholder outside it.
+
+**Where a contentful entry would go, by adverb kind.** Of the 11, one is manner on a verb — «compared
+favourably», which is also one of the 14 VP-adjunct defects, since its «to» PP is pinned on the
+subject. A manner entry and a PP adjunct are then the same shape, differing only in whether the
+modifier has an object absorbed:
+
+```
+⟦favourably⟧   λV.λs. And(V(s), vadv_favourably(V, s))
+⟦to x⟧         λx.λV.λs. And(V(s), vprep_to(x, V, s))
+```
+
+Four are adjective modifiers (`selectively essential` ×2, `highly concordant`, `preferentially
+essential`); the forward category binds the clause's `Fin`, so it denotes the same `ADV` whether it
+lands on a VP or a predicative adjective, and a contentful entry would have the same shape there.
+
+One is a focus particle — «not simply a result of MMR deficiency», where the skeleton negates the
+whole `is_a` and erases `simply`; focus particles are not modifiers of the VP's predicate and this
+encoding says nothing about them. Two are the discourse adverbs `also` and `thus`, which attach at
+`S/S` and `S\S` (`sentence_modifier_cats`) and stay transparent.
+
+Three are **frequency** adverbs («More commonly», «most commonly observed», «typically arises»),
+which quantify over occasions rather than conjoin a condition. `ADV` admits a non-conjunctive entry,
+which is the standard advantage of `(e→t)→(e→t)` over a Davidsonian conjunct. Under events they would
+need Champollion's outside-`V` quantifier instead, because the event `∃` is already closed inside the
+verb's entry (open question 1); `event-semantics.md` names that pattern for `for`-adverbials but does
+not work frequency adverbs. **Neither design works them here and no pin depends on it.**
+
+The same holds for the intentional and modal adverbs (`deliberately`) that `event-semantics.md`
+§"Adverbs" reports are not event predicates in any source it read — Davidson treats intention as
+intensional, de Groote & Winter call modal adverbs "orthogonal to the main tenets of event
+semantics", and the ERG gives scopal adverbs a handle argument. `ADV` takes the predicate as an
+argument, so such an adverb is writable at the type without a conjunct. None occurs in the corpus.
+
 ## Cost
 
 | | |
@@ -247,7 +310,8 @@ event to quantify over.
   library»), locatives («in models of microsatellite-stable cancers», «in nucleotide repeat
   regions»), sources («from Lynch syndrome», «from deficient DNA mismatch repair»). A
   non-intersective adjunct would need an entry without the conjunct, and the type admits it.
-- **Adverbs.** `event-semantics.md` §"Adverbs" is not worked here.
+- **Adverbs — worked `2026-10-07`**, see §"Adverbs". No pin changes and no category or type changes;
+  what stays unworked there is frequency adverbs, which neither design works.
 - **§3 of the paper — read `2026-10-07`.** It is weaker than §2 and does not change the
   recommendation. §3.1 replaces event ordering with a **time argument** on every verb
   (`∃t,t'. sing(j,M,t) & salute(j,flag,t') & t < t'`), which for Eigenius is the same per-verb slot

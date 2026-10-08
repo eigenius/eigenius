@@ -19,8 +19,11 @@
 > Coq. The stated ground for B over A is therefore answered.
 >
 > **What the alternative costs**, against this note's own figures: no kernel change, no event class,
-> `⟦S⟧` stays `Prop`, and **none** of the 316 of 465 closed-class entry types move. It changes the
-> preposition axioms' type, the adjunct entry, `adjunct_of`, the 8 adjunct pins and their ledger rows.
+> `⟦S⟧` stays `Prop`, and **none** of the 316 of 465 closed-class entry types move. It adds **five
+> preposition axioms and changes none**: `ontology:prep_*` serves 54 correct noun-internal uses
+> («deficiencies in homologous recombination») against 14 broken VP-adjunct ones, so a second family
+> `vprep_*` takes the adjunct role and no committed term needs migrating. It changes the adjunct
+> entry, `adjunct_of`, those 14 pins and their ledger rows.
 >
 > **Which decisions of 2026-10-06 survive.** The frames decision stands unchanged —
 > `frame_in : Prop → Entity → Prop`, its realisations, its embedded-clause rule and the drop test of
