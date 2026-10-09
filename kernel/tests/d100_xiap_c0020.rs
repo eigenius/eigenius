@@ -146,3 +146,26 @@ fn the_claim_as_written_does_not_type() {
         .collect();
     assert!(rest.is_empty(), "unexpected validation errors: {rest:#?}");
 }
+
+/// **The certificate's `reading` field, stated as a declaration, validates.**
+///
+/// Two assertions with different warrants: the TRANSLATION (biology — `variant:TranslatesTo`,
+/// declared because no transcript sequence is held, which is what the ontology says to do), and the
+/// RESOLUTION (editorial — in this claim «p.Ile380Val» denotes that one nucleotide allele). The
+/// second does not follow from the first: `TranslatesTo` is not injective, so the designation
+/// under-determines the allele. That is precisely why the certifier had to assert it, and why it
+/// belongs in a `justification:Declaration` with an accountable agent rather than in a prose field.
+#[test]
+fn the_declared_bridge_validates() {
+    let bridge = compile_layer(
+        "xiap-bridge",
+        include_str!("../../experiments/xiap-c0020/bridge.esl"),
+        chain(),
+    );
+    let errors = xiap_errors(&bridge);
+    assert!(
+        errors.is_empty(),
+        "the bridge validates — both declarations carry a proposition, an attribution and a \
+         trace: {errors:#?}"
+    );
+}
