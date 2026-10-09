@@ -10,7 +10,8 @@ any detour.
 ## Stack (top → bottom)
 
 > **entry 5 (`2026-10-08`). UAB round 1, survey step 3 — land one certified XIAP claim end to end.
-> ACTIVE, on `fix-singular-noun-np`.**
+> ACTIVE; nothing is on a branch yet. The lexicon bug that blocked it is merged as #275
+> (`8d336d1`, `2026-10-09`).**
 >
 > `experiments/uab/eigenius-survey-2026-09-30.md` §4 step 3: take C-0020 from the certification log
 > — «p.Ile380Val is carried by 4 hemizygous males.», an `observed` claim with a gnomAD GraphQL
@@ -26,7 +27,7 @@ any detour.
 > is experiment 01's synthetic refusal appearing in real certified material. Landing it faithfully
 > should REQUIRE the nucleotide allele the document's sentence never names.
 >
-> **Blocked on a lexicon bug, now fixed here (`2370b35`).** The claim did not parse, and neither did
+> **Was blocked on a lexicon bug, merged as #275 (`2370b35`).** The claim did not parse, and neither did
 > «the patient» or «the dependent»: `lookup_span`'s governed-relational prune was keyed on the
 > SURFACE, so one relational-adjective entry dropped every nominal, and any word that is both a
 > common noun and a relational adjective lost its noun reading. Keyed per entry on
