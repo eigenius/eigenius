@@ -169,3 +169,75 @@ fn the_declared_bridge_validates() {
          trace: {errors:#?}"
     );
 }
+
+/// **Rung 2 — limb A commits while the conjunction has no ground.**
+///
+/// C-0011 asserts two things at once. `justification:Grounds` has no conjunction introduction, so
+/// the combination must be DECLARED and eliminated with `app` — "there is no deduction theorem, so
+/// a bridge between vocabularies cannot be derived; it must be Declared." The bridge is declared
+/// and witnessed here, and limb A is grounded. Limb B is not: its premises were rejected and
+/// blocked, so nothing declares it and no witness exists.
+#[test]
+fn rung2_limb_a_commits() {
+    let limbs = compile_layer(
+        "xiap-c0011",
+        include_str!("../../experiments/xiap-c0020/c0011-limbs.esl"),
+        chain(),
+    );
+    let errors = xiap_errors(&limbs);
+    assert!(
+        errors.is_empty(),
+        "limb A, the declared conjunction bridge, and their traces all validate: {errors:#?}"
+    );
+}
+
+/// **Rung 2's result — the inference is sound, a premise failed, and the kernel says which.**
+///
+/// The conjunction bridge is declared, witnessed and correctly applied; limb A's ground exists.
+/// What is missing is `Grounds(LikelyTolerated)`, because C-0100 was rejected and C-0024 blocked, so
+/// limb B is declared nowhere and no witness is synthesized. The refusal names the absent leaf
+/// rather than reporting a bad rule or an ill-typed claim.
+///
+/// This is the verdict the collaborator had nowhere to put. His procedure recorded it in a
+/// `premise_failure` FIELD; here it is the shape of the justification term.
+#[test]
+fn rung2_the_conjunction_has_no_ground() {
+    let limbs = compile_layer(
+        "xiap-c0011",
+        include_str!("../../experiments/xiap-c0020/c0011-limbs.esl"),
+        chain(),
+    );
+    let refused = compile_layer(
+        "xiap-c0011-refused",
+        include_str!("../../experiments/xiap-c0020/c0011-refused.esl"),
+        limbs,
+    );
+    let errors = xiap_errors(&refused);
+    let on_claim: Vec<&String> = errors
+        .iter()
+        .filter(|(n, _)| n == "concl_both_limbs")
+        .map(|(_, m)| m)
+        .collect();
+    assert!(
+        !on_claim.is_empty(),
+        "the conjunction must be refused; errors were: {errors:#?}"
+    );
+    let joined = on_claim
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        joined.contains("urn:eigenius:uab:xiap:tolerated_holds"),
+        "refused for the MISSING LEAF — limb B's ground — not for the rule or the type; got:\n{joined}"
+    );
+    // Limb A still commits in the same layer: "two limbs, and they fail differently".
+    let on_limb_a: Vec<_> = errors
+        .iter()
+        .filter(|(n, _)| n == "concl_bounded")
+        .collect();
+    assert!(
+        on_limb_a.is_empty(),
+        "limb A must still commit while the conjunction fails: {on_limb_a:#?}"
+    );
+}
