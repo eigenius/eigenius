@@ -9,6 +9,45 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **entry 5 (`2026-10-08`). UAB round 1, survey step 3 — land one certified XIAP claim end to end.
+> ACTIVE, on `fix-singular-noun-np`.**
+>
+> `experiments/uab/eigenius-survey-2026-09-30.md` §4 step 3: take C-0020 from the certification log
+> — «p.Ile380Val is carried by 4 hemizygous males.», an `observed` claim with a gnomAD GraphQL
+> query, five sha256-archived files, an independent VCF reconciliation and a `reading` field —
+> express it in CNL, parse it, land it as an `ObservedResource` with `source`/`observed_at`, and
+> attach the evidence. Its two dependencies landed: experiment 01 as #267 (`a8d3e45`) and 02 as #269
+> (`a2a1076`), so `ontologies/variant/variant.esl` supplies `NucleotideAllele`/`ProteinAllele` and a
+> `TranslatesTo` documented as non-injective.
+>
+> **Why the claim is the interesting one.** Its subject is a PROTEIN allele and its predicate is a
+> count gnomAD computes over GENOTYPES at a nucleotide allele, `X-123900531-A-G`. The certificate's
+> `reading` field resolves that by hand — "Subject p.Ile380Val = X-123900531-A-G (c.1138A>G)" — which
+> is experiment 01's synthetic refusal appearing in real certified material. Landing it faithfully
+> should REQUIRE the nucleotide allele the document's sentence never names.
+>
+> **Blocked on a lexicon bug, now fixed here (`2370b35`).** The claim did not parse, and neither did
+> «the patient» or «the dependent»: `lookup_span`'s governed-relational prune was keyed on the
+> SURFACE, so one relational-adjective entry dropped every nominal, and any word that is both a
+> common noun and a relational adjective lost its noun reading. Keyed per entry on
+> `wn:<lemma>.n.<offset>` — WordNet's own part-of-speech claim — the three parse and the reference
+> page is bit-identical (799 readings, 290 skeletons, 62/62 hits, `invalid-selected 0`). The
+> `concordant` artifact it exists to kill (`is_a(classification, Concordance)`) stays dead, because
+> that surface has no WordNet noun sense at all.
+>
+> **Next, and not started:** the CNL form and its selected reading; a transparent definition over the
+> parse (experiment 01's `survey-typed.esl` is the shape — so a certificate matches by CONVERSION,
+> not assertion); the `ObservedResource` with `source`/`observed_at`; the five evidence files; and
+> then the measured answer to the survey's own question, which is what Eigenius CANNOT express of
+> C-0020 — `reconciliation`, the `reading`, and "hemizygous males = exome.ac_hemi + genome.ac_hemi"
+> as a derived count.
+>
+> **Gotcha for anyone measuring here:** `measure-parse-rate.sh` DECLARES its own config and strips
+> the ambient `EIGENIUS_WRN_PAGE` and `EIGENIUS_DUMP_CELL` — use `--page`, and for a cell dump run
+> the underlying `cargo test --release -p eigenius-wordnet --test db_backed_encoding` directly. And
+> `Parser::unknown_words` reports only STORED forms, so it calls every regular plural missing; the
+> harness's own `missing-lexeme` count is the one to believe.
+
 > **entry 4 (`2026-10-07`). #270 — adjunct attachment for verbs and their modifiers. DONE, merged
 > as #274 (`402faf2`, `2026-10-09`); #270 closed. What it left is below, and none of it is active.**
 >
