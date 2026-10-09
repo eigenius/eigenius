@@ -1,0 +1,87 @@
+// XIAP codon 380 — the vocabulary C-0020 needs, at the two resolutions the claim confuses.
+//
+// D100 rung 1. The claim, verbatim from the certification log (UAB round 1, experiment 03; the
+// material is not in this repository):
+//
+//     «p.Ile380Val is carried by 4 hemizygous males.»
+//
+// Its SUBJECT is a protein allele. Its PREDICATE is a count gnomAD computes over GENOTYPES at a
+// nucleotide allele, X-123900531-A-G, and the certificate's own `reading` field resolves the one to
+// the other by hand: "Subject p.Ile380Val = X-123900531-A-G (c.1138A>G)". So the sentence as written
+// applies a nucleotide-resolution predicate through a protein-resolution designation, which is
+// experiment 01's residue-versus-variant refusal appearing in real certified material.
+//
+// Unlike experiment 01, this reuses `ontologies/variant/variant.esl` rather than minting its own
+// classes: `NucleotideAllele`, `ProteinAllele`, and a `TranslatesTo` the ontology already documents
+// as non-injective. That is the dependency D100 names, landed as #269.
+
+namespace core    = "urn:eigenius:core";
+namespace lexicon = "urn:eigenius:lexicon";
+namespace units   = "urn:eigenius:units";
+namespace variant = "urn:eigenius:variant";
+namespace xiap    = "urn:eigenius:uab:xiap";
+
+// ── The gene and its two references ───────────────────────────────────────────────────────────
+
+class xiap:Gene : lexicon:Entity {
+    description = "A gene, local to this experiment. `variant:gene` is deliberately not class-constrained — the gene class lives in an importer layer — so one is declared here rather than depending on an importer this experiment does not load.";
+}
+
+resource xiap:XIAP : xiap:Gene {
+    core:short_name  = "XIAP";
+    core:description = "X-linked inhibitor of apoptosis, HGNC:592, Xq25. Outside the pseudoautosomal regions, which is what lets a hemizygous genotype be read as an XY sample.";
+}
+
+resource xiap:NM_001167 : variant:Transcript {
+    variant:accession = "NM_001167.4";
+    variant:gene      = xiap:XIAP;
+    core:description  = "The XIAP transcript c. coordinates count on.";
+}
+
+resource xiap:XIAP_protein : variant:ProteinProduct {
+    variant:accession = "HGNC:592:p";
+    variant:gene      = xiap:XIAP;
+    core:description  = "XIAP's protein product, isoform unspecified. p. coordinates count on it; the accession is minted from the gene's HGNC id per variant:ProteinProduct.";
+}
+
+// ── The two alleles the claim conflates ───────────────────────────────────────────────────────
+
+resource xiap:c_1138A_G : variant:NucleotideAllele {
+    variant:reference = "NM_001167.4";
+    variant:start     = 1138;
+    variant:end       = 1138;
+    variant:ref_state = "A";
+    variant:alt       = "G";
+    variant:hgvs      = "c.1138A>G";
+    core:description  = "The nucleotide allele gnomAD counts: X-123900531-A-G on GRCh38. What a person carries, and what the hemizygous count is a count of.";
+}
+
+resource xiap:p_Ile380Val : variant:ProteinAllele {
+    variant:reference = "HGNC:592:p";
+    variant:start     = 380;
+    variant:end       = 380;
+    variant:ref_state = "Ile";
+    variant:alt       = "Val";
+    variant:hgvs      = "p.Ile380Val";
+    core:description  = "The protein allele the document's sentence names. Several nucleotide alleles can translate to it, which is why a count over genotypes cannot be stated of it.";
+}
+
+// ── The predicate, at the resolution the evidence supports ────────────────────────────────────
+
+// «n hemizygous males carry the nucleotide allele a». Indexed by `NucleotideAllele` because that is
+// what gnomAD counts genotypes at: the observed value is AC_XY, exome 2 + genome 2.
+//
+// Stating this of `xiap:p_Ile380Val` does not type — a `ProteinAllele` does not inhabit
+// `NucleotideAllele` — and that refusal is rung 1's result. `variant:TranslatesTo` relates the two
+// but is not injective, so it supplies no route by which the count transfers.
+// The number of hemizygous male genotypes carrying this nucleotide allele, as a dimensionless
+// count: gnomAD's AC_XY minus twice nhomalt_XY. Outside the PARs a hemizygous genotype is an XY
+// sample, which the gnomAD FAQ states and the certificate cites as its warrant for the word
+// «males».
+//
+// An `axiom` rather than a `data` declaration, and not as a concession: `data` buys constructors
+// and elimination, which a relation whose truth comes from committed evidence and a
+// `justification:Grounds` term does not need. `ontology:has_count` is declared the same way for
+// the same reason. (`data`'s index telescope would reject the applied `units:Quantity(u"1")`
+// index in any case — eigenius#279.)
+axiom xiap:HemizygousMaleCount : variant:NucleotideAllele -> units:Quantity(u"1") -> Prop
