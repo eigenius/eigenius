@@ -241,3 +241,29 @@ fn rung2_the_conjunction_has_no_ground() {
         "limb A must still commit while the conjunction fails: {on_limb_a:#?}"
     );
 }
+
+/// **Rung 3's result — the compression obligation is not entailment.**
+///
+/// C-0078 was rejected for dropping one qualifier, with every number under it certified. Encoded
+/// here, the heading is grounded from the certified body by conjunction elimination and COMMITS:
+/// the weaker statement follows from the stronger, which is the soundest inference there is.
+///
+/// So a compression check built on entailment would certify the very claim the procedure caught.
+/// The gap is not a missing `Compresses` relation — it is that what the rule polices is what a
+/// heading LICENSES when read alone ("do not present it to a reviewer as settled expert
+/// consensus"), which is a constraint on a reader's inference, not on what the sentence asserts.
+/// `Grounds(P)` is indifferent to it, because the heading's P is grounded perfectly well.
+#[test]
+fn rung3_the_heading_commits_though_the_procedure_rejected_it() {
+    let compression = compile_layer(
+        "xiap-c0078",
+        include_str!("../../experiments/xiap-c0020/c0078-compression.esl"),
+        chain(),
+    );
+    let errors = xiap_errors(&compression);
+    assert!(
+        errors.is_empty(),
+        "the heading grounds from the certified body and commits — which is the finding, not a \
+         success: {errors:#?}"
+    );
+}
