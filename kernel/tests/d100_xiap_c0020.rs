@@ -67,22 +67,6 @@ fn chain() -> Arc<Layer> {
     )
 }
 
-/// The vocabulary compiles and validates: two alleles at two resolutions, and a count predicate
-/// indexed by the one the evidence is about.
-#[test]
-fn the_xiap_vocabulary_validates() {
-    let layer = chain();
-    let errors: Vec<String> = Validator::new(Arc::clone(&layer))
-        .validate()
-        .into_iter()
-        .map(|e| format!("{e:?}"))
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "the xiap layer validates against variant + bootstrap: {errors:#?}"
-    );
-}
-
 /// Every validation error the chain at `head` reports about a resource under `urn:eigenius:uab:`,
 /// as `(local name, message)`.
 fn xiap_errors(layer: &Arc<Layer>) -> Vec<(String, String)> {
@@ -101,6 +85,72 @@ fn xiap_errors(layer: &Arc<Layer>) -> Vec<(String, String)> {
                 .then(|| (i.rsplit(':').next().unwrap_or("").to_string(), d))
         })
         .collect()
+}
+
+/// **Rung 1's claim — `App(Declared(f), Observed(input))`.**
+///
+/// The vocabulary is two alleles at two resolutions plus count predicates indexed by the one the
+/// evidence is about: `HemizygousMaleCount` for the certificate's value, and
+/// `Exome`/`GenomeHemizygousCount` for the two numbers the export actually holds.
+///
+/// The certificate files C-0020 under `kind: observed`, but the value is not in the export: the
+/// archived response holds `exome.ac_hemi = 2` and `genome.ac_hemi = 2`, and `cert-gnomad.py` sums
+/// them. Every one of the log's 239 `observed` claims is reproduced by a script, so `observed`
+/// there means "its evidence is a database export", not "it was read off".
+///
+/// Encoded faithfully, the claim is the script's rule — declared, with the script as its warrant —
+/// applied to the observation. `observed` and `derived` are not two boxes a claim falls into; the
+/// derived claim IS the declared rule applied to the observed one. That is the composition the
+/// collaborator says his kinds lack ("claim kinds chosen ad hoc and do not compose").
+#[test]
+fn rung1_the_count_is_the_scripts_rule_applied_to_the_export() {
+    let layer = chain();
+    let errors: Vec<String> = Validator::new(Arc::clone(&layer))
+        .validate()
+        .into_iter()
+        .map(|e| format!("{e:?}"))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "the vocabulary, the export, the script's declared rule, their traces and the application \
+         all validate against variant + bootstrap: {errors:#?}"
+    );
+}
+
+/// **Rung 1's refusal — the sum cannot be read off the export.**
+///
+/// The same claim cited directly against the export, which is `kind: observed` taken at face value.
+/// The witness the kernel synthesizes from `xiap:gene_sweep_trace` carries the proposition the
+/// export states — the two per-callset counts — and refuses to supply any other. So the arithmetic
+/// cannot hide inside the observation: it has to be declared, and declaring it names an agent.
+#[test]
+fn rung1_the_sum_cannot_be_read_off_the_export() {
+    let shortcut = compile_layer(
+        "xiap-c0020-shortcut",
+        include_str!("../../experiments/xiap-c0020/c0020-shortcut.esl"),
+        chain(),
+    );
+    let errors = xiap_errors(&shortcut);
+    let on_claim: Vec<&String> = errors
+        .iter()
+        .filter(|(n, _)| n == "concl_c0020_shortcut")
+        .map(|(_, m)| m)
+        .collect();
+    assert!(
+        !on_claim.is_empty(),
+        "the shortcut must be refused; errors were: {errors:#?}"
+    );
+    let joined = on_claim
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        joined.contains("no admitted IsObservedAs witness")
+            && joined.contains("urn:eigenius:uab:xiap:gene_sweep_response"),
+        "refused because the EXPORT does not state the sum, not for a type or a missing resource; \
+         got:\n{joined}"
+    );
 }
 
 /// **The sentence as the document writes it does not type.**

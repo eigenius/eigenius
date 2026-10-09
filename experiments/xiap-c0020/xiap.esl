@@ -85,3 +85,11 @@ resource xiap:p_Ile380Val : variant:ProteinAllele {
 // the same reason. (`data`'s index telescope would reject the applied `units:Quantity(u"1")`
 // index in any case — eigenius#279.)
 axiom xiap:HemizygousMaleCount : variant:NucleotideAllele -> units:Quantity(u"1") -> Prop
+
+// The two per-callset counts the export actually carries. gnomAD reports exomes and genomes
+// separately; `ac_hemi` is a field of each. The claim's «4» is in NEITHER — it is their sum, computed
+// by `cert-gnomad.py`, which is why C-0020 is `App(Declared(f), Observed(input))` and not a reading
+// off the export. Every one of the log's 239 `observed` claims is reproduced by a script, so
+// `observed` there means "its evidence is a database export", not "it was read off".
+axiom xiap:ExomeHemizygousCount  : variant:NucleotideAllele -> units:Quantity(u"1") -> Prop
+axiom xiap:GenomeHemizygousCount : variant:NucleotideAllele -> units:Quantity(u"1") -> Prop
