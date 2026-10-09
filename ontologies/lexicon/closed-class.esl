@@ -940,53 +940,57 @@ resource lexicon:their_obj : lexicon:LexicalEntry {
 }
 
 // ── PP adjuncts: prepositions as VP modifiers (D63 §8.13 Slice 6-mod) ──
-// "HeLa affects BRCA1 in MSI" — a PP modifies the VP, adding an OPAQUE prepositional
+// "HeLa affects BRCA1 in MSI" — a PP modifies the VP, adding an OPAQUE adverbial
 // conjunct. Category `((S[dcl,fin]\NP) \ (S[dcl,fin]\NP)) / NP`: consume the standard NP,
-// then the VP on the left, yielding a VP with the locative conjoined:
-//   `λx. λV. λs. logic:And(V(s), ontology:prep_in(s, x))`  (no event variable; the
+// then the VP on the left, yielding a VP with the modifier conjoined:
+//   `λx. λV. λs. logic:And(V(s), ontology:adv_in(x, V, s))`  (no event variable; the
 // relation is opaque, mapped to the domain predicate's context slot by the institution).
+// The modifier takes `V` and applies to `V`, not to `s` — Luo & Shi's `ADV` (eigenius#270,
+// 2026-10-07): `adv_in` modifies the PREDICATION, where `prep_in` relates two ENTITIES and
+// stays the noun-modifier relation (`nmod_in_sem` below). The category and the `sem_type`
+// are unchanged; only which relation the body names, and in which argument order.
 // One entry per preposition; the `by`-passive agent (§8.9) is the special built case.
 // (PP-as-noun-modifier — "biomarker of X" — and the N-N kind compound are the close
 // follow-ons; this build does the VP-adjunct + the named-entity compound.)
 resource lexicon:prep_in_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_in(s, x))
+            logic:And(V(s), ontology:adv_in(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
 resource lexicon:prep_for_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_for(s, x))
+            logic:And(V(s), ontology:adv_for(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
 resource lexicon:prep_with_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_with(s, x))
+            logic:And(V(s), ontology:adv_with(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
 resource lexicon:prep_to_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_to(s, x))
+            logic:And(V(s), ontology:adv_to(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
 resource lexicon:prep_on_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_on(s, x))
+            logic:And(V(s), ontology:adv_on(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
 resource lexicon:prep_from_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_from(s, x))
+            logic:And(V(s), ontology:adv_from(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -996,14 +1000,14 @@ resource lexicon:prep_from_sem : lexicon:SemTerm {
 resource lexicon:prep_between_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_between(s, x))
+            logic:And(V(s), ontology:adv_between(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
 resource lexicon:prep_within_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_within(s, x))
+            logic:And(V(s), ontology:adv_within(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3024,7 +3028,7 @@ resource lexicon:beyond_nmod : lexicon:LexicalEntry {
 resource lexicon:prep_without_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_without(s, x))
+            logic:And(V(s), ontology:adv_without(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3079,7 +3083,7 @@ resource lexicon:without_prep_pass : lexicon:LexicalEntry {
 resource lexicon:prep_among_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_among(s, x))
+            logic:And(V(s), ontology:adv_among(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3134,7 +3138,7 @@ resource lexicon:among_prep_pass : lexicon:LexicalEntry {
 resource lexicon:prep_beyond_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_beyond(s, x))
+            logic:And(V(s), ontology:adv_beyond(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3254,7 +3258,7 @@ resource lexicon:not_adj_prednom : lexicon:LexicalEntry {
 resource lexicon:prep_after_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_after(s, x))
+            logic:And(V(s), ontology:adv_after(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3331,7 +3335,7 @@ resource lexicon:after_nmod : lexicon:LexicalEntry {
 resource lexicon:prep_at_value_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_at_value(s, u, q))
+            logic:And(V(s), ontology:adv_at_value(u, q, V, s))
           : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3345,21 +3349,21 @@ resource lexicon:nmod_at_value_sem : lexicon:SemTerm {
 resource lexicon:prep_for_value_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_for_value(s, u, q))
+            logic:And(V(s), ontology:adv_for_value(u, q, V, s))
           : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
 resource lexicon:prep_in_value_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_in_value(s, u, q))
+            logic:And(V(s), ontology:adv_in_value(u, q, V, s))
           : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
 resource lexicon:prep_with_value_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_with_value(s, u, q))
+            logic:And(V(s), ontology:adv_with_value(u, q, V, s))
           : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3373,7 +3377,7 @@ resource lexicon:nmod_with_value_sem : lexicon:SemTerm {
 resource lexicon:prep_after_value_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_after_value(s, u, q))
+            logic:And(V(s), ontology:adv_after_value(u, q, V, s))
           : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3661,7 +3665,7 @@ resource lexicon:at_value_nmod : lexicon:LexicalEntry {
 resource lexicon:prep_before_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (x : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_before(s, x))
+            logic:And(V(s), ontology:adv_before(x, V, s))
           : lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3674,7 +3678,7 @@ resource lexicon:nmod_before_sem : lexicon:SemTerm {
 resource lexicon:prep_after_offset_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (y : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_after_offset(s, y, u, q))
+            logic:And(V(s), ontology:adv_after_offset(y, u, q, V, s))
           : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3688,7 +3692,7 @@ resource lexicon:nmod_after_offset_sem : lexicon:SemTerm {
 resource lexicon:prep_before_offset_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (y : lexicon:Entity) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_before_offset(s, y, u, q))
+            logic:And(V(s), ontology:adv_before_offset(y, u, q, V, s))
           : forall (u : core:unit) => units:Quantity(u) -> lexicon:Entity -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -3702,7 +3706,7 @@ resource lexicon:nmod_before_offset_sem : lexicon:SemTerm {
 resource lexicon:prep_by_value_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:prep_by_value(s, u, q))
+            logic:And(V(s), ontology:adv_by_value(u, q, V, s))
           : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }
@@ -4090,7 +4094,7 @@ resource lexicon:by_value_prep_pass : lexicon:LexicalEntry {
 resource lexicon:every_period_sem : lexicon:SemTerm {
     lexicon:term = type_expr(
         ( fun (u : core:unit) => fun (q : units:Quantity(u)) => fun (V : lexicon:Entity -> Prop) => fun (s : lexicon:Entity) =>
-            logic:And(V(s), ontology:every_period(s, u, q))
+            logic:And(V(s), ontology:adv_every_period(u, q, V, s))
           : forall (u : core:unit) => units:Quantity(u) -> (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
     );
 }

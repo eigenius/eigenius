@@ -14,6 +14,18 @@
 
 //! **The bootstrap manifest is PINNED.**
 //!
+//! `2026-10-07` — **eigenius#270, the `adv_*` adverbial family.** Two layers moved, `ontology` and
+//! `closed-class`, and nothing else. `ontology` gained 22 axioms and changed none: `adv_in` …
+//! `adv_before` (13, one per entity-object preposition that has a VP-adjunct entry) and
+//! `adv_at_value` … `adv_every_period` (9, one per measured-value one). `closed-class` kept every
+//! category and every `sem_type` — the 22 VP-adjunct sem terms were already typed
+//! `Entity -> (Entity -> Prop) -> (Entity -> Prop)`, which is Luo & Shi's `ADV` with the object —
+//! and changed only which relation each body names and in which order: `And(V(s), prep_in(s, x))`
+//! became `And(V(s), adv_in(x, V, s))`, so the modifier applies to the PREDICATE and not to the
+//! subject. `prep_*` keeps its type and its meaning, a relation between two entities, for the
+//! noun-internal role (`nmod_*_sem`), so NO committed term needs migrating — which is why this is
+//! 22 additions and 0 retypings. The reseed is for the new axioms to reach the lexicon store.
+//!
 //! Editing any embedded ontology changes [`eigenius_kernel::bootstrap::current_manifest`], and every
 //! already-persisted store then refuses to resume with `BootstrapError::ManifestDrift`. This test
 //! makes that consequence surface HERE — in `cargo test`, with no database and no snapshot — instead
@@ -252,8 +264,8 @@ ingest:5ed296a01d68e83ba1aa2ea2a27628b5ccead88d31d060b5dd94c440246b0447
 reference:dfc95385753cf9d829bb527271bd12ad898f76075b86cd10c4ff3575baaf1852
 logic:eafa98fc2e8bef4d64ee96e1765a2b410219cc1025cf80e746ba4f83cf52a629
 lexicon:82614092af0234a157175961a7ed6a82d2aa1e50b23b3697c507474f23531702
-ontology:1bb0d263b7dd3a090594105061e9edc4e2a2c3946dc576311551a0f2ceb1668e
-closed-class:b13d6f26123ff21dadfca89b9d0dddc0342e82c92d4be0310d8b40d16a71d963
+ontology:c41587f04c6a98617a0f3fcc0ef41551f73b76fe78e50eef0ff2e3e3437dcd69
+closed-class:0a5ea20e25dd24c7be1f7ef3741a85f844b22c528d373d327d655bc1f83a6434
 encoding:a7ce37f8cbf5b7ef3d34895c63098c1f5d1076adaaec67f250317a987e5c8d5a
 ";
 
