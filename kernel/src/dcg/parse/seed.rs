@@ -159,10 +159,29 @@ impl Parser {
                 entries.retain(|e| e.in_lexicon.is_none() || !is_adjective_cat(e.item.cat()));
             }
             if surface_is_governed_relational {
+                // Keyed PER ENTRY, not per surface (eigenius#273-adjacent, `2026-10-08`). The prune
+                // above asks "does ANY entry for this surface govern a preposition?" and then drops
+                // EVERY nominal, which deletes the common-noun reading of any word that is also a
+                // relational adjective. Measured: «the variant», «the patient» and «the dependent»
+                // were unparseable — `variant` governs «in», `patient` and `dependent` «with»/«on» —
+                // while their plurals parsed, because a derived plural is seeded without the
+                // competing adjectival entries. For an engagement whose subject IS variants, and a
+                // clinical corpus full of patients, that is not a corner.
+                //
+                // The discriminator the long note above reaches for — "the nominal's HEAD IS the
+                // adjective" — is recorded in the entry's own `sense`: a WordNet NOUN sense
+                // (`wn:<lemma>.n.<offset>`) is the source lexicon asserting that this lemma IS a
+                // common noun. `concordant`'s only nominal is `umls:C4553529` with NO WordNet noun
+                // sense on the surface, so it is a terminological name for a concept whose English
+                // realisation is adjectival — exactly the artifact that produced
+                // `is_a(classification, Concordance)`. `variant`'s four nominals are
+                // `wn:variant.n.…`, independent nouns that have nothing to do with its
+                // «in»-governing adjective `wn:variant.a.02505415`.
                 entries.retain(|e| {
                     e.in_lexicon.is_none()
                         || !(is_ctor(e.item.cat(), "cat_n").is_some()
                             || is_ctor(e.item.cat(), "cat_np").is_some())
+                        || is_wordnet_noun_sense(e.sense.as_deref())
                 });
             }
             // **A `-s` surface cannot take a PLURAL subject** (verb-side number refinement). Morphology
@@ -1674,6 +1693,23 @@ pub(super) fn sense_cap_key(
 /// Only a `cat_n(T, num_any)` item is refined (to `cat_n(T, <num>)`); verbs,
 /// names, and multiword leaves pass through unchanged. The `lexicon:Num` decl is
 /// reused from the existing `num_any` ctor, so no decl lookup is needed.
+/// Whether an entry's `sense` is a WordNet **noun** sense — `wn:<lemma>.n.<offset>`.
+///
+/// This is the source lexicon's own part-of-speech claim, and it is what distinguishes a word that
+/// IS a common noun from a concept whose nominal name is a terminological artifact. A `umls:<cui>`
+/// sense carries no such claim: the UMLS names a concept, and one of its English names may be
+/// adjectival (`concordant` for C4553529), which is how a nominal entry appears for a surface that
+/// has no noun reading at all.
+fn is_wordnet_noun_sense(sense: Option<&str>) -> bool {
+    let Some(rest) = sense.and_then(|s| s.strip_prefix("wn:")) else {
+        return false;
+    };
+    // `wn:variant.n.05840650` → the POS is the component before the offset.
+    let mut parts = rest.rsplit('.');
+    let _offset = parts.next();
+    matches!(parts.next(), Some("n"))
+}
+
 /// Whether a category takes a **plural subject on a FINITE clause** — it contains the subject slot
 /// `bwd(cat_s(_, fin), cat_np(_, pl))` at any depth, so it matches an intransitive VP as well as a
 /// transitive verb's `fwd(VP, obj)` and any further-curried frame. A BASE-form VP is
@@ -1738,6 +1774,40 @@ fn split_coord_conjuncts(tokens: &[Token], is_conn: impl Fn(&str) -> bool) -> Op
     }
     conjuncts.push(&tokens[start..]);
     Some(conjuncts.into_iter().map(join_surfaces).collect())
+}
+
+#[cfg(test)]
+mod governed_relational_tests {
+    use super::is_wordnet_noun_sense;
+
+    /// The prune for a governed-relational surface must be keyed on the ENTRY, and the entry's
+    /// `sense` is where the source lexicon states its part of speech.
+    ///
+    /// Both cases below are the measured ones. `concordant` is why the prune exists: its only
+    /// nominal is `umls:C4553529`, a terminological name for a concept whose English realisation is
+    /// adjectival, and nominalising it strands the `with`-complement and yields
+    /// `is_a(classification, Concordance)` — a pinned `invalid` row. `variant` is why the prune was
+    /// too broad: it governs «in» AND has four independent WordNet noun senses, so dropping every
+    /// nominal on the surface made «the variant» unparseable — in a system whose subject is variants.
+    /// `patient` («with») and `dependent` («on»/«upon») were affected the same way.
+    #[test]
+    fn only_a_wordnet_noun_sense_survives_the_governed_relational_prune() {
+        // Kept: WordNet asserts the lemma is a common noun.
+        assert!(is_wordnet_noun_sense(Some("wn:variant.n.05840650")));
+        assert!(is_wordnet_noun_sense(Some("wn:patient.n.10405694")));
+        assert!(is_wordnet_noun_sense(Some("wn:dependent.n.10004804")));
+        // Dropped: a UMLS concept name carries no part-of-speech claim, and `concordant` has no
+        // WordNet noun sense on the surface at all.
+        assert!(!is_wordnet_noun_sense(Some("umls:C4553529")));
+        assert!(!is_wordnet_noun_sense(Some("umls:C0030705")));
+        // Dropped: the adjectival sense of the very same lemma.
+        assert!(!is_wordnet_noun_sense(Some("wn:variant.a.02505415")));
+        assert!(!is_wordnet_noun_sense(Some("wn:concordant.a.00577122")));
+        // Absent or malformed senses claim nothing.
+        assert!(!is_wordnet_noun_sense(None));
+        assert!(!is_wordnet_noun_sense(Some("wn:variant")));
+        assert!(!is_wordnet_noun_sense(Some("")));
+    }
 }
 
 #[cfg(test)]
