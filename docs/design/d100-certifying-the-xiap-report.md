@@ -153,6 +153,101 @@ the ledger's, on claims whose true status was established three times over:
    take — plausibly an entailment obligation from a heading to the conjunction of what it compresses,
    plus a no-dropped-qualifier side condition. Naming that precisely is the result.
 
+## Results
+
+Implemented in `experiments/xiap-c0020/` over the real bootstrap chain (`bootstrap` → `variant` →
+the experiment's vocabulary), checked by `kernel/tests/d100_xiap_c0020.rs` — 7 tests, in-memory, no
+database. Each refusal was checked to bite by inverting its input.
+
+| rung | the ledger's verdict | the kernel's | the divergence |
+|---|---|---|---|
+| C-0020 `observed` | certified | commits | the sentence as written does not type; the `kind` is wrong |
+| C-0011 `marked` | rejected, `premise_failure:` field | refused, naming the absent leaf | none — the verdict becomes a type |
+| C-0078 `compressed` | rejected under the compression rule | **commits** | the rule is not entailment |
+
+"What this measures" predicted C-0020 would agree and that a divergence there would be a defect in
+the encoding. The verdict agrees; the divergence is in the ledger's `kind`.
+
+### C-0020 — the claim is `App(Declared(f), Observed(input))`
+
+Three findings, in the order they appeared.
+
+**The sentence as the document writes it does not type.** «p.Ile380Val is carried by 4 hemizygous
+males» makes a `variant:ProteinAllele` the subject of a count `xiap:HemizygousMaleCount` indexes by
+`variant:NucleotideAllele`, because what gnomAD counted was genotypes at X-123900531-A-G.
+`variant:TranslatesTo` relates the two and is documented as non-injective, so it supplies no route
+by which the count transfers. Refused: *does not inhabit class `urn:eigenius:variant:NucleotideAllele`*.
+This is experiment 01's residue-versus-variant refusal (#267) reproduced on certified material.
+
+**The certificate's `reading` field is two declarations, not one.** It closes that gap by hand. Stated
+as `justification:Declaration`s it splits: the TRANSLATION (biology — `variant:TranslatesTo`, declared
+because no transcript sequence is held, which is what the ontology says to do) and the RESOLUTION
+(editorial — in this claim «p.Ile380Val» denotes that one nucleotide allele). The second does not
+follow from the first; `TranslatesTo` is not injective, so the designation under-determines the
+allele. That is why the certifier had to assert it, and why it wants an accountable agent rather than
+a prose field. Both validate.
+
+**`kind: observed` does not mean the value was read off.** All 239 `observed` claims in the log carry
+a `reproduce:` line; so do 72 of the 74 `derived` ones. C-0020's archived response holds
+`exome.ac_hemi = 2` and `genome.ac_hemi = 2`; the 4 is computed by `cert-gnomad.py`. Encoded
+faithfully, the claim is the script's rule — declared, with the script as its warrant — applied to the
+observation:
+
+```
+app( declared(hemizygous_sum_rule,  Exome(a,2) ∧ Genome(a,2) → HemizygousMaleCount(a,4)),
+     observed(gene_sweep_response,  Exome(a,2) ∧ Genome(a,2)) )
+  : Grounds( HemizygousMaleCount(a, 4) )
+```
+
+It commits. The shortcut — citing 4 straight off the export, which is `kind: observed` taken at face
+value — is refused: *no admitted `IsObservedAs` witness for `gene_sweep_response`* with that
+proposition. The witness the kernel synthesizes from the trace carries what the export states, so the
+arithmetic cannot hide inside the observation. Declaring it names an agent.
+
+`observed` and `derived` are not two boxes a claim falls into. The derived claim **is** the declared
+rule applied to the observed one, and that is why the kinds do not compose: they are labels on the
+whole claim where the structure is in its parts.
+
+### C-0011 — "sound inference, failed premise" is a type
+
+`justification:Grounds` has no conjunction introduction, so the two limbs must be declared as a bridge
+and eliminated with `app` — the paper's "there is no deduction theorem, so a bridge between
+vocabularies cannot be derived; it must be Declared."
+
+With the bridge declared and witnessed and limb A (`RiskBounded`) grounded, the conjunction is
+refused, and the refusal names `xiap:tolerated_holds` — limb B's absent leaf. Not a bad rule, not an
+ill-typed claim: the missing ground. Limb A still commits in the same layer, which is the ledger's
+«two limbs, and they fail differently» as a structural fact rather than a prose observation.
+
+This is the gap the collaborator names first. His procedure recorded the verdict in a
+`premise_failure:` FIELD; here it is the shape of the justification term, and the kernel computes
+which premise.
+
+### C-0078 — the compression obligation is not entailment
+
+The heading «Healthy hemizygous men carry substitutions here, and ClinVar calls one of them Benign»
+was rejected for dropping one qualifier — *single-submitter with criteria provided, which is one star;
+do not present it to a reviewer as settled expert consensus* — with every number under it certified.
+
+Encoded, the heading is grounded from the certified body through a declared weakening and
+**commits**. The weakening is conjunction elimination, declared rather than derived because `Grounds`
+has no conjunction vocabulary in either direction, so dropping a conjunct is as much a bridge as
+introducing one. As an inference it is impeccable: the weaker statement follows from the stronger. So
+a compression check built on entailment certifies the very claim the procedure caught.
+
+The gap is therefore not a missing `Compresses` relation. What the rule polices is what a heading
+LICENSES when read alone, which is a constraint on a reader's inference, not on what the sentence
+asserts. `Grounds(P)` is indifferent to it, because the heading's `P` is grounded perfectly well.
+Anything that catches C-0078 has to range over what a reader may conclude from the compressed form —
+a different judgement from `holds(kernel, t, Grounds(P))`, and one this stack does not have.
+
+### The dependency graph is in prose
+
+`depends_on:` is present on all 475 claims and empty on all 475. Twenty-three certificates name other
+claim ids inside prose fields instead — `premise_failure: C-0100 …`, `compresses: C-0080, C-0082, …`.
+The structured field exists for exactly this and is never used, which is the same fact as the one
+C-0020 shows: the composition is real, it is recorded, and it is recorded where nothing can check it.
+
 ## Not in scope
 
 - The other 472 claims. This is three rungs, not a corpus run; the corpus run is the survey's step 4
