@@ -9,8 +9,38 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **entry 4 (`2026-10-07`). #270 — adjunct attachment for verbs and their modifiers, on
-> `event-semantics`. ACTIVE.**
+> **entry 4 (`2026-10-07`). #270 — adjunct attachment for verbs and their modifiers. DONE, merged
+> as #274 (`402faf2`, `2026-10-09`); #270 closed. What it left is below, and none of it is active.**
+>
+> **Result.** `grammar-gap 0`, `expected-hits 62/62`, gate exit 0 against the re-baselined
+> `baseline.json`. 22 axioms added and 0 changed; no committed term retyped or migrated; no category
+> and no `sem_type` moved. The 13 adjunct pins were restored mechanically — each new skeleton rewrites
+> back to its old pin under `adv_X(obj, V, subj) → prep_X(subj, obj)`, so the pinned *analysis* never
+> changed. Store: `wordnet-umls-hpo-aligned-2026-10-07-adv`.
+>
+> **Carried, not active:**
+> - **#273** — renaming an ontology relation perturbs restrictor canonicalisation. Readings
+>   679 → 799 and skeletons 210 → 290 are this slice's, proven by a replay at `f331dcb` reproducing
+>   679/210 against both the 2026-10-05 store and one reseeded from identical provenance, with
+>   identical per-unit skeleton sets. 26 of the +80 are previously-identical terms the split
+>   separates; **54 are unexplained**. `conjoin_canonical` is located as the only stage keyed on what
+>   a relation is *named*; under-normalisation is EXCLUDED by measurement — making `beta_normalize`
+>   capture-avoiding drove its declines 1079 → 0 and recovered **5 skeletons**, while breaking a pin,
+>   so that fix was reverted. `restrictor_key` is a SORT key and the sort fixes conjunct order in the
+>   rebuilt Σ, which the pins record: **any change to that key re-pins units.**
+> - **`reading-correct` is unmeasured for the slice.** The live draw lost four of 42 units to
+>   `jev-latest` 503s, so it is not a measurement; `selection-baseline.json` is untouched. That is
+>   #264's gate, not #270's. Redraw when the provider is serving, then adjudicate.
+> - **One pin may want to move.** On «Project Achilles and project DRIVE identified WRN as the top
+>   preferential dependency in MSI cell lines compared to MSS cell lines.» (4 → 52 skeletons), 16 new
+>   readings put BOTH PPs inside the dependency's Σ — the 2026-10-06 ruling that the phrase modifies
+>   the noun «dependency», which the grammar could not produce before and the pin does not encode.
+>   The two other growers deserve the same look.
+> - **The eventivity feature (open question 9) is undecided** and nothing in the adopted design needs
+>   it; its justification ("a copular VP has no event to modify") lapsed with the event argument.
+> - **Kept for #273:** the `eigenius-pre` worktree at `f331dcb` (with `references/` symlinked in —
+>   `.gitignore` excludes it and only `.gitkeep` is tracked, so a fresh worktree parses nothing) and
+>   `wordnet-umls-hpo-aligned-2026-10-07-pre`, the only reproducible pre-change reference.
 >
 > **The owner adopted option D on `2026-10-07`: predicate modifiers, no events.** Verb adjuncts are
 > encoded as modifiers of the predicate, following Luo & Shi 2026, *Variable polyadicity without
