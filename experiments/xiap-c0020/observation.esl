@@ -1,0 +1,127 @@
+// C-0020's evidence, committed so the kernel can compute the ground rather than be told it.
+//
+// D100 rung 1. The certificate for C-0020 records a gnomAD v4 GraphQL sweep, its archived response
+// with a sha256, four observation timestamps, and an independent reconciliation against the v4.1
+// release VCFs. None of that asserts a GRADE: per `judgements-and-warrants.tex`'s deprecated-patterns
+// list, "no path exists by which asserting a class confers evidential standing", and
+// `justification:Grounds`'s `observed` leaf consumes a `witness:IsObservedAs` that the kernel
+// synthesizes from the layer's traces rather than from anything written here.
+//
+// So this file commits:
+//
+//   1. the ACTIVITY  — the query run, so the instrument is reachable from every claim resting on it
+//      (`prov:ObservationTrace` requires `was_generated_by` for exactly that reason);
+//   2. the MEASUREMENT RESOURCE — the archived response, carrying the proposition it evidences.
+//      `justification:Declaration` is explicitly "NOT a container for observations: an observed
+//      ground cites the measurement resource itself";
+//   3. the TRACE — a `prov:ObservationTrace` over it, which is what the kernel reads;
+//   4. the SCRIPT'S RULE, declared, with the script as its warrant;
+//   5. the CLAIM, as that rule applied to that observation.
+//
+// 4 and 5 are there because the certificate's `kind: observed` does not mean the value was read
+// off. The export holds `exome.ac_hemi = 2` and `genome.ac_hemi = 2`; the 4 is computed by
+// `cert-gnomad.py`. All 239 `observed` claims in the log are reproduced by a script, so `observed`
+// there means "its evidence is a database export". Encoding C-0020 as a bare `observed` leaf would
+// put the script's arithmetic inside the observation, where nobody can see or dispute it.
+//
+// The proposition is stated of the NUCLEOTIDE allele, because that is what gnomAD counted. The
+// document's sentence names the protein allele; bridging the two is a separate, declared step, and
+// rung 1's result is what the type system does when that bridge is absent.
+
+namespace core    = "urn:eigenius:core";
+namespace prov    = "urn:eigenius:prov";
+namespace agent   = "urn:eigenius:prov:agent";
+namespace eigentt = "urn:eigenius:eigentt";
+namespace units   = "urn:eigenius:units";
+namespace logic   = "urn:eigenius:logic";
+namespace justification = "urn:eigenius:justification";
+namespace xiap    = "urn:eigenius:uab:xiap";
+
+// ── 1. The activity: the query that read the world ────────────────────────────────────────────
+
+resource xiap:gnomad_v4_gene_sweep : prov:Activity {
+    core:short_name  = "gnomad-v4-xiap-gene-sweep";
+    core:description = "POST to the gnomAD GraphQL API for gene XIAP (ENSG00000101966) on GRCh38, dataset gnomad_r4 (v4.1), returning every variant with its exome and genome ac/an/ac_hemi/ac_hom/af/filters. The certificate's `reproduce:` line re-runs it offline against the archived response.";
+}
+
+// ── 2. The measurement resource: the archived response, carrying what it evidences ────────────
+
+resource xiap:gene_sweep_response : core:Resource {
+    core:short_name  = "gnomad-v4-XIAP-gene-sweep.json";
+    core:source_irl  = "https://gnomad.broadinstitute.org/api";
+    core:description = "The archived gnomAD response, sha256:70afc6e7863be5396a557bb01a46fbf5d00b574a981b8df9720b73d2ba979351. Hemizygous males at X-123900531-A-G are exome.ac_hemi + genome.ac_hemi = 2 + 2; the v4.1 release VCFs reconcile independently at AC_joint_XY = 4, with hemizygous genotypes = AC_XY - 2*nhomalt_XY and FILTER=PASS on both.";
+
+    eigentt:proposition = type_expr(
+        logic:And( xiap:ExomeHemizygousCount(xiap:c_1138A_G, units:mk_quantity(r"2", 0)),
+                   xiap:GenomeHemizygousCount(xiap:c_1138A_G, units:mk_quantity(r"2", 0)) )
+    );
+}
+
+// ── 3. The trace the kernel reads ─────────────────────────────────────────────────────────────
+
+resource xiap:gene_sweep_trace : prov:ObservationTrace {
+    prov:resource         = xiap:gene_sweep_response;
+    prov:was_generated_by = xiap:gnomad_v4_gene_sweep;
+    prov:timestamp        = "2026-09-17T00:49:19Z";
+    prov:observed_at      = "2026-09-17T00:49:19Z";
+    prov:source_irl       = "https://gnomad.broadinstitute.org/api";
+}
+
+// ── 4. The script's arithmetic, declared ──────────────────────────────────────────────────────
+//
+// The claim's value is not in the export. `cert-gnomad.py` sums the two callsets' `ac_hemi`, and
+// the reconciliation states the general form: "Hemizygous genotypes = AC_XY - 2*nhomalt_XY", which
+// for this allele is 4 - 0. Declared rather than computed because the kernel does not run the
+// script here; the script is named as the warrant, which is the rule the collaborator's procedure
+// enforces operationally — "a derived claim must name its script, its inputs and its output file".
+
+resource xiap:warrant_cert_gnomad : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:short_name        = "warrant_cert_gnomad";
+    core:description       = "code/cert-gnomad.py, which re-runs the sweep offline against the archived response and sums the per-callset hemizygous counts. The certificate's `reproduce:` line invokes it.";
+}
+
+resource xiap:hemizygous_sum_rule : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_cert_gnomad;
+    prov:rationale          = "Hemizygous males across callsets is the sum of the per-callset ac_hemi: 2 + 2. Stated for this allele and these values rather than universally, because quantifying over quantities needs an arithmetic the kernel would have to check, and the point here is the SHAPE of the ground, not the arithmetic.";
+
+    eigentt:proposition = type_expr(
+        logic:And( xiap:ExomeHemizygousCount(xiap:c_1138A_G, units:mk_quantity(r"2", 0)),
+                   xiap:GenomeHemizygousCount(xiap:c_1138A_G, units:mk_quantity(r"2", 0)) )
+        -> xiap:HemizygousMaleCount(xiap:c_1138A_G, units:mk_quantity(r"4", 0))
+    );
+}
+
+resource xiap:hemizygous_sum_rule_trace : prov:DeclarationTrace {
+    prov:resource           = xiap:hemizygous_sum_rule;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_cert_gnomad;
+    prov:timestamp          = "2026-10-09T00:00:00Z";
+}
+
+// ── 5. The claim, as App(Declared(f), Observed(input)) ────────────────────────────────────────
+//
+// This is the composition the collaborator says his kinds lack. `observed` and `derived` are not
+// two boxes a claim falls into: the derived claim IS the declared rule applied to the observation.
+
+resource xiap:concl_c0020 : justification:Conclusion {
+    core:description = "HemizygousMaleCount(c.1138A>G, 4) — C-0020's value, grounded as the script's rule applied to the export. Commits.";
+
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(
+                   declared(
+                       "urn:eigenius:uab:xiap:hemizygous_sum_rule",
+                       logic:And( xiap:ExomeHemizygousCount(xiap:c_1138A_G, units:mk_quantity(r"2", 0)),
+                                  xiap:GenomeHemizygousCount(xiap:c_1138A_G, units:mk_quantity(r"2", 0)) )
+                       -> xiap:HemizygousMaleCount(xiap:c_1138A_G, units:mk_quantity(r"4", 0)),
+                       ()),
+                   observed(
+                       "urn:eigenius:uab:xiap:gene_sweep_response",
+                       logic:And( xiap:ExomeHemizygousCount(xiap:c_1138A_G, units:mk_quantity(r"2", 0)),
+                                  xiap:GenomeHemizygousCount(xiap:c_1138A_G, units:mk_quantity(r"2", 0)) ),
+                       ()))),
+               type_expr(justification:Grounds(
+                   xiap:HemizygousMaleCount(xiap:c_1138A_G, units:mk_quantity(r"4", 0)) )) );
+}

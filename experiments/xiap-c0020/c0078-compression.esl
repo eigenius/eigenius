@@ -1,0 +1,122 @@
+// C-0078 — the heading that every number under it supports, and that was rejected anyway.
+//
+// D100 rung 3. The claim, `kind: compressed`:
+//
+//     «Finding 2 — Healthy hemizygous men carry substitutions here, and ClinVar calls one of them
+//      Benign»
+//
+//     compresses: C-0080, C-0082 … C-0093 (the Finding 2 table rows), with C-0018/C-0019 and C-0100
+//     qualifiers: 'that call is single-submitter with criteria provided, which is one star. Do not
+//                 present it to a reviewer as settled expert consensus'
+//     reading:    Rejected under the compression rule (one dropped qualifier is a rejection), NOT on
+//                 any number: every ClinVar value the heading compresses is certified in this pass
+//     verdict:    rejected
+//
+// The survey records that Eigenius has no counterpart for `compressed`. Rung 3's deliverable is to
+// say precisely what it would take — and the first thing to establish is what it is NOT.
+//
+// THE OBLIGATION IS NOT ENTAILMENT. The body says ClinVar calls the variant Benign AND that the call
+// is one-star single-submitter. The heading says ClinVar calls it Benign. The heading is therefore
+// ENTAILED by the body: it is the weaker statement, and dropping a conjunct is the soundest
+// inference there is. A compression check built on entailment would CERTIFY C-0078 — which is what
+// this file demonstrates, by grounding the heading from the body through a declared weakening and
+// watching it commit.
+//
+// So the gap is not a missing `Compresses(H, [B…])` relation with an entailment obligation. That
+// would be the wrong obligation, and it would pass the very claim the procedure caught.
+//
+// What the rule actually polices is what the heading LICENSES when read alone. The qualifier's own
+// words are "do not present it to a reviewer as settled expert consensus" — a constraint on the
+// INFERENCE A READER WILL DRAW, not on what the sentence asserts. Eigenius grounds propositions;
+// this is a property of a proposition's relation to the ones it stands in for, and `Grounds(P)` is
+// indifferent to it because the heading's P is grounded perfectly well.
+
+namespace core          = "urn:eigenius:core";
+namespace prov          = "urn:eigenius:prov";
+namespace agent         = "urn:eigenius:prov:agent";
+namespace justification = "urn:eigenius:justification";
+namespace eigentt       = "urn:eigenius:eigentt";
+namespace logic         = "urn:eigenius:logic";
+namespace variant       = "urn:eigenius:variant";
+namespace xiap          = "urn:eigenius:uab:xiap";
+
+// «ClinVar classifies a as Benign.»
+axiom xiap:ClinVarBenign : variant:ProteinAllele -> Prop
+
+// «That classification is a one-star, single-submitter call.» The qualifier the heading drops.
+axiom xiap:OneStarSingleSubmitter : variant:ProteinAllele -> Prop
+
+// ── The body: the table row, qualifier attached ───────────────────────────────────────────────
+
+resource xiap:warrant_clinvar_row : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:short_name        = "warrant_clinvar_row";
+    core:description       = "The Finding 2 table row and its review-status column, both certified in the pass that rejected the heading. Stands in for C-0083/C-0087/C-0089/C-0091/C-0092/C-0093, which this experiment does not re-derive.";
+}
+
+resource xiap:clinvar_row : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_clinvar_row;
+    prov:rationale          = "The body of Finding 2: the call AND its review status, which is what the certified rows say together.";
+
+    eigentt:proposition = type_expr(
+        logic:And( xiap:ClinVarBenign(xiap:p_Ile380Val),
+                   xiap:OneStarSingleSubmitter(xiap:p_Ile380Val) )
+    );
+}
+
+resource xiap:clinvar_row_trace : prov:DeclarationTrace {
+    prov:resource           = xiap:clinvar_row;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_clinvar_row;
+    prov:timestamp          = "2026-10-09T00:00:00Z";
+}
+
+// ── The weakening the heading performs ────────────────────────────────────────────────────────
+
+resource xiap:warrant_weakening : prov:Source {
+    prov:was_attributed_to = agent:eigenius_core_team;
+    core:short_name        = "warrant_weakening";
+    core:description       = "Conjunction elimination. Declared rather than derived for the reason justification.esl gives: Grounds has no conjunction vocabulary at all, in either direction, so dropping a conjunct is as much a bridge as introducing one.";
+}
+
+resource xiap:drop_the_qualifier : justification:Declaration {
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_weakening;
+    prov:rationale          = "The heading keeps the call and drops the review status. As an inference this is impeccable — the weaker statement follows from the stronger — which is exactly why an entailment-based compression check does not catch what the procedure caught.";
+
+    eigentt:proposition = type_expr(
+        logic:And( xiap:ClinVarBenign(xiap:p_Ile380Val),
+                   xiap:OneStarSingleSubmitter(xiap:p_Ile380Val) )
+        -> xiap:ClinVarBenign(xiap:p_Ile380Val)
+    );
+}
+
+resource xiap:drop_the_qualifier_trace : prov:DeclarationTrace {
+    prov:resource           = xiap:drop_the_qualifier;
+    prov:was_attributed_to  = agent:eigenius_core_team;
+    prov:had_primary_source = xiap:warrant_weakening;
+    prov:timestamp          = "2026-10-09T00:00:00Z";
+}
+
+// ── The heading commits. That is the finding. ─────────────────────────────────────────────────
+
+resource xiap:concl_heading : justification:Conclusion {
+    core:description = "ClinVarBenign(p.Ile380Val) — the heading's ClinVar limb, grounded from the certified body by dropping a conjunct. COMMITS. The certification procedure REJECTED this heading for dropping that conjunct, and was right to: the rule it enforces is not entailment.";
+
+    justification:grounds_judgement =
+        holds( eigentt:logic_kernel,
+               type_expr(app(
+                   declared(
+                       "urn:eigenius:uab:xiap:drop_the_qualifier",
+                       logic:And( xiap:ClinVarBenign(xiap:p_Ile380Val),
+                                  xiap:OneStarSingleSubmitter(xiap:p_Ile380Val) )
+                       -> xiap:ClinVarBenign(xiap:p_Ile380Val),
+                       ()),
+                   declared(
+                       "urn:eigenius:uab:xiap:clinvar_row",
+                       logic:And( xiap:ClinVarBenign(xiap:p_Ile380Val),
+                                  xiap:OneStarSingleSubmitter(xiap:p_Ile380Val) ),
+                       ()))),
+               type_expr(justification:Grounds( xiap:ClinVarBenign(xiap:p_Ile380Val) )) );
+}

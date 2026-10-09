@@ -9,39 +9,48 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **entry 5 (`2026-10-08`). UAB round 1, survey step 3 — land one certified XIAP claim end to end.
-> ACTIVE; nothing is on a branch yet. The lexicon bug that blocked it is merged as #275
-> (`8d336d1`, `2026-10-09`).**
+> **entry 5 (`2026-10-08`). UAB round 1, survey step 3 — three certified XIAP claims end to end.
+> IMPLEMENTED on `d100-xiap-c0020`; PR not opened. Plan + results:
+> [d100-certifying-the-xiap-report.md](../design/d100-certifying-the-xiap-report.md).**
 >
-> `experiments/uab/eigenius-survey-2026-09-30.md` §4 step 3: take C-0020 from the certification log
-> — «p.Ile380Val is carried by 4 hemizygous males.», an `observed` claim with a gnomAD GraphQL
-> query, five sha256-archived files, an independent VCF reconciliation and a `reading` field —
-> express it in CNL, parse it, land it as an `ObservedResource` with `source`/`observed_at`, and
-> attach the evidence. Its two dependencies landed: experiment 01 as #267 (`a8d3e45`) and 02 as #269
-> (`a2a1076`), so `ontologies/variant/variant.esl` supplies `NucleotideAllele`/`ProteinAllele` and a
-> `TranslatesTo` documented as non-injective.
+> `experiments/xiap-c0020/` over `bootstrap` → `variant` → the experiment's vocabulary;
+> `kernel/tests/d100_xiap_c0020.rs`, 7 tests, in-memory, no database. Each refusal checked to bite by
+> inverting its input. The lexicon bug that blocked the parse route is merged as #275 (`2370b35`);
+> the two dependencies landed as #267 (`a8d3e45`) and #269 (`a2a1076`).
 >
-> **Why the claim is the interesting one.** Its subject is a PROTEIN allele and its predicate is a
-> count gnomAD computes over GENOTYPES at a nucleotide allele, `X-123900531-A-G`. The certificate's
-> `reading` field resolves that by hand — "Subject p.Ile380Val = X-123900531-A-G (c.1138A>G)" — which
-> is experiment 01's synthetic refusal appearing in real certified material. Landing it faithfully
-> should REQUIRE the nucleotide allele the document's sentence never names.
+> | rung | the ledger | the kernel | divergence |
+> |---|---|---|---|
+> | C-0020 `observed` | certified | commits | the sentence as written does not type; the `kind` is wrong |
+> | C-0011 `marked` | rejected via a `premise_failure:` field | refused, naming the absent leaf | none — the verdict becomes a type |
+> | C-0078 `compressed` | rejected under the compression rule | **commits** | the rule is not entailment |
 >
-> **Was blocked on a lexicon bug, merged as #275 (`2370b35`).** The claim did not parse, and neither did
-> «the patient» or «the dependent»: `lookup_span`'s governed-relational prune was keyed on the
-> SURFACE, so one relational-adjective entry dropped every nominal, and any word that is both a
-> common noun and a relational adjective lost its noun reading. Keyed per entry on
-> `wn:<lemma>.n.<offset>` — WordNet's own part-of-speech claim — the three parse and the reference
-> page is bit-identical (799 readings, 290 skeletons, 62/62 hits, `invalid-selected 0`). The
-> `concordant` artifact it exists to kill (`is_a(classification, Concordance)`) stays dead, because
-> that surface has no WordNet noun sense at all.
+> **C-0020.** Three findings. (1) «p.Ile380Val is carried by 4 hemizygous males» does not type: a
+> `ProteinAllele` subject under a count indexed by `NucleotideAllele`, and `TranslatesTo` is
+> non-injective. (2) The certificate's `reading` field is TWO declarations — translation (biology) and
+> resolution (editorial) — and the second does not follow from the first. (3) `kind: observed` does
+> not mean read off: the export holds `exome.ac_hemi = 2` and `genome.ac_hemi = 2`, and
+> `cert-gnomad.py` sums them. Faithfully it is `app(declared(sum rule), observed(export))`, which
+> commits; citing 4 straight off the export is refused — *no admitted `IsObservedAs` witness*.
 >
-> **Next, and not started:** the CNL form and its selected reading; a transparent definition over the
-> parse (experiment 01's `survey-typed.esl` is the shape — so a certificate matches by CONVERSION,
-> not assertion); the `ObservedResource` with `source`/`observed_at`; the five evidence files; and
-> then the measured answer to the survey's own question, which is what Eigenius CANNOT express of
-> C-0020 — `reconciliation`, the `reading`, and "hemizygous males = exome.ac_hemi + genome.ac_hemi"
-> as a derived count.
+> **C-0011.** `Grounds` has no conjunction introduction, so the two limbs are a declared bridge
+> eliminated with `app`. Limb A commits; the conjunction is refused naming `tolerated_holds`, limb B's
+> absent leaf. "Sound inference, failed premise" is the shape of the term, not a field.
+>
+> **C-0078.** The heading grounds from the certified body through a declared weakening (conjunction
+> elimination — `Grounds` has no conjunction vocabulary in either direction) and COMMITS, so a
+> compression check built on entailment certifies the claim the procedure caught. The gap is not a
+> missing `Compresses` relation: the rule polices what a heading LICENSES read alone, a constraint on
+> a reader's inference. `Grounds(P)` is indifferent — the heading's `P` is grounded.
+>
+> **Measured on the log.** 475 claims: 239 `observed`, 80 `declared`, 74 `derived`, 49 `marked`, 20
+> `compressed`, 13 `exempt`. All 239 `observed` carry a `reproduce:` line, as do 72 of 74 `derived`.
+> `depends_on:` is present on all 475 and empty on all 475; 23 certificates name other claim ids in
+> prose fields instead (`premise_failure:`, `compresses:`).
+>
+> **Not done.** The CNL/parse route — these three are hand-written ESL, not parsed. The survey's §3
+> still describes D81's `ObservedResource`/`DeclaredResource` as shipped code; they were removed in
+> #239 (`c4a4eb7`) and `judgements-and-warrants.tex` deprecates the pattern. The survey lives in the
+> gitignored tree, so that correction is D100 Decision 3's to carry.
 >
 > **Gotcha for anyone measuring here:** `measure-parse-rate.sh` DECLARES its own config and strips
 > the ambient `EIGENIUS_WRN_PAGE` and `EIGENIUS_DUMP_CELL` — use `--page`, and for a cell dump run
