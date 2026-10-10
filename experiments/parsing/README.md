@@ -117,6 +117,23 @@ scripts/eval-parse-rate.sh <run.log> --baseline       # …and compare against t
 scripts/eval-parse-rate.sh <run.log> <other-run.log>  # …or against another run
 ```
 
+**Authoring a pin: from the GATED arm's skeleton set, and nothing else.** The faithfulness check
+compares `Expected::skeleton` against `unit_skel_set(&u.outcome)`, and `u.outcome` depends on the
+sense cap and the reranker — so the skeleton set DIFFERS BY ARM. A pin authored from a cap-only run
+can be absent from the reranked forest the gate scores, and `baseline.json` is reranked. Print the
+set with `EIGENIUS_DUMP_SKELETONS=1` on a run of the same arm and page as the gate, and pin from
+that. Two other artifacts look authoritative and are not: `selections.json`'s `skeleton` field and
+the `sk=` lines of `EIGENIUS_DUMP_READINGS`. Measured 2026-10-10: of three pins authored from those,
+one matched no reading at all — a pin that matches nothing is a permanent miss, worse than the stale
+pin it replaced.
+
+**And score the arm you are judging.** On the 2026-10-07 store the cap-only arm loses 8 pins the
+reranked arm keeps (54/62 against 62/62), because the sense cap truncates senses the ranker would
+have lifted above it. Those 8 read exactly like regressions — `prep_of` becoming `compound_kind`, a
+transitive verb going 1-place, a modal vanishing — and all 8 pass when the ranker runs. Comparing a
+cap-only run against `baseline.json` therefore manufactures regressions; compare cap-only to
+cap-only, or run the reranker.
+
 `eval-parse-rate.sh` exits **0** = valid and meets baseline, **1** = the run is not trustworthy
 (refuses to score it), **2** = regression.
 
