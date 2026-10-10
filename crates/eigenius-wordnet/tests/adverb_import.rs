@@ -32,7 +32,8 @@ use eigenius_kernel::nbe::term::Exp;
 use eigenius_kernel::validation::Validator;
 use eigenius_wordnet::convert::{render_document, MassNouns, SenseRanks};
 use eigenius_wordnet::governance::Governance;
-use eigenius_wordnet::wndb::parse_data_line;
+use eigenius_wordnet::import::{select_synsets, SeedSpec};
+use eigenius_wordnet::wndb::{parse_data_line, Pos};
 
 /// One adverb synset, rendered and stood up over the bootstrap.
 fn adverb_layer() -> (String, Arc<Layer>) {
@@ -140,4 +141,53 @@ fn every_adverb_entry_passes_the_felicity_gate() {
         gated += 1;
     }
     assert_eq!(gated, 2, "one lemma x two manner positions");
+}
+
+/// **The SELECTOR offers adverb synsets.**
+///
+/// Every other test here hands `render_document` a synset it built, so none of them goes through
+/// `select_synsets` — and the adverb deferral lived in three places, not one: the converter's match
+/// arm, the CLI's default `--pos`, and the selector, which loaded only `data.verb` and `data.adj`.
+/// With the first fixed and the other two not, a full reseed reported **`0 adv axioms` over 114038
+/// selected synsets** while all four of the tests above passed.
+///
+/// Reads the real `data.adv`, so it needs the provisioned dict.
+#[test]
+fn the_selector_offers_adverb_synsets() {
+    let dict = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../references/WordNet-3.0/dict"
+    ));
+    if !dict.join("data.adv").exists() {
+        eprintln!(
+            "SKIP: WordNet dict not provisioned under {}",
+            dict.display()
+        );
+        return;
+    }
+    let spec = SeedSpec {
+        all: false,
+        limit: Some(50),
+        seeds: Vec::new(),
+        pos: vec![Pos::Adv],
+    };
+    let chosen = select_synsets(dict, &spec).expect("read data.adv");
+    let adverbs = chosen.iter().filter(|s| s.pos == Pos::Adv).count();
+    assert_eq!(
+        adverbs, 50,
+        "select_synsets must offer adverb synsets when the spec asks for them; it loaded only \
+         data.verb and data.adj until 2026-10-09"
+    );
+}
+
+/// The CLI's default `--pos` includes `adv`, so a plain `--all` reseed imports adverbs. `--all`
+/// bounds the SELECTION, not the parts of speech, which is why leaving `adv` out of the default was
+/// silent rather than an error.
+#[test]
+fn the_default_pos_list_includes_adv() {
+    let src = include_str!("../src/bin/wordnet_import.rs");
+    assert!(
+        src.contains(r#"default_value = "noun,verb,adj,adv""#),
+        "the importer's default --pos must include adv, else the converter's adverb arm never fires"
+    );
 }

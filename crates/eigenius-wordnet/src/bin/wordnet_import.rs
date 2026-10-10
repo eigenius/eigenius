@@ -61,7 +61,12 @@ struct Args {
     #[arg(long)]
     limit: Option<usize>,
     /// POS to import.
-    #[arg(long, value_delimiter = ',', default_value = "noun,verb,adj")]
+    /// `adv` joined the default on 2026-10-09, when adverbs became importable at Luo & Shi's `ADV`
+    /// type. `--all` bounds the SELECTION, not the parts of speech, so leaving `adv` out of this
+    /// default meant the converter's adverb arm could never fire: a reseed reported `0 adv axioms`
+    /// over 114038 selected synsets while every converter-level test passed, because those tests
+    /// call `render_document` with a synset in hand and never go through the selector.
+    #[arg(long, value_delimiter = ',', default_value = "noun,verb,adj,adv")]
     pos: Vec<String>,
     /// Write the ESL as a SINGLE file here.
     #[arg(long)]

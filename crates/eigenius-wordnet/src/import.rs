@@ -169,6 +169,12 @@ pub fn select_synsets(dict: &Path, spec: &SeedSpec) -> std::io::Result<Vec<Synse
     };
     let verb = load(Pos::Verb)?;
     let adj = load(Pos::Adj)?;
+    // `data.adv` joined on 2026-10-09, when adverbs became importable at Luo & Shi's `ADV` type.
+    // The adverb deferral (D62 §8.7.5) lived in THREE places — the converter's match arm, the CLI's
+    // default `--pos`, and here — and only this one is invisible to a converter-level test, which
+    // holds a synset already and never asks the selector for one. A reseed reported `0 adv axioms`
+    // over 114038 selected synsets with every such test passing.
+    let adv = load(Pos::Adv)?;
 
     let mut chosen: Vec<Synset> = Vec::new();
     if spec.pos.contains(&Pos::Noun) {
@@ -176,14 +182,14 @@ pub fn select_synsets(dict: &Path, spec: &SeedSpec) -> std::io::Result<Vec<Synse
         let mut closed = close_nouns(&seeds, &noun);
         closed.insert(ENTITY_ROOT_OFFSET.to_string());
         chosen.extend(closed.iter().filter_map(|o| noun.get(o).cloned()));
-    } else if !verb.is_empty() || !adj.is_empty() {
+    } else if !verb.is_empty() || !adj.is_empty() || !adv.is_empty() {
         // verbs/adjs type at the noun root → it must be present even if nouns
         // weren't requested.
         if let Some(root) = noun.get(ENTITY_ROOT_OFFSET) {
             chosen.push(root.clone());
         }
     }
-    for (index, p) in [(&verb, Pos::Verb), (&adj, Pos::Adj)] {
+    for (index, p) in [(&verb, Pos::Verb), (&adj, Pos::Adj), (&adv, Pos::Adv)] {
         if spec.pos.contains(&p) {
             let seeds = select_seeds(index, spec);
             chosen.extend(seeds.iter().filter_map(|o| index.get(o).cloned()));
