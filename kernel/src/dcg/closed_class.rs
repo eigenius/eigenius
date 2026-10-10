@@ -79,6 +79,30 @@ const PREPOSITIONS_AND_CONJUNCTIONS: &[&str] = &[
     "if",  // subordinator
 ];
 
+/// Adverbs whose work the GRAMMAR does, so an imported manner adverb on the surface does not add a
+/// reading — it adds a WRONG one. Caught by the reference-page gate on 2026-10-10, once adverbs
+/// began importing.
+///
+/// `not` is negation, and WordNet types it as a manner adverb like any other (`r00024073`,
+/// "negation of a word or group of words"). Imported, it gave «The four other RecQ DNA helicases
+/// were not preferentially essential» a reading in which negation modifies the MANNER of being
+/// essential — the same defect class as reading `non-homologous` as `homologous`.
+///
+/// `also`/`too` is an additive discourse connective (`r00047534`, "in addition"). It attaches at the
+/// clause level (`S/S`, `S\S`), where it is genuinely transparent; a manner reading instead asserts
+/// something about HOW the identifying was done, which is how «We also identified MSI cell lines
+/// from rare lineages» lost its pinned analysis.
+///
+/// Withheld by SURFACE, not by synset: `r00047534` bundles `also`, `too`, `besides`, `likewise` and
+/// `as_well`, and only the first two are grammar-owned. Withholding the synset would have taken
+/// `likewise` with it — the one OOV token of the XIAP corpus the adverb import closed.
+///
+/// **`non` is deliberately absent.** It is grammar-owned in the same sense, but a bare `non` is not
+/// an English word — the prefix case is `OPAQUE_HYPHEN_PREFIXES` — and neither the bootstrap nor a
+/// parser rule supplies it, so withholding it would make the surface unknown for no measured gain.
+/// That is the `then`/`any`/`nor` defect, and `closed_class_surfaces_stay_known` refuses it.
+const GRAMMAR_OWNED_ADVERBS: &[&str] = &["not", "also", "too"];
+
 /// Determiners and quantifiers the bootstrap ships (D63 §8.3).
 const DETERMINERS: &[&str] = &[
     "some", "each", "every", "all", "any", "no", "several", "many", "few", "fewer", "most", "both",
@@ -122,6 +146,7 @@ const COPULA: &[&str] = &["be", "is", "are", "was", "were", "am", "been"];
 pub fn is_closed_class_surface(form: &str) -> bool {
     let f = form.trim().to_ascii_lowercase();
     PREPOSITIONS_AND_CONJUNCTIONS.contains(&f.as_str())
+        || GRAMMAR_OWNED_ADVERBS.contains(&f.as_str())
         || DETERMINERS.contains(&f.as_str())
         || DEMONSTRATIVES.contains(&f.as_str())
         || COPULA.contains(&f.as_str())

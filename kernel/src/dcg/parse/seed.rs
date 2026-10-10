@@ -1474,6 +1474,10 @@ pub(super) fn is_lexicalized_adverb(surface: &str) -> bool {
     // is absorbed in the CKY (fronted-modifier comma absorption).
     const LEXICALIZED_ADVERBS: &[&str] = &[
         "also",
+        // Shares WordNet synset `r00047534` ("in addition") with `also`, and is the same additive
+        // discourse connective. Listed so `closed_class` can withhold the imported MANNER entries
+        // on it without leaving the surface unknown.
+        "too",
         "however",
         "yet",
         "thus",
