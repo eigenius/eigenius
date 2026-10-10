@@ -29,7 +29,7 @@ use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::validation::Validator;
-use eigenius_umls::convert::{render_document, AddSet};
+use eigenius_umls::convert::{render_document, AddSet, AttestedForms};
 use eigenius_umls::rrf::build_subset;
 
 // RRF MRSAB: RSAB is col 4 (index 3), SRL is col 14 (index 13).
@@ -77,6 +77,7 @@ fn mirror_and_lexicon_validate_and_felicity_gate() {
         &Default::default(),
         &Default::default(),
         &AddSet::new(),
+        &AttestedForms::default(),
     );
     assert_eq!(rep.concepts, 2);
     assert_eq!(rep.semantic_types, 2);
@@ -115,6 +116,7 @@ fn scoped_parse_of_every_werner_syndrome_affects_hela() {
         &Default::default(),
         &Default::default(),
         &AddSet::new(),
+        &AttestedForms::default(),
     );
     let umls = esl_layer("umls", &doc, demo);
 

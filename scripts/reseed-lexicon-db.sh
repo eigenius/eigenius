@@ -234,9 +234,17 @@ UMLS_CHV_ARGS=()
 [[ "${DROP_CHV_REDUNDANT:-1}" == "1" ]] && UMLS_CHV_ARGS+=(--drop-chv-redundant)
 UMLS_SPLIT_ARGS=()
 [[ -n "$SPLIT_BYTES" ]] && UMLS_SPLIT_ARGS=(--split-bytes "$SPLIT_BYTES")
+# The non-content ADMIT GATE's two reference sets. `is_non_content_concept` withholds every noun
+# entry of a concept typed only T078/T080 ("Idea or Concept" / "Qualitative Concept"), justified by
+# the surface staying known via WordNet or the closed-class bootstrap. These let the importer CHECK
+# that premise instead of assuming it: where it fails and SPECIALIST attests the form as English,
+# the entry is kept. Omit them and the gate admits nothing, which is the pre-gate lexicon.
+UMLS_ATTEST_ARGS=(--wordnet-dict "$DICT" --specialist "$SPECIALIST")
+
 "$ROOT/target/release/umls-import" --meta-dir "$UMLS_META" --version "$UMLS_RELEASE" \
   --out-dir umls-chain "${UMLS_SPLIT_ARGS[@]}" \
-  "${UMLS_TUI_ARGS[@]}" "${UMLS_COUNTABILITY_ARGS[@]}" "${UMLS_DROP_ARGS[@]}" "${UMLS_CHV_ARGS[@]}"
+  "${UMLS_TUI_ARGS[@]}" "${UMLS_COUNTABILITY_ARGS[@]}" "${UMLS_DROP_ARGS[@]}" "${UMLS_CHV_ARGS[@]}" \
+  "${UMLS_ATTEST_ARGS[@]}"
 
 # Guard: the base layer must declare EVERY semantic type the concept chunks reference, else the
 # kernel rejects the chunks (UnresolvedClassReference, fail-closed). This catches the dangling-STY

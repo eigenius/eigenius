@@ -47,7 +47,8 @@ use eigenius_kernel::ontology::Iri;
 use eigenius_kernel::validation::Validator;
 use eigenius_kernel::{bootstrap, esl};
 use eigenius_umls::convert::{
-    header, render_base, render_concept_block, render_document, AddSet, DropSet, MassNouns,
+    header, render_base, render_concept_block, render_document, AddSet, AttestedForms, DropSet,
+    MassNouns,
 };
 use eigenius_umls::rrf::{
     parse_mrconso_line, parse_mrdef_line, parse_mrrank, parse_mrsab, parse_mrsty_line,
@@ -83,6 +84,17 @@ struct Args {
     /// stays; the common word is covered by WordNet). Absent ⇒ no drops.
     #[arg(long)]
     drop_atoms: Option<PathBuf>,
+    /// WordNet 3.0 `dict` directory — the WordNet half of the non-content admit gate
+    /// ([`AttestedForms`]). The gate admits a T078/T080-only concept's form only where NOTHING else
+    /// supplies it, and WordNet is the main thing that does. Absent ⇒ the gate cannot check the
+    /// premise and admits nothing, which is the pre-gate behaviour.
+    #[arg(long)]
+    wordnet_dict: Option<PathBuf>,
+    /// SPECIALIST `LEXICON` — the attestation half of the admit gate. Where the premise fails, this
+    /// decides: it attests `hemizygosity` and says nothing for `actclassaccommodation`. Absent ⇒ the
+    /// gate admits nothing.
+    #[arg(long)]
+    specialist: Option<PathBuf>,
     /// Curated atom overrides (`atom-overrides.json`): a hand-maintained `{ "drop": [...], "add": [...] }`
     /// of `{cui, form, why}` rows adjudicated from PARSE evidence rather than from the D63 alignment
     /// pipeline. `drop` rows merge into `--drop-atoms`; `add` rows inject a surface UMLS does not carry
@@ -338,6 +350,10 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
 
+    // The non-content admit gate's two reference sets. Both absent ⇒ it admits nothing, which is
+    // the behaviour before the gate existed.
+    let attested = AttestedForms::read(args.wordnet_dict.as_deref(), args.specialist.as_deref());
+
     // Partitioned emit: a base layer (semantic types + descriptor) + concept-batch
     // chunks, each under the size cap. The single-document path stays for small imports.
     if let Some(dir) = &args.out_dir {
@@ -349,19 +365,22 @@ fn main() -> ExitCode {
             &mass,
             &drops,
             &adds,
+            &attested,
         );
     }
 
-    let (doc, rep) = render_document(&subset, &args.version, &mass, &drops, &adds);
+    let (doc, rep) = render_document(&subset, &args.version, &mass, &drops, &adds, &attested);
     eprintln!(
         "umls import ({}): {} semantic-type classes, {} concept classes → {} lexical entries \
-         ({} junk atoms dropped; {} inflected duplicates pruned)",
+         ({} junk atoms dropped; {} inflected duplicates pruned; {} non-content forms admitted \
+         because nothing else supplies them)",
         args.version,
         rep.semantic_types,
         rep.concepts,
         rep.entries,
         rep.junk_skipped,
         rep.inflected_skipped,
+        rep.non_content_admitted,
     );
 
     if let Some(path) = &args.out {
@@ -400,6 +419,7 @@ fn main() -> ExitCode {
 /// each ≤ `split_bytes`. Every file carries the full header (license notice +
 /// namespaces). Load them in filename order; each concept chunk resolves its
 /// `subclass_of umlssty:*` against the base layer below it.
+#[allow(clippy::too_many_arguments)]
 fn emit_partitioned(
     subset: &Subset,
     version: &str,
@@ -408,6 +428,7 @@ fn emit_partitioned(
     mass: &MassNouns,
     drops: &DropSet,
     adds: &AddSet,
+    attested: &AttestedForms,
 ) -> ExitCode {
     if let Err(e) = fs::create_dir_all(dir) {
         eprintln!("error: creating {}: {e}", dir.display());
@@ -431,6 +452,7 @@ fn emit_partitioned(
     let mut total_mass = 0usize;
     let mut total_name = 0usize;
     let mut total_junk = 0usize;
+    let mut total_admitted = 0usize;
     let mut total_inflected = 0usize;
     let mut chunk_concepts = 0usize;
 
@@ -441,7 +463,7 @@ fn emit_partitioned(
     };
 
     for c in &subset.concepts {
-        let (block, brep) = render_concept_block(c, mass, drops, adds);
+        let (block, brep) = render_concept_block(c, mass, drops, adds, attested);
         // Roll over before exceeding the cap (but never write an empty chunk).
         if chunk_concepts > 0 && cur.len() + block.len() > split_bytes {
             match flush(idx, &cur) {
@@ -460,6 +482,7 @@ fn emit_partitioned(
         total_mass += brep.mass_entries;
         total_name += brep.name_entries;
         total_junk += brep.junk_skipped;
+        total_admitted += brep.non_content_admitted;
         total_inflected += brep.inflected_skipped;
         chunk_concepts += 1;
     }
@@ -474,7 +497,7 @@ fn emit_partitioned(
     }
 
     eprintln!(
-        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries ({total_mass} additive mass entries, RC-1 head-inheritance; {total_name} additive name entries, D70 named conditions; {total_junk} junk atoms dropped; {total_inflected} inflected duplicates pruned)",
+        "umls import ({version}): {sty} semantic-type classes, {} concept classes → {total_entries} lexical entries ({total_mass} additive mass entries, RC-1 head-inheritance; {total_name} additive name entries, D70 named conditions; {total_junk} junk atoms dropped; {total_inflected} inflected duplicates pruned; {total_admitted} non-content forms admitted because nothing else supplies them)",
         subset.concepts.len(),
     );
     eprintln!(
