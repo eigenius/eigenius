@@ -187,8 +187,8 @@ follow from the first; `TranslatesTo` is not injective, so the designation under
 allele. That is why the certifier had to assert it, and why it wants an accountable agent rather than
 a prose field. Both validate.
 
-**`kind: observed` does not mean the value was read off.** All 239 `observed` claims in the log carry
-a `reproduce:` line; so do 72 of the 74 `derived` ones. C-0020's archived response holds
+**`kind: observed` does not mean the value was read off.** All 220 live `observed` claims carry a
+`reproduce:` line, and so do all 69 live `derived` ones. C-0020's archived response holds
 `exome.ac_hemi = 2` and `genome.ac_hemi = 2`; the 4 is computed by `cert-gnomad.py`. Encoded
 faithfully, the claim is the script's rule — declared, with the script as its warrant — applied to the
 observation:
@@ -243,14 +243,21 @@ a different judgement from `holds(kernel, t, Grounds(P))`, and one this stack do
 
 ### The dependency graph is in prose
 
-`depends_on:` is present on all 475 claims and empty on all 475. Twenty-three certificates name other
-claim ids inside prose fields instead — `premise_failure: C-0100 …`, `compresses: C-0080, C-0082, …`.
-The structured field exists for exactly this and is never used, which is the same fact as the one
-C-0020 shows: the composition is real, it is recorded, and it is recorded where nothing can check it.
+Measured over the 427 **live** claims — 475 files, 48 of them retired by a `## E<n> · retired` entry.
+By kind: 220 `observed`, 70 `declared`, 69 `derived`, 43 `marked`, 15 `compressed`, 10 `exempt`.
+
+`depends_on:` is present on all 427 and non-empty on none. The structured fields that do carry claim
+ids are narrow: `supersedes:` on 47, `compresses:` on 13, `premise_failure:` on 2. **128 of the 427
+name another claim id in free prose outside all three** — in a `reading:`, a `note`, or a
+`rationale`.
+
+So the dependency graph is recorded for nearly a third of the live corpus and recorded where nothing
+can check it. That is the same fact C-0020 shows one level down: the composition is real, it is
+written, and it is written outside the structure.
 
 ## Not in scope
 
-- The other 472 claims. This is three rungs, not a corpus run; the corpus run is the survey's step 4
+- The other 424 live claims. This is three rungs, not a corpus run; the corpus run is the survey's step 4
   and wants the parse-coverage measurement first.
 - Error injection (the collaborator's item 4), which depends on this.
 - The real-patient case, blocked on IRB with affiliate-faculty status offered as a route.

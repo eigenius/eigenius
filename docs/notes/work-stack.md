@@ -10,8 +10,9 @@ any detour.
 ## Stack (top → bottom)
 
 > **entry 5 (`2026-10-08`). UAB round 1, survey step 3 — three certified XIAP claims end to end.
-> IMPLEMENTED on `d100-xiap-c0020`; PR not opened. Plan + results:
-> [d100-certifying-the-xiap-report.md](../design/d100-certifying-the-xiap-report.md).**
+> DONE, merged as #280 (`67d5fe8`, `2026-10-09`). Plan + results:
+> [d100-certifying-the-xiap-report.md](../design/d100-certifying-the-xiap-report.md). What it left is
+> under "Not done" below; none of it is active.**
 >
 > `experiments/xiap-c0020/` over `bootstrap` → `variant` → the experiment's vocabulary;
 > `kernel/tests/d100_xiap_c0020.rs`, 7 tests, in-memory, no database. Each refusal checked to bite by
@@ -42,10 +43,19 @@ any detour.
 > missing `Compresses` relation: the rule polices what a heading LICENSES read alone, a constraint on
 > a reader's inference. `Grounds(P)` is indifferent — the heading's `P` is grounded.
 >
-> **Measured on the log.** 475 claims: 239 `observed`, 80 `declared`, 74 `derived`, 49 `marked`, 20
-> `compressed`, 13 `exempt`. All 239 `observed` carry a `reproduce:` line, as do 72 of 74 `derived`.
-> `depends_on:` is present on all 475 and empty on all 475; 23 certificates name other claim ids in
-> prose fields instead (`premise_failure:`, `compresses:`).
+> **Measured on the log** — 427 LIVE claims (475 files, 48 retired by a `## E<n> · retired` entry):
+> 220 `observed`, 70 `declared`, 69 `derived`, 43 `marked`, 15 `compressed`, 10 `exempt`. All 220
+> `observed` and all 69 `derived` carry a `reproduce:` line. `depends_on:` is present on all 427 and
+> non-empty on none; `supersedes:` on 47, `compresses:` on 13, `premise_failure:` on 2 — and **128 of
+> 427 name another claim id in free prose outside all three**.
+>
+> **Survey §4 step 2 also closes** (it was "depends on nothing, cheap" and never run). Its "426 vs
+> 427" is a pass-2-era figure read against a pass-3 artefact: 475 files − 48 retired = 427 live, and
+> `passes/pass-03-ledger.json` holds 474 because C-0475 was created inline and added to no
+> certifier's list — which pass 3 records as its own finding 5 and rule R29. Its "13 vs 14
+> certifiers": 18 `cert-*.py` on disk, 4 marked `SUPERSEDED_BY`, 14 live, and pass 3's table reports
+> "14 of 14, 450 AGREE, 0 DISAGREE on live claims". The "twelve certifiers" in its narrative is the
+> pre-repair count. The artefact is self-consistent and self-documenting.
 >
 > **Not done.** The CNL/parse route — these three are hand-written ESL, not parsed. The survey's §3
 > still describes D81's `ObservedResource`/`DeclaredResource` as shipped code; they were removed in
