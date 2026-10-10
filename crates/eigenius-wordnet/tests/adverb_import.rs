@@ -90,20 +90,44 @@ fn the_adverb_is_typed_adv_and_conjoins() {
     );
 }
 
-/// Both manner positions ship: the forward pre-modifier `(S\\NP)/(S\\NP)` and the backward
-/// post-modifier `(S\\NP)\\(S\\NP)`. «partially exposed» needs the first, «confirms independently»
-/// the second.
+/// Both manner positions ship, and the forward one BINDS the clause feature.
+///
+/// `eigenius_kernel::dcg::category::adverb_modifier_cats` builds these same two categories for the
+/// parser's derivational fallback, and the two must agree or an imported adverb attaches where a
+/// derived one does not. Its forward pre-modifier leaves the clause feature a variable so the
+/// adverb hands back whatever it consumed — `adj`, `pred`, `fin`.
+///
+/// Emitting `cat_s(dcl, fin)` there instead cost six grammar-gaps on the reference page
+/// (2026-10-09): `lexicon:is_copula` takes its complement at `cat_s(dcl, adj)`, so «were
+/// selectively essential» and «were highly concordant» give the adverb an ADJECTIVAL predicate to
+/// modify, and a `fin`-only modifier cannot reach it. The backward post-modifier is verbal only and
+/// returns the `fin` it accepts, so it stays finite.
 #[test]
-fn both_manner_positions_ship() {
+fn both_manner_positions_ship_and_the_forward_one_binds_the_feature() {
     let (doc, _) = adverb_layer();
-    let vp = "lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:num_any))";
+    let fwd = doc
+        .lines()
+        .find(|l| l.contains("lexicon:cat      = type_expr( lexicon:cat_fin_forall"))
+        .expect("a forward pre-modifier binding the clause feature");
     assert!(
-        doc.contains(&format!("lexicon:fwd(lexicon:m_all, {vp}, {vp})")),
-        "forward pre-modifier:\n{doc}"
+        fwd.contains("lexicon:cat_num_forall") && fwd.contains("lexicon:fwd(lexicon:m_all"),
+        "forward pre-modifier binds fin AND num: {fwd}"
     );
     assert!(
-        doc.contains(&format!("lexicon:bwd(lexicon:m_all, {vp}, {vp})")),
-        "backward post-modifier:\n{doc}"
+        !fwd.contains("lexicon:cat_s(lexicon:dcl, lexicon:fin)"),
+        "the forward pre-modifier must NOT pin the clause feature to `fin` — that is the \
+         2026-10-09 regression: {fwd}"
+    );
+    let bwd = doc
+        .lines()
+        .find(|l| {
+            l.contains("lexicon:cat      = type_expr( lexicon:cat_num_forall")
+                && l.contains("lexicon:bwd(lexicon:m_all")
+        })
+        .expect("a backward post-modifier");
+    assert!(
+        bwd.contains("lexicon:cat_s(lexicon:dcl, lexicon:fin)"),
+        "the backward post-modifier is verbal only, so it stays finite: {bwd}"
     );
 }
 

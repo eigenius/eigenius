@@ -994,21 +994,36 @@ fn is_copula_lemma(lemma: &str) -> bool {
     lemma.trim().eq_ignore_ascii_case("be")
 }
 
-/// The VERB PHRASE a VP modifier consumes and returns: `S[dcl,fin]\NP`.
-fn adv_vp() -> String {
-    format!("lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
+/// The clause an adverb modifies, `S[dcl,<fin>]\NP[<num>]`, over the given feature expressions.
+fn adv_vp(fin: &str, num: &str) -> String {
+    format!("lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, {fin}), lexicon:cat_np({ENTITY_TOP}, {num}))")
 }
 
-/// The two manner positions of an adverb: the forward pre-modifier `(S\NP)/(S\NP)` and the
-/// backward post-modifier `(S\NP)\(S\NP)`. Both are the VP-adjunct preposition's category
-/// (`lexicon:in_prep`) with the `/NP` object slot removed, because a bare adverb takes no object.
-/// `lexicon:m_all` for the reason [`eigenius_kernel::dcg::category::adverb_modifier_cats`] gives:
-/// an adverb is exactly the case that should compose freely.
+/// The two manner positions of an adverb, mirroring
+/// [`eigenius_kernel::dcg::category::adverb_modifier_cats`] exactly — that function builds the same
+/// two categories for the parser's derivational fallback, and the two must agree or an imported
+/// adverb attaches where a derived one does not.
+///
+/// The forward pre-modifier BINDS the clause feature, so the adverb hands back whatever it consumed
+/// — `adj`, `pred`, `fin` — instead of collapsing it to one value. Hardcoding `fin` here cost six
+/// grammar-gaps on the reference page (2026-10-09): `lexicon:is_copula` takes its complement at
+/// `cat_s(dcl, adj)`, so «were selectively essential» and «were highly concordant» have an
+/// ADJECTIVAL predicate for the adverb to modify, and a `fin`-only modifier cannot reach it.
+/// `cat_fin_forall`/`cat_num_forall` erase in the denotation (`denote_cat` recurses through them),
+/// so ⟦cat⟧ and the entry's `sem_type` are unchanged by the binding.
+///
+/// The backward post-modifier is verbal only and returns the `fin` it accepts, so only the number
+/// is bound there.
 fn adv_cats() -> [String; 2] {
-    let vp = adv_vp();
+    let bound = adv_vp("f", "n");
+    let finite = adv_vp("lexicon:fin", "n");
     [
-        format!("lexicon:fwd(lexicon:m_all, {vp}, {vp})"),
-        format!("lexicon:bwd(lexicon:m_all, {vp}, {vp})"),
+        format!(
+            "lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, {bound}, {bound})))"
+        ),
+        format!(
+            "lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, {finite}, {finite}))"
+        ),
     ]
 }
 
