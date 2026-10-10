@@ -3,11 +3,10 @@
 
     python3 experiments/parsing/uab-xiap-score.py <run.log> <claims-map.tsv>
 
-The harness prints one `[unit N, …] TAG` line per unit in `segment_sentences` order, so unit index
-maps to claim by the cumulative `expected_units` of `claims-map.tsv`. The mapping is only sound if
-both agree on how many units the page has, so the total is asserted against the run's own summary
-line before anything is scored — a corpus the harness segmented differently is a different
-experiment, not a reproduction.
+The run must be `--units-per-line`: one line is one unit, so the harness's `[unit N, …] TAG` lines
+map to `claims-map.tsv` by index. That is asserted — against the run's own summary line and against
+the sidecar — before anything is scored, because under punctuation inference these 427 spans become
+653 units and no outcome can be attributed to the claim that produced it.
 
 A claim counts as COVERED when every one of its units is `ENCODED` or `AMBIG`: the parser produced
 at least one reading. `AMBIG` is coverage, not failure — choosing among readings is the selection
@@ -44,20 +43,15 @@ def main():
     with open(mapping, encoding="utf-8") as f:
         next(f)
         for line in f:
-            _, cid, kind, loc, words, form, exp = line.rstrip("\n").split("\t")
-            rows.append((cid, kind, loc, int(words), form, int(exp)))
+            _, cid, kind, loc, words, form = line.rstrip("\n").split("\t")
+            rows.append((cid, kind, loc, int(words), form))
 
-    expected = sum(r[5] for r in rows)
-    if expected != len(units):
-        sys.exit(f"corpus expects {expected} units, the harness produced {len(units)} — "
-                 f"the segmentation disagrees, so unit→claim indices are not aligned")
+    if len(rows) != len(units):
+        sys.exit(f"corpus has {len(rows)} spans, the harness produced {len(units)} units — "
+                 f"the run was not `--units-per-line`, so unit→claim indices are not aligned")
 
-    # Walk the units in order, assigning each to the claim whose span emitted it.
-    per_claim, i = {}, 0
-    for cid, kind, loc, words, form, exp in rows:
-        per_claim[cid] = (kind, form, words, [u[3] for u in units[i:i + exp]],
-                          sum(u[2] for u in units[i:i + exp]))
-        i += exp
+    per_claim = {cid: (kind, form, words, [units[i][3]], units[i][2])
+                 for i, (cid, kind, loc, words, form) in enumerate(rows)}
 
     def table(title, keep):
         sel = {c: v for c, v in per_claim.items() if keep(v)}

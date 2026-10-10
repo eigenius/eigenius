@@ -131,8 +131,56 @@ pub fn segment_sentences(doc: &str) -> Vec<String> {
     out
 }
 
+/// Take a document's units as GIVEN — one per non-blank line — instead of inferring them from
+/// punctuation.
+///
+/// [`segment_sentences`] infers units because running prose does not mark them. A corpus that
+/// arrives from a register, a claim log, a LIMS export or a table already carries its units, and
+/// re-inferring them destroys that information in both directions. Measured on a certification
+/// log's 427 claim spans (survey §4 step 4): `segment_sentences` returns 653 units — 90 spans split
+/// because a span holds more than one sentence, and 5 pairs merged because a span ends in a
+/// decimal-looking token and the next begins lowercase, which is the abbreviation case. Each span
+/// carries an id and a kind, so a re-segmented unit can be scored but not attributed.
+///
+/// Blank lines are skipped and each unit is trimmed. Nothing else is interpreted: a line that is a
+/// heading or a table cell is returned as it stands, for the caller to classify.
+pub fn segment_given_lines(doc: &str) -> Vec<String> {
+    doc.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// Given units are returned as they stand — including the two shapes `segment_sentences`
+    /// disagrees with: a span holding two sentences, and a span the next one would merge into.
+    #[test]
+    fn given_lines_are_the_units() {
+        let doc = "Methods\nCodon 380 is ATA. It is not CTA.\nhelix a1 holds 5 against 4.8.\nthe same pattern holds.\n\n";
+        assert_eq!(
+            segment_given_lines(doc),
+            vec![
+                "Methods",
+                "Codon 380 is ATA. It is not CTA.",
+                "helix a1 holds 5 against 4.8.",
+                "the same pattern holds.",
+            ]
+        );
+        // What the inferring segmenter does with the same four lines, which is why a pre-segmented
+        // corpus needs this function: the unterminated heading swallows the line after it, the
+        // two-sentence line splits, and the decimal-ending line swallows the lowercase one.
+        assert_eq!(
+            segment_sentences(doc),
+            vec![
+                "Methods\nCodon 380 is ATA.",
+                "It is not CTA.",
+                "helix a1 holds 5 against 4.8.\nthe same pattern holds.",
+            ]
+        );
+    }
     use super::*;
 
     #[test]

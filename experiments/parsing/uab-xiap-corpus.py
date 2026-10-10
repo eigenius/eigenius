@@ -8,10 +8,14 @@ The log is gitignored material, so this script takes its path and writes the pag
 tracked tree. Only the script and the aggregate numbers are committed.
 
 A claim is LIVE unless one of its entries is `## E<n> · retired`. Its `text:` is a verbatim span of
-the source document, so it is copied unaltered but for one thing: 147 of the 427 spans are headings
-or table cells with no sentence-final punctuation, and `kernel/src/dcg/segment.rs` breaks on `.!?`
-and nothing else — without a terminator each would run into the next claim. A `.` is appended to
-those, and the sidecar records which, so the scorer never credits a fragment as prose.
+the source document and is copied unaltered: the page is measured with `--units-per-line`, so one
+line is one unit and nothing is inferred from punctuation. Inferring it does not work here —
+`segment_sentences` turns these 427 spans into 653 units, splitting 90 and merging 5 pairs, after
+which no outcome can be attributed to the claim that produced it.
+
+146 spans are headings or table cells with no sentence-final punctuation («Methods», «Helix α1:
+Met375–Arg381»). They stay as they are and the sidecar marks them `fragment`, so the scorer reports
+them apart from prose rather than crediting or damning the grammar for the document's typography.
 
     python3 experiments/parsing/uab-xiap-corpus.py <claims-dir> <out-dir>
 
@@ -55,27 +59,24 @@ def main():
 
     page, rows = [], []
     for cid, kind, loc, text in live_claims(claims_dir):
+        # Newlines inside a span would split one unit into two, so they fold to spaces; nothing
+        # else is touched.
         one_line = " ".join(text.split())
         terminated = bool(re.search(r"[.!?]['\")\]]?$", one_line))
-        # A span's own sentence breaks become extra units; the scorer needs the count to hold a
-        # claim covered only when ALL of its units are.
-        breaks = len(re.findall(r"[.!?]['\")\]]?\s+[A-Z(\[]", one_line))
-        page.append(one_line if terminated else one_line + ".")
+        page.append(one_line)
         rows.append((len(page), cid, kind, loc, len(one_line.split()),
-                     "prose" if terminated else "fragment", breaks + 1))
+                     "prose" if terminated else "fragment"))
 
     with open(os.path.join(out_dir, "claims-page.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(page) + "\n")
     with open(os.path.join(out_dir, "claims-map.tsv"), "w", encoding="utf-8") as f:
-        f.write("line\tclaim\tkind\tlocation\twords\tform\texpected_units\n")
+        f.write("line\tclaim\tkind\tlocation\twords\tform\n")
         for r in rows:
             f.write("\t".join(str(x) for x in r) + "\n")
 
     frag = sum(1 for r in rows if r[5] == "fragment")
-    print(f"{len(rows)} live claims → {len(rows)} lines, "
-          f"{sum(r[6] for r in rows)} expected units "
-          f"({frag} fragments terminated, {sum(r[6] for r in rows) - len(rows)} extra from "
-          f"span-internal sentence breaks)")
+    print(f"{len(rows)} live claims → {len(rows)} lines = {len(rows)} units under "
+          f"--units-per-line ({frag} fragments, {len(rows) - frag} prose)")
 
 
 if __name__ == "__main__":
