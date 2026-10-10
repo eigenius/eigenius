@@ -9,6 +9,50 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **entry 6 (`2026-10-09`). UAB survey step 4 — parse coverage, and the vocabulary gap behind it.
+> ACTIVE on `uab-step4-parse-coverage` (8 commits, pushed, no PR). RESEED IN FLIGHT —
+> `wordnet-umls-2026-10-09-advimport`; nothing below takes effect until it lands, and `am` edits a
+> bootstrap ontology so the old store is unresumable by content hash.
+> [uab-xiap-parse-coverage.md](uab-xiap-parse-coverage.md) has the measurement and the analysis.**
+>
+> **Coverage: 5 of 427 live claim spans (1.2%), `encoded` 0.** Prose 5/281, fragments 0/146.
+> missing-lexeme 335, grammar-gap 84. The kind does not predict the outcome — it is a property of a
+> claim's warrant, not its sentence — so a per-kind coverage target is not a thing to steer by.
+> Section does: body 2.3%, tables 0, §References 0.
+>
+> **The gap is lexical, and mostly not a vocabulary gap.** 501 OOV types partitioned against WordNet
+> 3.0, UMLS 2026AA (4.98M English forms) and SPECIALIST (672k): 400 (80%) are identifiers and names
+> — importing more vocabulary does not move that number, they want recognition by form and routing by
+> document structure (D96, not D97). Three were an importer gap.
+>
+> **Three importer fixes landed, all awaiting the reseed:**
+> - adverbs import at Luo & Shi's `ADV` (`211cb10`). The payoff is CONTENT, not coverage: the
+>   derivational rule seeded IDENTITY sem, so «partially exposed» asserted nothing about *partially*
+>   — 90 occurrences over 79 of 427 spans. D62 §8.7.5 deferred `data.adv` for want of this type;
+>   #270 supplied it.
+> - the two closed-class lists are back in step (`9281dd2`). 112 bootstrap-supplied forms were absent
+>   from the withholding list; five surfaces were withheld with nothing covering them, and `then`,
+>   `nor`, `any` were being rescued per-document by the OOV augmentation. `any`/`nor`/`been` are
+>   pinned as an asserted set — each needs a semantic decision, not a copied entry.
+> - the non-content filter checks its premise (`a0bd8dd`). `AttestedForms` admits a T078/T080-only
+>   form only where nothing else supplies it AND SPECIALIST attests it: 215 forms, `hemizygosity`
+>   among them. Safe by construction against the compound-pile defect.
+>
+> **The harness gained a pre-segmented mode.** `segment_sentences` turned the 427 register spans into
+> 653 units (90 split, 5 merged), destroying the per-span attribution the kinds label.
+> `segment_given_lines` / `--units-per-line` takes the units as given; the default is unchanged.
+>
+> **After the reseed, in order:** re-run step 4 on the same corpus (does missing-lexeme fall, and do
+> units move to GRAMMAR-GAP or to AMBIG?); the reference-page gate, since `grammar-gap` is gated on
+> `baseline.json` and `reading-correct` on `selection-baseline.json` and adverbs gaining content moves
+> both; then re-pin from the forest. **A pin diff is not a regression signal here** — the new store's
+> adverbs assert what the old one dropped. Watch `grammar-gap` and `invalid-selected`.
+>
+> **Three requirements for step 5's document model**, with numbers, in the note: units given rather
+> than inferred; 34% of the corpus is not prose (88 table cells, 14 section headings — every one
+> `kind: compressed` — 44 other fragments); §References is 19% of the corpus and 41% of the lexical
+> gap, so it routes to `reference:Reference` rather than parsing.
+
 > **entry 5 (`2026-10-08`). UAB round 1, survey step 3 — three certified XIAP claims end to end.
 > DONE, merged as #280 (`67d5fe8`, `2026-10-09`). Plan + results:
 > [d100-certifying-the-xiap-report.md](../design/d100-certifying-the-xiap-report.md). What it left is

@@ -140,6 +140,49 @@ which 17 are word-like and new: `breakpoint`, `nonsynonymous`, `oligomerization`
 initialism collisions — `Liu`, `Meyer`, `Patel`, `SJ`, `KE` — which SPECIALIST would match for the
 wrong reason.
 
+### What was fixed, and what it needed
+
+The analysis above partitions the gap; three of its causes were importer-side and are now closed
+(branch `uab-step4-parse-coverage`). All three take effect only on a reseed, and the `am` entry edits
+a bootstrap ontology, so the old store is unresumable by content hash — the reseed is required, not
+optional.
+
+**Adverbs import at Luo & Shi's `ADV`** (`211cb10`). D62 §8.7.5 deferred `data.adv` for want of a
+type for a predicate modifier; eigenius#270 supplied it. Per synset, one axiom at
+`(e -> t) -> (e -> t)`, one `lexicon:SemTerm` holding `λV. λs. And(V(s), adv(V, s))`, and one entry
+per lemma in each of the two manner positions. The conjunction is in the entry, so modifier drop
+stays Luo & Shi's theorem.
+
+The payoff is not coverage — the deferral cost one OOV type, `likewise`, because the parser recovered
+adverbs by a derivational rule instead. It is CONTENT: that rule seeds **identity sem**, so the
+adverb β-reduces away and the claim is exactly the unmodified one. «p.Ile380Thr is partially exposed»
+asserted nothing about *partially*; 39 distinct `-ly` adverbs over 79 of the 427 spans, 90
+occurrences. The rule is now the fallback for forms the lexicon does not carry, and discourse adverbs
+keep identity because they attach at `S/S` and are transparent there. Its own comment had claimed
+WordNet does not store productive `-ly` adverbs; 2975 of WordNet's 4481 adverb lemmas end in `-ly`.
+
+**The closed-class lists are back in step** (`9281dd2`). `dcg::closed_class` (what the importers
+withhold) and `ontologies/lexicon/closed-class.esl` (what the bootstrap supplies) are two halves of
+one claim and had drifted both ways: 112 supplied forms were missing from the withholding list, 18 of
+them reified by UMLS as T078/T080 cruft, and five surfaces were withheld with nothing covering them.
+
+That second direction was live. `then`, `nor` and `any` were unknown to the lexicon in the run above
+and rescued per-document by the page's OOV augmentation — a function word grounded as though it were
+an unseen domain term. `then` left the withholding list (an adverb, now imported) and `am` was
+supplied; `any`, `nor` and `been` are pinned as an asserted set by
+`kernel/tests/closed_class_invariant.rs` because each needs a semantic decision rather than a copied
+entry: `any` is free-choice/NPI so `exists_sem` is wrong under negation, `nor` denies both conjuncts
+while the reserved table offers only and/or, `been` is a participle.
+
+**The non-content filter checks its premise** (`a0bd8dd`). `is_non_content_concept` withholds every
+noun entry of a concept typed only T078/T080, justified by the surface staying "known via WordNet /
+the closed-class bootstrap" — a premise nothing checked. `AttestedForms` now reads WordNet's
+`index.*` and SPECIALIST's `LEXICON` at import and admits a form only where the premise FAILS and
+SPECIALIST attests it: 585 single ordinary words of 21494 English atoms, of which SPECIALIST attests
+215, `hemizygosity` among them. It cannot reintroduce the compound-pile defect by construction —
+every documented case is closed-class (`And`, `Some`, `For (preposition)`) or multiword (`Associated
+with`), and the gate only reaches surfaces that currently have no reading at all.
+
 ### A measurement bug, found and fixed
 
 `Parser::has_token` re-derived its own lemma list — raw surface, Morphy lemmas, the hyphen rule —
