@@ -10,8 +10,8 @@ any detour.
 ## Stack (top → bottom)
 
 > **entry 6 (`2026-10-09`, closed `2026-10-10`). UAB survey step 4 — parse coverage, and the
-> adverb import behind it. DONE on `uab-step4-parse-coverage` (25 commits, pushed, PR open). The
-> gate PASSES every criterion against `baseline.json`.
+> adverb import behind it. DONE, merged as #281 (`670ac3a`, `2026-10-10`). The gate PASSES every
+> criterion against `baseline.json`.
 > [uab-xiap-parse-coverage.md](uab-xiap-parse-coverage.md) has the measurements.**
 >
 > Store: `wordnet-umls-hpo-aligned-2026-10-10-degskip`. The chain is FIVE steps, not three — the
