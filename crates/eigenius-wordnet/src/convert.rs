@@ -132,6 +132,9 @@ pub struct Report {
     pub adj_axioms: usize,
     /// Adverb synsets emitted at Luo & Shi's `ADV` type ([`push_adv`]).
     pub adv_axioms: usize,
+    /// Per-lemma adverb entries withheld because the synset is a DEGREE word the comparative
+    /// machinery owns ([`DEGREE_SURFACES`]). The axiom still ships.
+    pub degree_adverb_skipped: usize,
     pub entries: usize,
     /// Of `entries`, the participle (`ger`/`pss`) verb-form entries (D63 §8.9 6-aux):
     /// the generated gerund + past-participle forms an auxiliary selects.
@@ -1047,8 +1050,36 @@ fn adv_cats() -> [String; 2] {
 /// DISCOURSE adverbs are not this. `however`/`therefore` attach at the clause level (`S/S`, `S\S`)
 /// and are genuinely transparent there, so the parser keeps its identity sem for them; this emits
 /// the manner positions only.
+/// Degree words that must not get a MANNER-adverb entry, because the reference grammars do not give
+/// them one and the comparative machinery already owns them.
+///
+/// `references/openccg/test/lexicon.xml` (CCGbank-derived, Penn-tagged) assigns `more` JJR/RBR with
+/// `n/n`, `n/n/(n/n)` (the modifier-of-modifier degree reading) and predicative `s[adj]\np`, and
+/// `most` JJS/RBS with `n`, `n/n`, `n/n/(n/n)`; `grammars/comic` files `more` under
+/// `family="Adjective" pos="Adj"`. None of them is ever assigned the manner VP modifier
+/// `s\np/(s\np)` that [`adv_cats`] emits. `very` is the same shape, carrying `n/n/(n/n)` and
+/// `s[adj]\np/(s[adj]\np)`.
+///
+/// Measured cost of getting this wrong: the imported `less` won the selection on «The lines from
+/// rare lineages were less dependent on WRN» with
+/// `r00099527(λG. gt(deg_dependent_rel_on(WRN, G), std_dependent), the(…lines…))` — asserting the
+/// lines ARE dependent above the standard and then modifying the manner of that holding, which
+/// inverts the claim the sentence makes.
+///
+/// Skipped HERE rather than in `dcg::closed_class` deliberately. Withholding there is all-POS, and
+/// the grammars say these words SHOULD have their adjectival and nominal categories — `less water`,
+/// `a less amount`. This drops only the adverb entries.
+const DEGREE_SURFACES: &[&str] = &["less", "more", "most", "very", "least", "much", "far"];
+
 fn push_adv(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) {
     let loc = local(syn);
+    // A degree synset gets no manner entries ([`DEGREE_SURFACES`]). The AXIOM still ships, so the
+    // sense stays on the chain and nothing that references it dangles; only the per-lemma entries
+    // are withheld, mirroring how the closed-class and non-content filters work.
+    let degree = syn
+        .words
+        .iter()
+        .any(|w| DEGREE_SURFACES.contains(&w.to_ascii_lowercase().as_str()));
     let adv_type = format!("({ENTITY_TOP} -> Prop) -> {ENTITY_TOP} -> Prop");
     // The axiom is the sense's denotation; the gloss rides on it for the concept-description index
     // (D63 §6a index c), as the noun and adjective axioms do.
@@ -1071,6 +1102,10 @@ fn push_adv(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks
          \x20   );\n\
          }}\n\n"
     ));
+    if degree {
+        rep.degree_adverb_skipped += syn.words.len();
+        return;
+    }
     let sem_type = format!("({ENTITY_TOP} -> Prop) -> ({ENTITY_TOP} -> Prop)");
     for (i, lemma) in syn.words.iter().enumerate() {
         for (j, cat) in adv_cats().iter().enumerate() {

@@ -215,3 +215,60 @@ fn the_default_pos_list_includes_adv() {
         "the importer's default --pos must include adv, else the converter's adverb arm never fires"
     );
 }
+
+/// **A degree synset gets no manner entries, but keeps its axiom.**
+///
+/// The reference grammars never assign `less`/`more`/`most` the manner VP modifier `s\np/(s\np)`
+/// this importer emits — `references/openccg/test/lexicon.xml` gives `more` JJR/RBR over `n`, `n/n`
+/// and predicative `s[adj]\np`, and `grammars/comic` files it under `family="Adjective"`. Imported
+/// as a manner adverb, `less` won the selection on «The lines from rare lineages were less dependent
+/// on WRN» with a reading that asserts the lines ARE dependent and then modifies the manner —
+/// inverting the sentence.
+///
+/// The axiom still ships so the sense does not dangle; only the per-lemma entries are withheld.
+#[test]
+fn a_degree_synset_yields_no_manner_entries() {
+    let syn = parse_data_line(
+        "00099527 02 r 02 less 0 to_a_lesser_extent 0 001 ! 00099341 r 0101 | used to form the comparative",
+    )
+    .expect("parse the `less` data.adv line");
+    let (doc, rep) = render_document(
+        &[syn],
+        &SenseRanks::new(),
+        &MassNouns::new(),
+        &Governance::default(),
+    );
+    assert_eq!(rep.degree_adverb_skipped, 2, "both lemmas withheld:\n{doc}");
+    assert_eq!(
+        rep.adv_axioms, 1,
+        "the axiom still ships, so the sense does not dangle"
+    );
+    assert!(
+        !doc.contains("lexicon:form     = \"less\""),
+        "no manner entry on a degree word:\n{doc}"
+    );
+    assert!(
+        doc.contains("axiom wn:r00099527"),
+        "the axiom is still declared:\n{doc}"
+    );
+}
+
+/// A plain manner adverb is unaffected by the degree skip.
+#[test]
+fn a_manner_synset_still_gets_its_entries() {
+    let syn = parse_data_line(
+        "00448282 02 r 01 selectively 0 001 \\ 00065184 a 0101 | in a selective manner",
+    )
+    .expect("parse the `selectively` data.adv line");
+    let (doc, rep) = render_document(
+        &[syn],
+        &SenseRanks::new(),
+        &MassNouns::new(),
+        &Governance::default(),
+    );
+    assert_eq!(rep.degree_adverb_skipped, 0);
+    assert!(
+        doc.contains("lexicon:form     = \"selectively\""),
+        "a manner adverb keeps its entries:\n{doc}"
+    );
+}
