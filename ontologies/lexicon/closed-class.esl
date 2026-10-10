@@ -267,6 +267,14 @@ resource lexicon:copula_sem : lexicon:SemTerm {
     );
 }
 // is — copula, 3sg.
+resource lexicon:am_copula : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular present of BE — copula or auxiliary.";
+    lexicon:form     = "am";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg)), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np(lexicon:Entity, lexicon:num_any))) );
+    lexicon:sem      = lexicon:copula_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "be";
+}
 resource lexicon:is_copula : lexicon:LexicalEntry {
     core:description = "grammatical: third-person singular present of BE — copula or auxiliary.";
     lexicon:form     = "is";

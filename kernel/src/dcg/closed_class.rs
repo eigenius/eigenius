@@ -28,16 +28,42 @@
 //! needs the symbol recovers it as a document-glossary entry — the same accepted tradeoff the UMLS
 //! importer already documents for `as`=arsenic / `in`=indium.
 //!
+//! **Keeping it in step with the bootstrap.** The list and `ontologies/lexicon/closed-class.esl` are
+//! two halves of one claim — the closed class owns this surface, so an importer must not seed content
+//! on it — and they had drifted: 112 forms the bootstrap supplies were absent here, so UMLS could mint
+//! a concept on them. Eighteen of those are reified by UMLS as exactly the T078/T080 "Idea or Concept"
+//! / "Qualitative Concept" terminology cruft the filter exists for. Eight were added (2026-10-09):
+//! `against`, `per`, `to`, `via`, `without`, `if`, `has`, `had` — every one carries NO WordNet entry
+//! in any part of speech, so withholding cannot cost a content reading. The other ten (`about`,
+//! `above`, `around`, `below`, `beyond`, `off`, `out`, `less`, `have`, `approximately`) all do carry
+//! one, and adverbs now import, so they stay out: `closed_class_surfaces_stay_known` is the invariant,
+//! not "withhold everything grammatical".
+//!
+//! `then` was REMOVED (2026-10-09): it is neither a preposition nor a conjunction, WordNet carries it
+//! as an adverb, and adverbs now import — so withholding it left it with no reading at all. Measured
+//! on the XIAP certification log, `then`, `nor` and `any` were all unknown to the lexicon and were
+//! rescued per-document by the page's OOV augmentation, which grounds a function word as though it
+//! were an unseen domain term.
+//!
 //! This list is deliberately **only** what the closed class owns. Importer-specific artefact lists
 //! (UMLS's `lead`/`alone`/`negation` reifications) stay in that importer: `lead` is a legitimate
 //! WordNet content noun and verb, so it must not be dropped corpus-wide.
 
 /// Prepositions and conjunctions (D63 §5.3).
 const PREPOSITIONS_AND_CONJUNCTIONS: &[&str] = &[
-    "for", "from", "into", "as", "with", "on", "at", "by", "of", "in", "then", "than", "within",
-    "upon", "onto", "unto", "after", // prepositions
+    "for", "from", "into", "as", "with", "on", "at", "by", "of", "in", "than", "within", "upon",
+    "onto", "unto", "after", // prepositions
+    "against", "per", "to", "via",
+    "without", // …which the bootstrap also owned but this list missed
     "and", "or", "but", "nor", // coordinating conjunctions
+    "if",  // subordinator
 ];
+
+/// Auxiliary forms the bootstrap owns. `have` is NOT here: WordNet carries it as a content noun and
+/// verb ("patients have mutations"), and withholding is all-POS, so adding it would drop that
+/// corpus-wide — the same trap the module header records for `lead`. Its inflections `has`/`had`
+/// have no WordNet entry at all, so withholding them costs nothing.
+const AUXILIARIES: &[&str] = &["has", "had"];
 
 /// Determiners and quantifiers the bootstrap ships (D63 §8.3).
 const DETERMINERS: &[&str] = &[
@@ -82,6 +108,7 @@ const COPULA: &[&str] = &["be", "is", "are", "was", "were", "am", "been"];
 pub fn is_closed_class_surface(form: &str) -> bool {
     let f = form.trim().to_ascii_lowercase();
     PREPOSITIONS_AND_CONJUNCTIONS.contains(&f.as_str())
+        || AUXILIARIES.contains(&f.as_str())
         || DETERMINERS.contains(&f.as_str())
         || DEMONSTRATIVES.contains(&f.as_str())
         || COPULA.contains(&f.as_str())
