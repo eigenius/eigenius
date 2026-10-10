@@ -9,49 +9,84 @@ any detour.
 
 ## Stack (top → bottom)
 
-> **entry 6 (`2026-10-09`). UAB survey step 4 — parse coverage, and the vocabulary gap behind it.
-> ACTIVE on `uab-step4-parse-coverage` (8 commits, pushed, no PR). RESEED IN FLIGHT —
-> `wordnet-umls-2026-10-09-advimport`; nothing below takes effect until it lands, and `am` edits a
-> bootstrap ontology so the old store is unresumable by content hash.
-> [uab-xiap-parse-coverage.md](uab-xiap-parse-coverage.md) has the measurement and the analysis.**
+> **entry 6 (`2026-10-09`, closed `2026-10-10`). UAB survey step 4 — parse coverage, and the
+> adverb import behind it. DONE on `uab-step4-parse-coverage` (25 commits, pushed, PR open). The
+> gate PASSES every criterion against `baseline.json`.
+> [uab-xiap-parse-coverage.md](uab-xiap-parse-coverage.md) has the measurements.**
 >
-> **Coverage: 5 of 427 live claim spans (1.2%), `encoded` 0.** Prose 5/281, fragments 0/146.
-> missing-lexeme 335, grammar-gap 84. The kind does not predict the outcome — it is a property of a
-> claim's warrant, not its sentence — so a per-kind coverage target is not a thing to steer by.
-> Section does: body 2.3%, tables 0, §References 0.
+> Store: `wordnet-umls-hpo-aligned-2026-10-10-degskip`. The chain is FIVE steps, not three — the
+> recipe at entry 3 is right and I skipped two of them first time: reseed → build-alignment →
+> `obograph-import hp.json` → `add-layer-to-snapshot` → build-hpo-alignment. Provenance reproduced
+> on every run: 38391 merges, 20533 HPO resources, 864 equivalences.
 >
-> **The gap is lexical, and mostly not a vocabulary gap.** 501 OOV types partitioned against WordNet
-> 3.0, UMLS 2026AA (4.98M English forms) and SPECIALIST (672k): 400 (80%) are identifiers and names
-> — importing more vocabulary does not move that number, they want recognition by form and routing by
-> document structure (D96, not D97). Three were an importer gap.
+> **Gate (live reranked, the arm `baseline.json` records):** grammar-gap 0, expected-hits 62/62,
+> total-readings 828 (ceiling 895), skeletons 282, `encoded` 1 — the first unit ever to reach a
+> unique reading. COVERAGE, SELECTION-VALIDITY and LEDGER all PASS.
 >
-> **Three importer fixes landed, all awaiting the reseed:**
-> - adverbs import at Luo & Shi's `ADV` (`211cb10`). The payoff is CONTENT, not coverage: the
->   derivational rule seeded IDENTITY sem, so «partially exposed» asserted nothing about *partially*
->   — 90 occurrences over 79 of 427 spans. D62 §8.7.5 deferred `data.adv` for want of this type;
->   #270 supplied it.
-> - the two closed-class lists are back in step (`9281dd2`). 112 bootstrap-supplied forms were absent
->   from the withholding list; five surfaces were withheld with nothing covering them, and `then`,
->   `nor`, `any` were being rescued per-document by the OOV augmentation. `any`/`nor`/`been` are
->   pinned as an asserted set — each needs a semantic decision, not a copied entry.
-> - the non-content filter checks its premise (`a0bd8dd`). `AttestedForms` admits a T078/T080-only
->   form only where nothing else supplies it AND SPECIALIST attests it: 215 forms, `hemizygosity`
->   among them. Safe by construction against the compound-pile defect.
+> **Adverbs import at Luo & Shi's `ADV`.** D62 §8.7.5's deferral was implemented in THREE places —
+> the converter arm, the CLI's default `--pos`, and `select_synsets` — and lifting only the first
+> gave `0 adv axioms` over 114038 synsets while every converter test passed. 3621 axioms, 11034
+> entries. The payoff is CONTENT, not coverage: the derivational fallback seeded IDENTITY sem, so
+> «partially exposed» asserted nothing about *partially* — 90 occurrences over 79 of 427 XIAP spans.
 >
-> **The harness gained a pre-segmented mode.** `segment_sentences` turned the 427 register spans into
-> 653 units (90 split, 5 merged), destroying the per-span attribution the kinds label.
-> `segment_given_lines` / `--units-per-line` takes the units as given; the default is unchanged.
+> **Seven re-pins, all of the same shape** (the adverb conjoins where it reduced to identity):
+> typically, favourably, simply, preferentially, highly, selectively ×2. Each checked against its
+> note's recorded ruling — two of the forests offered a reading a maintainer had rejected
+> (`adv_in` applied to `speaker`; `in`/`with` as siblings rather than nested), and pinning either
+> would have laundered it.
 >
-> **After the reseed, in order:** re-run step 4 on the same corpus (does missing-lexeme fall, and do
-> units move to GRAMMAR-GAP or to AMBIG?); the reference-page gate, since `grammar-gap` is gated on
-> `baseline.json` and `reading-correct` on `selection-baseline.json` and adverbs gaining content moves
-> both; then re-pin from the forest. **A pin diff is not a regression signal here** — the new store's
-> adverbs assert what the old one dropped. Watch `grammar-gap` and `invalid-selected`.
+> **Grammar-owned adverbs withheld**: `not`, `also`, `too` (surface, not synset — `r00047534`
+> bundles `likewise`, which the import closed). `non` deliberately excluded: nothing supplies it.
+> Degree words `less/more/most/very/least/much/far` skipped in `push_adv` only, NOT in
+> `closed_class` — withholding there is all-POS and the reference grammars
+> (`references/openccg/test/lexicon.xml`) assign `more` JJR/RBR over `n`, `n/n` and predicative
+> `s[adj]\np`, never the manner VP modifier.
 >
-> **Three requirements for step 5's document model**, with numbers, in the note: units given rather
-> than inferred; 34% of the corpus is not prose (88 table cells, 14 section headings — every one
-> `kind: compressed` — 44 other fragments); §References is 19% of the corpus and 41% of the lexical
-> gap, so it routes to `reference:Reference` rather than parsing.
+> **Step 4 re-measured on the fixed store:** missing-lexeme 335 → 334, covered 5 → 6, OOV types
+> 501 → 495, and the page augmentation's grounding 147 → 131 — 16 tokens no longer rescued
+> per-document, `hemizygous` among them. **The conclusion is unchanged: the corpus's gap is not a
+> vocabulary gap.** ~400 of 495 OOV types are identifiers, accessions, coordinates, citation
+> fragments and author names. Importing vocabulary moves this by single digits.
+>
+> **Two method rules now in `experiments/parsing/README.md` §3, both of which cost real work here:**
+> author a pin from the GATED arm's `EIGENIUS_DUMP_SKELETONS` set — not `selections.json`, not the
+> `sk=` lines of `DUMP_READINGS` — and never score cap-only against the reranked baseline. Cap-only
+> loses 8 pins the ranker keeps (54/62 vs 62/62), and those 8 read exactly like regressions:
+> `prep_of` becoming `compound_kind`, a transitive verb going 1-place, a modal vanishing. I reported
+> four such "regressions" that all pass on the gated arm.
+>
+> **Left open, none blocking:** `reading-wrong 4` and `reading-unadjudicated 15` (selection quality,
+> untouched by pinning); `any`/`nor`/`been` pinned as known closed-class gaps, each needing a
+> semantic decision (`any` is free-choice, so `exists_sem` is wrong under negation; `nor` denies both
+> conjuncts and the reserved table offers only and/or; `been` is a participle); `then` on probation —
+> lifting it from the withholding list admitted four senses, not one; the hyphen noun-head work (14
+> types, needs the Σ-refinement decision) and the genitive construction for `'s` (4 types, no
+> genitive exists — `poss_of` is wired for anaphoric determiners only).
+
+> **entry 7 (`2026-10-10`). UAB survey step 5 — the document model. NEXT, not started.**
+>
+> `experiments/uab/eigenius-survey-2026-09-30.md` §4 step 5, which depends on step 4's evidence
+> (entry 6). [d96-jats-document-model.md](../design/d96-jats-document-model.md) is **decided**
+> (2026-09-25) as the model; what is unbuilt is its realisation in the encoding vocabulary, plus one
+> route it does not have.
+>
+> **Step 4's evidence populates two of D96's own complaints with counts.** It says "the encoding
+> vocabulary has kinds nothing assigns" — `enc:unit_kind` routes a `DiscourseUnit` while the encoder
+> hard-codes every unit to `kind_prose` — and that `kind_table` "conflates two things". Measured:
+> 34% of the XIAP corpus is not prose, and the two things are 88 TABLE CELLS against 14 SECTION
+> HEADINGS (every heading `kind: compressed`), plus 44 other fragments. §References is 19% of the
+> corpus and 41% of the lexical gap, so it routes to `reference:Reference` rather than parsing.
+>
+> **The gap: none of D96's four routes covers this source.** They are JATS, BioC, PDF→GROBID→TEI and
+> plain text, and D96 scopes itself to literature. The XIAP material is a CLAIM REGISTER
+> (`claims/*.md` with `id`/`location`/`text`/`kind` front matter) over a markdown clinical report —
+> a fifth route, and the one the collaboration needs, since those logs are exports from databases,
+> clinical systems and LIMS. It is also the cheapest: the register STATES each unit's location and
+> kind, so nothing is inferred. `segment_given_lines` (entry 6) is its first piece and is built;
+> D96's routes do not mention given-units because JATS and TEI supply them implicitly.
+>
+> JATS has the elements for all of it — `<sec>`, `<title>`, `<table-wrap>`, `<ref-list>`, `<xref>` —
+> so the model needs no amendment. D71 is the other half.
 
 > **entry 5 (`2026-10-08`). UAB round 1, survey step 3 — three certified XIAP claims end to end.
 > DONE, merged as #280 (`67d5fe8`, `2026-10-09`). Plan + results:
