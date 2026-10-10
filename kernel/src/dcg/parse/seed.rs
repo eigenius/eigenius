@@ -393,22 +393,25 @@ impl Parser {
         if !lexicalized && !self.is_derived_adverb(&s) {
             return Vec::new();
         }
-        // An IMPORTED adverb sense already seeds this span at the same categories, with Luo & Shi's
-        // `ADV` denotation instead of identity, so seeding here too would add a reading that
-        // asserts strictly less and differs only by having dropped the adverb. The derivational
-        // path is the fallback for a form the lexicon does not carry.
-        if !lexicalized
-            && self
-                .lex
-                .entries_for(&s)
-                .iter()
-                .any(|e| is_wordnet_sense_of_pos(e.sense.as_deref(), "r"))
-        {
-            return Vec::new();
+        // An IMPORTED adverb sense already seeds the MANNER positions, with Luo & Shi's `ADV`
+        // denotation instead of identity, so seeding them here too would add a reading that asserts
+        // strictly less and differs only by having dropped the adverb.
+        let imported = self
+            .lex
+            .entries_for(&s)
+            .iter()
+            .any(|e| is_wordnet_sense_of_pos(e.sense.as_deref(), "r"));
+        // Manner positions (adjective + VP modifier) are the FALLBACK, for a form the lexicon does
+        // not carry. The clause positions (`S/S`, `S\S`) are not: a discourse adverb really is
+        // transparent at the proposition level, and WordNet types `however`/`therefore`/`thus` as
+        // manner adverbs like any other, so the import does not supply that reading. Every one of
+        // the lexicalized set is in `data.adv`, which is why this is split rather than gated on
+        // `!lexicalized` — that left `however` with identity manner items beside the imported
+        // conjoining ones, the same position under two semantics.
+        let mut cats = Vec::new();
+        if !imported {
+            cats.extend(adverb_modifier_cats(&self.grammar.layer).unwrap_or_default());
         }
-        // Manner positions (adjective + VP modifier) for every transparent adverb; discourse
-        // adverbs (`also`/`however`/`yet`) ALSO attach at the clause level (`S/S`, `S\S`).
-        let mut cats = adverb_modifier_cats(&self.grammar.layer).unwrap_or_default();
         if lexicalized {
             cats.extend(sentence_modifier_cats(&self.grammar.layer).unwrap_or_default());
         }
