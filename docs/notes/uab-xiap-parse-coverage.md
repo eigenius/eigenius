@@ -12,7 +12,34 @@ Corpus: the 427 live claim spans of the certification log, verbatim, one per uni
 Coverage counts a span whose parse produced at least one reading — `ENCODED` or `AMBIG`. Choosing
 among readings is the selection stage, which a cap-only run does not reach.
 
+## Re-measured after the importer fixes (2026-10-10)
+
+Same corpus, same flags (`--no-llm --units-per-line`), store
+`wordnet-umls-hpo-aligned-2026-10-10-degskip`. `missing-lexeme` is arm-independent —
+`encode_unit` returns it before parsing anything — so cap-only gives the real figure.
+
+| | before | after |
+|---|---:|---:|
+| missing-lexeme | 335 | **334** |
+| grammar-gap | 84 | 84 |
+| covered (`ENCODED` + `AMBIG`) | 5 (1.2%) | **6 (1.4%)** |
+| distinct OOV types | 501 | **495** |
+| OOV grounded by the page's augmentation | 147 | **131** |
+| residual OOV | 230 | 230 |
+
+Six OOV types closed, one span recovered. The figure to watch is the augmentation's 147 → 131: **16
+tokens no longer need the page to invent a grounding for them**, `hemizygous` among them — it was
+being rescued per-document before, which is the defect that finding describes, not a fix.
+
+The analysis below predicted TWO types would close (`likewise` from the adverb import,
+`hemizygosity` from the admit gate). Six did. The partition under-counted, and the correction does
+not change its conclusion: **the corpus's gap is not a vocabulary gap.** 334 of 427 spans still die
+at the lexicon, and ~400 of the 495 remaining OOV types are identifiers, accessions, coordinates,
+citation fragments and author names that no lexicon should carry. Importing more vocabulary moves
+this by single digits; the document model (D96) is what moves it.
+
 ## The result
+
 
 **5 of 427 spans are covered (1.2%). `encoded` is 0: not one span reached a unique reading.**
 
