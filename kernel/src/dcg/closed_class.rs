@@ -28,16 +28,80 @@
 //! needs the symbol recovers it as a document-glossary entry — the same accepted tradeoff the UMLS
 //! importer already documents for `as`=arsenic / `in`=indium.
 //!
+//! **Keeping it in step with the bootstrap.** The list and `ontologies/lexicon/closed-class.esl` are
+//! two halves of one claim — the closed class owns this surface, so an importer must not seed content
+//! on it — and they had drifted: 112 forms the bootstrap supplies were absent here, so UMLS could mint
+//! a concept on them. Eighteen of those are reified by UMLS as exactly the T078/T080 "Idea or Concept"
+//! / "Qualitative Concept" terminology cruft the filter exists for. Eight were added (2026-10-09):
+//! `against`, `per`, `to`, `via`, `without`, `if` — every one carries NO WordNet entry in any part of
+//! speech, so withholding cannot cost a content reading. The other ten (`about`,
+//! `above`, `around`, `below`, `beyond`, `off`, `out`, `less`, `have`, `approximately`) all do carry
+//! one, and adverbs now import, so they stay out: `closed_class_surfaces_stay_known` is the invariant,
+//! not "withhold everything grammatical".
+//!
+//! **`has` and `had` were added and then withdrawn (2026-10-09).** The test that admitted them was
+//! wrong: WordNet's `index.*` is LEMMA-keyed, and the importer emits INFLECTED surfaces that never
+//! appear there — its own test pins "base (num_any) + finite 3sg (`eats`, sg) + finite plural
+//! (`eat`, pl)". `has` is the 3sg surface of `have`, so withholding it took the only 3sg transitive
+//! reading away and «This state has frequent insertion or deletion mutations.» became a grammar-gap
+//! on the reference page, leaving `has` with plural-subject entries from the lemma and the `pss`
+//! auxiliary. The right question for this list is "does an importer EMIT this surface", not "is it a
+//! WordNet index lemma" — so a surface that is an inflection of a content lemma never belongs here.
+//!
+//! `then` was REMOVED (2026-10-09): it is neither a preposition nor a conjunction, WordNet carries it
+//! as an adverb, and adverbs now import — so withholding it left it with no reading at all. Measured
+//! on the XIAP certification log, `then`, `nor` and `any` were all unknown to the lexicon and were
+//! rescued per-document by the page's OOV augmentation, which grounds a function word as though it
+//! were an unseen domain term.
+//!
+//! **That removal is too blunt and is on probation.** Withholding is all-POS, so lifting it admits
+//! every sense, not just the adverb: on the 2026-10-09 store `then` resolves to 10 entries — three
+//! adverb senses in both manner positions (wanted), plus `then.n.15296354` as a `cat_n`,
+//! `then.a.01731108` with a `cat_measure`, and `umls:C1883708`. A `cat_n` on `then` is exactly the
+//! compound-pile this list exists to stop. The narrower fix is to put `then` in
+//! `super::parse::seed`'s `LEXICALIZED_ADVERBS` — it is a temporal/discourse connective like `thus`
+//! and `hence` — and restore the withholding, so the reading comes from the parser's identity path
+//! at `S/S` instead of from four content senses. Deferred to the next reseed rather than paid for on
+//! speculation: whether it costs anything is a question for the reference-page gate, and `then` may
+//! not occur there at all.
+//!
 //! This list is deliberately **only** what the closed class owns. Importer-specific artefact lists
 //! (UMLS's `lead`/`alone`/`negation` reifications) stay in that importer: `lead` is a legitimate
 //! WordNet content noun and verb, so it must not be dropped corpus-wide.
 
 /// Prepositions and conjunctions (D63 §5.3).
 const PREPOSITIONS_AND_CONJUNCTIONS: &[&str] = &[
-    "for", "from", "into", "as", "with", "on", "at", "by", "of", "in", "then", "than", "within",
-    "upon", "onto", "unto", "after", // prepositions
+    "for", "from", "into", "as", "with", "on", "at", "by", "of", "in", "than", "within", "upon",
+    "onto", "unto", "after", // prepositions
+    "against", "per", "to", "via",
+    "without", // …which the bootstrap also owned but this list missed
     "and", "or", "but", "nor", // coordinating conjunctions
+    "if",  // subordinator
 ];
+
+/// Adverbs whose work the GRAMMAR does, so an imported manner adverb on the surface does not add a
+/// reading — it adds a WRONG one. Caught by the reference-page gate on 2026-10-10, once adverbs
+/// began importing.
+///
+/// `not` is negation, and WordNet types it as a manner adverb like any other (`r00024073`,
+/// "negation of a word or group of words"). Imported, it gave «The four other RecQ DNA helicases
+/// were not preferentially essential» a reading in which negation modifies the MANNER of being
+/// essential — the same defect class as reading `non-homologous` as `homologous`.
+///
+/// `also`/`too` is an additive discourse connective (`r00047534`, "in addition"). It attaches at the
+/// clause level (`S/S`, `S\S`), where it is genuinely transparent; a manner reading instead asserts
+/// something about HOW the identifying was done, which is how «We also identified MSI cell lines
+/// from rare lineages» lost its pinned analysis.
+///
+/// Withheld by SURFACE, not by synset: `r00047534` bundles `also`, `too`, `besides`, `likewise` and
+/// `as_well`, and only the first two are grammar-owned. Withholding the synset would have taken
+/// `likewise` with it — the one OOV token of the XIAP corpus the adverb import closed.
+///
+/// **`non` is deliberately absent.** It is grammar-owned in the same sense, but a bare `non` is not
+/// an English word — the prefix case is `OPAQUE_HYPHEN_PREFIXES` — and neither the bootstrap nor a
+/// parser rule supplies it, so withholding it would make the surface unknown for no measured gain.
+/// That is the `then`/`any`/`nor` defect, and `closed_class_surfaces_stay_known` refuses it.
+const GRAMMAR_OWNED_ADVERBS: &[&str] = &["not", "also", "too"];
 
 /// Determiners and quantifiers the bootstrap ships (D63 §8.3).
 const DETERMINERS: &[&str] = &[
@@ -82,6 +146,7 @@ const COPULA: &[&str] = &["be", "is", "are", "was", "were", "am", "been"];
 pub fn is_closed_class_surface(form: &str) -> bool {
     let f = form.trim().to_ascii_lowercase();
     PREPOSITIONS_AND_CONJUNCTIONS.contains(&f.as_str())
+        || GRAMMAR_OWNED_ADVERBS.contains(&f.as_str())
         || DETERMINERS.contains(&f.as_str())
         || DEMONSTRATIVES.contains(&f.as_str())
         || COPULA.contains(&f.as_str())

@@ -35,6 +35,8 @@
 //! syndrome …"), and it flows into general predicate slots by subsumption.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
 
 use crate::rrf::Subset;
 
@@ -162,6 +164,9 @@ pub struct Report {
     /// ([`NON_CONTENT_TUIS`]) — a relation/idea/qualifier reification (`And` C1515981, `Associated
     /// with` C0332281), not a thing. The concept CLASS still ships; only the `cat_n` entry is withheld.
     pub non_content_skipped: usize,
+    /// Forms a non-content concept KEPT because withholding them would leave no reading and
+    /// SPECIALIST attests them ([`AttestedForms::admits`]).
+    pub non_content_admitted: usize,
 }
 
 /// Escape a string for an ESL double-quoted literal.
@@ -428,6 +433,97 @@ fn is_non_content_concept(tuis: &[String]) -> bool {
     !tuis.is_empty() && tuis.iter().all(|t| NON_CONTENT_TUIS.contains(&t.as_str()))
 }
 
+/// The two reference sets the non-content admit gate needs: WordNet's lemmas and SPECIALIST's
+/// attested English forms. Both empty ⇒ the gate never admits, which is the pre-gate behaviour.
+#[derive(Default)]
+pub struct AttestedForms {
+    wordnet: BTreeSet<String>,
+    specialist: BTreeSet<String>,
+}
+
+impl AttestedForms {
+    /// Read WordNet's `index.{noun,verb,adj,adv}` and SPECIALIST's `LEXICON`. Either absent is
+    /// non-fatal and leaves that half empty, as `--countability` does.
+    pub fn read(dict: Option<&Path>, specialist: Option<&Path>) -> Self {
+        let mut out = Self::default();
+        if let Some(d) = dict {
+            for pos in ["noun", "verb", "adj", "adv"] {
+                let Ok(text) = fs::read_to_string(d.join(format!("index.{pos}"))) else {
+                    eprintln!("wordnet index.{pos}: absent — the admit gate cannot check WordNet");
+                    continue;
+                };
+                for line in text.lines().filter(|l| !l.starts_with(' ')) {
+                    if let Some(lemma) = line.split_whitespace().next() {
+                        out.wordnet.insert(lemma.replace('_', " ").to_lowercase());
+                    }
+                }
+            }
+        }
+        if let Some(s) = specialist {
+            match eigenius_specialist::Lexicon::read(s) {
+                Ok(lex) => {
+                    for r in lex.records() {
+                        out.specialist.insert(r.base.to_lowercase());
+                        out.specialist
+                            .extend(r.spelling_variants.iter().map(|v| v.to_lowercase()));
+                    }
+                }
+                Err(e) => eprintln!("specialist LEXICON: {e} — the admit gate cannot attest"),
+            }
+        }
+        out
+    }
+
+    /// Whether the non-content filter should ADMIT `form` after all.
+    ///
+    /// The filter's own justification is that the withheld surface "stays known via WordNet / the
+    /// closed-class bootstrap". That is a premise, and it was never checked. Where it HOLDS the
+    /// withholding is free — WordNet supplies `abundance`, `accuracy`, `aerobic` — and where it
+    /// FAILS the surface has no reading at all: `hemizygosity` is UMLS C1881036 (NCI, T080) and
+    /// nothing else in the pipeline carries it.
+    ///
+    /// So: admit only where the premise fails AND SPECIALIST attests the form as English. Measured
+    /// on UMLS 2026AA, 9538 concepts are typed only T078/T080 carrying 21494 English atoms; the
+    /// premise fails for 585 single ordinary words, of which SPECIALIST attests 215 — `apoptotic`,
+    /// `bioavailable`, `cirrhotic`, `fibrotic`, `hemizygosity`, `hepatocellular`, `lymphovascular`,
+    /// `mesenchymal`, `oncogenic`, `resectable`, `seropositive`, `squamous`, `syngeneic`.
+    ///
+    /// This CANNOT reintroduce the defect the filter exists for, and not by luck. Every documented
+    /// case is excluded by construction: `And`, `Some`, `For (preposition)`, `as`, `in`, `Be`, `no`
+    /// are closed-class surfaces, and `Associated with` is multiword. The gate only ever reaches a
+    /// surface that currently has NO reading — which is exactly why the premise was stated.
+    ///
+    /// Restricted to a single ordinary-cased word because that is the shape the measurement found
+    /// the premise failing on. The multiword residue is LOINC panel names (`Acer rubrum Ab.IgE.RAST
+    /// class`), CDISC trial fields (`Adverse Event Expected Indicator`) and MeSH inverted headings
+    /// (`Accuracy, Data`) — terminology metadata, correctly withheld.
+    fn admits(&self, form: &str) -> bool {
+        let f = form.trim();
+        // A single word, ordinary casing: one leading letter then lowercase. Excludes multiword
+        // panel names, ALL-CAPS code labels and run-together HL7 identifiers by shape.
+        let ordinary = f.len() > 3
+            && f.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && f.chars().skip(1).all(|c| c.is_ascii_lowercase());
+        if !ordinary {
+            return false;
+        }
+        let low = f.to_lowercase();
+        // The premise HOLDS — something else supplies it — so withholding costs nothing.
+        if self.wordnet.contains(&low)
+            || eigenius_kernel::dcg::closed_class::is_closed_class_surface(&low)
+        {
+            return false;
+        }
+        // The premise FAILS. Attestation decides.
+        self.specialist.contains(&low)
+    }
+
+    /// The forms of a non-content concept that the gate admits.
+    fn admitted<'a>(&self, forms: &'a [String]) -> Vec<&'a String> {
+        forms.iter().filter(|f| self.admits(f)).collect()
+    }
+}
+
 /// Whether `form` is a grammatical or function-word surface UMLS should not seed as a content noun
 /// ([`GRAMMATICAL_SURFACES`] / [`FUNCTION_WORD_SURFACES`]).
 fn is_grammatical_surface(form: &str) -> bool {
@@ -580,6 +676,7 @@ pub fn render_concept_block(
     mass: &MassNouns,
     drops: &DropSet,
     adds: &AddSet,
+    attested: &AttestedForms,
 ) -> (String, Report) {
     let mut buf = String::new();
     let mut rep = Report::default();
@@ -600,7 +697,15 @@ pub fn render_concept_block(
     // reification), UNLESS it is a named individual (a symbol → `cat_np`, which does not pile into
     // compounds). The concept CLASS shipped above regardless, so the mirror stays intact.
     if named_tui.is_none() && is_non_content_concept(&c.tuis) {
-        rep.non_content_skipped += c.forms.len();
+        // …except for the forms the ADMIT GATE rescues: the ones whose withholding would leave no
+        // reading anywhere, and that SPECIALIST attests as English ([`AttestedForms::admits`]).
+        let admitted = attested.admitted(&c.forms);
+        rep.non_content_skipped += c.forms.len() - admitted.len();
+        if !admitted.is_empty() {
+            rep.non_content_admitted += admitted.len();
+            let forms: Vec<String> = admitted.into_iter().cloned().collect();
+            push_entries(&mut buf, &c.cui, &forms, named_tui, bare, drops, &mut rep);
+        }
     } else {
         let forms = forms_with_adds(&c.cui, &c.forms, adds);
         push_entries(&mut buf, &c.cui, &forms, named_tui, bare, drops, &mut rep);
@@ -618,6 +723,7 @@ pub fn render_document(
     mass: &MassNouns,
     drops: &DropSet,
     adds: &AddSet,
+    attested: &AttestedForms,
 ) -> (String, Report) {
     let mut rep = Report::default();
     let (base, sty) = render_base(subset, version);
@@ -626,7 +732,7 @@ pub fn render_document(
     let mut body = base;
     body.push_str("\n// ── Concept classes (the mirror) + derived common-noun entries ──\n");
     for c in &subset.concepts {
-        let (block, brep) = render_concept_block(c, mass, drops, adds);
+        let (block, brep) = render_concept_block(c, mass, drops, adds, attested);
         body.push_str(&block);
         rep.entries += brep.entries;
         rep.mass_entries += brep.mass_entries;
@@ -639,6 +745,7 @@ pub fn render_document(
         // not — a counter that is only wrong on one of two code paths.
         rep.inflected_skipped += brep.inflected_skipped;
         rep.non_content_skipped += brep.non_content_skipped;
+        rep.non_content_admitted += brep.non_content_admitted;
         rep.concepts += 1;
     }
 
@@ -721,6 +828,122 @@ mod tests {
         }
     }
 
+    /// A T080-only concept, as `Hemizygosity` (C1881036, NCI) really is.
+    fn t080_subset(cui: &str, name: &str, forms: &[&str]) -> Subset {
+        Subset {
+            semantic_types: vec![SemanticType {
+                tui: "T080".to_string(),
+                name: "Qualitative Concept".to_string(),
+            }],
+            concepts: vec![Concept {
+                cui: cui.to_string(),
+                tuis: vec!["T080".to_string()],
+                preferred_name: name.to_string(),
+                forms: forms.iter().map(|f| f.to_string()).collect(),
+                definition: None,
+                symbol: None,
+            }],
+        }
+    }
+
+    /// The reference sets, built in memory rather than read from `references/` (gitignored, and the
+    /// gate's behaviour is what is under test, not the files).
+    fn attested(wordnet: &[&str], specialist: &[&str]) -> AttestedForms {
+        AttestedForms {
+            wordnet: wordnet.iter().map(|w| w.to_string()).collect(),
+            specialist: specialist.iter().map(|w| w.to_string()).collect(),
+        }
+    }
+
+    /// **The admit gate checks the premise the non-content filter assumes.**
+    ///
+    /// `is_non_content_concept` withholds every T078/T080-only concept's noun entries, justified by
+    /// "the surface stays known via WordNet / the closed-class bootstrap". For `hemizygosity` that
+    /// is false: nothing else in the pipeline carries it, so withholding leaves no reading at all.
+    #[test]
+    fn a_non_content_form_nothing_else_supplies_is_admitted() {
+        let (doc, rep) = render_document(
+            &t080_subset("C1881036", "Hemizygosity", &["Hemizygosity"]),
+            "2026AA",
+            &MassNouns::new(),
+            &DropSet::new(),
+            &AddSet::new(),
+            &attested(&[], &["hemizygosity"]),
+        );
+        assert_eq!(rep.non_content_admitted, 1, "admitted:\n{doc}");
+        assert_eq!(rep.non_content_skipped, 0);
+        assert!(doc.contains("\"Hemizygosity\""), "the entry ships:\n{doc}");
+    }
+
+    /// Where the premise HOLDS, withholding costs nothing and must continue — `abundance` is a
+    /// WordNet noun, so the UMLS T080 reification adds only a compound-pile hazard.
+    #[test]
+    fn a_non_content_form_wordnet_supplies_stays_withheld() {
+        let (_, rep) = render_document(
+            &t080_subset("C0001000", "Abundance", &["Abundance"]),
+            "2026AA",
+            &MassNouns::new(),
+            &DropSet::new(),
+            &AddSet::new(),
+            &attested(&["abundance"], &["abundance"]),
+        );
+        assert_eq!(rep.non_content_admitted, 0);
+        assert_eq!(rep.non_content_skipped, 1);
+    }
+
+    /// The gate cannot reintroduce the defect the filter exists for. `Associated with` is multiword,
+    /// `Some` is closed-class, and an HL7 code name is neither attested nor ordinary-cased — each
+    /// excluded by construction, not by an override list.
+    #[test]
+    fn the_gate_refuses_the_cases_the_filter_exists_for() {
+        for (cui, name, form, sp) in [
+            ("C0332281", "Associated with", "Associated with", true),
+            ("C0205392", "Some", "Some", true),
+            (
+                "C1000001",
+                "ActClassAccommodation",
+                "actclassaccommodation",
+                false,
+            ),
+            ("C1000002", "And", "And", true),
+        ] {
+            let specialist: Vec<&str> = if sp {
+                vec![&form.to_lowercase().leak()[..]]
+            } else {
+                vec![]
+            };
+            let (_, rep) = render_document(
+                &t080_subset(cui, name, &[form]),
+                "2026AA",
+                &MassNouns::new(),
+                &DropSet::new(),
+                &AddSet::new(),
+                &attested(&[], &specialist),
+            );
+            assert_eq!(
+                rep.non_content_admitted, 0,
+                "{form} must stay withheld — it is the defect class the filter names"
+            );
+        }
+    }
+
+    /// Both reference sets absent ⇒ the gate admits nothing, which is the behaviour before it
+    /// existed. A reseed that forgets `--wordnet-dict`/`--specialist` must not silently change the
+    /// lexicon's shape.
+    #[test]
+    fn without_its_reference_sets_the_gate_admits_nothing() {
+        let (_, rep) = render_document(
+            &t080_subset("C1881036", "Hemizygosity", &["Hemizygosity"]),
+            "2026AA",
+            &MassNouns::new(),
+            &DropSet::new(),
+            &AddSet::new(),
+            &AttestedForms::default(),
+        );
+        assert_eq!(rep.non_content_admitted, 0);
+        assert_eq!(rep.non_content_skipped, 1);
+    }
+
     /// The WRN **gene** (HGNC) — a NAMED INDIVIDUAL: `symbol = Some("WRN")`, TUI T028.
     fn wrn_gene_subset() -> Subset {
         Subset {
@@ -750,6 +973,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert_eq!(rep.semantic_types, 1);
         assert_eq!(rep.concepts, 1);
@@ -858,6 +1082,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert_eq!(rep.entries, 1);
         assert_eq!(rep.inflected_skipped, 1);
@@ -869,8 +1094,14 @@ mod tests {
             .entry("C5849123".to_string())
             .or_default()
             .insert("gene".to_string());
-        let (doc, rep) =
-            render_document(&subset, "2026AA", &MassNouns::new(), &drops, &AddSet::new());
+        let (doc, rep) = render_document(
+            &subset,
+            "2026AA",
+            &MassNouns::new(),
+            &drops,
+            &AddSet::new(),
+            &AttestedForms::default(),
+        );
         assert_eq!(rep.junk_skipped, 1);
         assert_eq!(
             rep.inflected_skipped, 0,
@@ -890,6 +1121,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         // T049 is a process/function type, so each form emits a count entry AND the additive mass
         // entry (the RC-1 shim) — one native atom is therefore 2 entries.
@@ -909,6 +1141,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &adds,
+            &AttestedForms::default(),
         );
         assert_eq!(
             rep.entries, 4,
@@ -935,6 +1168,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &adds,
+            &AttestedForms::default(),
         );
         assert_eq!(
             rep.entries, 2,
@@ -962,6 +1196,7 @@ mod tests {
             &MassNouns::new(),
             &drops,
             &adds,
+            &AttestedForms::default(),
         );
         assert_eq!(
             rep.entries, 2,
@@ -980,6 +1215,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert_eq!(rep.entries, 1);
         assert_eq!(rep.junk_skipped, 0);
@@ -997,6 +1233,7 @@ mod tests {
             &MassNouns::new(),
             &drops,
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert_eq!(rep.entries, 0, "the gENE content entry is not emitted");
         assert_eq!(rep.junk_skipped, 1);
@@ -1020,8 +1257,14 @@ mod tests {
             .entry("C5849123".to_string())
             .or_default()
             .insert("gENE".to_string()); // the drop names the MANGLED casing
-        let (doc, rep) =
-            render_document(&subset, "2026AA", &MassNouns::new(), &drops, &AddSet::new());
+        let (doc, rep) = render_document(
+            &subset,
+            "2026AA",
+            &MassNouns::new(),
+            &drops,
+            &AddSet::new(),
+            &AttestedForms::default(),
+        );
         assert_eq!(rep.junk_skipped, 0, "the clean GENE form is spared");
         assert_eq!(rep.entries, 1);
         assert!(doc.contains("lexicon:form       = \"GENE\";"));
@@ -1037,6 +1280,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         // The CUI is a `resource` (instance), NOT a `class`, typed by its semantic type.
         assert!(doc.contains("resource umlscui:C1337007 : umlssty:T028 {"));
@@ -1062,6 +1306,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert!(doc.contains("UMLS Metathesaurus"));
         assert!(doc.contains("MUST obtain their own UMLS license"));
@@ -1101,6 +1346,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert_eq!(rep.entries, 4, "2 forms × (count + mass)");
         assert_eq!(rep.mass_entries, 2);
@@ -1122,6 +1368,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert_eq!(rep.mass_entries, 0);
         assert!(!doc.contains("lexicon:mass"));
@@ -1161,7 +1408,14 @@ mod tests {
 
         // Without the drop: head-inheritance now fires (the veto is gone) AND the colliding atom
         // seeds — which is exactly the state the drop set exists to prevent.
-        let (doc, rep) = render_document(&subset, "2026AA", &mass, &DropSet::new(), &AddSet::new());
+        let (doc, rep) = render_document(
+            &subset,
+            "2026AA",
+            &mass,
+            &DropSet::new(),
+            &AddSet::new(),
+            &AttestedForms::default(),
+        );
         assert!(
             rep.mass_entries > 0,
             "T033 no longer vetoes head-inheritance"
@@ -1175,7 +1429,14 @@ mod tests {
             .entry("C5849123".to_string())
             .or_default()
             .insert("gENE".to_string());
-        let (doc, rep) = render_document(&subset, "2026AA", &mass, &drops, &AddSet::new());
+        let (doc, rep) = render_document(
+            &subset,
+            "2026AA",
+            &mass,
+            &drops,
+            &AddSet::new(),
+            &AttestedForms::default(),
+        );
         assert_eq!(rep.junk_skipped, 1);
         assert!(
             !doc.contains("lexicon:form       = \"gENE\";"),
@@ -1214,6 +1475,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert!(doc.contains("class umlscui:C1299585 :")); // the concept class is kept (mirror intact)
         assert!(!doc.contains("lexicon:form       = \"does not\";"));
@@ -1258,6 +1520,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert!(doc.contains("class umlscui:C0521125 :")); // both concept classes kept
         assert!(doc.contains("class umlscui:C0003818 :"));
@@ -1302,6 +1565,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert!(
             doc.contains("class umlscui:C0004667 :"),
@@ -1345,7 +1609,14 @@ mod tests {
                 symbol: None,
             }],
         };
-        let (doc, rep) = render_document(&subset, "2026AA", &mass, &DropSet::new(), &AddSet::new());
+        let (doc, rep) = render_document(
+            &subset,
+            "2026AA",
+            &mass,
+            &DropSet::new(),
+            &AddSet::new(),
+            &AttestedForms::default(),
+        );
         assert_eq!(
             rep.mass_entries, 1,
             "T191 with uncountable head 'cancer' stays mass via head-inheritance"
@@ -1380,6 +1651,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert_eq!(
             rep.mass_entries, 1,
@@ -1414,6 +1686,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert_eq!(rep.non_content_skipped, 2, "both forms withheld");
         assert_eq!(rep.entries, 0, "no common-noun entry");
@@ -1450,6 +1723,7 @@ mod tests {
             &MassNouns::new(),
             &DropSet::new(),
             &AddSet::new(),
+            &AttestedForms::default(),
         );
         assert_eq!(rep.non_content_skipped, 0);
         assert!(doc.contains("lexicon:cat_n(umlscui:C0000001, lexicon:num_any)"));

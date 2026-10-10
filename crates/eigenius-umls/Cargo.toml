@@ -8,6 +8,9 @@ description = "Import the UMLS Metathesaurus (RRF) into Eigenius: a faithful typ
 
 [dependencies]
 eigenius-kernel = { path = "../../kernel" }
+# The attestation half of the non-content admit gate ([`convert::AttestedForms`]): SPECIALIST says
+# whether a withheld surface is English. A leaf crate, so no cycle.
+eigenius-specialist = { path = "../eigenius-specialist" }
 clap = { version = "4", features = ["derive"] }
 # Loading the junk-atom drop set (`drops.json` from `lexicon-align drops`); the RRF parsers stay
 # hand-rolled (no serde).

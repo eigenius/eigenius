@@ -359,12 +359,20 @@ impl Parser {
 
     /// Transparent `-ly` **adverb** items (D62 Phase 3 — `docs/notes/d62-adverb-semantics-decision.md`).
     /// If `surface` is a single `-ly` form whose adjective base is **known to the lexicon**
-    /// (data-driven probe — no hardcoded adverb list; WordNet doesn't store productive `-ly`
-    /// adverbs), seed identity-sem modifier items at the WRN attachment categories
-    /// ([`adverb_modifier_cats`]). The adverb composes and contributes nothing to the claim `Prop`
-    /// — the science-transparent default; the measurement subset's obligation semantics is a later
-    /// arm. Empty when the surface isn't an `-ly` form, no adjective base resolves, or the `Cat`
-    /// inductives are unavailable.
+    /// (data-driven probe — no hardcoded adverb list), seed identity-sem modifier items at the WRN
+    /// attachment categories ([`adverb_modifier_cats`]).
+    ///
+    /// **This is now the FALLBACK.** The rule was written when `data.adv` was unimported (D62
+    /// §8.7.5, deferred for want of a type for a predicate modifier) and its comment claimed
+    /// WordNet does not store productive `-ly` adverbs — 2975 of WordNet's 4481 adverb lemmas end
+    /// in `-ly`. eigenius#270 adopted Luo & Shi, the importer now emits adverb synsets at
+    /// `ADV = (e -> t) -> (e -> t)`, and an imported sense seeds the same span with a CONJOINING
+    /// denotation. Identity is seeded only where the lexicon carries no adverb sense for the form,
+    /// and for the lexicalized DISCOURSE adverbs, which attach at `S/S` / `S\S` and are genuinely
+    /// transparent there.
+    ///
+    /// Empty when the surface isn't an `-ly` form, no adjective base resolves, the lexicon already
+    /// has an adverb sense, or the `Cat` inductives are unavailable.
     /// Whether `surface` is a productive `-ly` adverb whose adjective base is **known to the
     /// lexicon** (the data-driven recognition gate, D62 Phase 3). Shared by [`Self::adverb_items`]
     /// (seeding) and [`Self::has_token`] (the missing-lexeme diagnostic), so a derived adverb counts
@@ -385,9 +393,25 @@ impl Parser {
         if !lexicalized && !self.is_derived_adverb(&s) {
             return Vec::new();
         }
-        // Manner positions (adjective + VP modifier) for every transparent adverb; discourse
-        // adverbs (`also`/`however`/`yet`) ALSO attach at the clause level (`S/S`, `S\S`).
-        let mut cats = adverb_modifier_cats(&self.grammar.layer).unwrap_or_default();
+        // An IMPORTED adverb sense already seeds the MANNER positions, with Luo & Shi's `ADV`
+        // denotation instead of identity, so seeding them here too would add a reading that asserts
+        // strictly less and differs only by having dropped the adverb.
+        let imported = self
+            .lex
+            .entries_for(&s)
+            .iter()
+            .any(|e| is_wordnet_sense_of_pos(e.sense.as_deref(), "r"));
+        // Manner positions (adjective + VP modifier) are the FALLBACK, for a form the lexicon does
+        // not carry. The clause positions (`S/S`, `S\S`) are not: a discourse adverb really is
+        // transparent at the proposition level, and WordNet types `however`/`therefore`/`thus` as
+        // manner adverbs like any other, so the import does not supply that reading. Every one of
+        // the lexicalized set is in `data.adv`, which is why this is split rather than gated on
+        // `!lexicalized` — that left `however` with identity manner items beside the imported
+        // conjoining ones, the same position under two semantics.
+        let mut cats = Vec::new();
+        if !imported {
+            cats.extend(adverb_modifier_cats(&self.grammar.layer).unwrap_or_default());
+        }
         if lexicalized {
             cats.extend(sentence_modifier_cats(&self.grammar.layer).unwrap_or_default());
         }
@@ -1450,6 +1474,10 @@ pub(super) fn is_lexicalized_adverb(surface: &str) -> bool {
     // is absorbed in the CKY (fronted-modifier comma absorption).
     const LEXICALIZED_ADVERBS: &[&str] = &[
         "also",
+        // Shares WordNet synset `r00047534` ("in addition") with `also`, and is the same additive
+        // discourse connective. Listed so `closed_class` can withhold the imported MANNER entries
+        // on it without leaving the surface unknown.
+        "too",
         "however",
         "yet",
         "thus",
@@ -1701,13 +1729,19 @@ pub(super) fn sense_cap_key(
 /// adjectival (`concordant` for C4553529), which is how a nominal entry appears for a surface that
 /// has no noun reading at all.
 fn is_wordnet_noun_sense(sense: Option<&str>) -> bool {
+    is_wordnet_sense_of_pos(sense, "n")
+}
+
+/// Whether `sense` is a WordNet sense key of part of speech `pos` — `wn:<lemma>.<pos>.<offset>`,
+/// the shape the importer's `sense_key` emits.
+fn is_wordnet_sense_of_pos(sense: Option<&str>, pos: &str) -> bool {
     let Some(rest) = sense.and_then(|s| s.strip_prefix("wn:")) else {
         return false;
     };
     // `wn:variant.n.05840650` → the POS is the component before the offset.
     let mut parts = rest.rsplit('.');
     let _offset = parts.next();
-    matches!(parts.next(), Some("n"))
+    parts.next() == Some(pos)
 }
 
 /// Whether a category takes a **plural subject on a FINITE clause** — it contains the subject slot

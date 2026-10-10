@@ -140,7 +140,7 @@ pub use rules::constructions::{
     distribute_object, kind_subject, reciprocate, relativize, type_raise,
 };
 pub use rules::RightContext;
-pub use segment::segment_sentences;
+pub use segment::{segment_given_lines, segment_sentences};
 #[cfg(feature = "use-llm")]
 pub use sense_ranker::{live_sense_ranker, live_sense_ranker_from_env};
 pub use sense_ranker::{

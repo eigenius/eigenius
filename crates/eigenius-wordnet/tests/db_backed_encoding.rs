@@ -44,9 +44,10 @@ use eigenius_kernel::bootstrap::bootstrap_persistent;
 use eigenius_kernel::dcg::item::Item;
 use eigenius_kernel::dcg::{
     abbreviation_resources, extract_abbreviations, glossary_resources, ground_abbreviation,
-    pretty_term, segment_sentences, unit_sense_names, verbalize, AbbreviationBinding, DiscourseRun,
-    Identity, InProcessPipeline, Lemmatizer, LexicalIndex, LexicalLookup, LexiconAugmentation,
-    NoAbbreviationProposer, Parser, Pos, Proposal, ProposeCtx, Proposer, SentenceOutcome, Vb,
+    pretty_term, segment_given_lines, segment_sentences, unit_sense_names, verbalize,
+    AbbreviationBinding, DiscourseRun, Identity, InProcessPipeline, Lemmatizer, LexicalIndex,
+    LexicalLookup, LexiconAugmentation, NoAbbreviationProposer, Parser, Pos, Proposal, ProposeCtx,
+    Proposer, SentenceOutcome, Vb,
 };
 use eigenius_kernel::layer::{resolve_active_value_indexes, Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::nbe::check::{check_infer, CheckCtx};
@@ -3548,6 +3549,22 @@ fn snapshot_opens_with_lazy_form_index() {
     );
 }
 
+/// The page's units: inferred from punctuation, or taken as given — one per non-blank line — when
+/// `EIGENIUS_WRN_UNITS_PER_LINE` is set (`--units-per-line`).
+///
+/// A corpus of claim spans, table rows or LIMS records arrives already segmented, and the register
+/// that supplies it keys an id and a kind to each span. Inferring units from punctuation then
+/// disagrees with that register in both directions and the per-span attribution is lost: measured
+/// on a certification log's 427 live claim spans, `segment_sentences` returns 653 units, splitting
+/// 90 spans and merging 5 pairs.
+fn page_units(page: &str) -> Vec<String> {
+    if std::env::var("EIGENIUS_WRN_UNITS_PER_LINE").is_ok() {
+        segment_given_lines(page)
+    } else {
+        segment_sentences(page)
+    }
+}
+
 /// (d) — the measurement: feed the cleaned WRN first page through the parser over the FULL
 /// WordNet+UMLS store, and report the outcome distribution + OOV fix-buckets. Heavy (full lexicon,
 /// long sentences); `#[ignore]`d, run manually:
@@ -3586,8 +3603,7 @@ fn wrn_first_page_over_full_lexicon() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let index =
-        build_index_over(&head, Some(&aug)).with_document(segment_sentences(&page), ctx_window);
+    let index = build_index_over(&head, Some(&aug)).with_document(page_units(&page), ctx_window);
     eprintln!(
         "context window: {ctx_window} sentence(s) each side ({})",
         if ctx_window == 0 {
@@ -3746,7 +3762,7 @@ fn wrn_first_page_over_full_lexicon() {
     let (mut sel_struct_correct, mut sel_curated, mut sel_invalid) = (0usize, 0usize, 0usize);
 
     let mut report: Vec<UnitReport> = Vec::new();
-    for (i, text) in segment_sentences(&page).into_iter().enumerate() {
+    for (i, text) in page_units(&page).into_iter().enumerate() {
         let ntok = index.tokenize(&text).len();
         let t = std::time::Instant::now();
         let outcome = encode_unit(&text, &index, &lem, &head);

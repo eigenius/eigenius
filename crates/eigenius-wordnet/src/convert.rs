@@ -101,6 +101,7 @@ namespace reflection = \"urn:eigenius:reflection\";
 namespace epistemic  = \"urn:eigenius:reflection:epistemic\";
 namespace eigentt    = \"urn:eigenius:eigentt\";
 namespace lexicon    = \"urn:eigenius:lexicon\";
+namespace logic      = \"urn:eigenius:logic\";
 namespace measurements = \"urn:eigenius:measurements\";
 namespace wn         = \"urn:eigenius:wn\";
 ";
@@ -129,6 +130,11 @@ pub struct Report {
     pub instances: usize,
     pub verb_axioms: usize,
     pub adj_axioms: usize,
+    /// Adverb synsets emitted at Luo & Shi's `ADV` type ([`push_adv`]).
+    pub adv_axioms: usize,
+    /// Per-lemma adverb entries withheld because the synset is a DEGREE word the comparative
+    /// machinery owns ([`DEGREE_SURFACES`]). The axiom still ships.
+    pub degree_adverb_skipped: usize,
     pub entries: usize,
     /// Of `entries`, the participle (`ger`/`pss`) verb-form entries (D63 §8.9 6-aux):
     /// the generated gerund + past-participle forms an auxiliary selects.
@@ -991,6 +997,133 @@ fn is_copula_lemma(lemma: &str) -> bool {
     lemma.trim().eq_ignore_ascii_case("be")
 }
 
+/// The clause an adverb modifies, `S[dcl,<fin>]\NP[<num>]`, over the given feature expressions.
+fn adv_vp(fin: &str, num: &str) -> String {
+    format!("lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, {fin}), lexicon:cat_np({ENTITY_TOP}, {num}))")
+}
+
+/// The two manner positions of an adverb, mirroring
+/// [`eigenius_kernel::dcg::category::adverb_modifier_cats`] exactly — that function builds the same
+/// two categories for the parser's derivational fallback, and the two must agree or an imported
+/// adverb attaches where a derived one does not.
+///
+/// The forward pre-modifier BINDS the clause feature, so the adverb hands back whatever it consumed
+/// — `adj`, `pred`, `fin` — instead of collapsing it to one value. Hardcoding `fin` here cost six
+/// grammar-gaps on the reference page (2026-10-09): `lexicon:is_copula` takes its complement at
+/// `cat_s(dcl, adj)`, so «were selectively essential» and «were highly concordant» have an
+/// ADJECTIVAL predicate for the adverb to modify, and a `fin`-only modifier cannot reach it.
+/// `cat_fin_forall`/`cat_num_forall` erase in the denotation (`denote_cat` recurses through them),
+/// so ⟦cat⟧ and the entry's `sem_type` are unchanged by the binding.
+///
+/// The backward post-modifier is verbal only and returns the `fin` it accepts, so only the number
+/// is bound there.
+fn adv_cats() -> [String; 2] {
+    let bound = adv_vp("f", "n");
+    let finite = adv_vp("lexicon:fin", "n");
+    [
+        format!(
+            "lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:fwd(lexicon:m_all, {bound}, {bound})))"
+        ),
+        format!(
+            "lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, {finite}, {finite}))"
+        ),
+    ]
+}
+
+/// Adverb synset (`data.adv`) → Luo & Shi's `ADV` type, `(e -> t) -> (e -> t)`, one axiom per
+/// synset and one entry per lemma in each of the two manner positions.
+///
+/// D62 §8.7.5 deferred `data.adv` because there was no type for a predicate modifier. eigenius#270
+/// adopted Luo & Shi 2026 ("Variable polyadicity without events", MSCS 36, e11) and
+/// `ontology:adv_*` instantiates `ADV` at a PP's object; a bare adverb is the same thing without
+/// the object, so the deferral's reason is gone.
+///
+/// Until this, an adverb reached the parser only through the derivational rule in
+/// [`eigenius_kernel::dcg::parse`], which seeds it with IDENTITY sem — the adverb beta-reduces away
+/// and the claim is exactly the unmodified one. Measured on the XIAP certification log: 39 distinct
+/// `-ly` adverbs, 90 occurrences over 79 of 427 claim spans, each silently dropping its adverb from
+/// the proposition. «p.Ile380Thr is partially exposed» asserted nothing about *partially*.
+///
+/// The conjunction sits in the ENTRY, as eigenius#270 put it, so modifier drop stays Luo & Shi's
+/// theorem rather than a meaning postulate: dropping the adverb leaves `V(s)`.
+///
+/// DISCOURSE adverbs are not this. `however`/`therefore` attach at the clause level (`S/S`, `S\S`)
+/// and are genuinely transparent there, so the parser keeps its identity sem for them; this emits
+/// the manner positions only.
+/// Degree words that must not get a MANNER-adverb entry, because the reference grammars do not give
+/// them one and the comparative machinery already owns them.
+///
+/// `references/openccg/test/lexicon.xml` (CCGbank-derived, Penn-tagged) assigns `more` JJR/RBR with
+/// `n/n`, `n/n/(n/n)` (the modifier-of-modifier degree reading) and predicative `s[adj]\np`, and
+/// `most` JJS/RBS with `n`, `n/n`, `n/n/(n/n)`; `grammars/comic` files `more` under
+/// `family="Adjective" pos="Adj"`. None of them is ever assigned the manner VP modifier
+/// `s\np/(s\np)` that [`adv_cats`] emits. `very` is the same shape, carrying `n/n/(n/n)` and
+/// `s[adj]\np/(s[adj]\np)`.
+///
+/// Measured cost of getting this wrong: the imported `less` won the selection on «The lines from
+/// rare lineages were less dependent on WRN» with
+/// `r00099527(λG. gt(deg_dependent_rel_on(WRN, G), std_dependent), the(…lines…))` — asserting the
+/// lines ARE dependent above the standard and then modifying the manner of that holding, which
+/// inverts the claim the sentence makes.
+///
+/// Skipped HERE rather than in `dcg::closed_class` deliberately. Withholding there is all-POS, and
+/// the grammars say these words SHOULD have their adjectival and nominal categories — `less water`,
+/// `a less amount`. This drops only the adverb entries.
+const DEGREE_SURFACES: &[&str] = &["less", "more", "most", "very", "least", "much", "far"];
+
+fn push_adv(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) {
+    let loc = local(syn);
+    // A degree synset gets no manner entries ([`DEGREE_SURFACES`]). The AXIOM still ships, so the
+    // sense stays on the chain and nothing that references it dangles; only the per-lemma entries
+    // are withheld, mirroring how the closed-class and non-content filters work.
+    let degree = syn
+        .words
+        .iter()
+        .any(|w| DEGREE_SURFACES.contains(&w.to_ascii_lowercase().as_str()));
+    let adv_type = format!("({ENTITY_TOP} -> Prop) -> {ENTITY_TOP} -> Prop");
+    // The axiom is the sense's denotation; the gloss rides on it for the concept-description index
+    // (D63 §6a index c), as the noun and adjective axioms do.
+    // The axiom and its SemTerm go in ONE paragraph: [`route`] keeps the first paragraph of a block
+    // as the declaration and routes every later one as an entry, and a `lexicon:SemTerm` is not a
+    // `lexicon:LexicalEntry`.
+    buf.push_str(&format!(
+        "axiom wn:{loc} : {adv_type} desc: \"{}\"\n",
+        esc(&syn.gloss)
+    ));
+    rep.adv_axioms += 1;
+    // `λV. λs. And(V(s), adv(V, s))` — a SemTerm resource because the entry's sem is a term, not a
+    // bare axiom reference. Mirrors `lexicon:prep_in_sem`.
+    buf.push_str(&format!(
+        "resource wn:sem_{loc} : lexicon:SemTerm {{\n\
+         \x20   lexicon:term = type_expr(\n\
+         \x20       ( fun (V : {ENTITY_TOP} -> Prop) => fun (s : {ENTITY_TOP}) =>\n\
+         \x20           logic:And(V(s), wn:{loc}(V, s))\n\
+         \x20         : ({ENTITY_TOP} -> Prop) -> ({ENTITY_TOP} -> Prop) )\n\
+         \x20   );\n\
+         }}\n\n"
+    ));
+    if degree {
+        rep.degree_adverb_skipped += syn.words.len();
+        return;
+    }
+    let sem_type = format!("({ENTITY_TOP} -> Prop) -> ({ENTITY_TOP} -> Prop)");
+    for (i, lemma) in syn.words.iter().enumerate() {
+        for (j, cat) in adv_cats().iter().enumerate() {
+            push_entry(
+                buf,
+                rep,
+                &format!("e_{loc}_{i}_{j}"),
+                lemma,
+                cat,
+                &format!("sem_{loc}"),
+                &sem_type,
+                &sense_key(syn, lemma),
+                ranks,
+            );
+        }
+    }
+}
+
 fn adj_cat() -> String {
     format!("lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
 }
@@ -1401,7 +1534,11 @@ fn render_core(
                 push_adj(&mut block, syn, &mut rep, &noun_index, ranks, governance);
                 route(&block, &mut decls, &mut entries);
             }
-            Pos::Adv => {} // deferred (§8.7.5)
+            Pos::Adv => {
+                let mut block = String::new();
+                push_adv(&mut block, syn, &mut rep, ranks);
+                route(&block, &mut decls, &mut entries);
+            }
         }
     }
 

@@ -464,23 +464,18 @@ impl Parser {
         if self.grammar.reserved.coord_connective(&s_lc).is_some() {
             return true;
         }
-        if !self.lex.entries_for(&s_lc).is_empty() {
-            return true;
-        }
-        for pos in [Pos::Noun, Pos::Verb, Pos::Adj, Pos::Adv] {
-            for lemma in lemmatizer.lemmas(surface, pos) {
-                if !self
-                    .lex
-                    .entries_for(&lemma.trim().to_lowercase())
-                    .is_empty()
-                {
-                    return true;
-                }
-            }
-        }
-        // A hyphenated surface whose SPACE form is an entry denotes that entry (D69 §7h) —
-        // [`Self::candidate_lemmas`] seeds it, so it is known.
-        if s_lc.contains('-') && !self.lex.entries_for(&s_lc.replace('-', " ")).is_empty() {
+        // Exactly the lemmas the SEEDER will try ([`super::seed`] opens with the same call), so a
+        // token this reports missing is a token the parser could not have seeded. The list used to
+        // be re-derived here — raw surface, Morphy lemmas, the hyphen rule — and had drifted: it
+        // omitted the domain-plural fallback, so a UMLS-only plural whose singular is an entry
+        // (`indels`, `biomarkers` — neither singular is a WordNet lemma, so Morphy cannot reduce
+        // them) was reported as a missing lexeme while the parser seeded it. Measured on the XIAP
+        // certification log, that was 2% of the page's distinct OOV.
+        if self
+            .candidate_lemmas(surface, lemmatizer)
+            .iter()
+            .any(|c| !self.lex.entries_for(c).is_empty())
+        {
             return true;
         }
         // A productive `-ly` adverb whose adjective base is known, a lexicalized discourse adverb, or

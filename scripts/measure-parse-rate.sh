@@ -50,6 +50,9 @@
 #   scripts/measure-parse-rate.sh --selections <selections.json>  # replay recorded READING SELECTIONS
 #                                                    # (without it: a live run draws live selections;
 #                                                    #  a deterministic run uses the pin-backed arm)
+#   scripts/measure-parse-rate.sh --units-per-line   # the page is PRE-SEGMENTED: one unit per non-blank
+#                                                    #   line, no punctuation inference (claim spans, table
+#                                                    #   rows, LIMS records — a register already keyed them)
 #   scripts/measure-parse-rate.sh --pos-prune        # ARM: cross-POS prune (GH#97) — CHANGES the result
 #   scripts/measure-parse-rate.sh --combinatory-core # ARM: extra CCG combinators — CHANGES the grammar
 #   scripts/measure-parse-rate.sh --attribution    # + page ambiguity roll-up (read-only; see README §7)
@@ -93,6 +96,7 @@ PAGE_ARG="cnl-v3"
 SNAP="${EIGENIUS_DB_SNAPSHOT:-}"
 USE_LLM=1
 POS_PRUNE=0
+UNITS_PER_LINE=0
 COMB_CORE=0
 ATTRIBUTION=0
 CONTEXT_WINDOW=0
@@ -109,6 +113,7 @@ while [[ $# -gt 0 ]]; do
     --no-llm)           USE_LLM=0; shift ;;
     --replay)           REPLAY="$2"; shift 2 ;;
     --selections)       SEL_REPLAY="$2"; shift 2 ;;
+    --units-per-line)   UNITS_PER_LINE=1; shift ;;
     --pos-prune)        POS_PRUNE=1; shift ;;
     --combinatory-core) COMB_CORE=1; shift ;;
     --attribution)      ATTRIBUTION=1; shift ;;
@@ -128,12 +133,13 @@ done
 #
 # `EIGENIUS_POS_PRUNE` is read with `.is_ok()`: ANY value, including the empty string, enables it.
 # Setting it to "0" would turn it ON. It must be UNSET to be off — hence `env -u`, not `VAR=0`.
-for v in EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT EIGENIUS_ATTRIBUTION_ROLLUP EIGENIUS_TRACE_ATTRIBUTION EIGENIUS_CONTEXT_SENTENCES EIGENIUS_SELECTIONS EIGENIUS_SELECTIONS_OUT EIGENIUS_SELECT_FLAT EIGENIUS_SELECT_MODEL EIGENIUS_SENSE_MODEL EIGENIUS_SENSE_FLOOR; do
+for v in EIGENIUS_WRN_UNITS_PER_LINE EIGENIUS_POS_PRUNE EIGENIUS_COMBINATORY_CORE EIGENIUS_PARSE_DEBUG EIGENIUS_DUMP_CELL EIGENIUS_DUMP_RANK_PROMPT EIGENIUS_ATTRIBUTION_ROLLUP EIGENIUS_TRACE_ATTRIBUTION EIGENIUS_CONTEXT_SENTENCES EIGENIUS_SELECTIONS EIGENIUS_SELECTIONS_OUT EIGENIUS_SELECT_FLAT EIGENIUS_SELECT_MODEL EIGENIUS_SENSE_MODEL EIGENIUS_SENSE_FLOOR; do
   if [[ -n "${!v:-}" ]]; then
     echo "note: ignoring ambient $v=${!v} — the run declares its own config (use the flags)" >&2
   fi
 done
-ENV_STRIP=(env -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT -u EIGENIUS_ATTRIBUTION_ROLLUP -u EIGENIUS_TRACE_ATTRIBUTION -u EIGENIUS_CONTEXT_SENTENCES -u EIGENIUS_SELECTIONS -u EIGENIUS_SELECTIONS_OUT -u EIGENIUS_SELECT_FLAT -u EIGENIUS_SELECT_MODEL -u EIGENIUS_SENSE_MODEL -u EIGENIUS_SENSE_FLOOR)
+ENV_STRIP=(env -u EIGENIUS_WRN_UNITS_PER_LINE -u EIGENIUS_POS_PRUNE -u EIGENIUS_COMBINATORY_CORE -u EIGENIUS_PARSE_DEBUG -u EIGENIUS_DUMP_CELL -u EIGENIUS_DUMP_RANK_PROMPT -u EIGENIUS_ATTRIBUTION_ROLLUP -u EIGENIUS_TRACE_ATTRIBUTION -u EIGENIUS_CONTEXT_SENTENCES -u EIGENIUS_SELECTIONS -u EIGENIUS_SELECTIONS_OUT -u EIGENIUS_SELECT_FLAT -u EIGENIUS_SELECT_MODEL -u EIGENIUS_SENSE_MODEL -u EIGENIUS_SENSE_FLOOR)
+[[ "$UNITS_PER_LINE" == "1" ]] && ENV_STRIP+=(EIGENIUS_WRN_UNITS_PER_LINE=1)
 [[ "$POS_PRUNE" == "1" ]] && ENV_STRIP+=(EIGENIUS_POS_PRUNE=1)
 [[ "$COMB_CORE" == "1" ]] && ENV_STRIP+=(EIGENIUS_COMBINATORY_CORE=1)
 # Read-only instrument: it observes the forest and does NOT change the parse (the four metrics are
@@ -215,6 +221,7 @@ RUN_ID+="-$(basename "$PAGE" .txt)"
 RUN_ID+="-$([[ "$USE_LLM" == "1" ]] && echo reranked || echo caponly)"
 [[ -n "$REPLAY" ]]      && RUN_ID+="-replay"
 [[ -n "$SEL_REPLAY" ]]  && RUN_ID+="-selreplay"
+[[ "$UNITS_PER_LINE" == "1" ]] && RUN_ID+="-perline"
 [[ "$POS_PRUNE" == "1" ]] && RUN_ID+="-posprune"
 [[ "$COMB_CORE" == "1" ]] && RUN_ID+="-combcore"
 [[ "$FLAT_RANKER" == "1" ]] && RUN_ID+="-flatranker"
@@ -300,7 +307,7 @@ KNOBS="$(grep -hoE 'const (SENSE_CAP|CELL_BEAM): usize = [0-9]+' \
   echo "# snapshot:  $SNAP"
   echo "# reranker:  $RERANKER"
   echo "# profile:   release"
-  echo "# config:    pos_prune=$POS_PRUNE combinatory_core=$COMB_CORE attribution=$ATTRIBUTION context_window=$CONTEXT_WINDOW flat_ranker=$FLAT_RANKER ranker_model=$SELECT_MODEL$SENSE_KNOBS $KNOBS"
+  echo "# config:    units_per_line=$UNITS_PER_LINE pos_prune=$POS_PRUNE combinatory_core=$COMB_CORE attribution=$ATTRIBUTION context_window=$CONTEXT_WINDOW flat_ranker=$FLAT_RANKER ranker_model=$SELECT_MODEL$SENSE_KNOBS $KNOBS"
   echo "# rust_min_stack: ${RUST_MIN_STACK:-default}"
   echo "# ranks:     $RANKS_MODE"
   echo "# selections: $SELECTIONS_MODE"
