@@ -101,6 +101,7 @@ namespace reflection = \"urn:eigenius:reflection\";
 namespace epistemic  = \"urn:eigenius:reflection:epistemic\";
 namespace eigentt    = \"urn:eigenius:eigentt\";
 namespace lexicon    = \"urn:eigenius:lexicon\";
+namespace logic      = \"urn:eigenius:logic\";
 namespace measurements = \"urn:eigenius:measurements\";
 namespace wn         = \"urn:eigenius:wn\";
 ";
@@ -129,6 +130,8 @@ pub struct Report {
     pub instances: usize,
     pub verb_axioms: usize,
     pub adj_axioms: usize,
+    /// Adverb synsets emitted at Luo & Shi's `ADV` type ([`push_adv`]).
+    pub adv_axioms: usize,
     pub entries: usize,
     /// Of `entries`, the participle (`ger`/`pss`) verb-form entries (D63 §8.9 6-aux):
     /// the generated gerund + past-participle forms an auxiliary selects.
@@ -991,6 +994,86 @@ fn is_copula_lemma(lemma: &str) -> bool {
     lemma.trim().eq_ignore_ascii_case("be")
 }
 
+/// The VERB PHRASE a VP modifier consumes and returns: `S[dcl,fin]\NP`.
+fn adv_vp() -> String {
+    format!("lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
+}
+
+/// The two manner positions of an adverb: the forward pre-modifier `(S\NP)/(S\NP)` and the
+/// backward post-modifier `(S\NP)\(S\NP)`. Both are the VP-adjunct preposition's category
+/// (`lexicon:in_prep`) with the `/NP` object slot removed, because a bare adverb takes no object.
+/// `lexicon:m_all` for the reason [`eigenius_kernel::dcg::category::adverb_modifier_cats`] gives:
+/// an adverb is exactly the case that should compose freely.
+fn adv_cats() -> [String; 2] {
+    let vp = adv_vp();
+    [
+        format!("lexicon:fwd(lexicon:m_all, {vp}, {vp})"),
+        format!("lexicon:bwd(lexicon:m_all, {vp}, {vp})"),
+    ]
+}
+
+/// Adverb synset (`data.adv`) → Luo & Shi's `ADV` type, `(e -> t) -> (e -> t)`, one axiom per
+/// synset and one entry per lemma in each of the two manner positions.
+///
+/// D62 §8.7.5 deferred `data.adv` because there was no type for a predicate modifier. eigenius#270
+/// adopted Luo & Shi 2026 ("Variable polyadicity without events", MSCS 36, e11) and
+/// `ontology:adv_*` instantiates `ADV` at a PP's object; a bare adverb is the same thing without
+/// the object, so the deferral's reason is gone.
+///
+/// Until this, an adverb reached the parser only through the derivational rule in
+/// [`eigenius_kernel::dcg::parse`], which seeds it with IDENTITY sem — the adverb beta-reduces away
+/// and the claim is exactly the unmodified one. Measured on the XIAP certification log: 39 distinct
+/// `-ly` adverbs, 90 occurrences over 79 of 427 claim spans, each silently dropping its adverb from
+/// the proposition. «p.Ile380Thr is partially exposed» asserted nothing about *partially*.
+///
+/// The conjunction sits in the ENTRY, as eigenius#270 put it, so modifier drop stays Luo & Shi's
+/// theorem rather than a meaning postulate: dropping the adverb leaves `V(s)`.
+///
+/// DISCOURSE adverbs are not this. `however`/`therefore` attach at the clause level (`S/S`, `S\S`)
+/// and are genuinely transparent there, so the parser keeps its identity sem for them; this emits
+/// the manner positions only.
+fn push_adv(buf: &mut String, syn: &Synset, rep: &mut Report, ranks: &SenseRanks) {
+    let loc = local(syn);
+    let adv_type = format!("({ENTITY_TOP} -> Prop) -> {ENTITY_TOP} -> Prop");
+    // The axiom is the sense's denotation; the gloss rides on it for the concept-description index
+    // (D63 §6a index c), as the noun and adjective axioms do.
+    // The axiom and its SemTerm go in ONE paragraph: [`route`] keeps the first paragraph of a block
+    // as the declaration and routes every later one as an entry, and a `lexicon:SemTerm` is not a
+    // `lexicon:LexicalEntry`.
+    buf.push_str(&format!(
+        "axiom wn:{loc} : {adv_type} desc: \"{}\"\n",
+        esc(&syn.gloss)
+    ));
+    rep.adv_axioms += 1;
+    // `λV. λs. And(V(s), adv(V, s))` — a SemTerm resource because the entry's sem is a term, not a
+    // bare axiom reference. Mirrors `lexicon:prep_in_sem`.
+    buf.push_str(&format!(
+        "resource wn:sem_{loc} : lexicon:SemTerm {{\n\
+         \x20   lexicon:term = type_expr(\n\
+         \x20       ( fun (V : {ENTITY_TOP} -> Prop) => fun (s : {ENTITY_TOP}) =>\n\
+         \x20           logic:And(V(s), wn:{loc}(V, s))\n\
+         \x20         : ({ENTITY_TOP} -> Prop) -> ({ENTITY_TOP} -> Prop) )\n\
+         \x20   );\n\
+         }}\n\n"
+    ));
+    let sem_type = format!("({ENTITY_TOP} -> Prop) -> ({ENTITY_TOP} -> Prop)");
+    for (i, lemma) in syn.words.iter().enumerate() {
+        for (j, cat) in adv_cats().iter().enumerate() {
+            push_entry(
+                buf,
+                rep,
+                &format!("e_{loc}_{i}_{j}"),
+                lemma,
+                cat,
+                &format!("sem_{loc}"),
+                &sem_type,
+                &sense_key(syn, lemma),
+                ranks,
+            );
+        }
+    }
+}
+
 fn adj_cat() -> String {
     format!("lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:adj), lexicon:cat_np({ENTITY_TOP}, lexicon:num_any))")
 }
@@ -1401,7 +1484,11 @@ fn render_core(
                 push_adj(&mut block, syn, &mut rep, &noun_index, ranks, governance);
                 route(&block, &mut decls, &mut entries);
             }
-            Pos::Adv => {} // deferred (§8.7.5)
+            Pos::Adv => {
+                let mut block = String::new();
+                push_adv(&mut block, syn, &mut rep, ranks);
+                route(&block, &mut decls, &mut entries);
+            }
         }
     }
 

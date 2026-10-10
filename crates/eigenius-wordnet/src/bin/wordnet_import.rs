@@ -264,13 +264,14 @@ fn main() -> ExitCode {
     let (doc, rep) = render_document(&chosen, &ranks, &mass, &governance);
     eprintln!(
         "wordnet import: {} synsets selected → {} noun classes, {} instances, {} verb axioms, \
-         {} adj axioms, {} entries ({} of them ger/pss participle forms) \
+         {} adj axioms, {} adv axioms, {} entries ({} of them ger/pss participle forms) \
          ({} verb synsets deferred: only predicative/clausal/control frames)",
         chosen.len(),
         rep.noun_classes,
         rep.instances,
         rep.verb_axioms,
         rep.adj_axioms,
+        rep.adv_axioms,
         rep.entries,
         rep.participle_entries,
         rep.verbs_deferred,
@@ -383,12 +384,13 @@ fn emit_partitioned(
 
     eprintln!(
         "wordnet import: {} synsets → {} noun classes, {} instances, {} verb axioms, \
-         {} adj axioms, {} entries ({} ger/pss participle forms)",
+         {} adj axioms, {} adv axioms, {} entries ({} ger/pss participle forms)",
         synsets.len(),
         rep.noun_classes,
         rep.instances,
         rep.verb_axioms,
         rep.adj_axioms,
+        rep.adv_axioms,
         rep.entries,
         rep.participle_entries,
     );
