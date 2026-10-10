@@ -33,11 +33,20 @@
 //! on it — and they had drifted: 112 forms the bootstrap supplies were absent here, so UMLS could mint
 //! a concept on them. Eighteen of those are reified by UMLS as exactly the T078/T080 "Idea or Concept"
 //! / "Qualitative Concept" terminology cruft the filter exists for. Eight were added (2026-10-09):
-//! `against`, `per`, `to`, `via`, `without`, `if`, `has`, `had` — every one carries NO WordNet entry
-//! in any part of speech, so withholding cannot cost a content reading. The other ten (`about`,
+//! `against`, `per`, `to`, `via`, `without`, `if` — every one carries NO WordNet entry in any part of
+//! speech, so withholding cannot cost a content reading. The other ten (`about`,
 //! `above`, `around`, `below`, `beyond`, `off`, `out`, `less`, `have`, `approximately`) all do carry
 //! one, and adverbs now import, so they stay out: `closed_class_surfaces_stay_known` is the invariant,
 //! not "withhold everything grammatical".
+//!
+//! **`has` and `had` were added and then withdrawn (2026-10-09).** The test that admitted them was
+//! wrong: WordNet's `index.*` is LEMMA-keyed, and the importer emits INFLECTED surfaces that never
+//! appear there — its own test pins "base (num_any) + finite 3sg (`eats`, sg) + finite plural
+//! (`eat`, pl)". `has` is the 3sg surface of `have`, so withholding it took the only 3sg transitive
+//! reading away and «This state has frequent insertion or deletion mutations.» became a grammar-gap
+//! on the reference page, leaving `has` with plural-subject entries from the lemma and the `pss`
+//! auxiliary. The right question for this list is "does an importer EMIT this surface", not "is it a
+//! WordNet index lemma" — so a surface that is an inflection of a content lemma never belongs here.
 //!
 //! `then` was REMOVED (2026-10-09): it is neither a preposition nor a conjunction, WordNet carries it
 //! as an adverb, and adverbs now import — so withholding it left it with no reading at all. Measured
@@ -69,12 +78,6 @@ const PREPOSITIONS_AND_CONJUNCTIONS: &[&str] = &[
     "and", "or", "but", "nor", // coordinating conjunctions
     "if",  // subordinator
 ];
-
-/// Auxiliary forms the bootstrap owns. `have` is NOT here: WordNet carries it as a content noun and
-/// verb ("patients have mutations"), and withholding is all-POS, so adding it would drop that
-/// corpus-wide — the same trap the module header records for `lead`. Its inflections `has`/`had`
-/// have no WordNet entry at all, so withholding them costs nothing.
-const AUXILIARIES: &[&str] = &["has", "had"];
 
 /// Determiners and quantifiers the bootstrap ships (D63 §8.3).
 const DETERMINERS: &[&str] = &[
@@ -119,7 +122,6 @@ const COPULA: &[&str] = &["be", "is", "are", "was", "were", "am", "been"];
 pub fn is_closed_class_surface(form: &str) -> bool {
     let f = form.trim().to_ascii_lowercase();
     PREPOSITIONS_AND_CONJUNCTIONS.contains(&f.as_str())
-        || AUXILIARIES.contains(&f.as_str())
         || DETERMINERS.contains(&f.as_str())
         || DEMONSTRATIVES.contains(&f.as_str())
         || COPULA.contains(&f.as_str())

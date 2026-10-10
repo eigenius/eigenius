@@ -39,8 +39,7 @@ const CLAIMED: &[&str] = &[
     "for", "from", "into", "as", "with", "on", "at", "by", "of", "in", "than", "within", "upon",
     "onto", "unto", "after", "against", "per", "to", "via", "without",
     // coordinating conjunctions + subordinator
-    "and", "or", "but", "nor", "if", // auxiliaries
-    "has", "had", // determiners and quantifiers
+    "and", "or", "but", "nor", "if", // determiners and quantifiers
     "some", "each", "every", "all", "any", "no", "several", "many", "few", "fewer", "most", "both",
     // demonstratives
     "this", "that", "these", "those", // copula
