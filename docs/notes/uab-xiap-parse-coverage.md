@@ -83,6 +83,72 @@ productive morphology over stems the lexicon has: `nonsynonymous`, `oligomerizat
 This is D97's territory, and it says the specialist lexicon is not the whole answer: a domain lexicon
 would not supply `whereas`.
 
+## Where the vocabulary gap comes from
+
+Each OOV token type was checked against the three source files on disk — WordNet 3.0 `index.*`,
+UMLS 2026AA `MRCONSO.RRF` (4.98M English forms), SPECIALIST `LEXICON` (672k base forms and spelling
+variants) — and against the store. Partitioned by first applicable cause:
+
+| n | cause | where the fix lives |
+|---:|---|---|
+| 274 | identifier, coordinate, sequence, citation fragment | not the lexicon |
+| 126 | capitalised name (author, tool) | not the lexicon |
+| 49 | word-like, no source has it | mostly tool names and API field names |
+| 29 | hyphenated, every part known | compound morphology |
+| 17 | word-like, SPECIALIST has it | D97 |
+| 4 | possessive clitic not split | tokenizer |
+| 2 | in UMLS, not in the store | importer |
+| 1 | in WordNet, not imported | importer |
+
+**400 of 502 (80%) are identifiers and names.** `VCV000037244`, `chrX:g.123900531A>G`,
+`ENSG00000101966`, `ACCCCATTCATATAGCTTCT`, `2019;176`, `Jaganathan`. No lexicon should carry these,
+and importing more vocabulary does not reduce the number. They want recognition by form and routing
+by document structure, which is D96's territory, not D97's.
+
+**3 of 502 are an importer gap**, and only two are substantive:
+
+- `likewise` is in WordNet and not in the store. WordNet adverbs are not imported at all — D62
+  §8.7.5 defers `data.adv`, and 4481 adverb lemmas are absent. This shows up as one token because
+  the parser recovers adverbs by rule instead: `is_derived_adverb` takes productive `-ly` forms
+  whose adjective base is known, and `is_lexicalized_adverb` holds a hand-written list of
+  transitional adverbs. `likewise` is neither `-ly`-derived nor on the list.
+- `hemizygosity` is UMLS `C1881036` (NCI, semantic type T080), not in the drop set, and the snapshot
+  records `umls_scope: all`. Cause not established.
+
+### The hand-written inventories have paradigm holes
+
+`my` and `whereas` are not in WordNet or UMLS — neither carries determiners or conjunctions — so
+they come from `ontologies/lexicon/closed-class.esl`, which holds **149 forms**. The paradigms in it
+are partly filled:
+
+| | present | absent |
+|---|---|---|
+| possessive determiners | `its`, `their` | `my`, `your`, `his`, `her`, `our` |
+| subordinators | `if`, `that`, `which` | `whereas`, `while`, `although`, `because`, `when` |
+| transitional adverbs (`LEXICALIZED_ADVERBS`) | `however`, `therefore`, `thus`, `also` | `likewise` |
+
+Three hand-maintained inventories stand in for a general lexicon of English function words, and each
+has holes of the same shape: a category is present, the paradigm filling it is not.
+
+**SPECIALIST carries every one of them** — `my`, `your`, `whereas`, `while`, `although`, `because`,
+`when`, `how`, `likewise`, `however`, `therefore` — and it is already provisioned and already on this
+snapshot's provenance (`specialist: references/specialist/LEXICON`), used for adjective and verb
+senses but not as a source of forms. Over the whole corpus it covers 57 of the 502 OOV types, of
+which 17 are word-like and new: `breakpoint`, `nonsynonymous`, `oligomerization`, `tolerability`,
+`multiplexed`, `pulldown`, `homopolymeric`, `unanchored`, `unsequenceable`, the British spellings
+`orthologue` and `dimerisation`, and the function words above. The other 40 are surname and
+initialism collisions — `Liu`, `Meyer`, `Patel`, `SJ`, `KE` — which SPECIALIST would match for the
+wrong reason.
+
+### A measurement bug, found and fixed
+
+`Parser::has_token` re-derived its own lemma list — raw surface, Morphy lemmas, the hyphen rule —
+rather than calling `candidate_lemmas`, which the seeder uses. It had drifted: it omitted the
+domain-plural fallback, so a UMLS-only plural whose singular is an entry (`indels`, `biomarkers` —
+neither singular is a WordNet lemma, so Morphy cannot reduce them) was reported as a missing lexeme
+while the parser seeded it. `has_token` now calls `candidate_lemmas`. Worth 4 of 506 OOV types on
+this corpus; the headline is unchanged.
+
 ## The instrument had to change first
 
 The harness infers units from punctuation. On these 427 spans `segment_sentences` returns **653
