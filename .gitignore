@@ -106,6 +106,17 @@ experiments/lexicon-align/alignment*.esl
 experiments/lexicon-align/hpo-alignment.esl
 experiments/lexicon-align/hpo-equivalences.esl
 experiments/lexicon-align/candidates*.jsonl
+# D96 document-model encodings of the certification logs (survey §4 step 5). The LOGS live under
+# `experiments/uab`, which is ignored below, and an encoding of ignored material is the same material
+# in another notation — so the derivative is ignored too, whatever its extension. Any ESL, JSON or
+# chunk emitted by an encoder belongs in one of these directories, never beside the hand-written
+# vocabulary.
+#
+# Hand-written stays TRACKED: `experiments/xiap-c0020/*.esl` is authored vocabulary and the artifact
+# of D100, not a derivative. The test for which is who wrote it, not where it sits.
+experiments/*/encoded/
+experiments/*/derived/
+experiments/**/*.emitted.esl
 notes.md
 experiments.tgz
 references.tgz
