@@ -45,6 +45,17 @@
 //! rescued per-document by the page's OOV augmentation, which grounds a function word as though it
 //! were an unseen domain term.
 //!
+//! **That removal is too blunt and is on probation.** Withholding is all-POS, so lifting it admits
+//! every sense, not just the adverb: on the 2026-10-09 store `then` resolves to 10 entries — three
+//! adverb senses in both manner positions (wanted), plus `then.n.15296354` as a `cat_n`,
+//! `then.a.01731108` with a `cat_measure`, and `umls:C1883708`. A `cat_n` on `then` is exactly the
+//! compound-pile this list exists to stop. The narrower fix is to put `then` in
+//! `super::parse::seed`'s `LEXICALIZED_ADVERBS` — it is a temporal/discourse connective like `thus`
+//! and `hence` — and restore the withholding, so the reading comes from the parser's identity path
+//! at `S/S` instead of from four content senses. Deferred to the next reseed rather than paid for on
+//! speculation: whether it costs anything is a question for the reference-page gate, and `then` may
+//! not occur there at all.
+//!
 //! This list is deliberately **only** what the closed class owns. Importer-specific artefact lists
 //! (UMLS's `lead`/`alone`/`negation` reifications) stay in that importer: `lead` is a legitimate
 //! WordNet content noun and verb, so it must not be dropped corpus-wide.
