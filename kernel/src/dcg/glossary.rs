@@ -738,20 +738,41 @@ fn variant_layer_present(base: &Arc<Layer>) -> bool {
 
 /// The tokens of `document`, bare of surrounding punctuation that is not part of a notation.
 /// `(Rigaud` → `Rigaud`; `p.Ile380Thr,` → `p.Ile380Thr`; `NM_001167.4:c.1141C>T` is left whole.
+///
+/// A dash-joined token yields BOTH the whole and its parts. `Thr369–Asn373` is one
+/// whitespace-delimited token here, but the PARSER's tokenizer splits on the dash and asks the
+/// lexicon for `Asn373` — so an entry keyed only on the whole range is keyed under a surface
+/// nothing ever requests. That mismatch is why those endpoints stayed OOV after the range support
+/// landed: recognising the range was necessary and not sufficient. Extra candidates cost nothing,
+/// because `recognize` refuses whatever is not a notation (`ABE9-SpRY`, `Gyrd-Hansen`).
 fn notation_tokens(document: &str) -> Vec<&str> {
-    document
-        .split_whitespace()
-        .map(|t| {
-            t.trim_matches(|c: char| {
-                matches!(
-                    c,
-                    '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`' | '*' | '|' | '«' | '»'
-                ) || matches!(c, ',' | ';' | '!' | '?')
-            })
-            .trim_end_matches('.')
+    fn bare(t: &str) -> &str {
+        t.trim_matches(|c: char| {
+            matches!(
+                c,
+                '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`' | '*' | '|' | '«' | '»'
+            ) || matches!(c, ',' | ';' | '!' | '?')
         })
-        .filter(|t| !t.is_empty())
-        .collect()
+        .trim_end_matches('.')
+    }
+    const DASHES: [char; 3] = ['-', '\u{2013}', '\u{2014}'];
+    let mut out = Vec::new();
+    for raw in document.split_whitespace() {
+        let t = bare(raw);
+        if t.is_empty() {
+            continue;
+        }
+        out.push(t);
+        if t.contains(DASHES) {
+            for part in t.split(DASHES) {
+                let p = bare(part);
+                if !p.is_empty() && p != t {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// **Notation augmentation** — recognize published notations in `document`
@@ -782,6 +803,15 @@ pub fn notation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmen
         let Some(n) = recognize(tok) else { continue };
         let key = slug(tok);
         if key.is_empty() || !seen.insert(key.clone()) {
+            continue;
+        }
+        // OOV ONLY, and this guard is what makes that claim true rather than asserted. The
+        // published UniProt accession pattern also admits gene symbols shaped `P2RY12`, and the
+        // mitigation for that is precisely this: a surface the committed lexicon already supplies
+        // is left alone, so a known gene symbol never reaches the recognizer's verdict. It is also
+        // the "add, not shadow" rule the other sources follow — a second entry for a form the
+        // lexicon has is a duplicate, not a closure.
+        if !entries_for_form(base, tok).is_empty() {
             continue;
         }
         let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:ni_{key}")) else {
@@ -854,6 +884,56 @@ pub fn notation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmen
                     "a nucleotide allele, reference stated by the notation",
                 )
             }
+            (Notation::ResiduePosition { residue, position }, true, Some(acc)) => {
+                ni.set(
+                    p("urn:eigenius:variant:reference"),
+                    Value::String(acc.clone()),
+                );
+                ni.set(
+                    p("urn:eigenius:variant:start"),
+                    Value::Integer(*position as i64),
+                );
+                ni.set(
+                    p("urn:eigenius:variant:end"),
+                    Value::Integer(*position as i64),
+                );
+                ni.set(
+                    p("urn:eigenius:variant:ref_state"),
+                    Value::String(residue.clone()),
+                );
+                (
+                    "urn:eigenius:variant:Location",
+                    "a location, reference stated by the notation",
+                )
+            }
+            (
+                Notation::ResidueRange {
+                    start_residue,
+                    start,
+                    end,
+                    ..
+                },
+                true,
+                Some(acc),
+            ) => {
+                ni.set(
+                    p("urn:eigenius:variant:reference"),
+                    Value::String(acc.clone()),
+                );
+                ni.set(
+                    p("urn:eigenius:variant:start"),
+                    Value::Integer(*start as i64),
+                );
+                ni.set(p("urn:eigenius:variant:end"), Value::Integer(*end as i64));
+                ni.set(
+                    p("urn:eigenius:variant:ref_state"),
+                    Value::String(start_residue.clone()),
+                );
+                (
+                    "urn:eigenius:variant:Location",
+                    "an interval, reference stated by the notation",
+                )
+            }
             // Tier 2: the parse is certain, the accession is not. Recorded, not typed as an allele.
             _ => (entity.as_str(), describe(&n)),
         };
@@ -920,6 +1000,10 @@ fn describe(n: &eigenius_notation::Notation) -> &'static str {
         N::CodingChange(_) => "a coding change; its reference accession is not in the notation",
         N::ResiduePosition { .. } => {
             "a residue and position; its reference accession is not in the notation"
+        }
+        N::ResidueRange { .. } => {
+            "an interval between two residue positions; its reference accession is not in the \
+             notation"
         }
         N::UniProt(_) => "a UniProt accession",
         N::PdbEntry(_) => "a Protein Data Bank entry",

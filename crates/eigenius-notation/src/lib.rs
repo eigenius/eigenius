@@ -44,6 +44,15 @@ pub enum Notation {
     CodingChange(hgvs::Change),
     /// A residue and its position with no change stated — `Arg381`, `Ile380`.
     ResiduePosition { residue: String, position: u32 },
+    /// An INTERVAL between two residue positions — `Met375–Arg381`, a helix boundary. Distinct from
+    /// a position because `variant:Location` carries start AND end, and the document states helix
+    /// and domain extents this way: 9 distinct ranges over 8 units of the XIAP report.
+    ResidueRange {
+        start_residue: String,
+        start: u32,
+        end_residue: String,
+        end: u32,
+    },
     /// A UniProt accession — `P98170`, `A5D8Q0`.
     UniProt(String),
     /// A Protein Data Bank entry — `2KNA`.
@@ -95,6 +104,31 @@ fn parse_one_letter_change(body: &str) -> Option<hgvs::Change> {
         end: pos.parse().ok()?,
         ref_state: Some(ref_res.to_string()),
         alt: alt.to_string(),
+    })
+}
+
+/// `Met375-Arg381` — an interval between two residue positions, after dash normalisation. Rejected
+/// when it runs backwards, as `parse_c` rejects a backwards coding interval.
+fn parse_residue_range(t: &str) -> Option<Notation> {
+    let (lhs, rhs) = t.split_once('-')?;
+    let (
+        Some(Notation::ResiduePosition {
+            residue: a,
+            position: st,
+        }),
+        Some(Notation::ResiduePosition {
+            residue: b,
+            position: en,
+        }),
+    ) = (parse_residue_position(lhs), parse_residue_position(rhs))
+    else {
+        return None;
+    };
+    (st <= en).then_some(Notation::ResidueRange {
+        start_residue: a,
+        start: st,
+        end_residue: b,
+        end: en,
     })
 }
 
@@ -177,6 +211,12 @@ fn is_qualified_change(rest: &str) -> bool {
 /// matters only where two grammars could both match; each arm below is disjoint in practice.
 pub fn recognize(token: &str) -> Option<Notation> {
     let t = token.trim();
+    // An en- or em-dash is a hyphen. Normalised BEFORE the ASCII guard, because the document writes
+    // residue ranges with an en-dash (`Thr369–Asn373`) and that made the whole token non-ASCII —
+    // the guard then rejected it entire, taking BOTH endpoints with it, which is why `Asn373` and
+    // `Asn416` stayed OOV after the first wiring. 9 distinct ranges over 8 units.
+    let dashed = t.replace(['\u{2013}', '\u{2014}'], "-");
+    let t = dashed.as_str();
     // Every notation here is ASCII by specification, so a token carrying anything else is not one
     // of them. Stated once, at the top, rather than guarded in each arm — and it is also what
     // keeps the byte-indexed readers below from meeting a multi-byte char at all.
@@ -230,6 +270,9 @@ pub fn recognize(token: &str) -> Option<Notation> {
         if is_real_protein_change(&c) {
             return Some(Notation::ProteinChange(c));
         }
+    }
+    if let Some(n) = parse_residue_range(t) {
+        return Some(n);
     }
     if let Some(n) = parse_residue_position(t) {
         return Some(n);
@@ -321,6 +364,31 @@ mod tests {
                 position: 381
             })
         );
+        // Residue RANGES, as the document writes helix extents — en-dash, em-dash and hyphen.
+        for r in [
+            "Met375\u{2013}Arg381",
+            "Met375\u{2014}Arg381",
+            "Met375-Arg381",
+        ] {
+            assert_eq!(
+                recognize(r),
+                Some(Notation::ResidueRange {
+                    start_residue: "Met".into(),
+                    start: 375,
+                    end_residue: "Arg".into(),
+                    end: 381
+                }),
+                "{r}"
+            );
+        }
+        // The endpoints the en-dash form used to swallow whole.
+        assert!(matches!(
+            recognize("Thr369\u{2013}Asn373"),
+            Some(Notation::ResidueRange { end: 373, .. })
+        ));
+        // A backwards interval is refused, as parse_c refuses a backwards coding interval.
+        assert_eq!(recognize("Arg381-Met375"), None);
+
         assert_eq!(
             recognize("P98170"),
             Some(Notation::UniProt("P98170".into()))
@@ -422,11 +490,16 @@ mod tests {
             "1998",
             "380",
             "0KNA",
-            // Non-ASCII, which byte-indexed readers must refuse rather than panic on.
+            // Non-ASCII, which byte-indexed readers must refuse rather than panic on. (A residue
+            // RANGE is no longer here — dash normalisation admits it; these stay rejected.)
             "3₁₀",
             "α1",
-            "Met375–Arg381",
             "p.Ilé380Thr",
+            // Hyphenated tokens that are NOT ranges, now that the range arm splits on a hyphen.
+            "Ile-Thr",
+            "ABE9-SpRY",
+            "Gyrd-Hansen",
+            "157-nucleotide",
         ] {
             assert_eq!(
                 recognize(t),

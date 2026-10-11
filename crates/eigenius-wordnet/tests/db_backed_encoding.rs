@@ -514,6 +514,24 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     );
     aug.added.extend(ne_aug.added);
     aug.supporting.extend(ne_aug.supporting);
+
+    // The fifth extraction source (D101 §step 2). Merged AFTER the lexicon-backed pass so its
+    // OOV-only guard sees the committed lexicon, and alongside apposition rather than instead of
+    // it: the two recognise disjoint things, and `Ile380Thr` is the case apposition structurally
+    // cannot reach — interior capital, lowercase-initial prefixed form, and never a noun head in
+    // front of it.
+    let not_aug = eigenius_kernel::dcg::notation_augmentation(head, page);
+    let n_notations = not_aug.added.len();
+    eprintln!(
+        "notations: {n_notations} recognised — {:?}",
+        not_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(not_aug.added);
+    aug.supporting.extend(not_aug.supporting);
     let source_path = std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
     let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| page.to_string());
     let abbr_aug = {
@@ -554,9 +572,38 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     );
     aug.added.extend(abbr_aug.added);
     aug.supporting.extend(abbr_aug.supporting);
+    // RETRACT what the later sources supplied. `missing_oov` is the residual of the
+    // lexicon-backed pass ALONE, computed before apposition and notation ran, so merging their
+    // entries never removed anything from it — the line below reported 242 residual OOV unchanged
+    // while 93 notations had just closed. A gap a later source filled is not a gap.
+    // Every source's entries must actually be IN `aug` by now. Cheap, and it would have caught a
+    // real one: relocating the retraction block below deleted the notation merge, and the run
+    // reported "59 OOV grounded + 117 notation(s)" — the arithmetic subtracting notations that
+    // were never added — while measuring the source doing nothing at all.
+    assert!(
+        aug.added.len() >= n_names + n_notations,
+        "every source's entries must be merged: {} added < {n_names} names + {n_notations} notations",
+        aug.added.len()
+    );
+    let supplied: std::collections::BTreeSet<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.to_lowercase())
+        .collect();
+    let before_retraction = aug.missing_oov.len();
+    aug.missing_oov
+        .retain(|g| !supplied.contains(&g.surface.to_lowercase()));
     eprintln!(
-        "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), {} residual OOV",
-        aug.added.len() - n_names,
+        "residual OOV: {} → {} after retracting what apposition and notation supplied",
+        before_retraction,
+        aug.missing_oov.len()
+    );
+    // Each source counted SEPARATELY. Folding notations into "OOV grounded + injected" would make
+    // the fifth source's contribution unreadable in the one line anyone compares across runs.
+    eprintln!(
+        "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), \
+         {n_notations} notation(s), {} residual OOV",
+        aug.added.len() - n_names - n_notations,
         aug.missing_oov.len()
     );
     aug
