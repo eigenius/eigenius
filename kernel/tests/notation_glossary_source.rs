@@ -216,12 +216,9 @@ fn a_surface_the_lexicon_already_has_is_left_alone() {
     );
 }
 
-/// A residue RANGE must close its endpoints too, not only itself. In the page a helix boundary is
-/// one whitespace-delimited token (`Thr369–Asn373`), but the parser's tokenizer splits on the dash
-/// and asks the lexicon for `Asn373` — so an entry keyed only on the whole range is keyed under a
-/// surface nothing requests. That is why those endpoints stayed OOV after the range support landed.
+/// A residue RANGE closes the surfaces the PARSER asks for — the endpoints, not the range.
 #[test]
-fn a_residue_range_closes_its_endpoints_as_well_as_itself() {
+fn a_residue_range_closes_the_endpoints_the_parser_asks_for() {
     let head = bootstrap_head();
     let aug = notation_augmentation(
         &head,
@@ -232,12 +229,20 @@ fn a_residue_range_closes_its_endpoints_as_well_as_itself() {
         .iter()
         .map(|b| b.provenance.surface.clone())
         .collect();
-    for want in ["Thr369\u{2013}Asn373", "Thr369", "Asn373"] {
+    for want in ["Thr369", "Asn373"] {
         assert!(
             surfaces.iter().any(|s| s == want),
             "{want} must get an entry; got {surfaces:?}"
         );
     }
+    // And NOTHING is minted for a surface the tokenizer never yields. This test used to demand an
+    // entry for the whole range too, because a hand-written tokenizer split the dash itself and
+    // minted all three. Sharing the parser's tokenizer showed that entry was keyed under a surface
+    // nothing ever asks for: `preprocess::tokenize` returns exactly ["Thr369", "Asn373"] here.
+    assert!(
+        !surfaces.iter().any(|s| s.contains('\u{2013}')),
+        "no entry for a surface the parser does not produce: {surfaces:?}"
+    );
 }
 
 // ── The sixth source: recurrent OOV names ────────────────────────────────────
@@ -575,4 +580,34 @@ fn derivation_strips_one_affix_from_a_lowercase_word_only() {
     assert_eq!(derive_with("upup", known), None);
     // The real case still works, so the guards above are not vacuous.
     assert!(derive_with("pulldown", known).is_some());
+}
+
+/// A capital from a SENTENCE BOUNDARY is not a name. `Your` was minted as a named individual — it
+/// carries a capital and recurs, because the report addresses its reader. The closed-class guard
+/// missed it (the kernel's DETERMINERS holds quantifiers only, no possessives), and the signal that
+/// does catch it is the document writing `your` in lower case elsewhere.
+#[test]
+fn a_sentence_initial_capital_is_not_a_name() {
+    let head = bootstrap_head();
+    let doc = "Your message of 12 September is the source. Your note arrived after that, and \
+               your reading of it matches mine. Tse et al. measured the helix. Tse et al. \
+               report the boundaries. gnomAD lists no hemizygote, and gnomAD agrees.";
+    let aug = oov_name_augmentation(&head, doc);
+    let surfaces: Vec<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    assert!(
+        !surfaces.iter().any(|s| s == "Your"),
+        "`your` appears in lower case in the document, so the capital is positional: {surfaces:?}"
+    );
+    // Not vacuous: a Title-case surface the document NEVER lowercases is still a name, and the
+    // rule only reaches strictly Title-case forms, so interior capitals are untouched.
+    for want in ["Tse", "gnomAD"] {
+        assert!(
+            surfaces.iter().any(|s| s == want),
+            "{want} must still be a name: {surfaces:?}"
+        );
+    }
 }

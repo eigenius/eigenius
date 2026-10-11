@@ -736,64 +736,29 @@ fn variant_layer_present(base: &Arc<Layer>) -> bool {
         .is_some()
 }
 
-/// The tokens of `document`, bare of surrounding punctuation that is not part of a notation.
-/// `(Rigaud` → `Rigaud`; `p.Ile380Thr,` → `p.Ile380Thr`; `NM_001167.4:c.1141C>T` is left whole.
+/// The tokens of `document` **as the parser will tokenize it** —
+/// [`preprocess::tokenize`](super::preprocess::tokenize) over
+/// [`ProseUnits::load`](super::quantity::ProseUnits::load), the same construction
+/// `Parser::tokenize` uses.
 ///
-/// A dash-joined token yields BOTH the whole and its parts. `Thr369–Asn373` is one
-/// whitespace-delimited token here, but the PARSER's tokenizer splits on the dash and asks the
-/// lexicon for `Asn373` — so an entry keyed only on the whole range is keyed under a surface
-/// nothing ever requests. That mismatch is why those endpoints stayed OOV after the range support
-/// landed: recognising the range was necessary and not sufficient. Extra candidates cost nothing,
-/// because `recognize` refuses whatever is not a notation (`ABE9-SpRY`, `Gyrd-Hansen`).
-fn notation_tokens(document: &str) -> Vec<&str> {
-    fn bare(t: &str) -> &str {
-        t.trim_matches(|c: char| {
-            matches!(
-                c,
-                '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`' | '*' | '|' | '«' | '»'
-            ) || matches!(c, ',' | ';' | '!' | '?')
-        })
-        .trim_end_matches('.')
-    }
-    // Commas too: the parser's tokenizer splits `chrX:123,900,532` and asks the lexicon for
-    // `chrX:123`, the single biggest remaining blocker at 11 units. Same mismatch as the dash.
-    const DASHES: [char; 4] = ['-', '\u{2013}', '\u{2014}', ','];
-    let mut out = Vec::new();
-    for t in whitespace_tokens(document) {
-        out.push(t);
-        if t.contains(DASHES) {
-            for part in t.split(DASHES) {
-                let p = bare(part);
-                if !p.is_empty() && p != t {
-                    out.push(p);
-                }
-            }
-        }
-    }
-    out
-}
-
-/// The whitespace tokens alone, bare of surrounding punctuation — WITHOUT the dash parts.
+/// This replaced two hand-written tokenizers, and the reason is the whole point of the seam: a
+/// glossary source must mint an entry under the surface the parser will LATER ASK THE LEXICON FOR.
+/// Guessing at that failed four times in one sitting — a recognised `Thr369–Asn373` left `Asn373`
+/// OOV, a recognised `chrX:123,900,532` left `chrX:123` OOV, and a code-marked
+/// `fields=dbnsfp.gerp` left `dbnsfp.gerp` OOV twice over. Each time the patch was one more
+/// punctuation class, which is a Band-Aid on a defect whose fix is to stop having a second
+/// tokenizer.
 ///
-/// The split is not cosmetic. Dash parts exist so a residue range closes the endpoints the
-/// parser's tokenizer asks for, and [`notation_tokens`]'s consumer filters them through
-/// `recognize`, which refuses a non-notation. A consumer with no such filter must not see them:
-/// the name source accepts any recurring capitalised token, and on the dash parts it minted
-/// `Gyrd` and `Hansen` as separate entities beside `Gyrd-Hansen`.
-fn whitespace_tokens(document: &str) -> Vec<&str> {
-    fn bare(t: &str) -> &str {
-        t.trim_matches(|c: char| {
-            matches!(
-                c,
-                '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`' | '*' | '|' | '«' | '»'
-            ) || matches!(c, ',' | ';' | '!' | '?')
-        })
-        .trim_end_matches('.')
-    }
-    document
-        .split_whitespace()
-        .map(bare)
-        .filter(|t| !t.is_empty())
+/// The parser's lexer already decides the two cases I had reimplemented, and three I had not: an
+/// en-dash JOINS a range conditionally (`joins_range`), a comma inside `123,900,532` groups digits
+/// rather than separating (`groups_digits`), and brackets and appositives are resolved before
+/// tokens are formed.
+fn parser_tokens(base: &Arc<Layer>, document: &str) -> Vec<String> {
+    let units = super::quantity::ProseUnits::load(base);
+    super::preprocess::tokenize(document, &units)
+        .iter()
+        .map(|t| t.surface().to_string())
+        .filter(|s| !s.trim().is_empty())
         .collect()
 }
 
@@ -821,7 +786,8 @@ pub fn notation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmen
     let mut supporting = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
 
-    for tok in notation_tokens(document) {
+    for tok in parser_tokens(base, document) {
+        let tok = tok.as_str();
         let Some(n) = recognize(tok) else { continue };
         let key = slug(tok);
         if key.is_empty() || !seen.insert(key.clone()) {
@@ -1053,6 +1019,31 @@ fn describe(n: &eigenius_notation::Notation) -> &'static str {
 // and it is why this is a separate source with its own provenance rather than a loosened
 // apposition rule.
 
+/// Is `t`'s capital POSITIONAL rather than nominal — a sentence-initial word the document also
+/// writes in lower case?
+///
+/// `Your` was minted as a named individual: it carries a capital and recurs, because the report
+/// addresses its reader ("Your message of 12 September…"). The closed-class guard did not catch
+/// it — the kernel's `DETERMINERS` holds quantifiers only, with no possessives or articles — and
+/// widening that set would be treating the symptom. The signal that does catch it is that the
+/// DOCUMENT ITSELF writes `your` in lower case ten times, so the capital came from a sentence
+/// boundary.
+///
+/// Restricted to STRICTLY Title-case surfaces, which is what makes it safe: `gnomAD` and
+/// `AlphaFold` carry interior capitals and `UBA` is all caps, so none is reached; `Tse` is
+/// Title-case but never appears lowercase, so it survives.
+fn capital_is_positional(t: &str, document: &str) -> bool {
+    let mut cs = t.chars();
+    let Some(first) = cs.next() else { return false };
+    if !first.is_uppercase() || cs.any(|c| c.is_uppercase()) {
+        return false;
+    }
+    let lower = first.to_lowercase().collect::<String>() + &t[first.len_utf8()..];
+    document
+        .split_whitespace()
+        .any(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '\'') == lower)
+}
+
 /// Does `t` look like a NAME the document keeps using — a capital somewhere, letters and digits
 /// only, and nothing that belongs to another source?
 fn is_oov_name(t: &str) -> bool {
@@ -1088,7 +1079,8 @@ pub fn oov_name_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmen
         return LexiconAugmentation::default();
     };
 
-    let toks: Vec<&str> = whitespace_tokens(document);
+    let owned = parser_tokens(base, document);
+    let toks: Vec<&str> = owned.iter().map(String::as_str).collect();
     let mut freq: std::collections::BTreeMap<&str, usize> = Default::default();
     for t in &toks {
         *freq.entry(*t).or_default() += 1;
@@ -1101,6 +1093,10 @@ pub fn oov_name_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmen
     for t in &toks {
         let t = *t;
         if !is_oov_name(t) || freq.get(t).copied().unwrap_or(0) < MIN_OCCURRENCES {
+            continue;
+        }
+        // A capital from a sentence boundary is not a name.
+        if capital_is_positional(t, document) {
             continue;
         }
         let core = t.trim_end_matches("'s").trim_end_matches("\u{2019}s");
@@ -1510,7 +1506,8 @@ pub fn derivation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugm
     let mut supporting = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
 
-    for tok in whitespace_tokens(document) {
+    for tok in parser_tokens(base, document) {
+        let tok = tok.as_str();
         // Lowercase words only (enforced in `derive_with`): a capitalised OOV surface is a NAME,
         // which the sixth source owns.
         if !seen.insert(tok.to_string()) {
