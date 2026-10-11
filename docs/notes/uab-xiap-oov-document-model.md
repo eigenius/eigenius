@@ -82,3 +82,66 @@ worth taking, but they are not the gap. Recognising HGVS and accession notation 
   of their own (D101 defers figure/code/caption on the same principle).
 - The 24 units this attribution could not match: the kernel's tokenisation is authoritative and
   this note's is a reconstruction. The direction does not depend on them — 207 ≫ 36 either way.
+
+## Why `Ile380Thr` never reaches the named-individual route
+
+Measured `2026-10-11`. The route that closed unit 4's gap in step 4 is documented as "recurrence +
+non-adjective head", and `Ile380Thr` recurs in 20 units, so it should qualify. It does not, for
+three independent reasons — each sufficient on its own, each pinned in
+`kernel/tests/variant_notation_is_not_a_named_entity.rs` with a non-vacuous control
+(`project Achilles` IS recognized in the same frame).
+
+1. **The shape rejects it.** `name_token` admits ALL-CAPS (`DRIVE`) or Title-case with **no
+   interior capital** — the rule that deliberately rejects `mRNA` and `HeLa`. An HGVS three-letter
+   code is exactly that shape: the `T` of `Thr` is an interior capital.
+2. **The prefixed form fails earlier still.** `p.Ile380Thr` begins lowercase, so it is rejected
+   before the shape test runs.
+3. **There is no noun head.** The route is **apposition** — `<common-noun> <Name>`. The real
+   contexts, by frequency over the 450 units, are `an`, `for`, `of`, `than`, a table pipe, or a
+   VERB (`prefers`, `confirm`, `carrying`). None is a noun head.
+
+**Recurrence is never consulted**: candidacy fails first. So the threshold is not the lever — moving
+it changes nothing.
+
+### The parser already exists, unwired
+
+`eigenius-pmi-registry::hgvs::parse_p` reads exactly this notation, and returns its STRUCTURE:
+
+| notation | → | |
+|---|---|---|
+| `p.Ile380Thr` | start 380, end 380, ref `Ile`, alt `Thr` | |
+| `p.Ile380Val`, `p.Ala379Thr`, `p.Arg381Ter` | all parse | |
+| `Ile380Thr` (bare, as the report also writes it) | refused: "not a protein (p.) change" | correct for a registry — unprefixed is ambiguous between coding and protein coordinates |
+
+So this is not a capability to build. It is a capability the document glossary does not consult.
+
+### What a notation source would reach
+
+Of the 243 blocked units whose OOV tokens this attribution could match:
+
+| | units |
+|---|---:|
+| unblocked by notation + vocabulary | **119** (49%) |
+| still blocked | 124 |
+
+Notation classes, by units touched: HGVS protein 95, residue position 55, ClinVar VCV 24, genomic
+coordinate 11, UniProt accession 10, gene/transcript 8, PDB id 7, dbSNP rsid 6.
+
+**What remains are product names**, not notations: `ABE9` 11, `v4.1` 6, `SIFT4G` 6, `AlphaFold` 5,
+`AlphaMissense` 5, `ClinPred` 5, `ABE8e` 5, `MaveDB` 4, `HGMD` 4, `BayesDel` 4, `VEST4` 4, `SiPhy`
+4, `SpliceAI` 4 — base editors, predictors and databases. A separate closure, and several would
+pass `name_token` already if they occurred in apposition.
+
+`L145T` (4 units) is a **one-letter** HGVS code, which the three-letter pattern above misses; the
+report writes ABE9's mutations that way (`N108Q + L145T`). A notation source needs both alphabets.
+
+### The shape this argues for
+
+A **fifth** document-glossary extraction source, keyed on notation rather than orthography —
+`named_entity` is the fourth, and `abbrev` (Schwartz-Hearst) is already a separate source precisely
+because its pattern is its own. HGVS, accessions and coordinates are published grammars; recognising
+them needs no heuristic and no recurrence guard.
+
+It should NOT mint `ni_ile380thr` as an opaque individual. The parse yields reference residue,
+position and alternate residue, and an opaque name would put that meaning back in a string — the
+ad-hoc-predicate failure (`xiap:HemizygousMaleCount`) that the parser exists to prevent.
