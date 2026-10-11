@@ -29,8 +29,8 @@ XML as a storage format" (D96).
 
 | JATS | class | carries |
 |---|---|---|
-| `<article>` | `enc:Document` | the work, its manifestation, an ordered `enc:body`, an `enc:back` |
-| `<sec id= sec-type=>` | `enc:Section` | identity, title, `sec-type`, ordered children (sections or blocks) |
+| `<article>` | `enc:Document` | the manifestation: media type, path, content hash, title, an ordered `enc:body`, a `ref-list` |
+| `<sec id= sec-type=>` | `enc:Section` | identity, title, an `enc:SectionKind`, ordered children (sections or blocks) |
 | `<p>` | `enc:Paragraph` | an ordered run of `DiscourseUnit`s |
 | `<table-wrap>` | `enc:Table` | ordered rows; a caption when one exists |
 | `<ref-list>` / `<ref>` | existing `reference:Reference` | the cited works, as the bibliography |
@@ -49,8 +49,79 @@ of a string match (D96 §Alignment).
 captions. D96's alignment lists a `figure` kind split out of `kind_table`, a `code` kind, and
 captions as units of their own; none is exercised here. They belong in the vocabulary because the
 model is JATS's, but nothing in this corpus tests them, and a class no instance exercises is a class
-whose shape is a guess. **Proposed: define `Document`, `Section`, `Paragraph`, `Table` and
+whose shape is a guess. **Decided: define `Document`, `Section`, `Paragraph`, `Table` and
 `ReferenceSpan` now; defer `figure`, `code` and caption units to the first document that has one.**
+
+### Provenance has one root, and it is the document
+
+`reference:Reference` cannot hold a document's structure, by its own ontology's design rule:
+"Anything local to the citing document — the in-text reference number, the CiTO function, the
+imported claim — lives on the Citation, never on the Reference (a different paper citing the same
+work numbers it differently)" (`ontologies/reference/reference.esl`). A paragraph order and a byte
+offset are manifestation-local in exactly that sense. `reference:Reference` is also defined as "A
+published work cited by an encoding", identified by DOI or PubMed ID; the XIAP report is unpublished
+and has neither.
+
+**Decided: three resources on three axes, chained, none subsuming another.**
+
+| | axis | carries |
+|---|---|---|
+| `reference:Reference` | the WORK, when published | DOI/PMID, CSL-JSON metadata; the `<ref-list>` entries |
+| `enc:Document` | the MANIFESTATION — observed | media type, path, content hash, structure |
+| `enc:ReasoningStructure` | the DERIVATION — derived | `enc:claims`, `prov:derivation` → one ProgramTrace |
+
+`enc:ReasoningStructure` is already explicitly "DERIVED: this is the output of a program run over
+hashed input". A document model is a transcription of what the source says. Merging them would put
+an observation and a derivation in one resource, which is the kind-axis collapse the step-5 plan
+note warns about.
+
+So three properties move, because they describe the input and today sit on the output:
+`enc:document` retypes from `reference:Reference` to `enc:Document`; `enc:source_path` and
+`enc:source_sha256` move their domain from `enc:ReasoningStructure` to `enc:Document`. The hash
+belongs there regardless — D96's amendment resolves every locator "against a hashed document", so
+the hash is a property of the thing the locators address.
+
+Per-unit provenance then follows containment. `enc:source_document` on a `DiscourseUnit` is
+derivable by walking up to the `Document`, and a second home for the same fact is a disagreement
+waiting to happen, so it comes off.
+
+**Cost, measured:** 13 code sites in 3 files — `crates/eigenius-encoding/src/emit.rs`,
+`crates/eigenius-pmi-registry/src/convert.rs`,
+`crates/eigenius-encoding/tests/artifact_completeness.rs`. (`enc:document` 1, `enc:source_sha256` 1,
+`enc:source_path` 0, `enc:source_document` 4, `enc:section` 5, `enc:span_start`/`span_end` 1 each.)
+The larger grep counts — 476, 497, 473 — are the 467-unit emitted ESL, not code.
+
+### Section types: JATS's values, in an open class
+
+JATS's `sec-type` list is **suggested, not controlled**. The BITS 2.1 tag library says the attribute
+"may take any value" and names the JATS article recommendations; JATS4R draws the same distinction
+("controlled" values must come from a list, "suggested" values should) and notes that controlled
+lists hurt adoption when a user has a legitimate need for an unlisted value.
+
+So `enc:SectionKind` is a class of individuals, open by construction, carrying JATS's nine suggested
+values: `cases`, `conclusions`, `discussion`, `intro`, `materials`, `methods`, `results`, `subjects`,
+`supplementary-material`. Individuals, not a string, is what makes "the methods" a query. Open, not
+closed, because JATS's own is — a layer that needs a tenth adds it under `core:subclass_of` rather
+than through an enumerated selector.
+
+**Decided: use JATS's values; mint no document-local section vocabulary.** The XIAP report's 15
+headings:
+
+| heading | maps to | n |
+|---|---|---|
+| `# XIAP p.Ile380Thr bystander edit risk assessment` | `<article-title>`, in front matter — not a `<sec>` | 1 |
+| `## Bottom line up front` | `conclusions` — a BLUF is the conclusion, placed first | 1 |
+| `## The variant and its setting` | `intro` | 1 |
+| `## Finding 1 … 10` | `results` | 10 |
+| `## Methods` | `methods` | 1 |
+| `## References` | `<ref-list>`, in back matter — not a `<sec>` | 1 |
+
+Ten of thirteen body sections are findings, and "finding" is not a JATS value. Typing them `results`
+loses nothing: a query for the results returns them, and "finding 4" is answered by section IDENTITY
+and title, which are a resource and a string on that resource, not a `sec-type`. A document-local
+`sec-type` would buy only what identity already provides, while buying no cross-document query —
+which is the entire job of `sec-type`. Document order carries the BLUF-first arrangement, so
+`conclusions` appearing first is representable without a second ordering concept.
 
 ## What the conversion process is
 
@@ -85,20 +156,23 @@ sub-element is appended without a comma (`§Finding 4 table`), sections are abbr
 
 ## Cost
 
-`encoding` is a bootstrapped ontology, so this is a reseed. Three bootstrap edits should land
-together rather than separately: these structure classes; `enc:section` ranging over a resource; and
-the `enc:locator` property that would let a unit carry its Text Fragment on the chain instead of in
-a sidecar.
+`encoding` is a bootstrapped ontology, so this is a reseed (~30 min, plus snapshot and baselines).
+Four bootstrap edits land together rather than separately: the structure classes and `SectionKind`;
+the three provenance properties retyped or re-domained; `enc:section` ranging over a resource; and
+the `enc:locator` property that lets a unit carry its Text Fragment on the chain instead of in a
+sidecar.
 
 ## Open
 
-- **`sec-type` values.** JATS has a suggested list (`intro`, `methods`, `results`, `discussion`).
-  This report's sections are a title, a BLUF, a setting, ten findings, methods and references —
-  "finding" is not a JATS `sec-type`. Whether to use JATS's vocabulary and type the findings as
-  `results`, or to carry the document's own section vocabulary, is undecided.
-- **Where a manifestation lives.** `enc:source_document` is `class_types reference:Reference`,
-  described as "the published work this unit is drawn from". This report is unpublished. D96 already
-  plans the manifestation read for `reference:Reference`; `enc:Document` may be the better home,
-  with `reference:Reference` left to the bibliography.
-- **Whether `enc:Document` subsumes `enc:ReasoningStructure`**, which already carries
-  `enc:document` and `enc:claims` over one source work.
+- **Whether the BLUF is `conclusions` or an `<abstract>`.** JATS puts `<abstract>` in
+  `<article-meta>`, and this BLUF is body prose under its own `##` heading. Typed `conclusions`
+  above; if the ingest routes later want front-matter abstracts, the two readings diverge.
+- **`enc:ReferenceSpan` offsets against which base.** The spans are inside a unit, so unit-relative
+  offsets are the obvious base, but D96 derives unit offsets from a document-level locator. Whether
+  a span gets its own Text Fragment or an offset pair into its unit is unsettled.
+
+## Sources
+
+- [JATS 1.3 `sec-type`](https://jats.nlm.nih.gov/publishing/tag-library/1.3/attribute/sec-type.html)
+- [BITS 2.1 `sec-type`](https://jats.nlm.nih.gov/extensions/bits/tag-library/2.1/attribute/sec-type.html) — "may take any value"
+- [JATS4R attribute framework](https://jats4r.niso.org/jats4r-attribute-framework/) — controlled vs suggested
