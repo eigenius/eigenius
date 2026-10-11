@@ -29,13 +29,14 @@ XML as a storage format" (D96).
 
 | JATS | class | carries |
 |---|---|---|
-| `<article>` | `enc:Document` | the manifestation: `enc:media_type`, `enc:source_path`, `enc:source_sha256`, `enc:document_title`, an ordered `enc:body`, `enc:ref_list`, and `enc:work` when the source is published |
+| `<article>` | `enc:Document` | the manifestation: `enc:media_type`, `enc:source_path`, `enc:source_sha256`, `enc:document_title`, an ordered `enc:body`, an `enc:back`, and `enc:work` when the source is published |
 | — | `enc:Block` | the abstract element type of `enc:body` and `enc:children`: one type to walk, and a later `figure` or `code` needs no edit to containment |
-| `<sec id= sec-type=>` | `enc:Section` | `enc:section_title`, an `enc:section_kind`, and ordered `enc:children` (sub-sections and blocks interleaved) |
+| `<sec id= sec-type=>` | `enc:Section` | `enc:title`, an `enc:section_kind`, and ordered `enc:children` (sub-sections and blocks interleaved) |
 | `<p>` | `enc:Paragraph` | `enc:units` — an ordered run of `DiscourseUnit`s, one per sentence |
 | `<table-wrap>` | `enc:Table` | `enc:units` — one per row; separate from `Paragraph` because its units route to `kind_table`, by element and not by guess |
 | `sec-type` | `enc:SectionKind` | JATS's nine suggested values, as individuals |
-| `<ref-list>` / `<ref>` | existing `reference:Reference` | the cited works, reached through `enc:ref_list` |
+| `<ref-list>` | `enc:RefList` | `enc:title`, `enc:refs` (the entries), `enc:children` (sub-groups and prose) — it nests, because real bibliographies do |
+| `<ref>` | existing `reference:Reference` | one cited work, reached through `enc:refs` |
 | `<xref>` | `enc:ReferenceSpan` | `enc:span_unit`, `enc:ref_target`, `enc:ref_type`, `enc:ref_surface`, `enc:locator` |
 | `ref-type` | `enc:ReferenceType` | the five values D96 names: `bibr`, `table`, `fig`, `disp-formula`, `supplementary-material` |
 | — | `enc:locator` | the fragment identifier, on a `DiscourseUnit` or a `ReferenceSpan` |
@@ -66,6 +67,25 @@ captions as units of their own; none is exercised here. They belong in the vocab
 model is JATS's, but nothing in this corpus tests them, and a class no instance exercises is a class
 whose shape is a guess. **Decided: define `Document`, `Section`, `Paragraph`, `Table` and
 `ReferenceSpan` now; defer `figure`, `code` and caption units to the first document that has one.**
+
+### Back matter is part of the model
+
+The first cut gave `enc:Document` a flat `enc:ref_list` of `reference:Reference`. The report's
+bibliography does not fit in one: it is a leading provenance paragraph, **four** titled groups
+totalling **63** entries, and a trailing paragraph of database accessions — prose and nesting and
+titles, none of which an array of works can carry. (The plan note's "69 reference entries" counted
+the paragraphs as entries.)
+
+So `enc:RefList` is a `Block`, it nests (JATS's `<ref-list>` nests too), and it sits in
+`enc:back` rather than in `enc:body`: a `## References` heading at the same markdown depth as the
+argument's sections is not a section of the argument. `enc:title` replaced `enc:section_title` at
+the same time, because a `RefList` has a title for the same reason a `Section` does, and JATS calls
+the element `<title>` in both places.
+
+The group headings are bold-only lines (`**Base editing**`), which an "entirely bold" test
+separates from the **77** bold-LEAD paragraphs (`**Lead.** Then prose…`) elsewhere in the report —
+including one inside §References itself (`**Database records consulted directly:** dbSNP …`). Read
+off the markup, not guessed; the same distinction that caught the earlier 77 miscount.
 
 ### Provenance has one root, and it is the document
 
@@ -167,9 +187,18 @@ locations `¶`.
    in §References before this was fixed).
 3. **Locators.** Each unit gets a WICG Text Fragment resolved against the document's normalized text
    content, per D96's amendment; `span_start`/`span_end` are DERIVED from it, never authored.
-4. **Reference spans.** An inline citation (`(Rigaud et al. 2006)` — 9 of them, over 8 works)
-   becomes an `enc:ReferenceSpan` inside its prose unit, targeting the `reference:Reference` its
-   bibliography entry mints.
+4. **No reference spans, because markdown has no `<xref>`.** D96's rule is that a reference is
+   known by markup; markdown writes a citation as ordinary prose, so there is no element to follow.
+   Recognising one is a DERIVATION over the document, and a derivation does not belong inside a
+   transcription that is otherwise entirely observed. `enc:ReferenceSpan` stays in the vocabulary
+   for the JATS and XML routes, where `<xref>` exists, and the markdown route emits none.
+
+   What a later derivation step has to handle, measured on this report's body: **11** parenthesised
+   author-year citations over **8** works — one parenthesis carrying two
+   (`(Damgaard et al. 2012; Aguilar et al. 2014)`); **23** bare `Author et al. YEAR` over **13**
+   works; and **30+** `Author et al.` with no year at all, resolvable only against the
+   bibliography. An earlier count of "9 over 8 works" saw one of the three forms, and missed
+   `Gyrd-Hansen` because the pattern's character class excluded the hyphen.
 5. **Emit and load through the kernel.** A rejection is a finding, not a silent drop.
 
 ### The register is not an input
@@ -186,7 +215,7 @@ sub-element is appended without a comma (`§Finding 4 table`), sections are abbr
 
 `encoding` sits at the tip of `BOOTSTRAP_CHAIN` (`kernel/src/bootstrap/mod.rs:441`), so this is a
 reseed (~30 min, plus snapshot and baselines), and `bootstrap_manifest_is_pinned` is updated in the
-same commit — one line, `encoding:a7ce37f8…` → `encoding:e51cf727…`, confirming nothing else moved.
+same commit — one line, `encoding:a7ce37f8…` → `encoding:94f5d43c…`, confirming nothing else moved.
 
 **The file's own header denied this** until `2026-10-10`: it read "NOT in
 `kernel/src/bootstrap` BOOTSTRAP_CHAIN, and no longer planned for it ... which keeps a vocabulary

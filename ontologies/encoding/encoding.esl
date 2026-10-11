@@ -61,7 +61,7 @@ namespace justification = "urn:eigenius:justification";
 class enc:Document {
     description = "One source document's structure and manifestation — JATS <article> as resources. The OBSERVED input root: what the bytes say, pinned by a content hash. Distinct from the DERIVED enc:ReasoningStructure a run produces from it, and from the published reference:Reference work it may manifest (enc:work), which is often absent — an unpublished report has no DOI. Locators resolve against THIS resource (D96): a unit's fragment identifier is relative to this document's text content, so the hash belongs here, on the thing the locators address.";
     requires enc:body;
-    recommends enc:media_type, enc:document_title, enc:work, enc:ref_list,
+    recommends enc:media_type, enc:document_title, enc:work, enc:back,
                enc:source_path, enc:source_sha256;
 }
 
@@ -87,9 +87,9 @@ property enc:work : core:resource {
     domain enc:Document;
 }
 
-property enc:ref_list : core:resource_array {
-    description = "The works this document's bibliography cites (JATS <ref-list>/<ref>), in list order. The targets an enc:ReferenceSpan with ref_type `bibr` resolves to. Back matter, not a section: a '## References' heading maps here, not to an enc:Section.";
-    class_types reference:Reference;
+property enc:back : core:resource_array {
+    description = "The document's back matter in order (JATS <back>): the enc:RefList holding the bibliography, and any appendix blocks. Separate from enc:body because a '## References' heading at the same markdown depth as the body's sections is not a section of the argument.";
+    class_types enc:Block;
     domain enc:Document;
 }
 
@@ -105,12 +105,12 @@ class enc:Block {
 class enc:Section : enc:Block {
     description = "A titled, identified division of a document (JATS <sec>). Identity is the resource; a section's TYPE is enc:section_kind. Sections nest: enc:children holds sub-sections and blocks alike. This is what makes 'the methods' a query rather than a string match (D96) — and what makes a unit's containing section derivable by walking down from the document, so no unit needs a back-pointer to it.";
     requires enc:children;
-    recommends enc:section_title, enc:section_kind;
+    recommends enc:title, enc:section_kind;
 }
 
-property enc:section_title : core:string {
-    description = "The section's heading text (JATS <title>). A heading is a property of a section, not a DiscourseUnit of its own (D96).";
-    domain enc:Section;
+property enc:title : core:string {
+    description = "The element's heading text (JATS <title>). A heading is a property of the element it heads, not a DiscourseUnit of its own (D96) — which is why a title needs no unit, no kind and no locator of its own.";
+    domain enc:Section, enc:RefList;
 }
 
 property enc:section_kind : core:resource {
@@ -120,9 +120,9 @@ property enc:section_kind : core:resource {
 }
 
 property enc:children : core:resource_array {
-    description = "The section's contents in document order — sub-sections and blocks, interleaved as the source has them.";
+    description = "The element's contents in document order — sub-sections and blocks, interleaved as the source has them.";
     class_types enc:Block;
-    domain enc:Section;
+    domain enc:Section, enc:RefList;
 }
 
 class enc:Paragraph : enc:Block {
@@ -133,6 +133,17 @@ class enc:Paragraph : enc:Block {
 class enc:Table : enc:Block {
     description = "A table (JATS <table-wrap>): an ordered run of DiscourseUnits, one per row. Distinct from enc:Paragraph because its units route differently — enc:kind_table, not enc:kind_prose — and the routing follows the ELEMENT, not a guess about the text.";
     requires enc:units;
+}
+
+class enc:RefList : enc:Block {
+    description = "A bibliography, or one titled group within one (JATS <ref-list>, which nests). enc:refs holds its entries; enc:children holds its sub-lists and any prose it carries. Both, because a real bibliography has both: the XIAP report's has a leading provenance paragraph, four titled groups totalling 63 entries, and a trailing paragraph of database accessions. A flat array of references could hold none of that structure.";
+    recommends enc:title, enc:refs, enc:children;
+}
+
+property enc:refs : core:resource_array {
+    description = "This list's bibliographic entries in list order (JATS <ref>) — the works an enc:ReferenceSpan with ref_type `bibr` resolves to.";
+    class_types reference:Reference;
+    domain enc:RefList;
 }
 
 property enc:units : core:resource_array {
@@ -150,7 +161,7 @@ property enc:units : core:resource_array {
 // tenth kind adds it under core:subclass_of, rather than through an enumerated selector.
 //
 // Individuals, not a string, is what makes "the methods" a query. No document-local kinds: a
-// section the list does not name is identified by its own resource and enc:section_title, and a
+// section the list does not name is identified by its own resource and enc:title, and a
 // per-document sec-type would buy only what identity already provides while buying nothing across
 // documents — which is sec-type's entire job.
 
@@ -172,7 +183,7 @@ resource enc:sec_materials : enc:SectionKind {
 }
 resource enc:sec_results : enc:SectionKind {
     core:short_name = "results";
-    core:description = "Results — what was found. A report organised as numbered findings types each finding section here; the finding's number and wording live in enc:section_title and the section's own identity.";
+    core:description = "Results — what was found. A report organised as numbered findings types each finding section here; the finding's number and wording live in enc:title and the section's own identity.";
 }
 resource enc:sec_discussion : enc:SectionKind {
     core:short_name = "discussion";
@@ -203,7 +214,7 @@ resource enc:sec_supplementary_material : enc:SectionKind {
 // derived, as they are for units.
 
 class enc:ReferenceSpan {
-    description = "One inline reference inside a prose unit (JATS <xref>): a span of text that points at a numbered thing rather than asserting content. Known by markup, never inferred — this is what keeps a citation or a figure call-out out of the parser's quantity handling (D96, answering D95's open question).";
+    description = "One inline reference inside a prose unit (JATS <xref>): a span of text that points at a numbered thing rather than asserting content. Known by MARKUP, never inferred — this is what keeps a citation or a figure call-out out of the parser's quantity handling (D96, answering D95's open question). A source whose format has no <xref> therefore yields none: markdown writes a citation as ordinary prose, so recognising one there is a DERIVATION over the document and belongs with the other derivations, not inside a transcription that is otherwise entirely observed. Measured on one markdown report: 11 parenthesised author-year citations over 8 works, 23 bare `Author et al. YEAR` over 13, and 30+ `Author et al.` with no year at all, which no markup distinguishes from prose.";
     requires enc:span_unit, enc:ref_target;
     recommends enc:ref_type, enc:ref_surface, enc:locator;
 }
