@@ -165,6 +165,12 @@ fn position_well_formed(token: &str) -> bool {
     !digits.is_empty() && !digits.starts_with('0')
 }
 
+/// Does `rest` open with a coordinate-system prefix — `c.`, `g.`, `p.`, `n.` or `m.`?
+fn is_qualified_change(rest: &str) -> bool {
+    let b = rest.as_bytes();
+    b.len() > 2 && b[1] == b'.' && matches!(b[0], b'c' | b'g' | b'p' | b'n' | b'm')
+}
+
 /// Recognise one whitespace-delimited token, stripped of surrounding punctuation by the caller.
 ///
 /// Returns `None` for anything whose grammar does not match — this source never guesses. Order
@@ -176,6 +182,23 @@ pub fn recognize(token: &str) -> Option<Notation> {
     // keeps the byte-indexed readers below from meeting a multi-byte char at all.
     if t.is_empty() || !t.is_ascii() {
         return None;
+    }
+    // FULLY QUALIFIED first — `<accession>:<c|g|p|n|m>.<change>` is a change ON a reference, and
+    // the accession patterns below would otherwise claim it: `NM_001167.4:c.1141C>T` matched the
+    // RefSeq prefix and came back a SequenceRecord, which is the one form whose reference is
+    // stated and therefore the one that can carry true allele identity.
+    if let Some((acc, rest)) = t.split_once(':') {
+        if !acc.is_empty() && is_qualified_change(rest) {
+            if let Ok(c) = hgvs::parse_c(rest) {
+                return Some(Notation::CodingChange(c));
+            }
+            if let Ok(c) = hgvs::parse_p(rest) {
+                return is_real_protein_change(&c).then_some(Notation::ProteinChange(c));
+            }
+            // `g.`/`n.`/`m.` are coordinate systems this crate does not parse yet; the token is
+            // still a coordinate on a named reference, which is more than nothing.
+            return Some(Notation::GenomicCoordinate(t.to_string()));
+        }
     }
     // Changes, prefixed. `parse_p`/`parse_c` own their contracts; this only routes to them.
     if !t.starts_with("chr") && t.chars().any(|c| c.is_ascii_digit()) && !position_well_formed(t) {
@@ -331,6 +354,21 @@ mod tests {
             recognize("c.1141C>T"),
             Some(Notation::CodingChange(_))
         ));
+
+        // FULLY QUALIFIED: the one form whose reference accession is stated, and so the only one
+        // that can carry true allele identity. It must not be swallowed by the RefSeq pattern.
+        match recognize("NM_001167.4:c.1141C>T") {
+            Some(Notation::CodingChange(c)) => assert_eq!(
+                (c.start, c.ref_state.as_deref(), c.alt.as_str()),
+                (1141, Some("C"), "T")
+            ),
+            other => panic!("a qualified coding change, got {other:?}"),
+        }
+        // The bare accession still reads as a record.
+        assert_eq!(
+            recognize("NM_001167.4"),
+            Some(Notation::SequenceRecord("NM_001167.4".into()))
+        );
     }
 
     /// The precision side, which matters more: this source runs over OOV tokens and must not

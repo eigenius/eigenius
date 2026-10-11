@@ -93,6 +93,11 @@ pub enum ResolutionMethod {
     /// A deterministic named-entity apposition (`<common-noun-head> <Name>`) recognized it as a doc-local
     /// named individual (D63 named-entity glossary source). Deterministic, same trust as extraction.
     NameRecognized,
+    /// A PUBLISHED NOTATION recognized it (HGVS change, accession, coordinate — D101 §step 2,
+    /// `eigenius_notation::recognize`). Deterministic and the strongest of these: the others infer
+    /// from how English happens to be written and need a precision guard, whereas a notation's
+    /// grammar is published and is its own evidence — no recurrence, no stop-list, no threshold.
+    NotationRecognized,
     /// A retrieval hit against the committed lexicon (the form / description text index) grounded it.
     RetrievalGrounded,
     /// An LLM synthesized a provisional type/grounding from a retrieved definition. Lowest trust.
