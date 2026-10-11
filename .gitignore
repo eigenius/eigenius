@@ -127,3 +127,7 @@ wordnet-chain.tgz
 experiments/uab
 experiments/residue-variant.zip
 experiments/pmi-registry.zip
+
+# Python bytecode (a diagnostic import of an experiment script leaves these behind)
+__pycache__/
+*.pyc
