@@ -27,15 +27,34 @@ any detour.
 > `enc:ReasoningStructure` the derived output. The XIAP report is 450 units in that tree; the
 > register join holds at 427/427 by containment.
 >
-> **Step 2 closed `missing-lexeme` 267 → 106** (−60%) via three new glossary sources, measured
+> **Step 2 closed `missing-lexeme` 267 → 71** (−73%) via FIVE new glossary sources, measured
 > cap-only on the d101 store. [uab-xiap-oov-document-model.md](uab-xiap-oov-document-model.md) has
 > the per-block tables.
 >
-> | | start | +notation | +names | +tail |
-> |---|---:|---:|---:|---:|
-> | missing-lexeme | 267 | 193 | 119 | **106** |
-> | grammar-gap | 164 | 225 | 294 | **306** |
-> | residual OOV | 242 | 157 | 119 | **113** |
+> | | start | +notation | +names | +tail | +code+deriv | +shared tokenizer |
+> |---|---:|---:|---:|---:|---:|---:|
+> | missing-lexeme | 267 | 193 | 119 | 106 | 75 | **71** |
+> | grammar-gap | 164 | 225 | 294 | 306 | 335 | **338** |
+> | residual OOV | 242 | 157 | 119 | 113 | 79 | **77** |
+>
+> The sources, in merge order: notation (published grammars — HGVS both alphabets, accessions,
+> coordinates, bare positions), recurrent OOV names (orthography + repetition, admissible ONLY
+> because of the OOV gate), inline code spans (the author's own markup — 48 of 113 were marked),
+> derivation from an attested base (SUFFIXES ONLY, see below).
+>
+> **The glossary now uses the PARSER'S tokenizer** (`preprocess::tokenize` over
+> `ProseUnits::load`). Guessing at it failed four times — a recognised range left its endpoint OOV,
+> a recognised coordinate left its prefix OOV, a code-marked field path left its tail OOV twice —
+> and each patch was one more punctuation class. A source must mint under the surface the parser
+> will ASK FOR. `Notation::ResidueRange` never fires as a result: every dash range is split before
+> recognition.
+>
+> **Two rules were CUT after measuring, not tightened.** Derivational PREFIXES are unsound in
+> general — WordNet gives `discuss`→`cuss`, `research`→`search`, `remove`→`move`, `report`→`port`,
+> `nonsense`→`sense`, all with attested stems; they did not misfire here only because those words
+> are themselves in the lexicon. `disanalogy` and `overread` go to the LlmSynthesized arm instead.
+> And the name source has now had THREE precision defects of one shape — `Gyrd` (a surname half),
+> `AND` (a function word in caps), `Your` (a sentence-initial capital). Expect a fourth.
 >
 > grammar-gap RISING is the result: a unit cannot be scored on grammar until it clears the lexicon,
 > so step 3 has 306 real gaps where 267 units never got far enough to produce one.
