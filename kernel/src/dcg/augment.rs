@@ -93,6 +93,10 @@ pub enum ResolutionMethod {
     /// A deterministic named-entity apposition (`<common-noun-head> <Name>`) recognized it as a doc-local
     /// named individual (D63 named-entity glossary source). Deterministic, same trust as extraction.
     NameRecognized,
+    /// DERIVED from a base the lexicon does have, by a productive affix — `disanalogy` from
+    /// `analogy`, `overread` from `read`. Deterministic, and more trustworthy than an LLM
+    /// synthesis because the base is attested and the affix's contribution is stated, not guessed.
+    DerivedFromBase,
     /// An OOV surface that RECURS and carries a capital — a tool, database or product name the
     /// document uses repeatedly (`gnomAD`, `AlphaMissense`, `ABE9`). Weaker than the three above:
     /// orthography plus repetition, with no grammar and no defining context. What makes it
@@ -100,6 +104,10 @@ pub enum ResolutionMethod {
     /// because "in a 7.6M-entry lexicon almost every surface has some noun sense", and that
     /// objection does not reach a surface the lexicon has NO sense for.
     RecurrentOovName,
+    /// The DOCUMENT MARKED IT AS CODE — an inline code span (`` `dbnsfp.aa.pos` ``). The most
+    /// trusted of these, because nothing is inferred: the author said this token is a literal
+    /// string rather than a word, and D96's rule is that assignment follows the element.
+    MarkedAsCode,
     /// A PUBLISHED NOTATION recognized it (HGVS change, accession, coordinate — D101 §step 2,
     /// `eigenius_notation::recognize`). Deterministic and the strongest of these: the others infer
     /// from how English happens to be written and need a precision guard, whereas a notation's

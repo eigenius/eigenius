@@ -1284,3 +1284,284 @@ pub fn lexical_gap_resources(aug: &LexiconAugmentation, doc_ns: &str) -> Vec<Res
     }
     out
 }
+
+// ── Stage G: inline code spans — the SEVENTH extraction source ───────────────
+//
+// The tail after notation and names looked like six unrelated pattern-matching jobs: IUPAC
+// sequences, RFC 1123 hostnames, dotted API field paths, URLs with query strings, peptide
+// sequences with interpuncts, construct names like `XIAP^ΔUBA`. Measured instead: 48 of the 113
+// unresolvable tokens occur INSIDE AN INLINE CODE SPAN. The author already marked them, for the
+// one reason they have in common — each is a literal string being mentioned, not a word being
+// used.
+//
+// So this follows D96's rule ("a reference span is a reference because the markup says so; no rule
+// has to guess") rather than six orthographic heuristics, and it covers the heterogeneous set
+// uniformly because the AUTHOR's distinction is the right one.
+//
+// D101 recorded "0 code blocks" for this document and deferred a code kind on that basis. That
+// measured FENCED blocks, of which there are indeed none — and missed 198 inline spans, a
+// different element. The conclusion was drawn from the wrong measurement.
+
+/// The contents of each inline code span (`` `…` ``) in `document`, in order.
+fn code_spans(document: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = document;
+    while let Some(open) = rest.find('`') {
+        rest = &rest[open + 1..];
+        match rest.find('`') {
+            Some(close) => {
+                let span = &rest[..close];
+                if !span.trim().is_empty() {
+                    out.push(span);
+                }
+                rest = &rest[close + 1..];
+            }
+            None => break,
+        }
+    }
+    out
+}
+
+/// **Code-span augmentation** — the seventh source. Every token the document marks as code gets a
+/// doc-local literal individual and a `cat_np` alias, so a unit quoting `` `dbnsfp.aa.pos` ``
+/// parses instead of returning `missing-lexeme`.
+///
+/// Markup, not pattern: the only judgement is the author's. A token already supplied by the
+/// lexicon is left alone, and one a published notation claims is left to the notation source,
+/// which records the parse rather than an opaque string.
+pub fn code_span_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmentation {
+    let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
+        return LexiconAugmentation::default();
+    };
+    let Some(entity) = Iri::parse("urn:eigenius:lexicon:Entity").ok() else {
+        return LexiconAugmentation::default();
+    };
+    let p = |s: &str| Iri::parse(s).expect("valid well-known iri");
+
+    let mut added = Vec::new();
+    let mut supporting = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+
+    for span in code_spans(document) {
+        // A span can hold several tokens (`fields=dbnsfp.aa.pos,dbnsfp.gerp`); each is a literal.
+        for raw in span.split_whitespace() {
+            let tok = raw.trim_matches(|c: char| matches!(c, '(' | ')' | '"' | '\'' | ',' | ';'));
+            if tok.len() < 2 {
+                continue;
+            }
+            // A notation carries STRUCTURE; an opaque literal does not. Leave it to the source
+            // that can record the parse.
+            if eigenius_notation::recognize(tok).is_some() {
+                continue;
+            }
+            let key = slug(tok);
+            if key.is_empty() || !seen.insert(key.clone()) {
+                continue;
+            }
+            if !entries_for_form(base, tok).is_empty() {
+                continue;
+            }
+            let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:lit_{key}")) else {
+                continue;
+            };
+            let mut ni = Resource::new(ni_iri.clone());
+            ni.set(p(wk::IS_A), Value::Array(vec![Value::iri(&entity)]));
+            ni.set(
+                p(wk::DESCRIPTION),
+                Value::String(format!(
+                    "Doc-local literal: the document marks {tok:?} as code, so it is a string \
+                     mentioned rather than a word used."
+                )),
+            );
+            let mut b = LayerBuilder::new("code-span-emit", Some(Arc::clone(base)));
+            if b.add_resource(ni.clone()).is_err() {
+                continue;
+            }
+            let tmp = Arc::new(b.build(LayerStorage::in_memory()));
+            let binding = AbbreviationBinding {
+                abbr: tok,
+                long_form: tok,
+                concept_iri: ni_iri.as_str(),
+                doc_ns: "urn:eigenius:doc",
+            };
+            let Some(rs) = abbreviation_resources(&tmp, &binding) else {
+                continue;
+            };
+            let (entries, extra): (Vec<Resource>, Vec<Resource>) =
+                rs.into_iter().partition(|r| r.is_instance_of(&entry_class));
+            if entries.is_empty() {
+                continue;
+            }
+            supporting.push(ni);
+            supporting.extend(extra);
+            for proposed in entries {
+                added.push(LexicalBinding {
+                    proposed,
+                    provenance: Provenance {
+                        surface: tok.to_string(),
+                        long_form: None,
+                        context: span.to_string(),
+                        method: ResolutionMethod::MarkedAsCode,
+                        grounded_to: None,
+                        confidence: None,
+                    },
+                });
+            }
+        }
+    }
+
+    LexiconAugmentation {
+        added,
+        supporting,
+        missing_oov: Vec::new(),
+    }
+}
+
+// ── Stage H: derivation from an attested base — the EIGHTH source ────────────
+//
+// The words the lexicon simply lacks (`disanalogy`, `overread`, `pulldown`, `dimerisation`) are
+// what `ResolutionMethod::LlmSynthesized` was declared for — and that arm has exactly one
+// reference in the codebase, its own enum variant. Nothing produces it.
+//
+// Some of them need no LLM. A productive affix over an ATTESTED base is deterministic, and it is
+// more trustworthy than a synthesis because the base is in the lexicon and the affix's
+// contribution is stated rather than guessed. Verified against WordNet before building this:
+// analogy ✓, read ✓, pull ✓, dimer ✓. What has no base — `paywalled`, `phred` — is left for the
+// LLM arm, honestly unresolved rather than invented here.
+//
+// This does NOT give the derived word its base's meaning. It grounds the surface to the base
+// CONCEPT so the parse proceeds, and records the affix in the description. `disanalogy` is not
+// `analogy`; claiming so would be the error the whole pipeline exists to avoid. A later step that
+// needs the negation can read the affix off the record.
+
+/// The productive affixes worth trying, longest first so `-isation` beats `-ation`. Each is a
+/// (affix, is_prefix) pair with the gloss recorded on the minted entry.
+/// SUFFIXES ONLY, and that is the finding rather than a simplification.
+///
+/// The first version carried prefixes too, and on this document they produced `disanalogy` and
+/// `overread` correctly — then `resources` as `re` + `sources`, which is the PLURAL of `resource`
+/// and not a derivation at all. Probing the prefix set against WordNet showed the problem is
+/// general, not a slip: `discuss` → `cuss`, `research` → `search`, `remove` → `move`,
+/// `report` → `port` and `nonsense` → `sense` all have attested stems under a stripped prefix.
+/// None fired here only because those words are themselves in the lexicon, so the OOV gate skipped
+/// them — the rule was safe by luck, and one document with any of them OOV would mis-ground it.
+///
+/// Nothing deterministic separates `dis` + `analogy` from `dis` + `cuss`: both have a free stem,
+/// and only meaning tells them apart. So prefixes are not a deterministic rule, and the two they
+/// got right belong to the `LlmSynthesized` arm at lowest trust — honestly uncertain rather than
+/// quietly wrong. A suffix over an attested base is different: a word ending `-isation` whose stem
+/// is attested IS that derivation, and a particle verb is a closed construction.
+const AFFIXES: &[(&str, bool, &str)] = &[
+    (
+        "isation",
+        false,
+        "the process named by the base, British spelling",
+    ),
+    ("ization", false, "the process named by the base"),
+    ("down", false, "a particle verb built on the base"),
+    ("up", false, "a particle verb built on the base"),
+];
+
+/// Is `token` merely an INFLECTION of `stem` — plural, past or progressive — rather than a
+/// derivation? `resources` is `resource` + plural, and reading it as `re` + `sources` is the
+/// defect that exposed the prefix problem.
+fn is_mere_inflection(token: &str, stem: &str) -> bool {
+    ["s", "es", "ed", "ing"]
+        .iter()
+        .any(|sfx| token.strip_suffix(sfx).is_some_and(|t| t == stem))
+}
+
+/// One affix over an ATTESTED base, as `(stem, affix, gloss)` — or `None` when no affix applies or
+/// the stem is not attested.
+///
+/// `base_known` is INJECTED, following [`extract_named_entities_with`]: "the logic is
+/// unit-testable with a closure", and the layer-backed predicate lives in its caller. That matters
+/// here because the bootstrap chain carries no lexical FORMS at all — they arrive with the
+/// WordNet/UMLS import — so the rule is untestable against a layer without a served snapshot.
+///
+/// Only one affix is stripped, and only when the stem is attested: no chains, no invented bases.
+pub fn derive_with(
+    token: &str,
+    base_known: impl Fn(&str) -> bool,
+) -> Option<(String, &'static str, &'static str)> {
+    if token.len() < 5 || !token.chars().all(|c| c.is_ascii_lowercase()) {
+        return None;
+    }
+    AFFIXES.iter().find_map(|(affix, prefix, gloss)| {
+        let stem = if *prefix {
+            token.strip_prefix(affix)?
+        } else {
+            token.strip_suffix(affix)?
+        };
+        (stem.len() >= 3 && !is_mere_inflection(token, stem) && base_known(stem))
+            .then(|| (stem.to_string(), *affix, *gloss))
+    })
+}
+
+/// **Derivational augmentation** — the eighth source. An OOV surface that is a productive affix
+/// over a base the lexicon DOES supply is grounded to that base's concept, with the affix recorded.
+///
+/// Only one affix is stripped, and the base must be attested: no chains, no invented bases.
+pub fn derivation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmentation {
+    let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
+        return LexiconAugmentation::default();
+    };
+    let mut added = Vec::new();
+    let mut supporting = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+
+    for tok in whitespace_tokens(document) {
+        // Lowercase words only (enforced in `derive_with`): a capitalised OOV surface is a NAME,
+        // which the sixth source owns.
+        if !seen.insert(tok.to_string()) {
+            continue;
+        }
+        if !entries_for_form(base, tok).is_empty() {
+            continue;
+        }
+        let Some((stem, affix, gloss)) =
+            derive_with(tok, |stem| !entries_for_form(base, stem).is_empty())
+        else {
+            continue;
+        };
+        let hits = entries_for_form(base, &stem);
+        // Ground to the base's concept — the surface parses; it does NOT inherit the base's sense.
+        let Some(concept) = hits.first().and_then(|e| e.id().cloned()) else {
+            continue;
+        };
+        let binding = AbbreviationBinding {
+            abbr: tok,
+            long_form: &stem,
+            concept_iri: concept.as_str(),
+            doc_ns: "urn:eigenius:doc",
+        };
+        let Some(rs) = abbreviation_resources(base, &binding) else {
+            continue;
+        };
+        let (entries, extra): (Vec<Resource>, Vec<Resource>) =
+            rs.into_iter().partition(|r| r.is_instance_of(&entry_class));
+        if entries.is_empty() {
+            continue;
+        }
+        supporting.extend(extra);
+        for proposed in entries {
+            added.push(LexicalBinding {
+                proposed,
+                provenance: Provenance {
+                    surface: tok.to_string(),
+                    long_form: Some(format!("{stem} + {affix}: {gloss}")),
+                    context: stem.clone(),
+                    method: ResolutionMethod::DerivedFromBase,
+                    grounded_to: Some(concept.clone()),
+                    confidence: None,
+                },
+            });
+        }
+    }
+
+    LexiconAugmentation {
+        added,
+        supporting,
+        missing_oov: Vec::new(),
+    }
+}

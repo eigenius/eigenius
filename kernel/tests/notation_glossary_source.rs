@@ -426,3 +426,153 @@ fn the_gap_stream_validates_as_lexical_gaps() {
         errors.len()
     );
 }
+
+// ── The seventh source: inline code spans ────────────────────────────────────
+
+use eigenius_kernel::dcg::code_span_augmentation;
+
+/// 48 of the 113 tokens left unresolvable after notation and names occur inside an inline code
+/// span. The author marked them, for the one thing they have in common — each is a literal string
+/// MENTIONED, not a word used — which is why one markup rule covers what looked like six unrelated
+/// pattern-matching jobs (IUPAC sequences, hostnames, dotted field paths, URLs, peptides).
+#[test]
+fn a_token_the_document_marks_as_code_becomes_a_literal() {
+    let head = bootstrap_head();
+    let doc = "The query used `dbnsfp.aa.pos` and `gnomad.broadinstitute.org` directly, \
+               with the spacer `ACCCCATTCATATAGCTTCT` and the construct `XIAP^\u{394}UBA`.";
+    let aug = code_span_augmentation(&head, doc);
+    let surfaces: Vec<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    for want in [
+        "dbnsfp.aa.pos",
+        "gnomad.broadinstitute.org",
+        "ACCCCATTCATATAGCTTCT",
+        "XIAP^\u{394}UBA",
+    ] {
+        assert!(
+            surfaces.iter().any(|s| s == want),
+            "{want}, got {surfaces:?}"
+        );
+    }
+    assert!(
+        aug.added.iter().all(|b| b.provenance.method
+            == eigenius_kernel::dcg::augment::ResolutionMethod::MarkedAsCode),
+        "the document's own markup is the provenance"
+    );
+}
+
+/// Unmarked prose is untouched — the rule is the markup, not the shape of the token.
+#[test]
+fn unmarked_prose_is_not_claimed_as_a_literal() {
+    let head = bootstrap_head();
+    let aug = code_span_augmentation(
+        &head,
+        "The residue is partially exposed on helix one and the domain is dispensable.",
+    );
+    assert!(
+        aug.added.is_empty(),
+        "no code spans here, got {:?}",
+        aug.added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A NOTATION inside a code span stays the notation source's: that source records ref/position/alt
+/// as typed fields, where this one would mint an opaque string and lose the structure.
+#[test]
+fn a_notation_in_a_code_span_is_left_to_the_notation_source() {
+    let head = bootstrap_head();
+    let aug = code_span_augmentation(
+        &head,
+        "The variant `p.Ile380Thr` sits in `XIAP^\u{394}UBA`.",
+    );
+    let surfaces: Vec<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    assert!(
+        !surfaces.iter().any(|s| s == "p.Ile380Thr"),
+        "a notation must keep its parse, got {surfaces:?}"
+    );
+    assert!(
+        surfaces.iter().any(|s| s == "XIAP^\u{394}UBA"),
+        "a non-notation literal still closes, got {surfaces:?}"
+    );
+}
+
+// ── The eighth source: derivation from an attested base ──────────────────────
+
+use eigenius_kernel::dcg::derive_with;
+
+/// The words the lexicon simply lacks are what `ResolutionMethod::LlmSynthesized` was declared
+/// for — and that arm has one reference in the codebase, its own enum variant. Some need no LLM:
+/// a productive affix over an ATTESTED base is deterministic. The four bases below were verified
+/// present in WordNet before the rule was written (analogy, read, pull, dimer).
+#[test]
+fn a_productive_affix_over_an_attested_base_derives() {
+    // The lexicon the rule is tested against: exactly the bases the document's words need.
+    let known = |s: &str| matches!(s, "analogy" | "read" | "pull" | "dimer" | "cpg");
+
+    for (word, stem, affix) in [
+        ("pulldown", "pull", "down"),
+        ("dimerisation", "dimer", "isation"),
+    ] {
+        let got = derive_with(word, known);
+        assert_eq!(
+            got.as_ref().map(|(s, a, _)| (s.as_str(), *a)),
+            Some((stem, affix)),
+            "{word} should derive from {stem}"
+        );
+    }
+
+    // No attested base, no derivation — `paywalled` and `phred` stay honestly unresolved rather
+    // than being invented here. They are what the LLM arm is for.
+    for word in ["paywalled", "phred", "disanalogue"] {
+        assert_eq!(
+            derive_with(word, known),
+            None,
+            "{word} has no attested base"
+        );
+    }
+
+    // PREFIXES ARE NOT A DETERMINISTIC RULE, which is why they were removed. `disanalogy` and
+    // `overread` were correct here, but the same stripping gives `research` → `search` and
+    // `discuss` → `cuss`, whose stems are equally attested — they did not fire on this document
+    // only because those words are themselves in the lexicon, so the OOV gate skipped them. All
+    // five go to the LlmSynthesized arm rather than being grounded on luck.
+    let wide = |s: &str| matches!(s, "search" | "cuss" | "move" | "analogy" | "read");
+    for word in ["research", "discuss", "remove", "disanalogy", "overread"] {
+        assert_eq!(
+            derive_with(word, wide),
+            None,
+            "{word}: no prefix is stripped"
+        );
+    }
+
+    // An INFLECTION is not a derivation: `resources` is `resource` + plural, which the first
+    // version of this rule read as `re` + `sources`.
+    assert_eq!(
+        derive_with("resources", |s| s == "sources" || s == "resource"),
+        None
+    );
+}
+
+/// The guards: one affix only, a stem long enough to be a word, and lowercase only — a capitalised
+/// OOV surface is a NAME, which the sixth source owns.
+#[test]
+fn derivation_strips_one_affix_from_a_lowercase_word_only() {
+    let known = |s: &str| matches!(s, "pull" | "dimer" | "up");
+
+    // Capitalised: not this source's business — a capitalised OOV surface is a NAME.
+    assert_eq!(derive_with("Pulldown", |_| true), None);
+    // Too short to be a word: `up` is attested, but a two-letter stem is not accepted.
+    assert_eq!(derive_with("upup", known), None);
+    // The real case still works, so the guards above are not vacuous.
+    assert!(derive_with("pulldown", known).is_some());
+}
