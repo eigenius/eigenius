@@ -757,11 +757,7 @@ fn notation_tokens(document: &str) -> Vec<&str> {
     }
     const DASHES: [char; 3] = ['-', '\u{2013}', '\u{2014}'];
     let mut out = Vec::new();
-    for raw in document.split_whitespace() {
-        let t = bare(raw);
-        if t.is_empty() {
-            continue;
-        }
+    for t in whitespace_tokens(document) {
         out.push(t);
         if t.contains(DASHES) {
             for part in t.split(DASHES) {
@@ -773,6 +769,30 @@ fn notation_tokens(document: &str) -> Vec<&str> {
         }
     }
     out
+}
+
+/// The whitespace tokens alone, bare of surrounding punctuation — WITHOUT the dash parts.
+///
+/// The split is not cosmetic. Dash parts exist so a residue range closes the endpoints the
+/// parser's tokenizer asks for, and [`notation_tokens`]'s consumer filters them through
+/// `recognize`, which refuses a non-notation. A consumer with no such filter must not see them:
+/// the name source accepts any recurring capitalised token, and on the dash parts it minted
+/// `Gyrd` and `Hansen` as separate entities beside `Gyrd-Hansen`.
+fn whitespace_tokens(document: &str) -> Vec<&str> {
+    fn bare(t: &str) -> &str {
+        t.trim_matches(|c: char| {
+            matches!(
+                c,
+                '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`' | '*' | '|' | '«' | '»'
+            ) || matches!(c, ',' | ';' | '!' | '?')
+        })
+        .trim_end_matches('.')
+    }
+    document
+        .split_whitespace()
+        .map(bare)
+        .filter(|t| !t.is_empty())
+        .collect()
 }
 
 /// **Notation augmentation** — recognize published notations in `document`
@@ -1011,5 +1031,150 @@ fn describe(n: &eigenius_notation::Notation) -> &'static str {
         N::ClinVar(_) => "a ClinVar variation record",
         N::SequenceRecord(_) => "an Ensembl or RefSeq sequence record",
         N::GenomicCoordinate(_) => "a genomic coordinate",
+    }
+}
+
+// ── Stage F: recurrent OOV names — the SIXTH extraction source ───────────────────
+//
+// After notation, the units still blocked are blocked by PRODUCT NAMES: `gnomAD` 22 units, `ABE9`
+// 11, `SIFT4G` 6, `AlphaFold` / `AlphaMissense` / `ClinPred` / `ABE8e` 5 each. None is a notation —
+// there is no grammar to read — and none reaches apposition, which needs a common-noun head in
+// front and a Title-case shape neither `gnomAD` nor `ABE9` has.
+//
+// The signal is orthography plus repetition, which apposition explicitly rejects as too weak:
+// "in a 7.6M-entry lexicon almost every surface has *some* noun sense, so `is a common noun` does
+// not discriminate". That objection does not reach HERE, because this source only ever sees
+// surfaces the lexicon has NO sense for. The OOV gate is what makes the weak signal admissible,
+// and it is why this is a separate source with its own provenance rather than a loosened
+// apposition rule.
+
+/// Does `t` look like a NAME the document keeps using — a capital somewhere, letters and digits
+/// only, and nothing that belongs to another source?
+fn is_oov_name(t: &str) -> bool {
+    let core = t.trim_end_matches("'s").trim_end_matches("\u{2019}s");
+    // A function word in capitals is still a function word. `AND` was minted as a named
+    // individual: repetition and a capital are not enough, and the closed-class layer already
+    // owns the answer (case-insensitive, whole-surface).
+    if super::closed_class::is_closed_class_surface(core) {
+        return false;
+    }
+    core.len() >= 2
+        && core.starts_with(|c: char| c.is_ascii_alphabetic())
+        && core.chars().any(|c| c.is_ascii_uppercase())
+        && core
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
+        // A notation is the notation source's to claim, not this one's.
+        && eigenius_notation::recognize(core).is_none()
+}
+
+/// **Recurrent-OOV-name augmentation** — the sixth source. A surface the lexicon cannot supply,
+/// carrying a capital and occurring at least `MIN_OCCURRENCES` times, becomes a doc-local named
+/// individual with a `cat_np` alias. A possessive (`gnomAD's`) is emitted as a second alias of the
+/// SAME individual, not as an entity of its own.
+pub fn oov_name_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmentation {
+    /// Repetition is the whole precision guard, so one mention is not a name here.
+    const MIN_OCCURRENCES: usize = 2;
+
+    let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
+        return LexiconAugmentation::default();
+    };
+    let Some(entity) = Iri::parse("urn:eigenius:lexicon:Entity").ok() else {
+        return LexiconAugmentation::default();
+    };
+
+    let toks: Vec<&str> = whitespace_tokens(document);
+    let mut freq: std::collections::BTreeMap<&str, usize> = Default::default();
+    for t in &toks {
+        *freq.entry(*t).or_default() += 1;
+    }
+
+    let mut added = Vec::new();
+    let mut supporting = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+
+    for t in &toks {
+        let t = *t;
+        if !is_oov_name(t) || freq.get(t).copied().unwrap_or(0) < MIN_OCCURRENCES {
+            continue;
+        }
+        let core = t.trim_end_matches("'s").trim_end_matches("\u{2019}s");
+        let key = slug(core);
+        if key.is_empty() || !seen.insert(key.clone()) {
+            continue;
+        }
+        if !entries_for_form(base, core).is_empty() {
+            continue;
+        }
+        let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:ni_{key}")) else {
+            continue;
+        };
+        let p = |s: &str| Iri::parse(s).expect("valid well-known iri");
+        let mut ni = Resource::new(ni_iri.clone());
+        ni.set(p(wk::IS_A), Value::Array(vec![Value::iri(&entity)]));
+        ni.set(
+            p(wk::DESCRIPTION),
+            Value::String(format!(
+                "Doc-local named individual (recurrent OOV name): {core:?}, used {} times and \
+                 absent from the lexicon.",
+                freq.get(t).copied().unwrap_or(0)
+            )),
+        );
+        let mut b = LayerBuilder::new("oov-name-emit", Some(Arc::clone(base)));
+        if b.add_resource(ni.clone()).is_err() {
+            continue;
+        }
+        let tmp = Arc::new(b.build(LayerStorage::in_memory()));
+
+        // The bare name, and the possessive when the document writes one — two aliases, ONE
+        // individual: `gnomAD's` is a form of gnomAD, not a second database.
+        let mut surfaces = vec![core.to_string()];
+        for suffix in ["'s", "\u{2019}s"] {
+            let poss = format!("{core}{suffix}");
+            if document.contains(&poss) {
+                surfaces.push(poss);
+            }
+        }
+        let mut minted = false;
+        for surface in surfaces {
+            let binding = AbbreviationBinding {
+                abbr: &surface,
+                long_form: &surface,
+                concept_iri: ni_iri.as_str(),
+                doc_ns: "urn:eigenius:doc",
+            };
+            let Some(rs) = abbreviation_resources(&tmp, &binding) else {
+                continue;
+            };
+            let (entries, extra): (Vec<Resource>, Vec<Resource>) =
+                rs.into_iter().partition(|r| r.is_instance_of(&entry_class));
+            if entries.is_empty() {
+                continue;
+            }
+            minted = true;
+            supporting.extend(extra);
+            for proposed in entries {
+                added.push(LexicalBinding {
+                    proposed,
+                    provenance: Provenance {
+                        surface: surface.clone(),
+                        long_form: None,
+                        context: core.to_string(),
+                        method: ResolutionMethod::RecurrentOovName,
+                        grounded_to: None,
+                        confidence: None,
+                    },
+                });
+            }
+        }
+        if minted {
+            supporting.push(ni);
+        }
+    }
+
+    LexiconAugmentation {
+        added,
+        supporting,
+        missing_oov: Vec::new(),
     }
 }
