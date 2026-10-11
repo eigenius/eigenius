@@ -50,10 +50,39 @@ fn iri(s: &str) -> Iri {
     Iri::parse(s).expect("well-formed IRI")
 }
 
+/// Every token of `doc` as a gap.
+///
+/// The sources are gated on the PIPELINE's residual OOV set, which a served chain computes with
+/// lemmatisation. The bootstrap chain carries no lexical forms at all, so on it every surface is a
+/// gap — which is what these tests assumed implicitly when the gate was a raw surface lookup. This
+/// states that assumption instead of relying on it.
+fn all_oov(doc: &str) -> std::collections::BTreeSet<String> {
+    // The PARSER's tokenizer, because that is what the sources look surfaces up by. Building this
+    // set from `split_whitespace` reproduced the very mismatch the sources exist to avoid: the set
+    // held `Thr369–Asn373` while the source asked for `Thr369`.
+    let units = eigenius_kernel::dcg::ProseUnits::none();
+    eigenius_kernel::dcg::preprocess::tokenize(doc, &units)
+        .iter()
+        .flat_map(|t| [t.surface().to_string(), t.surface().to_lowercase()])
+        .filter(|t| !t.trim().is_empty())
+        .collect()
+}
+
+/// The five gated sources, with the gap set built from the document under test.
+fn notation_of(head: &Arc<Layer>, doc: &str) -> eigenius_kernel::dcg::augment::LexiconAugmentation {
+    notation_augmentation(head, doc, &all_oov(doc))
+}
+fn names_of(head: &Arc<Layer>, doc: &str) -> eigenius_kernel::dcg::augment::LexiconAugmentation {
+    oov_name_augmentation(head, doc, &all_oov(doc))
+}
+fn code_of(head: &Arc<Layer>, doc: &str) -> eigenius_kernel::dcg::augment::LexiconAugmentation {
+    code_span_augmentation(head, doc, &all_oov(doc))
+}
+
 #[test]
 fn the_bare_change_closes_the_gap_without_inventing_an_accession() {
     let head = bootstrap_head();
-    let aug = notation_augmentation(
+    let aug = notation_of(
         &head,
         "The bystander edit installs Ile380Thr in the UBA domain.",
     );
@@ -97,7 +126,7 @@ fn the_bare_change_closes_the_gap_without_inventing_an_accession() {
 #[test]
 fn a_qualified_notation_becomes_an_allele_with_true_identity() {
     let head = with_variant(bootstrap_head());
-    let aug = notation_augmentation(
+    let aug = notation_of(
         &head,
         "The correction targets NM_001167.4:c.1141C>T directly.",
     );
@@ -150,7 +179,7 @@ fn without_the_variant_layer_tier_one_degrades_rather_than_dangling() {
     // The glossary runs inside the kernel, whose chain ends at `encoding`. Emitting
     // variant:NucleotideAllele on a chain without the layer would be an unresolvable class.
     let head = bootstrap_head();
-    let aug = notation_augmentation(
+    let aug = notation_of(
         &head,
         "The correction targets NM_001167.4:c.1141C>T directly.",
     );
@@ -177,10 +206,10 @@ fn ordinary_prose_and_product_names_yield_nothing() {
     let head = bootstrap_head();
     // Every token here is one the XIAP corpus contains and that must NOT be read as notation —
     // the editors, predictors and databases that remain OOV after this source.
-    let aug = notation_augmentation(
+    let aug = notation_of(
         &head,
         "ABE9 and ABE8e were scored by SIFT4G, AlphaMissense, ClinPred and BayesDel against \
-         MaveDB and HGMD at v4.1, which the paywalled text calls a meta-classifier.",
+         MaveDB and HGMD, which the paywalled text calls a meta-classifier.",
     );
     assert!(
         aug.added.is_empty() && aug.supporting.is_empty(),
@@ -199,7 +228,7 @@ fn ordinary_prose_and_product_names_yield_nothing() {
 fn a_surface_the_lexicon_already_has_is_left_alone() {
     let head = bootstrap_head();
     // `2KNA` is PDB-shaped and NOT in the bootstrap lexicon, so it closes.
-    let closes = notation_augmentation(&head, "The coordinates come from 2KNA directly.");
+    let closes = notation_of(&head, "The coordinates come from 2KNA directly.");
     assert!(
         !closes.added.is_empty(),
         "an unknown PDB-shaped token should close the gap"
@@ -220,7 +249,7 @@ fn a_surface_the_lexicon_already_has_is_left_alone() {
 #[test]
 fn a_residue_range_closes_the_endpoints_the_parser_asks_for() {
     let head = bootstrap_head();
-    let aug = notation_augmentation(
+    let aug = notation_of(
         &head,
         "Helix \u{3b1}1 spans Thr369\u{2013}Asn373 in the domain.",
     );
@@ -257,7 +286,7 @@ fn a_recurring_capitalised_oov_name_is_minted() {
     let head = bootstrap_head();
     let doc = "The gnomAD v4 release lists no hemizygote. A second gnomAD query confirmed it. \
                ABE9 narrows the window, and ABE9 was built on ABE8e.";
-    let aug = oov_name_augmentation(&head, doc);
+    let aug = names_of(&head, doc);
     let surfaces: Vec<String> = aug
         .added
         .iter()
@@ -282,7 +311,7 @@ fn a_possessive_aliases_the_same_individual() {
     let head = bootstrap_head();
     let doc = "gnomAD reports no hemizygote. gnomAD's coverage at this site is complete. \
                The gnomAD page was checked.";
-    let aug = oov_name_augmentation(&head, doc);
+    let aug = names_of(&head, doc);
     let surfaces: Vec<String> = aug
         .added
         .iter()
@@ -310,7 +339,7 @@ fn prose_and_notation_are_not_claimed_as_names() {
     let head = bootstrap_head();
     let doc = "The variant Ile380Thr recurs. The variant Ile380Thr is the subject. \
                The residue is exposed. The residue is exposed on helix one.";
-    let aug = oov_name_augmentation(&head, doc);
+    let aug = names_of(&head, doc);
     let surfaces: Vec<String> = aug
         .added
         .iter()
@@ -337,7 +366,7 @@ fn neither_a_surname_half_nor_a_capitalised_function_word_is_a_name() {
     // through `recognize`, this one has no such filter, and it minted both halves of the surname.
     let doc = "Gyrd-Hansen et al. tested this. Gyrd-Hansen et al. showed dimerisation. \
                The A AND the B. The C AND the D.";
-    let aug = oov_name_augmentation(&head, doc);
+    let aug = names_of(&head, doc);
     let surfaces: Vec<String> = aug
         .added
         .iter()
@@ -372,8 +401,8 @@ fn the_gap_stream_validates_as_lexical_gaps() {
     let head = bootstrap_head();
     let doc = "gnomAD reports no hemizygote. gnomAD's coverage is complete. \
                The gnomAD page lists Ile380Thr and Ile380Thr again.";
-    let mut aug = notation_augmentation(&head, doc);
-    let names = oov_name_augmentation(&head, doc);
+    let mut aug = notation_of(&head, doc);
+    let names = names_of(&head, doc);
     aug.added.extend(names.added);
     aug.supporting.extend(names.supporting);
 
@@ -445,23 +474,27 @@ fn a_token_the_document_marks_as_code_becomes_a_literal() {
     let head = bootstrap_head();
     let doc = "The query used `dbnsfp.aa.pos` and `gnomad.broadinstitute.org` directly, \
                with the spacer `ACCCCATTCATATAGCTTCT` and the construct `XIAP^\u{394}UBA`.";
-    let aug = code_span_augmentation(&head, doc);
+    let aug = code_of(&head, doc);
     let surfaces: Vec<String> = aug
         .added
         .iter()
         .map(|b| b.provenance.surface.clone())
         .collect();
-    for want in [
-        "dbnsfp.aa.pos",
-        "gnomad.broadinstitute.org",
-        "ACCCCATTCATATAGCTTCT",
-        "XIAP^\u{394}UBA",
-    ] {
+    for want in ["dbnsfp.aa.pos", "ACCCCATTCATATAGCTTCT", "XIAP^\u{394}UBA"] {
         assert!(
             surfaces.iter().any(|s| s == want),
             "{want}, got {surfaces:?}"
         );
     }
+    // THE BOUNDARY with the notation source. `gnomad.broadinstitute.org` is a real host — a
+    // published grammar with a real TLD — so notation claims it and records WHAT it is.
+    // `dbnsfp.aa.pos` only looks like one: `pos` is no TLD, it is a dotted field path, and it
+    // stays here where the author's markup is the evidence. Before the TLD list was closed, the
+    // hostname rule took both and the field path was recorded as an address.
+    assert!(
+        !surfaces.iter().any(|s| s == "gnomad.broadinstitute.org"),
+        "a real hostname belongs to the notation source: {surfaces:?}"
+    );
     assert!(
         aug.added.iter().all(|b| b.provenance.method
             == eigenius_kernel::dcg::augment::ResolutionMethod::MarkedAsCode),
@@ -473,7 +506,7 @@ fn a_token_the_document_marks_as_code_becomes_a_literal() {
 #[test]
 fn unmarked_prose_is_not_claimed_as_a_literal() {
     let head = bootstrap_head();
-    let aug = code_span_augmentation(
+    let aug = code_of(
         &head,
         "The residue is partially exposed on helix one and the domain is dispensable.",
     );
@@ -492,7 +525,7 @@ fn unmarked_prose_is_not_claimed_as_a_literal() {
 #[test]
 fn a_notation_in_a_code_span_is_left_to_the_notation_source() {
     let head = bootstrap_head();
-    let aug = code_span_augmentation(
+    let aug = code_of(
         &head,
         "The variant `p.Ile380Thr` sits in `XIAP^\u{394}UBA`.",
     );
@@ -592,7 +625,7 @@ fn a_sentence_initial_capital_is_not_a_name() {
     let doc = "Your message of 12 September is the source. Your note arrived after that, and \
                your reading of it matches mine. Tse et al. measured the helix. Tse et al. \
                report the boundaries. gnomAD lists no hemizygote, and gnomAD agrees.";
-    let aug = oov_name_augmentation(&head, doc);
+    let aug = names_of(&head, doc);
     let surfaces: Vec<String> = aug
         .added
         .iter()

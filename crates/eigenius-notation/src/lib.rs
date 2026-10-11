@@ -68,6 +68,18 @@ pub enum Notation {
     SequenceRecord(String),
     /// A genomic coordinate — `chrX:123900530`.
     GenomicCoordinate(String),
+    /// An ISO 8601 calendar date — `2026-09-14`. A published grammar, and the report dates every
+    /// database query with one.
+    IsoDate(String),
+    /// A journal citation's year and volume — `2019;20`, as a reference list writes it.
+    CitationLocus(String),
+    /// A web address or one of its components — `rest.ensembl.org`,
+    /// `esearch.fcgi?db=clinvar&term=XIAP`. RFC 3986 / RFC 1123.
+    WebLocator(String),
+    /// A curated-database identifier with a published prefix — `HGNC:592`.
+    PrefixedId(String),
+    /// A software version — `v4.1`, `4.8a`, `ABE7.10`.
+    Version(String),
 }
 
 /// The one-letter amino-acid codes, in the IUPAC set, plus `*` for a stop.
@@ -222,6 +234,44 @@ fn is_qualified_change(rest: &str) -> bool {
     b.len() > 2 && b[1] == b'.' && matches!(b[0], b'c' | b'g' | b'p' | b'n' | b'm')
 }
 
+/// Top-level domains this corpus uses. A CLOSED list on purpose: "ends in letters" called
+/// `dbnsfp.aa.pos` a hostname, and a dotted FIELD PATH is not an address. Over-matching here does
+/// not merely mislabel — it takes the token from the code-span source, which would have recorded
+/// the author's own markup instead of a guess.
+const TLDS: &[&str] = &[
+    "org", "com", "net", "edu", "gov", "info", "io", "ac", "uk", "nl", "de", "fr", "jp", "ch",
+];
+
+/// A dotted host name, RFC 1123: labels of letters/digits/hyphens, and a RECOGNISED TLD.
+fn is_hostname(t: &str) -> bool {
+    let labels: Vec<&str> = t.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|l| {
+            !l.is_empty()
+                && l.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        })
+        && labels.last().is_some_and(|tld| TLDS.contains(tld))
+}
+
+/// A software version: an optional `v`, two or more dot-separated numeric components, and an
+/// optional single trailing letter. `v4.1`, `4.8a`, `v4.1.1`.
+///
+/// Deliberately narrow. `ABE7.10` is NOT a version by this rule — its leading `ABE7` is not
+/// numeric — and `2026AA` is not either, having no dot. Both are product names, which the
+/// recurrent-name source claims on its own evidence.
+fn is_version(t: &str) -> bool {
+    let body = t.strip_prefix('v').unwrap_or(t);
+    let core = body
+        .strip_suffix(|c: char| c.is_ascii_alphabetic())
+        .unwrap_or(body);
+    let parts: Vec<&str> = core.split('.').collect();
+    parts.len() >= 2
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
 /// Recognise one whitespace-delimited token, stripped of surrounding punctuation by the caller.
 ///
 /// Returns `None` for anything whose grammar does not match — this source never guesses. Order
@@ -302,6 +352,52 @@ pub fn recognize(token: &str) -> Option<Notation> {
     }
     if let Some(c) = parse_one_letter_change(t) {
         return Some(Notation::ProteinChange(c));
+    }
+    // ISO 8601 date, before anything numeric can claim it.
+    if t.len() == 10 && t.as_bytes()[4] == b'-' && t.as_bytes()[7] == b'-' {
+        let (y, rest) = t.split_at(4);
+        let (m, d) = (&rest[1..3], &rest[4..6]);
+        if [y, m, d]
+            .iter()
+            .all(|p| p.chars().all(|c| c.is_ascii_digit()))
+            && (1..=12).contains(&m.parse::<u32>().unwrap_or(0))
+            && (1..=31).contains(&d.parse::<u32>().unwrap_or(0))
+        {
+            return Some(Notation::IsoDate(t.to_string()));
+        }
+    }
+    // `2019;20` — a reference list's year and volume.
+    if let Some((y, v)) = t.split_once(';') {
+        if y.len() == 4
+            && y.chars().all(|c| c.is_ascii_digit())
+            && !v.is_empty()
+            && v.chars().all(|c| c.is_ascii_digit())
+        {
+            return Some(Notation::CitationLocus(t.to_string()));
+        }
+    }
+    // A web address or a component of one: a scheme, a query, or a dotted host/path.
+    if t.contains("://")
+        || t.contains('?')
+        || t.contains('&')
+        || (t.contains('.') && t.contains('/'))
+        || is_hostname(t)
+    {
+        return Some(Notation::WebLocator(t.to_string()));
+    }
+    // `HGNC:592` — a published registry prefix over a numeric id.
+    if let Some((prefix, id)) = t.split_once(':') {
+        if !prefix.is_empty()
+            && prefix.chars().all(|c| c.is_ascii_uppercase())
+            && !id.is_empty()
+            && id.chars().all(|c| c.is_ascii_digit())
+        {
+            return Some(Notation::PrefixedId(t.to_string()));
+        }
+    }
+    // A version: `v4.1`, `4.8a`, `ABE7.10`.
+    if is_version(t) {
+        return Some(Notation::Version(t.to_string()));
     }
     // Accessions and records, each by its published pattern.
     if let Some(rest) = t.strip_prefix("rs") {
@@ -486,8 +582,6 @@ mod tests {
             "SiPhy",
             "LOVD",
             "dbNSFP",
-            "v4.1",
-            "4.8a",
             "2026AA",
             // Ordinary words, including the residue codes standing alone.
             "Thr",

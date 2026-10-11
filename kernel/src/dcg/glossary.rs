@@ -698,6 +698,21 @@ mod anthropic {
 #[cfg(feature = "use-llm")]
 pub use anthropic::AnthropicAbbreviationProposer;
 
+/// Is `surface` a gap the PIPELINE could not resolve?
+///
+/// This replaced `entries_for_form(base, s).is_empty()` in every source, and the difference is not
+/// cosmetic. A raw surface lookup does not see what the pipeline resolves by LEMMATISATION, so it
+/// reports `nucleotides`, `cells`, `patients` and `males` as absent while `nucleotide`, `cell`,
+/// `patient` and `male` are all in the lexicon. The fallback, being total, then minted opaque
+/// individuals for 243 ordinary English words — common nouns, bare numerals and numeric ranges.
+///
+/// `augment_lexicon_backed` already computes the authoritative answer and returns it as
+/// `missing_oov`. Re-deriving it was the same mistake as re-deriving the tokenizer: the pipeline
+/// knows, and a second opinion drifts.
+fn is_pipeline_gap(oov: &BTreeSet<String>, surface: &str) -> bool {
+    oov.contains(surface) || oov.contains(&surface.to_lowercase())
+}
+
 // ── Stage E: notation recognition — the FIFTH extraction source (D101 §step 2) ────
 //
 // `Ile380Thr` blocked 20 units of the XIAP report and recurs 29 times, and the apposition source
@@ -770,7 +785,11 @@ fn parser_tokens(base: &Arc<Layer>, document: &str) -> Vec<String> {
 /// Tiered as the module comment above describes: a token carrying its reference accession becomes a
 /// `variant:Allele`; everything else closes the gap lexically with its parse recorded. Falls back to
 /// tier 2 for all tokens when the `variant` layer is absent from `base`.
-pub fn notation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmentation {
+pub fn notation_augmentation(
+    base: &Arc<Layer>,
+    document: &str,
+    oov: &BTreeSet<String>,
+) -> LexiconAugmentation {
     use eigenius_notation::{recognize, Notation};
 
     let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
@@ -799,7 +818,7 @@ pub fn notation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmen
         // is left alone, so a known gene symbol never reaches the recognizer's verdict. It is also
         // the "add, not shadow" rule the other sources follow — a second entry for a form the
         // lexicon has is a duplicate, not a closure.
-        if !entries_for_form(base, tok).is_empty() {
+        if !is_pipeline_gap(oov, tok) {
             continue;
         }
         let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:ni_{key}")) else {
@@ -1002,6 +1021,11 @@ fn describe(n: &eigenius_notation::Notation) -> &'static str {
         N::ClinVar(_) => "a ClinVar variation record",
         N::SequenceRecord(_) => "an Ensembl or RefSeq sequence record",
         N::GenomicCoordinate(_) => "a genomic coordinate",
+        N::IsoDate(_) => "an ISO 8601 date",
+        N::CitationLocus(_) => "a journal citation's year and volume",
+        N::WebLocator(_) => "a web address or a component of one",
+        N::PrefixedId(_) => "a curated-database identifier",
+        N::Version(_) => "a software version",
     }
 }
 
@@ -1068,7 +1092,11 @@ fn is_oov_name(t: &str) -> bool {
 /// carrying a capital and occurring at least `MIN_OCCURRENCES` times, becomes a doc-local named
 /// individual with a `cat_np` alias. A possessive (`gnomAD's`) is emitted as a second alias of the
 /// SAME individual, not as an entity of its own.
-pub fn oov_name_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmentation {
+pub fn oov_name_augmentation(
+    base: &Arc<Layer>,
+    document: &str,
+    oov: &BTreeSet<String>,
+) -> LexiconAugmentation {
     /// Repetition is the whole precision guard, so one mention is not a name here.
     const MIN_OCCURRENCES: usize = 2;
 
@@ -1104,7 +1132,7 @@ pub fn oov_name_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmen
         if key.is_empty() || !seen.insert(key.clone()) {
             continue;
         }
-        if !entries_for_form(base, core).is_empty() {
+        if !is_pipeline_gap(oov, core) {
             continue;
         }
         let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:ni_{key}")) else {
@@ -1325,7 +1353,11 @@ fn code_spans(document: &str) -> Vec<&str> {
 /// Markup, not pattern: the only judgement is the author's. A token already supplied by the
 /// lexicon is left alone, and one a published notation claims is left to the notation source,
 /// which records the parse rather than an opaque string.
-pub fn code_span_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmentation {
+pub fn code_span_augmentation(
+    base: &Arc<Layer>,
+    document: &str,
+    oov: &BTreeSet<String>,
+) -> LexiconAugmentation {
     let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
         return LexiconAugmentation::default();
     };
@@ -1354,7 +1386,7 @@ pub fn code_span_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugme
             if key.is_empty() || !seen.insert(key.clone()) {
                 continue;
             }
-            if !entries_for_form(base, tok).is_empty() {
+            if !is_pipeline_gap(oov, tok) {
                 continue;
             }
             let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:lit_{key}")) else {
@@ -1498,7 +1530,11 @@ pub fn derive_with(
 /// over a base the lexicon DOES supply is grounded to that base's concept, with the affix recorded.
 ///
 /// Only one affix is stripped, and the base must be attested: no chains, no invented bases.
-pub fn derivation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmentation {
+pub fn derivation_augmentation(
+    base: &Arc<Layer>,
+    document: &str,
+    oov: &BTreeSet<String>,
+) -> LexiconAugmentation {
     let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
         return LexiconAugmentation::default();
     };
@@ -1513,7 +1549,7 @@ pub fn derivation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugm
         if !seen.insert(tok.to_string()) {
             continue;
         }
-        if !entries_for_form(base, tok).is_empty() {
+        if !is_pipeline_gap(oov, tok) {
             continue;
         }
         let Some((stem, affix, gloss)) =
@@ -1550,6 +1586,222 @@ pub fn derivation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugm
                     context: stem.clone(),
                     method: ResolutionMethod::DerivedFromBase,
                     grounded_to: Some(concept.clone()),
+                    confidence: None,
+                },
+            });
+        }
+    }
+
+    LexiconAugmentation {
+        added,
+        supporting,
+        missing_oov: Vec::new(),
+    }
+}
+
+// ── Stage I: hyphenated compounds of known parts — the NINTH source ──────────
+//
+// The parser's lexer deliberately does NOT treat an ASCII hyphen as a separator (`is_separator`
+// covers em-dash, en-dash, figure dash and slash), because `wild-type` and `PolyPhen-2` are single
+// lexical items. So `missense-bystander` arrives whole and unknown while both parts are attested.
+//
+// Splitting hyphens in the tokenizer would close these and break the items the rule exists to
+// protect. Minting an entry for the whole compound closes them without touching that decision, and
+// the parts being attested is what makes it deterministic rather than a guess.
+//
+// This does NOT compose the parts' meanings. It grounds the surface on the HEAD part — the last,
+// in English — and records the whole. `missense-bystander` is a kind of bystander; claiming it
+// means exactly `bystander` would be wrong, and the record says which part carried the grounding.
+
+/// **Compound augmentation** — the ninth source. A hyphenated OOV surface whose parts are all
+/// supplied by the lexicon is grounded on its head part, with the full form recorded.
+pub fn compound_augmentation(
+    base: &Arc<Layer>,
+    document: &str,
+    oov: &BTreeSet<String>,
+) -> LexiconAugmentation {
+    let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
+        return LexiconAugmentation::default();
+    };
+    let mut added = Vec::new();
+    let mut supporting = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+
+    for tok in parser_tokens(base, document) {
+        let tok = tok.as_str();
+        if !tok.contains('-') || !tok.is_ascii() || !seen.insert(tok.to_string()) {
+            continue;
+        }
+        if !is_pipeline_gap(oov, tok) {
+            continue;
+        }
+        let parts: Vec<&str> = tok.split('-').filter(|p| !p.is_empty()).collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        // EVERY part attested, or this is not a compound of known parts — it is an unknown with a
+        // hyphen in it, which a later source may claim on weaker evidence.
+        let grounded: Vec<Vec<Arc<Resource>>> =
+            parts.iter().map(|p| entries_for_form(base, p)).collect();
+        if grounded.iter().any(|g| g.is_empty()) {
+            continue;
+        }
+        // The HEAD is the last part, in English. `missense-bystander` is a kind of bystander.
+        let Some(head) = grounded
+            .last()
+            .and_then(|g| g.first())
+            .and_then(|e| e.id().cloned())
+        else {
+            continue;
+        };
+        let binding = AbbreviationBinding {
+            abbr: tok,
+            long_form: parts.last().copied().unwrap_or(tok),
+            concept_iri: head.as_str(),
+            doc_ns: "urn:eigenius:doc",
+        };
+        let Some(rs) = abbreviation_resources(base, &binding) else {
+            continue;
+        };
+        let (entries, extra): (Vec<Resource>, Vec<Resource>) =
+            rs.into_iter().partition(|r| r.is_instance_of(&entry_class));
+        if entries.is_empty() {
+            continue;
+        }
+        supporting.extend(extra);
+        for proposed in entries {
+            added.push(LexicalBinding {
+                proposed,
+                provenance: Provenance {
+                    surface: tok.to_string(),
+                    long_form: Some(format!(
+                        "{} parts, head {}",
+                        parts.len(),
+                        parts[parts.len() - 1]
+                    )),
+                    context: tok.to_string(),
+                    method: ResolutionMethod::CompoundOfKnownParts,
+                    grounded_to: Some(head.clone()),
+                    confidence: None,
+                },
+            });
+        }
+    }
+
+    LexiconAugmentation {
+        added,
+        supporting,
+        missing_oov: Vec::new(),
+    }
+}
+
+// ── Stage J: the fallback — the TENTH and LAST source ────────────────────────
+//
+// `baseline.json`'s coverage gate is "grammar_gap == 0 and missing_lexeme == 0 — every sentence
+// parses. NON-NEGOTIABLE." A unit that never clears the lexicon is never scored on grammar at all,
+// so a residue of unknown surfaces caps coverage no matter how good the grammar gets.
+//
+// The nine sources above each ASSERT something: a published grammar parsed this, the document
+// marked it, it recurs as a name, its parts are attested, its base is attested. What is left after
+// them — a surname cited once, a token the author did not mark, a word no lexicon has — supports
+// no such claim. This source mints an entry anyway, and says exactly that.
+//
+// WHY THIS IS NOT LAUNDERING, and the two things that make the difference:
+//
+//   1. It runs LAST, so every surface it touches has already been declined by every source with
+//      real evidence. It cannot pre-empt a better answer.
+//   2. It is COUNTED SEPARATELY everywhere it is reported, and each entry carries
+//      `ResolutionMethod::UnevidencedFallback` into the gap stream. A coverage figure that hides
+//      how much of itself rests on no evidence is worse than a lower figure that does not.
+//
+// So `missing-lexeme 0` becomes readable as "N closed on evidence, M closed on none" rather than
+// as a single number that cannot be interrogated.
+
+/// **Fallback augmentation** — the tenth and last source. Any surface still absent from the
+/// lexicon becomes a doc-local opaque individual, so the unit reaches the grammar.
+///
+/// `already` is the set of surfaces the earlier sources supplied; this skips them rather than
+/// re-minting, and `entries_for_form` covers the committed lexicon.
+pub fn fallback_augmentation(
+    base: &Arc<Layer>,
+    document: &str,
+    oov: &BTreeSet<String>,
+    already: &BTreeSet<String>,
+) -> LexiconAugmentation {
+    let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
+        return LexiconAugmentation::default();
+    };
+    let Some(entity) = Iri::parse("urn:eigenius:lexicon:Entity").ok() else {
+        return LexiconAugmentation::default();
+    };
+    let p = |s: &str| Iri::parse(s).expect("valid well-known iri");
+
+    let mut added = Vec::new();
+    let mut supporting = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+
+    for tok in parser_tokens(base, document) {
+        let tok = tok.as_str();
+        // A single character, or anything with no letter or digit, is punctuation the grammar owns.
+        if tok.chars().count() < 2 || !tok.chars().any(|c| c.is_alphanumeric()) {
+            continue;
+        }
+        if already.contains(tok) || !seen.insert(tok.to_string()) {
+            continue;
+        }
+        if super::closed_class::is_closed_class_surface(tok) {
+            continue;
+        }
+        if !is_pipeline_gap(oov, tok) {
+            continue;
+        }
+        let key = slug(tok);
+        if key.is_empty() {
+            continue;
+        }
+        let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:unk_{key}")) else {
+            continue;
+        };
+        let mut ni = Resource::new(ni_iri.clone());
+        ni.set(p(wk::IS_A), Value::Array(vec![Value::iri(&entity)]));
+        ni.set(
+            p(wk::DESCRIPTION),
+            Value::String(format!(
+                "Doc-local opaque individual for {tok:?}. NO EVIDENCE beyond its occurrence: every \
+                 source with a claim to make — notation, markup, recurrence, attested parts, \
+                 attested base — declined it. Minted so the unit reaches the grammar."
+            )),
+        );
+        let mut b = LayerBuilder::new("fallback-emit", Some(Arc::clone(base)));
+        if b.add_resource(ni.clone()).is_err() {
+            continue;
+        }
+        let tmp = Arc::new(b.build(LayerStorage::in_memory()));
+        let binding = AbbreviationBinding {
+            abbr: tok,
+            long_form: tok,
+            concept_iri: ni_iri.as_str(),
+            doc_ns: "urn:eigenius:doc",
+        };
+        let Some(rs) = abbreviation_resources(&tmp, &binding) else {
+            continue;
+        };
+        let (entries, extra): (Vec<Resource>, Vec<Resource>) =
+            rs.into_iter().partition(|r| r.is_instance_of(&entry_class));
+        if entries.is_empty() {
+            continue;
+        }
+        supporting.push(ni);
+        supporting.extend(extra);
+        for proposed in entries {
+            added.push(LexicalBinding {
+                proposed,
+                provenance: Provenance {
+                    surface: tok.to_string(),
+                    long_form: None,
+                    context: tok.to_string(),
+                    method: ResolutionMethod::UnevidencedFallback,
+                    grounded_to: None,
                     confidence: None,
                 },
             });
