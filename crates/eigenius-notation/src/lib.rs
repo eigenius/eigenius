@@ -44,6 +44,9 @@ pub enum Notation {
     CodingChange(hgvs::Change),
     /// A residue and its position with no change stated — `Arg381`, `Ile380`.
     ResiduePosition { residue: String, position: u32 },
+    /// A CODING position or interval with no change stated — `c.1139`, `c.1135-1145`. A location
+    /// on a coding reference: variant:Location again, carrying start and end.
+    CodingPosition { start: u32, end: u32 },
     /// An INTERVAL between two residue positions — `Met375–Arg381`, a helix boundary. Distinct from
     /// a position because `variant:Location` carries start AND end, and the document states helix
     /// and domain extents this way: 9 distinct ranges over 8 units of the XIAP report.
@@ -105,6 +108,20 @@ fn parse_one_letter_change(body: &str) -> Option<hgvs::Change> {
         ref_state: Some(ref_res.to_string()),
         alt: alt.to_string(),
     })
+}
+
+/// `c.1139`, `c.1135-1145` — a coding position or interval with NO change. The document cites
+/// positions this way when it is locating a site rather than describing a substitution.
+fn parse_coding_position(body: &str) -> Option<Notation> {
+    let num = |x: &str| x.parse::<u32>().ok().filter(|_| !x.starts_with('0'));
+    let (a, b) = match body.split_once(['-', '\u{2013}', '_']) {
+        Some((l, r)) => (num(l)?, num(r)?),
+        None => {
+            let n = num(body)?;
+            (n, n)
+        }
+    };
+    (a <= b).then_some(Notation::CodingPosition { start: a, end: b })
 }
 
 /// `Met375-Arg381` — an interval between two residue positions, after dash normalisation. Rejected
@@ -255,13 +272,19 @@ pub fn recognize(token: &str) -> Option<Notation> {
         if let Ok(c) = hgvs::parse_p(t) {
             return is_real_protein_change(&c).then_some(Notation::ProteinChange(c));
         }
-        if let Some(c) = parse_one_letter_change(t.trim_start_matches("p.")) {
+        let body = t.trim_start_matches("p.");
+        if let Some(c) = parse_one_letter_change(body) {
             return Some(Notation::ProteinChange(c));
         }
-        return None;
+        // `p.Ala379` — a residue and position with no alternate stated.
+        return parse_residue_range(body).or_else(|| parse_residue_position(body));
     }
     if t.starts_with("c.") {
-        return hgvs::parse_c(t).ok().map(Notation::CodingChange);
+        if let Ok(c) = hgvs::parse_c(t) {
+            return Some(Notation::CodingChange(c));
+        }
+        // No change stated — a position, which is a location, not a change.
+        return parse_coding_position(t.trim_start_matches("c."));
     }
     // Bare changes, as the report also writes them (`Ile380Thr`, `N108Q`). `parse_p` refuses an
     // unprefixed notation — correct for a registry, where coding and protein coordinates are
@@ -478,13 +501,18 @@ mod tests {
             // Near-misses by shape.
             "Ile",
             "Ile380Xyz",
-            "p.Ile380",
+            // `p.Ile380` used to be here as a near-miss. It is now a POSITIVE: a bare protein
+            // position is a variant:Location, which is what `p.Ala379` in the document needed.
+            // The expectation changed with the feature; it was not loosened to pass.
             "p.",
             "c.",
             "rs",
             "VCV",
             "chrX",
             "Ile0380Thr",
+            "c.0139",
+            "c.",
+            "c.1145-1135",
             // Years and bare numbers, which a loose coordinate or PDB pattern would swallow.
             "2026",
             "1998",

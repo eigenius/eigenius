@@ -755,7 +755,9 @@ fn notation_tokens(document: &str) -> Vec<&str> {
         })
         .trim_end_matches('.')
     }
-    const DASHES: [char; 3] = ['-', '\u{2013}', '\u{2014}'];
+    // Commas too: the parser's tokenizer splits `chrX:123,900,532` and asks the lexicon for
+    // `chrX:123`, the single biggest remaining blocker at 11 units. Same mismatch as the dash.
+    const DASHES: [char; 4] = ['-', '\u{2013}', '\u{2014}', ','];
     let mut out = Vec::new();
     for t in whitespace_tokens(document) {
         out.push(t);
@@ -1021,6 +1023,9 @@ fn describe(n: &eigenius_notation::Notation) -> &'static str {
         N::ResiduePosition { .. } => {
             "a residue and position; its reference accession is not in the notation"
         }
+        N::CodingPosition { .. } => {
+            "a coding position; its reference accession is not in the notation"
+        }
         N::ResidueRange { .. } => {
             "an interval between two residue positions; its reference accession is not in the \
              notation"
@@ -1177,4 +1182,105 @@ pub fn oov_name_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmen
         supporting,
         missing_oov: Vec::new(),
     }
+}
+
+// ── The gap stream (D62 §9) ──────────────────────────────────────────────────
+//
+// `enc:LexicalGap` has been declared since D62 and had NO WRITER: the class, its three
+// dispositions and all four properties existed, and the only mention of it in the Rust was a
+// bootstrap comment listing the class names. So a run's lexical closure left no record — the
+// artifact could not say that `gnomAD` was a doc-local individual injected by the recurrent-name
+// source rather than a lexicon concept, which is exactly the provenance a reviewer needs before
+// trusting a claim built on it. D62 §9 calls the gap stream "a first-class coverage signal"; it
+// was a signal nothing emitted.
+//
+// `ResolutionMethod` cannot ride along machine-readably: it lives on the PROPOSAL by design
+// ("carried on the proposal, not on the committed entry"), and the encoding ontology has no
+// property for it. It goes in `core:description` here, and a queryable property is the one
+// ontology addition this would want — deliberately not taken, because it costs a reseed.
+
+/// **The gap stream** — one `enc:LexicalGap` per surface an augmentation touched, with how it was
+/// disposed: `gap_bound` where an existing concept was found, `gap_injected` where an entry was
+/// minted, `gap_unresolvable` for what survived every source.
+///
+/// `enc:gap_unit` is left unset: an augmentation is built per DOCUMENT, so the unit a gap blocked
+/// is not known at this seam. It is `recommends`, not `requires`, and inventing one would be worse
+/// than omitting it.
+///
+/// NOT STANDALONE: `enc:bound_entry` points at the minted `lexicon:LexicalEntry`, so these records
+/// must be committed alongside the augmentation's own entries and supporting individuals. On their
+/// own they fail validation with `UnresolvedClassReference`, which is the reference working.
+pub fn lexical_gap_resources(aug: &LexiconAugmentation, doc_ns: &str) -> Vec<Resource> {
+    let p = |s: &str| Iri::parse(s).expect("valid well-known iri");
+    let mut out = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+
+    let mut emit = |surface: &str, disposition: &str, entry: Option<&Iri>, note: String| {
+        let key = slug(surface);
+        if key.is_empty() || !seen.insert(format!("{disposition}:{key}")) {
+            return;
+        }
+        let Ok(iri) = Iri::parse(&format!("{doc_ns}:gap_{key}")) else {
+            return;
+        };
+        let Ok(disp) = Iri::parse(disposition) else {
+            return;
+        };
+        let mut r = Resource::new(iri);
+        r.set(
+            p(wk::IS_A),
+            Value::Array(vec![Value::iri(&p("urn:eigenius:encoding:LexicalGap"))]),
+        );
+        r.set(
+            p("urn:eigenius:encoding:gap_token"),
+            Value::String(surface.to_string()),
+        );
+        r.set(
+            p("urn:eigenius:encoding:gap_disposition"),
+            Value::iri(&disp),
+        );
+        if let Some(e) = entry {
+            r.set(p("urn:eigenius:encoding:bound_entry"), Value::iri(e));
+        }
+        r.set(p(wk::DESCRIPTION), Value::String(note));
+        out.push(r);
+    };
+
+    for b in &aug.added {
+        // Grounded to a concept the chain already had, or an entry minted for this document? That
+        // is the bound/injected distinction, and it is the one a reader needs.
+        let bound = b.provenance.grounded_to.is_some();
+        let entry = b.proposed.id().cloned();
+        emit(
+            &b.provenance.surface,
+            if bound {
+                "urn:eigenius:encoding:gap_bound"
+            } else {
+                "urn:eigenius:encoding:gap_injected"
+            },
+            entry.as_ref(),
+            format!(
+                "Resolved by {:?}{}.",
+                b.provenance.method,
+                b.provenance
+                    .grounded_to
+                    .as_ref()
+                    .map(|g| format!(", grounded to {g}"))
+                    .unwrap_or_default()
+            ),
+        );
+    }
+    for g in &aug.missing_oov {
+        emit(
+            &g.surface,
+            "urn:eigenius:encoding:gap_unresolvable",
+            None,
+            format!(
+                "No target found by {} method(s): {:?}.",
+                g.tried.len(),
+                g.tried
+            ),
+        );
+    }
+    out
 }

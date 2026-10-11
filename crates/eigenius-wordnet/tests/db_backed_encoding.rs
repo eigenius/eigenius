@@ -611,6 +611,24 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     let before_retraction = aug.missing_oov.len();
     aug.missing_oov
         .retain(|g| !supplied.contains(&g.surface.to_lowercase()));
+    // THE GAP STREAM (D62 §9), emitted as the instrument that drives the remaining tail. Until
+    // now the tail was attributed by re-tokenising the page in Python and intersecting with the
+    // log's OOV list, which left 27 units "unmatched by this attribution" — a blind spot created
+    // by guessing at the kernel's tokenisation instead of reading what the kernel recorded.
+    for g in eigenius_kernel::dcg::lexical_gap_resources(&aug, "urn:eigenius:doc") {
+        let field = |p: &str| {
+            g.get(&eigenius_kernel::ontology::Iri::parse(p).expect("iri"))
+                .cloned()
+        };
+        let token = field("urn:eigenius:encoding:gap_token")
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let disp = field("urn:eigenius:encoding:gap_disposition")
+            .and_then(|v| v.as_iri())
+            .map(|i| i.as_str().rsplit(':').next().unwrap_or("?").to_string())
+            .unwrap_or_default();
+        eprintln!("GAP\t{disp}\t{token}");
+    }
     eprintln!(
         "residual OOV: {} → {} after retracting what apposition and notation supplied",
         before_retraction,
