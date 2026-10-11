@@ -304,7 +304,19 @@ resource doc:u4 : enc:DiscourseUnit {
 
 resource doc:ref_group_1 : enc:RefList {
     enc:title = "XIAP deficiency - disease mechanism and phenotype";
-    enc:refs  = [doc:work];
+    enc:refs  = [doc:ref_1];
+}
+
+// An entry is a record PLUS the annotation prose the author wrote about it — 29 of this report's
+// 63 entries have one, and a certification claim can land on that sentence.
+resource doc:ref_1 : enc:Ref {
+    enc:work  = doc:work;
+    enc:units = [doc:u5];
+}
+
+resource doc:u5 : enc:DiscourseUnit {
+    enc:prose     = "The original description; establishes loss of function as the mechanism.";
+    enc:unit_kind = enc:kind_prose;
 }
 
 resource doc:sec_setting : enc:Section {
