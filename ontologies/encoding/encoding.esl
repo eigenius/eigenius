@@ -1,9 +1,11 @@
 // encoding — the D62 encoding-pipeline contract layer.
 //
-// NOT in kernel/src/bootstrap BOOTSTRAP_CHAIN, and no longer planned for it (D62 §11.3 said to
-// insert it after `lexicon`). It is loaded as a user layer — by the demo, by the artifact tests,
-// and by any run that emits these classes — which keeps a vocabulary change off the bootstrap
-// manifest and therefore out of the reseed path. Validated by `kernel/tests/encoding_validates.rs`.
+// IN kernel/src/bootstrap/mod.rs BOOTSTRAP_CHAIN, at its tip (D62 §11.3 said to insert it after
+// `lexicon`). D71 slice 2 argued the other way to keep vocabulary edits off the reseed path and
+// was wrong on the merits — the dependency was already there and unchecked (`2026-08-20`); this
+// header went on claiming the reverse until `2026-10-10`. So a vocabulary change here MOVES THE
+// BOOTSTRAP MANIFEST HASH and needs a reseed, and `bootstrap_manifest_is_pinned` must be updated
+// in the same commit. Validated by `kernel/tests/encoding_validates.rs`.
 // It references lexicon:, reference:, reflection:, eigentt: and justification:.
 //
 // PURPOSE. The encoding pipeline (D62) turns a document into typed, witnessed reasoning
@@ -27,6 +29,241 @@ namespace prov       = "urn:eigenius:prov";
 namespace justification = "urn:eigenius:justification";
 
 // ════════════════════════════════════════════════════════════════════
+// Document structure (D101): the JATS element set — the pipeline's INPUT
+// ──────────────────────────────────────────────────────────────────
+// Upstream of S0: the S-numbers below are D62's pipeline STAGES, and a document is what the
+// stages run over, not one of them. Hence no stage number.
+// ════════════════════════════════════════════════════════════════════
+//
+// D96 chose JATS as the document model; this is the vocabulary that choice implies. Without it a
+// converter can emit a flat list of DiscourseUnits tagged with a section STRING and nothing
+// objects — which is what happened: 467 units for one report, no article, no sections as objects,
+// no containment, no reference list, compiling and validating clean because there was nothing to
+// validate against.
+//
+// THREE AXES, THREE RESOURCES, chained, none subsuming another:
+//
+//   reference:Reference      the WORK, when published  — DOI/PMID, CSL-JSON metadata; the ref-list
+//   enc:Document            the MANIFESTATION, observed — media type, path, content hash, structure
+//   enc:ReasoningStructure  the DERIVATION, derived     — enc:claims + prov:derivation → ProgramTrace
+//
+// Document structure cannot live on reference:Reference, by that ontology's own design rule:
+// anything "local to the citing document ... lives on the Citation, never on the Reference (a
+// different paper citing the same work numbers it differently)". A paragraph order and a byte
+// offset are manifestation-local in exactly that sense. reference:Reference is also defined as "a
+// published work" identified by DOI or PubMed ID — which is why `emit_resources` has to MINT one
+// for a plain text file and say so in its own description, "the file carries no DOI or PMID"
+// (crates/eigenius-encoding/src/emit.rs). enc:Document is the home that workaround stands in for.
+//
+// Merging Document into ReasoningStructure would put an OBSERVED transcription and a DERIVED run
+// output in one resource. They stay apart for the same reason the kind axes do.
+
+class enc:Document {
+    description = "One source document's structure and manifestation — JATS <article> as resources. The OBSERVED input root: what the bytes say, pinned by a content hash. Distinct from the DERIVED enc:ReasoningStructure a run produces from it, and from the published reference:Reference work it may manifest (enc:work), which is often absent — an unpublished report has no DOI. Locators resolve against THIS resource (D96): a unit's fragment identifier is relative to this document's text content, so the hash belongs here, on the thing the locators address.";
+    requires enc:body;
+    recommends enc:media_type, enc:document_title, enc:work, enc:ref_list,
+               enc:source_path, enc:source_sha256;
+}
+
+property enc:body : core:resource_array {
+    description = "The document's top-level blocks, in document order (JATS <body>). Document order IS the array order, which is why a bottom-line-up-front section typed `conclusions` can come first without a second ordering concept.";
+    class_types enc:Block;
+    domain enc:Document;
+}
+
+property enc:document_title : core:string {
+    description = "The document's title (JATS <article-title>, in front matter). A title is NOT a section: the markdown h1 that opens a report maps here, not to an enc:Section.";
+    domain enc:Document;
+}
+
+property enc:media_type : core:string {
+    description = "The manifestation's media type ('text/markdown', 'application/xml', 'text/plain'). Required to interpret enc:locator: D96's fragment identifiers are media-type-appropriate, so a locator cannot be resolved without knowing what the bytes are.";
+    domain enc:Document;
+}
+
+property enc:work : core:resource {
+    description = "The published work this document manifests, when there is one. Absent for an unpublished source — which is the common case for the documents this pipeline encodes, and the reason document structure does not hang off reference:Reference.";
+    class_types reference:Reference;
+    domain enc:Document;
+}
+
+property enc:ref_list : core:resource_array {
+    description = "The works this document's bibliography cites (JATS <ref-list>/<ref>), in list order. The targets an enc:ReferenceSpan with ref_type `bibr` resolves to. Back matter, not a section: a '## References' heading maps here, not to an enc:Section.";
+    class_types reference:Reference;
+    domain enc:Document;
+}
+
+// ── Blocks ──────────────────────────────────────────────────────────
+//
+// One abstract root for everything that can sit in a body or a section, so containment is typed
+// once and a later `figure` or `code` block needs no edit to enc:body / enc:children.
+
+class enc:Block {
+    description = "A structural block in a document's body — an enc:Section, enc:Paragraph or enc:Table. The abstract element type of enc:body and enc:children, so the tree is walkable by one type and admits new block kinds without retyping containment.";
+}
+
+class enc:Section : enc:Block {
+    description = "A titled, identified division of a document (JATS <sec>). Identity is the resource; a section's TYPE is enc:section_kind. Sections nest: enc:children holds sub-sections and blocks alike. This is what makes 'the methods' a query rather than a string match (D96) — and what makes a unit's containing section derivable by walking down from the document, so no unit needs a back-pointer to it.";
+    requires enc:children;
+    recommends enc:section_title, enc:section_kind;
+}
+
+property enc:section_title : core:string {
+    description = "The section's heading text (JATS <title>). A heading is a property of a section, not a DiscourseUnit of its own (D96).";
+    domain enc:Section;
+}
+
+property enc:section_kind : core:resource {
+    description = "The section's type (JATS sec-type), as a resource rather than a string — a string sec-type is the string match it was meant to replace.";
+    class_types enc:SectionKind;
+    domain enc:Section;
+}
+
+property enc:children : core:resource_array {
+    description = "The section's contents in document order — sub-sections and blocks, interleaved as the source has them.";
+    class_types enc:Block;
+    domain enc:Section;
+}
+
+class enc:Paragraph : enc:Block {
+    description = "A prose paragraph (JATS <p>): an ordered run of DiscourseUnits, normally one per sentence. The unit of containment between a section and a sentence, so a unit's position is a path and not a label.";
+    requires enc:units;
+}
+
+class enc:Table : enc:Block {
+    description = "A table (JATS <table-wrap>): an ordered run of DiscourseUnits, one per row. Distinct from enc:Paragraph because its units route differently — enc:kind_table, not enc:kind_prose — and the routing follows the ELEMENT, not a guess about the text.";
+    requires enc:units;
+}
+
+property enc:units : core:resource_array {
+    description = "The DiscourseUnits this block contains, in document order — sentences for a Paragraph, rows for a Table.";
+    class_types enc:DiscourseUnit;
+    domain enc:Paragraph, enc:Table;
+}
+
+// ── Section kinds (JATS sec-type) ───────────────────────────────────
+//
+// JATS's sec-type list is SUGGESTED, not controlled: the BITS 2.1 tag library says the attribute
+// "may take any value", and JATS4R draws the same distinction (controlled values MUST come from a
+// list, suggested values SHOULD) and notes that controlled lists hurt adoption when a user has a
+// legitimate need for an unlisted value. So this class is open by construction — a layer needing a
+// tenth kind adds it under core:subclass_of, rather than through an enumerated selector.
+//
+// Individuals, not a string, is what makes "the methods" a query. No document-local kinds: a
+// section the list does not name is identified by its own resource and enc:section_title, and a
+// per-document sec-type would buy only what identity already provides while buying nothing across
+// documents — which is sec-type's entire job.
+
+class enc:SectionKind {
+    description = "The type of a section (JATS sec-type). Carries JATS's nine suggested values; open, because JATS's own list is.";
+}
+
+resource enc:sec_intro : enc:SectionKind {
+    core:short_name = "intro";
+    core:description = "Introduction — the problem, the setting, what is being assessed.";
+}
+resource enc:sec_methods : enc:SectionKind {
+    core:short_name = "methods";
+    core:description = "Methods — how the work was carried out.";
+}
+resource enc:sec_materials : enc:SectionKind {
+    core:short_name = "materials";
+    core:description = "Materials used.";
+}
+resource enc:sec_results : enc:SectionKind {
+    core:short_name = "results";
+    core:description = "Results — what was found. A report organised as numbered findings types each finding section here; the finding's number and wording live in enc:section_title and the section's own identity.";
+}
+resource enc:sec_discussion : enc:SectionKind {
+    core:short_name = "discussion";
+    core:description = "Discussion — interpretation of the results.";
+}
+resource enc:sec_conclusions : enc:SectionKind {
+    core:short_name = "conclusions";
+    core:description = "Conclusions — what follows. A bottom-line-up-front section is this kind placed first; document order carries the placement.";
+}
+resource enc:sec_cases : enc:SectionKind {
+    core:short_name = "cases";
+    core:description = "Case presentations.";
+}
+resource enc:sec_subjects : enc:SectionKind {
+    core:short_name = "subjects";
+    core:description = "Subjects studied.";
+}
+resource enc:sec_supplementary_material : enc:SectionKind {
+    core:short_name = "supplementary-material";
+    core:description = "Supplementary material.";
+}
+
+// ── Reference spans (JATS <xref>) ───────────────────────────────────
+//
+// D96's point: `Fig. 2d` inside an <xref> is a reference because the markup says so — the quantity
+// split never sees it and no rule has to guess. A span is a text region, so by D96's own locator
+// rule it is addressed by a fragment identifier, not by an offset pair into its unit; offsets stay
+// derived, as they are for units.
+
+class enc:ReferenceSpan {
+    description = "One inline reference inside a prose unit (JATS <xref>): a span of text that points at a numbered thing rather than asserting content. Known by markup, never inferred — this is what keeps a citation or a figure call-out out of the parser's quantity handling (D96, answering D95's open question).";
+    requires enc:span_unit, enc:ref_target;
+    recommends enc:ref_type, enc:ref_surface, enc:locator;
+}
+
+property enc:span_unit : core:resource {
+    description = "The DiscourseUnit this span occurs in.";
+    class_types enc:DiscourseUnit;
+    domain enc:ReferenceSpan;
+}
+
+property enc:ref_target : core:resource {
+    description = "What the span points at — a reference:Reference for a bibliographic citation, a block for a table or figure call-out.";
+    class_types reference:Reference, enc:Block;
+    domain enc:ReferenceSpan;
+}
+
+property enc:ref_type : core:resource {
+    description = "What kind of thing the span points at (JATS ref-type), which selects how the target resolves.";
+    class_types enc:ReferenceType;
+    domain enc:ReferenceSpan;
+}
+
+property enc:ref_surface : core:string {
+    description = "The span's display text as the document writes it ('Rigaud et al. 2006', 'Fig. 2d') — what a reader sees, kept because it is not recoverable from the target.";
+    domain enc:ReferenceSpan;
+}
+
+class enc:ReferenceType {
+    description = "The kind of thing an enc:ReferenceSpan points at (JATS ref-type): the five D96 names.";
+}
+
+resource enc:ref_bibr : enc:ReferenceType {
+    core:short_name = "bibr";
+    core:description = "A bibliographic citation — target is a reference:Reference in the document's ref-list.";
+}
+resource enc:ref_table : enc:ReferenceType {
+    core:short_name = "table";
+    core:description = "A table call-out — target is an enc:Table.";
+}
+resource enc:ref_fig : enc:ReferenceType {
+    core:short_name = "fig";
+    core:description = "A figure call-out.";
+}
+resource enc:ref_disp_formula : enc:ReferenceType {
+    core:short_name = "disp-formula";
+    core:description = "A displayed-equation call-out.";
+}
+resource enc:ref_supplementary_material : enc:ReferenceType {
+    core:short_name = "supplementary-material";
+    core:description = "A supplementary-material call-out.";
+}
+
+// ── Locators (D96, amended 2026-10-10) ──────────────────────────────
+
+property enc:locator : core:string {
+    description = "A media-type-appropriate URI FRAGMENT IDENTIFIER addressing this resource's text within its document — a WICG Text Fragment for markdown/HTML ('#:~:text=prefix-,start,end,-suffix'), XPointer for JATS/TEI, RFC 5147 '#line=n,m' for plain text, RFC 7111 '#cell=r,c' for CSV. The PRIMARY address (D96): enc:span_start / enc:span_end are derived from it by resolving against the document named by containment, whose enc:media_type says how to read it and whose enc:source_sha256 pins the version. Not parsed as structure — resolved against the document to yield text.";
+    domain enc:DiscourseUnit, enc:ReferenceSpan;
+}
+
+// ════════════════════════════════════════════════════════════════════
 // S0 — DiscourseUnit: the parsing unit + provenance
 // ════════════════════════════════════════════════════════════════════
 
@@ -48,13 +285,13 @@ property enc:unit_kind : core:resource {
 }
 
 property enc:source_document : core:resource {
-    description = "The published work this unit is drawn from — the bibliographic provenance root.";
+    description = "The published work this unit is drawn from — the bibliographic provenance root. REDUNDANT for a unit inside an enc:Document, where the work is reached by containment (unit → block → section → document → work); kept for the routes that emit units with no document structure. Not to be set alongside containment: two homes for one fact disagree.";
     class_types reference:Reference;
     domain enc:DiscourseUnit;
 }
 
 property enc:section : core:string {
-    description = "Human-readable section/location label within the source document (e.g. 'Results §2.1').";
+    description = "Human-readable section/location label for a unit from a source with NO document structure (e.g. 'Results §2.1', or a case id — crates/eigenius-pmi-registry). Deliberately NOT retyped to enc:Section: inside an enc:Document a unit's section is derivable by walking down from the document, and 'the methods' is a query over enc:section_kind, so a back-pointer here would be denormalization. D96's \"enc:section can carry the section's identity and sec-type\" is realised by Sections BEING resources, not by changing this field.";
     domain enc:DiscourseUnit;
 }
 
@@ -459,19 +696,19 @@ property enc:claims : core:resource_array {
 }
 
 property enc:document : core:resource {
-    description = "The source work this structure encodes.";
-    class_types reference:Reference;
+    description = "What this structure encodes. CANONICALLY an enc:Document — the manifestation whose bytes the run read. reference:Reference is still admitted because the pre-document-model routes point here at a work (and, for a file with no DOI, at one `emit_resources` mints document-locally); once every route emits an enc:Document this narrows to enc:Document alone.";
+    class_types enc:Document, reference:Reference;
     domain enc:ReasoningStructure;
 }
 
 property enc:source_path : core:string {
-    description = "Where the parsed bytes came from — the run's input location, stated once per document. Run provenance, not bibliography: the WORK is enc:document, and the same work re-parsed from a different file is the same Reference with a different source_path.";
-    domain enc:ReasoningStructure;
+    description = "Where the parsed bytes came from — the input location, stated once per document. Run provenance, not bibliography: the WORK is enc:Document's enc:work, and the same work re-parsed from a different file is the same Reference with a different source_path. Belongs on enc:Document (the manifestation IS the bytes); the enc:ReasoningStructure domain remains for the routes that emit no Document yet.";
+    domain enc:Document, enc:ReasoningStructure;
 }
 
 property enc:source_sha256 : core:string {
-    description = "SHA-256 of the exact bytes this structure was derived from, so a prose edit is visible on the chain and not only in whichever propositions it happened to change. Previously smuggled into enc:section on every unit, a field meant for a human-readable location within the document; stated once here instead.";
-    domain enc:ReasoningStructure;
+    description = "SHA-256 of the exact bytes, so a prose edit is visible on the chain and not only in whichever propositions it happened to change. Belongs on enc:Document: D96 resolves every enc:locator against a HASHED document, so the hash is a property of the thing the locators address. The enc:ReasoningStructure domain remains for the routes that emit no Document yet. Previously smuggled into enc:section on every unit, a field meant for a human-readable location.";
+    domain enc:Document, enc:ReasoningStructure;
 }
 
 // ════════════════════════════════════════════════════════════════════

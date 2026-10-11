@@ -252,3 +252,144 @@ fn encoding_ontology_is_expressible_and_validates() {
         );
     }
 }
+
+/// D101's document structure holds an INSTANCE, not just a schema: `enc:Document` → `enc:body` →
+/// `enc:Section` → `enc:children` → (`enc:Section` | `enc:Paragraph` | `enc:Table`) → `enc:units`
+/// → `enc:DiscourseUnit`, with an `enc:ReferenceSpan` over one unit.
+///
+/// The load-bearing question is `enc:Block`. `enc:body` and `enc:children` are `class_types
+/// enc:Block`, and every value they ever hold is a SUBCLASS instance — a Section, Paragraph or
+/// Table, never a Block itself. If `class_types` did not walk the parent chain, the whole
+/// containment design would be unusable, and the schema-only test above would not notice: it
+/// validates declarations, and this is a fact about values. Heterogeneous children (a section
+/// holding a sub-section and a table) are in the fixture for the same reason.
+#[test]
+fn the_document_structure_holds_a_nested_instance() {
+    // `r##`, not `r#`: a Text Fragment locator opens with `#`, so `"#` inside the fixture
+    // would close an `r#"` literal mid-ESL.
+    const DOC: &str = r##"
+namespace core      = "urn:eigenius:core";
+namespace enc       = "urn:eigenius:encoding";
+namespace reference = "urn:eigenius:reference";
+namespace doc       = "urn:eigenius:test:doc";
+
+resource doc:work : reference:Reference {
+    reference:title = "A cited work";
+}
+
+resource doc:report : enc:Document {
+    enc:document_title = "A two-section report";
+    enc:media_type     = "text/markdown";
+    enc:source_path    = "report.md";
+    enc:source_sha256  = "deadbeef";
+    enc:ref_list       = [doc:work];
+    enc:body           = [doc:sec_setting, doc:sec_finding_1];
+}
+
+resource doc:sec_setting : enc:Section {
+    enc:section_title = "The variant and its setting";
+    enc:section_kind  = enc:sec_intro;
+    enc:children      = [doc:p1];
+}
+
+resource doc:p1 : enc:Paragraph {
+    enc:units = [doc:u1];
+}
+
+resource doc:u1 : enc:DiscourseUnit {
+    enc:prose     = "The residue is partially exposed on helix alpha-1.";
+    enc:unit_kind = enc:kind_prose;
+    enc:locator   = "#:~:text=The%20residue%20is%20partially%20exposed";
+}
+
+// A section whose children are a SUB-SECTION and a TABLE — heterogeneous, both Blocks.
+resource doc:sec_finding_1 : enc:Section {
+    enc:section_title = "Finding 1 - the variant is absent from every resource queried";
+    enc:section_kind  = enc:sec_results;
+    enc:children      = [doc:sec_sub, doc:t1];
+}
+
+resource doc:sec_sub : enc:Section {
+    enc:section_title = "Callability, not tolerability";
+    enc:section_kind  = enc:sec_results;
+    enc:children      = [doc:p2];
+}
+
+resource doc:p2 : enc:Paragraph {
+    enc:units = [doc:u2];
+}
+
+resource doc:u2 : enc:DiscourseUnit {
+    enc:prose     = "Thirteen of seventeen predictors rate it worse (Rigaud et al. 2006).";
+    enc:unit_kind = enc:kind_prose;
+    enc:locator   = "#:~:text=Thirteen%20of%20seventeen";
+}
+
+resource doc:t1 : enc:Table {
+    enc:units = [doc:u3];
+}
+
+resource doc:u3 : enc:DiscourseUnit {
+    enc:prose     = "| predictor | call | score |";
+    enc:unit_kind = enc:kind_table;
+}
+
+resource doc:xref_1 : enc:ReferenceSpan {
+    enc:span_unit   = doc:u2;
+    enc:ref_target  = doc:work;
+    enc:ref_type    = enc:ref_bibr;
+    enc:ref_surface = "Rigaud et al. 2006";
+    enc:locator     = "#:~:text=worse%20-,(Rigaud%20et%20al.%202006)";
+}
+"##;
+
+    let encoding = esl_layer(
+        "encoding",
+        include_str!("../../ontologies/encoding/encoding.esl"),
+        parent_chain(),
+    );
+    let instance = esl_layer("test-doc", DOC, encoding);
+    let errors = Validator::new(Arc::clone(&instance)).validate();
+    assert!(
+        errors.is_empty(),
+        "a nested document instance validates with 0 errors, got {}:\n{errors:#?}",
+        errors.len()
+    );
+
+    // The tree is walkable by containment alone: the document's body reaches the units without
+    // any unit carrying a back-pointer. This is what replaces `enc:section` as a string.
+    let report = instance
+        .resolve(&iri("urn:eigenius:test:doc:report"))
+        .expect("doc:report is on the layer");
+    let Some(Value::Array(body)) = report.get(&iri("urn:eigenius:encoding:body")) else {
+        panic!("the document has an ordered enc:body");
+    };
+    assert_eq!(body.len(), 2, "two top-level sections, in document order");
+    assert_eq!(
+        body[0].as_iri().expect("body entries are IRIs").as_str(),
+        "urn:eigenius:test:doc:sec_setting",
+        "document ORDER is array order — the setting section is first"
+    );
+
+    // A section's kind is a resource on the layer, so "the methods" is a query over
+    // enc:section_kind rather than a match on a string.
+    let sec = instance
+        .resolve(&iri("urn:eigenius:test:doc:sec_finding_1"))
+        .expect("the finding section resolves");
+    assert_eq!(
+        sec.get(&iri("urn:eigenius:encoding:section_kind"))
+            .and_then(|v| v.as_iri())
+            .expect("the section carries a kind")
+            .as_str(),
+        "urn:eigenius:encoding:sec_results",
+        "a numbered finding is typed `results`; its number lives in the title and its identity"
+    );
+    for k in ["sec_intro", "sec_methods", "sec_results", "sec_conclusions"] {
+        assert!(
+            instance
+                .resolve(&iri(&format!("urn:eigenius:encoding:{k}")))
+                .is_some(),
+            "enc:{k} is on the chain"
+        );
+    }
+}
