@@ -697,3 +697,235 @@ mod anthropic {
 
 #[cfg(feature = "use-llm")]
 pub use anthropic::AnthropicAbbreviationProposer;
+
+// ── Stage E: notation recognition — the FIFTH extraction source (D101 §step 2) ────
+//
+// `Ile380Thr` blocked 20 units of the XIAP report and recurs 29 times, and the apposition source
+// never offered it: an interior capital is not Title-case, `p.Ile380Thr` does not begin uppercase,
+// and the document never puts a noun head in front of either (`an`, `for`, `of`, `than`, a table
+// pipe, or a verb). Recurrence was never consulted — candidacy failed first — so no threshold
+// change could have reached it. Loosening the shape to admit it would also admit `mRNA` and
+// `HeLa`, which that rule exists to reject.
+//
+// A notation is a different kind of evidence. `eigenius_notation::recognize` reads published
+// grammars, so there is nothing to tune and nothing to guard.
+//
+// WHAT A RECOGNISED TOKEN BECOMES, in two tiers, because `variant:Allele` is identified by its
+// reference ACCESSION ("one change on two references is two alleles, related by congruence, not
+// identity" — variant.esl):
+//
+//   1. The accession is IN the token (`NM_001167.4:c.1141C>T`) → a `variant:Allele` with complete,
+//      true identity, carrying start/end/ref_state/alt/hgvs as typed fields.
+//   2. The accession is absent (`Ile380Thr`, 25 of this document's 29 distinct changes) → a
+//      doc-local `lexicon:Entity` individual that closes the gap LEXICALLY, with the parse recorded
+//      on it. No allele is minted, because the accession would have to be invented, and the
+//      document names FIVE protein references (P98170 plus four orthologues). Binding one is a
+//      judgement with a warrant — `justification:Declared` — and that belongs to the encoding
+//      step, which has the document's context. A glossary closes gaps; it does not make claims.
+//
+// Either way the parse is on the resource, never in the name: `ni_ile380thr` as an opaque string
+// would put the meaning back where the ad-hoc-predicate failure puts it.
+
+/// Is the `variant` layer on this chain? It is NOT in `BOOTSTRAP_CHAIN` — it loads above the tip,
+/// after `lexicon` (its classes subclass `lexicon:Entity`) — so the glossary must detect it and
+/// degrade to tier 2 for everything rather than emit classes the chain cannot resolve.
+fn variant_layer_present(base: &Arc<Layer>) -> bool {
+    Iri::parse("urn:eigenius:variant:Allele")
+        .ok()
+        .and_then(|i| base.resolve(&i))
+        .is_some()
+}
+
+/// The tokens of `document`, bare of surrounding punctuation that is not part of a notation.
+/// `(Rigaud` → `Rigaud`; `p.Ile380Thr,` → `p.Ile380Thr`; `NM_001167.4:c.1141C>T` is left whole.
+fn notation_tokens(document: &str) -> Vec<&str> {
+    document
+        .split_whitespace()
+        .map(|t| {
+            t.trim_matches(|c: char| {
+                matches!(
+                    c,
+                    '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | '`' | '*' | '|' | '«' | '»'
+                ) || matches!(c, ',' | ';' | '!' | '?')
+            })
+            .trim_end_matches('.')
+        })
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
+/// **Notation augmentation** — recognize published notations in `document`
+/// ([`eigenius_notation::recognize`]) and emit each as a doc-local individual with a `cat_np`
+/// proper-noun alias, so a unit carrying `Ile380Thr` reaches the grammar instead of returning
+/// `missing-lexeme` before it is parsed.
+///
+/// Tiered as the module comment above describes: a token carrying its reference accession becomes a
+/// `variant:Allele`; everything else closes the gap lexically with its parse recorded. Falls back to
+/// tier 2 for all tokens when the `variant` layer is absent from `base`.
+pub fn notation_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmentation {
+    use eigenius_notation::{recognize, Notation};
+
+    let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
+        return LexiconAugmentation::default();
+    };
+    let Some(entity) = Iri::parse("urn:eigenius:lexicon:Entity").ok() else {
+        return LexiconAugmentation::default();
+    };
+    let has_variant = variant_layer_present(base);
+    let p = |s: &str| Iri::parse(s).expect("valid well-known iri");
+
+    let mut added = Vec::new();
+    let mut supporting = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+
+    for tok in notation_tokens(document) {
+        let Some(n) = recognize(tok) else { continue };
+        let key = slug(tok);
+        if key.is_empty() || !seen.insert(key.clone()) {
+            continue;
+        }
+        let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:ni_{key}")) else {
+            continue;
+        };
+
+        // Tier 1 needs the accession the notation itself states. `recognize` returns the parse, not
+        // the qualifier, so the token is re-read for one: `<accession>:<c|g|p|n|m>.<change>`.
+        let qualified = tok
+            .split_once(':')
+            .filter(|(acc, rest)| {
+                !acc.is_empty()
+                    && rest.len() > 2
+                    && rest.as_bytes()[1] == b'.'
+                    && matches!(rest.as_bytes()[0], b'c' | b'g' | b'p' | b'n' | b'm')
+            })
+            .map(|(acc, _)| acc.to_string());
+
+        let mut ni = Resource::new(ni_iri.clone());
+        let (class, note) = match (&n, has_variant, &qualified) {
+            (Notation::ProteinChange(c), true, Some(acc)) => {
+                ni.set(
+                    p("urn:eigenius:variant:reference"),
+                    Value::String(acc.clone()),
+                );
+                ni.set(
+                    p("urn:eigenius:variant:start"),
+                    Value::Integer(c.start as i64),
+                );
+                ni.set(p("urn:eigenius:variant:end"), Value::Integer(c.end as i64));
+                ni.set(p("urn:eigenius:variant:alt"), Value::String(c.alt.clone()));
+                if let Some(r) = &c.ref_state {
+                    ni.set(
+                        p("urn:eigenius:variant:ref_state"),
+                        Value::String(r.clone()),
+                    );
+                }
+                ni.set(
+                    p("urn:eigenius:variant:hgvs"),
+                    Value::String(tok.to_string()),
+                );
+                (
+                    "urn:eigenius:variant:ProteinAllele",
+                    "a protein allele, reference stated by the notation",
+                )
+            }
+            (Notation::CodingChange(c), true, Some(acc)) => {
+                ni.set(
+                    p("urn:eigenius:variant:reference"),
+                    Value::String(acc.clone()),
+                );
+                ni.set(
+                    p("urn:eigenius:variant:start"),
+                    Value::Integer(c.start as i64),
+                );
+                ni.set(p("urn:eigenius:variant:end"), Value::Integer(c.end as i64));
+                ni.set(p("urn:eigenius:variant:alt"), Value::String(c.alt.clone()));
+                if let Some(r) = &c.ref_state {
+                    ni.set(
+                        p("urn:eigenius:variant:ref_state"),
+                        Value::String(r.clone()),
+                    );
+                }
+                ni.set(
+                    p("urn:eigenius:variant:hgvs"),
+                    Value::String(tok.to_string()),
+                );
+                (
+                    "urn:eigenius:variant:NucleotideAllele",
+                    "a nucleotide allele, reference stated by the notation",
+                )
+            }
+            // Tier 2: the parse is certain, the accession is not. Recorded, not typed as an allele.
+            _ => (entity.as_str(), describe(&n)),
+        };
+        let Ok(class_iri) = Iri::parse(class) else {
+            continue;
+        };
+        ni.set(p(wk::IS_A), Value::Array(vec![Value::iri(&class_iri)]));
+        ni.set(
+            p(wk::DESCRIPTION),
+            Value::String(format!(
+                "Doc-local individual, notation recognized (D101): {tok:?} — {note}."
+            )),
+        );
+
+        let mut b = LayerBuilder::new("notation-emit", Some(Arc::clone(base)));
+        if b.add_resource(ni.clone()).is_err() {
+            continue;
+        }
+        let tmp = Arc::new(b.build(LayerStorage::in_memory()));
+        let binding = AbbreviationBinding {
+            abbr: tok,
+            long_form: tok,
+            concept_iri: ni_iri.as_str(),
+            doc_ns: "urn:eigenius:doc",
+        };
+        let Some(rs) = abbreviation_resources(&tmp, &binding) else {
+            continue;
+        };
+        let (entries, extra): (Vec<Resource>, Vec<Resource>) =
+            rs.into_iter().partition(|r| r.is_instance_of(&entry_class));
+        if entries.is_empty() {
+            continue;
+        }
+        supporting.push(ni);
+        supporting.extend(extra);
+        for proposed in entries {
+            added.push(LexicalBinding {
+                proposed,
+                provenance: Provenance {
+                    surface: tok.to_string(),
+                    long_form: None,
+                    context: tok.to_string(),
+                    method: ResolutionMethod::NotationRecognized,
+                    grounded_to: None,
+                    confidence: None,
+                },
+            });
+        }
+    }
+
+    LexiconAugmentation {
+        added,
+        supporting,
+        missing_oov: Vec::new(),
+    }
+}
+
+/// What the recognised notation is, for the individual's description — the parse in words, so the
+/// resource says what it is without the IRI having to carry it.
+fn describe(n: &eigenius_notation::Notation) -> &'static str {
+    use eigenius_notation::Notation as N;
+    match n {
+        N::ProteinChange(_) => "a protein change; its reference accession is not in the notation",
+        N::CodingChange(_) => "a coding change; its reference accession is not in the notation",
+        N::ResiduePosition { .. } => {
+            "a residue and position; its reference accession is not in the notation"
+        }
+        N::UniProt(_) => "a UniProt accession",
+        N::PdbEntry(_) => "a Protein Data Bank entry",
+        N::DbSnp(_) => "a dbSNP reference SNP",
+        N::ClinVar(_) => "a ClinVar variation record",
+        N::SequenceRecord(_) => "an Ensembl or RefSeq sequence record",
+        N::GenomicCoordinate(_) => "a genomic coordinate",
+    }
+}
