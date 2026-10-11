@@ -549,6 +549,35 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     );
     aug.added.extend(name_aug.added);
     aug.supporting.extend(name_aug.supporting);
+
+    // The seventh source: what the DOCUMENT marks as code. 48 of the 113 tokens left unresolvable
+    // after notation and names sit inside an inline code span — the author already distinguished
+    // "string mentioned" from "word used", which is one markup rule where the shapes looked like
+    // six unrelated pattern-matching jobs.
+    let code_aug = eigenius_kernel::dcg::code_span_augmentation(head, page);
+    let n_code = code_aug.added.len();
+    eprintln!("code-span literals: {n_code}");
+    aug.added.extend(code_aug.added);
+    aug.supporting.extend(code_aug.supporting);
+
+    // The eighth: a productive affix over a base the lexicon DOES have. Deterministic, and the
+    // arm that would otherwise handle these — ResolutionMethod::LlmSynthesized — has no producer.
+    let deriv_aug = eigenius_kernel::dcg::derivation_augmentation(head, page);
+    let n_derived = deriv_aug.added.len();
+    eprintln!(
+        "derived from a base: {n_derived} — {:?}",
+        deriv_aug
+            .added
+            .iter()
+            .map(|b| format!(
+                "{} ({})",
+                b.provenance.surface,
+                b.provenance.long_form.clone().unwrap_or_default()
+            ))
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(deriv_aug.added);
+    aug.supporting.extend(deriv_aug.supporting);
     let source_path = std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
     let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| page.to_string());
     let abbr_aug = {
@@ -598,9 +627,9 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // reported "59 OOV grounded + 117 notation(s)" — the arithmetic subtracting notations that
     // were never added — while measuring the source doing nothing at all.
     assert!(
-        aug.added.len() >= n_names + n_notations + n_oov_names,
+        aug.added.len() >= n_names + n_notations + n_oov_names + n_code + n_derived,
         "every source's entries must be merged: {} added < {n_names} names + {n_notations} \
-         notations + {n_oov_names} oov-names",
+         notations + {n_oov_names} oov-names + {n_code} code + {n_derived} derived",
         aug.added.len()
     );
     let supplied: std::collections::BTreeSet<String> = aug
@@ -638,8 +667,9 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // the fifth source's contribution unreadable in the one line anyone compares across runs.
     eprintln!(
         "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), \
-         {n_notations} notation(s), {n_oov_names} recurrent-name(s), {} residual OOV",
-        aug.added.len() - n_names - n_notations - n_oov_names,
+         {n_notations} notation(s), {n_oov_names} recurrent-name(s), {n_code} code-literal(s), \
+         {n_derived} derived, {} residual OOV",
+        aug.added.len() - n_names - n_notations - n_oov_names - n_code - n_derived,
         aug.missing_oov.len()
     );
     aug
