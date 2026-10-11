@@ -532,6 +532,23 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     );
     aug.added.extend(not_aug.added);
     aug.supporting.extend(not_aug.supporting);
+
+    // The sixth source. What notation leaves blocked is product names — gnomAD alone blocked 22
+    // units — and the signal there is orthography plus repetition, admissible only because the
+    // surface is OOV. Merged last of the deterministic sources so both the lexicon and notation
+    // have had their claim first.
+    let name_aug = eigenius_kernel::dcg::oov_name_augmentation(head, page);
+    let n_oov_names = name_aug.added.len();
+    eprintln!(
+        "recurrent OOV names: {n_oov_names} — {:?}",
+        name_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(name_aug.added);
+    aug.supporting.extend(name_aug.supporting);
     let source_path = std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
     let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| page.to_string());
     let abbr_aug = {
@@ -581,8 +598,9 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // reported "59 OOV grounded + 117 notation(s)" — the arithmetic subtracting notations that
     // were never added — while measuring the source doing nothing at all.
     assert!(
-        aug.added.len() >= n_names + n_notations,
-        "every source's entries must be merged: {} added < {n_names} names + {n_notations} notations",
+        aug.added.len() >= n_names + n_notations + n_oov_names,
+        "every source's entries must be merged: {} added < {n_names} names + {n_notations} \
+         notations + {n_oov_names} oov-names",
         aug.added.len()
     );
     let supplied: std::collections::BTreeSet<String> = aug
@@ -602,8 +620,8 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // the fifth source's contribution unreadable in the one line anyone compares across runs.
     eprintln!(
         "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), \
-         {n_notations} notation(s), {} residual OOV",
-        aug.added.len() - n_names - n_notations,
+         {n_notations} notation(s), {n_oov_names} recurrent-name(s), {} residual OOV",
+        aug.added.len() - n_names - n_notations - n_oov_names,
         aug.missing_oov.len()
     );
     aug

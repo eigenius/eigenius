@@ -93,6 +93,13 @@ pub enum ResolutionMethod {
     /// A deterministic named-entity apposition (`<common-noun-head> <Name>`) recognized it as a doc-local
     /// named individual (D63 named-entity glossary source). Deterministic, same trust as extraction.
     NameRecognized,
+    /// An OOV surface that RECURS and carries a capital — a tool, database or product name the
+    /// document uses repeatedly (`gnomAD`, `AlphaMissense`, `ABE9`). Weaker than the three above:
+    /// orthography plus repetition, with no grammar and no defining context. What makes it
+    /// admissible at all is the OOV gate — apposition rejects "is a common noun" as a signal
+    /// because "in a 7.6M-entry lexicon almost every surface has some noun sense", and that
+    /// objection does not reach a surface the lexicon has NO sense for.
+    RecurrentOovName,
     /// A PUBLISHED NOTATION recognized it (HGVS change, accession, coordinate — D101 §step 2,
     /// `eigenius_notation::recognize`). Deterministic and the strongest of these: the others infer
     /// from how English happens to be written and need a precision guard, whereas a notation's

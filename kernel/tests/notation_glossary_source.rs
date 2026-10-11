@@ -239,3 +239,117 @@ fn a_residue_range_closes_its_endpoints_as_well_as_itself() {
         );
     }
 }
+
+// ── The sixth source: recurrent OOV names ────────────────────────────────────
+
+use eigenius_kernel::dcg::oov_name_augmentation;
+
+/// After notation, what still blocks the XIAP report is PRODUCT NAMES — `gnomAD` alone blocks 22
+/// units. None is a notation and none reaches apposition, which needs a common-noun head in front
+/// and a Title-case shape neither `gnomAD` nor `ABE9` has.
+#[test]
+fn a_recurring_capitalised_oov_name_is_minted() {
+    let head = bootstrap_head();
+    let doc = "The gnomAD v4 release lists no hemizygote. A second gnomAD query confirmed it. \
+               ABE9 narrows the window, and ABE9 was built on ABE8e.";
+    let aug = oov_name_augmentation(&head, doc);
+    let surfaces: Vec<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    for want in ["gnomAD", "ABE9"] {
+        assert!(
+            surfaces.iter().any(|s| s == want),
+            "{want}, got {surfaces:?}"
+        );
+    }
+    // ABE8e occurs ONCE here: repetition is the whole precision guard.
+    assert!(
+        !surfaces.iter().any(|s| s == "ABE8e"),
+        "a single mention is not a name, got {surfaces:?}"
+    );
+}
+
+/// A possessive is a FORM of the name, not a second entity: two aliases, one individual.
+#[test]
+fn a_possessive_aliases_the_same_individual() {
+    let head = bootstrap_head();
+    let doc = "gnomAD reports no hemizygote. gnomAD's coverage at this site is complete. \
+               The gnomAD page was checked.";
+    let aug = oov_name_augmentation(&head, doc);
+    let surfaces: Vec<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    assert!(surfaces.iter().any(|s| s == "gnomAD"), "{surfaces:?}");
+    assert!(surfaces.iter().any(|s| s == "gnomAD's"), "{surfaces:?}");
+    let individuals: Vec<&str> = aug
+        .supporting
+        .iter()
+        .filter_map(|r| r.id().map(|i| i.as_str()))
+        .filter(|i| i.contains("ni_gnomad"))
+        .collect();
+    assert_eq!(
+        individuals.len(),
+        1,
+        "one individual, two aliases: {individuals:?}"
+    );
+}
+
+/// The precision side. Ordinary prose must not be swallowed, and a notation stays the notation
+/// source's to claim even though it recurs and carries capitals.
+#[test]
+fn prose_and_notation_are_not_claimed_as_names() {
+    let head = bootstrap_head();
+    let doc = "The variant Ile380Thr recurs. The variant Ile380Thr is the subject. \
+               The residue is exposed. The residue is exposed on helix one.";
+    let aug = oov_name_augmentation(&head, doc);
+    let surfaces: Vec<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    assert!(
+        !surfaces.iter().any(|s| s == "Ile380Thr"),
+        "a notation belongs to the notation source, got {surfaces:?}"
+    );
+    for w in ["The", "variant", "residue", "exposed", "helix"] {
+        assert!(
+            !surfaces.iter().any(|s| s == w),
+            "{w} is prose, got {surfaces:?}"
+        );
+    }
+}
+
+/// Two precision defects the first wired run exposed, both from interactions rather than from the
+/// rule itself.
+#[test]
+fn neither_a_surname_half_nor_a_capitalised_function_word_is_a_name() {
+    let head = bootstrap_head();
+    // Dash parts exist so a residue RANGE closes its endpoints; the notation source filters them
+    // through `recognize`, this one has no such filter, and it minted both halves of the surname.
+    let doc = "Gyrd-Hansen et al. tested this. Gyrd-Hansen et al. showed dimerisation. \
+               The A AND the B. The C AND the D.";
+    let aug = oov_name_augmentation(&head, doc);
+    let surfaces: Vec<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    assert!(
+        surfaces.iter().any(|s| s == "Gyrd-Hansen"),
+        "the whole surname is a name, got {surfaces:?}"
+    );
+    for half in ["Gyrd", "Hansen"] {
+        assert!(
+            !surfaces.iter().any(|s| s == half),
+            "{half} is half a surname, not a name: {surfaces:?}"
+        );
+    }
+    assert!(
+        !surfaces.iter().any(|s| s == "AND"),
+        "a function word in capitals is still a function word: {surfaces:?}"
+    );
+}
