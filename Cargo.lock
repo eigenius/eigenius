@@ -1181,6 +1181,7 @@ dependencies = [
  "bytemuck",
  "ciborium",
  "criterion",
+ "eigenius-notation",
  "hex",
  "humantime",
  "hyper-util",
@@ -1283,6 +1284,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "eigenius-notation"
+version = "0.1.0"
+
+[[package]]
 name = "eigenius-obograph"
 version = "0.1.0"
 dependencies = [
@@ -1314,6 +1319,7 @@ dependencies = [
  "clap",
  "eigenius-encoding",
  "eigenius-kernel",
+ "eigenius-notation",
  "serde",
  "serde_json",
 ]
