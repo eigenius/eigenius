@@ -26,7 +26,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::esl;
-use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
+use eigenius_kernel::layer::{LayerBuilder, LayerStorage};
 use eigenius_kernel::validation::Validator;
 
 #[test]
