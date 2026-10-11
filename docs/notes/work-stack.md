@@ -9,6 +9,65 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
+> OOV closure. Branch `uab-step5-document-model`, 20 commits ahead of `main`, not yet a PR.**
+>
+> **Store: `wordnet-umls-hpo-aligned-2026-10-10-d101`.** The D101 reseed, `2026-10-10`, 56 m 40 s
+> for all five steps of the chain in entry 3's recipe. Every provenance input matched the previous
+> store exactly, and all three expected counts reproduced — 38,391 merges, 20,533 HPO resources,
+> 864 equivalences — which is what established that `ontologies/encoding/encoding.esl` was the only
+> bootstrap-affecting change. The gate PASSES on it: grammar-gap 0, expected-hits 62/62, miss-set
+> unchanged, readings 799→819 (ceiling 895), skeletons 290→280.
+>
+> **D101 gave the encoding ontology its document structure** —
+> [d101-document-structure-in-the-encoding-ontology.md](../design/d101-document-structure-in-the-encoding-ontology.md).
+> `Document`, `Block`, `Section`, `Paragraph`, `Table`, `RefList`, `Ref`, `SectionKind`,
+> `ReferenceSpan`, `ReferenceType`, `locator`. Three resources on three axes, none subsuming
+> another: `reference:Reference` the published WORK, `enc:Document` the observed MANIFESTATION,
+> `enc:ReasoningStructure` the derived output. The XIAP report is 450 units in that tree; the
+> register join holds at 427/427 by containment.
+>
+> **Step 2 closed `missing-lexeme` 267 → 106** (−60%) via three new glossary sources, measured
+> cap-only on the d101 store. [uab-xiap-oov-document-model.md](uab-xiap-oov-document-model.md) has
+> the per-block tables.
+>
+> | | start | +notation | +names | +tail |
+> |---|---:|---:|---:|---:|
+> | missing-lexeme | 267 | 193 | 119 | **106** |
+> | grammar-gap | 164 | 225 | 294 | **306** |
+> | residual OOV | 242 | 157 | 119 | **113** |
+>
+> grammar-gap RISING is the result: a unit cannot be scored on grammar until it clears the lexicon,
+> so step 3 has 306 real gaps where 267 units never got far enough to produce one.
+>
+> **`enc:LexicalGap` now has a writer**, after being declared since D62 with no producer at all —
+> 497 records on this document (213 injected, 171 bound, 113 unresolvable). D62 §9 calls the gap
+> stream a first-class coverage signal; nothing emitted it. It is also the INSTRUMENT: every tail
+> figure before it came from re-tokenising the page in Python, which left 27 units unattributable.
+>
+> **`ResolutionMethod::LlmSynthesized` is the same shape — declared, one reference, no producer.**
+> That is the designed route for a word absent from the lexicon, and it does not exist.
+>
+> **The 113 unresolvable are NOT one problem.** Measured from the gap stream: 31 coined compounds
+> (the parser's compound machinery — tokenisation prerequisite, then grammar), 37 data tokens (of
+> which ~25 are published notations not yet implemented — IUPAC sequences, RFC 1123 hostnames, HGNC
+> ids — and ~6 are self-denoting literals needing a grammar category), 14 words absent from the
+> lexicon (4 reachable by derivation: disanalogy→analogy, overread→read, pulldown→pull,
+> dimerisation→dimer; the rest want the LlmSynthesized arm). Only 7 types ever had a deterministic
+> rule, and all three are taken.
+>
+> **Exit gate:** steps 3–6 of the owner's order — measure parse success over the 306 gaps, CNL
+> rewrite, close the encoding gap, then verify each encoding via `verbalize` against the original
+> prose.
+>
+> **Open, carried:** the parse baselines are not re-measured since the reseed (`reading-unadjudicated
+> 15` blocks a clean selection score); `enc:gap_unit` is unset because an augmentation is built per
+> DOCUMENT; `ResolutionMethod` is not machine-readable and a property for it costs a reseed — batch
+> it with `enc:gap_injected`'s description, which still says "(LLM)" though injection is now
+> deterministic.
+
+---
+
 > **entry 6 (`2026-10-09`, closed `2026-10-10`). UAB survey step 4 — parse coverage, and the
 > adverb import behind it. DONE, merged `2026-10-10`. The gate PASSES every
 > criterion against `baseline.json`.
