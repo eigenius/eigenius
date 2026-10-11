@@ -35,6 +35,9 @@
 //!   for "he has polyuria".
 
 pub mod convert;
-pub mod hgvs;
+// HGVS moved to the zero-dependency `eigenius-notation` crate on 2026-10-11 so the kernel's
+// document glossary could read the same parser; re-exported because this crate's rows, converter
+// and tests address it as `crate::hgvs`.
+pub use eigenius_notation::hgvs;
 pub mod hpo_history;
 pub mod record;
