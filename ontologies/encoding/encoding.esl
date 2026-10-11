@@ -82,9 +82,9 @@ property enc:media_type : core:string {
 }
 
 property enc:work : core:resource {
-    description = "The published work this document manifests, when there is one. Absent for an unpublished source — which is the common case for the documents this pipeline encodes, and the reason document structure does not hang off reference:Reference.";
+    description = "The published work this element manifests or cites. On an enc:Document: the work it is a manifestation of, absent for an unpublished source — the common case for the documents this pipeline encodes, and the reason document structure does not hang off reference:Reference. On an enc:Ref: the work the bibliography entry cites.";
     class_types reference:Reference;
-    domain enc:Document;
+    domain enc:Document, enc:Ref;
 }
 
 property enc:back : core:resource_array {
@@ -136,20 +136,26 @@ class enc:Table : enc:Block {
 }
 
 class enc:RefList : enc:Block {
-    description = "A bibliography, or one titled group within one (JATS <ref-list>, which nests). enc:refs holds its entries; enc:children holds its sub-lists and any prose it carries. Both, because a real bibliography has both: the XIAP report's has a leading provenance paragraph, four titled groups totalling 63 entries, and a trailing paragraph of database accessions. A flat array of references could hold none of that structure.";
+    description = "A bibliography, or one titled group within one (JATS <ref-list>, which nests). enc:refs holds its enc:Ref entries; enc:children holds its sub-lists and any prose it carries. Both, because a real bibliography has both: the XIAP report's has a leading provenance paragraph, four titled groups totalling 63 entries, and a trailing paragraph of database accessions. A flat array of references could hold none of that structure.";
     recommends enc:title, enc:refs, enc:children;
 }
 
 property enc:refs : core:resource_array {
-    description = "This list's bibliographic entries in list order (JATS <ref>) — the works an enc:ReferenceSpan with ref_type `bibr` resolves to.";
-    class_types reference:Reference;
+    description = "This list's entries in list order (JATS <ref>).";
+    class_types enc:Ref;
     domain enc:RefList;
 }
 
+class enc:Ref : enc:Block {
+    description = "One bibliography entry (JATS <ref>): the work it cites (enc:work) and the annotation prose it carries (enc:units). Both, because an entry is not only a record — 29 of the XIAP report's 63 entries end with a sentence of the author's own about why the work is cited ('The source for all helix boundaries, the hydrophobic-core residue list, and the Ile366/Ile380/Phe386 dimer-interface assignment'), and a certification claim can land on that sentence. Dropping it would lose content; hanging it off the RefList instead would detach it from the entry it is about.";
+    requires enc:work;
+    recommends enc:units;
+}
+
 property enc:units : core:resource_array {
-    description = "The DiscourseUnits this block contains, in document order — sentences for a Paragraph, rows for a Table.";
+    description = "The DiscourseUnits this block contains, in document order — sentences for a Paragraph, rows for a Table, annotation sentences for a Ref.";
     class_types enc:DiscourseUnit;
-    domain enc:Paragraph, enc:Table;
+    domain enc:Paragraph, enc:Table, enc:Ref;
 }
 
 // ── Section kinds (JATS sec-type) ───────────────────────────────────
