@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 
 # ── block structure, read off markdown's own syntax ───────────────────────────────────────────────
 
@@ -106,7 +107,14 @@ def blocks(text):
     return out
 
 
-SENT_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z(\[«“])")
+# A sentence boundary is punctuation followed by an uppercase or opening-bracket start — but not
+# when the punctuation closes an abbreviation. `(` is in the lookahead because a sentence can open
+# with a parenthetical, and that is what split «Gyrd-Hansen et al. (2008) report …» after `al.`:
+# measured, 5 units ended in `et al.`, each one half of a sentence. Python requires fixed-width
+# lookbehinds, so each abbreviation is its own.
+SENT_END = re.compile(
+    r"(?<=[.!?])(?<!et al\.)(?<!e\.g\.)(?<!i\.e\.)(?<!cf\.)\s+(?=[A-Z(\[«“])"
+)
 
 
 def sentences(lines):
@@ -126,19 +134,68 @@ def normalized(doc):
     return re.sub(r"\s+", " ", doc)
 
 
+def frag_encode(s):
+    """Percent-encode one text directive term.
+
+    A locator is a URI FRAGMENT IDENTIFIER (D96), and RFC 3986's `fragment` production excludes
+    space, so a raw space or a raw `κ` makes it not one. Everything but RFC 3986 unreserved is
+    encoded, and `-` with it, because `-,` and `,-` are the directive's own prefix/suffix
+    delimiters: an unencoded hyphen inside a term would be read as structure. `.`, `_` and `~`
+    stay literal — they are unreserved and carry no meaning to the directive.
+    """
+    return urllib.parse.quote(s, safe="._~").replace("-", "%2D")
+
+
+def frag_decode(s):
+    return urllib.parse.unquote(s).replace("%2D", "-")
+
+
+TEXT_DIRECTIVE = re.compile(r"^#:~:text=(?:(?P<pre>[^,]*)-,)?(?P<text>[^,]*?)(?:,-(?P<suf>[^,]*))?$")
+
+
 def text_fragment(doc, needle, ctx=24):
     """A WICG Text Fragment for `needle`, with prefix/suffix only where the text repeats. Returns
     (fragment, (start, end)) so the span is DERIVED from the locator, never authored beside it.
-    (None, None) if absent — which the caller treats as an error, not as offset 0."""
+    (None, None) if absent — which the caller treats as an error, not as offset 0.
+
+    The fragment is then RESOLVED back against the document and the span recomputed from it. If the
+    round trip does not land on the same span the fragment is rejected, because a locator that does
+    not resolve is not a locator — and the span is only honestly "derived from the locator" if the
+    locator is what produced it.
+    """
     first = doc.find(needle)
     if first < 0:
         return None, None
-    enc = lambda s: re.sub(r"[-,&]", lambda m: "%%%02X" % ord(m.group()), s.strip())
     if doc.find(needle, first + 1) < 0:
-        return f"#:~:text={enc(needle)}", (first, first + len(needle))
-    pre = doc[max(0, first - ctx):first]
-    suf = doc[first + len(needle):first + len(needle) + ctx]
-    return (f"#:~:text={enc(pre)}-,{enc(needle)},-{enc(suf)}", (first, first + len(needle)))
+        frag = f"#:~:text={frag_encode(needle)}"
+    else:
+        pre = doc[max(0, first - ctx):first].strip()
+        suf = doc[first + len(needle):first + len(needle) + ctx].strip()
+        frag = f"#:~:text={frag_encode(pre)}-,{frag_encode(needle)},-{frag_encode(suf)}"
+    span = resolve_fragment(doc, frag)
+    if span != (first, first + len(needle)):
+        return None, None
+    return frag, span
+
+
+def resolve_fragment(doc, frag):
+    """A text directive → the (start, end) it addresses in `doc`, or None. Prefix and suffix narrow
+    the match the way the WICG directive specifies: the text must occur with that prefix before it
+    and that suffix after it."""
+    m = TEXT_DIRECTIVE.match(frag)
+    if not m:
+        return None
+    text = frag_decode(m.group("text"))
+    pre = frag_decode(m.group("pre")) if m.group("pre") else ""
+    suf = frag_decode(m.group("suf")) if m.group("suf") else ""
+    at = 0
+    while True:
+        i = doc.find(text, at)
+        if i < 0:
+            return None
+        if doc[:i].rstrip().endswith(pre) and doc[i + len(text):].lstrip().startswith(suf):
+            return (i, i + len(text))
+        at = i + 1
 
 
 # ── section kinds (D101 "Section types: JATS's values, in an open class") ─────────────────────────
