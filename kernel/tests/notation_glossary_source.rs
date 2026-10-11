@@ -353,3 +353,76 @@ fn neither_a_surname_half_nor_a_capitalised_function_word_is_a_name() {
         "a function word in capitals is still a function word: {surfaces:?}"
     );
 }
+
+// ── The gap stream ───────────────────────────────────────────────────────────
+
+use eigenius_kernel::dcg::lexical_gap_resources;
+use eigenius_kernel::validation::Validator;
+
+/// `enc:LexicalGap` had no writer since D62 declared it, so a run's lexical closure left no
+/// record — nothing in an artifact said `gnomAD` was a doc-local individual rather than a lexicon
+/// concept. The records must VALIDATE as the class they claim, not merely serialise.
+#[test]
+fn the_gap_stream_validates_as_lexical_gaps() {
+    let head = bootstrap_head();
+    let doc = "gnomAD reports no hemizygote. gnomAD's coverage is complete. \
+               The gnomAD page lists Ile380Thr and Ile380Thr again.";
+    let mut aug = notation_augmentation(&head, doc);
+    let names = oov_name_augmentation(&head, doc);
+    aug.added.extend(names.added);
+    aug.supporting.extend(names.supporting);
+
+    let gaps = lexical_gap_resources(&aug, "urn:eigenius:doc");
+    assert!(
+        !gaps.is_empty(),
+        "the stream must record what the sources closed"
+    );
+
+    // Every record carries what the class REQUIRES: a token and a disposition.
+    for g in &gaps {
+        assert!(
+            g.get(&iri("urn:eigenius:encoding:gap_token")).is_some()
+                && g.get(&iri("urn:eigenius:encoding:gap_disposition"))
+                    .is_some(),
+            "requires gap_token + gap_disposition: {:?}",
+            g.id()
+        );
+    }
+
+    // Deterministic sources mint entries, so these are `injected`, not `bound`.
+    let injected = gaps
+        .iter()
+        .filter(|g| {
+            g.get(&iri("urn:eigenius:encoding:gap_disposition"))
+                .and_then(|v| v.as_iri())
+                .map(|i| i.as_str() == "urn:eigenius:encoding:gap_injected")
+                .unwrap_or(false)
+        })
+        .count();
+    assert!(
+        injected > 0,
+        "a minted entry is an injected gap, got {gaps:?}"
+    );
+
+    // And they load: a record that does not validate is not a coverage signal. The stream is NOT
+    // standalone — `bound_entry` points at the minted entry, so the entries and their supporting
+    // individuals must be committed with it, which is what the artifact does. Validating the gaps
+    // alone fails with UnresolvedClassReference, and that is correct behaviour, not a bug.
+    let mut b = LayerBuilder::new("gap-stream", Some(Arc::clone(&head)));
+    for r in aug.supporting.iter().cloned() {
+        let _ = b.add_resource(r);
+    }
+    for binding in &aug.added {
+        let _ = b.add_resource(binding.proposed.clone());
+    }
+    for g in gaps {
+        b.add_resource(g).expect("gap record adds");
+    }
+    let layer = Arc::new(b.build(LayerStorage::in_memory()));
+    let errors = Validator::new(Arc::clone(&layer)).validate();
+    assert!(
+        errors.is_empty(),
+        "{} validation error(s): {errors:#?}",
+        errors.len()
+    );
+}

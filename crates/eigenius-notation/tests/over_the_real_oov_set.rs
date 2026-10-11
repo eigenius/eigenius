@@ -42,6 +42,7 @@ fn it_classifies_the_real_oov_set() {
                     Notation::CodingChange(_) => "CodingChange",
                     Notation::ResiduePosition { .. } => "ResiduePosition",
                     Notation::ResidueRange { .. } => "ResidueRange",
+                    Notation::CodingPosition { .. } => "CodingPosition",
                     Notation::UniProt(_) => "UniProt",
                     Notation::PdbEntry(_) => "PdbEntry",
                     Notation::DbSnp(_) => "DbSnp",
