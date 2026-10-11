@@ -242,27 +242,6 @@ if [[ "$USE_JSON" == "1" ]]; then
   BUNI=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected']['units'])")
   echo
   echo "  vs committed baseline (experiments/parsing/baseline.json):"
-  [[ "$U" -ne "$BUNI" ]] && echo "    NOTE: unit count differs ($BUNI → $U) — a different page or segmentation."
-  printf '    %-16s %s → %s %s\n' "grammar-gap" "$BGAP" "$GAP" \
-    "$([[ "$GAP" -gt "$BGAP" ]] && echo '  REGRESSION' || { [[ "$GAP" -lt "$BGAP" ]] && echo '  improved' || echo '  (unchanged)'; })"
-  # encoded is INFORMATIONAL, not gated: a correctness fix can lower it (a unit encoded on the WRONG
-  # reading becomes ambiguous when the right reading is restored — the 2026-07-20 gloss bug). The
-  # faithfulness gate is expected-hits below.
-  printf '    %-16s %s → %s %s\n' "encoded (info)" "$BENC" "$ENC" \
-    "$([[ "$ENC" -lt "$BENC" ]] && echo '  lower (not gated — see expected-hits)' || { [[ "$ENC" -gt "$BENC" ]] && echo '  higher' || echo '  (unchanged)'; })"
-  [[ "$GAP" -gt "$BGAP" ]] && RC=2
-
-  # ── Trap 3b: WHICH reranker, not just whether one ran. ──────────────────────
-  # The KIND check (cap-only vs reranked) is the only instrument check this path had, so until
-  # 2026-10-10 a run that swapped the sense-ranker MODEL scored as comparable and every delta it
-  # caused was attributed to the code or lexicon under test. The model is as much an instrument as
-  # the knobs: `claude-sonnet-5-5` was measured against `claude-sonnet-4-6` on this very page
-  # (kernel/src/dcg/model_config.rs, eigenius#59 strand 2) and held only 20 of 41 selections
-  # stable across draws against 38 — a swap moves the numbers on its own.
-  #
-  # The two sides record it differently — the log as a leading model id ("claude-sonnet-4-6
-  # (live) — RECORDING to …"), baseline.json as prose that names it — so this compares the run's
-  # MODEL ID against the baseline's recorded string rather than the strings themselves.
   BRERANK_J=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON')).get('provenance',{}).get('reranker',''))")
   BKIND_J=reranked
   case "${BRERANK_J,,}" in ''|none|caponly|'cap-only'*) BKIND_J=caponly ;; esac
@@ -293,6 +272,27 @@ if [[ "$USE_JSON" == "1" ]]; then
     fi
   fi
 
+  [[ "$U" -ne "$BUNI" ]] && echo "    NOTE: unit count differs ($BUNI → $U) — a different page or segmentation."
+  printf '    %-16s %s → %s %s\n' "grammar-gap" "$BGAP" "$GAP" \
+    "$([[ "$GAP" -gt "$BGAP" ]] && echo '  REGRESSION' || { [[ "$GAP" -lt "$BGAP" ]] && echo '  improved' || echo '  (unchanged)'; })"
+  # encoded is INFORMATIONAL, not gated: a correctness fix can lower it (a unit encoded on the WRONG
+  # reading becomes ambiguous when the right reading is restored — the 2026-07-20 gloss bug). The
+  # faithfulness gate is expected-hits below.
+  printf '    %-16s %s → %s %s\n' "encoded (info)" "$BENC" "$ENC" \
+    "$([[ "$ENC" -lt "$BENC" ]] && echo '  lower (not gated — see expected-hits)' || { [[ "$ENC" -gt "$BENC" ]] && echo '  higher' || echo '  (unchanged)'; })"
+  [[ "$GAP" -gt "$BGAP" ]] && RC=2
+
+  # ── Trap 3b: WHICH reranker, not just whether one ran. ──────────────────────
+  # The KIND check (cap-only vs reranked) is the only instrument check this path had, so until
+  # 2026-10-10 a run that swapped the sense-ranker MODEL scored as comparable and every delta it
+  # caused was attributed to the code or lexicon under test. The model is as much an instrument as
+  # the knobs: `claude-sonnet-5-5` was measured against `claude-sonnet-4-6` on this very page
+  # (kernel/src/dcg/model_config.rs, eigenius#59 strand 2) and held only 20 of 41 selections
+  # stable across draws against 38 — a swap moves the numbers on its own.
+  #
+  # The two sides record it differently — the log as a leading model id ("claude-sonnet-4-6
+  # (live) — RECORDING to …"), baseline.json as prose that names it — so this compares the run's
+  # MODEL ID against the baseline's recorded string rather than the strings themselves.
   # ── Faithfulness gate: no curated unit may LOSE its expected (verified-correct) reading ──────────
   BEH=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('expected_reading_hits',0))")
   BEC=$(python3 -c "import json;print(json.load(open('$BASELINE_JSON'))['expected'].get('expected_reading_curated',0))")
