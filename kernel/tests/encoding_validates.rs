@@ -282,12 +282,33 @@ resource doc:report : enc:Document {
     enc:media_type     = "text/markdown";
     enc:source_path    = "report.md";
     enc:source_sha256  = "deadbeef";
-    enc:ref_list       = [doc:work];
     enc:body           = [doc:sec_setting, doc:sec_finding_1];
+    enc:back           = [doc:references];
+}
+
+// Back matter, as a real bibliography is shaped: a titled list holding prose AND a titled
+// sub-group, not a flat array of works.
+resource doc:references : enc:RefList {
+    enc:title    = "References";
+    enc:children = [doc:p_refs_provenance, doc:ref_group_1];
+}
+
+resource doc:p_refs_provenance : enc:Paragraph {
+    enc:units = [doc:u4];
+}
+
+resource doc:u4 : enc:DiscourseUnit {
+    enc:prose     = "Every PMID below was resolved against PubMed on 13 September 2026.";
+    enc:unit_kind = enc:kind_prose;
+}
+
+resource doc:ref_group_1 : enc:RefList {
+    enc:title = "XIAP deficiency - disease mechanism and phenotype";
+    enc:refs  = [doc:work];
 }
 
 resource doc:sec_setting : enc:Section {
-    enc:section_title = "The variant and its setting";
+    enc:title         = "The variant and its setting";
     enc:section_kind  = enc:sec_intro;
     enc:children      = [doc:p1];
 }
@@ -304,13 +325,13 @@ resource doc:u1 : enc:DiscourseUnit {
 
 // A section whose children are a SUB-SECTION and a TABLE — heterogeneous, both Blocks.
 resource doc:sec_finding_1 : enc:Section {
-    enc:section_title = "Finding 1 - the variant is absent from every resource queried";
+    enc:title         = "Finding 1 - the variant is absent from every resource queried";
     enc:section_kind  = enc:sec_results;
     enc:children      = [doc:sec_sub, doc:t1];
 }
 
 resource doc:sec_sub : enc:Section {
-    enc:section_title = "Callability, not tolerability";
+    enc:title         = "Callability, not tolerability";
     enc:section_kind  = enc:sec_results;
     enc:children      = [doc:p2];
 }
@@ -384,6 +405,24 @@ resource doc:xref_1 : enc:ReferenceSpan {
         "urn:eigenius:encoding:sec_results",
         "a numbered finding is typed `results`; its number lives in the title and its identity"
     );
+    // Back matter nests: the bibliography is a titled RefList whose children include prose and a
+    // titled sub-group. A flat enc:ref_list property could hold none of that, which is why the
+    // first cut of this vocabulary was wrong — the XIAP report's bibliography has a provenance
+    // paragraph, four titled groups over 63 entries, and a trailing accessions paragraph.
+    let refs = instance
+        .resolve(&iri("urn:eigenius:test:doc:references"))
+        .expect("the bibliography resolves");
+    assert_eq!(
+        refs.get(&iri("urn:eigenius:encoding:title"))
+            .and_then(|v| v.as_str().map(str::to_string))
+            .expect("the RefList is titled"),
+        "References"
+    );
+    let Some(Value::Array(kids)) = refs.get(&iri("urn:eigenius:encoding:children")) else {
+        panic!("the RefList nests prose and sub-groups");
+    };
+    assert_eq!(kids.len(), 2, "a Paragraph and a sub-RefList, both Blocks");
+
     for k in ["sec_intro", "sec_methods", "sec_results", "sec_conclusions"] {
         assert!(
             instance
