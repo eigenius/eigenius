@@ -93,6 +93,16 @@ pub enum ResolutionMethod {
     /// A deterministic named-entity apposition (`<common-noun-head> <Name>`) recognized it as a doc-local
     /// named individual (D63 named-entity glossary source). Deterministic, same trust as extraction.
     NameRecognized,
+    /// A HYPHENATED COMPOUND whose parts the lexicon supplies — `missense-bystander`,
+    /// `single-submitter`. Deterministic: the parts are attested and the hyphen is the document's
+    /// own join, not a guess about word boundaries.
+    CompoundOfKnownParts,
+    /// A LAST RESORT — no source could say anything about this surface beyond its existence, and
+    /// an entry was minted so the unit reaches the grammar. The WEAKEST signal here by a wide
+    /// margin: it asserts only that the token occurred. Counted separately wherever these are
+    /// reported, because a coverage number that hides how much of it rests on no evidence is worse
+    /// than a lower one that does not.
+    UnevidencedFallback,
     /// DERIVED from a base the lexicon does have, by a productive affix — `disanalogy` from
     /// `analogy`, `overread` from `read`. Deterministic, and more trustworthy than an LLM
     /// synthesis because the base is attested and the affix's contribution is stated, not guessed.

@@ -502,6 +502,17 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
             lem,
         )
     };
+    // THE PIPELINE'S OWN RESIDUAL OOV SET is the gate every source below uses. Deriving it
+    // independently — a raw `entries_for_form` surface lookup — does not see what the pipeline
+    // resolves by LEMMATISATION, and the total fallback then minted opaque individuals for 243
+    // ordinary words: nucleotides, cells, patients, males, plus bare numerals and ranges.
+    let oov: std::collections::BTreeSet<String> = aug
+        .missing_oov
+        .iter()
+        .flat_map(|g| [g.surface.clone(), g.surface.to_lowercase()])
+        .collect();
+    eprintln!("pipeline OOV surfaces: {}", aug.missing_oov.len());
+
     let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(head, page);
     let n_names = ne_aug.added.len();
     eprintln!(
@@ -520,7 +531,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // it: the two recognise disjoint things, and `Ile380Thr` is the case apposition structurally
     // cannot reach — interior capital, lowercase-initial prefixed form, and never a noun head in
     // front of it.
-    let not_aug = eigenius_kernel::dcg::notation_augmentation(head, page);
+    let not_aug = eigenius_kernel::dcg::notation_augmentation(head, page, &oov);
     let n_notations = not_aug.added.len();
     eprintln!(
         "notations: {n_notations} recognised — {:?}",
@@ -537,7 +548,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // units — and the signal there is orthography plus repetition, admissible only because the
     // surface is OOV. Merged last of the deterministic sources so both the lexicon and notation
     // have had their claim first.
-    let name_aug = eigenius_kernel::dcg::oov_name_augmentation(head, page);
+    let name_aug = eigenius_kernel::dcg::oov_name_augmentation(head, page, &oov);
     let n_oov_names = name_aug.added.len();
     eprintln!(
         "recurrent OOV names: {n_oov_names} — {:?}",
@@ -554,7 +565,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // after notation and names sit inside an inline code span — the author already distinguished
     // "string mentioned" from "word used", which is one markup rule where the shapes looked like
     // six unrelated pattern-matching jobs.
-    let code_aug = eigenius_kernel::dcg::code_span_augmentation(head, page);
+    let code_aug = eigenius_kernel::dcg::code_span_augmentation(head, page, &oov);
     let n_code = code_aug.added.len();
     eprintln!("code-span literals: {n_code}");
     aug.added.extend(code_aug.added);
@@ -562,7 +573,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
 
     // The eighth: a productive affix over a base the lexicon DOES have. Deterministic, and the
     // arm that would otherwise handle these — ResolutionMethod::LlmSynthesized — has no producer.
-    let deriv_aug = eigenius_kernel::dcg::derivation_augmentation(head, page);
+    let deriv_aug = eigenius_kernel::dcg::derivation_augmentation(head, page, &oov);
     let n_derived = deriv_aug.added.len();
     eprintln!(
         "derived from a base: {n_derived} — {:?}",
@@ -578,6 +589,36 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     );
     aug.added.extend(deriv_aug.added);
     aug.supporting.extend(deriv_aug.supporting);
+
+    // The ninth: a hyphenated compound whose PARTS are attested. The parser's lexer deliberately
+    // keeps an ASCII hyphen inside a token (`wild-type`, `PolyPhen-2` are single items), so
+    // `missense-bystander` arrives whole and unknown while both halves are known.
+    let comp_aug = eigenius_kernel::dcg::compound_augmentation(head, page, &oov);
+    let n_compounds = comp_aug.added.len();
+    eprintln!("compounds of known parts: {n_compounds}");
+    aug.added.extend(comp_aug.added);
+    aug.supporting.extend(comp_aug.supporting);
+
+    // The TENTH and last: whatever every source with a claim to make has declined. Counted on its
+    // own line, always, because a coverage figure that hides how much of itself rests on no
+    // evidence is worse than a lower figure that does not.
+    let supplied_now: std::collections::BTreeSet<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    let fb_aug = eigenius_kernel::dcg::fallback_augmentation(head, page, &oov, &supplied_now);
+    let n_fallback = fb_aug.added.len();
+    eprintln!(
+        "UNEVIDENCED FALLBACK: {n_fallback} — {:?}",
+        fb_aug
+            .added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
+    aug.added.extend(fb_aug.added);
+    aug.supporting.extend(fb_aug.supporting);
     let source_path = std::env::var("EIGENIUS_WRN_SOURCE").unwrap_or_else(|_| WRN_PAGE.to_string());
     let source_text = std::fs::read_to_string(&source_path).unwrap_or_else(|_| page.to_string());
     let abbr_aug = {
@@ -627,9 +668,11 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // reported "59 OOV grounded + 117 notation(s)" — the arithmetic subtracting notations that
     // were never added — while measuring the source doing nothing at all.
     assert!(
-        aug.added.len() >= n_names + n_notations + n_oov_names + n_code + n_derived,
+        aug.added.len()
+            >= n_names + n_notations + n_oov_names + n_code + n_derived + n_compounds + n_fallback,
         "every source's entries must be merged: {} added < {n_names} names + {n_notations} \
-         notations + {n_oov_names} oov-names + {n_code} code + {n_derived} derived",
+         notations + {n_oov_names} oov-names + {n_code} code + {n_derived} derived + \
+         {n_compounds} compounds + {n_fallback} fallback",
         aug.added.len()
     );
     let supplied: std::collections::BTreeSet<String> = aug
@@ -668,8 +711,16 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     eprintln!(
         "augmentation: {} OOV grounded + injected, {n_names} named-entity individual(s), \
          {n_notations} notation(s), {n_oov_names} recurrent-name(s), {n_code} code-literal(s), \
-         {n_derived} derived, {} residual OOV",
-        aug.added.len() - n_names - n_notations - n_oov_names - n_code - n_derived,
+         {n_derived} derived, {n_compounds} compound(s), {n_fallback} UNEVIDENCED, \
+         {} residual OOV",
+        aug.added.len()
+            - n_names
+            - n_notations
+            - n_oov_names
+            - n_code
+            - n_derived
+            - n_compounds
+            - n_fallback,
         aug.missing_oov.len()
     );
     aug

@@ -98,11 +98,11 @@ pub use category::{
 #[cfg(feature = "use-llm")]
 pub use glossary::AnthropicAbbreviationProposer;
 pub use glossary::{
-    abbreviation_resources, code_span_augmentation, derivation_augmentation, derive_with,
-    document_glossary_resources, document_glossary_resources_with, glossary_resources,
-    ground_abbreviation, ground_long_form, is_adjective, is_apposition_head, is_common_noun,
-    lexical_gap_resources, named_entity_augmentation, notation_augmentation, oov_name_augmentation,
-    AbbreviationBinding,
+    abbreviation_resources, code_span_augmentation, compound_augmentation, derivation_augmentation,
+    derive_with, document_glossary_resources, document_glossary_resources_with,
+    fallback_augmentation, glossary_resources, ground_abbreviation, ground_long_form, is_adjective,
+    is_apposition_head, is_common_noun, lexical_gap_resources, named_entity_augmentation,
+    notation_augmentation, oov_name_augmentation, AbbreviationBinding,
 };
 pub use item::{Combinator, Cost, Item};
 pub use lemmatizer::{regular_plural_stem, Identity, Lemmatizer, Pos};

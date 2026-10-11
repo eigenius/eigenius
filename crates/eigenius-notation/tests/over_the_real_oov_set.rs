@@ -49,6 +49,11 @@ fn it_classifies_the_real_oov_set() {
                     Notation::ClinVar(_) => "ClinVar",
                     Notation::SequenceRecord(_) => "SequenceRecord",
                     Notation::GenomicCoordinate(_) => "GenomicCoordinate",
+                    Notation::IsoDate(_) => "IsoDate",
+                    Notation::CitationLocus(_) => "CitationLocus",
+                    Notation::WebLocator(_) => "WebLocator",
+                    Notation::PrefixedId(_) => "PrefixedId",
+                    Notation::Version(_) => "Version",
                 })
                 .or_default()
                 .push(t),
