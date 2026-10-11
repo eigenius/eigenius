@@ -1,7 +1,9 @@
 # D96 — JATS as the document model
 
 **Status: decided** (2026-09-25) — the model. Its realisation in the encoding vocabulary and the
-ingest routes below is design, not yet built.
+ingest routes below is design, not yet built. **Amended `2026-10-10`**: locators are
+media-type-appropriate URI fragment identifiers and offsets are derived from them, which answers the
+offset-base question (see "Locators are fragment identifiers").
 
 ## The gap
 
@@ -60,6 +62,10 @@ has to guess.
   any source with markup.
 - **Sections.** `enc:section` is a free string ("Results §2.1"). With JATS it can carry the section's
   identity and `sec-type`, so "the methods" is a query, not a string match.
+- **Locators, with offsets derived from them** (amended `2026-10-10`, see "Locators are fragment
+  identifiers" below). A unit is addressed by a media-type-appropriate FRAGMENT IDENTIFIER, not by a
+  byte offset; `enc:span_start`/`span_end` stay as a derived convenience, recomputed from the locator
+  against a hashed document. This answers the offset-base question for every route at once.
 - **Offsets.** `enc:span_start`/`span_end` are offsets "in the source document", which today means
   the extracted text. With JATS they need a defined base — the document's text content in document
   order is the natural one, and it has to be fixed before anything records offsets against it.
@@ -72,7 +78,7 @@ has to guess.
   and whether the text is the version of record or an accepted manuscript. JATS carries this in
   `<article-meta>`.
 
-## Three routes to one model
+## Five routes to one model
 
 | Source | Route | Inline references |
 |---|---|---|
@@ -80,6 +86,10 @@ has to guess.
 | BioC (NCBI's text-mining form of PMC) | typed passages with offsets | **dropped** — flattened to text |
 | a PDF with no JATS | GROBID → TEI, mapped onto the model | marked (`<ref type="figure">`) |
 | plain text, as today's corpus | none | none — D95 defers its fallback rule to this work |
+| markdown from a register (the XIAP log) | the register supplies the structure | none in the text; the register names them |
+
+The heading said "three" while the table listed four, before the register route was added
+(`2026-10-10`).
 
 GROBID is the established extractor for scientific PDFs; it would replace the geometric
 `extract-section.py`, which infers from type size what TEI states. Plain text keeps the need for a
@@ -98,6 +108,50 @@ fallback rule in D95's preprocessor, but only there.
 - **The two versions word the same step differently**, and one of D95's hazards is an artefact of
   that: `931g` is Nature's typesetting of what the manuscript writes as `931 RCF`.
 
+## Locators are fragment identifiers (amended `2026-10-10`)
+
+**A unit's address is a URI fragment identifier whose scheme is chosen by the source's media type.**
+The interpretation of a fragment identifier is determined by the media type of the document it
+addresses, which is the property this model needs: four ingest routes with four source formats do
+not want one invented locator vocabulary coerced across them. `prov:source_irl` already holds the
+URI; the fragment completes it, and a content hash pins the version.
+
+| route | media type | fragment scheme |
+|---|---|---|
+| PMC / publisher JATS | `application/xml` | **XPointer** — `<sec id=…>`, and `string-range()` for a span inside an element |
+| PDF → GROBID → TEI | `application/xml` | XPointer, over TEI's own ids |
+| BioC | typed passages with offsets | the passage offsets BioC already carries |
+| plain text | `text/plain` | **RFC 5147** — `#line=n,m` (line-oriented, so stabler than `#char=`) |
+| a table, any route | — | **RFC 7111**'s addressing — `#row=`, `#col=`, `#cell=r,c` |
+| markdown (the register route) | `text/markdown` — no fragment standard | **Text Fragments** — `#:~:text=prefix-,textStart,textEnd,-suffix` |
+
+**Text Fragments fixes the defect this document already records.** The bullet above reports that the
+encoder computes a span as `doc.find(text)` — "byte offsets of the first occurrence, so a repeated
+sentence maps to its first, and 0 when the text is not found". The WICG Text Fragments syntax exists
+to disambiguate a repeated string by the text around it, so a locator carrying prefix and suffix is
+UNIQUE BY CONSTRUCTION. It is also content-addressed, hence stable under an edit elsewhere in the
+document, where a byte offset is not.
+
+That stability is not a theoretical preference. The XIAP certification register addresses 475 claims
+with 266 hand-written locators, and of the 140 that name a paragraph, **59 name it by topic**
+(`§Finding 1 ¶ direction`, `¶ closing`, `¶ NMD`) rather than by ordinal (`¶3`). Human certifiers
+reached for content addressing unprompted, for the same reason: an inserted paragraph does not move
+`¶ closing`.
+
+**Consequences.**
+
+- **Offsets become derived.** `enc:span_start`/`span_end` are recomputed from the locator plus the
+  document hash, never authored. The offset base stops being a blocking decision, because nothing
+  records offsets as its primary address.
+- **A locator can key a unit.** A hand-written register locator addresses a REGION — 17 claims share
+  `§References, database records consulted directly` — but a Text Fragment with prefix and suffix
+  does not, so the document model's units can be keyed by locator after all.
+- **Sections keep their own identity.** Orthogonal to this: `enc:section` carrying `sec-type` is
+  what makes "the methods" a query rather than a string match, and a heading is a `<title>` property
+  of a `<sec>`, not a unit kind of its own.
+- **Nothing here is parsed from the fragment.** A locator is resolved against the document to yield
+  text; it is not itself interpreted as structure.
+
 ## Scope
 
 **In.** The model: JATS's structure and reference semantics as the pipeline's. The alignment above
@@ -108,8 +162,10 @@ format for fetched documents.
 
 ## Open questions
 
-- **The offset base** — what `span_start` counts in when the source is JATS, and whether offsets
-  already recorded against extracted text are migrated or left as they are.
+- ~~**The offset base**~~ — **ANSWERED `2026-10-10`** by "Locators are fragment identifiers": a unit
+  is addressed by a media-type-appropriate fragment identifier and offsets are derived from it, so
+  there is no base to choose. Offsets already recorded against extracted text are left as they are
+  and recomputed when a unit is next written.
 - **Captions** — whether a caption is parsed as prose. D95 records that figure legends use an
   elliptical register the grammar does not cover; a caption unit could be captured and not parsed,
   as a table is.
