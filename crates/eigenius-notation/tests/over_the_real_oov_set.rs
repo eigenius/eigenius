@@ -41,6 +41,7 @@ fn it_classifies_the_real_oov_set() {
                     Notation::ProteinChange(_) => "ProteinChange",
                     Notation::CodingChange(_) => "CodingChange",
                     Notation::ResiduePosition { .. } => "ResiduePosition",
+                    Notation::ResidueRange { .. } => "ResidueRange",
                     Notation::UniProt(_) => "UniProt",
                     Notation::PdbEntry(_) => "PdbEntry",
                     Notation::DbSnp(_) => "DbSnp",

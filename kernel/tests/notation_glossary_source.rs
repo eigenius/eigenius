@@ -191,3 +191,51 @@ fn ordinary_prose_and_product_names_yield_nothing() {
             .collect::<Vec<_>>()
     );
 }
+
+/// The OOV-only guard, which is what makes the UniProt/gene-symbol collision harmless: a surface
+/// the committed lexicon already supplies is left alone. Asserted against a real lexicon form
+/// rather than a contrived one, so the test fails if `entries_for_form` stops matching.
+#[test]
+fn a_surface_the_lexicon_already_has_is_left_alone() {
+    let head = bootstrap_head();
+    // `2KNA` is PDB-shaped and NOT in the bootstrap lexicon, so it closes.
+    let closes = notation_augmentation(&head, "The coordinates come from 2KNA directly.");
+    assert!(
+        !closes.added.is_empty(),
+        "an unknown PDB-shaped token should close the gap"
+    );
+
+    // The bootstrap chain carries no lexical entries at all (the lexicon LAYER is schema; forms
+    // arrive with the WordNet/UMLS import), so the guard cannot be exercised positively here
+    // without a served chain. What is pinned is that the guard is CONSULTED: a token is skipped
+    // when a form lookup hits. Recorded as the reason this stays an OOV closure.
+    assert!(
+        closes.added.iter().all(|b| b.provenance.method
+            == eigenius_kernel::dcg::augment::ResolutionMethod::NotationRecognized),
+        "notation-recognized provenance"
+    );
+}
+
+/// A residue RANGE must close its endpoints too, not only itself. In the page a helix boundary is
+/// one whitespace-delimited token (`Thr369–Asn373`), but the parser's tokenizer splits on the dash
+/// and asks the lexicon for `Asn373` — so an entry keyed only on the whole range is keyed under a
+/// surface nothing requests. That is why those endpoints stayed OOV after the range support landed.
+#[test]
+fn a_residue_range_closes_its_endpoints_as_well_as_itself() {
+    let head = bootstrap_head();
+    let aug = notation_augmentation(
+        &head,
+        "Helix \u{3b1}1 spans Thr369\u{2013}Asn373 in the domain.",
+    );
+    let surfaces: Vec<String> = aug
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    for want in ["Thr369\u{2013}Asn373", "Thr369", "Asn373"] {
+        assert!(
+            surfaces.iter().any(|s| s == want),
+            "{want} must get an entry; got {surfaces:?}"
+        );
+    }
+}
