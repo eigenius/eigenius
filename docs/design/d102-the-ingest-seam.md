@@ -25,9 +25,14 @@ exist twice and the tree's knowledge is discarded in between.
 `enc:unit_kind` is documented as the routing switch: "What kind of unit this is (prose / equation /
 citation / table) — selects the routing: only `prose` enters the DCG parser." The converter sets
 `kind_table` on all 125 table rows. The parser never sees it, because its input is a text file with
-no kinds. **110 table rows and 14 non-prose fragments were therefore scored as grammar failures —
-124 units, 37% of `grammar-gap 392`** (`uab-xiap-grammar-gaps.md`). The switch is specified and
-unreachable.
+no kinds, so **110 of those rows were scored as grammar failures — 28% of `grammar-gap 392`**
+(`uab-xiap-grammar-gaps.md`). The switch is specified and unreachable.
+
+**Two things kept separate, which an earlier draft of this doc ran together.** `unit_kind` routes
+the 125 `kind_table` units and nothing else. The 14 bold-lead fragments (`**What I would do:**`) are
+`kind_prose` by the model's own typing, so routing does not reach them — whether they warrant a kind
+of their own is a document-model question, not a routing one. Decision 2 is worth 110 gaps, not the
+124 that draft claimed.
 
 ## The seam
 
