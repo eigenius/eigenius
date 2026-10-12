@@ -102,7 +102,7 @@ pub use glossary::{
     derive_with, document_glossary_resources, document_glossary_resources_with,
     fallback_augmentation, glossary_resources, ground_abbreviation, ground_long_form, is_adjective,
     is_apposition_head, is_common_noun, lexical_gap_resources, named_entity_augmentation,
-    notation_augmentation, oov_name_augmentation, AbbreviationBinding,
+    notation_augmentation, oov_name_augmentation, AbbreviationBinding, SegmentedDocument,
 };
 pub use item::{Combinator, Cost, Item};
 pub use lemmatizer::{regular_plural_stem, Identity, Lemmatizer, Pos};

@@ -706,9 +706,12 @@ pub use anthropic::AnthropicAbbreviationProposer;
 /// `patient` and `male` are all in the lexicon. The fallback, being total, then minted opaque
 /// individuals for 243 ordinary English words — common nouns, bare numerals and numeric ranges.
 ///
-/// `augment_lexicon_backed` already computes the authoritative answer and returns it as
-/// `missing_oov`. Re-deriving it was the same mistake as re-deriving the tokenizer: the pipeline
-/// knows, and a second opinion drifts.
+/// `oov` is the PARSER's answer — [`Parser::unknown_words`](super::parse::Parser::unknown_words)
+/// over the document's units, which is the one definition of the missing-lexeme signal and the one
+/// the encoder reads. Re-deriving it was the same mistake as re-deriving the tokenizer: the
+/// pipeline knows, and a second opinion drifts. `augment_lexicon_backed`'s own `missing_oov` is a
+/// pre-pass residual, not that answer — it never flagged `Asn373`, `Cas9`, `Glu378`, `I380T`,
+/// `CHRPOS` or `Gaudelli` though all are in the XIAP page (D102 decision 7).
 fn is_pipeline_gap(oov: &BTreeSet<String>, surface: &str) -> bool {
     oov.contains(surface) || oov.contains(&surface.to_lowercase())
 }
@@ -753,10 +756,10 @@ fn variant_layer_present(base: &Arc<Layer>) -> bool {
 
 /// The tokens of `document` **as the parser will tokenize it** —
 /// [`preprocess::tokenize`](super::preprocess::tokenize) over
-/// [`ProseUnits::load`](super::quantity::ProseUnits::load), the same construction
-/// `Parser::tokenize` uses.
+/// [`ProseUnits::load`](super::quantity::ProseUnits::load), **per unit**, which is the construction
+/// `Parser::tokenize` runs under `Parser::unknown_words`.
 ///
-/// This replaced two hand-written tokenizers, and the reason is the whole point of the seam: a
+/// This replaced three hand-written tokenizers, and the reason is the whole point of the seam: a
 /// glossary source must mint an entry under the surface the parser will LATER ASK THE LEXICON FOR.
 /// Guessing at that failed four times in one sitting — a recognised `Thr369–Asn373` left `Asn373`
 /// OOV, a recognised `chrX:123,900,532` left `chrX:123` OOV, and a code-marked
@@ -768,13 +771,75 @@ fn variant_layer_present(base: &Arc<Layer>) -> bool {
 /// en-dash JOINS a range conditionally (`joins_range`), a comma inside `123,900,532` groups digits
 /// rather than separating (`groups_digits`), and brackets and appositives are resolved before
 /// tokens are formed.
-fn parser_tokens(base: &Arc<Layer>, document: &str) -> Vec<String> {
-    let units = super::quantity::ProseUnits::load(base);
-    super::preprocess::tokenize(document, &units)
+///
+/// That last one is why the GRANULARITY is the unit and not the joined page: bracket resolution
+/// runs over whatever string it is handed, so joining changes which parentheticals are balanced.
+/// [`SegmentedDocument`] has the measurement.
+fn parser_tokens(base: &Arc<Layer>, document: &SegmentedDocument) -> Vec<String> {
+    let prose = super::quantity::ProseUnits::load(base);
+    document
+        .units()
         .iter()
+        .flat_map(|unit| super::preprocess::tokenize(unit, &prose))
         .map(|t| t.surface().to_string())
         .filter(|s| !s.trim().is_empty())
         .collect()
+}
+
+/// The document a glossary source reads: the **units the parser will parse**, and the text they
+/// were segmented from.
+///
+/// Both, because a source needs both and the two must not be derived independently. A source has to
+/// mint its entry under the surface the parser later asks the lexicon for, and the parser tokenizes
+/// ONE UNIT at a time ([`Parser::tokenize`](super::parse::Parser::tokenize), under
+/// [`Parser::unknown_words`](super::parse::Parser::unknown_words)).
+///
+/// Tokenizing the joined page instead is not a near-miss. The lexer resolves parentheticals before
+/// tokens are formed, so a parenthetical that OPENS in one unit and CLOSES in a later one is
+/// balanced only in the join: joining strips a span no unit strips, and every surface inside it
+/// vanishes from the stream. And the pairing shifts both ways: joining also leaves a unit-internal
+/// parenthetical unstripped, manufacturing surfaces no unit forms.
+///
+/// Measured on the XIAP certification log — one unit per line, with parentheses that cross line
+/// breaks — tokenizing the join forms 1548 distinct surfaces against the 325 units' 2148: the join
+/// DELETES 613 and MANUFACTURES 13. `unknown_words` per unit reported 526 missing surfaces where a
+/// page-level sweep reported 375, and the 151 the page-level stream never formed included every
+/// surface the parse then returned as `missing-lexeme`: `Asn373`, `Thr369`, `Val376Ala`, `Cas9`.
+/// A source enumerating the page-level stream cannot close a gap it never sees, and `SpCas9` — one
+/// of the manufactured 13 — got an entry under a surface the parser never asks about.
+///
+/// The text is kept as given, not rejoined from the units: a rejoin has to pick a separator, and
+/// the predicates that read running text — a sentence-initial capital ([`capital_is_positional`]),
+/// a possessive, a markup span ([`code_spans`]) — would then be reading a document the author did
+/// not write.
+pub struct SegmentedDocument<'a> {
+    text: &'a str,
+    units: Vec<String>,
+}
+
+impl<'a> SegmentedDocument<'a> {
+    /// `text` as the author wrote it, `units` as the document model segmented it (D102 decision 1:
+    /// the document model segments, the pipeline does not re-segment).
+    pub fn new(text: &'a str, units: Vec<String>) -> Self {
+        Self { text, units }
+    }
+
+    /// For a document that arrives unsegmented — segment it with the kernel's own
+    /// [`segment_sentences`](super::segment::segment_sentences), the same one the parser's document
+    /// context uses.
+    pub fn from_sentences(text: &'a str) -> Self {
+        Self::new(text, super::segment::segment_sentences(text))
+    }
+
+    /// The running text, for the predicates that read position, repetition or markup.
+    pub fn text(&self) -> &'a str {
+        self.text
+    }
+
+    /// The units, for everything that tokenizes.
+    pub fn units(&self) -> &[String] {
+        &self.units
+    }
 }
 
 /// **Notation augmentation** — recognize published notations in `document`
@@ -787,7 +852,7 @@ fn parser_tokens(base: &Arc<Layer>, document: &str) -> Vec<String> {
 /// tier 2 for all tokens when the `variant` layer is absent from `base`.
 pub fn notation_augmentation(
     base: &Arc<Layer>,
-    document: &str,
+    document: &SegmentedDocument,
     oov: &BTreeSet<String>,
 ) -> LexiconAugmentation {
     use eigenius_notation::{recognize, Notation};
@@ -1094,7 +1159,7 @@ fn is_oov_name(t: &str) -> bool {
 /// SAME individual, not as an entity of its own.
 pub fn oov_name_augmentation(
     base: &Arc<Layer>,
-    document: &str,
+    document: &SegmentedDocument,
     oov: &BTreeSet<String>,
 ) -> LexiconAugmentation {
     /// Repetition is the whole precision guard, so one mention is not a name here.
@@ -1124,7 +1189,7 @@ pub fn oov_name_augmentation(
             continue;
         }
         // A capital from a sentence boundary is not a name.
-        if capital_is_positional(t, document) {
+        if capital_is_positional(t, document.text()) {
             continue;
         }
         let core = t.trim_end_matches("'s").trim_end_matches("\u{2019}s");
@@ -1160,7 +1225,7 @@ pub fn oov_name_augmentation(
         let mut surfaces = vec![core.to_string()];
         for suffix in ["'s", "\u{2019}s"] {
             let poss = format!("{core}{suffix}");
-            if document.contains(&poss) {
+            if document.text().contains(&poss) {
                 surfaces.push(poss);
             }
         }
@@ -1346,6 +1411,29 @@ fn code_spans(document: &str) -> Vec<&str> {
     out
 }
 
+/// Does `haystack` contain `tok` at token boundaries — not flanked by an identifier character?
+///
+/// A plain `contains` would let a span holding `gene_symbol` claim `gene`, and one holding `ENSE7`
+/// claim `E7`. `_` counts as a flanker because a code span is where identifiers live: without it,
+/// `gene_symbol` claims `gene` on the underscore.
+fn contains_token(haystack: &str, tok: &str) -> bool {
+    let flanker = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    let mut from = 0usize;
+    while let Some(off) = haystack[from..].find(tok) {
+        let at = from + off;
+        let before = haystack[..at].chars().next_back();
+        let after = haystack[at + tok.len()..].chars().next();
+        if !flanker(before) && !flanker(after) {
+            return true;
+        }
+        from = at + tok.len().max(1);
+        if from >= haystack.len() {
+            break;
+        }
+    }
+    false
+}
+
 /// **Code-span augmentation** — the seventh source. Every token the document marks as code gets a
 /// doc-local literal individual and a `cat_np` alias, so a unit quoting `` `dbnsfp.aa.pos` ``
 /// parses instead of returning `missing-lexeme`.
@@ -1353,9 +1441,17 @@ fn code_spans(document: &str) -> Vec<&str> {
 /// Markup, not pattern: the only judgement is the author's. A token already supplied by the
 /// lexicon is left alone, and one a published notation claims is left to the notation source,
 /// which records the parse rather than an opaque string.
+///
+/// **The markup is the gate; the surface is the parser's.** This enumerates
+/// [`parser_tokens`] and claims a token when a code span contains it, rather than splitting the
+/// span itself. Splitting it was a third re-derivation of the tokenizer — `split_whitespace` plus a
+/// fixed trim set — and it minted the wrong strings: `gene(gene_symbol:` for a span the parser
+/// tokenizes as `gene`, `gene_symbol`; `[CHRPOS]` for `CHRPOS`; and the whole of
+/// `lookup/symbol/homo_sapiens/XIAP?expand=1` for `homo_sapiens`. Seven surfaces carried the
+/// author's markup and still fell through to the unevidenced fallback.
 pub fn code_span_augmentation(
     base: &Arc<Layer>,
-    document: &str,
+    document: &SegmentedDocument,
     oov: &BTreeSet<String>,
 ) -> LexiconAugmentation {
     let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
@@ -1370,71 +1466,75 @@ pub fn code_span_augmentation(
     let mut supporting = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
 
-    for span in code_spans(document) {
-        // A span can hold several tokens (`fields=dbnsfp.aa.pos,dbnsfp.gerp`); each is a literal.
-        for raw in span.split_whitespace() {
-            let tok = raw.trim_matches(|c: char| matches!(c, '(' | ')' | '"' | '\'' | ',' | ';'));
-            if tok.len() < 2 {
-                continue;
-            }
-            // A notation carries STRUCTURE; an opaque literal does not. Leave it to the source
-            // that can record the parse.
-            if eigenius_notation::recognize(tok).is_some() {
-                continue;
-            }
-            let key = slug(tok);
-            if key.is_empty() || !seen.insert(key.clone()) {
-                continue;
-            }
-            if !is_pipeline_gap(oov, tok) {
-                continue;
-            }
-            let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:lit_{key}")) else {
-                continue;
-            };
-            let mut ni = Resource::new(ni_iri.clone());
-            ni.set(p(wk::IS_A), Value::Array(vec![Value::iri(&entity)]));
-            ni.set(
-                p(wk::DESCRIPTION),
-                Value::String(format!(
-                    "Doc-local literal: the document marks {tok:?} as code, so it is a string \
-                     mentioned rather than a word used."
-                )),
-            );
-            let mut b = LayerBuilder::new("code-span-emit", Some(Arc::clone(base)));
-            if b.add_resource(ni.clone()).is_err() {
-                continue;
-            }
-            let tmp = Arc::new(b.build(LayerStorage::in_memory()));
-            let binding = AbbreviationBinding {
-                abbr: tok,
-                long_form: tok,
-                concept_iri: ni_iri.as_str(),
-                doc_ns: "urn:eigenius:doc",
-            };
-            let Some(rs) = abbreviation_resources(&tmp, &binding) else {
-                continue;
-            };
-            let (entries, extra): (Vec<Resource>, Vec<Resource>) =
-                rs.into_iter().partition(|r| r.is_instance_of(&entry_class));
-            if entries.is_empty() {
-                continue;
-            }
-            supporting.push(ni);
-            supporting.extend(extra);
-            for proposed in entries {
-                added.push(LexicalBinding {
-                    proposed,
-                    provenance: Provenance {
-                        surface: tok.to_string(),
-                        long_form: None,
-                        context: span.to_string(),
-                        method: ResolutionMethod::MarkedAsCode,
-                        grounded_to: None,
-                        confidence: None,
-                    },
-                });
-            }
+    let spans = code_spans(document.text());
+    for owned in parser_tokens(base, document) {
+        let tok = owned.as_str();
+        if tok.chars().count() < 2 {
+            continue;
+        }
+        // The author's markup, and nothing else: some code span holds this token, bounded so a
+        // span containing `gene_symbol` does not also claim `gene`. The span that holds it is
+        // the provenance context.
+        let Some(span) = spans.iter().copied().find(|sp| contains_token(sp, tok)) else {
+            continue;
+        };
+        // A notation carries STRUCTURE; an opaque literal does not. Leave it to the source
+        // that can record the parse.
+        if eigenius_notation::recognize(tok).is_some() {
+            continue;
+        }
+        let key = slug(tok);
+        if key.is_empty() || !seen.insert(key.clone()) {
+            continue;
+        }
+        if !is_pipeline_gap(oov, tok) {
+            continue;
+        }
+        let Ok(ni_iri) = Iri::parse(&format!("urn:eigenius:doc:lit_{key}")) else {
+            continue;
+        };
+        let mut ni = Resource::new(ni_iri.clone());
+        ni.set(p(wk::IS_A), Value::Array(vec![Value::iri(&entity)]));
+        ni.set(
+            p(wk::DESCRIPTION),
+            Value::String(format!(
+                "Doc-local literal: the document marks {tok:?} as code, so it is a string \
+                 mentioned rather than a word used."
+            )),
+        );
+        let mut b = LayerBuilder::new("code-span-emit", Some(Arc::clone(base)));
+        if b.add_resource(ni.clone()).is_err() {
+            continue;
+        }
+        let tmp = Arc::new(b.build(LayerStorage::in_memory()));
+        let binding = AbbreviationBinding {
+            abbr: tok,
+            long_form: tok,
+            concept_iri: ni_iri.as_str(),
+            doc_ns: "urn:eigenius:doc",
+        };
+        let Some(rs) = abbreviation_resources(&tmp, &binding) else {
+            continue;
+        };
+        let (entries, extra): (Vec<Resource>, Vec<Resource>) =
+            rs.into_iter().partition(|r| r.is_instance_of(&entry_class));
+        if entries.is_empty() {
+            continue;
+        }
+        supporting.push(ni);
+        supporting.extend(extra);
+        for proposed in entries {
+            added.push(LexicalBinding {
+                proposed,
+                provenance: Provenance {
+                    surface: tok.to_string(),
+                    long_form: None,
+                    context: span.to_string(),
+                    method: ResolutionMethod::MarkedAsCode,
+                    grounded_to: None,
+                    confidence: None,
+                },
+            });
         }
     }
 
@@ -1532,7 +1632,7 @@ pub fn derive_with(
 /// Only one affix is stripped, and the base must be attested: no chains, no invented bases.
 pub fn derivation_augmentation(
     base: &Arc<Layer>,
-    document: &str,
+    document: &SegmentedDocument,
     oov: &BTreeSet<String>,
 ) -> LexiconAugmentation {
     let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
@@ -1617,7 +1717,7 @@ pub fn derivation_augmentation(
 /// supplied by the lexicon is grounded on its head part, with the full form recorded.
 pub fn compound_augmentation(
     base: &Arc<Layer>,
-    document: &str,
+    document: &SegmentedDocument,
     oov: &BTreeSet<String>,
 ) -> LexiconAugmentation {
     let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
@@ -1724,7 +1824,7 @@ pub fn compound_augmentation(
 /// re-minting, and `entries_for_form` covers the committed lexicon.
 pub fn fallback_augmentation(
     base: &Arc<Layer>,
-    document: &str,
+    document: &SegmentedDocument,
     oov: &BTreeSet<String>,
     already: &BTreeSet<String>,
 ) -> LexiconAugmentation {
