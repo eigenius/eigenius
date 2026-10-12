@@ -165,14 +165,25 @@ built next rather than which one the model privileges.
 and nothing here needs a per-document one: `Å` occurs 7 times in the XIAP source and `bp` 4, both
 resolving from the chain, 0 of either in the residual tail.
 
-The lexicon scope is a different matter, and the mechanism already exists. `lexicon:LexiconProfile`
-is "a named, ordered parse scope … selectable as a scope by IRI", and `lexicon:lexica` says "array
-order IS resolution precedence (D65 §4.1; earlier ranks first, **later stay in the forest, no
-shadowing**)". `lexicon:in_lexicon` carries membership, and absent means "unscoped /
-always-available".
+The lexicon scope is a different matter, and the mechanism already exists.
+`lexicon:LexiconProfile` is "a named, ordered parse scope … selectable as a scope by IRI".
 
-So decision 5's glossary gets identity for free, and the precedence risk dissolves: an
-`UnevidencedFallback` entry ranked last cannot REMOVE a chain sense, only rank below it.
+**It does two separable things, and the distinction is the whole value.** `lexicon:in_lexicon`:
+"a scope **keeps only** entries whose in_lexicon is in the scope set, and the entry's lexicon order
+feeds the rank. Absent ⇒ unscoped / always-available (e.g. the grammatical closed class)."
+
+| | mechanism | effect |
+|---|---|---|
+| **selection** — which lexica the profile names | exclusion, HARD | an entry in an unnamed lexicon is gone, not demoted |
+| **order** — their position in `lexicon:lexica` | rank, SOFT | "earlier ranks first, later stay in the forest, no shadowing"; folded in as the primary rank key, before sense-frequency |
+
+So NARROWING IS WHAT A PROFILE IS FOR. An earlier draft of this section listed "whether to narrow
+the chain's lexica" as open, which mistook a policy question for a mechanism one: the mechanism is
+built, specified and unused.
+
+Both halves land on decision 5's glossary. Selection gives it identity and membership for free.
+Order dissolves the precedence risk: an `UnevidencedFallback` entry ranked last cannot REMOVE a
+chain sense, only rank below it.
 
 **One glossary lexicon would be wrong, because the glossary is not homogeneous.** Its entries span
 `ResolutionMethod`, which is already declared "a trust signal on the binding, most-trusted first" —
@@ -256,9 +267,13 @@ measured.
   same bytes get the same closure. It does not say what happens when a better source later claims a
   surface the fallback took — whether the stored glossary is superseded, versioned, or left alone
   with the improvement visible only in a fresh run.
-- **Whether to narrow the CHAIN's lexica per document** (as against adding the document's own,
-  which decision 6 settles). It would cut sense ambiguity — measured sense× 4.95, 2297 readings over
-  464 skeletons — but it trades coverage for precision in the one place this project refuses to:
-  `grammar_gap == 0` AND `missing_lexeme == 0`, non-negotiable. And there is no measurement of WHICH
-  senses are spurious, only that there are many. Step 3 produces that measurement; the question is
-  answerable after it, not before.
+- **WHICH lexica a document's profile should name** — the policy, not the mechanism, which
+  decision 6 settles. Narrowing cuts sense ambiguity, measured here at sense× 4.95: 2297 readings
+  over 464 skeletons. But selection is EXCLUSION, so a profile that drops a lexicon a document
+  needs loses coverage outright rather than ranking it low, and coverage is the one thing this
+  project holds non-negotiable (`grammar_gap == 0` and `missing_lexeme == 0`).
+  
+  That makes a profile TESTABLE rather than a judgement call: a candidate profile is admissible iff
+  coverage holds on it, and preferable iff it lowers `total-skeletons` while doing so. What is
+  missing is not a decision but a measurement of which senses are spurious — step 3 produces it,
+  and the first profile worth testing is the one it implies.
