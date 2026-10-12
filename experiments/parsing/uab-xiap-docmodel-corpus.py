@@ -20,6 +20,15 @@ rate over all three says nothing about any of them.
 `form` keeps step 4's rule (sentence-final punctuation ⇒ prose, else fragment) so that one axis
 stays comparable between the two measurements.
 
+ONLY `kind_prose` UNITS REACH THE PAGE (D102 decision 2). `enc:unit_kind` is the routing switch —
+"only `prose` enters the DCG parser" — specified since D62 and unreachable until now, because the
+parser's input was a text file carrying no kinds. The 125 table rows are captured structurally and
+must not be scored as grammar failures; 110 of them were.
+
+Note what this does NOT route: the bold-lead fragments (`**What I would do:**`) are `kind_prose` by
+the model's own typing, so they stay. Whether they should be a kind of their own is a document-model
+question, not a routing one.
+
 One line is one unit: the harness must run `--units-per-line`, which the scorer asserts.
 """
 
@@ -42,13 +51,21 @@ def main():
     block = dm.block_of(model)
     reachable = set(region)
 
-    page, rows, orphans = [], [], []
+    page, rows, orphans, routed = [], [], [], []
     for u in model["units"]:
         uid = u["id"]
         if uid not in reachable:
             # A unit the containment walk never reaches is a defect in the model, not a datum:
             # it would be measured without belonging anywhere. Reported, never silently dropped.
             orphans.append(uid)
+            continue
+        # D102 decision 2: enc:unit_kind ROUTES. "What kind of unit this is (prose / equation /
+        # citation / table) — selects the routing: only `prose` enters the DCG parser." The switch
+        # has been specified since D62 and unreachable, because the parser's input was a text file
+        # with no kinds; 110 of the 125 table rows were scored as GRAMMAR gaps for failing to be
+        # sentences. Routed out here, where the document model's own typing is in hand.
+        if u["kind"] != "kind_prose":
+            routed.append((uid, u["kind"]))
             continue
         one_line = " ".join(u["prose"].split())
         terminated = bool(re.search(r"[.!?]['\")\]]?$", one_line))
@@ -72,6 +89,14 @@ def main():
     print("  by block: " + "  ".join(f"{k} {v}" for k, v in sorted(by_block.items())))
     print("  by form : " + "  ".join(f"{k} {v}" for k, v in sorted(by_form.items())))
     print(f"  regions : {len(dm.regions(model))}")
+    if routed:
+        by_kind = {}
+        for _, k in routed:
+            by_kind[k] = by_kind.get(k, 0) + 1
+        print("  ROUTED OUT (enc:unit_kind != kind_prose, D102 d2): "
+              + "  ".join(f"{k} {v}" for k, v in sorted(by_kind.items())))
+        print("     these are captured structurally, NOT parsed — and must not be counted as "
+              "grammar gaps")
     if orphans:
         print(f"  ORPHANS (unreachable by containment, EXCLUDED): {len(orphans)} "
               + ", ".join(orphans[:8]))
