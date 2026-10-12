@@ -99,6 +99,31 @@ names and cell values — STRUCTURED capture, not prose parsing, which is what d
 `kind_table` to. And it marks the field set D101 deferred as unexercised (0 captions, 0 labels in
 the XIAP report): caption and label are the right fields when a document has them.
 
+**The difference that matters is not a field, it is where the representation LIVES.** Every tool
+above produces a document-shaped JSON — an intermediate artifact, checked by its own code, handed to
+downstream NLP. There is no intermediate here. `enc:Document` and everything under it ARE chain
+resources, so the unified representation is the knowledge graph itself.
+
+Three consequences, and each is already visible in this session's work:
+
+- **The representation is validated, not conventional.** `enc:body` and `enc:children` are
+  `class_types enc:Block`, so a non-Block in a body is a `ClassTypeMismatch` from the kernel. A JSON
+  schema is enforced by whatever reads it; this is enforced before the document exists.
+- **Structure is queryable by the same mechanism as everything else.** "The methods" is a query over
+  `enc:section_kind` because a section is a resource on a chain — not a string field a consumer must
+  agree to interpret the same way.
+- **Provenance, locators and the gap stream are in the same graph as the content.** `enc:LexicalGap`
+  records, `enc:locator`, `variant:Allele` fields and the units they describe are one addressable
+  structure, not a JSON document beside a separate record of what happened to it.
+
+That is also why decision 3 above is cheap for us and would not be for them: passing an
+`enc:Document` IRI to the pipeline is the platform's own idiom, where a JSON pipeline must pass the
+blob.
+
+**And it means no XML stage on the live route.** `lxml`/XPath is the right tool for querying a JATS
+tree, and the route in use reads markdown, whose structure is line-oriented. When route 1 is built,
+JATS maps onto these resources directly — there is no document-JSON in between to query.
+
 **Two places we are deliberately stricter, and should stay so.**
 
 | | prior art | here |
