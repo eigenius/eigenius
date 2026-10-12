@@ -54,13 +54,23 @@ any detour.
 > and the largest actionable one is 6 author surnames the model already carries in
 > `reference:creator` on its 63 `enc:Ref` entries.
 >
-> **One defect, found three times: a source minting entries under surfaces the parser never asks
+> **One defect, found FOUR times: a source minting entries under surfaces the parser never asks
 > for.** The gate used `has_token` per surface where the encoder uses `unknown_words` per unit; five
 > sources enumerated page-level tokens, and joining the page DELETES 613 distinct surfaces (the
 > lexer strips a parenthetical that opens in one unit and closes in a later one) and MANUFACTURES 13
 > (`SpCas9`, which the fallback had minted an entry for); and `code_span_augmentation` split spans
-> with `split_whitespace`, minting `gene(gene_symbol:` and `[CHRPOS]`. `SegmentedDocument` carries
-> the units and their text, built once, and all six sources take it.
+> with `split_whitespace`, minting `gene(gene_symbol:` and `[CHRPOS]`; and the named-entity source
+> did the same, minting `axis Damgaard` from `axis (Damgaard et al. 2012)` and `CAT PAM` from
+> `` the `CAT` PAM `` — dead multiword keys the parser can never match. `SegmentedDocument` carries
+> the units and their text, built once, and all seven sources take it. Named entities 6 → 3, every
+> other source and the whole parse unchanged.
+>
+> The named-entity head test is now the author's MARKUP, per occurrence, not orthography: rejecting
+> ALL-CAPS heads would also have caught `CAT PAM` and would have been wrong, since this page's
+> all-caps-headed appositions are `CFTR W1282X`, `ACMG PM2`, `MANE CDS` and `REST API`, all real.
+> Re-measuring caught one regression on the way: the parser drops `:` and sentence-final `.` rather
+> than emitting them, so `Two errata: Nat Commun` read as one apposition; a clause boundary is now
+> read from the gap between two token spans.
 >
 > The sources, in merge order: notation (published grammars — HGVS both alphabets, accessions,
 > coordinates, bare positions), recurrent OOV names (orthography + repetition, admissible ONLY
@@ -110,6 +120,15 @@ any detour.
 > DOCUMENT; `ResolutionMethod` is not machine-readable and a property for it costs a reseed — batch
 > it with `enc:gap_injected`'s description, which still says "(LLM)" though injection is now
 > deterministic.
+>
+> **Batched for the next reseed — closed-class omissions.** `is_closed_class_surface` does not own
+> `while`, `whereas`, `although`, `because`, `during`, `whether`, nor `your`, `my`, `everything`,
+> `likewise`. Measured cost: `while` has a WordNet noun sense ("a while"), so it passes
+> `is_apposition_head` and the named-entity source minted **`while Ile380`** from "buried at ~0%
+> while Ile380 is 18–30% exposed" — a multiword NP entry that can block the subordinate-clause
+> reading. The fix is the closed-class layer owning the surface, which changes what the importer
+> seeds; adding `while` to the source's own 56-entry `HEAD_STOP_WORDS` would be the fifth patch on a
+> hand-list that has now failed five times.
 
 ---
 

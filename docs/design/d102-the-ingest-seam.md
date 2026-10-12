@@ -273,6 +273,48 @@ moved are exactly `CHRPOS`, `chrX`, `dbnsfp.gerp`, `gene_symbol`, `homo_sapiens`
 `reference_genome`, `rest.php`. Nothing else changed — same 282 grammar gaps, same 2057 readings
 over 458 skeletons. A provenance fix should move evidence, not coverage.
 
+### A fourth, in the named-entity source
+
+`extract_named_entities_with` read `text.split_whitespace()` and stripped surrounding punctuation
+itself. It produced six entities on this page, three of them strings the parser never forms:
+
+| entity | where it came from | why it is not one |
+|---|---|---|
+| `axis Damgaard` | `axis (Damgaard et al. 2012)` | the `(` was stripped by the source's own `bare()`; the parser resolves the parenthetical away, so neither token is ever adjacent to the other |
+| `CAT PAM` | `` as was the `CAT` PAM `` | `CAT` is a PAM sequence the author quoted as a literal, not a noun typing `PAM` |
+| `while Ile380` | `buried at ~0% while Ile380 is 18–30% exposed` | `while` has a WordNet noun sense ("a while"), so it passes `is_apposition_head` |
+
+The minted entry is a MULTIWORD key and the parser matches it by joining its own tokens, so a key
+built any other way is a key it can never match — a dead entry claiming coverage that does not
+exist. The source now takes the parser's tokens, per unit, which disposes of `axis Damgaard`.
+
+**For `CAT PAM`, markup, not orthography.** Rejecting an ALL-CAPS head would also catch it and would
+be wrong: this page's all-caps-headed appositions are `CFTR W1282X`, `ACMG PM2`, `MANE CDS` and
+`REST API`, all four real, and `CFTR W1282X` types a variant by its gene. The author's backticks say
+which is which, and it is the same `code_spans` the code-span source reads — one markup rule serving
+both. The test is per OCCURRENCE, against the token's own byte span: asking whether the SURFACE
+appears in any span would reject `gene`, `protein`, `variant`, `region`, `codon`, `sequence`,
+`position`, `score` and 60 more document-wide, because each also sits inside a quoted URL here.
+
+**`while Ile380` is a closed-class omission and costs a reseed.** `is_closed_class_surface` does not
+own `while`, `whereas`, `although`, `because`, `during` or `whether`. Adding `while` to the source's
+own 56-entry `HEAD_STOP_WORDS` would be the fifth patch on a hand-list that has now failed five
+times; the layer whose job this is should own the surface, which changes what the importer seeds.
+Batched with the other reseed-gated edits.
+
+**One regression, caught by re-measuring.** The parser emits `,` as a non-word token but DROPS `:`
+and a sentence-final `.`, so adjacency in the token stream is not adjacency in the text:
+`Two errata: Nat Commun 2025` became the apposition `errata Nat Commun`, which took one of
+`Nat Commun`'s two occurrences with it and dropped the real entity below the recurrence threshold.
+A clause boundary is now read from the gap between two token spans — the parser's own data, not a
+third tokenizer.
+
+Result: 6 entities → 3. `Ensembl REST` also went, correctly — one of its two occurrences is inside a
+parenthetical the parser strips, so the recurrence evidence is one, not two. Every other source is
+unchanged (93 notations, 46 names, 29 code literals, 2 derived, 74 compounds, 64 unevidenced), and so
+is the parse: `missing-lexeme` 0, grammar-gap 282, 2057 readings over 458 skeletons. All three
+removed entries were dead keys.
+
 ### What the 64 unevidenced entries are
 
 The fallback is counted separately so it can be read as a worklist. Of 421 entries, 64 rest on no
