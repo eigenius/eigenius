@@ -3003,6 +3003,111 @@ fn probe_step5_construction_families() {
     }
 }
 
+/// LOCALIZE the reduced-relative PP gap (survey §4 step 3, item 1). `queried here` lifts to a noun
+/// post-modifier and `queried in the study` does not; this ladder separates the participle, the
+/// modifier kind, and the attachment. Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       probe_reduced_relative_pp -- --ignored --nocapture
+#[test]
+#[ignore = "localize the reduced-relative PP gap; --ignored --nocapture"]
+fn probe_reduced_relative_pp() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    let probes: &[(&str, &str)] = &[
+        ("bare participle", "The resource queried is reliable."),
+        ("+ adverb", "The resource queried here is reliable."),
+        (
+            "+ adverb (other)",
+            "The resource queried recently is reliable.",
+        ),
+        (
+            "+ agent by-phrase",
+            "The resource queried by the study is reliable.",
+        ),
+        (
+            "+ adjunct PP",
+            "The resource queried in the study is reliable.",
+        ),
+        (
+            "+ adjunct PP (other prep)",
+            "The resource queried for the study is reliable.",
+        ),
+        (
+            "other verb + adjunct PP",
+            "The gene expressed in the liver is current.",
+        ),
+        (
+            "other verb + adverb",
+            "The gene expressed strongly is current.",
+        ),
+        (
+            "used + adjunct PP",
+            "The method used in the study is simple.",
+        ),
+        ("used + adverb", "The method used here is simple."),
+        // The PP alone as a post-modifier, with no participle: the `pp_mod` baseline.
+        (
+            "PP post-modifier alone",
+            "The resource in the study is reliable.",
+        ),
+        // Present participle (ger) post-nominal.
+        ("ger + object", "A patient carrying the variant was found."),
+        ("ger + adverb", "A patient waiting here was found."),
+        ("ger intransitive", "A patient waiting was found."),
+        (
+            "ger + adjunct PP",
+            "A patient waiting in the study was found.",
+        ),
+        // Predicative controls: the same VP used finitely, to show the verb frame itself is fine.
+        (
+            "finite passive + PP",
+            "The resource was queried in the study.",
+        ),
+        ("finite ger + object", "A patient was carrying the variant."),
+        // Is `expressed in …` the OBLIQUE route? WordNet's PP frames are preposition-agnostic
+        // (`prep_any`), so if the oblique lift is what licenses it, ANY preposition fills the slot.
+        (
+            "express + other prep",
+            "The gene expressed for the liver is current.",
+        ),
+        (
+            "express + another",
+            "The gene expressed with the liver is current.",
+        ),
+        (
+            "express + agent",
+            "The gene expressed by the liver is current.",
+        ),
+        // And the control: `query` in a frame it has no PP for, finite vs participial.
+        (
+            "query finite + adverb",
+            "The resource was queried recently.",
+        ),
+        (
+            "query participial + adverb",
+            "The resource queried recently is reliable.",
+        ),
+    ];
+    for (label, s) in probes {
+        let unknown = index.unknown_words(s, &lem);
+        if !unknown.is_empty() {
+            eprintln!("  [{:>9}] {label:<28} {s}  <- {unknown:?}", "LEX-GAP");
+            continue;
+        }
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {label:<28} {s}");
+    }
+}
+
 /// STEP 4 (RC-1) — witness the bare-UMLS-noun-subject mechanism (d63-parse-gap-closure §3/§4).
 /// Part 1: the actual `lexicon:cat` of the abbreviation forms in the snapshot (count `num_any` vs `mass`
 /// vs `cat_np`). Part 2: a determiner/number/mass battery isolating whether a determiner or a mass/plural

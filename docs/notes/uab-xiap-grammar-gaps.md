@@ -164,19 +164,96 @@ rest would be caught.
 `rules::constructions::appose_group` handles the `<common noun> <Name>` designation («genes MSH2»).
 The comma-delimited NP appositive is a different construction and nothing covers it.
 
+## Item 1 landed: the short-passive participial lift
+
+**`pass` had exactly one producer.** `reduced_relative` (`S[dcl,pass]\NP → cat_pp`) fires on nothing
+else, and the only route to `pass` was `gq_prep_passive_agent` — the long passive's by-phrase. So
+"the deficiency predicted by the model" had a reduced relative and the same construction with the
+agent left out did not.
+
+Localized before building anything. The failure is not "adjunct PP", which is what the probe table
+above suggested:
+
+| | before |
+|---|---|
+| «The gene expressed in the liver is current.» | CLOSED×2 |
+| «The resource queried in the study is reliable.» | GAP |
+
+`express` has a WordNet PP frame, so `expressed in …` went through
+`oblique_participial_lifts`; `query` has none. Confirmed by the frame being
+preposition-agnostic — `expressed for …` and `expressed with …` parse too. And
+«The resource was queried in the study.» parses finitely, so VP-adjunct attachment was never the
+problem.
+
+`short_passive_participial_lifts` adds the second producer: `(S[dcl,pss]\NP)/cat_np` →
+`S[dcl,pass]\NP`, with the agent existentially closed by `lexicon:passive_sem` — the same term the
+finite short passive (`is`/`was` + unsaturated TV) carries, resolved from the chain rather than
+rebuilt, so the two cannot drift apart. Taking the UNSATURATED functor is the guard: lifting the
+saturated `pss` is what built relativizer-less subject relatives, and once the object slot is filled
+this no longer matches. The leaf emits the shifted `cat_pp` as well, by calling `reduced_relative`
+rather than repeating its mapping, because a `UnaryShift` never sees a one-token cell.
+
+Every passive-participial probe now parses — bare, with an adverb, and with an adjunct PP, for verbs
+with no PP frame:
+
+| | before | after |
+|---|---|---|
+| «The resource queried is reliable.» | GAP | CLOSED×2 |
+| «The resource queried recently is reliable.» | GAP | CLOSED×2 |
+| «The resource queried in the study is reliable.» | GAP | CLOSED×4 |
+| «The method used in the study is simple.» | GAP | CLOSED×4 |
+
+### What it cost, and what it bought
+
+The 62-unit CNL baseline page (`baseline.json`'s corpus), cap-only, same store, A/B against the
+unmodified tree:
+
+| | before | after |
+|---|---:|---:|
+| grammar-gap / missing-lexeme | 0 / 0 | 0 / 0 |
+| ambiguous / open | 41 / 21 | 41 / 21 |
+| expected-hits | 53 | 53 |
+| readings | 1258 | 1264 |
+| skeletons | 296 | 304 |
+
+Coverage holds, the outcome distribution is identical and no pin moved; the cost is 8 skeletons.
+
+The probe battery goes 17 → **19** of 29 parsed, 11 → **9** constructional gaps.
+
+The XIAP page, 325 prose units:
+
+| | before | after |
+|---|---:|---:|
+| grammar-gap | 282 | **281** |
+| open | 3 | 4 |
+| readings | 2057 | 2440 |
+| skeletons | 458 | 467 |
+
+**One unit.** That is the measurement that matters for planning: closing a construction converts two
+probes and one page unit, because a 20-to-40-token sentence fails for several reasons at once and
+fixing one of them leaves it failing. The unit that moved went to OPEN — it parses, awaiting
+referent resolution — not to encoded.
+
+The agentive by-phrase probe went CLOSED×4 → CLOSED×8. That is genuine ambiguity, not a
+re-derivation: `for the study` gives 4 and `by the study` 8, and the extra four are the agentive
+analysis, whose semantics differs from the agentless one plus an adjunct (agent bound vs.
+existentially closed). The same `by` ambiguity English has in "written by candlelight".
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:
 
-1. **The reduced relative + PP** (`queried in the study`, `used in the study`) and the
-   **participial post-modifier with an object** (`carrying the variant`). The adverb form already
-   parses, so the rule exists and its PP/object extension is missing. These appear in the verbless-NP
-   units, in NP subjects, and inside long sentences.
-2. **The comma appositive.** Two probes, and it is pervasive in the annotation and caption lines.
-3. **`cannot`**, once the split-vs-reseed decision is made. One token, 7 uses.
-4. **The clause splice**, as part of step 4's CNL rewrite rather than a lexer change: measured at
-   11 of 145 pieces recovered, so it is worth doing and will not be the step that closes the gate.
+1. ~~The reduced relative + PP~~ — **done**, above. Measured: 1 page unit.
+2. **The participial post-modifier with an object** (`carrying the variant`). The passive half is
+   now built; this is the active `ger` half, and the intransitive and adjunct-PP forms already parse
+   («A patient waiting in the study was found.»).
+3. **The comma appositive.** Two probes, and it is pervasive in the annotation and caption lines.
+4. **`cannot`**, once the split-vs-reseed decision is made. One token, 7 uses.
 5. **`rather than` over participles**, and the **demonstrative partitive**. One probe each.
+
+**But the measured yield is ~1 unit per construction**, so the order above closes the gate slowly if
+at all. The leverage is step 4: the clause splice alone recovers 11 of 145 pieces, and a rewrite
+addresses length — the dominant variable — directly, where a grammar rule does not.
 
 Nothing above the lexicon is in doubt: `missing-lexeme` is 0 over the corpus, and the one lexical
 gap the battery found (`cannot`) is a closed-class omission rather than a content word.
