@@ -2850,6 +2850,159 @@ fn probe_grammar_gap_root_causes() {
     }
 }
 
+/// STEP 5 construction battery (`2026-10-11`, survey §4 step 3) — the families the XIAP report's
+/// short grammar gaps exhibit, isolated as synthetic probes over ordinary vocabulary so no lexical
+/// gap is in play. Each failing family is paired with the nearest probe that parses, which is what
+/// localizes it — and a probe whose vocabulary the chain lacks is tagged LEX-GAP rather than GAP,
+/// because two families that looked constructional on the page (a derived `-ly` adverb inside a
+/// passive agent phrase, and `cannot`) turned out to be lexical once isolated.
+///
+/// Measured results, `wordnet-umls-hpo-aligned-2026-10-10-d101`, cap-only — see
+/// `docs/notes/uab-xiap-grammar-gaps.md` for what each contrast establishes:
+///
+///   GAP   reduced relative + PP ..... "the resource queried in the study is reliable"
+///   ok    .. + adverb instead ....... "the release queried here is current"
+///   GAP   participial + object ...... "a patient carrying the variant was found"
+///   ok    passive agent by-phrase ... "the question is resolved by the assay"
+///   GAP   comma appositive .......... "the study, the first of its kind, reports three results"
+///   LEX   `cannot` ................... no entry in the served chain at all, 7 uses on the page
+///   ok    `could not` / `did not` .... "the method could not resolve the question"
+///   GAP   bare negative subject ..... "neither is evidence that the variant is tolerated"
+///   ok    negative quantifier ....... "nothing in the study contradicts the result"
+///   GAP   demonstrative partitive ... "both of those are worth having"
+///   ok    `none of the` .............. "none of the methods resolves the question"
+///   GAP   `rather than` + participles "the gene was tested rather than assumed"
+///   GAP   verbless NP as a unit ..... "the source of the results"
+///
+/// Run:
+///   cargo test -p eigenius-wordnet --test db_backed_encoding \
+///       probe_step5_construction_families -- --ignored --nocapture
+#[test]
+#[ignore = "step 5 construction battery (survey §4 step 3); --ignored --nocapture"]
+fn probe_step5_construction_families() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    // Ordinary vocabulary only — the whole point is that `missing-lexeme` is 0 on every probe, so a
+    // GAP is the construction and nothing else. No augmentation overlay for the same reason.
+    let probes: &[(&str, &str)] = &[
+        ("baseline SVO", "The study reports three results."),
+        ("baseline copular", "The result is a conservative change."),
+        (
+            "baseline passive + PP",
+            "The gene is expressed in the liver.",
+        ),
+        ("worth + gerund", "Two further options are worth testing."),
+        ("demonstrative partitive", "Both of those are worth having."),
+        ("gerund object", "The method deserves naming."),
+        ("gerund object", "The result wants testing."),
+        (
+            "rather than + participles",
+            "The gene was tested rather than assumed.",
+        ),
+        (
+            "reduced relative + PP",
+            "The resource queried in the study is reliable.",
+        ),
+        (
+            "reduced relative + adverb",
+            "The release queried here is current.",
+        ),
+        (
+            "participial + object",
+            "A patient carrying the variant was found.",
+        ),
+        (
+            "reduced relative + PP",
+            "The method used in the study is simple.",
+        ),
+        (
+            "comma appositive",
+            "The study, the first of its kind, reports three results.",
+        ),
+        (
+            "comma appositive",
+            "The gene, a known target, is expressed.",
+        ),
+        (
+            "bare negative subject",
+            "Neither is evidence that the variant is tolerated.",
+        ),
+        ("negative quantifier", "No database resolves the question."),
+        (
+            "negative quantifier",
+            "None of the methods resolves the question.",
+        ),
+        (
+            "negative quantifier",
+            "Nothing in the study contradicts the result.",
+        ),
+        (
+            "VP ellipsis",
+            "The first method resolves the question and the second does.",
+        ),
+        ("modal", "One assay will resolve the question."),
+        (
+            "passive agent by-phrase",
+            "The question is resolved by the assay.",
+        ),
+        (
+            "passive + locative PP",
+            "The question is resolved in the study.",
+        ),
+        (
+            "passive + adverb + PP",
+            "The gene is expressed strongly in the liver.",
+        ),
+        ("cannot", "The method cannot resolve the question."),
+        ("could not", "The study could not find a patient."),
+        ("did not", "The method did not resolve the question."),
+        ("verbless NP", "The source of the results."),
+        ("verbless NP", "The canonical citation for the method."),
+        ("verbless NP", "Two caveats on reading the table."),
+    ];
+    // CHAIN-ONLY, deliberately: a probe whose vocabulary the served lexicon does not have is
+    // reported LEX-GAP, not GAP. The distinction is the whole point of the battery — `cannot` and a
+    // derived `-ly` adverb both looked like constructional failures on the page and are not. An
+    // augmentation would hide that by minting an opaque individual, which composes with nothing and
+    // fails the parse anyway, under a tag that says "construction".
+    let index = build_index_over(&head, None);
+    let (mut gaps, mut lex) = (0usize, 0usize);
+    for (family, s) in probes {
+        let unknown = index.unknown_words(s, &lem);
+        if !unknown.is_empty() {
+            lex += 1;
+            eprintln!("  [{:>9}] {family:<26} {s}  <- {unknown:?}", "LEX-GAP");
+            continue;
+        }
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            gaps += 1;
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {family:<26} {s}");
+    }
+    eprintln!(
+        "{} probes: {gaps} constructional gap(s), {lex} lexical gap(s), {} parsed",
+        probes.len(),
+        probes.len() - gaps - lex
+    );
+    // The baselines must parse, or the battery is measuring the lexicon rather than the grammar.
+    for s in [
+        "The study reports three results.",
+        "The result is a conservative change.",
+    ] {
+        assert!(
+            !index.parse_open(s, &lem).0.is_empty(),
+            "baseline must parse: {s:?}"
+        );
+    }
+}
+
 /// STEP 4 (RC-1) — witness the bare-UMLS-noun-subject mechanism (d63-parse-gap-closure §3/§4).
 /// Part 1: the actual `lexicon:cat` of the abbreviation forms in the snapshot (count `num_any` vs `mass`
 /// vs `cat_np`). Part 2: a determiner/number/mass battery isolating whether a determiner or a mass/plural
