@@ -201,6 +201,115 @@ This makes the enum's order load-bearing, which found a defect: six variants add
 had not honoured it, leaving `UnevidencedFallback` fourth, above `NotationRecognized`. Harmless
 while nothing read the order, wrong the moment a profile does. Corrected the same day.
 
+**7. The augmentation is driven by the PARSER's missing-lexeme signal, not by a pre-pass.**
+
+Every glossary source needs one predicate: which surfaces can the parser not resolve? The encoder
+answers it in one call — `encode_unit` produces `Outcome::MissingLexeme { unknown }` from
+`index.unknown_words(text, lem)` — and `Parser::unknown_words` documents itself as "the
+missing-lexeme signal, and the one definition of it, which the encoding harnesses read". **The gate
+calls that function, on the same unit texts.** Every other formulation drifted:
+
+| gate | failure | measured |
+|---|---|---|
+| `entries_for_form(surface).is_empty()` | too LOOSE — blind to lemmatisation | the fallback minted opaque individuals for 243 ordinary words: `nucleotides`, `cells`, `patients`, `males`, bare numerals, ranges |
+| `aug.missing_oov` | too NARROW — a pre-pass over the page, not the parse's signal | never flagged `Asn373`, `Cas9`, `Glu378`, `I380T`, `CHRPOS`, `Gaudelli`, all present in the page; 103 distinct OOV survived and `missing-lexeme` was 67 |
+| every token, not just words | the quantity path's tokens are never asked about | reported `2026`, `167`, `400,000`, `95%`, `7.6 × 10⁻⁶`, `−0.005`, `1–7`, `50–55` as gaps; the fallback minted opaque individuals for numbers |
+| `has_token` per surface, over the whole page | two re-derivations at once: a multiword entry covers a token `has_token` rejects, and the page is not what the parser tokenizes | 375 surfaces flagged, yet `missing-lexeme` 66, and the parse's own OOV list named `Asn373`, `Thr369`, `Val376Ala`, `Cas9` — surfaces the gate had not flagged |
+
+**The granularity is the unit, and joining is lossy in both directions.** The lexer resolves
+parentheticals before tokens are formed, so a parenthetical that OPENS in one unit and CLOSES in a
+later one is balanced only in the join: joining strips a span no unit strips. The pairing also
+shifts the other way, leaving a unit-internal parenthetical unstripped. This page is one unit per
+line and its parentheses cross line breaks.
+
+| | distinct surfaces |
+|---|---|
+| tokenizing the joined page | 1548 |
+| tokenizing the 325 units | 2148 |
+| deleted by joining | 613 |
+| manufactured by joining | 13 |
+
+Per unit, `unknown_words` reports **526** missing surfaces; over the joined page, 375. The 151 the
+page-level stream never forms are where `Asn373`, `Thr369`, `Val376Ala` and `Cas9` live. `SpCas9` is
+one of the manufactured 13, and the fallback had minted an entry for it — under a surface the parser
+never asks about.
+
+That applied to the gate, and equally to the sources that close against it: five enumerated
+`parser_tokens` over the joined page, so they could not mint an entry for a surface the join had
+deleted. `SegmentedDocument` carries the units and the text they were segmented from, built once,
+and the five take it. The text is kept as given rather than rejoined, because the predicates that
+read running text — a sentence-initial capital, a possessive, a markup span — would otherwise read a
+document the author did not write. `kernel/tests/notation_glossary_source.rs`
+(`a_surface_only_unit_tokenization_forms_still_reaches_a_source`) pins it.
+
+### What the two fixes measured
+
+325 prose units, cap-only, store `wordnet-umls-hpo-aligned-2026-10-10-d101`:
+
+| | missing-lexeme | distinct OOV | grammar-gap | non-prose | scale-bound |
+|---|---|---|---|---|---|
+| page-level `has_token` gate, page-level sources | 66 | 102 | 225 | 10 | 8 |
+| `unknown_words` gate, page-level sources | 59 | 89 | 231 | 11 | 8 |
+| `unknown_words` gate, unit-level sources | **0** | **0** | 282 | 15 | 12 |
+
+The 66 units did not become encodings: 57 moved to grammar-gap, 5 to non-prose, 4 to scale-bound —
+66 exactly. Closing the lexical gap routes a unit to the grammar; it does not parse it.
+
+Source reach, same three runs: notations 77 → 77 → **93**, recurrent names 35 → 35 → **46**,
+code literals 8 → 21 → **21**, compounds 42 → 41 → **74**, derived 2 → 2 → **2**, unevidenced
+fallback 35 → 34 → **71** of 420 entries.
+
+### A third re-derivation, in the one source left on the raw text
+
+`code_span_augmentation` split each span itself — `split_whitespace` plus a fixed trim set of
+`()"',;` — so it minted `gene(gene_symbol:` where the parser asks for `gene_symbol`, `[CHRPOS]` for
+`CHRPOS`, and the whole of `lookup/symbol/homo_sapiens/XIAP?expand=1` for `homo_sapiens`. Seven
+surfaces carried the author's backticks and still fell through to the unevidenced fallback.
+
+It now enumerates `parser_tokens` and claims a token when a code span contains it, bounded so a span
+holding `gene_symbol` does not also claim `gene`. The markup stays the only judgement; the surface
+is the parser's. Measured: code literals 21 → **29**, unevidenced 71 → **64**, and the seven that
+moved are exactly `CHRPOS`, `chrX`, `dbnsfp.gerp`, `gene_symbol`, `homo_sapiens`,
+`reference_genome`, `rest.php`. Nothing else changed — same 282 grammar gaps, same 2057 readings
+over 458 skeletons. A provenance fix should move evidence, not coverage.
+
+### What the 64 unevidenced entries are
+
+The fallback is counted separately so it can be read as a worklist. Of 421 entries, 64 rest on no
+evidence beyond occurrence:
+
+| n | class | what would ground it |
+|---|---|---|
+| 13 | derivational morphology — `oligomerise`, `orthologue`, `ungapped`, `queryable`, `re-derivations`, `paywalled` | the derivation source is suffix-only; prefixes were cut as unsound (`resources` → `re`+`sources`), and British `-ise`/`-logue` variants have no rule |
+| 11 | possessive of an attested base — `gene's`, `XIAP's`, `domain's`, `locus's` | the `'s` clitic belongs to the GRAMMAR, not a glossary entry per base; `oov_name_augmentation` already mints a possessive alias for recurrent names, which is the wrong level |
+| 11 | tool or metric name, unmarked — `PROVEAN`, `MetaRNN`, `pLDDT`, `PHRED`, `RSA`, `ti:tv` | recurrence plus orthography declined them; they are named in the prose but not marked, and most occur once |
+| 9 | joined compound with an OOV part — `XIAP-UBA`, `dATP-triggered`, `91-mammals`, `NOD2→NF-κB` | the compound source needs BOTH parts attested; these have one OOV part, and one is joined by `→` rather than a hyphen |
+| 9 | published identifier with no grammar in the recognizer — `A>G`, `T>C`, `W1282X`, `AF-P98170-F1`, `3₁₀`, `ABE7.10` | each has a published grammar: bare HGVS substitution, one-letter protein change, AlphaFold DB entry, helix nomenclature, base-editor version |
+| 6 | author surname — `Tavtigian`, `Gaudelli`, `Richter`, `Shrake`, `Rupley`, `Herrero` | **the document model already names them.** Each appears in `reference:creator` on an `enc:Ref` — `"Shrake A, Rupley JA"`, `"Tavtigian SV, Greenblatt MS, Harrison SM, et al"` — one of 63 such lines in this model |
+
+The last row is the one this document is about. A glossary source reading `reference:creator` off the
+63 `enc:Ref` entries closes six gaps on markup — D96's "assignment follows the element, never a
+heuristic" — where recurrence and orthography both declined them. It would be the first source that
+reads the model rather than the text, which is decision 1 applied to the glossary.
+
+
+`TokenKind::Word` is "a token the lexicon is asked about. With no entry it is a missing lexeme";
+`Numeral`, `Quantity`, `Range`, `QuantityList` and `Comma` go down the quantity path. `unknown_words`
+applies that restriction itself, which is one more reason to call it rather than reconstruct it.
+
+The function needs a parser, a parser needs the lexical index, and the index is built FROM the
+augmentation — so no pre-pass can be authoritative. **The augmentation therefore runs between two
+index builds**: a chain-only parser supplies the true missing-lexeme set, the sources close against
+it, and the index is rebuilt with the result. That is D62 §7.6a's lazy recovery, applied at the
+seam rather than per unit.
+
+It costs one extra index build over the served lexicon. That cost is what makes the answer the
+parser's rather than a guess ahead of it.
+
+**A measurement taken before this is not attributable.** `missing-lexeme 0` on the 450-unit run was
+luck — the pre-pass happened to cover enough — and the same code gave 67 on the 325-unit prose-only
+run. Figures from either are superseded.
+
 ## Markdown through JATS, rather than a second graph emitter
 
 **Decided: convert markdown-from-a-register to JATS, then ingest it by route 1.** This settles
@@ -273,8 +382,8 @@ measured.
   surface the fallback took — whether the stored glossary is superseded, versioned, or left alone
   with the improvement visible only in a fresh run.
 - **WHICH lexica a document's profile should name** — the policy, not the mechanism, which
-  decision 6 settles. Narrowing cuts sense ambiguity, measured here at sense× 4.95: 2297 readings
-  over 464 skeletons. But selection is EXCLUSION, so a profile that drops a lexicon a document
+  decision 6 settles. Narrowing cuts sense ambiguity, measured here at sense× 4.49: 2057 readings
+  over 458 skeletons. But selection is EXCLUSION, so a profile that drops a lexicon a document
   needs loses coverage outright rather than ranking it low, and coverage is the one thing this
   project holds non-negotiable (`grammar_gap == 0` and `missing_lexeme == 0`).
   

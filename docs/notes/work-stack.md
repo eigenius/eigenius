@@ -27,15 +27,40 @@ any detour.
 > `enc:ReasoningStructure` the derived output. The XIAP report is 450 units in that tree; the
 > register join holds at 427/427 by containment.
 >
-> **Step 2 closed `missing-lexeme` 267 → 71** (−73%) via FIVE new glossary sources, measured
-> cap-only on the d101 store. [uab-xiap-oov-document-model.md](uab-xiap-oov-document-model.md) has
-> the per-block tables.
+> **Step 2 is CLOSED: `missing-lexeme` 0, distinct OOV 0** (`2026-10-11`), measured cap-only on the
+> d101 store over the 325 PROSE units — D102 decision 2 routes the 125 `kind_table` units out, so
+> they are no longer counted as gaps. [uab-xiap-oov-document-model.md](uab-xiap-oov-document-model.md)
+> has the per-block tables.
 >
 > | | start | +notation | +names | +tail | +code+deriv | +shared tokenizer |
 > |---|---:|---:|---:|---:|---:|---:|
-> | missing-lexeme | 267 | 193 | 119 | 106 | 75 | **71** |
-> | grammar-gap | 164 | 225 | 294 | 306 | 335 | **338** |
-> | residual OOV | 242 | 157 | 119 | 113 | 79 | **77** |
+> | missing-lexeme | 267 | 193 | 119 | 106 | 75 | 71 |
+> | grammar-gap | 164 | 225 | 294 | 306 | 335 | 338 |
+> | residual OOV | 242 | 157 | 119 | 113 | 79 | 77 |
+>
+> **That table is 450 units with table rows counted as prose, and its gate was wrong twice over.**
+> On the 325 prose units, with the parser's own `unknown_words` as the gate and every source
+> enumerating the same units (D102 decision 7):
+>
+> | | missing-lexeme | distinct OOV | grammar-gap | non-prose | scale-bound |
+> |---|---:|---:|---:|---:|---:|
+> | page-level `has_token` gate, page-level sources | 66 | 102 | 225 | 10 | 8 |
+> | `unknown_words` gate, page-level sources | 59 | 89 | 231 | 11 | 8 |
+> | `unknown_words` gate, unit-level sources | **0** | **0** | 282 | 15 | 12 |
+>
+> The 66 did not become encodings: 57 → grammar-gap, 5 → non-prose, 4 → scale-bound, exactly 66.
+> Closing the lexical gap routes a unit to the grammar; it does not parse it. 421 entries, of which
+> 64 rest on no evidence beyond occurrence — D102 "What the 64 unevidenced entries are" buckets them,
+> and the largest actionable one is 6 author surnames the model already carries in
+> `reference:creator` on its 63 `enc:Ref` entries.
+>
+> **One defect, found three times: a source minting entries under surfaces the parser never asks
+> for.** The gate used `has_token` per surface where the encoder uses `unknown_words` per unit; five
+> sources enumerated page-level tokens, and joining the page DELETES 613 distinct surfaces (the
+> lexer strips a parenthetical that opens in one unit and closes in a later one) and MANUFACTURES 13
+> (`SpCas9`, which the fallback had minted an entry for); and `code_span_augmentation` split spans
+> with `split_whitespace`, minting `gene(gene_symbol:` and `[CHRPOS]`. `SegmentedDocument` carries
+> the units and their text, built once, and all six sources take it.
 >
 > The sources, in merge order: notation (published grammars — HGVS both alphabets, accessions,
 > coordinates, bare positions), recurrent OOV names (orthography + repetition, admissible ONLY
@@ -52,30 +77,31 @@ any detour.
 > **Two rules were CUT after measuring, not tightened.** Derivational PREFIXES are unsound in
 > general — WordNet gives `discuss`→`cuss`, `research`→`search`, `remove`→`move`, `report`→`port`,
 > `nonsense`→`sense`, all with attested stems; they did not misfire here only because those words
-> are themselves in the lexicon. `disanalogy` and `overread` go to the LlmSynthesized arm instead.
+> are themselves in the lexicon. `disanalogy` and `overread` land in the UNEVIDENCED fallback —
+> `LlmSynthesized` would be the designed route and still has no producer (below).
 > And the name source has now had THREE precision defects of one shape — `Gyrd` (a surname half),
 > `AND` (a function word in caps), `Your` (a sentence-initial capital). Expect a fourth.
 >
-> grammar-gap RISING is the result: a unit cannot be scored on grammar until it clears the lexicon,
-> so step 3 has 306 real gaps where 267 units never got far enough to produce one.
+> grammar-gap RISING is the result: a unit cannot be scored on grammar until it clears the lexicon.
+> With the lexicon fully closed, step 3 has **282** gaps over the 325 prose units, where 267 units
+> never used to get far enough to produce one.
 >
 > **`enc:LexicalGap` now has a writer**, after being declared since D62 with no producer at all —
-> 497 records on this document (213 injected, 171 bound, 113 unresolvable). D62 §9 calls the gap
+> 384 records on the prose units (238 injected, 145 bound, 1 unresolvable; it was 497/213/171/113
+> before step 2 closed and before the table units were routed out). D62 §9 calls the gap
 > stream a first-class coverage signal; nothing emitted it. It is also the INSTRUMENT: every tail
 > figure before it came from re-tokenising the page in Python, which left 27 units unattributable.
 >
 > **`ResolutionMethod::LlmSynthesized` is the same shape — declared, one reference, no producer.**
 > That is the designed route for a word absent from the lexicon, and it does not exist.
 >
-> **The 113 unresolvable are NOT one problem.** Measured from the gap stream: 31 coined compounds
-> (the parser's compound machinery — tokenisation prerequisite, then grammar), 37 data tokens (of
-> which ~25 are published notations not yet implemented — IUPAC sequences, RFC 1123 hostnames, HGNC
-> ids — and ~6 are self-denoting literals needing a grammar category), 14 words absent from the
-> lexicon (4 reachable by derivation: disanalogy→analogy, overread→read, pulldown→pull,
-> dimerisation→dimer; the rest want the LlmSynthesized arm). Only 7 types ever had a deterministic
-> rule, and all three are taken.
+> **Unresolvable is now 1.** What used to be 113 is the 64 UNEVIDENCED entries, which is a different
+> and better-posed question: every surface reaches the grammar, but 64 do so on no evidence beyond
+> occurrence. D102 "What the 64 unevidenced entries are" buckets them — 13 derivational morphology,
+> 11 possessives of an attested base, 11 unmarked tool names, 9 joined compounds with an OOV part,
+> 9 published identifiers with no grammar in the recognizer, 6 author surnames.
 >
-> **Exit gate:** steps 3–6 of the owner's order — measure parse success over the 306 gaps, CNL
+> **Exit gate:** steps 3–6 of the owner's order — measure parse success over the 282 gaps, CNL
 > rewrite, close the encoding gap, then verify each encoding via `verbalize` against the original
 > prose.
 >

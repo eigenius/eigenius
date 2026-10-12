@@ -502,16 +502,61 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
             lem,
         )
     };
-    // THE PIPELINE'S OWN RESIDUAL OOV SET is the gate every source below uses. Deriving it
-    // independently — a raw `entries_for_form` surface lookup — does not see what the pipeline
-    // resolves by LEMMATISATION, and the total fallback then minted opaque individuals for 243
-    // ordinary words: nucleotides, cells, patients, males, plus bare numerals and ranges.
-    let oov: std::collections::BTreeSet<String> = aug
-        .missing_oov
-        .iter()
-        .flat_map(|g| [g.surface.clone(), g.surface.to_lowercase()])
-        .collect();
-    eprintln!("pipeline OOV surfaces: {}", aug.missing_oov.len());
+    // THE PARSER'S OWN missing-lexeme signal is the gate every source below uses, obtained from a
+    // CHAIN-ONLY parser before any augmentation exists (D102 decision 7, D62 §7.6a lazy recovery).
+    //
+    // Two earlier gates were wrong in opposite directions. A raw `entries_for_form` surface lookup
+    // is too LOOSE — it cannot see what the parser resolves by lemmatisation, so the total fallback
+    // minted opaque individuals for 243 ordinary words (nucleotides, cells, patients, males, bare
+    // numerals, ranges). `aug.missing_oov` is too NARROW — it is a pre-pass over the page, not the
+    // parse's signal, and it never flagged `Asn373`, `Cas9`, `Glu378`, `I380T`, `CHRPOS` or
+    // `Gaudelli` although all are in the page, leaving 103 distinct OOV and missing-lexeme 67.
+    //
+    // A whole-page `has_token` sweep was wrong too, in the LOOSE direction: it reported 375
+    // surfaces yet left missing-lexeme 66, and the parse's own OOV list named `Asn373`, `Thr369`,
+    // `Val376Ala` and `Cas9` — surfaces the sweep had NOT flagged. Two re-derivations, not one:
+    // `has_token` is a per-surface predicate, while the signal is `Parser::unknown_words`, which
+    // also excludes a token covered by a MULTIWORD entry and tokenizes the UNIT rather than the
+    // page. Tokenizing the whole page merges across unit boundaries, so the surfaces it asks about
+    // are not the surfaces the parse asks about.
+    //
+    // So call the one function the encoder calls. `encode_unit` produces
+    // `Outcome::MissingLexeme { unknown }` from `index.unknown_words(text, lem)`, and
+    // `unknown_words` documents itself as "the missing-lexeme signal, and the one definition of
+    // it, which the encoding harnesses read". Over `page_units(page)` — the same segmentation the
+    // encode loop iterates — this gate and the gate it feeds ask about identical strings.
+    //
+    // The cost is one extra index build over the served lexicon, which is what makes the answer
+    // authoritative rather than a guess ahead of the parse.
+    // The units the parser will parse, paired with the text they came from — one construction, so
+    // the gate below and the sources it feeds cannot tokenize at different granularities. Measured
+    // on this page: tokenizing the join forms 1548 distinct surfaces and the 325 units form 2148 —
+    // the join DELETES 613 and MANUFACTURES 13. `SpCas9` is one of the 13, and the fallback used to
+    // mint an entry for it, under a surface the parser never asks about.
+    let doc = eigenius_kernel::dcg::SegmentedDocument::new(page, page_units(page));
+    let oov: std::collections::BTreeSet<String> = {
+        let probe = build_index_over(head, None);
+        let mut set = std::collections::BTreeSet::new();
+        // `unknown_words` already restricts to WORD tokens: TokenKind::Word is "a token the
+        // lexicon is asked about. With no entry it is a missing lexeme", and Numeral / Quantity /
+        // Range / QuantityList / Comma are not asked about at all — they go down the quantity path.
+        // An earlier gate probed every token and reported 2026, 167, 400,000, 95%, 7.6 × 10⁻⁶,
+        // −0.005, 1–7 and 50–55 as gaps; the fallback then minted opaque individuals for numbers.
+        for unit in doc.units() {
+            for w in probe.unknown_words(unit, lem) {
+                set.insert(w.to_lowercase());
+                set.insert(w);
+            }
+        }
+        set
+    };
+    eprintln!(
+        "parser missing-lexeme surfaces: {} (chain-only unknown_words over {} units; \
+         aug.missing_oov reported {})",
+        oov.len(),
+        doc.units().len(),
+        aug.missing_oov.len()
+    );
 
     let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(head, page);
     let n_names = ne_aug.added.len();
@@ -531,7 +576,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // it: the two recognise disjoint things, and `Ile380Thr` is the case apposition structurally
     // cannot reach — interior capital, lowercase-initial prefixed form, and never a noun head in
     // front of it.
-    let not_aug = eigenius_kernel::dcg::notation_augmentation(head, page, &oov);
+    let not_aug = eigenius_kernel::dcg::notation_augmentation(head, &doc, &oov);
     let n_notations = not_aug.added.len();
     eprintln!(
         "notations: {n_notations} recognised — {:?}",
@@ -548,7 +593,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // units — and the signal there is orthography plus repetition, admissible only because the
     // surface is OOV. Merged last of the deterministic sources so both the lexicon and notation
     // have had their claim first.
-    let name_aug = eigenius_kernel::dcg::oov_name_augmentation(head, page, &oov);
+    let name_aug = eigenius_kernel::dcg::oov_name_augmentation(head, &doc, &oov);
     let n_oov_names = name_aug.added.len();
     eprintln!(
         "recurrent OOV names: {n_oov_names} — {:?}",
@@ -565,7 +610,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // after notation and names sit inside an inline code span — the author already distinguished
     // "string mentioned" from "word used", which is one markup rule where the shapes looked like
     // six unrelated pattern-matching jobs.
-    let code_aug = eigenius_kernel::dcg::code_span_augmentation(head, page, &oov);
+    let code_aug = eigenius_kernel::dcg::code_span_augmentation(head, &doc, &oov);
     let n_code = code_aug.added.len();
     eprintln!("code-span literals: {n_code}");
     aug.added.extend(code_aug.added);
@@ -573,7 +618,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
 
     // The eighth: a productive affix over a base the lexicon DOES have. Deterministic, and the
     // arm that would otherwise handle these — ResolutionMethod::LlmSynthesized — has no producer.
-    let deriv_aug = eigenius_kernel::dcg::derivation_augmentation(head, page, &oov);
+    let deriv_aug = eigenius_kernel::dcg::derivation_augmentation(head, &doc, &oov);
     let n_derived = deriv_aug.added.len();
     eprintln!(
         "derived from a base: {n_derived} — {:?}",
@@ -593,7 +638,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     // The ninth: a hyphenated compound whose PARTS are attested. The parser's lexer deliberately
     // keeps an ASCII hyphen inside a token (`wild-type`, `PolyPhen-2` are single items), so
     // `missense-bystander` arrives whole and unknown while both halves are known.
-    let comp_aug = eigenius_kernel::dcg::compound_augmentation(head, page, &oov);
+    let comp_aug = eigenius_kernel::dcg::compound_augmentation(head, &doc, &oov);
     let n_compounds = comp_aug.added.len();
     eprintln!("compounds of known parts: {n_compounds}");
     aug.added.extend(comp_aug.added);
@@ -607,7 +652,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
         .iter()
         .map(|b| b.provenance.surface.clone())
         .collect();
-    let fb_aug = eigenius_kernel::dcg::fallback_augmentation(head, page, &oov, &supplied_now);
+    let fb_aug = eigenius_kernel::dcg::fallback_augmentation(head, &doc, &oov, &supplied_now);
     let n_fallback = fb_aug.added.len();
     eprintln!(
         "UNEVIDENCED FALLBACK: {n_fallback} — {:?}",
@@ -659,7 +704,10 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
     );
     aug.added.extend(abbr_aug.added);
     aug.supporting.extend(abbr_aug.supporting);
-    // RETRACT what the later sources supplied. `missing_oov` is the residual of the
+    // RETRACT what the later sources supplied. NOTE `missing_oov` is the lexicon-backed pass's
+    // own pre-pass residual and is INCOMPLETE as an OOV enumeration (see the probe above); it is
+    // retracted here so the reported figure is not stale, not because it is authoritative.
+    // `missing_oov` is the residual of the
     // lexicon-backed pass ALONE, computed before apposition and notation ran, so merging their
     // entries never removed anything from it — the line below reported 242 residual OOV unchanged
     // while 93 notations had just closed. A gap a later source filled is not a gap.

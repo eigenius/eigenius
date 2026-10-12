@@ -22,6 +22,7 @@
 use std::sync::Arc;
 
 use eigenius_kernel::dcg::notation_augmentation;
+use eigenius_kernel::dcg::SegmentedDocument;
 use eigenius_kernel::esl;
 use eigenius_kernel::layer::{Layer, LayerBuilder, LayerStorage};
 use eigenius_kernel::ontology::Iri;
@@ -56,13 +57,18 @@ fn iri(s: &str) -> Iri {
 /// lemmatisation. The bootstrap chain carries no lexical forms at all, so on it every surface is a
 /// gap — which is what these tests assumed implicitly when the gate was a raw surface lookup. This
 /// states that assumption instead of relying on it.
-fn all_oov(doc: &str) -> std::collections::BTreeSet<String> {
+fn all_oov(doc: &SegmentedDocument) -> std::collections::BTreeSet<String> {
     // The PARSER's tokenizer, because that is what the sources look surfaces up by. Building this
     // set from `split_whitespace` reproduced the very mismatch the sources exist to avoid: the set
     // held `Thr369–Asn373` while the source asked for `Thr369`.
-    let units = eigenius_kernel::dcg::ProseUnits::none();
-    eigenius_kernel::dcg::preprocess::tokenize(doc, &units)
+    //
+    // Per UNIT, for the same reason: the parser tokenizes one unit at a time, and a bracket a unit
+    // leaves open consumes the rest of a joined page (see
+    // `a_surface_only_unit_tokenization_forms_still_reaches_a_source`).
+    let prose = eigenius_kernel::dcg::ProseUnits::none();
+    doc.units()
         .iter()
+        .flat_map(|u| eigenius_kernel::dcg::preprocess::tokenize(u, &prose))
         .flat_map(|t| [t.surface().to_string(), t.surface().to_lowercase()])
         .filter(|t| !t.trim().is_empty())
         .collect()
@@ -70,13 +76,68 @@ fn all_oov(doc: &str) -> std::collections::BTreeSet<String> {
 
 /// The five gated sources, with the gap set built from the document under test.
 fn notation_of(head: &Arc<Layer>, doc: &str) -> eigenius_kernel::dcg::augment::LexiconAugmentation {
+    notation_in(head, &SegmentedDocument::from_sentences(doc))
+}
+fn notation_in(
+    head: &Arc<Layer>,
+    doc: &SegmentedDocument,
+) -> eigenius_kernel::dcg::augment::LexiconAugmentation {
     notation_augmentation(head, doc, &all_oov(doc))
 }
 fn names_of(head: &Arc<Layer>, doc: &str) -> eigenius_kernel::dcg::augment::LexiconAugmentation {
-    oov_name_augmentation(head, doc, &all_oov(doc))
+    let d = SegmentedDocument::from_sentences(doc);
+    oov_name_augmentation(head, &d, &all_oov(&d))
 }
 fn code_of(head: &Arc<Layer>, doc: &str) -> eigenius_kernel::dcg::augment::LexiconAugmentation {
-    code_span_augmentation(head, doc, &all_oov(doc))
+    let d = SegmentedDocument::from_sentences(doc);
+    code_span_augmentation(head, &d, &all_oov(&d))
+}
+
+/// A glossary source must reach a surface that only UNIT tokenization forms.
+///
+/// The parser tokenizes one unit at a time, so that is the granularity at which a source has to
+/// enumerate. Tokenizing the joined page instead is not a near-miss: the lexer resolves
+/// parentheticals before tokens are formed, and a parenthetical that OPENS in one unit and CLOSES
+/// in a later one is balanced only in the join — so joining strips a span that no unit strips, and
+/// every surface inside it disappears from the stream. The page here is one unit per line and the
+/// report's parentheses cross line breaks.
+///
+/// Measured on the XIAP certification log: 526 missing surfaces per unit against 375 page-level,
+/// and the 151 the page-level stream never formed included every surface the parse then returned
+/// as `missing-lexeme` (`Asn373`, `Thr369`, `Val376Ala`, `Cas9`). A source cannot close a gap it
+/// never sees.
+#[test]
+fn a_surface_only_unit_tokenization_forms_still_reaches_a_source() {
+    let head = bootstrap_head();
+    let units = vec![
+        "The domain (see Fig. 1".to_string(),
+        "carries Ile380Thr) in the fold.".to_string(),
+    ];
+    let joined = units.join("\n");
+
+    // The premise: page-level tokenization drops the second unit entirely.
+    let prose = eigenius_kernel::dcg::ProseUnits::none();
+    let page_level: Vec<String> = eigenius_kernel::dcg::preprocess::tokenize(&joined, &prose)
+        .iter()
+        .map(|t| t.surface().to_string())
+        .collect();
+    assert!(
+        !page_level.iter().any(|t| t == "Ile380Thr"),
+        "premise: the open bracket makes the page-level stream lose Ile380Thr, got {page_level:?}"
+    );
+
+    let doc = SegmentedDocument::new(&joined, units);
+    let aug = notation_in(&head, &doc);
+    assert!(
+        aug.added
+            .iter()
+            .any(|b| b.provenance.surface == "Ile380Thr"),
+        "the source enumerates UNITS, so it still reaches Ile380Thr; got {:?}",
+        aug.added
+            .iter()
+            .map(|b| b.provenance.surface.clone())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -464,6 +525,58 @@ fn the_gap_stream_validates_as_lexical_gaps() {
 // ── The seventh source: inline code spans ────────────────────────────────────
 
 use eigenius_kernel::dcg::code_span_augmentation;
+
+/// The markup is the gate; the SURFACE is the parser's.
+///
+/// Splitting the span itself was a third re-derivation of the tokenizer (`split_whitespace` plus a
+/// fixed trim set), and it minted strings the parser never asks for. Measured on the XIAP page:
+/// seven surfaces carried the author's markup and still fell through to the unevidenced fallback,
+/// because the source had minted `gene(gene_symbol:`, `[CHRPOS]` and the whole of
+/// `lookup/symbol/homo_sapiens/XIAP?expand=1` instead of `gene_symbol`, `CHRPOS`, `homo_sapiens`.
+///
+/// The bound matters too: a span holding `gene_symbol` must not also claim `gene`.
+#[test]
+fn a_code_span_is_claimed_under_the_surface_the_parser_asks_for() {
+    let head = bootstrap_head();
+    // `123900532[CHRPOS]` rather than a bracket set off by spaces: the lexer strips a bracketed
+    // appositive, so the parser forms no `CHRPOS` token in `and [CHRPOS] fields` at all — and a
+    // source must not mint an entry for a surface the parser never asks about either.
+    let doc = "The query `gene(gene_symbol: \"XIAP\")` reads `123900532[CHRPOS]` from \
+               `lookup/symbol/homo_sapiens/XIAP`.";
+    let surfaces: Vec<String> = code_of(&head, doc)
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    for want in ["gene_symbol", "CHRPOS", "homo_sapiens"] {
+        assert!(
+            surfaces.iter().any(|s| s == want),
+            "{want}, got {surfaces:?}"
+        );
+    }
+    for never in [
+        "gene(gene_symbol:",
+        "[CHRPOS]",
+        "lookup/symbol/homo_sapiens/XIAP",
+    ] {
+        assert!(
+            !surfaces.iter().any(|s| s == never),
+            "the parser never asks for {never}: {surfaces:?}"
+        );
+    }
+
+    // The bound: `gene` is a token of the prose, and the only span holding those four characters
+    // holds them inside `gene_symbol`.
+    let bounded: Vec<String> = code_of(&head, "A gene is read from `gene_symbol` here.")
+        .added
+        .iter()
+        .map(|b| b.provenance.surface.clone())
+        .collect();
+    assert!(
+        bounded.iter().any(|s| s == "gene_symbol") && !bounded.iter().any(|s| s == "gene"),
+        "a span holding `gene_symbol` does not claim `gene`: {bounded:?}"
+    );
+}
 
 /// 48 of the 113 tokens left unresolvable after notation and names occur inside an inline code
 /// span. The author marked them, for the one thing they have in common — each is a literal string
