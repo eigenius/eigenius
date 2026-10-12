@@ -133,11 +133,32 @@ any detour.
 > page). **A surface the fallback grounds with an opaque individual clears `missing-lexeme` and then
 > scores as a grammar gap** — the general warning for the 64 unevidenced entries.
 >
-> Work order from the measurement: reduced relative + PP and participial-with-object (the adverb form
-> already parses, so the rule exists and its extension is missing); the comma appositive (nothing
-> covers it — `appose_group` is the `<noun> <Name>` designation, a different construction);
-> `cannot`; the clause splice as part of step 4's CNL rewrite; then `rather than` over participles
-> and the demonstrative partitive.
+> Work order from the measurement, item 1 DONE (`2026-10-12`): **the short-passive participial lift**.
+> `reduced_relative` fires only on `pass`, and `pass` had exactly ONE producer —
+> `gq_prep_passive_agent`, the long passive's by-phrase — so the same construction with the agent
+> left out had no route. The diagnosis in the probe table was wrong and localizing fixed it: the
+> blocker is not "adjunct PP" but the verb's FRAME. `expressed in the liver` parses because `express`
+> has a WordNet PP frame and rides `oblique_participial_lifts`; `query` has none. Confirmed by the
+> frame being preposition-agnostic (`expressed for/with …` parse) and by
+> «The resource was queried in the study.» parsing finitely.
+>
+> `short_passive_participial_lifts`: `(S[dcl,pss]\NP)/cat_np` → `S[dcl,pass]\NP`, agent
+> existentially closed by `lexicon:passive_sem` — the SAME term the finite short passive carries,
+> resolved from the chain so the two cannot drift. The UNSATURATED functor is the guard (lifting the
+> saturated `pss` is what built relativizer-less subject relatives). The leaf also emits the shifted
+> `cat_pp`, by calling `reduced_relative` rather than repeating its mapping, because a `UnaryShift`
+> never sees a one-token cell.
+>
+> Measured. 62-unit CNL baseline page, cap-only, A/B against the unmodified tree: grammar-gap 0 →
+> 0, missing-lexeme 0 → 0, ambiguous 41 → 41, open 21 → 21, expected-hits 53 → 53, readings 1258 →
+> 1264, skeletons 296 → 304. Probe battery 17 → 19 of 29 parsed. XIAP page: grammar-gap 282 → **281**,
+> open 3 → 4, readings 2057 → 2440, skeletons 458 → 467.
+>
+> **One page unit.** That is the planning number: a construction fix converts two probes and one unit,
+> because a 20-to-40-token sentence fails for several reasons at once. Remaining order —
+> participial-with-object (the active `ger` half), the comma appositive, `cannot`, `rather than` over
+> participles, the demonstrative partitive — but at ~1 unit each the leverage is step 4's rewrite,
+> which addresses length, the dominant variable.
 >
 > **Exit gate:** steps 4–6 of the owner's order — CNL rewrite, close the encoding gap, then verify
 > each encoding via `verbalize` against the original prose.

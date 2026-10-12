@@ -820,6 +820,19 @@ impl Parser {
         // ENF (`TypeRaised` provenance) keeps these inert outside extraction. Composed cells are
         // raised in the CKY loop.
         let mut beam_drops = 0usize;
+        // ONE definition of what the passive means: `lexicon:passive_sem`, the same term the finite
+        // short passive (`is`/`was` + unsaturated TV) carries. Resolved once — the lift fires at
+        // every leaf, and decoding the λ-term per item would re-decode it thousands of times. A
+        // chain without the entry simply has no short-passive participial route.
+        let passive_sem: Option<Exp> = Iri::parse("urn:eigenius:lexicon:passive_sem")
+            .ok()
+            .and_then(|i| {
+                super::super::lexicon::resolve_sem_value(
+                    &self.grammar.layer,
+                    &crate::ontology::resource::Value::String(i.as_str().to_string()),
+                )
+                .ok()
+            });
         for (i, row) in chart.iter_mut().enumerate() {
             let raised = self.grammar.raise_nps(&row[i]);
             row[i].extend(raised);
@@ -863,6 +876,24 @@ impl Parser {
                     .flat_map(super::super::rules::combinators::oblique_participial_lifts)
                     .collect::<Vec<_>>(),
             );
+            // POST-nominal SHORT-PASSIVE lift — the agentless counterpart of the long passive's
+            // by-phrase, and the second producer of `pass` (`reduced_relative` accepts nothing
+            // else). Same leaf-time requirement as the oblique lift: the source is the unsaturated
+            // one-token functor, which is what keeps the saturated `pss` — the relativizer-less
+            // subject relative — out.
+            if let Some(psem) = passive_sem.as_ref() {
+                let lifted: Vec<Item> = row[i]
+                    .iter()
+                    .flat_map(|it| {
+                        super::super::rules::combinators::short_passive_participial_lifts(
+                            it,
+                            psem,
+                            &self.grammar.layer,
+                        )
+                    })
+                    .collect();
+                mods.extend(lifted);
+            }
             row[i].extend(mods);
             // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all
             // candidate lemmas/POS of the token (`sense_cap` already bounds it per-lemma).

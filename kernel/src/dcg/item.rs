@@ -135,6 +135,25 @@ pub enum Combinator {
     /// `cat_pp` across two nodes (the routes split by provenance, so `Sig` keeps them apart) where the
     /// shift route it replaced carried one.
     ObliqueParticipial,
+    /// A **seed-time SHORT-PASSIVE participial lift** (`short_passive_participial_lifts`): the
+    /// agentless passive participle VP, `S[dcl,pass]\NP`, built from the still-unsaturated
+    /// transitive past participle `(S[dcl,pss]\NP)/NP` with the agent existentially closed.
+    ///
+    /// It exists because `pass` had exactly ONE producer — `gq_prep_passive_agent`, the long
+    /// passive's by-phrase — and [`crate::dcg::rules::constructions::reduced_relative`] fires only
+    /// on `pass`. So a reduced relative could be built for "the deficiency predicted by the model"
+    /// and not for "the method used", "the resource queried in the study" or "the release queried
+    /// recently", which are the same construction with the agent left out.
+    ///
+    /// The semantics is `lexicon:passive_sem` — `λTV. λp. ∃a. TV(p, a)` — resolved from the chain
+    /// rather than rebuilt here, so the participial and the finite short passive (`is`/`was` +
+    /// unsaturated TV, D63 §8.9 Slice 6-aux) cannot drift apart.
+    ///
+    /// **Unsaturated is the guard, not a check.** Lifting the SATURATED `pss` is what built
+    /// relativizer-less SUBJECT relatives ("*the man ate the food" for "the man that ate"); once the
+    /// object slot is filled this no longer matches, exactly as `is_passive` stops matching
+    /// "affected BRCA1". Taking the functor is also what keeps the agent slot available to close.
+    ShortPassiveParticipial,
     /// A **scope-bearing operator's lexical leaf** — an entry declaring `lexicon:scope_bearing`
     /// (sentential negation `not`, the modals, do-support). Set once at seeding by
     /// [`crate::dcg::lexicon::entry_to_item`]; the tag exists so [`Self::Modal`] can be put on the

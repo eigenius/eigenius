@@ -1528,6 +1528,104 @@ pub(crate) fn oblique_participial_lifts(it: &Item) -> Vec<Item> {
     }
 }
 
+/// SHORT-PASSIVE participial lift — the second producer of `pass`, and the one the agentless
+/// reduced relative needs.
+///
+/// `reduced_relative` fires only on `S[dcl,pass]\NP`, and until this existed the only route to
+/// `pass` was `gq_prep_passive_agent` — the long passive's by-phrase. So "the deficiency predicted
+/// by the model" had a reduced relative and "the method used", "the resource queried in the study"
+/// and "the release queried recently" did not, though they are the same construction with the agent
+/// left out. Measured on the XIAP report, the participial post-modifier is one of the two largest
+/// constructional gaps (`docs/notes/uab-xiap-grammar-gaps.md`).
+///
+/// `(S[dcl,pss]\NP)/cat_np` → `S[dcl,pass]\NP`, with the agent existentially closed by
+/// `lexicon:passive_sem` (`λTV. λp. ∃a. TV(p, a)`, the impredicative ∃). That term is RESOLVED FROM
+/// THE CHAIN, not rebuilt here, so this and the finite short passive (`is`/`was` taking the same
+/// unsaturated TV, D63 §8.9 Slice 6-aux) cannot drift apart — they are one definition of what the
+/// passive means, used at two categories.
+///
+/// **The UNSATURATED functor is the guard.** Lifting the saturated `pss` is what built
+/// relativizer-less SUBJECT relatives ("*the man ate the food" for "the man that ate"); once the
+/// object slot is filled this no longer matches, exactly as `is_passive` stops matching "*BRCA1 is
+/// affected HeLa". It is also what leaves the agent slot available to close: after saturation the
+/// agent is gone and only the patient reading survives.
+///
+/// Seed-time, like [`oblique_participial_lifts`] and for the same reason: both chart drivers run the
+/// `UnaryShift` table inside `for len in 2..=n`, so a shift never sees a single-token cell, and
+/// `queried` is one.
+pub(crate) fn short_passive_participial_lifts(
+    it: &Item,
+    passive_sem: &Exp,
+    layer: &Arc<Layer>,
+) -> Vec<Item> {
+    let Some(vp) = short_passive_participial_cat(it.cat()) else {
+        return Vec::new();
+    };
+    let sem = Exp::App(Box::new(passive_sem.clone()), Box::new(it.sem().clone()));
+    // The VP itself, so a VP-adjunct (an adverb, a PP) can attach before the span is shifted.
+    let mut out = vec![Item::from_parts(
+        vp.clone(),
+        sem.clone(),
+        Combinator::ShortPassiveParticipial,
+        it.cost(),
+    )];
+    // AND the shifted post-modifier, because the UNMODIFIED participle is one token and
+    // `reduced_relative` is a `UnaryShift` — both chart drivers run the shift table inside
+    // `for len in 2..=n`, so a leaf never reaches it. Applying the shift function here rather than
+    // repeating its mapping keeps `pass → cat_pp` defined once.
+    if let Some(pp) = super::constructions::reduced_relative(&vp, layer) {
+        out.push(Item::from_parts(
+            pp,
+            sem,
+            Combinator::ShortPassiveParticipial,
+            it.cost(),
+        ));
+    }
+    out
+}
+
+/// `(S[dcl,pss]\NP)/cat_np` → `S[dcl,pass]\NP`, or `None` for any other category.
+///
+/// The result's subject is the OBJECT slot's NP — the patient is what the passive promotes — and the
+/// agent slot (the source's own subject) is the one `passive_sem` closes.
+fn short_passive_participial_cat(cat: &Exp) -> Option<Exp> {
+    use super::super::category::{is_ctor, slash_parts};
+    let (_mode, vp, obj) = slash_parts(cat, "fwd")?;
+    is_ctor(obj, "cat_np")?;
+    let (vmode, s, subj) = slash_parts(vp, "bwd")?;
+    is_ctor(subj, "cat_np")?;
+    let [mood, voice] = is_ctor(s, "cat_s")? else {
+        return None;
+    };
+    if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
+        return None;
+    }
+    if !matches!(voice, Exp::InductiveCtor(_, n, _) if n == "pss") {
+        return None;
+    }
+    let Exp::InductiveCtor(decl, _, _) = cat else {
+        return None;
+    };
+    Some(Exp::InductiveCtor(
+        decl.clone(),
+        "bwd".into(),
+        vec![
+            // The VP slash's own modality, not the functor's — the derived category must not relax
+            // what may consume it.
+            vmode.clone(),
+            Exp::InductiveCtor(
+                decl.clone(),
+                "cat_s".into(),
+                vec![
+                    mood.clone(),
+                    Exp::InductiveCtor(decl.clone(), "pass".into(), Vec::new()),
+                ],
+            ),
+            obj.clone(),
+        ],
+    ))
+}
+
 /// `(S[dcl,pss]\NP)/cat_pp_arg(P)` → `cat_pp/cat_pp_arg(P)`, or `None` for any other category.
 /// The argument is carried through UNCHANGED, so the governed preposition (`prep_any` for WordNet's
 /// preposition-agnostic PP frames) still has to be matched by whatever fills it.
