@@ -161,7 +161,9 @@ built next rather than which one the model privileges.
 
 ## Markdown through JATS, rather than a second graph emitter
 
-**Decided: convert markdown-from-a-register to JATS, then ingest it by route 1.** One ingest route
+**Decided: convert markdown-from-a-register to JATS, then ingest it by route 1.** This settles
+which route is built — route 1, fed by a converter — and it is not the same question as which route
+is canonical, which D96's media-type-appropriate locators already dissolve (see Prior art). One ingest route
 is built and maintained instead of two, and JATS is the shape the model is named for. Two
 constraints make it honest, and one sequencing rule stops it costing a measured result.
 
@@ -224,10 +226,6 @@ measured.
 
 ## Open
 
-- **Which route is built next** — not which is canonical, which the media-type-appropriate locator
-  already settles (see Prior art). Markdown-from-a-register is the one in use; JATS-read-directly
-  is what the prior art implements and what would exercise `enc:ReferenceSpan`, which markdown
-  cannot.
 - **Whether a reused glossary may be AMENDED.** Decision 5 keys reuse on the content hash, so the
   same bytes get the same closure. It does not say what happens when a better source later claims a
   surface the fallback took — whether the stored glossary is superseded, versioned, or left alone
