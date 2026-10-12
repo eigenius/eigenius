@@ -82,6 +82,40 @@ hand the pipeline can recompute `enc:span_start`/`span_end` instead of trusting 
 they can carry `enc:gap_unit`, which is currently unset because an augmentation is built per
 document and the blocked unit is not known at that seam.
 
+## Prior art
+
+The unified-internal-representation shape is established, not novel, which lowers the risk on D96's
+five-routes-to-one-model. Verified `2026-10-11`:
+
+- **`allenai/s2orc-doc2json`** describes itself as PDF2JSON, TEX2JSON and **JATS2JSON** into one
+  target schema, PDFs via Grobid. CORD-19's paper states it parses PMC's JATS "generating the same
+  target S2ORC JSON format". Three input routes, one representation — D96's architecture, built and
+  used at scale. Its PDF path is Grobid→TEI, which is the route D96 already names.
+- **`titipata/pubmed_parser`** (cited as Achakulvisut et al. 2020) handles the PMC open-access JATS
+  subset with per-element handlers.
+
+**Two places this supports a decision above.** `parse_pubmed_table` returns caption, label, column
+names and cell values — STRUCTURED capture, not prose parsing, which is what decision 2 routes
+`kind_table` to. And it marks the field set D101 deferred as unexercised (0 captions, 0 labels in
+the XIAP report): caption and label are the right fields when a document has them.
+
+**Two places we are deliberately stricter, and should stay so.**
+
+| | prior art | here |
+|---|---|---|
+| a unit's section | `parse_pubmed_paragraph` returns a `section` STRING ("Background", "Discussion") | `enc:Section` is a resource with an `enc:section_kind`, so "the methods" is a query (D96, D101) |
+| an inline citation | `reference_ids`, a list per PARAGRAPH | `enc:ReferenceSpan` — the unit, the target, the ref-type, the surface, a locator |
+
+The paragraph-level list is cheaper and loses which mention cited what. D101 keeps the span and
+declines to emit one from markdown at all, because markdown has no `<xref>` to read.
+
+**And it sharpens the canonical-route question rather than answering it.** Every tool above treats
+JATS as primary with Grobid→TEI as the fallback, because their corpora are PMC. Ours is
+markdown-from-a-register. The conclusion is not to pick one: D96's amendment already made locators
+**media-type-appropriate**, so JATS gets XPointer and markdown gets a Text Fragment without either
+being canonical. That is the hedge paying off, and the open question below narrows to which route is
+built next rather than which one the model privileges.
+
 ## Cost
 
 `enc:Document` already exists and is seeded, so this is not a reseed. It is a change to two public
@@ -91,9 +125,10 @@ measured.
 
 ## Open
 
-- **Which of the five routes is canonical.** Markdown-from-a-register is the one in use and the row
-  D96 added last; JATS-read-directly is the one the model is named for. The answer determines
-  whether `enc:locator` is primarily a Text Fragment or an XPointer.
+- **Which route is built next** — not which is canonical, which the media-type-appropriate locator
+  already settles (see Prior art). Markdown-from-a-register is the one in use; JATS-read-directly
+  is what the prior art implements and what would exercise `enc:ReferenceSpan`, which markdown
+  cannot.
 - **Whether the augmentation becomes per-document and persisted.** Today it is an in-memory overlay
   rebuilt every run. A Document-keyed glossary would make a run reproducible without re-deriving it,
   and would give the 46 unevidenced closures a durable home — but it also commits doc-local
