@@ -159,6 +159,32 @@ markdown-from-a-register. The conclusion is not to pick one: D96's amendment alr
 being canonical. That is the hedge paying off, and the open question below narrows to which route is
 built next rather than which one the model privileges.
 
+**6. The document's glossary is a `lexicon:Lexicon` per method, named by a `LexiconProfile`.**
+
+`ProseUnits` stays chain-derived. It is the measurement-unit vocabulary, not a discourse concern,
+and nothing here needs a per-document one: `Å` occurs 7 times in the XIAP source and `bp` 4, both
+resolving from the chain, 0 of either in the residual tail.
+
+The lexicon scope is a different matter, and the mechanism already exists. `lexicon:LexiconProfile`
+is "a named, ordered parse scope … selectable as a scope by IRI", and `lexicon:lexica` says "array
+order IS resolution precedence (D65 §4.1; earlier ranks first, **later stay in the forest, no
+shadowing**)". `lexicon:in_lexicon` carries membership, and absent means "unscoped /
+always-available".
+
+So decision 5's glossary gets identity for free, and the precedence risk dissolves: an
+`UnevidencedFallback` entry ranked last cannot REMOVE a chain sense, only rank below it.
+
+**One glossary lexicon would be wrong, because the glossary is not homogeneous.** Its entries span
+`ResolutionMethod`, which is already declared "a trust signal on the binding, most-trusted first" —
+a surface closed by a published grammar is not the same claim as one closed on nothing. A single
+lexicon would give them one position in the order. So: **one `lexicon:Lexicon` per method, ordered
+by that enum, named by one `LexiconProfile` the Document carries.** Nothing is invented; the
+ordering already existed and the profile already existed.
+
+This makes the enum's order load-bearing, which found a defect: six variants added on `2026-10-11`
+had not honoured it, leaving `UnevidencedFallback` fourth, above `NotationRecognized`. Harmless
+while nothing read the order, wrong the moment a profile does. Corrected the same day.
+
 ## Markdown through JATS, rather than a second graph emitter
 
 **Decided: convert markdown-from-a-register to JATS, then ingest it by route 1.** This settles
@@ -230,5 +256,9 @@ measured.
   same bytes get the same closure. It does not say what happens when a better source later claims a
   surface the fallback took — whether the stored glossary is superseded, versioned, or left alone
   with the improvement visible only in a fresh run.
-- **Whether `ProseUnits` and the lexicon scope vary per document.** `enc:ScopedUnit` exists for
-  per-unit scope; nothing says whether a Document carries a default.
+- **Whether to narrow the CHAIN's lexica per document** (as against adding the document's own,
+  which decision 6 settles). It would cut sense ambiguity — measured sense× 4.95, 2297 readings over
+  464 skeletons — but it trades coverage for precision in the one place this project refuses to:
+  `grammar_gap == 0` AND `missing_lexeme == 0`, non-negotiable. And there is no measurement of WHICH
+  senses are spurious, only that there are many. Step 3 produces that measurement; the question is
+  answerable after it, not before.
