@@ -30,6 +30,31 @@ fn permissive(_head: &str) -> bool {
     true
 }
 
+/// No markup in these fixtures.
+fn no_code(_unit: usize, _tok: &eigenius_kernel::dcg::Token) -> bool {
+    false
+}
+
+/// `text` as the pipeline delivers it: segmented into units, each tokenized by the parser — which is
+/// what the extractor now reads (D102 decision 7).
+fn units(text: &str) -> Vec<(String, Vec<eigenius_kernel::dcg::Token>)> {
+    let prose = eigenius_kernel::dcg::ProseUnits::none();
+    eigenius_kernel::dcg::segment_sentences(text)
+        .into_iter()
+        .map(|u| {
+            let toks = eigenius_kernel::dcg::tokenize(&u, &prose);
+            (u, toks)
+        })
+        .collect()
+}
+
+/// The borrowed view the extractor takes.
+fn view(
+    us: &[(String, Vec<eigenius_kernel::dcg::Token>)],
+) -> Vec<(&str, Vec<eigenius_kernel::dcg::Token>)> {
+    us.iter().map(|(t, k)| (t.as_str(), k.clone())).collect()
+}
+
 #[test]
 fn variant_notation_fails_the_title_case_shape() {
     // `name_token` admits ALL-CAPS (`DRIVE`) or Title-case with NO interior capital — the rule
@@ -37,7 +62,7 @@ fn variant_notation_fails_the_title_case_shape() {
     // `Ile380Thr` carries an interior `T`, so it is not a name token at all, and no amount of
     // recurrence can admit it.
     let text = "The residue Ile380Thr recurs. The residue Ile380Thr recurs again.";
-    let got = extract_named_entities_with(text, permissive);
+    let got = extract_named_entities_with(&view(&units(text)), permissive, no_code);
     assert!(
         !got.iter().any(|n| n.name.contains("Ile380Thr")),
         "interior capital rejects the HGVS shape, got {got:?}"
@@ -46,8 +71,11 @@ fn variant_notation_fails_the_title_case_shape() {
     // The control: the same frame with a Title-case name IS recognized, so the test is not
     // vacuous — the apposition machinery works and the shape is what rejects the variant.
     let ok = extract_named_entities_with(
-        "The project Achilles recurs. The project Achilles recurs again.",
+        &view(&units(
+            "The project Achilles recurs. The project Achilles recurs again.",
+        )),
         permissive,
+        no_code,
     );
     assert!(
         ok.iter().any(|n| n.name == "Achilles"),
@@ -60,7 +88,7 @@ fn the_hgvs_prefix_fails_the_first_character_test() {
     // `p.Ile380Thr` — the form the report uses in tables and quotations — begins lowercase, so it
     // is rejected before the shape test is even reached.
     let text = "The variant p.Ile380Thr recurs. The variant p.Ile380Thr recurs again.";
-    let got = extract_named_entities_with(text, permissive);
+    let got = extract_named_entities_with(&view(&units(text)), permissive, no_code);
     assert!(
         !got.iter().any(|n| n.name.contains("Ile380Thr")),
         "a lowercase-initial name is not a name token, got {got:?}"
@@ -82,7 +110,7 @@ fn the_documents_real_contexts_offer_no_noun_head() {
         "carrying Ile380Thr is",
     ] {
         let text = format!("{frame}. {frame}.");
-        let got = extract_named_entities_with(&text, permissive);
+        let got = extract_named_entities_with(&view(&units(&text)), permissive, no_code);
         assert!(
             !got.iter().any(|n| n.name.contains("Ile380Thr")),
             "«{frame}» offers no noun head, got {got:?}"

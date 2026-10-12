@@ -477,13 +477,45 @@ fn common_noun_concept(layer: &Arc<Layer>, form: &str) -> Option<Iri> {
 /// [`LexiconAugmentation`] (entries in `added`, minted individuals in `supporting`) to MERGE into the
 /// document's augmentation — the same in-memory overlay the OOV grounding uses, so no persistent layer is
 /// committed.
-pub fn named_entity_augmentation(base: &Arc<Layer>, document: &str) -> LexiconAugmentation {
+pub fn named_entity_augmentation(
+    base: &Arc<Layer>,
+    document: &SegmentedDocument,
+) -> LexiconAugmentation {
     let Ok(entry_class) = Iri::parse("urn:eigenius:lexicon:LexicalEntry") else {
         return LexiconAugmentation::default();
     };
     let entity = Iri::parse("urn:eigenius:lexicon:Entity").ok();
 
-    let names = extract_named_entities_with(document, |w| is_apposition_head(base, w));
+    // The parser's tokens, per unit — the minted entry is a multiword key, and the parser matches it
+    // by joining its own tokens.
+    let prose = super::quantity::ProseUnits::load(base);
+    let units: Vec<(&str, Vec<super::preprocess::Token>)> = document
+        .units()
+        .iter()
+        .map(|u| (u.as_str(), super::preprocess::tokenize(u, &prose)))
+        .collect();
+    // The author's markup rejects a head quoted as a literal: `` the `CAT` PAM `` is not `CAT`
+    // typing `PAM`. Same `code_spans` the code-span source reads, so one markup rule serves both.
+    //
+    // Per OCCURRENCE: the byte ranges are computed inside each unit, and a token is code-marked iff
+    // its own span falls in one. Asking whether the SURFACE appears in any span would reject `gene`,
+    // `protein`, `variant`, `region`, `codon` and 60 more common nouns document-wide, because each
+    // also sits inside a quoted URL on this page.
+    let code_ranges: Vec<Vec<std::ops::Range<usize>>> = document
+        .units()
+        .iter()
+        .map(|u| code_span_ranges(u))
+        .collect();
+    let names = extract_named_entities_with(
+        &units,
+        |w| is_apposition_head(base, w),
+        |u, t| {
+            let s = t.span();
+            code_ranges[u]
+                .iter()
+                .any(|r| r.start <= s.start && s.end <= r.end)
+        },
+    );
     let mut added = Vec::new();
     let mut supporting = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -1406,6 +1438,31 @@ fn code_spans(document: &str) -> Vec<&str> {
                 rest = &rest[close + 1..];
             }
             None => break,
+        }
+    }
+    out
+}
+
+/// The byte range of each inline code span's CONTENT in `text` — [`code_spans`] with offsets, so a
+/// token's own span can be tested for containment instead of its surface being matched anywhere.
+pub(crate) fn code_span_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut out = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while let Some(open) = bytes[i..].iter().position(|b| *b == b'`') {
+        let start = i + open + 1;
+        match bytes[start..].iter().position(|b| *b == b'`') {
+            Some(close) => {
+                let end = start + close;
+                if text[start..end].trim() != "" {
+                    out.push(start..end);
+                }
+                i = end + 1;
+            }
+            None => break,
+        }
+        if i >= bytes.len() {
+            break;
         }
     }
     out

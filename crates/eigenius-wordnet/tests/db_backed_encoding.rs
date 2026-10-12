@@ -558,7 +558,7 @@ fn page_augmentation(head: &Arc<Layer>, page: &str, lem: &MorphyLemmatizer) -> L
         aug.missing_oov.len()
     );
 
-    let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(head, page);
+    let ne_aug = eigenius_kernel::dcg::named_entity_augmentation(head, &doc);
     let n_names = ne_aug.added.len();
     eprintln!(
         "named entities: {:?}",
@@ -6351,7 +6351,8 @@ fn named_entity_source_closes_unit4_via_overlay() {
                in MSI cell lines compared to MSS cell lines. Project Achilles screened cell lines. \
                Project DRIVE analysed cell lines.";
 
-    let aug = eigenius_kernel::dcg::named_entity_augmentation(&head, doc);
+    let seg = eigenius_kernel::dcg::SegmentedDocument::new(doc, page_units(doc));
+    let aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &seg);
     let mut got: Vec<String> = aug
         .added
         .iter()
@@ -6593,7 +6594,8 @@ fn probe_ne_alias_case_reachability() {
     } else {
         page
     };
-    let mut aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &doc);
+    let seg = eigenius_kernel::dcg::SegmentedDocument::new(&doc, page_units(&doc));
+    let mut aug = eigenius_kernel::dcg::named_entity_augmentation(&head, &seg);
     // Match the SWEEP's augmentation set exactly, or the trace explains a different parse than the one
     // whose skeletons are being adjudicated. The sweep merges TWO overlays: the named-entity glossary
     // over the parsed CNL (above) AND the abbreviation glossary over the SOURCE page (MSI/MSS
