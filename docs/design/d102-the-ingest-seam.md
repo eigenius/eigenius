@@ -76,11 +76,29 @@ D96's amendment already requires this: a unit's fragment identifier is relative 
 text content, read through `enc:media_type`, pinned by `enc:source_sha256`. With the Document in
 hand the pipeline can recompute `enc:span_start`/`span_end` instead of trusting an authored pair.
 
-**5. The glossary's gap stream attaches to the Document.**
+**5. The glossary attaches to the Document, and is reusable from it.**
 
-`enc:LexicalGap` records gained a writer on `2026-10-11` and are emitted per run. With a Document
-they can carry `enc:gap_unit`, which is currently unset because an augmentation is built per
-document and the blocked unit is not known at that seam.
+Today the augmentation is an in-memory overlay rebuilt every run — `glossary.rs` states it commits
+no persistent layer. Attaching it to the Document makes a run's lexical closure a property of the
+document rather than of the run:
+
+- **Capture.** The minted individuals, their `lexicon:LexicalEntry` aliases and the `enc:LexicalGap`
+  records become resources the Document names. The gap records already exist (written `2026-10-11`);
+  what is missing is a home. With one they can carry `enc:gap_unit`, currently unset because an
+  augmentation is built per document and the blocked unit is not known at that seam.
+- **Reuse, keyed on the content hash.** A second run over the same `enc:source_sha256` loads the
+  glossary instead of re-deriving it. That is what makes a run reproducible without re-deriving
+  closure — and it is the only way an LLM-synthesised entry can be replayed rather than re-asked,
+  which matters because `ResolutionMethod::LlmSynthesized` is the arm the remaining absent words
+  need and it has no producer yet.
+- **A durable home for what rests on nothing.** The 46 `UnevidencedFallback` entries on the XIAP
+  report are reproducible but currently discarded. Committed and named, they can be reviewed,
+  replaced by a better source later, or cited as the reason a claim is weak.
+
+**This commits doc-local individuals to a chain**, which the in-memory overlay deliberately avoided.
+The gap stream is what makes it acceptable: every entry carries the method that produced it, so a
+reader can see which of a document's glossary rests on a published grammar and which on nothing. A
+glossary without that record would be a chain full of unexplained individuals.
 
 ## Prior art
 
@@ -141,6 +159,42 @@ markdown-from-a-register. The conclusion is not to pick one: D96's amendment alr
 being canonical. That is the hedge paying off, and the open question below narrows to which route is
 built next rather than which one the model privileges.
 
+## Markdown through JATS, rather than a second graph emitter
+
+**Decided: convert markdown-from-a-register to JATS, then ingest it by route 1.** One ingest route
+is built and maintained instead of two, and JATS is the shape the model is named for. Two
+constraints make it honest, and one sequencing rule stops it costing a measured result.
+
+**Constraint 1 — the converter emits only what markdown LICENSES.** D96's rule is that a reference
+is a reference "because the markup says so", and the evidence is the AUTHOR'S markup. A
+markdown→JATS converter that synthesised `<xref>` for `(Rigaud et al. 2006)` would launder our own
+inference into markup and then read it back as evidence. Markdown licenses `<sec>`/`<title>` from a
+heading, `<p>` from a blank-line block, `<table-wrap>` from a `|` run, `<code>` from a backtick span,
+`<ref>` from a bibliography bullet. It licenses NO `<xref>`. So the generated JATS carries none, the
+route-1 reader correctly produces no `enc:ReferenceSpan`, and the outcome matches today's for the
+same reason rather than by accident. Honestly incomplete beats speculatively complete.
+
+**Constraint 2 — the JATS is a DERIVED manifestation; the markdown one is kept.** A locator is
+media-type-appropriate (D96), so units ingested from JATS carry XPointers into the JATS — which is
+not the file the author wrote. Dropping the markdown Document would break resolution back to the
+author's bytes and make `enc:source_sha256` the hash of a file nobody authored. So:
+
+```
+  markdown Document ──prov:derivation──▶ JATS Document ──▶ parse ──▶ ReasoningStructure
+   (author's bytes,                       (generated,
+    Text Fragment locators)                XPointer locators)
+```
+
+Two manifestations of one work, related by derivation — the same shape D101 already uses to keep the
+WORK, the MANIFESTATION and the DERIVATION apart. Which locator a consumer wants decides which
+Document it resolves against.
+
+**Sequencing — the direct path stays until route 1 is measured equivalent.** `uab-xiap-document-
+model.py` emits the graph directly today and is measured: 450 units, 427 of 427 register locators
+resolving, 702 resources validating. Replacing a measured path with an unmeasured one is how a
+regression becomes invisible. Route 1 is equivalent when it reproduces those three figures from
+generated JATS; until then the direct emitter is the reference, not the legacy.
+
 ## Cost
 
 `enc:Document` already exists and is seeded, so this is not a reseed. It is a change to two public
@@ -154,9 +208,9 @@ measured.
   already settles (see Prior art). Markdown-from-a-register is the one in use; JATS-read-directly
   is what the prior art implements and what would exercise `enc:ReferenceSpan`, which markdown
   cannot.
-- **Whether the augmentation becomes per-document and persisted.** Today it is an in-memory overlay
-  rebuilt every run. A Document-keyed glossary would make a run reproducible without re-deriving it,
-  and would give the 46 unevidenced closures a durable home — but it also commits doc-local
-  individuals to a chain, which is a separate decision.
+- **Whether a reused glossary may be AMENDED.** Decision 5 keys reuse on the content hash, so the
+  same bytes get the same closure. It does not say what happens when a better source later claims a
+  surface the fallback took — whether the stored glossary is superseded, versioned, or left alone
+  with the improvement visible only in a fresh run.
 - **Whether `ProseUnits` and the lexicon scope vary per document.** `enc:ScopedUnit` exists for
   per-unit scope; nothing says whether a Document carries a default.
