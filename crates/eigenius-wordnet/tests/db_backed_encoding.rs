@@ -3137,6 +3137,33 @@ fn probe_step5_families_medium() {
             "object predicative",
             "The predictors rate the variant damaging.",
         ),
+        // `but not` is the SAME truth-conditional operator (`but_not_coord`: η-expand to Prop, then
+        // And(a, ¬b)). If these parse, `rather than` needs a trigger, not a semantics.
+        (
+            "but not, NP vs NP",
+            "The study measured the result but not the control.",
+        ),
+        (
+            "but not, ADJ vs ADJ",
+            "The result is clear but not ambiguous.",
+        ),
+        (
+            "but not, PP vs PP",
+            "The gene is expressed in the liver but not in the kidney.",
+        ),
+        (
+            "but not, V vs V",
+            "The study measured but not assumed the result.",
+        ),
+        (
+            "but not, NP subject",
+            "The result but not the control is clear.",
+        ),
+        (
+            "and, NP object",
+            "The study measured the result and the control.",
+        ),
+        ("and, NP subject", "The result and the control are clear."),
     ];
     let (mut gaps, mut lex) = (0usize, 0usize);
     for (family, s) in probes {
