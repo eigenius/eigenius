@@ -3003,6 +3003,167 @@ fn probe_step5_construction_families() {
     }
 }
 
+/// SECOND construction battery (survey §4 step 3) — the families visible in the 10-16 token plain
+/// prose gaps, which the first battery (built from the 5-9 band) never reached. Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       probe_step5_families_medium -- --ignored --nocapture
+#[test]
+#[ignore = "second construction battery, 10-16 token band; --ignored --nocapture"]
+fn probe_step5_families_medium() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    let probes: &[(&str, &str)] = &[
+        ("imperative", "Report the result."),
+        ("negative imperative", "Do not report the result."),
+        (
+            "fronted conditional",
+            "If the assay fails, the result is void.",
+        ),
+        (
+            "fronted where-clause",
+            "Where the assay fails, the result is void.",
+        ),
+        (
+            "zero object relative",
+            "The resource I could query is reliable.",
+        ),
+        (
+            "that object relative",
+            "The resource that I could query is reliable.",
+        ),
+        (
+            "that subject relative",
+            "The resource that resolves the question is reliable.",
+        ),
+        (
+            "zero complementizer",
+            "The study mentioned the result was clear.",
+        ),
+        (
+            "that complementizer",
+            "The study mentioned that the result was clear.",
+        ),
+        (
+            "without + gerund",
+            "The study searched without finding the variant.",
+        ),
+        (
+            "absolute participial",
+            "The study reports the result, having built the assay.",
+        ),
+        (
+            "fronted rather-than",
+            "Rather than assume the result, the study measured it.",
+        ),
+        (
+            "both ... and over VPs",
+            "The result both bounds the argument and reinforces the conclusion.",
+        ),
+        (
+            "VP coordination under aux",
+            "The result has been settled and is recorded below.",
+        ),
+        (
+            "emphatic reflexive",
+            "The codon itself carries two variants.",
+        ),
+        (
+            "free relative + stranding",
+            "Absence is what a neutral variant looks like.",
+        ),
+        (
+            "rate X as more Y than Z",
+            "The predictors rate the variant as more damaging than the control.",
+        ),
+        (
+            "rate X worse than Y",
+            "The predictors rate the variant worse than the control.",
+        ),
+        (
+            "sentence-initial Yet",
+            "Yet the predictors rate the variant worse.",
+        ),
+        ("sentence-initial So", "So this is the complete set."),
+        (
+            "modal + adv + neg + inf",
+            "The interface would therefore not be expected to abolish oligomerisation.",
+        ),
+        (
+            "parenthetical adverb",
+            "It is therefore, empirically, compatible with the result.",
+        ),
+        (
+            "unlike-category coordination",
+            "It is the same residue, carried by four men, and benign.",
+        ),
+        (
+            "ger + object post-nominal",
+            "Every method placing the target at the position was enumerated.",
+        ),
+        // `rather than` is the largest battery-proven family by incidence (41 of 281 gaps). Which
+        // of its positions work?
+        (
+            "rather than, NP vs NP",
+            "The study measured the result rather than the control.",
+        ),
+        (
+            "rather than, ADJ vs ADJ",
+            "The result is clear rather than ambiguous.",
+        ),
+        (
+            "rather than, V vs V",
+            "The study measured rather than assumed the result.",
+        ),
+        (
+            "rather than, PP vs PP",
+            "The gene is expressed in the liver rather than in the kidney.",
+        ),
+        // And plain comparatives, to separate `than` the comparative from `rather than`.
+        (
+            "comparative, adjective",
+            "The result is clearer than the control.",
+        ),
+        (
+            "comparative, more + adj",
+            "The result is more conservative than the control.",
+        ),
+        (
+            "comparative, noun",
+            "The study showed greater dependence than the control.",
+        ),
+        (
+            "object predicative",
+            "The predictors rate the variant damaging.",
+        ),
+    ];
+    let (mut gaps, mut lex) = (0usize, 0usize);
+    for (family, s) in probes {
+        let unknown = index.unknown_words(s, &lem);
+        if !unknown.is_empty() {
+            lex += 1;
+            eprintln!("  [{:>9}] {family:<30} {s}  <- {unknown:?}", "LEX-GAP");
+            continue;
+        }
+        let (closed, open) = index.parse_open(s, &lem);
+        let tag = if !closed.is_empty() {
+            format!("CLOSED×{}", closed.len())
+        } else if !open.is_empty() {
+            format!("OPEN×{}", open.len())
+        } else {
+            gaps += 1;
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {family:<30} {s}");
+    }
+    eprintln!(
+        "{} probes: {gaps} constructional gap(s), {lex} lexical gap(s), {} parsed",
+        probes.len(),
+        probes.len() - gaps - lex
+    );
+}
+
 /// LOCALIZE the reduced-relative PP gap (survey §4 step 3, item 1). `queried here` lifts to a noun
 /// post-modifier and `queried in the study` does not; this ladder separates the participle, the
 /// modifier kind, and the attachment. Run:
