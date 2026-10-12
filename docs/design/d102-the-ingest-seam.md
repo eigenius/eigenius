@@ -165,14 +165,34 @@ built next rather than which one the model privileges.
 is built and maintained instead of two, and JATS is the shape the model is named for. Two
 constraints make it honest, and one sequencing rule stops it costing a measured result.
 
-**Constraint 1 — the converter emits only what markdown LICENSES.** D96's rule is that a reference
-is a reference "because the markup says so", and the evidence is the AUTHOR'S markup. A
-markdown→JATS converter that synthesised `<xref>` for `(Rigaud et al. 2006)` would launder our own
-inference into markup and then read it back as evidence. Markdown licenses `<sec>`/`<title>` from a
-heading, `<p>` from a blank-line block, `<table-wrap>` from a `|` run, `<code>` from a backtick span,
-`<ref>` from a bibliography bullet. It licenses NO `<xref>`. So the generated JATS carries none, the
-route-1 reader correctly produces no `enc:ReferenceSpan`, and the outcome matches today's for the
-same reason rather than by accident. Honestly incomplete beats speculatively complete.
+**Constraint 1 — the converter marks what it can identify RELIABLY, and records the rule.**
+
+An earlier draft of this section argued the converter must emit only elements markdown licenses,
+and must not synthesise `<xref>`, on the grounds that reading back our own inference as markup is
+circular. That misread D96. Its rule is stated with its purpose attached: "`Fig. 2d` inside an
+`<xref>` is a reference because the markup says so; **the quantity split never sees it, and no rule
+has to guess**", and an `<xref>` becomes "one reference token, neither a quantity nor lexical
+content". The class of error being removed is the PARSER guessing mid-parse — `2006` read as a
+quantity, `Rigaud` as lexical content. "No rule has to guess" means no rule inside the parse.
+
+A conversion step that identifies citations once, before parsing, and marks them is therefore what
+the rule asks for. Whether the mark was authored or derived does not change that the quantity split
+never sees the number. Provenance is handled at the document level, not per element: the JATS
+Document is derived from the markdown one, so every `<xref>` in it is known to be inferred without
+annotating each.
+
+**What this recovers.** Markdown yields NO reference spans today, discarding every citation in the
+document — measured on the XIAP report: 11 parenthesised author-year citations over 8 works (one
+parenthesis carrying two), 23 bare `Author et al. YEAR` over 13 works, and 30+ `Author et al.` with
+no year, resolvable only against the bibliography.
+
+**The real constraint is precision, which differs by form.** The parenthesised form is a clean
+pattern and the bibliography is in the same document to resolve against. The bare author-year form
+is weaker, and the no-year form needs the bibliography to disambiguate. The converter should mark
+the forms it can do reliably, and the `enc:Document` should record WHICH rule produced its marks —
+the same discipline the glossary's `ResolutionMethod` applies to lexical closure, where a surface
+closed by a published grammar is distinguished from one closed on nothing. A derived document whose
+marks are uniform makes that one statement rather than per-element provenance.
 
 **Constraint 2 — the JATS is a DERIVED manifestation; the markdown one is kept.** A locator is
 media-type-appropriate (D96), so units ingested from JATS carry XPointers into the JATS — which is
