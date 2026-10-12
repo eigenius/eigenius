@@ -239,17 +239,82 @@ re-derivation: `for the study` gives 4 and `by the study` 8, and the extra four 
 analysis, whose semantics differs from the agentless one plus an adjunct (agent bound vs.
 existentially closed). The same `by` ambiguity English has in "written by candlelight".
 
+## The second battery — what the 10-16 token band shows
+
+The first battery was built from the 5-9 token gaps and never reached the constructions that
+dominate the rest. 32 more probes (`probe_step5_families_medium`): **8 parse, 21 are constructional
+gaps, 3 are lexical.**
+
+| | fails | parses |
+|---|---|---|
+| **`rather than`, EVERY position** | «The study measured the result rather than the control.» (NP) | — |
+| | «The result is clear rather than ambiguous.» (ADJ) | |
+| | «The study measured rather than assumed the result.» (V) | |
+| | «The gene is expressed in the liver rather than in the kidney.» (PP) | |
+| zero object relative | «The resource I could query is reliable.» | «The resource that I could query is reliable.» |
+| zero complementizer | «The study mentioned the result was clear.» | «The study mentioned that the result was clear.» |
+| VP coordination under an auxiliary | «The result has been settled and is recorded below.» | — |
+| noun comparative | «The study showed greater dependence than the control.» | «The result is clearer than the control.» |
+| | | «The result is more conservative than the control.» |
+| object-predicative comparative | «The predictors rate the variant worse than the control.» | «The predictors rate the variant damaging.» |
+| free relative + stranding | «Absence is what a neutral variant looks like.» | — |
+| `both … and` over VPs | «The result both bounds the argument and reinforces the conclusion.» | — |
+| `without` + gerund | «The study searched without finding the variant.» | — |
+| imperative | «Report the result.» / «Do not report the result.» | — |
+| fronted conditional | «If the assay fails, the result is void.» | — |
+| sentence-initial `So` | «So this is the complete set.» | «Yet the predictors rate the variant worse.» |
+| parenthetical adverb | «It is therefore, empirically, compatible with the result.» | — |
+| unlike-category coordination | «It is the same residue, carried by four men, and benign.» | — |
+| absolute participial | — | «The study reports the result, having built the assay.» |
+
+**Imperatives are a declared deferral, not an oversight.** `lexicon:Mood` has `imp`, and the
+ontology states that ⟦S[imp,_]⟧ is deferred to D63 Slice 5, where "⟦·⟧ fails closed rather than
+denoting `Prop`". Only 3 of the 281 gaps open with an imperative verb, and 3 with a subordinator, so
+on this page both are small.
+
+Three LEXICAL gaps surfaced alongside, all closed-class omissions —
+`is_closed_class_surface` owns none of `where`, `itself`/`himself`/`themselves`, `rather`, `so`,
+`neither`, `what`, `unless`, though it does own `both`, `if` and `without`.
+
+### Sized against the 281
+
+Incidence of the battery-proven families (overlapping):
+
+| | | |
+|---:|---:|---|
+| 41 | 14% | **`rather than`** |
+| 17 | 6% | `where` / `unless` / `neither` |
+| 12 | 4% | free relative `what` |
+| 11 | 3% | comparative `than` (excluding `rather than`) |
+| 6 | 2% | `both … and` |
+| 6 | 2% | `cannot` |
+| 4 | 1% | sentence-initial `So` |
+| 4 | 1% | reflexive `-self` / `-selves` |
+| 2 | 0% | `without` + gerund |
+| 2 | 0% | parenthetical `, …ly,` |
+| **92** | **32%** | carry at least one |
+
+Incidence is not cause — a unit carrying `rather than` fails for its other constructions too, which
+is why item 1 converted one unit, not forty. These numbers rank the families; they do not predict
+how many units each closes.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:
 
 1. ~~The reduced relative + PP~~ — **done**, above. Measured: 1 page unit.
-2. **The participial post-modifier with an object** (`carrying the variant`). The passive half is
+2. **`rather than`.** Not in the grammar in ANY position — NP, adjective, verb or PP — and in 41 of
+   the 281 gaps, the largest proven family by a factor of two.
+3. **The participial post-modifier with an object** (`carrying the variant`). The passive half is
    now built; this is the active `ger` half, and the intransitive and adjunct-PP forms already parse
    («A patient waiting in the study was found.»).
-3. **The comma appositive.** Two probes, and it is pervasive in the annotation and caption lines.
-4. **`cannot`**, once the split-vs-reseed decision is made. One token, 7 uses.
-5. **`rather than` over participles**, and the **demonstrative partitive**. One probe each.
+4. **The zero relative and the zero complementizer.** Both `that`-ful forms parse, so this is one
+   omission in two places rather than two constructions.
+5. **VP coordination under an auxiliary** («has been settled and is recorded»).
+6. **The closed-class omissions** — `where`, `rather`, `so`, `neither`, `what`, `unless`, the
+   reflexives, `cannot` — batched into one reseed. 17 + 12 + 6 + 4 + 4 gaps carry one.
+7. **The comma appositive**, the noun comparative, the free relative, `both … and`, the
+   demonstrative partitive, the parenthetical adverb, unlike-category coordination.
 
 **But the measured yield is ~1 unit per construction**, so the order above closes the gate slowly if
 at all. The leverage is step 4: the clause splice alone recovers 11 of 145 pieces, and a rewrite
