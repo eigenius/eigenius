@@ -298,6 +298,24 @@ Incidence is not cause — a unit carrying `rather than` fails for its other con
 is why item 1 converted one unit, not forty. These numbers rank the families; they do not predict
 how many units each closes.
 
+## What core-en has, and what it does not
+
+The kernel ports rule SHAPES from core-en (`references/openccg/grammars/core-en`) — `bnp`, the
+`conj.xsl` list-with-operator model, `rrel`, `adv.xsl`'s Transitional-Adverb, `auxv.xsl`'s Negation
+family. It is worth knowing which of the measured gaps have a reference there. core-en is **85
+dictionary entries and 54 families**, a core grammar rather than a coverage target.
+
+| gap | core-en |
+|---|---|
+| zero object relative | **YES** — the `rrel` type-changing rule, `s[dcl]/np → n\n` with a `GenRel` relation. This is the half `reduced_relative`'s comment says was NOT taken: "we take the SUBJECT-gap (backward) form rather than its object-gap (forward) one, because that is the participial case". The forward form is the zero object relative, and it is specified. |
+| bare quantifier subject | **YES** — `both`, `neither`, `none` are `QNP`, family `QuantNP`. `Nothing in the study …` and `None of the methods …` already parse here; `Neither is evidence …` and `Both of those …` do not. |
+| `where` | **YES** — `WhNP`, alongside `what`. (A free relative is a different use of `what`; core-en's is the wh one.) |
+| fronted adverbial | **PARTIAL** — `form-vals` has `fronted` beside `dcl`, and there is a topicalization rule `tpc`. |
+| `but` | **PARTIAL** — `Conj-Sentential-Binary` (S, and S-VP) only, with an HLDS `Arg1`/`Arg2` LF. The polymorphic `but not` that `but_not_coord` builds, recursing on the denotation to `And(a, ¬b)`, is Eigenius's own and goes beyond core-en. |
+| **`rather than`** | **NO.** There is no `rather` stem, no `instead`, no `without`. Nothing to port — the semantics has to be argued, and the argument is that it is `but not` (above). |
+| comparative `than` | **NO.** No `than` stem and no comparative/superlative machinery at all. `cat_pp_than`, `elided_than` and the adjective comparatives are entirely Eigenius's. |
+| imperative | **NO.** `form-vals` is `dcl`/`fronted`, `q`/`wh`, `base`, `emb`, `inf`, `adj`, `ng`. So D63 Slice 5's deferral matches core-en's own scope rather than departing from it. |
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:
