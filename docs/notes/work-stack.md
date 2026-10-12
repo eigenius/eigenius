@@ -111,9 +111,36 @@ any detour.
 > 11 possessives of an attested base, 11 unmarked tool names, 9 joined compounds with an OOV part,
 > 9 published identifiers with no grammar in the recognizer, 6 author surnames.
 >
-> **Exit gate:** steps 3–6 of the owner's order — measure parse success over the 282 gaps, CNL
-> rewrite, close the encoding gap, then verify each encoding via `verbalize` against the original
-> prose.
+> **Step 3 MEASURED (`2026-10-12`).** Parse success **16 of 325 (4.9%)** — 1 encoded, 12 ambiguous,
+> 3 open — against 282 grammar gaps, 15 non-prose, 12 scale-bound.
+> [uab-xiap-grammar-gaps.md](uab-xiap-grammar-gaps.md) has it all.
+>
+> Length dominates: 22% at 5–9 tokens, 9% at 10–14, 4% at 15–19, 2% at 20–39, **0% above 40**. All
+> 282 gaps are `WIDEN [Exhausted]` on an unpruned final rung, so they are established no-parse; only
+> 7 had any Lever-B cell-beam drop. Markdown markup is NOT a cause — the lexer already strips
+> `**bold**`, `*italic*`, bullets and headings.
+>
+> Three experiments. (1) The lexer DROPS `:` and `;`, splicing two clauses into one unit; splitting
+> the 68 affected gaps into 145 pieces takes 11 from 0 to parsed and leaves 125 — real, not dominant.
+> (2) "The gap is really a verbless NP" is FALSE: framing the 148 plain-prose gaps as an NP subject
+> parses 6, at a rate indistinguishable from the corpus baseline at the same length. (3) A 29-probe
+> construction battery (`probe_step5_construction_families`) — 17 parse, 11 constructional gaps, 1
+> lexical.
+>
+> The battery tags LEX-GAP separately from GAP, and that corrected two readings taken from the page
+> where the augmentation had supplied a missing word and the unit failed anyway: the passive AGENT
+> by-phrase actually parses, and `cannot` has NO entry in the served chain at all (7 uses on the
+> page). **A surface the fallback grounds with an opaque individual clears `missing-lexeme` and then
+> scores as a grammar gap** — the general warning for the 64 unevidenced entries.
+>
+> Work order from the measurement: reduced relative + PP and participial-with-object (the adverb form
+> already parses, so the rule exists and its extension is missing); the comma appositive (nothing
+> covers it — `appose_group` is the `<noun> <Name>` designation, a different construction);
+> `cannot`; the clause splice as part of step 4's CNL rewrite; then `rather than` over participles
+> and the demonstrative partitive.
+>
+> **Exit gate:** steps 4–6 of the owner's order — CNL rewrite, close the encoding gap, then verify
+> each encoding via `verbalize` against the original prose.
 >
 > **Open, carried:** the parse baselines are not re-measured since the reseed (`reading-unadjudicated
 > 15` blocks a clean selection score); `enc:gap_unit` is unset because an augmentation is built per
