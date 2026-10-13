@@ -369,6 +369,75 @@ been closed and each converted exactly one unit, against families of 41 and comp
 That is the number to plan with: incidence ranks the families, it does not predict conversions,
 because a 20-to-40-token sentence fails for several reasons at once.
 
+## Item 3: the closed-class batch — zero units, and why that is the result that matters
+
+44 entries over three bootstrap edits: 20 possessive determiners (`my`/`your`/`our`/`his`/`her` ×
+sg|pl × subj|obj), `unless` and `whereas`, and 22 indefinite pronouns. Measured on a store reseeded
+at `bfb1fa1`, all three provenance counts reproduced.
+
+| | before | after |
+|---|---:|---:|
+| **CNL baseline, 62 units** | 1264 / 304, hits 53 | **identical**, coverage PASS |
+| **XIAP page** grammar-gap | 280 | 281 |
+| ambiguous / open / encoded | 12 / 5 / 1 | 11 / 5 / 1 |
+| readings / skeletons | 2440 / 491 | 2303 / 489 |
+| unevidenced fallback | 64 | **60** |
+
+**Zero units converted, and one lost — correctly.** Exactly one unit changed, and diffing the
+outcome SETS rather than the totals identified it immediately: a 29-token unit that is really TWO
+sentences (a bold verbless fragment followed by a sentence, a converter segmentation artifact). It
+had carried `Your`, which the UNEVIDENCED FALLBACK had minted as an opaque doc-local individual — a
+plain NP — and that NP was what let the parser find an analysis spanning both sentences, via
+`WIDEN [Ranked] attempts=4 cap=Some(16)`. With a real possessive determiner there the spurious
+analysis is gone and the unit fails, which is what it should do.
+
+So the gap count went UP by one while the grammar got more correct. This is the warning recorded
+with the 64 unevidenced entries, now measured: an opaque individual does not merely fail to help —
+it can MANUFACTURE a parse. Four surfaces left the fallback here (`your`, `my`, `our` and one more),
+which is the provenance gain the batch actually delivered.
+
+### What works now, and what does not
+
+| paradigm | before | after |
+|---|---|---|
+| possessive determiners | 1 of 7 | **6 of 7** — `their` is the pre-existing one-number gap |
+| subordinating conjunctions | 3 of 14 | **5 of 14** — `unless`, `whereas` |
+| indefinite pronouns | 1 of 11 OK, 7 absent | **0 absent**, still 1 OK |
+
+**The indefinites are entries without an analysis, and the probe ladder says exactly why:**
+
+| | |
+|---|---|
+| «Something is clear.» | parses |
+| «Something resolves the question.» | parses |
+| «Something **in the study** is clear.» | GAP |
+
+A post-modifier blocks them. The entries are type-raised subjects `S/(S\NP)`, which cannot take a
+PP because they are not NPs; in a determiner analysis the modifier belongs on the silent noun,
+"some [thing in the study]". The corpus uses modified indefinites almost exclusively — "Nothing
+here", "Everything in Findings 1–7", "something specific to say", "anything I could not check" — so
+these will fire on few real occurrences until the modifier route exists. `nothing` still reports OK
+only because WordNet's NOUN entry takes the PP as a plain NP, which is the wrong reading the new
+entry does not displace.
+
+`cannot` was NOT added: the split-vs-reseed decision named in the order of work was never taken, and
+it is 6 gaps.
+
+### Three fixes, three measurements
+
+| fix | incidence | units converted |
+|---|---:|---:|
+| short-passive participial lift | — | 1 |
+| `rather than` | 41 gaps | 1 |
+| closed-class batch | 51 gaps, 44 sole-blocker | **0** |
+
+The closed-class batch was chosen precisely because it was a different KIND of fix with the best
+sole-blocker count, and it converted fewer units than the two constructions. Grammar work on this
+corpus does not close the gate: the units fail for several reasons at once, and the measured yield
+per fix is at best one. Step 4's rewrite addresses length, which the step-3 measurement identified
+as the dominant variable, and the clause-splice A/B already showed it recovers 11 pieces where a
+construction recovers one.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:

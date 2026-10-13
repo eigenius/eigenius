@@ -12,7 +12,31 @@ any detour.
 > **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
 > OOV closure. Branch `uab-step5-document-model`, 20 commits ahead of `main`, not yet a PR.**
 >
-> **Store: `wordnet-umls-hpo-aligned-2026-10-12-rt`** (reseeded `2026-10-12` at `c99fbf5` for the
+> **Store: `wordnet-umls-hpo-aligned-2026-10-12-cc`** (reseeded `2026-10-12` at `bfb1fa1` for the
+> closed-class batch; provenance reproduced again — 38,391 / 20,533 / 864 — and the CNL baseline
+> page measured IDENTICALLY for the third consecutive store).
+>
+> **Item 3 of step 3's order, the closed-class batch: ZERO units converted.** 44 entries over three
+> bootstrap edits — 20 possessive determiners, `unless`/`whereas`, 22 indefinite pronouns. XIAP page
+> grammar-gap 280 → 281, ambiguous 12 → 11, readings 2440 → 2303, unevidenced fallback 64 → **60**.
+>
+> The one unit that changed went AMBIG → GRAMMAR-GAP, and it is CORRECT: it is two sentences in one
+> unit (a converter artifact), and its old parse existed only because the fallback had minted `Your`
+> as an opaque doc-local NP, which let the parser span both. A real possessive determiner removes
+> that. **An opaque fallback individual does not merely fail to help — it can MANUFACTURE a parse**,
+> which is the warning filed with the 64 unevidenced entries, now measured.
+>
+> Possessive determiners 1 → 6 of 7; subordinators 3 → 5 of 14. The INDEFINITES are entries without
+> an analysis: «Something is clear» parses, «Something in the study is clear» does not, because a
+> type-raised subject `S/(S\NP)` cannot take a post-modifier — and the corpus uses modified
+> indefinites almost exclusively. `cannot` was not added.
+>
+> **Three fixes, three measurements: 1 unit, 1 unit, 0 units** (short-passive lift; `rather than`,
+> 41 gaps; closed-class, 44 sole-blocker gaps). The batch was chosen as the best-ratio KIND of fix
+> and did worst. Grammar work does not close this gate — step 4's rewrite does, and the clause-splice
+> A/B already measured 11 pieces recovered against a construction's one.
+>
+> **Superseded store: `wordnet-umls-hpo-aligned-2026-10-12-rt`** (reseeded `2026-10-12` at `c99fbf5` for the
 > `rather than` bootstrap edit; all three provenance counts reproduced — 38,391 merges, 20,533 HPO
 > resources, 864 equivalences — and the CNL baseline page measured IDENTICALLY to the old store,
 > 1264 readings / 304 skeletons / 53 hits, so the reseed is faithful in effect and not only in
