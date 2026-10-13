@@ -3027,6 +3027,16 @@ fn probe_closed_class_paradigms() {
     // One frame per series, so a failure is the FORM and not the frame.
     let series: &[(&str, &[&str], &str)] = &[
         (
+            "indef pronoun BARE",
+            &["something", "nothing", "everything", "someone", "anyone"],
+            "{} is clear.",
+        ),
+        (
+            "indef pronoun + VP",
+            &["something", "nothing", "everything", "someone", "anyone"],
+            "{} resolves the question.",
+        ),
+        (
             "indefinite pronoun",
             &[
                 "something",
