@@ -3003,6 +3003,118 @@ fn probe_step5_construction_families() {
     }
 }
 
+/// FULL closed-class paradigm inventory — every member of each series, with a minimal frame that
+/// needs its GRAMMATICAL reading. `has_token` is not the test: `his`, `nothing` and `yourself` all
+/// return true from a WordNet CONTENT entry while `closed-class.esl` has no entry for them, so a
+/// form can be "present" and still have no usable category. Three outcomes:
+///
+///   LEXICAL   no entry at all — shows up as `missing-lexeme`
+///   WRONGCAT  known, but the frame has no parse — shows up as a GRAMMAR gap
+///   OK        the frame parses
+///
+/// Run:
+///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-hpo-aligned-2026-10-12-rt \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_closed_class_paradigms -- --ignored --nocapture
+#[test]
+#[ignore = "full closed-class paradigm inventory; --ignored --nocapture"]
+fn probe_closed_class_paradigms() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+
+    // One frame per series, so a failure is the FORM and not the frame.
+    let series: &[(&str, &[&str], &str)] = &[
+        (
+            "indefinite pronoun",
+            &[
+                "something",
+                "anything",
+                "nothing",
+                "everything",
+                "someone",
+                "anyone",
+                "everyone",
+                "somebody",
+                "anybody",
+                "nobody",
+                "everybody",
+            ],
+            "{} in the study is clear.",
+        ),
+        (
+            "possessive determiner",
+            &["my", "your", "his", "her", "its", "our", "their"],
+            "{} result is clear.",
+        ),
+        (
+            "possessive pronoun",
+            &["mine", "yours", "hers", "ours", "theirs"],
+            "The result is {}.",
+        ),
+        (
+            "reflexive",
+            &[
+                "myself",
+                "yourself",
+                "himself",
+                "herself",
+                "itself",
+                "oneself",
+                "ourselves",
+                "yourselves",
+                "themselves",
+            ],
+            "The gene affects {}.",
+        ),
+        (
+            "subordinating conjunction",
+            &[
+                "although", "though", "because", "since", "unless", "until", "whereas", "while",
+                "whilst", "when", "after", "before", "if", "once",
+            ],
+            "The result is clear {} the assay works.",
+        ),
+        (
+            "complementizer",
+            &["whether", "where", "how", "why", "that"],
+            "The study reports {} the gene is expressed.",
+        ),
+    ];
+
+    for (name, forms, frame) in series {
+        let (mut lex, mut wrong, mut ok) = (Vec::new(), Vec::new(), Vec::new());
+        for f in *forms {
+            let sent = frame.replace("{}", f);
+            // Capitalise a sentence-initial form so the frame is well-formed English.
+            let sent = if frame.starts_with("{}") {
+                let mut c = sent.chars();
+                c.next()
+                    .map(|a| a.to_uppercase().to_string() + c.as_str())
+                    .unwrap_or(sent)
+            } else {
+                sent
+            };
+            let unknown = index.unknown_words(&sent, &lem);
+            if unknown.iter().any(|u| u.eq_ignore_ascii_case(f)) {
+                lex.push(*f);
+                continue;
+            }
+            let (c, o) = index.parse_open(&sent, &lem);
+            if c.is_empty() && o.is_empty() {
+                wrong.push(*f);
+            } else {
+                ok.push(*f);
+            }
+        }
+        eprintln!("\n{name}  ({} forms)", forms.len());
+        eprintln!("  OK       {:>2}: {ok:?}", ok.len());
+        eprintln!("  WRONGCAT {:>2}: {wrong:?}", wrong.len());
+        eprintln!("  LEXICAL  {:>2}: {lex:?}", lex.len());
+    }
+}
+
 /// RESEED BATCH inventory — for each closed-class candidate, is it a LEXICAL gap (no entry in the
 /// served chain at all, so `unknown_words` flags it) or a WRONG-CATEGORY entry (known, but the
 /// minimal sentence using it still has no parse)? The two need different ontology edits, and only
