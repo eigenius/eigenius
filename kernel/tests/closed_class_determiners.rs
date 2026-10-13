@@ -1605,6 +1605,36 @@ fn plural_definite_the_parses() {
     );
 }
 
+/// `rather than` is the EXCLUDING coordinator, and it means what `but not` means.
+///
+/// `X rather than Y` is `X ∧ ¬Y`: the two differ in the correction `rather than` conveys, which is
+/// not truth-conditional, so one builder serves both and this test asserts the sems are equal. What
+/// differs is the trigger — `rather than` is ONE reserved construct over two tokens, declared as a
+/// pair, because neither half carries the meaning alone. The pair declaration is also what leaves
+/// `rather`'s degree-adverb reading and `than`'s comparative-marker reading untouched
+/// (`kernel/tests/comparative_than.rs` holds the latter).
+#[test]
+fn rather_than_is_the_excluding_coordinator() {
+    let (_layer, index) = index_over_bootstrap();
+
+    let f = index.parse("HeLa affects BRCA1 rather than HeLa", &Identity);
+    assert!(!f.is_empty(), "`rather than` parses");
+    let sem = pretty_term(f[0].sem());
+    assert!(
+        sem.starts_with("And(") && sem.contains("False"),
+        "affirms O₁, negates O₂ (`→ False`): {sem}"
+    );
+
+    // Same truth condition as `but not`, to the term.
+    let b = index.parse("HeLa affects BRCA1 but not HeLa", &Identity);
+    assert!(!b.is_empty(), "the `but not` control parses");
+    assert_eq!(
+        sem,
+        pretty_term(b[0].sem()),
+        "`rather than` and `but not` build the same term"
+    );
+}
+
 #[test]
 fn but_not_contrastive_object_ellipsis() {
     // D62 §2 #8: `[verb] O₁ but not O₂` — the shared verb applies affirmatively to O₁ and negatively

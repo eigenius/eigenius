@@ -677,7 +677,7 @@ class lexicon:ReservedConstruct {
 // (typed_resource_iris), never through the `lexicon:form` value index — so it neither belongs to that
 // domain nor should pollute that index.
 property lexicon:construct_form : core:string {
-    description = "The reserved construct's surface form (`and`, `,`, `which`, `each`, …).";
+    description = "The reserved construct's surface form (`and`, `,`, `which`, `each`, …). A form containing a SPACE is a multi-token construct, matched against that many consecutive tokens (`rather than`) — for a fixed pair whose halves carry the meaning only together. `but not` is NOT one of these: `but` and `not` are each reserved in their own right and compose, which is why they stay two kinds.";
     domain lexicon:ReservedConstruct;
 }
 // ReservedKind — the CLOSED vocabulary of grammatical roles a reserved construct plays, as a
@@ -716,12 +716,16 @@ resource lexicon:rk_reciprocal_each : lexicon:ReservedKind {
 resource lexicon:rk_reciprocal_other : lexicon:ReservedKind {
     core:description = "`other` — second token of the reciprocal `each other`.";
 }
+resource lexicon:rk_coord_rather_than : lexicon:ReservedKind {
+    core:description = "`rather than` — the EXCLUDING coordinator, written as one two-token construct_form. Truth-conditionally identical to `but not` (`X ∧ ¬Y`), so it shares that builder; the difference is the correction/preference it conveys, which is not truth-conditional. Unlike `but not` — two independently reserved tokens composed — neither half carries this meaning alone: `rather` is an ordinary degree adverb (`rather clear`) and `than` is the comparative marker (`larger than`). Declaring the PAIR is what leaves both of those readings untouched.";
+}
 property lexicon:construct_kind : core:resource {
     description = "The reserved construct's grammatical role the CKY keys on — a lexicon:ReservedKind individual. allows_only enforces the closed vocabulary at commit; the parser maps the referenced IRI to its internal ReservedKind.";
     class_types lexicon:ReservedKind;
     allows_only lexicon:rk_coord_and, lexicon:rk_coord_or, lexicon:rk_comma,
         lexicon:rk_relativizer, lexicon:rk_wh_relativizer, lexicon:rk_contrastive_but,
-        lexicon:rk_negator, lexicon:rk_reciprocal_each, lexicon:rk_reciprocal_other;
+        lexicon:rk_negator, lexicon:rk_reciprocal_each, lexicon:rk_reciprocal_other,
+        lexicon:rk_coord_rather_than;
     domain lexicon:ReservedConstruct;
 }
 
