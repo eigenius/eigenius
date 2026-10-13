@@ -2827,6 +2827,15 @@ resource lexicon:rc_not : lexicon:ReservedConstruct {
     lexicon:construct_form = "not";
     lexicon:construct_kind = lexicon:rk_negator;
 }
+// `rather than` — the excluding coordinator, one construct over TWO tokens. `X rather than Y` is
+// `X ∧ ¬Y`, which is `but not`'s truth condition, so it shares that builder; what differs is the
+// correction it conveys, and that is not truth-conditional. The pair is declared rather than its
+// halves because neither half means this alone — `rather` is a degree adverb (`rather clear`) and
+// `than` is the comparative marker (`larger than`), and both readings must survive.
+resource lexicon:rc_rather_than : lexicon:ReservedConstruct {
+    lexicon:construct_form = "rather than";
+    lexicon:construct_kind = lexicon:rk_coord_rather_than;
+}
 resource lexicon:rc_each : lexicon:ReservedConstruct {
     lexicon:construct_form = "each";
     lexicon:construct_kind = lexicon:rk_reciprocal_each;

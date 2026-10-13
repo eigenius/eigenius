@@ -184,6 +184,7 @@ enum BinKind {
     Relativize,
     Coordinate,
     ButNot,
+    RatherThan,
     Reciprocal,
     AppositiveSubj,
     AppositiveObj,
@@ -197,6 +198,7 @@ impl BinRule {
             BinRule::Relativize => BinKind::Relativize,
             BinRule::Coordinate(_) => BinKind::Coordinate,
             BinRule::ButNot => BinKind::ButNot,
+            BinRule::RatherThan => BinKind::RatherThan,
             BinRule::Reciprocal => BinKind::Reciprocal,
             BinRule::AppositiveSubj => BinKind::AppositiveSubj,
             BinRule::AppositiveObj => BinKind::AppositiveObj,
@@ -208,7 +210,7 @@ impl BinRule {
 
 /// The token-keyed binary rule table (all `const`, so no `LazyLock`). Priority = order, but site
 /// order is not load-bearing (both drivers build every site).
-static BIN_RULES: [TokBinRule; 8] = [
+static BIN_RULES: [TokBinRule; 9] = [
     TokBinRule {
         name: "relativize",
         kind: BinKind::Relativize,
@@ -227,7 +229,17 @@ static BIN_RULES: [TokBinRule; 8] = [
         name: "but_not",
         kind: BinKind::ButNot,
         trigger: trig_but_not,
-        build: build_but_not,
+        build: build_coord_excluding,
+        reads_sem: true,
+    },
+    // `rather than` — the same builder. Its truth condition IS `but not`'s (`X ∧ ¬Y`); only the
+    // trigger differs, because `rather than` is one construct over two tokens where `but not` is
+    // two reserved tokens composed.
+    TokBinRule {
+        name: "rather_than",
+        kind: BinKind::RatherThan,
+        trigger: trig_rather_than,
+        build: build_coord_excluding,
         reads_sem: true,
     },
     TokBinRule {
@@ -308,6 +320,27 @@ fn trig_coordinate(g: &Grammar, tokens: &[Token], i: usize, j: usize, out: &mut 
                 BinRule::Coordinate(op),
             ));
         }
+    }
+}
+
+/// Excluding `[O₁] rather than [O₂]`: a multi-token reserved CONSTRUCT, so its width comes from the
+/// table rather than being counted here — `phrase_at` reports it, and the right operand starts after
+/// it. Unlike [`trig_but_not`], whose two tokens are each reserved in their own right, neither
+/// `rather` nor `than` carries this meaning alone, so the PAIR is what is declared.
+fn trig_rather_than(g: &Grammar, tokens: &[Token], i: usize, j: usize, out: &mut Vec<BinSite>) {
+    let surfaces: Vec<&str> = tokens.iter().map(|t| t.surface()).collect();
+    for c in (i + 1)..j {
+        let Some((kind, width)) = g.reserved.phrase_at(&surfaces, c) else {
+            continue;
+        };
+        if kind != ReservedKind::CoordRatherThan || c + width > j {
+            continue;
+        }
+        out.push(BinSite::new(
+            (i, c - 1),
+            (c + width, j),
+            BinRule::RatherThan,
+        ));
     }
 }
 
@@ -448,7 +481,7 @@ fn build_coordinate(g: &Grammar, rule: BinRule, l: &Item, r: &Item) -> Option<It
         .map(|(cat, sem)| Item::from_parts(cat, sem, prov, cost))
 }
 
-fn build_but_not(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
+fn build_coord_excluding(g: &Grammar, _rule: BinRule, l: &Item, r: &Item) -> Option<Item> {
     let cost = l.cost().saturating_add(r.cost());
     if cats_coordinate(l.cat(), r.cat(), &g.layer) {
         // Escape hatch: the DECISION reads the sem (a completed coordination cannot be a `but not`
@@ -862,6 +895,10 @@ pub(crate) enum BinRule {
     Coordinate(&'static str),
     /// `[O₁] but not [O₂]` → contrastive `a ∧ ¬b` or a `conn_but_not` group.
     ButNot,
+    /// `[O₁] rather than [O₂]` → the SAME `a ∧ ¬b`, built by the same function. Only the trigger
+    /// differs: `rather than` is one reserved construct over two tokens, where `but not` is two
+    /// reserved tokens composed.
+    RatherThan,
     /// `[group] <TV> each other → S` (`reciprocate`).
     Reciprocal,
     /// Non-restrictive appositive `[NP] , that/which [body]` — subject/prep-object position
@@ -1184,9 +1221,16 @@ mod tests {
     use super::*;
 
     /// **Escape-hatch invariant** (Phase 2c). The rules that declare `reads_sem` must be exactly the
-    /// ones whose DECISION consults the sem — `Coordinate` and `ButNot` — the two the packing
-    /// `super::super::chart::forest::Sig` carries a coordination bit for. Adding a sem-reading rule
-    /// without extending `Sig` (and this declaration) would be unsound; this test catches it.
+    /// ones whose DECISION consults the sem — `Coordinate`, `ButNot` and `RatherThan` — all of which
+    /// the packing `super::super::chart::forest::Sig` covers. Adding a sem-reading rule without
+    /// extending `Sig` (and this declaration) would be unsound; this test catches it, and did when
+    /// `RatherThan` was added.
+    ///
+    /// `RatherThan` needed no new `Sig` bit, and the reason is that the bit is computed **per item**
+    /// — `sem_is_coordination(it.sem())`, unconditionally — not per rule. Any rule whose decision
+    /// consults that one predicate is already separated by it, and `RatherThan` shares `ButNot`'s
+    /// builder and therefore its predicate exactly. A rule consulting some OTHER property of a sem
+    /// would still need its own bit, which is what this invariant goes on guarding.
     #[test]
     fn escape_hatch_matches_sig() {
         let sem_reading: Vec<BinKind> = bin_rules()
@@ -1196,8 +1240,9 @@ mod tests {
             .collect();
         assert_eq!(
             sem_reading,
-            vec![BinKind::Coordinate, BinKind::ButNot],
-            "only Coordinate and ButNot read the sem in their firing decision"
+            vec![BinKind::Coordinate, BinKind::ButNot, BinKind::RatherThan],
+            "only Coordinate, ButNot and RatherThan read the sem in their firing decision, and all \
+             three decide on `sem_is_coordination`, the one predicate `Sig` carries"
         );
     }
 
@@ -1209,6 +1254,7 @@ mod tests {
             BinKind::Relativize,
             BinKind::Coordinate,
             BinKind::ButNot,
+            BinKind::RatherThan,
             BinKind::Reciprocal,
             BinKind::AppositiveSubj,
             BinKind::AppositiveObj,
