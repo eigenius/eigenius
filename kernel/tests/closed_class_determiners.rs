@@ -1635,6 +1635,75 @@ fn rather_than_is_the_excluding_coordinator() {
     );
 }
 
+/// A possessive determiner does not agree with what it possesses.
+///
+/// `its`/`their` hardcode the possessed noun's number (`cat_forall(sg|pl, …)`) — a property of
+/// their attested uses, not of English. The first/second-person forms added for the XIAP report
+/// BIND that number with `cat_num_forall` and thread it to the subject NP, so both numbers compose
+/// and subject-verb agreement still routes: «my gene affects …» and «my genes affect …».
+///
+/// `your` alone is in 13 of that report's grammar gaps — it is addressed to a person.
+#[test]
+fn a_possessive_determiner_takes_either_number() {
+    let (_layer, index) = index_over_bootstrap();
+
+    for s in [
+        "my gene affects HeLa",
+        "my genes affect HeLa",
+        "your gene affects HeLa",
+        "your genes affect HeLa",
+        "our gene affects HeLa",
+        "his gene affects HeLa",
+        "her gene affects HeLa",
+        "HeLa affects my gene",
+        "HeLa affects your genes",
+    ] {
+        let (c, o) = index.parse_open(s, &PluralS);
+        assert!(!c.is_empty() || !o.is_empty(), "{s:?} must compose");
+    }
+    // The possessor is a referent hole, exactly as `its` gives — so these are OPEN parses, and the
+    // sem carries `poss_of`.
+    let (_c, open) = index.parse_open("my gene affects HeLa", &PluralS);
+    let sem = pretty_term(open.first().expect("an open parse").item.sem());
+    assert!(
+        sem.contains("poss_of"),
+        "the possessive relation is built: {sem}"
+    );
+}
+
+/// `unless` is `if`'s negative twin; `whereas` is `but`'s case.
+///
+/// Both are the subordinators the D62 findings note does NOT route through Fork A — that covers
+/// `because`/`although`/`while`, which are FACTIVE and whose decided treatment needs hypothetical
+/// proof variables threaded through the derivation, an engine extension rather than a lexical row.
+/// These two need neither: `unless` is native implication over an intuitionistic negation, and
+/// `whereas` denotes the same proposition as the `and`-coordination, reusing `but_sem`.
+#[test]
+fn unless_is_negative_implication_and_whereas_is_contrastive_conjunction() {
+    let (_layer, index) = index_over_bootstrap();
+
+    let f = index.parse("HeLa affects BRCA1 unless HeLa affects BRCA1", &Identity);
+    assert!(!f.is_empty(), "`unless` composes");
+    let sem = pretty_term(f[0].sem());
+    assert!(
+        sem.contains("False"),
+        "the antecedent is negated (`→ False`): {sem}"
+    );
+
+    let w = index.parse("HeLa affects BRCA1 whereas HeLa affects BRCA1", &Identity);
+    assert!(!w.is_empty(), "`whereas` composes");
+    let wsem = pretty_term(w[0].sem());
+    assert!(
+        wsem.starts_with("And("),
+        "both clauses are asserted, as for `but`: {wsem}"
+    );
+    assert_eq!(
+        wsem,
+        pretty_term(index.parse("HeLa affects BRCA1 but HeLa affects BRCA1", &Identity)[0].sem()),
+        "`whereas` denotes what `but` denotes"
+    );
+}
+
 #[test]
 fn but_not_contrastive_object_ellipsis() {
     // D62 §2 #8: `[verb] O₁ but not O₂` — the shared verb applies affirmatively to O₁ and negatively

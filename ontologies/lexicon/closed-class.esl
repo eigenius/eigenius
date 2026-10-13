@@ -837,6 +837,43 @@ resource lexicon:but_subord : lexicon:LexicalEntry {
     lexicon:sense    = "but";
 }
 
+// ── `unless` and `whereas` (D62 2d, the two non-factive subordinators) ──────
+// These are the subordinators the findings note does NOT route through Fork A. Fork A
+// (`docs/notes/d62-subordinator-design-findings.md`) covers `because`/`although`/`while`, which are
+// FACTIVE: their decided treatment is `Because : Π(p q:Prop) → p → q → Prop` with hypothetical
+// proof variables threaded through the derivation — an engine extension, not a lexical row. These
+// two need neither.
+//
+// `unless` is `if`'s negative twin and uses the same native implication: "S₁ unless S₂" is
+// `¬⟦S₂⟧ → ⟦S₁⟧`, with intuitionistic `¬P = P → False`. Non-factive, no new logic type.
+resource lexicon:unless_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (s2 : Prop) => fun (s1 : Prop) => ((s2 -> logic:False) -> s1)
+          : Prop -> Prop -> Prop )
+    );
+}
+resource lexicon:unless_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: negative conditional subordinator ('unless the assay works').";
+    lexicon:form     = "unless";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:unless_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "unless";
+}
+// `whereas` asserts BOTH clauses and contrasts them, which is `but`'s case exactly: the contrast is
+// rhetorical and not part of the typed claim, so it denotes the same proposition as the
+// `and`-coordination (the FINAL `but` decision in the findings note, verified against every `but`
+// in the WRN source). It reuses `but_sem` rather than restating it — one definition of what the
+// contrastive conjunction means.
+resource lexicon:whereas_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: contrastive subordinator ('whereas the control is clear').";
+    lexicon:form     = "whereas";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:but_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "whereas";
+}
+
 // ── Referential pronouns (D62 §2e / D64 Phase A — the open-parse carrier) ──
 // A referential pronoun is categorially a plain NP (core-en `ProNP` = NP) whose semantics
 // is an UNRESOLVED referent — an open-parse *hole* (D64). The committed entry stores the
@@ -930,6 +967,198 @@ resource lexicon:its_obj : lexicon:LexicalEntry {
     lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
     lexicon:sense    = "its";
 }
+// ── First/second/third-person possessive determiners (paradigm completion) ──
+// `its`/`their` below carry ONE number each (`cat_forall(sg|pl, …)`), which is a property of their
+// attested uses rather than of English: a possessive determiner does not agree with what it
+// possesses, so "my gene is" and "my genes are" are both well formed. The number cannot be BOUND
+// and threaded — `cat_forall`'s head-number is checked by `feat_meets`, a lattice meet, which a
+// bound variable cannot satisfy — so each form gets one entry per head number, exactly as `its`
+// and `their` do. (`its genes` / `their gene` are the same gap on the existing two; left alone
+// here rather than changed under cover of this batch.)
+//
+// Measured need: of the six broken possessive determiners, `your` alone occurs in 13 of the XIAP
+// report's grammar gaps — it is a report addressed to a person.
+
+resource lexicon:my_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular possessive determiner ('my result'), sg head.";
+    lexicon:form     = "my";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "my";
+}
+
+resource lexicon:my_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular possessive determiner ('my result'), sg head.";
+    lexicon:form     = "my";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "my";
+}
+
+resource lexicon:my_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular possessive determiner ('my result'), pl head.";
+    lexicon:form     = "my";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "my";
+}
+
+resource lexicon:my_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person singular possessive determiner ('my result'), pl head.";
+    lexicon:form     = "my";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "my";
+}
+
+resource lexicon:your_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: second-person possessive determiner ('your result'), sg head.";
+    lexicon:form     = "your";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "your";
+}
+
+resource lexicon:your_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: second-person possessive determiner ('your result'), sg head.";
+    lexicon:form     = "your";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "your";
+}
+
+resource lexicon:your_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: second-person possessive determiner ('your result'), pl head.";
+    lexicon:form     = "your";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "your";
+}
+
+resource lexicon:your_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: second-person possessive determiner ('your result'), pl head.";
+    lexicon:form     = "your";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "your";
+}
+
+resource lexicon:our_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural possessive determiner ('our result'), sg head.";
+    lexicon:form     = "our";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "our";
+}
+
+resource lexicon:our_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural possessive determiner ('our result'), sg head.";
+    lexicon:form     = "our";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "our";
+}
+
+resource lexicon:our_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural possessive determiner ('our result'), pl head.";
+    lexicon:form     = "our";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "our";
+}
+
+resource lexicon:our_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: first-person plural possessive determiner ('our result'), pl head.";
+    lexicon:form     = "our";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "our";
+}
+
+resource lexicon:his_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular masculine possessive determiner ('his result'), sg head.";
+    lexicon:form     = "his";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "his";
+}
+
+resource lexicon:his_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular masculine possessive determiner ('his result'), sg head.";
+    lexicon:form     = "his";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "his";
+}
+
+resource lexicon:his_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular masculine possessive determiner ('his result'), pl head.";
+    lexicon:form     = "his";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "his";
+}
+
+resource lexicon:his_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular masculine possessive determiner ('his result'), pl head.";
+    lexicon:form     = "his";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "his";
+}
+
+resource lexicon:her_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular feminine possessive determiner ('her result'), sg head.";
+    lexicon:form     = "her";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "her";
+}
+
+resource lexicon:her_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular feminine possessive determiner ('her result'), sg head.";
+    lexicon:form     = "her";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "her";
+}
+
+resource lexicon:her_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular feminine possessive determiner ('her result'), pl head.";
+    lexicon:form     = "her";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "her";
+}
+
+resource lexicon:her_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular feminine possessive determiner ('her result'), pl head.";
+    lexicon:form     = "her";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "her";
+}
+
 resource lexicon:their_subj : lexicon:LexicalEntry {
     core:description = "grammatical: third-person plural possessive determiner ('their survival').";
     lexicon:form     = "their";
