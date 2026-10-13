@@ -12,7 +12,13 @@ any detour.
 > **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
 > OOV closure. Branch `uab-step5-document-model`, 20 commits ahead of `main`, not yet a PR.**
 >
-> **Store: `wordnet-umls-hpo-aligned-2026-10-10-d101`.** The D101 reseed, `2026-10-10`, 56 m 40 s
+> **Store: `wordnet-umls-hpo-aligned-2026-10-12-rt`** (reseeded `2026-10-12` for the
+> `rather than` bootstrap edit; all three provenance counts reproduced — 38,391 merges, 20,533 HPO
+> resources, 864 equivalences — and the CNL baseline page measured IDENTICALLY to the old store,
+> 1264 readings / 304 skeletons / 53 hits, so the reseed is faithful in effect and not only in
+> provenance). Superseding `wordnet-umls-hpo-aligned-2026-10-10-d101`, which no longer resumes.
+>
+> **The d101 store:** The D101 reseed, `2026-10-10`, 56 m 40 s
 > for all five steps of the chain in entry 3's recipe. Every provenance input matched the previous
 > store exactly, and all three expected counts reproduced — 38,391 merges, 20,533 HPO resources,
 > 864 equivalences — which is what established that `ontologies/encoding/encoding.esl` was the only
@@ -110,6 +116,22 @@ any detour.
 > occurrence. D102 "What the 64 unevidenced entries are" buckets them — 13 derivational morphology,
 > 11 possessives of an attested base, 11 unmarked tool names, 9 joined compounds with an OOV part,
 > 9 published identifiers with no grammar in the recognizer, 6 author surnames.
+>
+> **Item 2 of step 3's work order DONE (`2026-10-12`): `rather than`.** `X rather than Y` is
+> `X ∧ ¬Y` — `but not`'s truth condition — so it needed a TRIGGER and no semantics;
+> `build_coord_excluding` is reused verbatim. Declared as a PAIR, not two kinds, because neither
+> half carries the meaning alone (`rather` is a degree adverb, `than` the comparative marker); both
+> halves stay unreserved. `construct_form` now admits a multi-token form and `ReservedTable` has a
+> `by_phrase` longest-match lookup. One operator, two triggers, and the probes prove it — identical
+> counts in every position (ADJ ×8, V ×8, PP ×4, NP GAP for both `rather than` and `but not`).
+>
+> Measured on the reseeded store: CNL baseline UNCHANGED (grammar-gap 0, 1264 readings, 304
+> skeletons, 53 hits); battery 12 → **15** parsed of 39; XIAP page grammar-gap 281 → **280**, open
+> 4 → 5, readings 2440 → 2440, skeletons 467 → 491. The unit that moved went GAP → OPEN, and
+> `total_readings` counts closed parses only, hence readings flat.
+>
+> **One page unit, for the second construction running.** Two families closed, each converting
+> exactly one unit. Incidence ranks the families; it does not predict conversions.
 >
 > **Step 3 MEASURED (`2026-10-12`).** Parse success **16 of 325 (4.9%)** — 1 encoded, 12 ambiguous,
 > 3 open — against 282 grammar gaps, 15 non-prose, 12 scale-bound.

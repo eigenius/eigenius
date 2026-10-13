@@ -316,13 +316,65 @@ dictionary entries and 54 families**, a core grammar rather than a coverage targ
 | comparative `than` | **NO.** No `than` stem and no comparative/superlative machinery at all. `cat_pp_than`, `elided_than` and the adjective comparatives are entirely Eigenius's. |
 | imperative | **NO.** `form-vals` is `dcl`/`fronted`, `q`/`wh`, `base`, `emb`, `inf`, `adj`, `ng`. So D63 Slice 5's deferral matches core-en's own scope rather than departing from it. |
 
+## Item 2 landed: `rather than`
+
+`X rather than Y` is `X ∧ ¬Y` — `but not`'s truth condition — so this needed a TRIGGER and no
+semantics. `build_coord_excluding` (the renamed `build_but_not`) is reused verbatim; what differs
+between the two is the correction `rather than` conveys, and that is not truth-conditional.
+
+Declared as a PAIR rather than two kinds. `but not` is two tokens each reserved in their own right;
+neither half of `rather than` carries the meaning alone — `rather` is a degree adverb (`rather
+clear`), `than` the comparative marker (`larger than`). So `lexicon:construct_form` now admits a
+multi-token form and `ReservedTable` gained a `by_phrase` map with longest-match `phrase_at`. Both
+halves stay unreserved, which a test asserts.
+
+It is ONE operator with two triggers, and the probe counts say so — identical in every position:
+
+| | `rather than` | `but not` |
+|---|---|---|
+| ADJ vs ADJ | CLOSED×8 | CLOSED×8 |
+| V vs V | CLOSED×8 | CLOSED×8 |
+| PP vs PP | CLOSED×4 | CLOSED×4 |
+| NP vs NP | GAP | GAP |
+
+The NP case fails for both, and for plain `and` in subject position — the pre-existing coordination
+gap, which this does not reach.
+
+### Measured, on a store reseeded after the `rather than` edit
+
+A bootstrap edit, so the store was rebuilt. All three provenance counts reproduced exactly —
+38,391 merges, 20,533 HPO resources, 864 equivalences — and `umls_scope: all`, UMLS 2026AA and the
+three input sha256 prefixes match the previous store.
+
+| | before | after |
+|---|---:|---:|
+| **CNL baseline, 62 units** | | |
+| grammar-gap / missing-lexeme | 0 / 0 | 0 / 0 |
+| readings / skeletons | 1264 / 304 | 1264 / 304 |
+| expected-hits | 53 | 53 |
+| **construction battery, 39 probes** | 12 parsed, 24 gaps | **15 parsed, 21 gaps** |
+| **XIAP page, 325 units** | | |
+| grammar-gap | 281 | **280** |
+| open | 4 | 5 |
+| readings | 2440 | 2440 |
+| skeletons | 467 | 491 |
+
+The baseline page is unchanged to the figure, which is two results at once: the reseed is faithful
+in EFFECT and not only in provenance, and the new construct perturbs nothing where it does not
+occur.
+
+**One page unit again.** It moved GAP → OPEN, and `total_readings` counts closed parses only, so it
+contributes 0 readings and 24 skeletons — hence readings flat at 2440. Two constructions have now
+been closed and each converted exactly one unit, against families of 41 and comparable incidence.
+That is the number to plan with: incidence ranks the families, it does not predict conversions,
+because a 20-to-40-token sentence fails for several reasons at once.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:
 
 1. ~~The reduced relative + PP~~ — **done**, above. Measured: 1 page unit.
-2. **`rather than`.** Not in the grammar in ANY position — NP, adjective, verb or PP — and in 41 of
-   the 281 gaps, the largest proven family by a factor of two.
+2. ~~`rather than`~~ — **done**, above. Measured: 1 page unit.
 3. **The participial post-modifier with an object** (`carrying the variant`). The passive half is
    now built; this is the active `ger` half, and the intransitive and adjunct-PP forms already parse
    («A patient waiting in the study was found.»).
