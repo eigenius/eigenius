@@ -1751,6 +1751,63 @@ fn an_indefinite_pronoun_quantifies() {
     );
 }
 
+/// A FACTIVE subordinator exports its presuppositions as proof obligations (D62 2d, Fork A).
+///
+/// `because`/`although`/`while` presuppose both clauses, and the decided treatment makes that a
+/// typing requirement: `logic:Because : Π(p q:Prop) → p → q → Prop` takes PROOFS of both. The parser
+/// never proves a clause, so the arguments are hypothetical — `lexicon:hypothesis_of(P)` stands in
+/// the derivation as a closed constant (so the entry gate-passes and the term stays a `Prop`
+/// through composition) and the felicity gate freshens each into a typed free variable.
+///
+/// The result is an OPEN parse with two `ProofObligation` holes, each carried at its own clause's
+/// proposition. It can never close by anaphora — there is no antecedent for a proof — which is the
+/// point: the obligation leaves the parser for the justification layer to discharge or fail on.
+#[test]
+fn a_factive_subordinator_exports_proof_obligations() {
+    use eigenius_kernel::dcg::HoleKind;
+    let (_layer, index) = index_over_bootstrap();
+
+    for (word, head) in [
+        ("because", "Because"),
+        ("although", "Although"),
+        ("while", "While"),
+    ] {
+        let s = format!("HeLa affects BRCA1 {word} HeLa affects BRCA1");
+        let (closed, open) = index.parse_open(&s, &Identity);
+        assert!(
+            closed.is_empty(),
+            "{word}: a factive clause cannot close — its presuppositions are undischarged"
+        );
+        let p = open
+            .first()
+            .unwrap_or_else(|| panic!("{word}: must give an OPEN parse"));
+        let proofs: Vec<_> = p
+            .holes
+            .iter()
+            .filter(|h| h.kind == HoleKind::ProofObligation)
+            .collect();
+        assert_eq!(
+            proofs.len(),
+            2,
+            "{word}: one obligation per clause, got {:?}",
+            p.holes.iter().map(|h| &h.var).collect::<Vec<_>>()
+        );
+        let sem = pretty_term(p.item.sem());
+        assert!(
+            sem.contains(head),
+            "{word}: the relation is the typed content, not a conjunction: {sem}"
+        );
+        // Each obligation is carried at a PROPOSITION — its own clause — not at `Entity`.
+        for h in proofs {
+            let ty = pretty_term(&h.ty);
+            assert!(
+                ty.contains("affect"),
+                "{word}: the hole stands at its clause's proposition, got {ty}"
+            );
+        }
+    }
+}
+
 #[test]
 fn but_not_contrastive_object_ellipsis() {
     // D62 §2 #8: `[verb] O₁ but not O₂` — the shared verb applies affirmatively to O₁ and negatively

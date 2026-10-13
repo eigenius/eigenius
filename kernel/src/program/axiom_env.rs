@@ -473,6 +473,18 @@ mod tests {
             "urn:eigenius:lexicon:anaphor_of",
             // D95 slice 7d — a demonstrative before a numeral (`these two genetic events`).
             "urn:eigenius:lexicon:anaphor_of_count",
+            // D62 2d Fork A — the FACTIVE subordinators. Each is its own opaque primitive for the
+            // reason the modals above are: collapsing `because` onto `And` would drop the causal
+            // claim from the typed content, and there is no causal or temporal relation to reduce
+            // it to. The kernel asserts no laws about them.
+            "urn:eigenius:logic:Because",
+            "urn:eigenius:logic:Although",
+            "urn:eigenius:logic:While",
+            // The `Prop` sibling of `anaphor_of` above: the hypothetical proof a factive
+            // subordinator takes for each clause. It inhabits an arbitrary `Prop`, which is sound
+            // only because it never survives the felicity gate — the gate freshens every occurrence
+            // into a `ProofObligation` hole, exactly the discipline `anaphor_of` already carries.
+            "urn:eigenius:lexicon:hypothesis_of",
             "urn:eigenius:lexicon:speaker",
             "urn:eigenius:lexicon:poss_of",
             // D93 — reduced by the kernel, not opaque; see `nbe/unit_ext.rs`.
@@ -500,8 +512,8 @@ mod tests {
         assert!(
             unexpected.is_empty(),
             "bootstrap axioms should be the D52 measurement set + the D63 ontology \
-             relations + the modal operators + the `lexicon:card` cardinality functor + the \
-             D93 unit operators + the D95 quantity order; \
+             relations + the modal operators + the D62 factive subordinators + the \
+             `lexicon:card` cardinality functor + the D93 unit operators + the D95 quantity order; \
              unexpected axioms: {unexpected:?}"
         );
     }

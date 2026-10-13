@@ -106,13 +106,14 @@ impl Parser {
             eprintln!("    [felicity] readback start");
         }
         let nf = felicity_readback(&evaled)?;
-        // Demonstrative holes (D64, `d64-demonstratives-as-holes.md` §2): freshen every
+        // Gate-time holes, in one traversal (D64 §2 for the demonstrative, D62 2d Fork A for the
+        // factive subordinator's proof arguments): freshen every
         // `lexicon:anaphor_of(A)` application in the NORMAL FORM — β-reduction has made the
         // restrictor `A` concrete here, which is why these holes cannot be seeded like the
         // Entity-typed pronoun holes (the determiner hasn't met its noun at seed time). Each
         // occurrence becomes a fresh variable carried at the RESTRICTOR type, so the resolution
         // re-gate vetoes a type-wrong antecedent.
-        let (nf, dem_holes) = super::super::holes::freshen_anaphor_of(&nf);
+        let (nf, gate_holes) = super::super::holes::freshen_gate_holes(&nf);
         // The holes carried by this parse — each a typed parameter (seed holes readback-named
         // `{base}0`; demonstrative holes named by the gate's traversal).
         let mut infos: Vec<HoleInfo> = present
@@ -124,10 +125,14 @@ impl Parser {
                 count: None,
             })
             .collect();
-        infos.extend(dem_holes.into_iter().map(|h| HoleInfo {
+        infos.extend(gate_holes.into_iter().map(|h| HoleInfo {
             var: h.var,
             ty: h.ty,
-            kind: HoleKind::EntityRef,
+            kind: if h.is_proof {
+                HoleKind::ProofObligation
+            } else {
+                HoleKind::EntityRef
+            },
             count: h.count,
         }));
         if dbg {
@@ -187,6 +192,15 @@ pub enum HoleKind {
     /// pronoun / possessor (seed-time freshening), the RESTRICTOR class for a demonstrative
     /// (`anaphor_of(A)`, felicity-time freshening — "these findings" resolves only to findings).
     EntityRef,
+    /// An undischarged FACTIVE PRESUPPOSITION (D62 2d Fork A): the hypothetical proof a factive
+    /// subordinator takes for each of its clauses, carried at that clause's own proposition.
+    ///
+    /// Not an anaphora hole, and the D64 resolver must not try to fill it — there is no antecedent
+    /// to apply. It is an OBLIGATION, exported for the justification-logic layer to discharge with
+    /// a witness or to fail closed on. Its scoping IS the projection account: a hypothesis still
+    /// free here projected through whatever negation and modals it passed, because those are formed
+    /// within the context and do not discharge it.
+    ProofObligation,
 }
 
 /// One typed parameter of an [`OpenParse`]'s abstraction: the binder name (`var`) standing for an

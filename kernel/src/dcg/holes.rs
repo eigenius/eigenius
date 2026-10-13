@@ -29,6 +29,14 @@ use crate::nbe::term::Exp;
 /// The placeholder axiom a pronoun's `sem` carries in the lexicon, before freshening.
 const ANAPHOR_IRI: &str = "urn:eigenius:lexicon:anaphor";
 
+/// The placeholder a FACTIVE subordinator's `sem` carries for each of its two proof arguments
+/// (D62 2d Fork A). The `Prop` sibling of `anaphor_of`: it stands in the derivation as a closed
+/// constant so the entry gate-passes and the term stays a `Prop` through composition, and the
+/// felicity gate freshens it into a typed free variable — a [`HoleKind::ProofObligation`].
+///
+/// [`HoleKind::ProofObligation`]: super::parse::HoleKind::ProofObligation
+const HYPOTHESIS_OF_IRI: &str = "urn:eigenius:lexicon:hypothesis_of";
+
 /// Base name of the referent-hole free variable for a pronoun/possessive spanning tokens
 /// `[i, j]`. Position-keyed, so distinct occurrences are distinct holes.
 pub(super) fn hole_base(i: usize, j: usize) -> String {
@@ -91,15 +99,25 @@ pub(crate) fn count_value(q: &Exp) -> Option<usize> {
     }
 }
 
-/// A demonstrative's referent hole, as [`freshen_anaphor_of`] finds it: the fresh variable, the
-/// restrictor type it stands at, and the count a numeral after the demonstrative states.
-pub(super) struct DemonstrativeHole {
+/// A hole [`freshen_gate_holes`] finds in a normal form: the fresh variable, the type it stands at,
+/// the count a numeral after a demonstrative states, and WHICH placeholder produced it.
+pub(super) struct GateHole {
     pub(super) var: String,
     pub(super) ty: Exp,
     pub(super) count: Option<Exp>,
+    /// `true` for a factive subordinator's proof argument (`hypothesis_of`), `false` for a
+    /// demonstrative's referent (`anaphor_of`). The two are freshened in ONE traversal because they
+    /// have the same shape — a one-argument axiom whose argument IS the hole's type — and differ
+    /// only in what resolves them: an antecedent from the chain, or a witness from the
+    /// justification layer.
+    pub(super) is_proof: bool,
 }
 
-/// Freshen every `lexicon:anaphor_of(A)` application in a NORMAL FORM into a typed referent hole:
+/// Freshen every `lexicon:anaphor_of(A)` and `lexicon:hypothesis_of(P)` application in a NORMAL
+/// FORM into a typed hole. ONE traversal for both, because they have the same shape — a
+/// one-argument axiom whose argument IS the hole's type — and differ only in what resolves them.
+///
+/// For the referent holes:
 /// each occurrence is replaced by a fresh variable (`$demref$<k>_0`, traversal order — the
 /// skeleton normalizer α-normalizes the `$name$digits_digits` shape, so the naming is
 /// drift-free), and `(var, A)` is returned so the gate can carry the hole at the RESTRICTOR type
@@ -109,27 +127,36 @@ pub(super) struct DemonstrativeHole {
 /// `anaphor_of` head cannot occur in a well-typed nf; a bare un-applied constant is left alone
 /// (nothing to type the hole with) and the gate's closed `check` rejects the candidate. A counted
 /// occurrence, `anaphor_of_count(A, q)`, returns its count `q` beside the type.
-pub(super) fn freshen_anaphor_of(exp: &Exp) -> (Exp, Vec<DemonstrativeHole>) {
-    fn walk(e: &Exp, holes: &mut Vec<DemonstrativeHole>) -> Exp {
+pub(super) fn freshen_gate_holes(exp: &Exp) -> (Exp, Vec<GateHole>) {
+    fn walk(e: &Exp, holes: &mut Vec<GateHole>) -> Exp {
         if let Exp::App(f, a) = e {
             let head = |g: &Exp, iri: &str| matches!(g, Exp::EigonAxiom(i) if i.as_str() == iri);
-            let (ty, count) = if head(f, ANAPHOR_OF_IRI) {
-                (Some(a.as_ref().clone()), None)
+            let (ty, count, is_proof) = if head(f, ANAPHOR_OF_IRI) {
+                (Some(a.as_ref().clone()), None, false)
+            } else if head(f, HYPOTHESIS_OF_IRI) {
+                // `hypothesis_of(P)` — the argument IS the proposition the hypothesis proves, so it
+                // types the hole directly, exactly as the restrictor does for `anaphor_of`.
+                (Some(a.as_ref().clone()), None, true)
             } else if let Exp::App(g, t) = f.as_ref() {
                 if head(g, ANAPHOR_OF_COUNT_IRI) {
-                    (Some(t.as_ref().clone()), Some(a.as_ref().clone()))
+                    (Some(t.as_ref().clone()), Some(a.as_ref().clone()), false)
                 } else {
-                    (None, None)
+                    (None, None, false)
                 }
             } else {
-                (None, None)
+                (None, None, false)
             };
             if let Some(ty) = ty {
-                let var = format!("$demref${}_0", holes.len());
-                holes.push(DemonstrativeHole {
+                let var = if is_proof {
+                    format!("$proof${}_0", holes.len())
+                } else {
+                    format!("$demref${}_0", holes.len())
+                };
+                holes.push(GateHole {
                     var: var.clone(),
                     ty,
                     count,
+                    is_proof,
                 });
                 return Exp::Var(var);
             }

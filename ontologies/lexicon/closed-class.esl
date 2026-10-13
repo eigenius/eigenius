@@ -837,6 +837,70 @@ resource lexicon:but_subord : lexicon:LexicalEntry {
     lexicon:sense    = "but";
 }
 
+// ── FACTIVE subordinators (D62 2d, Fork A) ─────────────────────────────────
+// `because` / `although` / `while` presuppose BOTH clauses, and the decided treatment makes that
+// presupposition a typing requirement: `logic:Because : Π(p q:Prop) → p → q → Prop` takes proofs of
+// both. The parser never proves a clause — felicity is not truth — so the proof arguments are
+// HYPOTHETICAL.
+//
+// `lexicon:hypothesis_of` is the Prop sibling of `lexicon:anaphor_of` (the demonstrative's
+// restrictor-typed referent hole) and works the same way: it stands in the derivation as a closed
+// constant so the entry gate-passes and the term stays a `Prop` throughout composition, and the
+// FELICITY GATE freshens each occurrence into a typed free variable — a hole of kind
+// `ProofObligation`. Keeping the term a `Prop` during composition is what makes §5's projection
+// account fall out: negation and the modals apply to it normally and do not discharge the
+// hypothesis, so the obligation projects through them.
+//
+// It is an axiom inhabiting an arbitrary `Prop`, which is only sound because it never survives the
+// gate — exactly the discipline `anaphor_of : ∀(A:Set) → A` already carries for `Set`.
+axiom lexicon:hypothesis_of : forall (P : Prop) => P
+
+resource lexicon:because_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (s2 : Prop) => fun (s1 : Prop) =>
+            logic:Because(s1, s2, lexicon:hypothesis_of(s1), lexicon:hypothesis_of(s2))
+          : Prop -> Prop -> Prop )
+    );
+}
+resource lexicon:because_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: causal subordinator, FACTIVE ('because the assay works').";
+    lexicon:form     = "because";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:because_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "because";
+}
+resource lexicon:although_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (s2 : Prop) => fun (s1 : Prop) =>
+            logic:Although(s1, s2, lexicon:hypothesis_of(s1), lexicon:hypothesis_of(s2))
+          : Prop -> Prop -> Prop )
+    );
+}
+resource lexicon:although_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: concessive subordinator, FACTIVE ('although the assay fails').";
+    lexicon:form     = "although";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:although_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "although";
+}
+resource lexicon:while_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (s2 : Prop) => fun (s1 : Prop) =>
+            logic:While(s1, s2, lexicon:hypothesis_of(s1), lexicon:hypothesis_of(s2))
+          : Prop -> Prop -> Prop )
+    );
+}
+resource lexicon:while_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: temporal/concessive subordinator, FACTIVE ('while the cell divides').";
+    lexicon:form     = "while";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:while_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "while";
+}
+
 // ── `unless` and `whereas` (D62 2d, the two non-factive subordinators) ──────
 // These are the subordinators the findings note does NOT route through Fork A. Fork A
 // (`docs/notes/d62-subordinator-design-findings.md`) covers `because`/`although`/`while`, which are
