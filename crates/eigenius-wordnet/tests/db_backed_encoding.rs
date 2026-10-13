@@ -3003,6 +3003,138 @@ fn probe_step5_construction_families() {
     }
 }
 
+/// RESEED BATCH inventory — for each closed-class candidate, is it a LEXICAL gap (no entry in the
+/// served chain at all, so `unknown_words` flags it) or a WRONG-CATEGORY entry (known, but the
+/// minimal sentence using it still has no parse)? The two need different ontology edits, and only
+/// the first shows up as `missing-lexeme`. Run:
+///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///       probe_reseed_batch_inventory -- --ignored --nocapture
+#[test]
+#[ignore = "reseed-batch inventory: lexical gap vs wrong category; --ignored --nocapture"]
+fn probe_reseed_batch_inventory() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    // (word, a minimal sentence that needs its GRAMMATICAL reading)
+    let cases: &[(&str, &str)] = &[
+        ("cannot", "The method cannot resolve the question."),
+        ("where", "The study reports where the gene is expressed."),
+        ("while", "The gene is expressed while the cell divides."),
+        ("whereas", "The gene is expressed whereas the cell divides."),
+        ("although", "Although the assay fails, the result is clear."),
+        ("because", "The result is clear because the assay works."),
+        ("during", "The gene is expressed during the assay."),
+        (
+            "whether",
+            "The study reports whether the gene is expressed.",
+        ),
+        ("unless", "The result is void unless the assay works."),
+        ("so", "So this is the complete set."),
+        ("rather", "The result is rather clear."),
+        (
+            "neither",
+            "Neither is evidence that the variant is tolerated.",
+        ),
+        ("what", "Absence is what a neutral variant looks like."),
+        ("itself", "The codon itself carries two variants."),
+        ("themselves", "The codons themselves carry two variants."),
+        ("your", "Your result is clear."),
+        ("my", "My result is clear."),
+        ("everything", "Everything in the study is clear."),
+        ("likewise", "The control is likewise clear."),
+        ("anything", "Anything in the study is clear."),
+        ("yours", "The result is yours."),
+    ];
+    let mut lexical = Vec::new();
+    let mut wrong_cat = Vec::new();
+    for (w, sent) in cases {
+        let unknown = index.unknown_words(sent, &lem);
+        if unknown.iter().any(|u| u.eq_ignore_ascii_case(w)) {
+            lexical.push(*w);
+            eprintln!("  [ LEXICAL ] {w:<12} no entry at all      — {sent}");
+            continue;
+        }
+        if !unknown.is_empty() {
+            eprintln!("  [ SKIP    ] {w:<12} probe has other OOV: {unknown:?}");
+            continue;
+        }
+        let (closed, open) = index.parse_open(sent, &lem);
+        if closed.is_empty() && open.is_empty() {
+            wrong_cat.push(*w);
+            eprintln!("  [ WRONGCAT] {w:<12} known, no parse      — {sent}");
+        } else {
+            eprintln!(
+                "  [ OK      ] {w:<12} parses ×{}            — {sent}",
+                closed.len().max(open.len())
+            );
+        }
+    }
+    eprintln!("\nLEXICAL GAPS ({}): {lexical:?}", lexical.len());
+    eprintln!("WRONG CATEGORY ({}): {wrong_cat:?}", wrong_cat.len());
+
+    // The CLOSED SERIES. A closed-class addition should populate a whole paradigm, not the words
+    // one corpus happened to use — these sets are finite and enumerable, so enumerating them is
+    // right here where enumerating an open set (productive `-ly` adverbs) would not be.
+    for (series, words) in [
+        (
+            "indefinite pronouns",
+            &[
+                "something",
+                "anything",
+                "nothing",
+                "everything",
+                "someone",
+                "anyone",
+                "everyone",
+                "somebody",
+                "anybody",
+                "nobody",
+                "everybody",
+            ][..],
+        ),
+        (
+            "possessive det/pronouns",
+            &[
+                "my", "your", "his", "her", "its", "our", "their", "mine", "yours", "hers", "ours",
+                "theirs",
+            ][..],
+        ),
+        (
+            "reflexives",
+            &[
+                "myself",
+                "yourself",
+                "himself",
+                "herself",
+                "itself",
+                "oneself",
+                "ourselves",
+                "yourselves",
+                "themselves",
+            ][..],
+        ),
+        (
+            "subordinating conjunctions",
+            &[
+                "although", "though", "because", "since", "unless", "until", "whereas", "whether",
+                "while", "whilst", "where", "when", "after", "before", "if", "once",
+            ][..],
+        ),
+    ] {
+        let missing: Vec<&str> = words
+            .iter()
+            .copied()
+            .filter(|w| !index.has_token(w, &lem))
+            .collect();
+        eprintln!(
+            "  {series:<28} {:>2} of {:>2} MISSING: {missing:?}",
+            missing.len(),
+            words.len()
+        );
+    }
+}
+
 /// SECOND construction battery (survey §4 step 3) — the families visible in the 10-16 token plain
 /// prose gaps, which the first battery (built from the 5-9 band) never reached. Run:
 ///   cargo test --release -p eigenius-wordnet --test db_backed_encoding \
