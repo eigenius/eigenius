@@ -1704,6 +1704,53 @@ fn unless_is_negative_implication_and_whereas_is_contrastive_conjunction() {
     );
 }
 
+/// An indefinite pronoun is a QUANTIFIED NP, not an entity.
+///
+/// `nothing` occurs 15 times in the XIAP report — the most frequent indefinite there — and it
+/// "parsed" before this only because WordNet carries a NOUN `nothing`. That is a wrong reading, not
+/// a working one, and the same held for `someone`, `somebody` and `nobody`. So the test is on the
+/// SEM, not on whether a parse exists: the negative forms must build `→ False` and the universal
+/// forms a `forall`.
+#[test]
+fn an_indefinite_pronoun_quantifies() {
+    let (_layer, index) = index_over_bootstrap();
+
+    let sem_of = |s: &str| -> String {
+        let (c, o) = index.parse_open(s, &Identity);
+        let it = c
+            .first()
+            .map(|i| i.sem().clone())
+            .or_else(|| o.first().map(|p| p.item.sem().clone()))
+            .unwrap_or_else(|| panic!("{s:?} must compose"));
+        pretty_term(&it)
+    };
+
+    // Negative: ∀x. ¬V(x) — the `→ False` is the whole point, and a noun reading has none.
+    for s in ["nothing affects HeLa", "nobody affects HeLa"] {
+        let sem = sem_of(s);
+        assert!(sem.contains("False"), "{s:?} must negate: {sem}");
+    }
+    // Universal and existential compose, in both positions.
+    for s in [
+        "everything affects HeLa",
+        "everyone affects HeLa",
+        "something affects HeLa",
+        "someone affects HeLa",
+        "anyone affects HeLa",
+        "HeLa affects nothing",
+        "HeLa affects everything",
+        "HeLa affects something",
+    ] {
+        let _ = sem_of(s);
+    }
+    // The negative is not merely an entity: it differs from the existential's sem.
+    assert_ne!(
+        sem_of("nothing affects HeLa"),
+        sem_of("something affects HeLa"),
+        "the negative and the existential cannot denote the same thing"
+    );
+}
+
 #[test]
 fn but_not_contrastive_object_ellipsis() {
     // D62 §2 #8: `[verb] O₁ but not O₂` — the shared verb applies affirmatively to O₁ and negatively

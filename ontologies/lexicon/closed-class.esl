@@ -874,6 +874,260 @@ resource lexicon:whereas_subord : lexicon:LexicalEntry {
     lexicon:sense    = "whereas";
 }
 
+// ── Indefinite pronouns (paradigm completion) ────────────────────────────────
+// An indefinite pronoun IS a quantified NP: `something` = "some thing", `everyone` = "every
+// person". So its category is the determiner's RESULT with the restrictor already fixed —
+// `S/(S\NP)` in subject position, the object-determiner shape in object position — and its
+// semantics is the determiner's sem with `A` instantiated at `lexicon:Entity`. These restate the
+// three quantifier sems at that instance rather than quantify over `Set`, because the restrictor
+// is no longer an argument.
+//
+// Measured need: `nothing` occurs 15 times in the XIAP report, the most frequent indefinite there
+// by a wide margin, and it "parsed" before this only because WordNet carries a NOUN `nothing` — a
+// wrong reading rather than a working one. `someone`, `somebody` and `nobody` were the same shape.
+//
+// `person` is NOT distinguished from `thing`: both restrict to `lexicon:Entity`. The one-/-body
+// forms should restrict to a person class; there is none in the chain to point at, so the
+// restriction is dropped rather than faked, and `everyone` is `every entity` here.
+resource lexicon:exists_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) =>
+            forall (C : Prop) => (forall (x : lexicon:Entity) => (V(x) -> C)) -> C
+          : (lexicon:Entity -> Prop) -> Prop )
+    );
+}
+resource lexicon:forall_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => forall (x : lexicon:Entity) => V(x)
+          : (lexicon:Entity -> Prop) -> Prop )
+    );
+}
+resource lexicon:no_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (V : lexicon:Entity -> Prop) => forall (x : lexicon:Entity) => (V(x) -> logic:False)
+          : (lexicon:Entity -> Prop) -> Prop )
+    );
+}
+resource lexicon:obj_exists_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (C : Prop) => (forall (x : lexicon:Entity) => (TV(x, subj) -> C)) -> C
+          : (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:obj_forall_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (x : lexicon:Entity) => TV(x, subj)
+          : (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+resource lexicon:obj_no_entity_sem : lexicon:SemTerm {
+    lexicon:term = type_expr(
+        ( fun (TV : lexicon:Entity -> lexicon:Entity -> Prop) => fun (subj : lexicon:Entity) =>
+            forall (x : lexicon:Entity) => (TV(x, subj) -> logic:False)
+          : (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) )
+    );
+}
+
+resource lexicon:something_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "something";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "something";
+}
+
+resource lexicon:something_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "something";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "something";
+}
+
+resource lexicon:someone_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "someone";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "someone";
+}
+
+resource lexicon:someone_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "someone";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "someone";
+}
+
+resource lexicon:somebody_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "somebody";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "somebody";
+}
+
+resource lexicon:somebody_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — at least one entity.";
+    lexicon:form     = "somebody";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_exists_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "somebody";
+}
+
+resource lexicon:everything_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everything";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "everything";
+}
+
+resource lexicon:everything_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everything";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "everything";
+}
+
+resource lexicon:everyone_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everyone";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "everyone";
+}
+
+resource lexicon:everyone_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everyone";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "everyone";
+}
+
+resource lexicon:everybody_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everybody";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "everybody";
+}
+
+resource lexicon:everybody_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity.";
+    lexicon:form     = "everybody";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "everybody";
+}
+
+resource lexicon:nothing_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — no entity.";
+    lexicon:form     = "nothing";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:no_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "nothing";
+}
+
+resource lexicon:nothing_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — no entity.";
+    lexicon:form     = "nothing";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_no_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "nothing";
+}
+
+resource lexicon:nobody_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — no entity.";
+    lexicon:form     = "nobody";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:no_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "nobody";
+}
+
+resource lexicon:nobody_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — no entity.";
+    lexicon:form     = "nobody";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_no_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "nobody";
+}
+
+resource lexicon:anything_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anything";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "anything";
+}
+
+resource lexicon:anything_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anything";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "anything";
+}
+
+resource lexicon:anyone_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anyone";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "anyone";
+}
+
+resource lexicon:anyone_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anyone";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "anyone";
+}
+
+resource lexicon:anybody_subj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anybody";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(lexicon:Entity, lexicon:sg))) );
+    lexicon:sem      = lexicon:forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> Prop) -> Prop );
+    lexicon:sense    = "anybody";
+}
+
+resource lexicon:anybody_obj : lexicon:LexicalEntry {
+    core:description = "grammatical: indefinite pronoun — every entity (free choice).";
+    lexicon:form     = "anybody";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(lexicon:Entity, lexicon:num_any))))) );
+    lexicon:sem      = lexicon:obj_forall_entity_sem;
+    lexicon:sem_type = type_expr( (lexicon:Entity -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "anybody";
+}
+
 // ── Referential pronouns (D62 §2e / D64 Phase A — the open-parse carrier) ──
 // A referential pronoun is categorially a plain NP (core-en `ProNP` = NP) whose semantics
 // is an UNRESOLVED referent — an open-parse *hole* (D64). The committed entry stores the
