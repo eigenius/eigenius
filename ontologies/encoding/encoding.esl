@@ -409,8 +409,67 @@ resource enc:gap_bound : enc:GapDisposition {
 }
 resource enc:gap_injected : enc:GapDisposition {
     core:short_name = "injected";
-    core:description = "A new lexicon:LexicalEntry was proposed (LLM) and committed (felicity-gated).";
+    core:description = "A new lexicon:LexicalEntry was proposed and committed (felicity-gated). The proposal is DETERMINISTIC — the glossary sources (notation, markup, recurrence, attested parts, attested base, …) — not an LLM; `enc:resolution_method` records which one.";
 }
+// ── How a lexical gap was resolved (D102 decision 6) ──────────────────────
+// The disposition says WHETHER a gap closed; this says BY WHAT, and the order is TRUST — most
+// trusted first. It is the parser-side mirror of `dcg::augment::ResolutionMethod`, made
+// machine-readable on the gap stream so a coverage figure can be read by provenance rather than
+// taken on the aggregate: an entry minted by `enc:rm_unevidenced_fallback` clears `missing-lexeme`
+// and can still distort the grammar, which is measurable only if the method is recorded.
+class enc:ResolutionMethod {
+    description = "How a lexical gap was closed, as a closed resource enum ordered by TRUST (most trusted first). Mirrors dcg::augment::ResolutionMethod; the order is load-bearing wherever a lexicon profile ranks by it.";
+}
+resource enc:rm_definition_extracted : enc:ResolutionMethod {
+    core:short_name = "definition_extracted";
+    core:description = "The document defined it — an abbreviation with its long form in the source.";
+}
+resource enc:rm_marked_as_code : enc:ResolutionMethod {
+    core:short_name = "marked_as_code";
+    core:description = "The author marked it as code; the only judgement is theirs.";
+}
+resource enc:rm_notation_recognized : enc:ResolutionMethod {
+    core:short_name = "notation_recognized";
+    core:description = "A published grammar parsed it (HGVS, an accession, a coordinate).";
+}
+resource enc:rm_name_recognized : enc:ResolutionMethod {
+    core:short_name = "name_recognized";
+    core:description = "An apposition named it — a common-noun head before a proper name.";
+}
+resource enc:rm_compound_of_known_parts : enc:ResolutionMethod {
+    core:short_name = "compound_of_known_parts";
+    core:description = "A joined compound whose parts are all attested.";
+}
+resource enc:rm_derived_from_base : enc:ResolutionMethod {
+    core:short_name = "derived_from_base";
+    core:description = "A suffix derivation from an attested base.";
+}
+resource enc:rm_retrieval_grounded : enc:ResolutionMethod {
+    core:short_name = "retrieval_grounded";
+    core:description = "Grounded against the chain's form or description indexes.";
+}
+resource enc:rm_recurrent_oov_name : enc:ResolutionMethod {
+    core:short_name = "recurrent_oov_name";
+    core:description = "Orthography plus repetition, admissible only because the surface is OOV.";
+}
+resource enc:rm_llm_synthesized : enc:ResolutionMethod {
+    core:short_name = "llm_synthesized";
+    core:description = "Proposed by an untrusted LLM and felicity-gated. DECLARED WITH NO PRODUCER — the designed route for a word absent from the lexicon, and it does not exist yet.";
+}
+resource enc:rm_unevidenced_fallback : enc:ResolutionMethod {
+    core:short_name = "unevidenced_fallback";
+    core:description = "No source with a claim to make took it: an opaque individual minted so the unit reaches the grammar, on NO evidence beyond its occurrence. Measured to distort the grammar as well as fail to help — it can manufacture a parse.";
+}
+property enc:resolution_method : core:resource {
+    description = "Which ResolutionMethod closed this lexical gap. Absent on a gap that did not close.";
+    class_types enc:ResolutionMethod;
+    allows_only enc:rm_definition_extracted, enc:rm_marked_as_code, enc:rm_notation_recognized,
+        enc:rm_name_recognized, enc:rm_compound_of_known_parts, enc:rm_derived_from_base,
+        enc:rm_retrieval_grounded, enc:rm_recurrent_oov_name, enc:rm_llm_synthesized,
+        enc:rm_unevidenced_fallback;
+    domain enc:LexicalGap;
+}
+
 resource enc:gap_unresolvable : enc:GapDisposition {
     core:short_name = "unresolvable";
     core:description = "No target found and none injectable — a recorded vocabulary gap (fail-closed).";
