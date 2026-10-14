@@ -438,6 +438,47 @@ per fix is at best one. Step 4's rewrite addresses length, which the step-3 meas
 as the dominant variable, and the clause-splice A/B already showed it recovers 11 pieces where a
 construction recovers one.
 
+## Item 4: Fork A — zero units, and the measurement that explains all four
+
+The factive subordinators (`because`/`although`/`while`/`though`/`whilst`), `cannot` split in the
+lexer, `its genes`/`their gene`, and `enc:ResolutionMethod` on the gap stream. Store reseeded after
+the `cannot` split, provenance reproduced for the fourth consecutive time.
+
+| | before | after |
+|---|---:|---:|
+| **CNL baseline, 62 units** | 1264 / 304, hits 53 | **identical**, coverage PASS |
+| **XIAP page** — every outcome | 1 / 11 / 5, gap 281 | **unchanged** |
+| readings / skeletons | 2303 / 489 | 2303 / 521 |
+
+**Zero units. Not one outcome changed.** The baseline holding identical is worth noting on its own:
+this batch added an axiom family, a hole kind, an arm to the felicity gate's traversal, and a
+TOKENIZER change — and moved no figure on the gated page.
+
+Subordinating conjunctions went 3 of 14 → **10 of 14** (the four left are `since`/`until`/`when`/
+`once`, temporal with no account). So the construction works; it converts nothing.
+
+### Why: a binary connective converts at the SQUARE of the clause rate
+
+Splitting the 18 gap units that carry a factive subordinator at the subordinator gives 37 clause
+halves. Measured on the same store:
+
+| | |
+|---|---:|
+| halves that parse alone | **8 of 37 (22%)** |
+| halves that are still gaps | 29 |
+
+A subordinator needs BOTH sides. At a 22% clause rate the unit rate is `p² ≈ 4.7%`, so over 18
+units the expected yield is **0.84 conversions** — and zero is exactly what that predicts. Fork A
+did not underperform; the base clause rate makes binary constructions nearly unconvertible.
+
+The same lens explains the earlier results rather than being fitted to them: `rather than` is also
+binary, over 41 gaps, and returned 1.
+
+**This is the quantitative case for step 4.** A rewrite that splits a unit into independent clauses
+converts a `p²` problem into a `p` problem — that is the whole of its advantage, and it is why the
+clause-splice A/B recovered 11 pieces where every construction fix recovered one or none. Closing
+constructions raises `p` slowly; splitting changes the exponent.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:
