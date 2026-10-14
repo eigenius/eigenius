@@ -28,6 +28,24 @@ fronted adjunct, `per` after a count, and a list with its unit once (DO items 11
 quantities, rules 11 and 12); and for slice 9: a factor on a count comparative, `a median` before it,
 and `compared to` for `than` (Measured quantities, rule 13).*
 
+**Revised `2026-10-13`** against the UAB survey §4 step 5 measurements — the first revision driven
+by a corpus other than WRN, and the first to CORRECT claims rather than only add them. Every row
+below is now backed by a named probe (see "Each row is a probe", at the end), because the previous
+posture — "expected to drift as the grammar grows; check a claim against the baseline" — put the
+burden on the reader and left the guide six months stale. Three DO items claimed coverage the
+parser does not have, and one DON'T row instructed authors to DESTROY content the parser now
+carries:
+
+- **`because` / `although` flipped from DON'T to DO.** The row said "subordinators unbuilt → split +
+  use a transitional". D62 2d Fork A built them (`logic:Because : Π(p q:Prop) → p → q → Prop`), so
+  splitting now DISCARDS the causal relation instead of working around a gap. Keeping the
+  subordinator is preferred.
+- **Coordination, relative clauses and clausal complements were over-claimed** — NP coordination
+  fails in SUBJECT position, and the ZERO relative and ZERO complementizer both fail. See the
+  corrected DO items 4, 7 and 10.
+- A dozen measured DON'Ts were missing, the largest being that the lexer DELETES a clause-position
+  `:` or `;`.
+
 ## Purpose & posture
 
 The parser is the oracle: a sentence either composes into a kernel-checked typed tree or it does not.
@@ -77,8 +95,21 @@ Two rules sit above everything else:
      against an antecedent that is itself a finding, earlier in the same document. A demonstrative in
      the first sentence, or one whose restrictor matches nothing prior, leaves the sentence OPEN.
      Write the full NP when there is no antecedent to point at.
-4. **Coordination.** `and`/`or`; comma lists `X, Y and Z`; sentence-level `S but S`. Contrastive
-   `requires A but not B` **when A and B are the same kind of thing** (e.g. two activities).
+4. **Coordination — in OBJECT position, and between like non-NP categories.** `and`/`or`; comma
+   lists `X, Y and Z`; sentence-level `S but S`.
+   - ⚠ **NP coordination fails as a SUBJECT.** `The study measured the result and the control.`
+     parses; `The result and the control are clear.` does NOT. Write two sentences, or move the
+     coordination into object position.
+   - **Contrastive `X but not Y` and `X rather than Y`** are the same operator (`X ∧ ¬Y`) and work
+     between **adjectives, verbs or PPs** — `clear but not ambiguous`, `measured rather than
+     assumed`, `in the liver rather than in the kidney`. ⚠ **Between two NPs neither parses**:
+     `measured the result rather than the control` has no parse. Split it.
+   - ⚠ **`both … and` over two VPs has no parse** (`both bounds the argument and reinforces the
+     conclusion`). Write two sentences.
+   - ⚠ **VP coordination under one auxiliary has no parse** (`has been settled and is recorded
+     below`). Repeat the auxiliary, or split.
+   - ⚠ **Unlike categories cannot coordinate** (`It is the same residue, carried by four men, and
+     benign.`). One category per coordination.
 5. **Adjectives & compounds.**
    - *Genuine* stacked attributive adjectives — each modifies the head **independently** (`a human
      colorectal tumour`); and noun–noun compounds (`cancer models`, `cell line`, `MSI cancer models`).
@@ -93,11 +124,22 @@ Two rules sit above everything else:
 6. **Prepositional phrases.** `of`/`in`/`for`/`with`/`on`/`from`/`within`/`between`, as noun
    post-modifiers (`a biomarker of dependency`) and verb adjuncts (`essential in MSI models`). The
    object may be a determined NP (`within a gene`, `for tumours`).
-7. **Relative clauses.** Restrictive `the gene that affects X` / `which affects X`; non-restrictive
-   `WRN, which encodes a helicase, is essential.`
+7. **Relative clauses — ALWAYS with the relativizer written.** Restrictive `the gene that affects X`
+   / `which affects X`; non-restrictive `WRN, which encodes a helicase, is essential.`
+   - ⚠ **The ZERO relative has no parse.** `The resource I could query is reliable.` fails where
+     `The resource that I could query is reliable.` parses (CLOSED×27). Never drop `that`.
+   - **The agentless reduced relative now parses** (D62 2d short-passive lift): `the resource
+     queried in the study`, `the method used in the study`, `the release queried recently`, and bare
+     `the resource queried`. So a past-participial post-modifier needs no rewrite.
+   - ⚠ **The ACTIVE participial post-modifier does not** — `a patient carrying the variant` has no
+     parse. This one cannot be split faithfully: "A patient carries the variant." asserts of a
+     patient what held only of the restricted set. Rephrase with a relativizer: `a patient that
+     carries the variant`.
 8. **Passive.** `WRN was depleted.` `Apoptosis was promoted by depletion.`
 9. **Negation.** `WRN does not affect MSS models.` `The activity is not essential.`
-10. **Clausal complements (report verbs).** `These findings show that WRN is a vulnerability.`
+10. **Clausal complements (report verbs) — ALWAYS with `that`.** `These findings show that WRN is a
+    vulnerability.` ⚠ **The ZERO complementizer has no parse**: `The study mentioned the result was
+    clear.` fails where the `that` form parses (CLOSED×8).
 11. **Transitional adverbs** (sentence-initial): `Thus,` `Therefore,` `Hence,` `Moreover,`
     `Similarly,` `Notably,` — transparent (they don't change the claim). **One adjunct may open the
     sentence**, with or without a comma, and reads as it does after the verb: `After 24 h, the medium
@@ -113,6 +155,31 @@ Two rules sit above everything else:
     noun (`300 μl of CellTiter-Glo`). A factor goes before a count comparative (`0.56-fold fewer
     deletion mutations`). See "Measured quantities" below.
 
+14. **Factive subordinators — `because`, `although`, `while`, `though`, `whilst`** (D62 2d Fork A,
+    `2026-10-13`). Write them; do NOT split them. Each presupposes both clauses, and the parser
+    builds `logic:Because(p, q, h_p, h_q)` where `h_p`/`h_q` are HYPOTHETICAL proofs exported as
+    proof obligations for the reasoning layer. Splitting into two sentences would discard the
+    relation, which is the content.
+    - **A factive clause yields an OPEN parse, never a closed one** — the obligations cannot be
+      discharged by the parser (felicity is not truth). That is correct, and it counts as a parse
+      under the success criterion below.
+    - ⚠ **`unless` and `whereas` also parse** — `unless` is `¬S₂ → S₁` (native implication),
+      `whereas` denotes what `but` denotes.
+    - ⚠ **The TEMPORAL subordinators do NOT**: `since`, `until`, `when`, `once` have no account at
+      all — EigenTT has no time indexing. Restate as separate claims with an explicit order.
+15. **Possessive determiners, either head number.** `my`/`your`/`our`/`his`/`her`/`its`/`their`
+    before a singular or plural head (`my gene`, `my genes`). The possessor is a referent hole, so
+    the sentence is OPEN until an antecedent resolves it — as for a pronoun.
+16. **Indefinite pronouns, BARE or with a verb.** `Nothing resolves the question.` `Everything is
+    clear.` `Someone raised it.` They are quantified NPs, not entities — the negative forms build
+    `∀x. ¬V(x)`.
+    - ⚠ **With a post-modifier they have no parse**: `Everything in Findings 1–7 is inference.`
+      fails. Write the restriction as its own claim, or name the set (`Findings 1–7 are inference.`).
+    - ⚠ **`neither` as a bare subject has no parse** (`Neither is evidence that …`) — it presupposes
+      a two-member set the grammar cannot restrict to. Name both members.
+    - ⚠ **`both of those` has no parse** either; `none of the methods` does.
+17. **`cannot`** now reads as `can` + `not` (lexer, `2026-10-13`), so it needs no rewrite.
+
 ## DON'T — and how to rewrite it
 
 | Avoid (journal style) | Why | Rewrite recipe |
@@ -127,12 +194,30 @@ Two rules sit above everything else:
 | **Telegraphic caption annotations** (`Scale bar, 50 μm`; `pH 7.5`; `(1,200 V, 20 ms, 2 pulses)`) | Not sentences — a label and its value, with no verb. Figure legends and instrument settings are written in an elliptical register the sentence grammar does not cover. | Expand to the sentence it abbreviates: `The scale bar is 50 μm.` A parameter list becomes one sentence per parameter. This is **register**, not content — nothing is added or dropped, so R2 is satisfied. |
 | **Em-dash appositives** (`—an interaction…—`) | Not covered; the dash content is dropped. | Split into separate sentences: `Synthetic lethality is an interaction between two genetic events. …` |
 | **Long multi-clause sentences** (relative + subordinate + parenthetical stacked) | Each clause must compose; one gap kills the whole, and long units hit the beam. | **One claim per sentence.** |
-| **`because` / `although` subordinate clauses** | Not in the lexicon (OOV); subordinators unbuilt. | Split + use a transitional: `…. Therefore ….` Drop concessive `although` or restate as two facts. |
+| ~~**`because` / `although` subordinate clauses**~~ — **WITHDRAWN `2026-10-13`, now a DO (§14)** | They were OOV; D62 2d Fork A built them as factive dependent relations. | **Do not split them.** Splitting discards the causal or concessive relation, which is part of the claim. The old recipe ("split + use a transitional") actively destroys content the parser now carries. |
 | **Cross-type `but not`** (`required the helicase activity … but not its exonuclease activity` — different kinds) | The two objects must be the same category. | Split: `MSI models required the helicase activity of WRN. MSI models did not require the exonuclease activity of WRN.` |
 | **Deeply-embedded / determined-subject pied-piping** (`the way in which the co-occurrence leads…`) | Only simple/name-subject pied-piping is covered. | Rephrase as a separate clause: `The co-occurrence leads to cell death.` |
 | **Novel / OOV or en-dash hyphenations** (`CRISPR–Cas9-mediated`; an en-dash `–`, not a hyphen) | An unknown head/base is OOV; the en-dash isn't the hyphen token. | Rephrase or drop the modifier. **But a hyphenated compound whose head is a known adjective now PARSES** (D63 morphology: `double-stranded`, `pcr-based`, `large-scale`, `synthetic-lethal`) — **prefer** hyphenation for lexicalized compound modifiers (DO §5), don't avoid it. |
 | **Possessive ellipsis / heavy gapping**, fronted reduced clauses with complex complements | Limited; gapping beyond same-type `but not` isn't covered. | Use an explicit subject and a full verb in each clause. |
 | **`and/or`** | Not a token; collapsing it to `and` overstates (requires *both*). | Write **`or`** — `logic:Or` is **inclusive** (true if either or both), which is exactly what `and/or` means. (Faithfulness rule, not just style — `and/or → and` is a meaning change; `and/or → or` is meaning-preserving.) |
+
+### Added `2026-10-13` — measured on the UAB survey corpus
+
+| Avoid | Why | Rewrite recipe |
+|---|---|---|
+| **A clause-position `:` or `;`** (`The residue is buried: it sits in the core.`) | The lexer emits `,` as a token but **DELETES** `:` and `;`, handing the grammar two independent clauses spliced with no connective. Measured: 68 gap units carry one. | Write two sentences. (Measured: splitting them mechanically recovers 11 pieces of 145 — real, and far from sufficient.) |
+| **A label colon** (`Searched: holds no score set.`; `The original description: establishes loss of function.`) | NOT two clauses — a colon joining an annotation LABEL to its predicate. Splitting it gives a bare NP and a bare VP, neither of which parses; leaving it gives the splice above. | Expand to a sentence: `The search holds no score set.` This is the register fix the "telegraphic caption" row prescribes, applied to annotation lists. |
+| **The ACTIVE participial post-modifier** (`a patient carrying the variant`) | No parse; only the passive/agentless form (`a patient found in the study`) composes. | Use a relativizer: `a patient that carries the variant`. **Do not split it** — "A patient carries the variant." asserts of a patient what held only of the restricted set, so the split is a meaning change, not a reformatting. |
+| **A comma appositive** (`CADD v1.6, the release queried here, gives X`) | No rule covers it. `appose_group` handles the `<common noun> <Name>` designation (`gene MSH2`), a different construction. | Two sentences: `CADD v1.6 is the release queried here. CADD v1.6 gives X.` This one splits faithfully. |
+| **A NOUN comparative** (`greater dependence than the control`) | No parse. ADJECTIVE comparatives do parse — `clearer than`, `more conservative than` — and so does a plain object predicative (`rate the variant damaging`), but not `rate the variant worse than the control`. | Recast onto an adjective: `The dependence is greater than the control's.` |
+| **A free relative** (`Absence is what a neutral variant looks like.`) | No parse — a clause used as an NP, with a stranded preposition. | Name the thing: `Absence is the normal pattern for a neutral variant.` |
+| **`without` + gerund** (`searched without finding the variant`) | A preposition takes a noun phrase; the gerund clause has no parse (the same reason as the existing "preposition with a clause as its object" row). | Two clauses: `The study searched. The study did not find the variant.` |
+| **A parenthetical adverb between commas** (`It is therefore, empirically, compatible.`) | No parse. A sentence-initial transitional adverb IS covered (DO §11). | Move it to the front: `Empirically, it is therefore compatible.` |
+| **Sentence-initial `So`** (`So this is the complete set.`) | No parse — though sentence-initial `Yet` parses (CLOSED×36), as do the DO §11 transitionals. | Use a covered transitional: `Therefore, this is the complete set.` |
+| **A fronted conditional** (`If the assay fails, the result is void.`) | No parse in the fronted position. | Put the subordinate clause second: `The result is void if the assay fails.` |
+| **An imperative** (`Report the result.` / `Do not report the result.`) | A DECLARED deferral, not an oversight: `lexicon:Mood` has `imp`, and ⟦S[imp,_]⟧ fails closed pending D63 Slice 5. core-en has no imperative either. | Restate as a declarative about what is to be done: `The result should be reported.` |
+| **An embedded question** (`reports where the gene is expressed`, `whether`, `how`, `why`) | Gated on the same Slice 5 interrogative denotation as the imperative. | Nominalize: `reports the location of expression`. |
+| **A verbless unit** (`The source of the results.`; `ESM1b.`) | A unit must be a sentence; `Parser::parse` returns full-span `S` only. Measured: framing such units as NP subjects recovers them at no better than the length baseline, so this is a register fix, not a grammar gap. | Write the sentence it abbreviates, or route it out of prose (a bibliography annotation is not a claim). |
 
 ## Measured quantities (D93 / D95)
 
@@ -302,6 +387,33 @@ third has 6 readings, against 12 with `931g`.
 
 **What is still lost:** *"in triplicate"* is a replication count, which is D52's, not a quantity.
 Do not rewrite it as `3 replicates` to make it look like one.
+
+## Each row is a probe
+
+**The guide's claims are asserted by tests, not by the reader's diligence.** The previous posture —
+"expected to drift as the grammar grows; check a claim against the baseline before relying on it" —
+is how three DO items came to over-claim and the `because` row came to prescribe destroying content
+the parser carries. The quantities section already had the better pattern (a corpus plus
+`kernel/tests/quantity_corpus.rs`); syntax now has it too.
+
+| probe | what it pins |
+|---|---|
+| `probe_step5_construction_families` (29 probes, `--ignored`) | the DO/DON'T families from the 5–9 token band: reduced relatives, appositives, comparatives, negative subjects, `rather than`, verbless NPs. Each failing family is paired with the nearest probe that PARSES, which is what localizes it. |
+| `probe_step5_families_medium` (39 probes) | the 10–16 token band: zero relative vs `that` relative, zero vs `that` complementizer, `but not` and `rather than` by operand category, NP coordination by position, `both … and`, `without` + gerund, `So` vs `Yet`, imperatives, fronted conditionals. |
+| `probe_closed_class_paradigms` (6 paradigms) | every member of the indefinite-pronoun, possessive-determiner, possessive-pronoun, reflexive, subordinator and complementizer series, as OK / WRONGCAT / LEXICAL. A form "present" via a WordNet content entry is NOT coverage — `nothing` passed that way for 15 occurrences while denoting an entity. |
+| `probe_reduced_relative_pp` | the passive participial ladder: bare, + adverb, + adjunct PP, + agent by-phrase, and the active `ger` + object that still fails. |
+| `kernel/tests/closed_class_determiners.rs` | the bootstrap-level assertions for what landed `2026-10-13`: the factive subordinators' two proof obligations, `rather than` ≡ `but not`, `unless`'s negated antecedent, the possessive paradigm in both numbers, indefinite quantification, `can not`. |
+
+Three probes carry a tag the guide depends on:
+
+- **`LEX-GAP` is not `GAP`.** A probe whose vocabulary the served chain lacks is tagged separately,
+  because a missing word is a lexicon problem and a missing rule is a grammar one. That distinction
+  retracted two rows mid-revision: the passive AGENT by-phrase was read as a gap when the real cause
+  was a derived `-ly` adverb, and `cannot` was read as a wrong category when it had no entry at all.
+- **An OPEN parse counts.** The success criterion below admits closed OR open; a factive subordinator
+  and a possessive determiner both yield open parses by design.
+- **A parse is not a correct parse.** `nothing` "passed" for 15 occurrences on a noun reading. Where
+  a row's claim is semantic, the probe asserts the SEM, not that a parse exists.
 
 ## Success criterion
 
