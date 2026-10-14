@@ -1657,6 +1657,9 @@ fn a_possessive_determiner_takes_either_number() {
         "her gene affects HeLa",
         "HeLa affects my gene",
         "HeLa affects your genes",
+        // `its`/`their` carried one head number each until the paradigm was completed.
+        "its genes affect HeLa",
+        "their gene affects HeLa",
     ] {
         let (c, o) = index.parse_open(s, &PluralS);
         assert!(!c.is_empty() || !o.is_empty(), "{s:?} must compose");
@@ -1771,6 +1774,9 @@ fn a_factive_subordinator_exports_proof_obligations() {
         ("because", "Because"),
         ("although", "Although"),
         ("while", "While"),
+        // Same relations, other spellings — they share the sems rather than restate them.
+        ("though", "Although"),
+        ("whilst", "While"),
     ] {
         let s = format!("HeLa affects BRCA1 {word} HeLa affects BRCA1");
         let (closed, open) = index.parse_open(&s, &Identity);
@@ -1806,6 +1812,21 @@ fn a_factive_subordinator_exports_proof_obligations() {
             );
         }
     }
+}
+
+/// `cannot` is ONE token with no entry; `can not` is two tokens that both have one.
+///
+/// This is the control for splitting `cannot` in the lexer rather than minting a bespoke entry:
+/// if the split form parses, the split reuses `can` and `not` and needs no new semantics — and no
+/// reseed, since it is a preprocessing change rather than an ontology one.
+#[test]
+fn can_not_parses_as_two_tokens() {
+    let (_layer, index) = index_over_bootstrap();
+    let (c, o) = index.parse_open("HeLa can not affect BRCA1", &Identity);
+    assert!(
+        !c.is_empty() || !o.is_empty(),
+        "`can not` composes from the existing modal + negator"
+    );
 }
 
 #[test]

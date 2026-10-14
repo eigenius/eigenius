@@ -901,6 +901,26 @@ resource lexicon:while_subord : lexicon:LexicalEntry {
     lexicon:sense    = "while";
 }
 
+// `though` and `whilst` are the same factive relations under other spellings — they share
+// `although_sem` / `while_sem` rather than restating them, so the paradigm has one definition per
+// RELATION, not per surface.
+resource lexicon:though_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: concessive subordinator, FACTIVE ('though the assay fails').";
+    lexicon:form     = "though";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:although_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "though";
+}
+resource lexicon:whilst_subord : lexicon:LexicalEntry {
+    core:description = "grammatical: temporal/concessive subordinator, FACTIVE ('whilst the cell divides').";
+    lexicon:form     = "whilst";
+    lexicon:cat      = type_expr( lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_s(lexicon:dcl, lexicon:fin)), lexicon:cat_s(lexicon:dcl, lexicon:fin)) );
+    lexicon:sem      = lexicon:while_sem;
+    lexicon:sem_type = type_expr( Prop -> Prop -> Prop );
+    lexicon:sense    = "whilst";
+}
+
 // ── `unless` and `whereas` (D62 2d, the two non-factive subordinators) ──────
 // These are the subordinators the findings note does NOT route through Fork A. Fork A
 // (`docs/notes/d62-subordinator-design-findings.md`) covers `because`/`although`/`while`, which are
@@ -1477,6 +1497,41 @@ resource lexicon:her_obj_pl : lexicon:LexicalEntry {
     lexicon:sense    = "her";
 }
 
+// `its`/`their` carried ONE head number each (`its gene`, `their genes`), so `its genes` and
+// `their gene` did not compose. The first/second-person forms above take one entry per head number;
+// these complete the two that predate them, on the same shape.
+resource lexicon:its_subj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular possessive determiner ('its functions'), pl head.";
+    lexicon:form     = "its";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:pl)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "its";
+}
+resource lexicon:its_obj_pl : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person singular possessive determiner ('its functions'), pl head.";
+    lexicon:form     = "its";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:pl, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "its";
+}
+resource lexicon:their_subj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person plural possessive determiner ('their survival'), sg head.";
+    lexicon:form     = "their";
+    lexicon:cat      = type_expr( lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:fwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin_any), lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, lexicon:fin), lexicon:cat_np(T, lexicon:sg)))) );
+    lexicon:sem      = lexicon:poss_subj_sem;
+    lexicon:sem_type = type_expr( forall (A : Set) => (A -> Prop) -> Prop );
+    lexicon:sense    = "their";
+}
+resource lexicon:their_obj_sg : lexicon:LexicalEntry {
+    core:description = "grammatical: third-person plural possessive determiner ('their survival'), sg head.";
+    lexicon:form     = "their";
+    lexicon:cat      = type_expr( lexicon:cat_fin_forall(fun (f : lexicon:Fin) => lexicon:cat_num_forall(fun (n : lexicon:Num) => lexicon:cat_forall(lexicon:sg, fun (T : Set) => lexicon:bwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:fwd(lexicon:m_all, lexicon:bwd(lexicon:m_all, lexicon:cat_s(lexicon:dcl, f), lexicon:cat_np(lexicon:Entity, n)), lexicon:cat_np(T, lexicon:num_any)))))) );
+    lexicon:sem      = lexicon:poss_obj_sem;
+    lexicon:sem_type = type_expr( forall (T : Set) => (T -> lexicon:Entity -> Prop) -> (lexicon:Entity -> Prop) );
+    lexicon:sense    = "their";
+}
 resource lexicon:their_subj : lexicon:LexicalEntry {
     core:description = "grammatical: third-person plural possessive determiner ('their survival').";
     lexicon:form     = "their";
