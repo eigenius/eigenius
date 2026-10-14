@@ -734,15 +734,53 @@ fn flush(text: &str, run: &mut Vec<&Lexeme>, tokens: &mut Vec<Token>) {
         _ if !surface.chars().any(|c| c.is_ascii_alphabetic()) => TokenKind::NonProse,
         _ => TokenKind::Word,
     };
-    tokens.push(Token {
-        span: run[start].span.start..run[last].span.end,
-        surface,
-        kind,
-    });
+    let span = run[start].span.start..run[last].span.end;
+    if let Some(parts) = split_solid_negation(&surface, &span) {
+        tokens.extend(parts);
+    } else {
+        tokens.push(Token {
+            span,
+            surface,
+            kind,
+        });
+    }
     for l in run[last + 1..].iter().filter(|l| is_operator(l.text(text))) {
         tokens.push(symbol(text, l));
     }
     run.clear();
+}
+
+/// `cannot` → `can` + `not`, the one English modal written SOLID with its negation.
+///
+/// The parser already composes `can` with the `not` negator, scope machinery and all
+/// (`closed_class_determiners::can_not_parses_as_two_tokens` asserts it), so splitting the solid
+/// spelling reuses that rather than hand-writing a negated-modal sem — which would have to
+/// reproduce `not`'s `ScopeOperator` behaviour and could get the scope wrong. It is a lexical gap
+/// otherwise: `cannot` has no entry at all, and 6 of the XIAP report's grammar gaps carry it.
+///
+/// ONE member, and deliberately not a general contraction table. The apostrophe contractions
+/// (`can't`, `don't`, `isn't`) are a different orthographic class, need their own lexeme handling
+/// for the apostrophe, and do not occur in any corpus measured here; `cannot` is the only solid
+/// one. The split is exact rather than a re-lex: `can` and `not` are contiguous in the source, so
+/// each half keeps a true sub-span — which the gate's code-span containment and the named-entity
+/// boundary test both read.
+fn split_solid_negation(surface: &str, span: &std::ops::Range<usize>) -> Option<Vec<Token>> {
+    if !surface.eq_ignore_ascii_case("cannot") || span.len() != 6 {
+        return None;
+    }
+    let (can, not) = surface.split_at(3);
+    Some(vec![
+        Token {
+            span: span.start..span.start + 3,
+            surface: can.to_string(),
+            kind: TokenKind::Word,
+        },
+        Token {
+            span: span.start + 3..span.end,
+            surface: not.to_string(),
+            kind: TokenKind::Word,
+        },
+    ])
 }
 
 /// The number words (decision 6): the closed class's cardinals before D95 slice 7d, whose entries
@@ -812,6 +850,43 @@ mod tests {
     /// No unit vocabulary: these tests are about everything but quantities.
     fn tokenize(text: &str) -> Vec<Token> {
         super::tokenize(text, &ProseUnits::none())
+    }
+
+    /// `cannot` is ONE orthographic word and TWO tokens — the only English modal written solid with
+    /// its negation. Splitting it lets the parser compose the existing `can` with the `not` negator
+    /// (scope machinery and all) instead of needing a bespoke negated-modal entry; `cannot` has no
+    /// lexical entry at all, and 6 of the XIAP report's grammar gaps carry it.
+    #[test]
+    fn cannot_splits_into_can_and_not() {
+        let t = tokenize("The method cannot resolve it.");
+        let surfaces: Vec<&str> = t.iter().map(|x| x.surface()).collect();
+        assert_eq!(surfaces, ["The", "method", "can", "not", "resolve", "it"]);
+        // Each half keeps a TRUE sub-span — the gate's code-span containment and the named-entity
+        // boundary test both read spans, so a synthesised one would corrupt them.
+        let can = t.iter().find(|x| x.surface() == "can").expect("can");
+        let not = t.iter().find(|x| x.surface() == "not").expect("not");
+        assert_eq!(
+            can.span().end,
+            not.span().start,
+            "contiguous, no gap invented"
+        );
+        assert_eq!(
+            not.span().end - can.span().start,
+            6,
+            "together they span `cannot`"
+        );
+        // Case is preserved on the first half, and `can not` written out is unaffected.
+        assert_eq!(
+            tokenize("Cannot resolve it.")
+                .iter()
+                .map(|x| x.surface().to_string())
+                .collect::<Vec<_>>(),
+            ["Can", "not", "resolve", "it"]
+        );
+        // A word merely CONTAINING the letters is left alone.
+        assert!(tokenize("cannotation is a word")
+            .iter()
+            .any(|x| x.surface() == "cannotation"));
     }
 
     /// Decision 7: scientific notation is one numeral; a power of ten alone needs a superscript or a
