@@ -46,6 +46,15 @@ carries:
 - A dozen measured DON'Ts were missing, the largest being that the lexer DELETES a clause-position
   `:` or `;`.
 
+**Revised `2026-10-15`, the final revision before the rewrite it governs.** Three changes, all from
+measurements taken `2026-10-14`. (1) **R1 now carries a token budget** — under 31 — because length is
+the only variable measured on the XIAP page that separates parsed units from failing ones, and R1 now
+explicitly outranks every DON'T row. (2) **A new R3: a citation is provenance, not a claim**, after 64
+of the certification log's 427 gold spans turned out to be bibliographic records. (3) **A new "How to
+apply this guide"** carrying the census that demotes the DON'T tables to a correctness filter: every
+countable row sits at the 86% base gap rate and 46% of failing units carry none of them, so a
+row-by-row pass moves nothing. The tables are unchanged in content; what changed is their standing.
+
 **Revised `2026-10-14`: the ACTIVE participial post-modifier moved from DON'T to DO.** The `ger` arm
 of `reduced_relative` built it, so `a patient carrying the variant` composes and its DON'T row is
 gone. This is the second row in two revisions to flip because the grammar grew, and the pattern is
@@ -63,10 +72,17 @@ science in the subset the parser covers**. This matches the encoding objective �
 *load-bearing factual claims* as checkable `Prop`s; rhetorical packaging, inline statistics, and
 citations are out of the claim by design (D62 S0 routes them out).
 
-Two rules sit above everything else:
+Three rules sit above everything else, and **R1 outranks every DON'T row in this guide** — see "How
+to apply this guide" below for the measurement that puts it there.
 
-- **(R1) One claim per sentence.** Almost every grammar gap below is dissolved by splitting a compound
-  journal sentence into several short factual ones.
+- **(R1) One claim per sentence, and keep it under 31 tokens.** Almost every grammar gap below is
+  dissolved by splitting a compound journal sentence into several short factual ones. The budget is
+  measured, not a style preference: over the 325 prose units of the UAB XIAP report
+  (`2026-10-14`), units that produced a reading ran a **median of 11 tokens and NONE exceeded 31**,
+  while units that failed ran a median of 22 and up to 59. Length is the only variable measured on
+  that corpus that separates the two. It is necessary and not sufficient — 69% of the failing units
+  were already under 31 tokens — so the budget is a floor to clear before the rest of the guide
+  applies, not a guarantee.
 - **(R2) Faithfulness over parseability — never drop a *qualifier* to make a sentence parse.** A
   simplification may drop *data* (numbers, citations, figure refs — out of the claim by design), but it
   **may not** drop a word that changes the claim's **strength, scope, or modality**: modals
@@ -75,6 +91,44 @@ Two rules sit above everything else:
   (`double-stranded`). If keeping a qualifier means the sentence does not yet parse, **keep it anyway
   and record the gap** — a faithful un-parsed claim is a tracked to-do; a parsed distorted claim is a
   silent error (the D61 faithfulness gap). See the audit + rule at the end of this note for why.
+- **(R3) A citation is provenance, not a claim — do not write one as a sentence.** A reference-list
+  entry (author list, title, journal, year, pages, PMID) has no truth condition, so there is nothing
+  for the parser to check and nothing for the kernel to hold. It belongs in the claim's provenance
+  fields, which is where a certificate already keeps it. Measured on the XIAP certification log
+  (`2026-10-14`): **64 of its 427 gold claim spans are bibliographic records**, 61 of them registered
+  under the `observed` kind, and 56 carry a `PMID`. The harness classifies all 64 `non-prose`, which
+  is correct — they are 15% of the register and unparseable by construction. The same applies to a
+  span that covers SEVERAL claims (`compressed`) or states why a claim is not checkable (`exempt`):
+  0 of those 25 spans parse, because neither is a single assertion. Represent them as structure.
+
+## How to apply this guide
+
+**Rewrite for LENGTH first. Use the DON'T rows as a correctness filter while you do, not as the thing
+that decides what to rewrite.** This ordering is measured, and the measurement is the reason the
+guide now says it (`2026-10-14`, the 325-unit XIAP page against its 279 grammar gaps):
+
+| | gap units | all units | gap-rate |
+|---|---:|---:|---:|
+| clause-position `:` or `;` | 78 | 93 | 84% |
+| em-dash appositive | 66 | 76 | 87% |
+| parenthetical aside `(…)` | 61 | 73 | 84% |
+| en-dash inside a word | 21 | 25 | 84% |
+| **base gap rate** | **279** | **325** | **86%** |
+
+Every mechanically-countable DON'T row sits AT the base rate, so carrying one makes a unit no more
+likely to fail than a unit without it. And **46% of the failing units carry none of the four**, at the
+same median length as the rest — they are not the short, simple residue. The rows are frequent, not
+blocking; a row-by-row pass over the document would feel productive and move nothing.
+
+What a row IS good for is the edit you make once you have split a sentence, because a row names a
+construction with a known-wrong or known-absent analysis. Two consequences for how to read the
+tables:
+
+- **A row's cost is its OCCURRENCE count, not its row count** — it is a rewrite performed at every
+  instance. When the grammar absorbs a row, that whole burden disappears: the active participial row
+  (withdrawn `2026-10-14`) stood over ~15 of the page's 325 units.
+- **Prefer a row whose rewrite is mechanical.** Where a row's own recipe warns that the obvious
+  rewrite changes the claim, R2 governs and the safe move is often to leave it and record the gap.
 
 ## DO — constructions the parser covers
 
@@ -208,7 +262,7 @@ Two rules sit above everything else:
 | **Parenthetical asides / inline abbreviations** (`(MSI)`, `(PARP-1)`, `(Fig. 1a)`) | Asides are dropped; the parenthetical can't be a claim. | Introduce an abbreviation in its **own** sentence, or just use one form consistently. Drop figure/citation refs. |
 | **Telegraphic caption annotations** (`Scale bar, 50 μm`; `pH 7.5`; `(1,200 V, 20 ms, 2 pulses)`) | Not sentences — a label and its value, with no verb. Figure legends and instrument settings are written in an elliptical register the sentence grammar does not cover. | Expand to the sentence it abbreviates: `The scale bar is 50 μm.` A parameter list becomes one sentence per parameter. This is **register**, not content — nothing is added or dropped, so R2 is satisfied. |
 | **Em-dash appositives** (`—an interaction…—`) | Not covered; the dash content is dropped. | Split into separate sentences: `Synthetic lethality is an interaction between two genetic events. …` |
-| **Long multi-clause sentences** (relative + subordinate + parenthetical stacked) | Each clause must compose; one gap kills the whole, and long units hit the beam. | **One claim per sentence.** |
+| **Long multi-clause sentences** (relative + subordinate + parenthetical stacked) | Each clause must compose; one gap kills the unit. **This is the dominant variable** — parsed units measured a median 11 tokens with none over 31, failing units a median 22 and up to 59 (XIAP page, `2026-10-14`). | Split per R1, to one claim and under 31 tokens each. Splitting is the lever; the other rows in this table are the filter applied afterwards. |
 | ~~**`because` / `although` subordinate clauses**~~ — **WITHDRAWN `2026-10-13`, now a DO (§14)** | They were OOV; D62 2d Fork A built them as factive dependent relations. | **Do not split them.** Splitting discards the causal or concessive relation, which is part of the claim. The old recipe ("split + use a transitional") actively destroys content the parser now carries. |
 | **Cross-type `but not`** (`required the helicase activity … but not its exonuclease activity` — different kinds) | The two objects must be the same category. | Split: `MSI models required the helicase activity of WRN. MSI models did not require the exonuclease activity of WRN.` |
 | **Deeply-embedded / determined-subject pied-piping** (`the way in which the co-occurrence leads…`) | Only simple/name-subject pied-piping is covered. | Rephrase as a separate clause: `The co-occurrence leads to cell death.` |
