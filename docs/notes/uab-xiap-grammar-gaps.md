@@ -563,6 +563,61 @@ The two units converted, by construction (the page itself is not reproduced here
 Two units, against one each for items 1 and 2 — the highest per-construction yield measured on this
 page so far, and still 2 of 325.
 
+## The DON'T-row census: no row is a lever, and length still is
+
+Prompted by asking what item 5 was worth to the CNL rewrite. Step 4's rewrite is mechanically the
+guide's DON'T rows applied at every occurrence, so a row's cost is its OCCURRENCE count, not its row
+count. Item 5's row stood over ~15 of the 325 units while converting 2 — and its own remedy warned
+that the obvious rewrite (splitting) changes the claim.
+
+That invites the question for the rows that remain. Over the same 325 units, against the post-item-5
+outcome set (279 gaps):
+
+| DON'T row (mechanically countable) | gap units | all units | gap-rate |
+|---|---:|---:|---:|
+| clause-position `:` or `;` | 78 | 93 | 84% |
+| em-dash appositive | 66 | 76 | 87% |
+| parenthetical aside `(…)` | 61 | 73 | 84% |
+| en-dash inside a word | 21 | 25 | 84% |
+| sentence-initial `So` | 4 | 4 | 100% |
+| `without` + gerund / parenthetical adverb / fronted conditional / free relative | 2 each | 2 each | 100% |
+| **base rate** | **279** | **325** | **86%** |
+
+**Every countable row sits AT the base rate.** Carrying one of these patterns makes a unit no more
+likely to fail than a unit without it, so none of them is a lever — they are frequent, not
+blocking. The 100% rows are n = 2-4 and carry nothing.
+
+Overlap says the same thing from the other side. Counting how many of the five most frequent
+patterns each gap unit carries:
+
+| patterns carried | gap units | |
+|---:|---:|---|
+| 0 | 128 | **46%** |
+| 1 | 71 | 25% |
+| 2 | 36 | 13% |
+| 3 | 34 | 12% |
+| 4-5 | 10 | 4% |
+
+**46% of gap units carry none of them**, at a median 21 tokens against 22 for all gap units — so
+they are not the short, simple residue either. They fail for reasons the DON'T rows do not name.
+
+What does discriminate is length, and the separation is clean:
+
+```text
+PARSED units:  median 11 tokens, range  5-31
+GAP    units:  median 22 tokens, range  0-59
+```
+
+Exactly 2x, and no parsed unit exceeds 31 tokens while gaps run to 59.
+
+**Consequence for step 4.** The rewrite is driven by LENGTH, not by the DON'T-row checklist; the rows
+are a correctness filter to apply WHILE rewriting, not the thing that decides what to rewrite. This
+is also why the v1 splitter was the right instrument failing on execution — splitting is the correct
+lever, and it regressed 17 -> 14 only because label colons are not clause boundaries.
+
+It also fixes what a grammar fix is worth here. Not its converted-unit count (0-2), but the number
+of obligatory, meaning-risky edits it deletes from a rewrite whose real job is elsewhere.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:
