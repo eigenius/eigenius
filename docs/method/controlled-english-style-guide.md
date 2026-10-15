@@ -46,6 +46,15 @@ carries:
 - A dozen measured DON'Ts were missing, the largest being that the lexer DELETES a clause-position
   `:` or `;`.
 
+**Revised `2026-10-14`: the ACTIVE participial post-modifier moved from DON'T to DO.** The `ger` arm
+of `reduced_relative` built it, so `a patient carrying the variant` composes and its DON'T row is
+gone. This is the second row in two revisions to flip because the grammar grew, and the pattern is
+worth naming: **a DON'T row is a rewrite the author must perform at every occurrence**, so its real
+cost is the occurrence count, not the row count. This one stood over ~15 of the XIAP page's 325
+units while converting 2 of them outright — and its own remedy warned that the obvious rewrite
+(splitting) changes the claim. A grammar fix that deletes such a row is worth more than its
+converted-unit count suggests.
+
 ## Purpose & posture
 
 The parser is the oracle: a sentence either composes into a kernel-checked typed tree or it does not.
@@ -131,10 +140,16 @@ Two rules sit above everything else:
    - **The agentless reduced relative now parses** (D62 2d short-passive lift): `the resource
      queried in the study`, `the method used in the study`, `the release queried recently`, and bare
      `the resource queried`. So a past-participial post-modifier needs no rewrite.
-   - ⚠ **The ACTIVE participial post-modifier does not** — `a patient carrying the variant` has no
-     parse. This one cannot be split faithfully: "A patient carries the variant." asserts of a
-     patient what held only of the restricted set. Rephrase with a relativizer: `a patient that
-     carries the variant`.
+   - **The ACTIVE participial post-modifier now parses too** (`2026-10-14`, the `ger` arm of
+     `reduced_relative`): `a patient carrying the variant` (CLOSED×2), `a method resolving the
+     question` (CLOSED×4), `every method placing the target at the position` (CLOSED×16). It derives
+     the SAME restrictor as the relativizer form — `Σx:method. resolve(the question, x)` — so the two
+     are interchangeable and neither needs rewriting to the other.
+   - ⚠ **Still write the relativizer when the participle is INTRANSITIVE and the verb has an
+     adjective of the same spelling.** `a patient waiting` resolves to the adjective `waiting`, not
+     to the participle, and `the gene encoding a helicase` to a compound noun pile. The `ger` entry
+     does not reach the chart for those surfaces. Where the verb has no adjective or noun homograph
+     (`carrying`, `resolving`, `arriving`, `placing`), the bare participle is fine.
 8. **Passive.** `WRN was depleted.` `Apoptosis was promoted by depletion.`
 9. **Negation.** `WRN does not affect MSS models.` `The activity is not essential.`
 10. **Clausal complements (report verbs) — ALWAYS with `that`.** `These findings show that WRN is a
@@ -207,7 +222,6 @@ Two rules sit above everything else:
 |---|---|---|
 | **A clause-position `:` or `;`** (`The residue is buried: it sits in the core.`) | The lexer emits `,` as a token but **DELETES** `:` and `;`, handing the grammar two independent clauses spliced with no connective. Measured: 68 gap units carry one. | Write two sentences. (Measured: splitting them mechanically recovers 11 pieces of 145 — real, and far from sufficient.) |
 | **A label colon** (`Searched: holds no score set.`; `The original description: establishes loss of function.`) | NOT two clauses — a colon joining an annotation LABEL to its predicate. Splitting it gives a bare NP and a bare VP, neither of which parses; leaving it gives the splice above. | Expand to a sentence: `The search holds no score set.` This is the register fix the "telegraphic caption" row prescribes, applied to annotation lists. |
-| **The ACTIVE participial post-modifier** (`a patient carrying the variant`) | No parse; only the passive/agentless form (`a patient found in the study`) composes. | Use a relativizer: `a patient that carries the variant`. **Do not split it** — "A patient carries the variant." asserts of a patient what held only of the restricted set, so the split is a meaning change, not a reformatting. |
 | **A comma appositive** (`CADD v1.6, the release queried here, gives X`) | No rule covers it. `appose_group` handles the `<common noun> <Name>` designation (`gene MSH2`), a different construction. | Two sentences: `CADD v1.6 is the release queried here. CADD v1.6 gives X.` This one splits faithfully. |
 | **A NOUN comparative** (`greater dependence than the control`) | No parse. ADJECTIVE comparatives do parse — `clearer than`, `more conservative than` — and so does a plain object predicative (`rate the variant damaging`), but not `rate the variant worse than the control`. | Recast onto an adjective: `The dependence is greater than the control's.` |
 | **A free relative** (`Absence is what a neutral variant looks like.`) | No parse — a clause used as an NP, with a stranded preposition. | Name the thing: `Absence is the normal pattern for a neutral variant.` |
@@ -401,7 +415,8 @@ the parser carries. The quantities section already had the better pattern (a cor
 | `probe_step5_construction_families` (29 probes, `--ignored`) | the DO/DON'T families from the 5–9 token band: reduced relatives, appositives, comparatives, negative subjects, `rather than`, verbless NPs. Each failing family is paired with the nearest probe that PARSES, which is what localizes it. |
 | `probe_step5_families_medium` (39 probes) | the 10–16 token band: zero relative vs `that` relative, zero vs `that` complementizer, `but not` and `rather than` by operand category, NP coordination by position, `both … and`, `without` + gerund, `So` vs `Yet`, imperatives, fronted conditionals. |
 | `probe_closed_class_paradigms` (6 paradigms) | every member of the indefinite-pronoun, possessive-determiner, possessive-pronoun, reflexive, subordinator and complementizer series, as OK / WRONGCAT / LEXICAL. A form "present" via a WordNet content entry is NOT coverage — `nothing` passed that way for 15 occurrences while denoting an entity. |
-| `probe_reduced_relative_pp` | the passive participial ladder: bare, + adverb, + adjunct PP, + agent by-phrase, and the active `ger` + object that still fails. |
+| `probe_reduced_relative_pp` | the passive participial ladder: bare, + adverb, + adjunct PP, + agent by-phrase. |
+| `probe_ger_post_nominal` | the ACTIVE participial ladder, each probe paired with its relativizer control, and the SEM printed — the construction once "parsed" as a compound noun pile and a reading count alone did not catch it. |
 | `kernel/tests/closed_class_determiners.rs` | the bootstrap-level assertions for what landed `2026-10-13`: the factive subordinators' two proof obligations, `rather than` ≡ `but not`, `unless`'s negated antecedent, the possessive paradigm in both numbers, indefinite quantification, `can not`. |
 
 Three probes carry a tag the guide depends on:
