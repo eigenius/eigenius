@@ -1554,6 +1554,31 @@ pub fn front_participial(cat: &Exp, sem: &Exp, layer: &Arc<Layer>) -> Option<(Ex
 ///   "… compared to MSS cell lines"           64 ->  64   set-identical, 0 lost / 0 added
 /// ```
 ///
+/// **`ger` is licensed alongside `pass`; `pss` stays out.** The ACTIVE participial post-modifier —
+/// "a patient [carrying the variant]", "the gene [encoding a helicase]" — is the same mapping over
+/// the same `Entity → Prop` denotation. What differs is which slot the modified noun fills: for
+/// `pass` the PATIENT, for `ger` the AGENT, and English licenses both ("the DNA induced by WRN",
+/// "the man eating the sandwich"). The argument that refuses `pss` does not reach `ger`: `pss`
+/// saturated is a finite-LOOKING active VP, so shifting it builds "*the man ate the food" for "the
+/// man that ate", while `carrying` has no finite homograph at all.
+///
+/// Before this, the active participial had NO route, and the gap counts UNDERSTATED it — three probe
+/// sentences appeared to parse, and the sems say what they parsed as (2026-10-14):
+///
+/// ```text
+///   "The gene encoding a helicase is essential."
+///     gt(deg_a01580306(the(Σg. compound_kind(g, Σh. compound_kind(h, Σx. compound_kind(x, n05436752))))), …)
+///   "A patient waiting was found."
+///     ΠG#0:Prop. ΠG#1:C0542399. gt(deg_a01450713(G#1), std_a01450713) → G#0 → G#0
+/// ```
+///
+/// The first is a three-deep COMPOUND NOUN PILE (gene-encoding-helicase); the second resolved
+/// `waiting` as an ADJECTIVE degree. Neither is a modifier reading.
+///
+/// The TRANSITIVE case reaches this shift on its own: `carrying` is `(S[dcl,ger]\NP)/cat_np` and
+/// saturates over `carrying the variant`, which is >= 2 tokens. The INTRANSITIVE is saturated at the
+/// leaf, so it needs the seed-time half, [`super::combinators::ger_participial_lifts`].
+///
 /// core-en states the rule as `s[dcl]/np → n\n` with a `GenRel` relation. We take the SUBJECT-gap
 /// (backward) form rather than its object-gap (forward) one, because that is the participial case —
 /// the same asymmetry as [`front_participial`], which is this rule's sentence-level counterpart
@@ -1570,7 +1595,7 @@ pub fn reduced_relative(cat: &Exp, layer: &Arc<Layer>) -> Option<Exp> {
     if !matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl") {
         return None;
     }
-    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "pass") {
+    if !matches!(fin, Exp::InductiveCtor(_, n, _) if n == "pass" || n == "ger") {
         return None;
     }
     let _ = layer;

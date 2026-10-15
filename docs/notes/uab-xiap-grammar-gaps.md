@@ -7,7 +7,10 @@ these numbers and the synthetic probes are tracked.
 
 Step 2 took `missing-lexeme` to 0 on the parser's own signal, so every unit reaches the grammar.
 
-## Parse success: 16 of 325 (4.9%)
+## Parse success: 16 of 325 (4.9%) — the step-3 baseline
+
+Superseded by the five items below; **19 of 325 (5.85%)** as of 2026-10-14. The table is kept as the
+measurement every later delta is taken against.
 
 | outcome | units |
 |---|---:|
@@ -126,7 +129,6 @@ presented as a constructional one:
 |---|---|---|
 | reduced relative + PP | «The resource queried in the study is reliable.» | «The release queried here is current.» |
 | | «The method used in the study is simple.» | |
-| participial post-modifier taking an object | «A patient carrying the variant was found.» | — |
 | comma appositive | «The study, the first of its kind, reports three results.» | — |
 | | «The gene, a known target, is expressed.» | |
 | bare negative subject | «Neither is evidence that the variant is tolerated.» | «Nothing in the study contradicts the result.» |
@@ -423,13 +425,14 @@ entry does not displace.
 `cannot` was NOT added: the split-vs-reseed decision named in the order of work was never taken, and
 it is 6 gaps.
 
-### Three fixes, three measurements
+### Four fixes, four measurements
 
 | fix | incidence | units converted |
 |---|---:|---:|
 | short-passive participial lift | — | 1 |
 | `rather than` | 41 gaps | 1 |
 | closed-class batch | 51 gaps, 44 sole-blocker | **0** |
+| active `ger` participial lift | — | **2** |
 
 The closed-class batch was chosen precisely because it was a different KIND of fix with the best
 sole-blocker count, and it converted fewer units than the two constructions. Grammar work on this
@@ -479,15 +482,94 @@ converts a `p²` problem into a `p` problem — that is the whole of its advanta
 clause-splice A/B recovered 11 pieces where every construction fix recovered one or none. Closing
 constructions raises `p` slowly; splitting changes the exponent.
 
+## Item 5 landed: the active `ger` participial lift
+
+**The gap count understated this one, and the sems say why.** Three probes appeared to parse. What
+they parsed as (2026-10-14, pre-change):
+
+```text
+"The gene encoding a helicase is essential."     CLOSED×3
+  gt(deg_a01580306(the(ΣG#0:C0920283. compound_kind(G#0,
+    ΣG#1:C0439234. compound_kind(G#1, ΣG#2:C2700640. compound_kind(G#2, n05436752)))).1), std_a01580306)
+"A patient waiting was found."                   CLOSED×2
+  ΠG#0:Prop. ΠG#1:C0542399. gt(deg_a01450713(G#1), std_a01450713) → G#0 → G#0
+```
+
+The first is a three-deep COMPOUND NOUN PILE — gene-encoding-helicase. The second resolved
+`waiting` as an ADJECTIVE degree. Neither is a post-modifier reading, so the construction had no
+route at any verb, and the earlier claim here that "the intransitive and adjunct-PP forms already
+parse" was wrong.
+
+### The fix is the active mirror of item 1
+
+`reduced_relative` maps a subject-gapped VP to `cat_pp` with the sem unchanged — both denote
+`Entity → Prop`. It fired on `fin = pass` only; it now fires on `fin ∈ {pass, ger}`. What differs
+between the two is which slot the modified noun fills: for `pass` the PATIENT, for `ger` the AGENT,
+and English licenses both ("the DNA induced by WRN", "the man eating the sandwich"). The argument
+that keeps `pss` out does not reach `ger`: `pss` saturated is a finite-LOOKING active VP, so shifting
+it builds "*the man ate the food" for "the man that ate", while `carrying` has no finite homograph.
+
+Work splits by span length. The TRANSITIVE reaches the shift unaided — `carrying` is
+`(S[dcl,ger]\NP)/cat_np` and saturates over `carrying the variant`, two tokens or more. The
+INTRANSITIVE is saturated at ONE token, and both chart drivers run the `UnaryShift` table inside
+`for len in 2..=n`, so `ger_participial_lifts` emits it at seed time — calling `reduced_relative`
+rather than restating the mapping, which is what item 1 does for `pass`.
+
+| | before | after | restrictor now |
+|---|---|---|---|
+| «A patient carrying the variant was found.» | GAP | CLOSED×2 | `ΣG#1:n10405694. v01449974_t(the(n07366627), G#1)` |
+| «A method resolving the question is reliable.» | GAP | CLOSED×4 | `ΣG#1:n05660268. v00698855_t(the(n07193596), G#1)` |
+| «A method that resolves the question is reliable.» | CLOSED×12 | CLOSED×12 | `ΣG#1:n05660268. v00698855_t(the(n07193596), G#1)` |
+| «A patient arriving was found.» | CLOSED×2 | CLOSED×6 | `ΣG#1:n10405694. v02005948_i(G#1)` |
+
+The reduced form derives a restrictor IDENTICAL to the `that`-ful form's. That is the correctness
+check; the reading count alone would not have caught the compound pile.
+
+### Two probes stay shadowed, and it is lexical
+
+«A patient waiting …» (all three forms) and «The gene encoding a helicase …» are unchanged, at the
+same reading counts. The sems still show the adjective (`deg_a01450713`) and the noun inside the
+compound pile, so the `ger` verb entry is not reaching the chart for those surfaces at all. The run
+config is `SENSE_CAP=2 CELL_BEAM=64`; which of the two levers cuts it is not localized.
+
+### What it cost, and what it bought
+
+The XIAP page, 325 prose units, same snapshot and arms:
+
+| | before | after |
+|---|---:|---:|
+| grammar-gap | 281 | **279** |
+| ambiguous | 11 | **13** |
+| encoded / open | 1 / 5 | 1 / 5 |
+| readings | 2303 | 4015 |
+| skeletons | 521 | 1190 |
+| wall-clock | 814s | 884s |
+
+**The whole reading increase is the two new units.** 4015 − 2303 = 1712, and the two added entries
+are `AMBIG×1658` and `AMBIG×54` — 1712 exactly. The histogram says the same thing by bucket: every
+bucket is unchanged except `31-100` (2 → 3) and `>100` (4 → 5), the two the new units land in. No
+existing unit gained a reading or moved a bucket, so the doubled skeleton count is those two units'
+own ambiguity in units that previously produced ZERO, not a tax on the document. The spread cost is
+the 9% wall-clock: 52 units seed extra leaf items that never reach a reading.
+
+The two units converted, by construction (the page itself is not reproduced here — see
+`docs/method/`'s data rule):
+
+| unit | tokens | the `ger` span | readings |
+|---:|---:|---|---:|
+| 3 | 16 | a post-posed `, <adverb> -ing <NP>` adjunct after a copular predicate nominal | 1658 |
+| 65 | 8 | a bare plural head + `-ing <NP>` + two coordinated PPs | 54 |
+
+Two units, against one each for items 1 and 2 — the highest per-construction yield measured on this
+page so far, and still 2 of 325.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:
 
 1. ~~The reduced relative + PP~~ — **done**, above. Measured: 1 page unit.
 2. ~~`rather than`~~ — **done**, above. Measured: 1 page unit.
-3. **The participial post-modifier with an object** (`carrying the variant`). The passive half is
-   now built; this is the active `ger` half, and the intransitive and adjunct-PP forms already parse
-   («A patient waiting in the study was found.»).
+3. ~~The participial post-modifier with an object~~ — **done**, item 5 above. Measured: 2 page units.
 4. **The zero relative and the zero complementizer.** Both `that`-ful forms parse, so this is one
    omission in two places rather than two constructions.
 5. **VP coordination under an auxiliary** («has been settled and is recorded»).
@@ -496,8 +578,8 @@ By units unblocked per unit of work, on these measurements:
 7. **The comma appositive**, the noun comparative, the free relative, `both … and`, the
    demonstrative partitive, the parenthetical adverb, unlike-category coordination.
 
-**But the measured yield is ~1 unit per construction**, so the order above closes the gate slowly if
-at all. The leverage is step 4: the clause splice alone recovers 11 of 145 pieces, and a rewrite
+**But the measured yield is 0-2 units per construction** (1, 1, 0, 0, 2 for items 1-5), so the order
+above closes the gate slowly if at all: five constructions moved the page 16 → 19 of 325. The leverage is step 4: the clause splice alone recovers 11 of 145 pieces, and a rewrite
 addresses length — the dominant variable — directly, where a grammar rule does not.
 
 Nothing above the lexicon is in doubt: `missing-lexeme` is 0 over the corpus, and the one lexical

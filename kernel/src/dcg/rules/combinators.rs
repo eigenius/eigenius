@@ -1626,6 +1626,52 @@ fn short_passive_participial_cat(cat: &Exp) -> Option<Exp> {
     ))
 }
 
+/// POST-nominal ACTIVE participial lift at the LEAF — the `ger` half of what
+/// [`short_passive_participial_lifts`] does for `pass`.
+///
+/// An INTRANSITIVE present participle is already saturated at the leaf ("waiting" is
+/// `S[dcl,ger]\NP`, one token), and both chart drivers run the `UnaryShift` table inside
+/// `for len in 2..=n`, so [`super::constructions::reduced_relative`] never reaches it. The
+/// TRANSITIVE case needs nothing here: "carrying" is `(S[dcl,ger]\NP)/cat_np`, saturates over
+/// "carrying the variant" — two tokens or more — and the shift table covers that span.
+///
+/// Applying `reduced_relative` rather than restating its mapping keeps `ger → cat_pp` defined once,
+/// exactly as the short-passive lift does for `pass`. Category-only, cost unchanged.
+pub(crate) fn ger_participial_lifts(it: &Item, layer: &Arc<Layer>) -> Vec<Item> {
+    if !is_saturated_ger_vp(it.cat()) {
+        return Vec::new();
+    }
+    match super::constructions::reduced_relative(it.cat(), layer) {
+        Some(pp) => vec![Item::from_parts(
+            pp,
+            it.sem().clone(),
+            Combinator::GerParticipial,
+            it.cost(),
+        )],
+        None => Vec::new(),
+    }
+}
+
+/// Whether `cat` is a saturated subject-gapped present participle `S[dcl,ger]\NP`.
+///
+/// The SATURATION test is what keeps the transitive functor `(S[dcl,ger]\NP)/cat_np` out of the
+/// leaf route: it is a `fwd`, so `slash_parts(.., "bwd")` refuses it, and it reaches the shift
+/// later over the span that includes its object.
+fn is_saturated_ger_vp(cat: &Exp) -> bool {
+    use super::super::category::{is_ctor, slash_parts};
+    let Some((_m, s, subj)) = slash_parts(cat, "bwd") else {
+        return false;
+    };
+    if is_ctor(subj, "cat_np").is_none() {
+        return false;
+    }
+    let Some([mood, voice]) = is_ctor(s, "cat_s") else {
+        return false;
+    };
+    matches!(mood, Exp::InductiveCtor(_, n, _) if n == "dcl")
+        && matches!(voice, Exp::InductiveCtor(_, n, _) if n == "ger")
+}
+
 /// `(S[dcl,pss]\NP)/cat_pp_arg(P)` → `cat_pp/cat_pp_arg(P)`, or `None` for any other category.
 /// The argument is carried through UNCHANGED, so the governed preposition (`prep_any` for WordNet's
 /// preposition-agnostic PP frames) still has to be matched by whatever fills it.

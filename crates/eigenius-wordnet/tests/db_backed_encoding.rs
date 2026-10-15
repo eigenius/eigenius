@@ -3445,6 +3445,76 @@ fn probe_step5_families_medium() {
     );
 }
 
+/// LOCALIZE the ACTIVE participial post-modifier (`ger` + object). The passive half is built
+/// (short_passive_participial_lifts); this ladder separates the intransitive, the adverb, the
+/// adjunct PP and the OBJECT, and checks the relativizer control. Run:
+///   EIGENIUS_DB_SNAPSHOT=/…/wordnet-umls-hpo-aligned-2026-10-13-fa \
+///     cargo test --release -p eigenius-wordnet --test db_backed_encoding \
+///     probe_ger_post_nominal -- --ignored --nocapture
+#[test]
+#[ignore = "localize the active participial post-modifier; --ignored --nocapture"]
+fn probe_ger_post_nominal() {
+    let Some(path) = snapshot_path() else { return };
+    let Some(head) = open_head(&path) else { return };
+    let lem = morphy();
+    let index = build_index_over(&head, None);
+    for (label, s) in [
+        ("intransitive, bare", "A patient waiting was found."),
+        ("intransitive + adverb", "A patient waiting here was found."),
+        (
+            "intransitive + PP",
+            "A patient waiting in the study was found.",
+        ),
+        (
+            "TRANSITIVE + object",
+            "A patient carrying the variant was found.",
+        ),
+        (
+            "transitive + object (2)",
+            "The gene encoding a helicase is essential.",
+        ),
+        (
+            "transitive + object (3)",
+            "A method resolving the question is reliable.",
+        ),
+        (
+            "relativizer control",
+            "The gene that encodes a helicase is essential.",
+        ),
+        (
+            "relativizer control (2)",
+            "A method that resolves the question is reliable.",
+        ),
+        // Is the intransitive really a POST-NOMINAL participial, or something else? A verb with no
+        // adjective and no noun reading isolates that.
+        (
+            "intransitive, no adj reading",
+            "A patient arriving was found.",
+        ),
+        ("subject position", "The patient waiting is here."),
+    ] {
+        let unknown = index.unknown_words(s, &lem);
+        if !unknown.is_empty() {
+            eprintln!("  [{:>9}] {label:<26} {s}  <- {unknown:?}", "LEX-GAP");
+            continue;
+        }
+        let (c, o) = index.parse_open(s, &lem);
+        let tag = if !c.is_empty() {
+            format!("CLOSED×{}", c.len())
+        } else if !o.is_empty() {
+            format!("OPEN×{}", o.len())
+        } else {
+            "GAP".to_string()
+        };
+        eprintln!("  [{tag:>9}] {label:<26} {s}");
+        // A parse is not a CORRECT parse. Print the first reading for the cases that compose, so a
+        // compound-noun or appositive analysis is not mistaken for a participial one.
+        if let Some(it) = c.first() {
+            eprintln!("              {}", pretty_term(it.sem()));
+        }
+    }
+}
+
 /// LOCALIZE the reduced-relative PP gap (survey §4 step 3, item 1). `queried here` lifts to a noun
 /// post-modifier and `queried in the study` does not; this ladder separates the participle, the
 /// modifier kind, and the attachment. Run:

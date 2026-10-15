@@ -201,10 +201,30 @@ any detour.
 > open 3 → 4, readings 2057 → 2440, skeletons 458 → 467.
 >
 > **One page unit.** That is the planning number: a construction fix converts two probes and one unit,
-> because a 20-to-40-token sentence fails for several reasons at once. Remaining order —
-> participial-with-object (the active `ger` half), the comma appositive, `cannot`, `rather than` over
-> participles, the demonstrative partitive — but at ~1 unit each the leverage is step 4's rewrite,
-> which addresses length, the dominant variable.
+> because a 20-to-40-token sentence fails for several reasons at once.
+>
+> **Item 5, the active `ger` participial lift (`2026-10-14`): TWO page units — the best per-construction
+> yield measured here.** `reduced_relative` fired on `fin = pass` only; it now fires on
+> `fin ∈ {pass, ger}`, with `ger_participial_lifts` emitting the one-token intransitive at seed time
+> (the `UnaryShift` table starts at `len 2`). Kernel-only, no reseed. The gap count had UNDERSTATED
+> the construction: «The gene encoding a helicase is essential.» parsed as a three-deep
+> `compound_kind` noun pile and «A patient waiting was found.» as an adjective degree, so three
+> probes counted as covered were wrong parses. The reduced form now derives a restrictor
+> byte-identical to the `that`-ful relative's.
+>
+> XIAP page: grammar-gap 281 → **279**, ambiguous 11 → **13**, readings 2303 → 4015, skeletons 521 →
+> 1190, wall-clock 814s → 884s. The whole reading increase is the two NEW units (1658 + 54 = 1712
+> exactly); every histogram bucket is unchanged except the two they land in, so no existing unit
+> gained a reading. The two converted units are a post-posed `, <adv> -ing <NP>` adjunct (16 tok) and
+> a bare plural head + `-ing <NP>` + coordinated PPs (8 tok). Page total now **19 of 325 (5.85%)**.
+>
+> Remaining order — the comma appositive, `rather than` over participles, the demonstrative partitive,
+> the zero relative/complementizer — but at 0-2 units each the leverage is step 4's rewrite, which
+> addresses length, the dominant variable.
+>
+> **Carried from item 5:** «waiting» and «encoding a helicase» stay shadowed by a lexical adjective and
+> a noun-in-compound reading; the `ger` verb entry does not reach the chart for those surfaces, and
+> which of `SENSE_CAP=2` / `CELL_BEAM=64` cuts it is NOT localized.
 >
 > **Exit gate:** steps 4–6 of the owner's order — CNL rewrite, close the encoding gap, then verify
 > each encoding via `verbalize` against the original prose.

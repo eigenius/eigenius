@@ -894,6 +894,21 @@ impl Parser {
                     .collect();
                 mods.extend(lifted);
             }
+            // POST-nominal ACTIVE participial lift — the `ger` counterpart, leaf-time for the same
+            // mechanical reason: an INTRANSITIVE participle ("waiting") is saturated at one token,
+            // and the shift table only runs over spans of length >= 2. The transitive
+            // ("carrying the variant") saturates over a longer span and reaches the shift unaided.
+            mods.extend(
+                row[i]
+                    .iter()
+                    .flat_map(|it| {
+                        super::super::rules::combinators::ger_participial_lifts(
+                            it,
+                            &self.grammar.layer,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            );
             row[i].extend(mods);
             // A leaf cell is non-top iff the sentence has >1 token; the beam caps it across all
             // candidate lemmas/POS of the token (`sense_cap` already bounds it per-lemma).

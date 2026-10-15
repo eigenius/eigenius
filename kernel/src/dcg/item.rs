@@ -154,6 +154,16 @@ pub enum Combinator {
     /// object slot is filled this no longer matches, exactly as `is_passive` stops matching
     /// "affected BRCA1". Taking the functor is also what keeps the agent slot available to close.
     ShortPassiveParticipial,
+    /// A **seed-time ACTIVE participial lift** (`ger_participial_lifts`): a saturated one-token
+    /// present participle `S[dcl,ger]\NP` shifted to the noun post-modifier `cat_pp`.
+    ///
+    /// The `ger` half of what [`Self::ShortPassiveParticipial`] does for `pass`, and needed for the
+    /// same mechanical reason: both chart drivers run the `UnaryShift` table inside
+    /// `for len in 2..=n`, so [`crate::dcg::rules::constructions::reduced_relative`] never sees a
+    /// single-token cell, and an INTRANSITIVE participle ("waiting") is one. The transitive
+    /// ("carrying the variant") saturates over >= 2 tokens and reaches the shift unaided, so this
+    /// does not fire on it.
+    GerParticipial,
     /// A **scope-bearing operator's lexical leaf** — an entry declaring `lexicon:scope_bearing`
     /// (sentential negation `not`, the modals, do-support). Set once at seeding by
     /// [`crate::dcg::lexicon::entry_to_item`]; the tag exists so [`Self::Modal`] can be put on the
