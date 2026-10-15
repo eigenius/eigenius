@@ -243,6 +243,26 @@ any detour.
 > construction and scored as failure. `compressed` (a span over several claims) and `exempt` (a
 > statement of why a claim is not checkable) are candidates for the same treatment.
 >
+> **Step 4 EXECUTED (`2026-10-15`) — the whole page rewritten against the final guide.** 325 source
+> units → **1,056 CNL sentences** (3.84x), median 9 tokens, max 22, **0 over R1's 31-token budget**;
+> 275 units rewrote as claims and 50 went to provenance under R3. Corpus and the source-unit →
+> output-line map live at `experiments/parsing/derived/step5/cnl-page.txt` and `cnl-map.tsv`
+> (gitignored); step 6 needs that map to verbalize each encoding back against the original prose.
+>
+> **The result is 2x, not 8x.** Source units FULLY covered (every piece parses) 19/298 → **37/275,
+> 6.4% → 13.5%**; 191 partially covered, 47 with no piece parsing. The sentence-level 45.9% runs on a
+> denominator the rewrite inflated 3.84x and is not the result. `missing-lexeme` 0, `scale-bound`
+> 12 → 0, `non-prose` 15 → 7, and all 7 survivors are the token `Å`.
+>
+> **Two A/B tests, 28 and 30 sentences, both run before acting.** Mid-sentence transitional adverbs
+> ranked +15.3pp over 97 sentences and are **REFUTED** — MID 1/14 vs FRONT 1/14, identical. **A bare
+> decimal numeral does not parse** and is CONFIRMED — DECIMAL 0/15 vs INTEGER 7/15, only the numeral
+> changed. A D95 gap, not a style problem.
+>
+> **But the quantity gap is not the lever per unit.** Fixing decimals AND `Å` entirely caps at **47 of
+> 275 fully covered (17.1%)**, up from 37; **228 units are blocked by a diffuse tail**. Same shape as
+> the DON'T-row census — no single cause dominates. Step 5's iteration has no large lever to pull.
+>
 > **Exit gate:** steps 4–6 of the owner's order — CNL rewrite, close the encoding gap, then verify
 > each encoding via `verbalize` against the original prose.
 >

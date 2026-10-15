@@ -664,6 +664,76 @@ several claims and an exemption states why a claim is not checkable, so neither 
 assertion. Those two kinds are candidates for the same treatment as the bibliography: not prose to be
 parsed, but structure to be represented.
 
+## Step 4 executed: the CNL rewrite of the XIAP page, and what it bought
+
+The whole page rewritten against the `2026-10-15` guide — R1's token budget, R2 faithfulness, R3
+citations to provenance — then measured on `wordnet-umls-hpo-aligned-2026-10-13-fa`, cap-only.
+
+| | source | CNL rewrite |
+|---|---:|---:|
+| units / sentences | 325 | **1,056** (3.84x) |
+| median tokens | 23 | **9** |
+| max tokens | 103 | **22** |
+| over the 31-token budget | 102 | **0** |
+
+275 source units rewrote as claims; 50 went to provenance under R3 (the reference list and the
+document header).
+
+### The headline is 2x, not 8x
+
+| | raw prose | CNL |
+|---|---:|---:|
+| **source units FULLY covered** (every piece parses) | 19 / 298 = 6.4% | **37 / 275 = 13.5%** |
+| partially covered (some pieces parse) | — | 191 (69.5%) |
+| no piece parses | — | 47 (17.1%) |
+| *sentence level* | *5.85%* | *45.9%* |
+
+The sentence-level 45.9% runs on a denominator the rewrite itself inflated 3.84x, so the honest
+metric is original units fully covered. That is 6.4% → 13.5%.
+
+`missing-lexeme` 0, `scale-bound` 12 → **0**, `non-prose` 15 → **7** — and all 7 survivors are one
+token, `Å`.
+
+### Two hypotheses, A/B tested; one died
+
+The gap analysis against the 53.8% base rate ranked mid-sentence `therefore`/`also` at +15.3pp over
+97 sentences. **Refuted** by a 28-sentence A/B that moves the adverb to the sentence-initial position
+DO §11 licenses and changes nothing else:
+
+```text
+  MID   half: 1 parsed of 14
+  FRONT half: 1 parsed of 14      identical, and the same sentence in both forms
+```
+
+Correlation, not cause. Acting on the ranked table would have rewritten 97 sentences for nothing —
+the same trap the DON'T-row census documents, hit again on this page's own gap set.
+
+**A bare decimal numeral does not parse.** Confirmed by the same method, swapping the decimal for an
+integer and touching nothing else:
+
+```text
+  DECIMAL half: 0 parsed of 15
+  INTEGER half: 7 parsed of 15
+```
+
+The 8 that stay gap carry a second blocker (scientific notation, or a comparative over a quantity).
+This is a D95 gap, not a style problem, and it falls hardest on the methods and predictor-score
+material where nearly every claim carries a number.
+
+### The quantity gap is decisive per sentence and NOT the lever per unit
+
+| | fully-covered units |
+|---|---:|
+| now | 37 (13.5%) |
+| blocked only by decimal-bearing lines | +7 |
+| blocked only by decimal- and `Å`-bearing lines | +3 |
+| **upper bound if both parsed** | **47 (17.1%)** |
+| blocked by something else | **228** |
+
+An upper bound, since the A/B recovered 7 of 15 rather than all. **228 of 275 units are blocked by a
+diffuse tail** — the same shape the DON'T-row census found, now measured on the rewritten corpus:
+no single cause dominates, and the residue is long.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:
