@@ -226,6 +226,23 @@ any detour.
 > a noun-in-compound reading; the `ger` verb entry does not reach the chart for those surfaces, and
 > which of `SENSE_CAP=2` / `CELL_BEAM=64` cuts it is NOT localized.
 >
+> **Survey §4 step 4 run as SPECIFIED (`2026-10-14`) — per-kind over the 427 gold claim spans, which
+> no earlier measurement used** (they all used the 325 narrative page units). 22 parsed of 427, or
+> **6.1% on the 362 prose spans against the page's 6.4%** — the same, though claim spans are a quarter
+> shorter at the median (18 vs 23 tokens, 88% vs 69% under the 31-token ceiling). Length is necessary,
+> not sufficient, and this is the measurement that establishes it. `missing-lexeme` 0 over all 427:
+> the lexicon blocks no claim in the register. Per-kind, `marked` 14.0% / `declared` 10.1% /
+> `derived` 4.5% / `observed` 3.8% (52% of the register, the worst-covered) / `compressed` and
+> `exempt` 0 of 25.
+>
+> **64 of the 427 gold spans are BIBLIOGRAPHIC RECORDS, not propositions** — 61 of them in `observed`,
+> and 56 carry a `PMID` inside a reference-list entry. The skill registers them as `observed` because
+> it certifies the citation RESOLVES; the harness calls them `non-prose`, correctly. A citation is
+> provenance, which the certificate's `resource:`/`data:` fields already hold for every other
+> `observed` claim. **D96 must separate the two**, or 13% of the register is unparseable by
+> construction and scored as failure. `compressed` (a span over several claims) and `exempt` (a
+> statement of why a claim is not checkable) are candidates for the same treatment.
+>
 > **Exit gate:** steps 4–6 of the owner's order — CNL rewrite, close the encoding gap, then verify
 > each encoding via `verbalize` against the original prose.
 >

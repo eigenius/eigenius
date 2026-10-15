@@ -618,6 +618,52 @@ lever, and it regressed 17 -> 14 only because label colons are not clause bounda
 It also fixes what a grammar fix is worth here. Not its converted-unit count (0-2), but the number
 of obligatory, meaning-risky edits it deletes from a rewrite whose real job is elsewhere.
 
+## Survey §4 step 4, as specified: per-kind over the 427 gold claim spans
+
+Step 4 says "run the harness on the XIAP markdown's claim SPANS as a corpus — the register gives 427
+gold spans with kinds, so the measurement is PER-KIND". Every measurement up to now used the 325
+narrative prose units of the page instead. Run `2026-10-14` on
+`wordnet-umls-hpo-aligned-2026-10-13-fa`, cap-only, same arms:
+
+| kind | gold | non-prose | prose | parsed | rate on prose |
+|---|---:|---:|---:|---:|---:|
+| `observed` | 220 | 61 | 159 | 6 | 3.8% |
+| `declared` | 70 | 1 | 69 | 7 | **10.1%** |
+| `derived` | 69 | 2 | 66 | 3 | 4.5% |
+| `marked` | 43 | 0 | 43 | 6 | **14.0%** |
+| `compressed` | 15 | 0 | 15 | 0 | 0% |
+| `exempt` | 10 | 0 | 10 | 0 | 0% |
+| **all** | **427** | **64** | **362** | **22** | **6.1%** |
+
+**The corpus choice is immaterial, which was worth measuring because the lengths differ.** Claim
+spans run median 18 tokens against 23 for page units, p75 26 against 37, and 88% sit under the
+31-token ceiling against 69%. On the prose denominator they parse at 6.1% against the page's 6.4% —
+the same. Length is NECESSARY and not sufficient, and this is the measurement that says so: a corpus
+a quarter shorter at the median converts nothing extra.
+
+**`missing-lexeme` is 0 over all 427.** The lexicon is not the blocker on any claim in the register.
+
+### 64 of the 427 gold spans are bibliographic records
+
+`non-prose` concentrates almost entirely in `observed` (61 of 64), and the cause is one shape: 56 of
+the 64 carry a `PMID`, inside a reference-list entry — author list, italic title, journal, year,
+pages, PMID. The fact-check skill registers these as `observed` claims because it certifies that the
+citation RESOLVES, which is a real obligation, but a bibliographic record is not a proposition. The
+harness classifies them `non-prose` correctly.
+
+**This is a document-model finding, and it belongs to step 5.** A citation is PROVENANCE — it is what
+the certificate's `resource:` / `data:` fields already hold for every other `observed` claim — not an
+assertion with a truth condition. D96 has to separate the two, or 13% of the register is permanently
+unparseable by construction and counted as failure.
+
+### What the per-kind spread says
+
+`marked` is the best-covered kind (14.0%) and `observed` the worst (3.8%) while being 52% of the
+register. `compressed` and `exempt` are 0 of 25 — by their own definitions a compression spans
+several claims and an exemption states why a claim is not checkable, so neither is a single
+assertion. Those two kinds are candidates for the same treatment as the bibliography: not prose to be
+parsed, but structure to be represented.
+
 ## Order of work
 
 By units unblocked per unit of work, on these measurements:
