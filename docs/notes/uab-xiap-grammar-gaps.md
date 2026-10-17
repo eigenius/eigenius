@@ -720,6 +720,31 @@ The 8 that stay gap carry a second blocker (scientific notation, or a comparativ
 This is a D95 gap, not a style problem, and it falls hardest on the methods and predictor-score
 material where nearly every claim carries a number.
 
+### An A/B corpus FEEDS the recurrence-based named-entity miner
+
+Found while checking a sentence that disagreed between runs — `GRAMMAR-GAP` in the 1,056-unit run,
+`AMBIG` in the 28-unit A/B, same snapshot and flags, 0.7s against 5.7s. The augmentation lines say
+why:
+
+```text
+  full run (1,056)  named entities: ["map Ile380", "Ensembl VEP", "protein HGVS", "MANE CDS", …]
+  A/B  run (   28)  named entities: ["named XLP-2"]
+```
+
+The miner requires RECURRENCE across the document, and an A/B corpus holds every sentence twice,
+once per arm — so each arm's content words recur by construction. The A/B minted a named entity the
+real document does not grant, and that is what parsed the sentence.
+
+**Both arms share the corrupted augmentation, so a within-run A/B comparison stays valid** — MID vs
+FRONT and DECIMAL vs INTEGER are unaffected. What does not transfer is the ABSOLUTE rate in an A/B
+run, and a premise carried in from the document's context ("all 14 of these were gaps") is not true
+in the A/B's own context. Read an A/B here as a contrast and never as a coverage figure.
+
+The same property means a parse outcome on this corpus is DOCUMENT-SCOPED. Comparing two runs
+requires either the same corpus or the knowledge that the augmentation moved with it; the page vs
+CNL comparison above is a comparison of two real documents, each with its own augmentation, which is
+the intended reading.
+
 ### The quantity gap is decisive per sentence and NOT the lever per unit
 
 | | fully-covered units |
