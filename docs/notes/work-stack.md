@@ -9,6 +9,11 @@ any detour.
 
 ## Stack (top → bottom)
 
+> **MOVING MACHINES?** Read [uab-xiap-handoff.md](uab-xiap-handoff.md) FIRST. Most of this entry's
+> work product is gitignored and does not travel with the branch, and the CNL rewrite
+> (`experiments/parsing/derived/step5/c0*.py`) is hand-authored and unrecoverable if not copied
+> out of band.
+>
 > **entry 7 (`2026-10-10`, active). UAB survey step 5 — the document model (D96/D101), and step 2's
 > OOV closure. Branch `uab-step5-document-model`, 20 commits ahead of `main`, not yet a PR.**
 >
